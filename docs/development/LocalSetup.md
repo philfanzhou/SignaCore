@@ -13,7 +13,7 @@
 ### 1. 克隆并还原
 
 ```bash
-cd services/QuantumZhou.Identity
+cd src/services/QuantumZhou.Identity
 dotnet restore
 ```
 
