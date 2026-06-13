@@ -1,0 +1,66 @@
+# RSA 密钥管理 — 设计说明 (DESIGN)
+
+## 文件结构
+
+```
+backend/Domain/KeyManager.cs
+backend/Host/Program.cs (JWKS 端点配置)
+```
+
+## 关键接口签名
+
+```csharp
+public interface IKeyManager {
+    RsaSecurityKey GetCurrentKey();
+    Task<bool> NeedsKeyRotationAsync();
+    Task RotateKeyAsync();
+    Task InitializationCompleted { get; }
+}
+```
+
+## 依赖的数据库表
+
+- [security_keys](../../database/tables/security_keys.md)
+
+## 加密流程
+
+### 主密钥派生
+
+```
+Master Key (来源: 环境变量 RSA_MASTER_KEY > 文件 > 自动生成)
+    │
+    ▼ HKDF(SHA256, masterKey, salt="QuantumZhou.Identity.KeyProtection",
+           info="RSA-Private-Key-Encryption")
+32-byte AES Key
+```
+
+### 私钥加密流程
+
+```
+Master Key
+    │
+    ▼ HKDF(SHA256, masterKey, randomSalt, info="RSA-Private-Key-Encrypt")
+32-byte AES Key
+    │
+    ▼ AES-256-GCM(nonce, plaintext=pkcs8PrivateKey)
+nonce(12 bytes) + tag(16 bytes) + ciphertext
+    │
+    ▼ Base64 编码
+EncryptedPrivateKeyParams (存储到数据库)
+```
+
+**详细步骤：**
+
+1. 生成随机 16-byte salt
+2. 使用 HKDF(SHA256, masterKey, randomSalt, info="RSA-Private-Key-Encrypt") 派生 32-byte AES 密钥
+3. 使用 AES-256-GCM 加密 PKCS#8 编码的私钥，生成 12-byte nonce 和 16-byte tag
+4. 拼接 nonce(12) + tag(16) + ciphertext，进行 Base64 编码
+5. 将 Base64 字符串和 randomSalt 一同存储为 `EncryptedPrivateKeyParams`
+
+## 关键设计决策
+
+| 决策 | 说明 |
+|------|------|
+| 启动阻塞 | 服务启动时阻塞等待 `KeyManager.InitializationCompleted`，在密钥初始化完成前不接受任何请求 |
+| 主密钥丢失恢复 | 如果主密钥丢失导致私钥解密失败，旧密钥被标记为非活跃（deactivated），自动生成新的密钥对；所有基于旧密钥签发的 JWT 将失效 |
+| JWKS 速率限制 | JWKS 端点配置独立的速率限制器（FixedWindow 策略，60 次/分钟），防止公钥查询被滥用 |

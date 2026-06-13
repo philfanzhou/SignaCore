@@ -1,0 +1,118 @@
+using Microsoft.Extensions.Logging;
+using QuantumZhou.Identity.Database;
+using QuantumZhou.Identity.Database.Entity;
+using QuantumZhou.Identity.Database.Repositories;
+using QuantumZhou.Identity.Domain.Services;
+
+namespace QuantumZhou.Identity.Domain.Validators;
+
+public class PasswordValidator : IIdentityValidator
+{
+    private readonly IPasswordCredentialRepository _passwordCredentialRepository;
+    private readonly IAccountRepository _accountRepository;
+    private readonly ILoginAttemptRepository _loginAttemptRepository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IPasswordHasher _passwordHasher;
+    private readonly ILogger<PasswordValidator> _logger;
+
+    public PasswordValidator(
+        IPasswordCredentialRepository passwordCredentialRepository,
+        IAccountRepository accountRepository,
+        ILoginAttemptRepository loginAttemptRepository,
+        IUnitOfWork unitOfWork,
+        IPasswordHasher passwordHasher,
+        ILogger<PasswordValidator> logger)
+    {
+        _passwordCredentialRepository = passwordCredentialRepository;
+        _accountRepository = accountRepository;
+        _loginAttemptRepository = loginAttemptRepository;
+        _unitOfWork = unitOfWork;
+        _passwordHasher = passwordHasher;
+        _logger = logger;
+    }
+
+    public string GrantType => IdentityConstants.GrantTypePassword;
+
+    public async Task<ValidationResult> ValidateAsync(ValidationRequest request)
+    {
+        if (string.IsNullOrEmpty(request.Username) || string.IsNullOrEmpty(request.Password))
+        {
+            _logger.LogWarning("Password validation failed: username or password is empty");
+            return ValidationResult.Failure("Username or password cannot be empty");
+        }
+
+        var loginAttempt = await _loginAttemptRepository.GetByUsernameAsync(request.Username);
+        if (loginAttempt?.LockoutUntil != null && loginAttempt.LockoutUntil > DateTimeOffset.UtcNow)
+        {
+            _logger.LogWarning(
+                "Password validation failed: account is locked out, Username={Username}, LockoutUntil={LockoutUntil}",
+                request.Username, loginAttempt.LockoutUntil);
+            return ValidationResult.Failure(
+                $"Account is locked. Try again after {loginAttempt.LockoutUntil:HH:mm:ss} UTC.");
+        }
+
+        var credential = await _passwordCredentialRepository.GetByUsernameAsync(request.Username);
+
+        if (credential == null)
+        {
+            _logger.LogWarning("Password validation failed: username not found, Username={Username}", request.Username);
+            return ValidationResult.Failure("Wrong username or password");
+        }
+
+        var account = await _accountRepository.GetByIdAsync(credential.AccountId);
+        if (account == null || !account.IsActive)
+        {
+            _logger.LogWarning("Password validation failed: account not found or disabled, Username={Username}", request.Username);
+            return ValidationResult.Failure("Account is disabled");
+        }
+
+        if (!_passwordHasher.VerifyPassword(request.Password, credential.PasswordHash))
+        {
+            _logger.LogWarning("Password validation failed: wrong password, Username={Username}", request.Username);
+            await RecordFailedAttemptAsync(loginAttempt, request.Username);
+            return ValidationResult.Failure("Wrong username or password");
+        }
+
+        if (loginAttempt != null && loginAttempt.FailedAttempts > 0)
+        {
+            await _loginAttemptRepository.RemoveAsync(loginAttempt);
+            await _unitOfWork.SaveChangesAsync();
+        }
+
+        _logger.LogInformation("Password validated successfully: Username={Username}", request.Username);
+        return ValidationResult.Success(account, IdentityConstants.AuthMethodPassword, credential.Username);
+    }
+
+    private async Task RecordFailedAttemptAsync(LoginAttemptEntity? loginAttempt, string username)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        if (loginAttempt == null)
+        {
+            loginAttempt = new LoginAttemptEntity
+            {
+                Id = Guid.NewGuid(),
+                Username = username,
+                LastAttemptAt = now,
+                FailedAttempts = 1,
+                LockoutUntil = null
+            };
+            await _loginAttemptRepository.AddAsync(loginAttempt);
+        }
+        else
+        {
+            loginAttempt.LastAttemptAt = now;
+            loginAttempt.FailedAttempts++;
+
+            if (loginAttempt.FailedAttempts >= IdentityConstants.MaxFailedLoginAttempts)
+            {
+                loginAttempt.LockoutUntil = now.AddMinutes(IdentityConstants.LoginLockoutMinutes);
+                _logger.LogWarning(
+                    "Account locked due to too many failed attempts, Username={Username}, LockoutUntil={LockoutUntil}",
+                    username, loginAttempt.LockoutUntil);
+            }
+        }
+
+        await _unitOfWork.SaveChangesAsync();
+    }
+}

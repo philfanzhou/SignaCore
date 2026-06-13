@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package quantumzhou.identity.v1;
+
+option csharp_namespace = "QuantumZhou.Identity.Contract.Protos";
+
+// ========== Identity Authentication Service ==========
+service AuthGrpcService {
+  // Unified Token acquisition interface (OAuth2 grant_type mode)
+  rpc GetToken(GetTokenRequest) returns (TokenResponse);
+
+  // Register callback interface (business system registers its own permission callback)
+  rpc RegisterCallback(RegisterCallbackRequest) returns (RegisterCallbackResponse);
+
+  // Revoke refresh token
+  rpc RevokeRefreshToken(RevokeRefreshTokenRequest) returns (BoolResponse);
+}
+
+// ========== Unified Token Request (OAuth2 grant_type mode) ==========
+message GetTokenRequest {
+  string grant_type = 1;           // password | sms | wechat_code | refresh_token
+  string app_id = 9;               // Gateway App ID
+  string app_secret = 10;          // Gateway App Secret
+
+  // Using oneof, new login methods only need to add new credential types
+  oneof credential {
+    PasswordCredential password = 20;
+    SmsCredential sms = 21;
+    WeChatCredential wechat = 22;
+    RefreshTokenCredential refresh_token = 23;
+  }
+}
+
+// ========== Password Login Credential ==========
+message PasswordCredential {
+  string username = 1;
+  string password = 2;
+}
+
+// ========== SMS Login Credential ==========
+message SmsCredential {
+  string phone = 1;
+  string code = 2;
+}
+
+// ========== WeChat Login Credential ==========
+message WeChatCredential {
+  string code = 1;
+}
+
+// ========== Refresh Token Credential ==========
+message RefreshTokenCredential {
+  string refresh_token = 1;
+}
+
+// ========== Token Response ==========
+message TokenResponse {
+  bool success = 1;
+  string message = 2;
+  string access_token = 3;         // JWT access token
+  string refresh_token = 4;        // Refresh token
+  int64 expires_in = 5;            // Expiration time (seconds)
+  int64 expires_at = 6;            // Expiration timestamp
+  UserInfo user_info = 7;
+}
+
+// ========== User Info ==========
+message UserInfo {
+  string user_id = 1;
+  string username = 2;
+  string phone = 3;
+  string email = 4;
+  string client_type = 5;
+  string auth_method = 6;           // Password, Sms, WeChat, RefreshToken
+  repeated string roles = 7;       // Role list
+  repeated string permissions = 8; // Permission list
+}
+
+// ========== Callback Registration Request ==========
+message RegisterCallbackRequest {
+  string app_id = 1;
+  string app_secret = 2;
+  string callback_url = 3;          // Business system permission callback URL
+  int32 ttl_seconds = 4;           // Time to live (seconds)
+}
+
+// ========== Callback Registration Response ==========
+message RegisterCallbackResponse {
+  bool success = 1;
+  string message = 2;
+  int64 expires_at = 3;             // Registration expiration time
+}
+
+// ========== Revoke Refresh Token Request ==========
+message RevokeRefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+// ========== Generic Response ==========
+message BoolResponse {
+  bool success = 1;
+}
