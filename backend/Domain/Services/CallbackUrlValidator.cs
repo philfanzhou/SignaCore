@@ -29,14 +29,63 @@ public class CallbackUrlValidator
 
         var host = uri.Host;
 
-        if (!_allowPrivateAddresses && IPAddress.TryParse(host, out _))
+        if (!_allowPrivateAddresses && IPAddress.TryParse(host, out var parsedIp))
         {
-            return ValidationResult.Invalid("Callback URL must use a domain name, not an IP address");
+            if (IsPrivateIpAddress(parsedIp))
+            {
+                return ValidationResult.Invalid("Callback URL must not point to a private/internal IP address");
+            }
         }
 
-        if (!_allowPrivateAddresses && IsPrivateIpAddress(host))
+        if (!_allowPrivateAddresses && !IPAddress.TryParse(host, out _))
         {
-            return ValidationResult.Invalid("Callback URL must not resolve to a private/internal IP address");
+            // 域名情况下，同步 DNS 解析检查私有地址
+            // 注意：此处使用同步解析以保持接口一致性，生产环境建议使用白名单模式
+            if (IsPrivateIpAddress(host))
+            {
+                return ValidationResult.Invalid("Callback URL must not resolve to a private/internal IP address");
+            }
+        }
+
+        if (_allowedDomains.Count > 0 && !_allowedDomains.Contains(host))
+        {
+            return ValidationResult.Invalid($"Callback domain '{host}' is not in the allowed domains list");
+        }
+
+        return ValidationResult.Valid();
+    }
+
+    /// <summary>
+    /// 异步验证回调 URL，避免同步 DNS 解析阻塞请求线程。
+    /// </summary>
+    public async Task<ValidationResult> ValidateAsync(string callbackUrl)
+    {
+        if (!Uri.TryCreate(callbackUrl, UriKind.Absolute, out var uri))
+        {
+            return ValidationResult.Invalid("Callback URL is not a valid absolute URL");
+        }
+
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+        {
+            return ValidationResult.Invalid("Callback URL must use HTTP or HTTPS scheme");
+        }
+
+        var host = uri.Host;
+
+        if (!_allowPrivateAddresses && IPAddress.TryParse(host, out var parsedIp))
+        {
+            if (IsPrivateIpAddress(parsedIp))
+            {
+                return ValidationResult.Invalid("Callback URL must not point to a private/internal IP address");
+            }
+        }
+
+        if (!_allowPrivateAddresses && !IPAddress.TryParse(host, out _))
+        {
+            if (await IsPrivateIpAddressAsync(host))
+            {
+                return ValidationResult.Invalid("Callback URL must not resolve to a private/internal IP address");
+            }
         }
 
         if (_allowedDomains.Count > 0 && !_allowedDomains.Contains(host))
@@ -52,6 +101,27 @@ public class CallbackUrlValidator
         try
         {
             var ipAddresses = Dns.GetHostAddresses(host);
+            foreach (var ip in ipAddresses)
+            {
+                if (IsPrivateIpAddress(ip))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static async Task<bool> IsPrivateIpAddressAsync(string host)
+    {
+        try
+        {
+            var ipAddresses = await Dns.GetHostAddressesAsync(host);
             foreach (var ip in ipAddresses)
             {
                 if (IsPrivateIpAddress(ip))

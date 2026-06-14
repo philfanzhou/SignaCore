@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using QuantumZhou.Identity.Domain;
 using Xunit;
 
@@ -47,7 +48,7 @@ public class CallbackUrlValidatorTests
         var result = _validator.Validate("http://192.168.1.1/callback");
 
         Assert.False(result.IsValid);
-        Assert.Contains("domain name, not an IP address", result.ErrorMessage);
+        Assert.Contains("private/internal IP address", result.ErrorMessage);
     }
 
     [Fact]
@@ -139,5 +140,55 @@ public class CallbackUrlValidatorTests
 
         Assert.False(result.IsValid);
         Assert.Contains("not in the allowed domains list", result.ErrorMessage);
+    }
+
+    // ========== ValidateAsync 测试 ==========
+
+    [Fact]
+    public async Task ValidateAsync_WithValidHttpsUrl_ReturnsValid()
+    {
+        var result = await _validator.ValidateAsync("https://example.com/callback");
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WithInvalidUrl_ReturnsInvalid()
+    {
+        var result = await _validator.ValidateAsync("not-a-url");
+        Assert.False(result.IsValid);
+        Assert.Contains("not a valid absolute URL", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WithFtpScheme_ReturnsInvalid()
+    {
+        var result = await _validator.ValidateAsync("ftp://example.com/callback");
+        Assert.False(result.IsValid);
+        Assert.Contains("HTTP or HTTPS", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WithAllowedDomain_ReturnsValid()
+    {
+        var validator = new CallbackUrlValidator(new[] { "trusted.example.com" });
+        var result = await validator.ValidateAsync("https://trusted.example.com/callback");
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WithDisallowedDomain_ReturnsInvalid()
+    {
+        var validator = new CallbackUrlValidator(new[] { "trusted.example.com" });
+        var result = await validator.ValidateAsync("https://untrusted.example.com/callback");
+        Assert.False(result.IsValid);
+        Assert.Contains("not in the allowed domains list", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WithAllowPrivateAddresses_AcceptsIpAddress()
+    {
+        var validator = new CallbackUrlValidator(allowPrivateAddresses: true);
+        var result = await validator.ValidateAsync("http://192.168.1.1/callback");
+        Assert.True(result.IsValid);
     }
 }

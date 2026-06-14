@@ -38,6 +38,12 @@ RegisterCallback Request
 Validate AppId/AppSecret not empty
     │
     ▼
+CallbackUrlValidator.Validate(CallbackUrl)（如果 CallbackUrl 非空）
+    │   └── 检查 URL 格式（必须是有效的 HTTP/HTTPS 绝对 URL）
+    │   └── 检查是否解析到私有 IP 地址（除非 AllowPrivateAddresses=true）
+    │   └── 检查域名是否在白名单中（如果配置了 AllowedDomains）
+    │
+    ▼
 AppRegistrationRepository.GetByAppIdAsync
     │
     ▼

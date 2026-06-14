@@ -44,7 +44,8 @@ public class GatewayValidationServiceTests
         var result = await service.ValidateAsync("testapp", "testsecret");
 
         Assert.True(result.IsSuccess);
-        Assert.Equal("Gateway", result.AuthMethod);
+        Assert.NotNull(result.App);
+        Assert.Equal("testapp", result.App.AppId);
     }
 
     [Fact]

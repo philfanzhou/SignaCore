@@ -16,14 +16,14 @@ public class CleanupWorker : BackgroundService {
 
 ## 数据保留策略
 
-| 数据类型 | 保留期 | 清理方法 |
-|----------|--------|----------|
-| RefreshToken | 过期后 | RemoveExpiredAndRevokedAsync |
-| AppRegistration | 过期后 | DeactivateExpiredCallbacksAsync |
-| SecurityKey | 过期且非活跃 | RemoveExpiredInactiveAsync |
-| LoginAttempt | >1 天 | RemoveExpiredAsync |
-| LoginHistory | >90 天 | RemoveOlderThanAsync |
-| AuditLog | >365 天 | RemoveOlderThanAsync |
+| 数据类型 | 保留期 | 清理方法 | 执行方式 |
+|----------|--------|----------|----------|
+| RefreshToken | 过期后 | RemoveExpiredAndRevokedAsync | ExecuteDeleteAsync（数据库端直接删除） |
+| AppRegistration | 过期后 | DeactivateExpiredCallbacksAsync | ExecuteUpdateAsync（数据库端直接更新） |
+| SecurityKey | 过期且非活跃 | RemoveExpiredInactiveAsync | ExecuteDeleteAsync（数据库端直接删除） |
+| LoginAttempt | >1 天 | RemoveExpiredAsync | ExecuteDeleteAsync（数据库端直接删除） |
+| LoginHistory | >90 天 | RemoveOlderThanAsync | ExecuteDeleteAsync（数据库端直接删除） |
+| AuditLog | >365 天 | RemoveOlderThanAsync | ExecuteDeleteAsync（数据库端直接删除） |
 
 ## 数据流/调用链
 
@@ -68,3 +68,4 @@ CleanupWorker.ExecuteAsync()
 | 使用 Scoped 服务 | 每次清理周期通过 `CreateScope()` 创建新的作用域，避免长生命周期的 DbContext 问题 |
 | While 循环 + Delay | 清理在 `while` 循环中执行，每次循环后通过 `Task.Delay` 等待下一个周期 |
 | 清理失败容错 | 单个清理步骤失败仅记录错误日志，不中断整个清理流程，后续步骤继续执行 |
+| 数据库端执行删除/更新 | 使用 `ExecuteDeleteAsync`/`ExecuteUpdateAsync` 替代 `ToListAsync`+内存 `RemoveRange`，避免全表加载到内存，提升性能和减少内存占用 |

@@ -163,15 +163,9 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     public async Task<int> RemoveExpiredAndRevokedAsync()
     {
         var now = DateTimeOffset.UtcNow;
-        var expiredOrRevoked = await _dbContext.RefreshTokens
-            .Where(r => r.IsRevoked)
-            .ToListAsync();
-        var expired = await _dbContext.RefreshTokens
-            .Where(r => !r.IsRevoked)
-            .ToListAsync();
-        expiredOrRevoked.AddRange(expired.Where(r => r.ExpiresAt < now));
-        _dbContext.RefreshTokens.RemoveRange(expiredOrRevoked);
-        return expiredOrRevoked.Count;
+        return await _dbContext.RefreshTokens
+            .Where(r => r.IsRevoked || r.ExpiresAt < now)
+            .ExecuteDeleteAsync();
     }
 }
 
@@ -203,15 +197,9 @@ public class AppRegistrationRepository : IAppRegistrationRepository
 
     public async Task<int> DeactivateExpiredCallbacksAsync(DateTimeOffset utcNow)
     {
-        var expiredApps = await _dbContext.AppRegistrations
-            .Where(a => a.CallbackExpiresAt.HasValue && a.IsActive)
-            .ToListAsync();
-        var toDeactivate = expiredApps.Where(a => a.CallbackExpiresAt! < utcNow).ToList();
-        foreach (var app in toDeactivate)
-        {
-            app.IsActive = false;
-        }
-        return toDeactivate.Count;
+        return await _dbContext.AppRegistrations
+            .Where(a => a.CallbackExpiresAt.HasValue && a.IsActive && a.CallbackExpiresAt! < utcNow)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsActive, false));
     }
 }
 
@@ -227,19 +215,17 @@ public class SecurityKeyRepository : ISecurityKeyRepository
     public async Task<SecurityKeyEntity?> GetActiveKeyAsync()
     {
         var now = DateTimeOffset.UtcNow;
-        var activeKeys = await _dbContext.SecurityKeys
-            .Where(k => k.IsActive)
-            .ToListAsync();
-        return activeKeys
-            .Where(k => k.ExpiresAt > now)
+        return await _dbContext.SecurityKeys
+            .Where(k => k.IsActive && k.ExpiresAt > now)
             .OrderByDescending(k => k.CreatedAt)
-            .FirstOrDefault();
+            .FirstOrDefaultAsync();
     }
 
     public async Task<SecurityKeyEntity?> GetLatestKeyAsync()
     {
-        var keys = await _dbContext.SecurityKeys.ToListAsync();
-        return keys.OrderByDescending(k => k.CreatedAt).FirstOrDefault();
+        return await _dbContext.SecurityKeys
+            .OrderByDescending(k => k.CreatedAt)
+            .FirstOrDefaultAsync();
     }
 
     public async Task<IReadOnlyList<SecurityKeyEntity>> GetValidKeysAsync()
@@ -267,11 +253,9 @@ public class SecurityKeyRepository : ISecurityKeyRepository
     public async Task RemoveExpiredInactiveAsync()
     {
         var now = DateTimeOffset.UtcNow;
-        var expiredInactive = await _dbContext.SecurityKeys
-            .Where(k => !k.IsActive)
-            .ToListAsync();
-        var toRemove = expiredInactive.Where(k => k.ExpiresAt < now).ToList();
-        _dbContext.SecurityKeys.RemoveRange(toRemove);
+        await _dbContext.SecurityKeys
+            .Where(k => !k.IsActive && k.ExpiresAt < now)
+            .ExecuteDeleteAsync();
     }
 }
 
@@ -331,9 +315,9 @@ public class LoginAttemptRepository : ILoginAttemptRepository
 
     public async Task RemoveExpiredAsync(DateTimeOffset cutoff)
     {
-        var expired = await _dbContext.LoginAttempts.ToListAsync();
-        var toRemove = expired.Where(l => l.LastAttemptAt < cutoff).ToList();
-        _dbContext.LoginAttempts.RemoveRange(toRemove);
+        await _dbContext.LoginAttempts
+            .Where(l => l.LastAttemptAt < cutoff)
+            .ExecuteDeleteAsync();
     }
 }
 
@@ -354,22 +338,19 @@ public class LoginHistoryRepository : ILoginHistoryRepository
 
     public async Task<List<LoginHistoryEntity>> GetByAccountIdAsync(Guid accountId, int pageSize, int skip)
     {
-        var histories = await _dbContext.LoginHistories
+        return await _dbContext.LoginHistories
             .Where(h => h.AccountId == accountId)
-            .ToListAsync();
-        return histories
             .OrderByDescending(h => h.CreatedAt)
             .Skip(skip)
             .Take(pageSize)
-            .ToList();
+            .ToListAsync();
     }
 
     public async Task<int> RemoveOlderThanAsync(DateTimeOffset cutoff)
     {
-        var older = await _dbContext.LoginHistories.ToListAsync();
-        var toRemove = older.Where(h => h.CreatedAt < cutoff).ToList();
-        _dbContext.LoginHistories.RemoveRange(toRemove);
-        return toRemove.Count;
+        return await _dbContext.LoginHistories
+            .Where(h => h.CreatedAt < cutoff)
+            .ExecuteDeleteAsync();
     }
 }
 
@@ -404,20 +385,18 @@ public class AuditLogRepository : IAuditLogRepository
         if (actorId.HasValue)
             query = query.Where(a => a.ActorId == actorId.Value);
 
-        var results = await query.ToListAsync();
-        return results
+        return await query
             .OrderByDescending(a => a.CreatedAt)
             .Skip(skip)
             .Take(pageSize)
-            .ToList();
+            .ToListAsync();
     }
 
     public async Task<int> RemoveOlderThanAsync(DateTimeOffset cutoff)
     {
-        var older = await _dbContext.AuditLogs.ToListAsync();
-        var toRemove = older.Where(a => a.CreatedAt < cutoff).ToList();
-        _dbContext.AuditLogs.RemoveRange(toRemove);
-        return toRemove.Count;
+        return await _dbContext.AuditLogs
+            .Where(a => a.CreatedAt < cutoff)
+            .ExecuteDeleteAsync();
     }
 }
 

@@ -61,6 +61,8 @@
 | 主密钥来源 | 优先级：环境变量 `RSA_MASTER_KEY` > 文件 > 自动生成 |
 | 密钥轮换周期 | 30 天 |
 | 启动阻塞 | 服务在 `KeyManager.InitializationCompleted` 完成前阻塞，不接受请求 |
+| JWKS 速率限制 | FixedWindowRateLimiter 60 次/分钟，随应用生命周期释放（ApplicationStopping 时 Dispose） |
+| 优雅关闭 | HostOptions.ShutdownTimeout=30s，Kestrel.RequestHeadersTimeout=30s |
 
 ## 测试策略
 

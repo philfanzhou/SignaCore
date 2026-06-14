@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
@@ -67,7 +68,7 @@ public class CallbackServiceTests
     public async Task FetchExternalClaimsAsync_WithCustomClaims_ReturnsClaims()
     {
         var handler = new MockHttpMessageHandler(
-            "{\"customClaims\":{\"tenant_id\":\"123\",\"environment\":\"prod\"}}",
+            "{\"customClaims\":{\"department\":\"Engineering\",\"school\":\"TestSchool\"}}",
             HttpStatusCode.OK);
 
         var httpClient = new HttpClient(handler);
@@ -77,8 +78,95 @@ public class CallbackServiceTests
         var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
 
         Assert.Equal(2, claims.Count);
-        Assert.Contains(claims, c => c.Type == "tenant_id" && c.Value == "123");
-        Assert.Contains(claims, c => c.Type == "environment" && c.Value == "prod");
+        Assert.Contains(claims, c => c.Type == "department" && c.Value == "Engineering");
+        Assert.Contains(claims, c => c.Type == "school" && c.Value == "TestSchool");
+    }
+
+    [Fact]
+    public async Task FetchExternalClaimsAsync_WithDisallowedCustomClaimType_FiltersOut()
+    {
+        var handler = new MockHttpMessageHandler(
+            "{\"customClaims\":{\"department\":\"Engineering\",\"forbidden_field\":\"value\"}}",
+            HttpStatusCode.OK);
+
+        var httpClient = new HttpClient(handler);
+        var factory = new TestHttpClientFactory(httpClient);
+        var service = new CallbackService(factory, CreateLogger(), _validator);
+
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+
+        Assert.Single(claims);
+        Assert.Contains(claims, c => c.Type == "department" && c.Value == "Engineering");
+    }
+
+    [Fact]
+    public async Task FetchExternalClaimsAsync_WithTooManyRoles_TruncatesToMax()
+    {
+        // 生成超过 50 个角色
+        var roles = Enumerable.Range(0, 55).Select(i => $"role_{i}").ToList();
+        var json = $"{{\"roles\":[{string.Join(",", roles.Select(r => $"\"{r}\""))}]}}";
+        var handler = new MockHttpMessageHandler(json, HttpStatusCode.OK);
+
+        var httpClient = new HttpClient(handler);
+        var factory = new TestHttpClientFactory(httpClient);
+        var service = new CallbackService(factory, CreateLogger(), _validator);
+
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+
+        Assert.Equal(50, claims.Count);
+        Assert.All(claims, c => Assert.Equal(ClaimTypes.Role, c.Type));
+    }
+
+    [Fact]
+    public async Task FetchExternalClaimsAsync_WithTooManyPermissions_TruncatesToMax()
+    {
+        var permissions = Enumerable.Range(0, 55).Select(i => $"perm_{i}").ToList();
+        var json = $"{{\"permissions\":[{string.Join(",", permissions.Select(p => $"\"{p}\""))}]}}";
+        var handler = new MockHttpMessageHandler(json, HttpStatusCode.OK);
+
+        var httpClient = new HttpClient(handler);
+        var factory = new TestHttpClientFactory(httpClient);
+        var service = new CallbackService(factory, CreateLogger(), _validator);
+
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+
+        Assert.Equal(50, claims.Count);
+        Assert.All(claims, c => Assert.Equal(IdentityConstants.ClaimPermission, c.Type));
+    }
+
+    [Fact]
+    public async Task FetchExternalClaimsAsync_WithOverlongClaimValue_FiltersOut()
+    {
+        var longValue = new string('a', 257);
+        var handler = new MockHttpMessageHandler(
+            $"{{\"customClaims\":{{\"department\":\"{longValue}\"}}}}",
+            HttpStatusCode.OK);
+
+        var httpClient = new HttpClient(handler);
+        var factory = new TestHttpClientFactory(httpClient);
+        var service = new CallbackService(factory, CreateLogger(), _validator);
+
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+
+        Assert.Empty(claims);
+    }
+
+    [Fact]
+    public async Task FetchExternalClaimsAsync_WithBlankRole_FiltersOut()
+    {
+        var handler = new MockHttpMessageHandler(
+            "{\"roles\":[\"admin\",\"\",\"  \",\"user\"]}",
+            HttpStatusCode.OK);
+
+        var httpClient = new HttpClient(handler);
+        var factory = new TestHttpClientFactory(httpClient);
+        var service = new CallbackService(factory, CreateLogger(), _validator);
+
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+
+        Assert.Equal(2, claims.Count);
+        Assert.Contains(claims, c => c.Value == "admin");
+        Assert.Contains(claims, c => c.Value == "user");
     }
 }
 

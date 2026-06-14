@@ -152,50 +152,42 @@ public class AdminController : ControllerBase
 
         var total = await query.CountAsync();
 
-        var allFiltered = await query.ToListAsync();
-        var users = allFiltered
+        var pagedAccounts = await query
             .OrderByDescending(account => account.CreatedAt)
             .Skip((normalizedPage - 1) * normalizedPageSize)
             .Take(normalizedPageSize)
-            .Select(account =>
-            {
-                var username = dbContext.PasswordCredentials
-                    .Where(credential => credential.AccountId == account.Id)
-                    .Select(credential => credential.Username)
-                    .FirstOrDefault();
-                var phone = dbContext.UserLogins
-                    .Where(login => login.AccountId == account.Id && login.ProviderName == IdentityConstants.AuthMethodSms)
-                    .Select(login => login.ProviderUserId)
-                    .FirstOrDefault();
-                return new
-                {
-                    account.Id,
-                    account.IsActive,
-                    account.Remark,
-                    account.Nickname,
-                    account.CreatedAt,
-                    Username = username,
-                    Phone = phone
-                };
-            })
-            .ToList();
+            .ToListAsync();
 
-        var items = users.Select(user =>
+        var accountIds = pagedAccounts.Select(a => a.Id).ToList();
+
+        var credentials = await dbContext.PasswordCredentials
+            .AsNoTracking()
+            .Where(c => accountIds.Contains(c.AccountId))
+            .ToDictionaryAsync(c => c.AccountId, c => c.Username);
+
+        var phones = await dbContext.UserLogins
+            .AsNoTracking()
+            .Where(l => accountIds.Contains(l.AccountId) && l.ProviderName == IdentityConstants.AuthMethodSms)
+            .ToDictionaryAsync(l => l.AccountId, l => l.ProviderUserId);
+
+        var items = pagedAccounts.Select(account =>
         {
-            var name = user.Username ?? user.Phone ?? string.Empty;
-            var displayName = !string.IsNullOrWhiteSpace(user.Nickname)
-                ? user.Nickname
-                : (!string.IsNullOrWhiteSpace(user.Username)
-                    ? user.Username
-                    : (!string.IsNullOrWhiteSpace(user.Phone) ? user.Phone : user.Id.ToString()[..8]));
+            var username = credentials.GetValueOrDefault(account.Id);
+            var phone = phones.GetValueOrDefault(account.Id);
+            var name = username ?? phone ?? string.Empty;
+            var displayName = !string.IsNullOrWhiteSpace(account.Nickname)
+                ? account.Nickname
+                : (!string.IsNullOrWhiteSpace(username)
+                    ? username
+                    : (!string.IsNullOrWhiteSpace(phone) ? phone : account.Id.ToString()[..8]));
             return new AdminUserListItemResponse(
-                user.Id.ToString(),
+                account.Id.ToString(),
                 name,
-                user.Phone ?? string.Empty,
-                user.IsActive,
-                user.Remark ?? string.Empty,
-                user.Nickname,
-                user.CreatedAt.ToUnixTimeSeconds(),
+                phone ?? string.Empty,
+                account.IsActive,
+                account.Remark ?? string.Empty,
+                account.Nickname,
+                account.CreatedAt.ToUnixTimeSeconds(),
                 displayName);
         })
             .ToList();

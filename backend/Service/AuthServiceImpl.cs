@@ -9,6 +9,7 @@ using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Services;
+using QuantumZhou.Identity.Domain.Services.Sms;
 using QuantumZhou.Identity.Domain.Validators;
 
 namespace QuantumZhou.Identity.Service;
@@ -27,12 +28,15 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
     private readonly AuthMetrics _authMetrics;
     private readonly ILogger<AuthServiceImpl> _logger;
     private readonly GatewayValidationService _gatewayValidator;
+    private readonly CallbackUrlValidator _callbackUrlValidator;
     private readonly IPasswordPolicy _passwordPolicy;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IAccountRepository _accountRepository;
     private readonly IPasswordCredentialRepository _passwordCredentialRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAuditService _auditService;
+    private readonly IOtpService _otpService;
+    private readonly ISmsSender _smsSender;
 
     public AuthServiceImpl(
         IKeyManager keyManager,
@@ -47,12 +51,15 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
         AuthMetrics authMetrics,
         ILogger<AuthServiceImpl> logger,
         GatewayValidationService gatewayValidator,
+        CallbackUrlValidator callbackUrlValidator,
         IPasswordPolicy passwordPolicy,
         IPasswordHasher passwordHasher,
         IAccountRepository accountRepository,
         IPasswordCredentialRepository passwordCredentialRepository,
         IUnitOfWork unitOfWork,
-        IAuditService auditService)
+        IAuditService auditService,
+        IOtpService otpService,
+        ISmsSender smsSender)
     {
         _keyManager = keyManager;
         _tokenService = tokenService;
@@ -66,12 +73,15 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
         _authMetrics = authMetrics;
         _logger = logger;
         _gatewayValidator = gatewayValidator;
+        _callbackUrlValidator = callbackUrlValidator;
         _passwordPolicy = passwordPolicy;
         _passwordHasher = passwordHasher;
         _accountRepository = accountRepository;
         _passwordCredentialRepository = passwordCredentialRepository;
         _unitOfWork = unitOfWork;
         _auditService = auditService;
+        _otpService = otpService;
+        _smsSender = smsSender;
     }
 
     public override async Task<TokenResponse> GetToken(GetTokenRequest request, ServerCallContext context)
@@ -168,6 +178,15 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
             return new RegisterCallbackResponse { Success = false, Message = "AppId and AppSecret are required" };
         }
 
+        if (!string.IsNullOrWhiteSpace(request.CallbackUrl))
+        {
+            var urlValidation = _callbackUrlValidator.Validate(request.CallbackUrl);
+            if (!urlValidation.IsValid)
+            {
+                return new RegisterCallbackResponse { Success = false, Message = $"Invalid callback URL: {urlValidation.ErrorMessage}" };
+            }
+        }
+
         var app = await _appRegistrationRepository.GetByAppIdAsync(request.AppId);
         if (app == null)
         {
@@ -205,6 +224,46 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
         return new BoolResponse { Success = success };
     }
 
+    public override async Task<RequestSmsCodeResponse> RequestSmsCode(RequestSmsCodeRequest request, ServerCallContext context)
+    {
+        if (string.IsNullOrWhiteSpace(request.Phone))
+        {
+            return new RequestSmsCodeResponse { Success = false, Message = "Phone number is required" };
+        }
+
+        // 验证网关凭据（如果提供了 AppId）
+        if (!string.IsNullOrEmpty(request.AppId))
+        {
+            var gatewayResult = await _gatewayValidator.ValidateAsync(request.AppId, request.AppSecret);
+            if (!gatewayResult.IsSuccess)
+            {
+                _logger.LogWarning("SMS code request gateway validation failed: AppId={AppId}, Reason={Reason}", request.AppId, gatewayResult.ErrorMessage);
+                return new RequestSmsCodeResponse { Success = false, Message = gatewayResult.ErrorMessage };
+            }
+        }
+
+        try
+        {
+            var code = await _otpService.GenerateAndSendAsync(request.Phone.Trim(), _smsSender);
+            _logger.LogInformation("SMS verification code sent: Phone={Phone}", request.Phone.Trim());
+
+            await _auditService.RecordLoginAsync(null, request.Phone.Trim(), IdentityConstants.GrantTypeSms, "sms_code_sent",
+                context.GetClientIp(), context.GetUserAgent(), null, request.AppId, context.GetCorrelationId());
+
+            return new RequestSmsCodeResponse { Success = true, Message = "Verification code sent" };
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning("SMS code request failed: Phone={Phone}, Reason={Reason}", request.Phone, ex.Message);
+            return new RequestSmsCodeResponse { Success = false, Message = ex.Message };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SMS code request exception: Phone={Phone}", request.Phone);
+            return new RequestSmsCodeResponse { Success = false, Message = "Failed to send verification code" };
+        }
+    }
+
     private async Task<GatewayValidationResult> ValidateGatewayAsync(GetTokenRequest request, ServerCallContext context, Stopwatch stopwatch)
     {
         if (string.IsNullOrEmpty(request.AppId))
@@ -224,8 +283,7 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
             return GatewayValidationResult.Fail(new TokenResponse { Success = false, Message = appValidation.ErrorMessage });
         }
 
-        var app = await _appRegistrationRepository.GetByAppIdAsync(request.AppId);
-        return GatewayValidationResult.Ok(app);
+        return GatewayValidationResult.Ok(appValidation.App);
     }
 
     private static CredentialInfo ExtractCredential(GetTokenRequest request)

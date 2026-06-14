@@ -17,6 +17,14 @@ public class CallbackService : ICallbackService
     private readonly CallbackUrlValidator _urlValidator;
     private const int TimeoutSeconds = IdentityConstants.CallbackTimeoutSeconds;
 
+    private static readonly HashSet<string> AllowedCustomClaimTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "department", "class_name", "grade", "subject", "school", "organization", "title"
+    };
+
+    private const int MaxClaimsPerType = 50;
+    private const int MaxClaimValueLength = 256;
+
     public CallbackService(IHttpClientFactory httpClientFactory, ILogger<CallbackService> logger, CallbackUrlValidator urlValidator)
     {
         _httpClientFactory = httpClientFactory;
@@ -26,7 +34,7 @@ public class CallbackService : ICallbackService
 
     public async Task<List<Claim>> FetchExternalClaimsAsync(string callbackUrl, string userId)
     {
-        var urlValidation = _urlValidator.Validate(callbackUrl);
+        var urlValidation = await _urlValidator.ValidateAsync(callbackUrl);
         if (!urlValidation.IsValid)
         {
             _logger.LogWarning("Callback URL validation failed: {Url}, Reason={Reason}", callbackUrl, urlValidation.ErrorMessage);
@@ -57,17 +65,31 @@ public class CallbackService : ICallbackService
 
             if (result.Roles != null)
             {
-                foreach (var role in result.Roles)
+                var validRoles = result.Roles
+                    .Where(r => !string.IsNullOrWhiteSpace(r) && r.Length <= MaxClaimValueLength)
+                    .Take(MaxClaimsPerType);
+                foreach (var role in validRoles)
                 {
                     claims.Add(new Claim(ClaimTypes.Role, role));
+                }
+                if (result.Roles.Count > MaxClaimsPerType)
+                {
+                    _logger.LogWarning("Callback returned too many roles ({Count}), truncated to {Max}", result.Roles.Count, MaxClaimsPerType);
                 }
             }
 
             if (result.Permissions != null)
             {
-                foreach (var permission in result.Permissions)
+                var validPermissions = result.Permissions
+                    .Where(p => !string.IsNullOrWhiteSpace(p) && p.Length <= MaxClaimValueLength)
+                    .Take(MaxClaimsPerType);
+                foreach (var permission in validPermissions)
                 {
                     claims.Add(new Claim(IdentityConstants.ClaimPermission, permission));
+                }
+                if (result.Permissions.Count > MaxClaimsPerType)
+                {
+                    _logger.LogWarning("Callback returned too many permissions ({Count}), truncated to {Max}", result.Permissions.Count, MaxClaimsPerType);
                 }
             }
 
@@ -75,6 +97,18 @@ public class CallbackService : ICallbackService
             {
                 foreach (var kvp in result.CustomClaims)
                 {
+                    if (!AllowedCustomClaimTypes.Contains(kvp.Key))
+                    {
+                        _logger.LogWarning("Callback returned disallowed claim type: {ClaimType}, skipping", kvp.Key);
+                        continue;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(kvp.Value) || kvp.Value.Length > MaxClaimValueLength)
+                    {
+                        _logger.LogWarning("Callback returned invalid claim value for {ClaimType}, skipping", kvp.Key);
+                        continue;
+                    }
+
                     claims.Add(new Claim(kvp.Key, kvp.Value));
                 }
             }

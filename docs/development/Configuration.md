@@ -14,10 +14,12 @@
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
 | Database:Provider | SQLite | 数据库提供者（SQLite / PostgreSQL） |
-| Database:AutoMigrate | true | 是否自动执行迁移 |
+| Database:AutoMigrate | true | 是否自动执行迁移（生产环境建议设为 false） |
 | ConnectionStrings:Default | Data Source=quantumzhou_identity.db | SQLite 连接字符串 |
 | ConnectionStrings:PostgreSQL | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | PostgreSQL 连接字符串 |
 | DB_PASSWORD（环境变量） | - | PostgreSQL 密码，自动追加到连接字符串 |
+
+> PostgreSQL 连接字符串自动追加连接池参数：`Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100;Connection Lifetime=300`。如连接字符串中已包含 `Pooling=` 则不追加。
 
 ## JWT 配置
 
@@ -49,6 +51,8 @@
 | Sms:BypassCode | （空） | 绕过验证码（仅限开发/预发布，空值=禁用） |
 | SMS_BYPASS_CODE（环境变量） | - | 绕过验证码，优先级高于配置文件 |
 
+> **SMS 发送器选择**：开发环境使用 `LoggingSmsSender`（仅记录日志，验证码掩码显示）；生产环境使用 `ThrowingSmsSender`（调用时抛出异常，防止验证码泄露）。生产环境需配置真实 SMS 提供商实现替换 `ThrowingSmsSender`。
+
 ## 微信配置
 
 | 配置键 | 默认值 | 说明 |
@@ -78,6 +82,20 @@
 |--------|--------|------|
 | Callback:AllowedDomains | [] | 允许的回调域名列表（空=不限制） |
 | Callback:AllowPrivateAddresses | true | 是否允许私有 IP 地址回调 |
+
+## OpenTelemetry 配置
+
+| 配置键 | 默认值 | 说明 |
+|--------|--------|------|
+| OpenTelemetry:OtlpEndpoint | （空） | OTLP 导出端点（如 `http://localhost:4317`），为空时不启用 OTLP 导出 |
+
+## 运行时配置
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| HostOptions.ShutdownTimeout | 30 秒 | 优雅关闭超时时间，超时后强制终止请求 |
+| Kestrel.RequestHeadersTimeout | 30 秒 | 请求头接收超时 |
+| JWKS RateLimiter | 60 次/分钟 | JWKS 端点速率限制 |
 
 ## 管理员配置
 

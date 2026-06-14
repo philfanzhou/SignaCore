@@ -29,7 +29,7 @@ public class RateLimitingInterceptor : Interceptor
         ServerCallContext context,
         UnaryServerMethod<TRequest, TResponse> continuation)
     {
-        var clientIp = context.Peer;
+        var clientIp = ExtractClientIp(context.Peer);
 
         var entry = _limiters.GetOrAdd(clientIp, ip =>
         {
@@ -60,6 +60,30 @@ public class RateLimitingInterceptor : Interceptor
         {
             lease.Dispose();
         }
+    }
+
+    private static string ExtractClientIp(string peer)
+    {
+        // gRPC Peer format: "ipv4:1.2.3.4:12345" or "ipv6:[::1]:12345"
+        if (string.IsNullOrEmpty(peer)) return peer;
+
+        var colonIndex = peer.IndexOf(':');
+        if (colonIndex < 0) return peer;
+
+        var afterScheme = peer.AsSpan(colonIndex + 1);
+
+        // IPv6: "ipv6:[::1]:12345" -> extract between brackets
+        if (afterScheme.StartsWith("[" ))
+        {
+            var closeBracket = afterScheme.IndexOf(']');
+            if (closeBracket > 0) return afterScheme.Slice(1, closeBracket - 1).ToString();
+        }
+
+        // IPv4: "ipv4:1.2.3.4:12345" -> extract between first and last colon
+        var lastColon = afterScheme.LastIndexOf(':');
+        if (lastColon > 0) return afterScheme.Slice(0, lastColon).ToString();
+
+        return peer;
     }
 
     private void MaybeCleanupStaleEntries()

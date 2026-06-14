@@ -28,32 +28,32 @@
 ### AC-FR-01: 清理过期/已撤销刷新令牌
 - **Given** 数据库中存在已过期或已撤销的刷新令牌
 - **When** 清理周期执行
-- **Then** 调用 `RemoveExpiredAndRevokedAsync` 删除这些记录
+- **Then** 调用 `RemoveExpiredAndRevokedAsync`，使用 `ExecuteDeleteAsync` 在数据库端直接删除，不加载到内存
 
 ### AC-FR-02: 标记过期应用注册
 - **Given** 数据库中存在已过期的应用注册
 - **When** 清理周期执行
-- **Then** 调用 `DeactivateExpiredCallbacksAsync` 将其标记为不活跃
+- **Then** 调用 `DeactivateExpiredCallbacksAsync`，使用 `ExecuteUpdateAsync` 在数据库端直接更新 IsActive=false，不加载到内存
 
 ### AC-FR-03: 清理过期非活跃密钥
 - **Given** 数据库中存在已过期且状态为非活跃的安全密钥
 - **When** 清理周期执行
-- **Then** 调用 `RemoveExpiredInactiveAsync` 删除这些记录
+- **Then** 调用 `RemoveExpiredInactiveAsync`，使用 `ExecuteDeleteAsync` 在数据库端直接删除，不加载到内存
 
 ### AC-FR-04: 清理过期登录尝试
 - **Given** 数据库中存在超过 1 天的登录尝试记录
 - **When** 清理周期执行
-- **Then** 调用 `RemoveExpiredAsync` 删除截止日期为 -1 天之前的记录
+- **Then** 调用 `RemoveExpiredAsync`，使用 `ExecuteDeleteAsync` 在数据库端直接删除，不加载到内存
 
 ### AC-FR-05: 清理过期登录历史
 - **Given** 数据库中存在超过 90 天的登录历史记录
 - **When** 清理周期执行
-- **Then** 调用 `RemoveOlderThanAsync` 删除截止日期为 -90 天之前的记录
+- **Then** 调用 `RemoveOlderThanAsync`，使用 `ExecuteDeleteAsync` 在数据库端直接删除，不加载到内存
 
 ### AC-FR-06: 清理过期审计日志
 - **Given** 数据库中存在超过 365 天的审计日志
 - **When** 清理周期执行
-- **Then** 调用 `RemoveOlderThanAsync` 删除截止日期为 -365 天之前的记录
+- **Then** 调用 `RemoveOlderThanAsync`，使用 `ExecuteDeleteAsync` 在数据库端直接删除，不加载到内存
 
 ### AC-FR-07: 密钥轮换检查
 - **Given** 清理周期执行
@@ -67,10 +67,13 @@
 | 清理间隔 | 24 小时（`IdentityConstants.CleanupIntervalHours`） |
 | 清理失败处理 | 清理失败仅记录错误日志，不抛出异常，继续执行后续清理任务 |
 | 密钥轮换检查 | 密钥轮换检查包含在清理周期中，作为最后一步执行 |
+| 数据库端执行 | 清理操作使用 `ExecuteDeleteAsync`/`ExecuteUpdateAsync`，避免全表加载到内存 |
 
 ## 测试策略
 
-- 单元测试：`test/CleanupWorkerTests.cs`
+- 单元测试：`test/Domain/CleanupWorkerTests.cs`
   - 验证各清理方法按正确顺序调用
   - 验证清理失败不影响后续任务执行
   - 验证密钥轮换检查在清理周期末尾执行
+- 单元测试：`test/Domain/EfCoreRepositoriesTests.cs`（如存在）
+  - 验证 `ExecuteDeleteAsync`/`ExecuteUpdateAsync` 正确执行数据库端操作

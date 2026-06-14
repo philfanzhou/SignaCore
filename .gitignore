@@ -29,6 +29,7 @@ bld/
 ## ASP.NET
 appsettings.Development.json
 appsettings.*.json
+!appsettings.Production.json
 !.gitignore
 *.env
 .env.local
@@ -67,3 +68,8 @@ coverage*.info
 ## Entity Framework Migrations
 # Uncomment if you don't want to track migrations
 # **/Migrations/
+
+## SQLite database files
+*.db
+*.db-shm
+*.db-wal

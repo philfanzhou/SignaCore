@@ -14,6 +14,9 @@ service AuthGrpcService {
 
   // Revoke refresh token
   rpc RevokeRefreshToken(RevokeRefreshTokenRequest) returns (BoolResponse);
+
+  // Request SMS verification code
+  rpc RequestSmsCode(RequestSmsCodeRequest) returns (RequestSmsCodeResponse);
 }
 
 // ========== Unified Token Request (OAuth2 grant_type mode) ==========
@@ -99,4 +102,17 @@ message RevokeRefreshTokenRequest {
 // ========== Generic Response ==========
 message BoolResponse {
   bool success = 1;
+}
+
+// ========== Request SMS Code ==========
+message RequestSmsCodeRequest {
+  string phone = 1;
+  string app_id = 2;
+  string app_secret = 3;
+}
+
+// ========== Request SMS Code Response ==========
+message RequestSmsCodeResponse {
+  bool success = 1;
+  string message = 2;
 }

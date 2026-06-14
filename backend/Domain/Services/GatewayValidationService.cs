@@ -18,34 +18,34 @@ public class GatewayValidationService
         _logger = logger;
     }
 
-    public async Task<ValidationResult> ValidateAsync(string appId, string? appSecret)
+    public async Task<GatewayAuthResult> ValidateAsync(string appId, string? appSecret)
     {
         if (string.IsNullOrEmpty(appSecret))
         {
-            return ValidationResult.Failure("AppSecret is required");
+            return GatewayAuthResult.Failure("AppSecret is required");
         }
 
         var app = await _appRegistrationRepository.GetByAppIdAsync(appId);
         if (app == null)
         {
-            return ValidationResult.Failure("AppId not registered");
+            return GatewayAuthResult.Failure("AppId not registered");
         }
 
         if (!app.IsActive)
         {
-            return ValidationResult.Failure("App is disabled");
+            return GatewayAuthResult.Failure("App is disabled");
         }
 
         if (app.CallbackExpiresAt.HasValue && app.CallbackExpiresAt < DateTimeOffset.UtcNow)
         {
-            return ValidationResult.Failure("App registration has expired");
+            return GatewayAuthResult.Failure("App registration has expired");
         }
 
         if (!BCrypt.Net.BCrypt.Verify(appSecret, app.AppSecretHash))
         {
-            return ValidationResult.Failure("AppSecret mismatch");
+            return GatewayAuthResult.Failure("AppSecret mismatch");
         }
 
-        return ValidationResult.Success(new Database.Entity.AccountEntity { Id = Guid.Empty }, "Gateway");
+        return GatewayAuthResult.Success(app);
     }
 }

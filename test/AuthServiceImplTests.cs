@@ -13,6 +13,7 @@ using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Services;
+using QuantumZhou.Identity.Domain.Services.Sms;
 using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Service;
 using Xunit;
@@ -147,6 +148,9 @@ public class AuthServiceImplTests
         var factory = new ValidatorFactory(validators, NullLogger<ValidatorFactory>.Instance);
         var claimsResolver = new ClaimsResolver(NullLogger<ClaimsResolver>.Instance);
         var auditServiceMock = CreateAuditServiceMock();
+        var callbackUrlValidator = new CallbackUrlValidator();
+        var otpServiceMock = new Mock<IOtpService>();
+        var smsSenderMock = new Mock<ISmsSender>();
         return new AuthServiceImpl(
             CreateMockKeyManager().Object,
             CreateMockTokenService().Object,
@@ -160,12 +164,15 @@ public class AuthServiceImplTests
             CreateAuthMetrics(),
             CreateLogger(),
             CreateGatewayValidator(appRegMock),
+            callbackUrlValidator,
             CreatePasswordPolicy(),
             CreatePasswordHasher(),
             CreateAccountRepoMock().Object,
             CreatePasswordCredentialRepoMock().Object,
             CreateUnitOfWorkMock().Object,
-            auditServiceMock.Object);
+            auditServiceMock.Object,
+            otpServiceMock.Object,
+            smsSenderMock.Object);
     }
 
     private static AuthServiceImpl CreateServiceWithPasswordValidator(
@@ -178,6 +185,9 @@ public class AuthServiceImplTests
         var validators = new IIdentityValidator[] { new PasswordValidator(passwordRepoMock.Object, accountRepoMock.Object, new Mock<ILoginAttemptRepository>().Object, CreateUnitOfWorkMock().Object, hasher, NullLogger<PasswordValidator>.Instance) };
         var factory = new ValidatorFactory(validators, NullLogger<ValidatorFactory>.Instance);
         var claimsResolver = new ClaimsResolver(NullLogger<ClaimsResolver>.Instance);
+        var callbackUrlValidator = new CallbackUrlValidator();
+        var otpServiceMock = new Mock<IOtpService>();
+        var smsSenderMock = new Mock<ISmsSender>();
         return new AuthServiceImpl(
             CreateMockKeyManager().Object,
             CreateMockTokenService().Object,
@@ -191,12 +201,15 @@ public class AuthServiceImplTests
             CreateAuthMetrics(),
             CreateLogger(),
             CreateGatewayValidator(appRegRepoMock),
+            callbackUrlValidator,
             CreatePasswordPolicy(),
             CreatePasswordHasher(),
             accountRepoMock.Object,
             passwordRepoMock.Object,
             CreateUnitOfWorkMock().Object,
-            CreateAuditServiceMock().Object);
+            CreateAuditServiceMock().Object,
+            otpServiceMock.Object,
+            smsSenderMock.Object);
     }
 
     private static AuthServiceImpl CreateServiceWithRefreshTokenValidator(
@@ -207,6 +220,9 @@ public class AuthServiceImplTests
         var validators = new IIdentityValidator[] { new RefreshTokenValidator(refreshTokenRepoMock.Object, accountRepoMock.Object, NullLogger<RefreshTokenValidator>.Instance) };
         var factory = new ValidatorFactory(validators, NullLogger<ValidatorFactory>.Instance);
         var claimsResolver = new ClaimsResolver(NullLogger<ClaimsResolver>.Instance);
+        var callbackUrlValidator = new CallbackUrlValidator();
+        var otpServiceMock = new Mock<IOtpService>();
+        var smsSenderMock = new Mock<ISmsSender>();
         return new AuthServiceImpl(
             CreateMockKeyManager().Object,
             CreateMockTokenService().Object,
@@ -220,12 +236,49 @@ public class AuthServiceImplTests
             CreateAuthMetrics(),
             CreateLogger(),
             CreateGatewayValidator(appRegRepoMock),
+            callbackUrlValidator,
             CreatePasswordPolicy(),
             CreatePasswordHasher(),
             accountRepoMock.Object,
             CreatePasswordCredentialRepoMock().Object,
             CreateUnitOfWorkMock().Object,
-            CreateAuditServiceMock().Object);
+            CreateAuditServiceMock().Object,
+            otpServiceMock.Object,
+            smsSenderMock.Object);
+    }
+
+    private static AuthServiceImpl CreateServiceWithOtpMocks(
+        IdentityDbContext context,
+        Mock<IAppRegistrationRepository> appRegRepoMock,
+        IOtpService otpService,
+        ISmsSender smsSender)
+    {
+        var validators = Array.Empty<IIdentityValidator>();
+        var factory = new ValidatorFactory(validators, NullLogger<ValidatorFactory>.Instance);
+        var claimsResolver = new ClaimsResolver(NullLogger<ClaimsResolver>.Instance);
+        var callbackUrlValidator = new CallbackUrlValidator();
+        return new AuthServiceImpl(
+            CreateMockKeyManager().Object,
+            CreateMockTokenService().Object,
+            CreateJwtOptions(),
+            CreateRefreshTokenOptions(),
+            appRegRepoMock.Object,
+            CreateRefreshTokenRepoMock().Object,
+            claimsResolver,
+            factory,
+            null,
+            CreateAuthMetrics(),
+            CreateLogger(),
+            CreateGatewayValidator(appRegRepoMock),
+            callbackUrlValidator,
+            CreatePasswordPolicy(),
+            CreatePasswordHasher(),
+            CreateAccountRepoMock().Object,
+            CreatePasswordCredentialRepoMock().Object,
+            CreateUnitOfWorkMock().Object,
+            CreateAuditServiceMock().Object,
+            otpService,
+            smsSender);
     }
 
     [Fact]
@@ -488,6 +541,76 @@ public class AuthServiceImplTests
 
         Assert.False(response.Success);
         Assert.Contains("mismatch", response.Message);
+    }
+
+    [Fact]
+    public async Task RegisterCallbackAsync_WithInvalidCallbackUrl_ReturnsFailure()
+    {
+        var context = CreateInMemoryContext();
+        var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "valid_app_id", AppSecretHash = BCrypt.Net.BCrypt.HashPassword("valid_secret"), AppName = "Valid App", IsActive = true, CreatedAt = DateTimeOffset.UtcNow };
+        context.AppRegistrations.Add(app);
+        await context.SaveChangesAsync();
+
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+        appRegRepoMock.Setup(r => r.GetByAppIdAsync("valid_app_id")).ReturnsAsync(app);
+        var service = CreateService(context, appRegRepoMock);
+
+        var request = new RegisterCallbackRequest { AppId = "valid_app_id", AppSecret = "valid_secret", CallbackUrl = "not-a-valid-url" };
+
+        var response = await service.RegisterCallback(request, CreateMockServerCallContext());
+
+        Assert.False(response.Success);
+        Assert.Contains("Invalid callback URL", response.Message);
+    }
+
+    [Fact]
+    public async Task RequestSmsCodeAsync_WithEmptyPhone_ReturnsFailure()
+    {
+        var context = CreateInMemoryContext();
+        var service = CreateService(context);
+
+        var request = new RequestSmsCodeRequest { Phone = "", AppId = "testapp", AppSecret = "testsecret" };
+
+        var response = await service.RequestSmsCode(request, CreateMockServerCallContext());
+
+        Assert.False(response.Success);
+        Assert.Contains("Phone number is required", response.Message);
+    }
+
+    [Fact]
+    public async Task RequestSmsCodeAsync_WithInvalidGateway_ReturnsFailure()
+    {
+        var context = CreateInMemoryContext();
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+        appRegRepoMock.Setup(r => r.GetByAppIdAsync("badapp")).ReturnsAsync((AppRegistrationEntity?)null);
+        var service = CreateService(context, appRegRepoMock);
+
+        var request = new RequestSmsCodeRequest { Phone = "13800138000", AppId = "badapp", AppSecret = "wrong" };
+
+        var response = await service.RequestSmsCode(request, CreateMockServerCallContext());
+
+        Assert.False(response.Success);
+    }
+
+    [Fact]
+    public async Task RequestSmsCodeAsync_WithoutAppId_SendsCode()
+    {
+        var context = CreateInMemoryContext();
+        var otpServiceMock = new Mock<IOtpService>();
+        otpServiceMock.Setup(o => o.GenerateAndSendAsync(It.IsAny<string>(), It.IsAny<ISmsSender>()))
+            .ReturnsAsync("123456");
+        var smsSenderMock = new Mock<ISmsSender>();
+
+        var appRegRepoMock = CreateAppRegistrationRepoMock(context);
+        var service = CreateServiceWithOtpMocks(context, appRegRepoMock, otpServiceMock.Object, smsSenderMock.Object);
+
+        var request = new RequestSmsCodeRequest { Phone = "13800138000" };
+
+        var response = await service.RequestSmsCode(request, CreateMockServerCallContext());
+
+        Assert.True(response.Success);
+        Assert.Contains("sent", response.Message);
+        otpServiceMock.Verify(o => o.GenerateAndSendAsync("13800138000", smsSenderMock.Object), Times.Once);
     }
 
     [Fact]

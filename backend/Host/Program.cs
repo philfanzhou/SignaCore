@@ -31,6 +31,11 @@ builder.WebHost.ConfigureKestrel(options =>
     {
         listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2;
     });
+    options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
+});
+builder.Services.Configure<Microsoft.Extensions.Hosting.HostOptions>(options =>
+{
+    options.ShutdownTimeout = TimeSpan.FromSeconds(30);
 });
 
 // ========== OpenTelemetry & Metrics ==========
@@ -46,6 +51,14 @@ builder.Services.AddOpenTelemetry()
         tracing.AddAspNetCoreInstrumentation()
                .AddHttpClientInstrumentation()
                .AddSource("QuantumZhou.Identity");
+        var otlpEndpoint = builder.Configuration["OpenTelemetry:OtlpEndpoint"];
+        if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+        {
+            tracing.AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri(otlpEndpoint);
+            });
+        }
     });
 
 // ========== 1. Database ==========
@@ -63,6 +76,11 @@ if (dbProvider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase))
     if (dbPassword != null && !connectionString.Contains("Password="))
     {
         connectionString = $"{connectionString};Password={dbPassword}";
+    }
+    // 添加连接池配置
+    if (!connectionString.Contains("Pooling=", StringComparison.OrdinalIgnoreCase))
+    {
+        connectionString = $"{connectionString};Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100;Connection Lifetime=300";
     }
 }
 
@@ -136,7 +154,7 @@ var smsOptions = new SmsOptions
     BypassCode = builder.Configuration["Sms:BypassCode"] ?? Environment.GetEnvironmentVariable("SMS_BYPASS_CODE")
 };
 builder.Services.AddSingleton(smsOptions);
-if (!string.IsNullOrWhiteSpace(connectionString))
+if (dbProvider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase))
 {
     builder.Services.AddScoped<IOtpService, DbOtpService>();
 }
@@ -144,7 +162,15 @@ else
 {
     builder.Services.AddSingleton<IOtpService, InMemoryOtpService>();
 }
-builder.Services.AddSingleton<ISmsSender, LoggingSmsSender>();
+// 开发环境使用 LoggingSmsSender，生产环境使用 ThrowingSmsSender 防止验证码泄露
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddSingleton<ISmsSender, LoggingSmsSender>();
+}
+else
+{
+    builder.Services.AddSingleton<ISmsSender, ThrowingSmsSender>();
+}
 
 // ========== 11. WeChat API Client ==========
 var wechatOptions = new WechatOptions
@@ -230,17 +256,37 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AdminWeb", policy =>
     {
+        string[] origins;
         if (adminWebOrigins.Length == 0)
         {
-            policy.AllowAnyOrigin()
-                .AllowAnyHeader()
-                .AllowAnyMethod();
-            return;
+            if (builder.Environment.IsDevelopment())
+            {
+                origins = new[] { "http://localhost:5002", "http://localhost:5003", "http://localhost:5173" };
+            }
+            else
+            {
+                // 生产环境必须显式配置 AdminWeb:AllowedOrigins，否则不启用 CORS
+                origins = Array.Empty<string>();
+            }
+        }
+        else
+        {
+            origins = adminWebOrigins;
         }
 
-        policy.WithOrigins(adminWebOrigins)
-            .AllowAnyHeader()
-            .AllowAnyMethod();
+        if (origins.Length > 0)
+        {
+            policy.WithOrigins(origins)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        }
+        else
+        {
+            // 无来源时仅允许基本请求，不携带凭据
+            policy.AllowAnyHeader()
+                .AllowAnyMethod();
+        }
     });
 });
 
@@ -319,13 +365,6 @@ builder.Services.AddScoped<AuthServiceImpl>();
 builder.Services.AddSingleton<AuthMetrics>();
 
 var app = builder.Build();
-
-var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
-lifetime.ApplicationStopping.Register(() =>
-{
-    app.Logger.LogInformation("Application is shutting down...");
-});
-
 
 app.Logger.LogInformation("Service endpoints configured: gRPC={GrpcPort}, HTTP={HttpPort}", grpcPort, httpPort);
 
@@ -646,6 +685,13 @@ var jwksRateLimiter = new System.Threading.RateLimiting.FixedWindowRateLimiter(
         QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
         QueueLimit = 0
     });
+
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+lifetime.ApplicationStopping.Register(() =>
+{
+    app.Logger.LogInformation("Application is shutting down...");
+    jwksRateLimiter.Dispose();
+});
 
 app.Use(async (context, next) =>
 {

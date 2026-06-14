@@ -7,6 +7,7 @@
 | AuthGrpcService.GetToken | 入 | gRPC | HTTP/2 | 统一 Token 获取接口 |
 | AuthGrpcService.RegisterCallback | 入 | gRPC | HTTP/2 | 业务系统注册回调 |
 | AuthGrpcService.RevokeRefreshToken | 入 | gRPC | HTTP/2 | 吊销刷新令牌 |
+| AuthGrpcService.RequestSmsCode | 入 | gRPC | HTTP/2 | 请求短信验证码 |
 | Admin API (api/admin/*) | 入 | HTTP REST | HTTP/1.1,2 | 管理员操作接口（Cookie Auth） |
 | Gateway API (api/gateway/*) | 入 | HTTP REST | HTTP/1.1,2 | 网关用户查询接口（AppId/AppSecret Auth） |
 | Profile API (api/profile/*) | 入 | HTTP REST | HTTP/1.1,2 | 用户个人信息接口（JWT Bearer Auth） |
