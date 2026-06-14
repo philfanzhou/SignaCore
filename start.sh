@@ -3,11 +3,10 @@ set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 IMAGE_TAG="20260502"
-IMAGE="quantumzhou.identity:${IMAGE_TAG}"
+IMAGE_NAME="quantumzhou.identity:${IMAGE_TAG}"
 CONTAINER_NAME="ruoyu-identity"
 NETWORK_NAME="ruoyu-net"
 
-#GRPC_PORT=10890
 HTTP_PORT=10891
 
 DB_PROVIDER="PostgreSQL"
@@ -58,7 +57,7 @@ docker run -d \
     -e Callback__AllowPrivateAddresses="${CALLBACK_ALLOW_PRIVATE}" \
     -e Callback__AllowedDomains__0="${CALLBACK_ALLOWED_DOMAIN}" \
     -v "${DATA_DIR}/master-key:/app/master-key" \
-    "$IMAGE"
+    "$IMAGE_NAME"
 
 echo "${CONTAINER_NAME} started"
 docker logs -f -t "$CONTAINER_NAME"
