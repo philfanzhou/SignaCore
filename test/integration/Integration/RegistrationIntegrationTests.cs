@@ -137,6 +137,9 @@ public class RegistrationIntegrationTests : IAsyncLifetime
         var refreshTokenRepository = scope.ServiceProvider.GetRequiredService<IRefreshTokenRepository>();
         var gatewayValidator = new GatewayValidationService(appRegRepository, NullLogger<GatewayValidationService>.Instance);
         var auditService = scope.ServiceProvider.GetRequiredService<IAuditService>();
+        var callbackUrlValidator = scope.ServiceProvider.GetRequiredService<CallbackUrlValidator>();
+        var otpService = scope.ServiceProvider.GetRequiredService<IOtpService>();
+        var smsSender = scope.ServiceProvider.GetRequiredService<ISmsSender>();
 
         return new AuthServiceImpl(
             keyManager,
@@ -151,12 +154,15 @@ public class RegistrationIntegrationTests : IAsyncLifetime
             authMetrics,
             logger,
             gatewayValidator,
+            callbackUrlValidator,
             passwordPolicy,
             passwordHasher,
             accountRepository,
             passwordCredentialRepository,
             unitOfWork,
-            auditService);
+            auditService,
+            otpService,
+            smsSender);
     }
 
     private IKeyManager CreateMockKeyManager()

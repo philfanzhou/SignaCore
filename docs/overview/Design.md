@@ -42,6 +42,8 @@
 Contract ← Database ← Domain ← Service ← Host
                                     ↑         │
                                     └─────────┘
+
+Client ← Contract（内部依赖，不暴露给调用方）
 ```
 
 | 项目 | 依赖 |
@@ -51,6 +53,55 @@ Contract ← Database ← Domain ← Service ← Host
 | QuantumZhou.Identity.Domain | Database |
 | QuantumZhou.Identity.Service | Domain, Contract |
 | QuantumZhou.Identity.Host | Service, Domain, Database, Contract |
+| QuantumZhou.Identity.Client | Contract, JwtBearer |
+
+## Client SDK
+
+`QuantumZhou.Identity.Client` 是提供给业务服务接入 Identity 认证的 SDK 类库，封装了 gRPC 客户端注册、JWT Bearer 认证配置和认证端点（login/refresh/me/logout），使业务服务只需 3 行代码即可完成认证接入。
+
+### 接入方式
+
+```csharp
+// Program.cs
+builder.Services.AddIdentityClient(builder.Configuration);
+// ...
+app.UseIdentityClient();
+app.MapIdentityAuthEndpoints();
+```
+
+```json
+// appsettings.json
+{
+  "Identity": {
+    "GrpcEndpoint": "http://localhost:5001",
+    "AppId": "your_app_id",
+    "AppSecret": ""
+  },
+  "Jwt": {
+    "Issuer": "QuantumZhou.Identity",
+    "Audience": "QuantumZhou.microservices",
+    "JwksEndpoint": "http://localhost:5002/.well-known/jwks"
+  }
+}
+```
+
+### 提供的端点
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| POST | `/admin/auth/login` | AllowAnonymous | 用户名密码登录，代理 gRPC GetToken |
+| POST | `/admin/auth/refresh` | AllowAnonymous | RefreshToken 刷新 |
+| GET | `/admin/auth/me` | 需认证 | 获取当前用户信息（从 JWT Claims 读取） |
+| POST | `/admin/auth/logout` | 需认证 | 登出（前端清除 Token） |
+
+### 关键源文件
+
+| 文件 | 用途 |
+|------|------|
+| [IdentityClientOptions.cs](../../backend/Client/IdentityClientOptions.cs) | 配置项定义 |
+| [ServiceCollectionExtensions.cs](../../backend/Client/ServiceCollectionExtensions.cs) | AddIdentityClient() 扩展方法 |
+| [ApplicationBuilderExtensions.cs](../../backend/Client/ApplicationBuilderExtensions.cs) | UseIdentityClient() + MapIdentityAuthEndpoints() |
+| [AuthEndpoints.cs](../../backend/Client/AuthEndpoints.cs) | 认证端点实现 |
 
 ## 详细设计
 

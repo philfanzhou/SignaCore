@@ -15,6 +15,7 @@ using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Services;
+using QuantumZhou.Identity.Domain.Services.Sms;
 using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Service;
 using Xunit;
@@ -124,8 +125,11 @@ public class AuthServiceImplIntegrationTests : IAsyncLifetime
         var refreshTokenRepository = scope.ServiceProvider.GetRequiredService<IRefreshTokenRepository>();
         var gatewayValidator = new GatewayValidationService(appRegRepository, NullLogger<GatewayValidationService>.Instance);
         var auditService = scope.ServiceProvider.GetRequiredService<IAuditService>();
+        var callbackUrlValidator = scope.ServiceProvider.GetRequiredService<CallbackUrlValidator>();
+        var otpService = scope.ServiceProvider.GetRequiredService<IOtpService>();
+        var smsSender = scope.ServiceProvider.GetRequiredService<ISmsSender>();
 
-        return new AuthServiceImpl(keyManager, tokenService, jwtOptions, refreshTokenOptions, appRegRepository, refreshTokenRepository, claimsResolver, validatorFactory, null, authMetrics, logger, gatewayValidator, passwordPolicy, passwordHasher, accountRepository, passwordCredentialRepository, unitOfWork, auditService);
+        return new AuthServiceImpl(keyManager, tokenService, jwtOptions, refreshTokenOptions, appRegRepository, refreshTokenRepository, claimsResolver, validatorFactory, null, authMetrics, logger, gatewayValidator, callbackUrlValidator, passwordPolicy, passwordHasher, accountRepository, passwordCredentialRepository, unitOfWork, auditService, otpService, smsSender);
     }
 
     private IKeyManager CreateMockKeyManager()

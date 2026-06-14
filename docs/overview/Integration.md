@@ -18,6 +18,22 @@
 | WeChat API (/sns/jscode2session) | 出 | HTTP | HTTPS | 微信登录获取 OpenId |
 | Business Service Callback | 出 | HTTP | HTTP/HTTPS | 登录后获取用户角色和权限 |
 
+## Client SDK 集成
+
+业务服务通过 `QuantumZhou.Identity.Client` 项目引用接入 Identity 认证。Client SDK 内部使用 gRPC 调用 Identity 的 `GetToken` 接口，对外封装为 HTTP 端点（login/refresh/me/logout）。
+
+### 调用链路
+
+```
+业务前端 → 业务后端 (Client SDK AuthEndpoints) → Identity (gRPC GetToken)
+```
+
+### 已接入服务
+
+| 服务 | 接入方式 | 认证端点路径 |
+|------|---------|-------------|
+| ruoyu.docretrieval | Identity.Client 项目引用 | `/admin/auth/*` |
+
 ## 失败语义总结
 
 ### 出方向：WeChat API 调用失败

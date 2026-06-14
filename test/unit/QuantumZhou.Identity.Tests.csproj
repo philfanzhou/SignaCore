@@ -30,10 +30,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\backend\Database\QuantumZhou.Identity.Database.csproj" />
-    <ProjectReference Include="..\backend\Domain\QuantumZhou.Identity.Domain.csproj" />
-    <ProjectReference Include="..\backend\Service\QuantumZhou.Identity.Service.csproj" />
-    <ProjectReference Include="..\backend\Host\QuantumZhou.Identity.Host.csproj">
+    <ProjectReference Include="..\..\backend\Database\QuantumZhou.Identity.Database.csproj" />
+    <ProjectReference Include="..\..\backend\Domain\QuantumZhou.Identity.Domain.csproj" />
+    <ProjectReference Include="..\..\backend\Service\QuantumZhou.Identity.Service.csproj" />
+    <ProjectReference Include="..\..\backend\Host\QuantumZhou.Identity.Host.csproj">
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
       <ExcludeAssets>buildTransitive</ExcludeAssets>
     </ProjectReference>
@@ -42,6 +42,7 @@
   <ItemGroup>
     <Compile Remove="obj\**\*.AssemblyInfo.cs" />
     <Compile Remove="obj\**\*.AssemblyAttributes.cs" />
+    <Compile Remove="Client\**" />
   </ItemGroup>
 
 </Project>

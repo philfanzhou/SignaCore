@@ -74,8 +74,8 @@ dotnet ef database update --project ../Host
 
 ```bash
 # 单元测试
-dotnet test test/QuantumZhou.Identity.Tests.csproj
+dotnet test test/unit/QuantumZhou.Identity.Tests.csproj
 
 # 集成测试（需要运行中的服务）
-dotnet test QuantumZhou.Identity.IntegrationTests/
+dotnet test test/integration/QuantumZhou.Identity.IntegrationTests.csproj
 ```
