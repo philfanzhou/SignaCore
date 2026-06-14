@@ -10,12 +10,17 @@ NETWORK_NAME="ruoyu-net"
 #GRPC_PORT=10890
 HTTP_PORT=10891
 
+DB_PROVIDER="PostgreSQL"
+CALLBACK_ALLOW_PRIVATE="true"
+CALLBACK_ALLOWED_DOMAIN="ruoyu-teacher-api"
+
 DB_HOST="ruoyu-postgres"
 DB_PORT="5432"
 DB_NAME="ruoyu_identity"
 DB_USER="postgres"
 DB_PASS="postgres"
 CONNECTION_STRING="Host=${DB_HOST};Port=${DB_PORT};Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASS};"
+
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="Qwer1234"
 
@@ -45,13 +50,13 @@ docker run -d \
     -p "${HTTP_PORT}:5002" \
     -e TZ=Asia/Shanghai \
     -e APP_TITLE="${CONTAINER_NAME}" \
-    -e Database__Provider="PostgreSQL" \
+    -e Database__Provider="${DB_PROVIDER}" \
     -e ConnectionStrings__PostgreSQL="${CONNECTION_STRING}" \
     -e AdminWeb__AdminUsernames__0="${ADMIN_USERNAME}" \
     -e ADMIN_BOOTSTRAP_USERNAME="${ADMIN_USERNAME}" \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
-    -e Callback__AllowPrivateAddresses="true" \
-    -e Callback__AllowedDomains__0="ruoyu-teacher-api" \
+    -e Callback__AllowPrivateAddresses="${CALLBACK_ALLOW_PRIVATE}" \
+    -e Callback__AllowedDomains__0="${CALLBACK_ALLOWED_DOMAIN}" \
     -v "${DATA_DIR}/master-key:/app/master-key" \
     "$IMAGE"
 
