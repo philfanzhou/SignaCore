@@ -12,6 +12,7 @@ backend/Host/Program.cs (JWKS 端点配置)
 ```csharp
 public interface IKeyManager {
     RsaSecurityKey GetCurrentKey();
+    Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync();
     Task<bool> NeedsKeyRotationAsync();
     Task RotateKeyAsync();
     Task InitializationCompleted { get; }
@@ -64,3 +65,4 @@ EncryptedPrivateKeyParams (存储到数据库)
 | 启动阻塞 | 服务启动时阻塞等待 `KeyManager.InitializationCompleted`，在密钥初始化完成前不接受任何请求 |
 | 主密钥丢失恢复 | 如果主密钥丢失导致私钥解密失败，旧密钥被标记为非活跃（deactivated），自动生成新的密钥对；所有基于旧密钥签发的 JWT 将失效 |
 | JWKS 速率限制 | JWKS 端点配置独立的速率限制器（FixedWindow 策略，60 次/分钟），防止公钥查询被滥用 |
+| JWKS 多密钥返回 | JWKS 端点返回所有未过期密钥（含已停用但未过期的），确保密钥轮换后旧 token 在过期前仍可验证。`IssuerSigningKeyResolver` 同样使用 `GetValidKeysAsync()`，JWT 库按 `kid` 自动匹配 |

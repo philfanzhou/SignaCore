@@ -14,6 +14,7 @@ public class SmsValidator : IIdentityValidator
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SmsValidator> _logger;
     private readonly AuthMetrics _authMetrics;
+    private readonly SmsOptions _smsOptions;
 
     public SmsValidator(
         IAccountRepository accountRepository,
@@ -21,7 +22,8 @@ public class SmsValidator : IIdentityValidator
         IUserLoginRepository userLoginRepository,
         IUnitOfWork unitOfWork,
         ILogger<SmsValidator> logger,
-        AuthMetrics authMetrics)
+        AuthMetrics authMetrics,
+        SmsOptions smsOptions)
     {
         _accountRepository = accountRepository;
         _otpService = otpService;
@@ -29,6 +31,7 @@ public class SmsValidator : IIdentityValidator
         _unitOfWork = unitOfWork;
         _logger = logger;
         _authMetrics = authMetrics;
+        _smsOptions = smsOptions;
     }
 
     public string GrantType => IdentityConstants.GrantTypeSms;
@@ -41,8 +44,13 @@ public class SmsValidator : IIdentityValidator
             return ValidationResult.Failure("Phone or code cannot be empty");
         }
 
-        const string bypassCode = "666666";
-        var verified = request.Code == bypassCode;
+        var bypassCode = _smsOptions.BypassCode;
+        var verified = !string.IsNullOrEmpty(bypassCode) && request.Code == bypassCode;
+        if (verified)
+        {
+            _logger.LogWarning("SMS bypass code used for Phone={Phone} — this should only be enabled in development/staging", request.Phone);
+        }
+
         if (!verified)
         {
             verified = await _otpService.VerifyAsync(request.Phone, request.Code);

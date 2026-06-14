@@ -42,14 +42,34 @@
 
 ### 管理员引导账户
 
-```json
-{
-  "AdminBootstrap": {
-    "Username": "admin",
-    "Password": "Admin@2026"
-  }
-}
+管理员密码不再硬编码于配置文件，通过环境变量传入：
+
+```bash
+# 必须设置的环境变量
+export ADMIN_BOOTSTRAP_USERNAME=admin
+export ADMIN_BOOTSTRAP_PASSWORD=YourSecurePassword
 ```
+
+appsettings.json 中 `AdminBootstrap:Password` 默认为空，`PostConfigure` 从环境变量覆盖。
+
+### SMS 绕过验证码（仅限开发/预发布）
+
+```bash
+# 开发环境可设置绕过码，生产环境必须留空
+export SMS_BYPASS_CODE=666666
+```
+
+当 `Sms:BypassCode` 或 `SMS_BYPASS_CODE` 为空时，绕过逻辑完全禁用。
+
+### Teacher Portal 应用注册
+
+```bash
+# 必须设置的环境变量
+export TEACHER_PORTAL_APP_ID=your-app-id
+export TEACHER_PORTAL_APP_SECRET=your-app-secret
+```
+
+当 AppId 和 AppSecret 均未配置时，服务启动时跳过注册并输出警告日志。
 
 ### Redis 配置
 
@@ -103,5 +123,12 @@ gunzip -c backup_identity_20240101_020000.sql.gz | docker exec -i ruoyu-postgres
 1. 检查 Identity 服务状态：`curl http://localhost:5002/health`
 2. 查看 Identity 服务日志：`docker logs ruoyu-identity | grep -i error`
 3. 检查 KeyManager 初始化：`docker logs ruoyu-identity | grep "KeyManager initialization"`
-4. 验证 JWKS 端点：`curl http://localhost:5002/.well-known/jwks`
+4. 验证 JWKS 端点：`curl http://localhost:5002/.well-known/jwks`（应返回所有未过期密钥）
 5. 确认各服务中的 JWT Issuer 和 Audience 配置一致
+
+### 密钥轮换后旧 token 失效
+
+JWKS 端点返回所有未过期密钥（含已停用但未过期的），确保密钥轮换后旧 token 在过期前仍可验证。如果旧 token 仍然失效：
+
+1. 检查旧密钥的 `ExpiresAt` 是否已过期：`docker logs ruoyu-identity | grep "GetValidKeysAsync"`
+2. 确认调用方缓存了 JWKS 响应且会定期刷新（建议缓存时间 ≤ 1 小时）

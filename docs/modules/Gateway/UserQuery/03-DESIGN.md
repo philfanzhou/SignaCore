@@ -106,3 +106,5 @@ Client ──POST /api/gateway/users/batch──▶ GatewayController
 4. **批量查询保持请求顺序**：通过 `orderedUserIds` 和 `userMap` 确保返回结果按请求中 ID 的顺序排列，不存在的 ID 不出现在结果中
 5. **无效 GUID 过滤**：批量查询时，非 GUID 格式的字符串会被 `Guid.TryParse` 过滤，不会导致查询错误
 6. **凭证验证**：`GatewayValidationService.ValidateAsync` 依次验证 AppSecret 非空 → AppId 已注册 → App 已激活 → App 未过期 → BCrypt 验证 AppSecret
+7. **AppSecret 脱敏中间件**：`X-Admin-AppSecret` 请求头在认证中间件之后被移至 `HttpContext.Items`，防止下游日志/中间件意外记录该值。`GatewayController` 优先从 `HttpContext.Items` 读取，回退到请求头
+8. **HTTPS 安全模型**：Gateway API 设计为内部网络调用（Docker `ruoyu-net`）。生产环境必须通过反向代理 TLS 终结或直接启用 HTTPS。非 HTTPS 请求会输出警告日志

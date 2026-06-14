@@ -13,6 +13,7 @@ using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Services.Sms;
 using QuantumZhou.Identity.Domain.Services.WeChat;
 using QuantumZhou.Identity.Host;
+using QuantumZhou.Identity.Host.Controllers;
 using QuantumZhou.Identity.Service;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -131,7 +132,8 @@ var smsOptions = new SmsOptions
 {
     OtpTtlSeconds = int.Parse(builder.Configuration["Sms:OtpTtlSeconds"] ?? "300"),
     MaxAttempts = int.Parse(builder.Configuration["Sms:MaxAttempts"] ?? "5"),
-    LockoutSeconds = int.Parse(builder.Configuration["Sms:LockoutSeconds"] ?? "600")
+    LockoutSeconds = int.Parse(builder.Configuration["Sms:LockoutSeconds"] ?? "600"),
+    BypassCode = builder.Configuration["Sms:BypassCode"] ?? Environment.GetEnvironmentVariable("SMS_BYPASS_CODE")
 };
 builder.Services.AddSingleton(smsOptions);
 if (!string.IsNullOrWhiteSpace(connectionString))
@@ -217,6 +219,13 @@ builder.Services.AddHealthChecks()
 var adminWebOrigins = builder.Configuration.GetSection("AdminWeb:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
 builder.Services.Configure<AdminWebOptions>(builder.Configuration.GetSection(AdminWebOptions.SectionName));
 builder.Services.Configure<AdminBootstrapOptions>(builder.Configuration.GetSection(AdminBootstrapOptions.SectionName));
+builder.Services.PostConfigure<AdminBootstrapOptions>(options =>
+{
+    var envUsername = Environment.GetEnvironmentVariable("ADMIN_BOOTSTRAP_USERNAME");
+    if (!string.IsNullOrWhiteSpace(envUsername)) options.Username = envUsername;
+    var envPassword = Environment.GetEnvironmentVariable("ADMIN_BOOTSTRAP_PASSWORD");
+    if (!string.IsNullOrWhiteSpace(envPassword)) options.Password = envPassword;
+});
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AdminWeb", policy =>
@@ -320,6 +329,17 @@ lifetime.ApplicationStopping.Register(() =>
 
 app.Logger.LogInformation("Service endpoints configured: gRPC={GrpcPort}, HTTP={HttpPort}", grpcPort, httpPort);
 
+// ========== HTTPS Warning for Gateway API ==========
+// Gateway API transmits AppSecret via request headers; warn if not running behind HTTPS/TLS.
+// Note: Kestrel configured via ConfigureKestrel may not populate app.Urls; this is a best-effort check.
+var hasHttpsEndpoint = app.Urls.Any(url => url.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+if (!hasHttpsEndpoint)
+{
+    app.Logger.LogWarning(
+        "No HTTPS endpoint detected. Gateway API (X-Admin-AppSecret header) will transmit secrets over plain HTTP. " +
+        "In production, enable HTTPS or ensure TLS termination at the reverse proxy.");
+}
+
 // ========== 18. Database Initialization (must happen before KeyManager) ==========
 var autoMigrate = bool.Parse(builder.Configuration["Database:AutoMigrate"] ?? "true");
 if (autoMigrate)
@@ -413,7 +433,11 @@ if (autoMigrate)
 
                                 using (var cmd = connection.CreateCommand())
                                 {
-                                    cmd.CommandText = "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'accounts'";
+                                    cmd.CommandText = "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = @table";
+                                    var tableParam = cmd.CreateParameter();
+                                    tableParam.ParameterName = "@table";
+                                    tableParam.Value = "accounts";
+                                    cmd.Parameters.Add(tableParam);
                                     var result = await cmd.ExecuteScalarAsync();
                                     hasAccounts = result != null && Convert.ToInt64(result) > 0;
                                 }
@@ -433,7 +457,15 @@ if (autoMigrate)
 
                                         using (var cmd = connection.CreateCommand())
                                         {
-                                            cmd.CommandText = $"INSERT INTO \"__EFMigrationsHistory\" (\"MigrationId\", \"ProductVersion\") VALUES ('{initialMigrationId}', '8.0.4')";
+                                            cmd.CommandText = "INSERT INTO \"__EFMigrationsHistory\" (\"MigrationId\", \"ProductVersion\") VALUES (@migrationId, @productVersion)";
+                                            var migrationIdParam = cmd.CreateParameter();
+                                            migrationIdParam.ParameterName = "@migrationId";
+                                            migrationIdParam.Value = initialMigrationId;
+                                            cmd.Parameters.Add(migrationIdParam);
+                                            var productVersionParam = cmd.CreateParameter();
+                                            productVersionParam.ParameterName = "@productVersion";
+                                            productVersionParam.Value = "8.0.4";
+                                            cmd.Parameters.Add(productVersionParam);
                                             await cmd.ExecuteNonQueryAsync();
                                         }
 
@@ -514,30 +546,41 @@ if (autoMigrate)
                 }
             }
 
-            // Initialize Teacher Portal app registration for testing purposes
-            var teacherAppId = "a6eab9bd87404c0ababc910114d11a62";
-            var teacherAppSecret = "cGzoAwXaP+PahtD3qXYVY75IJiPWtfbt/4SIt+WrKoQ=";
-            var existingTeacherApp = await db.AppRegistrations
-                .AsNoTracking()
-                .FirstOrDefaultAsync(a => a.AppId == teacherAppId);
-            if (existingTeacherApp == null)
+            // Initialize Teacher Portal app registration from configuration
+            var teacherAppId = Environment.GetEnvironmentVariable("TEACHER_PORTAL_APP_ID")
+                ?? builder.Configuration["TeacherPortal:AppId"] ?? string.Empty;
+            var teacherAppSecret = Environment.GetEnvironmentVariable("TEACHER_PORTAL_APP_SECRET")
+                ?? builder.Configuration["TeacherPortal:AppSecret"] ?? string.Empty;
+            var teacherCallbackUrl = builder.Configuration["TeacherPortal:CallbackUrl"] ?? "http://localhost:5004/api/auth/callback";
+
+            if (!string.IsNullOrWhiteSpace(teacherAppId) && !string.IsNullOrWhiteSpace(teacherAppSecret))
             {
-                db.AppRegistrations.Add(new AppRegistrationEntity
+                var existingTeacherApp = await db.AppRegistrations
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(a => a.AppId == teacherAppId);
+                if (existingTeacherApp == null)
                 {
-                    Id = Guid.NewGuid(),
-                    AppId = teacherAppId,
-                    AppSecretHash = BCrypt.Net.BCrypt.HashPassword(teacherAppSecret),
-                    AppName = "Teacher Portal",
-                    CallbackUrl = "http://localhost:5004/api/auth/callback",
-                    IsActive = true,
-                    CreatedAt = DateTimeOffset.UtcNow
-                });
-                await db.SaveChangesAsync();
-                app.Logger.LogInformation("Teacher Portal app registration created: AppId={AppId}", teacherAppId);
+                    db.AppRegistrations.Add(new AppRegistrationEntity
+                    {
+                        Id = Guid.NewGuid(),
+                        AppId = teacherAppId,
+                        AppSecretHash = BCrypt.Net.BCrypt.HashPassword(teacherAppSecret),
+                        AppName = "Teacher Portal",
+                        CallbackUrl = teacherCallbackUrl,
+                        IsActive = true,
+                        CreatedAt = DateTimeOffset.UtcNow
+                    });
+                    await db.SaveChangesAsync();
+                    app.Logger.LogInformation("Teacher Portal app registration created: AppId={AppId}", teacherAppId);
+                }
+                else
+                {
+                    app.Logger.LogInformation("Teacher Portal app registration already exists: AppId={AppId}", teacherAppId);
+                }
             }
             else
             {
-                app.Logger.LogInformation("Teacher Portal app registration already exists: AppId={AppId}", teacherAppId);
+                app.Logger.LogWarning("Teacher Portal app registration skipped: AppId/AppSecret not configured. Set TEACHER_PORTAL_APP_ID and TEACHER_PORTAL_APP_SECRET environment variables or TeacherPortal:AppId/TeacherPortal:AppSecret in configuration.");
             }
         }
         catch (Exception ex)
@@ -574,6 +617,22 @@ if (app.Environment.IsDevelopment())
 }
 app.UseCors("AdminWeb");
 app.UseAuthentication();
+
+// ========== Sensitive Header Redaction Middleware ==========
+// Strips X-Admin-AppSecret from the request headers after authentication
+// so that downstream logging/middleware cannot accidentally log the secret value.
+// The secret has already been consumed by GatewayController.ValidateGatewayRequestAsync.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Headers.TryGetValue(GatewayController.AppSecretHeader, out var secretValue))
+    {
+        // Store the secret in HttpContext.Items for controller access, then remove from headers
+        context.Items[GatewayController.AppSecretHeader] = secretValue.ToString();
+        context.Request.Headers.Remove(GatewayController.AppSecretHeader);
+    }
+    await next();
+});
+
 app.UseAuthorization();
 
 app.MapHealthChecks("/health");
@@ -635,23 +694,24 @@ app.MapGet("/.well-known/openid-configuration", (HttpContext httpContext, IConfi
 });
 
 // ========== JWKS Discovery ==========
-app.MapGet("/.well-known/jwks", (IKeyManager keyManager) =>
+app.MapGet("/.well-known/jwks", async (IKeyManager keyManager) =>
 {
-    var key = keyManager.GetCurrentKey();
-    var rsa = key.Rsa ?? throw new InvalidOperationException("Key is not RSA");
-    var parameters = rsa.ExportParameters(false);
-
-    var jwk = new
+    var keys = await keyManager.GetValidKeysAsync();
+    var jwks = keys.Select(key =>
     {
-        kty = "RSA",
-        use = "sig",
-        kid = key.KeyId,
-        alg = "RS256",
-        n = Base64UrlEncoder.Encode(parameters.Modulus!),
-        e = Base64UrlEncoder.Encode(parameters.Exponent!)
-    };
-
-    return Results.Ok(new { keys = new[] { jwk } });
+        var rsa = key.Rsa ?? throw new InvalidOperationException("Key is not RSA");
+        var parameters = rsa.ExportParameters(false);
+        return new
+        {
+            kty = "RSA",
+            use = "sig",
+            kid = key.KeyId,
+            alg = "RS256",
+            n = Base64UrlEncoder.Encode(parameters.Modulus!),
+            e = Base64UrlEncoder.Encode(parameters.Exponent!)
+        };
+    });
+    return Results.Ok(new { keys = jwks });
 });
 
 app.MapGrpcService<AuthServiceImpl>();

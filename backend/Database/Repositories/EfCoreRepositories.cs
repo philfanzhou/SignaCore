@@ -242,6 +242,16 @@ public class SecurityKeyRepository : ISecurityKeyRepository
         return keys.OrderByDescending(k => k.CreatedAt).FirstOrDefault();
     }
 
+    public async Task<IReadOnlyList<SecurityKeyEntity>> GetValidKeysAsync()
+    {
+        var now = DateTimeOffset.UtcNow;
+        return await _dbContext.SecurityKeys
+            .Where(k => k.ExpiresAt > now)
+            .OrderByDescending(k => k.IsActive)
+            .ThenByDescending(k => k.CreatedAt)
+            .ToListAsync();
+    }
+
     public Task AddAsync(SecurityKeyEntity key)
     {
         _dbContext.SecurityKeys.Add(key);

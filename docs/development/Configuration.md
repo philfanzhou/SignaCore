@@ -46,6 +46,8 @@
 | Sms:OtpTtlSeconds | 300 | 验证码有效期（秒） |
 | Sms:MaxAttempts | 5 | 最大验证尝试次数 |
 | Sms:LockoutSeconds | 600 | 超过最大尝试后锁定时间（秒） |
+| Sms:BypassCode | （空） | 绕过验证码（仅限开发/预发布，空值=禁用） |
+| SMS_BYPASS_CODE（环境变量） | - | 绕过验证码，优先级高于配置文件 |
 
 ## 微信配置
 
@@ -84,7 +86,21 @@
 | AdminWeb:AdminUsernames | [] | 允许访问管理端的用户名白名单（空=允许所有） |
 | AdminWeb:AllowedOrigins | ["http://localhost:5173"] | CORS 允许的前端来源 |
 | AdminBootstrap:Username | admin | 初始管理员用户名 |
-| AdminBootstrap:Password | Admin@2026 | 初始管理员密码 |
+| AdminBootstrap:Password | （空） | 初始管理员密码（生产环境必须通过环境变量配置） |
+| ADMIN_BOOTSTRAP_USERNAME（环境变量） | - | 初始管理员用户名，优先级高于配置文件 |
+| ADMIN_BOOTSTRAP_PASSWORD（环境变量） | - | 初始管理员密码，优先级高于配置文件 |
+
+## Teacher Portal 应用注册配置
+
+| 配置键 | 默认值 | 说明 |
+|--------|--------|------|
+| TeacherPortal:AppId | （空） | Teacher Portal 应用 ID |
+| TeacherPortal:AppSecret | （空） | Teacher Portal 应用密钥 |
+| TeacherPortal:CallbackUrl | http://localhost:5004/api/auth/callback | 回调 URL |
+| TEACHER_PORTAL_APP_ID（环境变量） | - | Teacher Portal 应用 ID，优先级高于配置文件 |
+| TEACHER_PORTAL_APP_SECRET（环境变量） | - | Teacher Portal 应用密钥，优先级高于配置文件 |
+
+> 当 AppId 和 AppSecret 均未配置时，服务启动时跳过 Teacher Portal 应用注册并输出警告日志。
 
 ## RSA 主密钥
 

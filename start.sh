@@ -48,8 +48,8 @@ docker run -d \
     -e Database__Provider="PostgreSQL" \
     -e ConnectionStrings__PostgreSQL="${CONNECTION_STRING}" \
     -e AdminWeb__AdminUsernames__0="${ADMIN_USERNAME}" \
-    -e AdminBootstrap__Username="${ADMIN_USERNAME}" \
-    -e AdminBootstrap__Password="${ADMIN_PASSWORD}" \
+    -e ADMIN_BOOTSTRAP_USERNAME="${ADMIN_USERNAME}" \
+    -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Callback__AllowPrivateAddresses="true" \
     -e Callback__AllowedDomains__0="ruoyu-teacher-api" \
     -v "${DATA_DIR}/master-key:/app/master-key" \

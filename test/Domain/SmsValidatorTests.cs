@@ -43,6 +43,8 @@ public class SmsValidatorTests
         return new AuthMetrics(meterFactory.Object);
     }
 
+    private static SmsOptions CreateSmsOptions(string? bypassCode = null) => new() { BypassCode = bypassCode };
+
     [Fact]
     public async Task ValidateAsync_WithValidSmsCode_ReturnsSuccess()
     {
@@ -58,7 +60,8 @@ public class SmsValidatorTests
             CreateUserLoginRepoMock().Object,
             CreateUnitOfWorkMock().Object,
             CreateLogger(),
-            CreateAuthMetrics());
+            CreateAuthMetrics(),
+            CreateSmsOptions());
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -83,7 +86,8 @@ public class SmsValidatorTests
             CreateUserLoginRepoMock().Object,
             CreateUnitOfWorkMock().Object,
             CreateLogger(),
-            CreateAuthMetrics());
+            CreateAuthMetrics(),
+            CreateSmsOptions());
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -106,7 +110,8 @@ public class SmsValidatorTests
             CreateUserLoginRepoMock().Object,
             CreateUnitOfWorkMock().Object,
             CreateLogger(),
-            CreateAuthMetrics());
+            CreateAuthMetrics(),
+            CreateSmsOptions());
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -142,7 +147,8 @@ public class SmsValidatorTests
             userLoginRepoMock.Object,
             uowMock.Object,
             CreateLogger(),
-            CreateAuthMetrics());
+            CreateAuthMetrics(),
+            CreateSmsOptions());
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -180,7 +186,8 @@ public class SmsValidatorTests
             CreateUserLoginRepoMock().Object,
             CreateUnitOfWorkMock().Object,
             CreateLogger(),
-            CreateAuthMetrics());
+            CreateAuthMetrics(),
+            CreateSmsOptions());
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -203,7 +210,8 @@ public class SmsValidatorTests
             CreateUserLoginRepoMock().Object,
             CreateUnitOfWorkMock().Object,
             CreateLogger(),
-            CreateAuthMetrics());
+            CreateAuthMetrics(),
+            CreateSmsOptions());
 
         Assert.Equal(IdentityConstants.GrantTypeSms, validator.GrantType);
     }

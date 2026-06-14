@@ -24,7 +24,7 @@ curl http://localhost:5002/.well-known/openid-configuration
 curl http://localhost:5002/.well-known/jwks
 ```
 
-预期返回 JSON，`keys` 数组包含一个 RSA 公钥（`kty: "RSA"`, `alg: "RS256"`）。
+预期返回 JSON，`keys` 数组包含一个或多个 RSA 公钥（`kty: "RSA"`, `alg: "RS256"`）。
 
 注意：JWKS 端点有速率限制（60 次/分钟），超出返回 429。
 
@@ -37,7 +37,7 @@ curl http://localhost:5002/.well-known/jwks
 grpcurl -plaintext localhost:5001 list
 
 # 调用 GetToken（密码登录）
-grpcurl -plaintext -d '{"grant_type":"password","username":"admin","password":"Admin@2026","app_id":"a6eab9bd87404c0ababc910114d11a62","app_secret":"cGzoAwXaP+PahtD3qXYVY75IJiPWtfbt/4SIt+WrKoQ="}' localhost:5001 QuantumZhou.Identity.AuthGrpcService/GetToken
+grpcurl -plaintext -d '{"grant_type":"password","username":"admin","password":"$ADMIN_BOOTSTRAP_PASSWORD","app_id":"$TEACHER_PORTAL_APP_ID","app_secret":"$TEACHER_PORTAL_APP_SECRET"}' localhost:5001 QuantumZhou.Identity.AuthGrpcService/GetToken
 ```
 
 预期返回 `TokenResponse`，包含 `access_token` 和 `refresh_token`。
@@ -66,7 +66,7 @@ echo "<access_token>" | cut -d. -f2 | base64 -d 2>/dev/null | python3 -m json.to
 # 管理员登录
 curl -X POST http://localhost:5002/api/admin/session/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"Admin@2026"}' \
+  -d '{"username":"admin","password":"$ADMIN_BOOTSTRAP_PASSWORD"}' \
   -c cookies.txt
 
 # 获取当前会话

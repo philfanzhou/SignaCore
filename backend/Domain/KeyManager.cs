@@ -19,6 +19,7 @@ public class MasterKeyInfo
 public interface IKeyManager
 {
     RsaSecurityKey GetCurrentKey();
+    Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync();
     Task<bool> NeedsKeyRotationAsync();
     Task RotateKeyAsync();
     Task InitializationCompleted { get; }
@@ -152,6 +153,29 @@ public class KeyManager : IKeyManager
         {
             return _currentKey!;
         }
+    }
+
+    public async Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync()
+    {
+        await _initializationTcs.Task;
+        using var scope = _scopeFactory.CreateScope();
+        var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
+        var keyEntities = await keyRepo.GetValidKeysAsync();
+
+        var keys = new List<RsaSecurityKey>();
+        foreach (var entity in keyEntities)
+        {
+            try
+            {
+                keys.Add(LoadKeyFromEntity(entity));
+            }
+            catch (CryptographicException ex)
+            {
+                _logger.LogWarning(ex, "Failed to load key {KeyId}, skipping", entity.KeyId);
+            }
+        }
+
+        return keys;
     }
 
     public RsaSecurityKey GetCurrentKey()
