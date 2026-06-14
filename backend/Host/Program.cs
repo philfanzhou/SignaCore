@@ -367,6 +367,7 @@ builder.Services.AddSingleton<AuthMetrics>();
 var app = builder.Build();
 
 app.Logger.LogInformation("Service endpoints configured: gRPC={GrpcPort}, HTTP={HttpPort}", grpcPort, httpPort);
+app.Logger.LogInformation("Database: {Provider}", dbProvider);
 
 // ========== HTTPS Warning for Gateway API ==========
 // Gateway API transmits AppSecret via request headers; warn if not running behind HTTPS/TLS.

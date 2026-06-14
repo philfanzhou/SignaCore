@@ -55,10 +55,5 @@ docker run -d \
     -v "${DATA_DIR}/master-key:/app/master-key" \
     "$IMAGE"
 
-echo ""
-echo "QuantumZhou.Identity Unified Service Started"
-echo "  HTTP Port: ${HTTP_PORT} (Admin Web)"
-echo "  Network: ${NETWORK_NAME}"
-echo "  DB: ${DB_HOST}:${DB_PORT}/${DB_NAME}"
-echo "=== Real-time Logs ==="
+echo "${CONTAINER_NAME} started"
 docker logs -f -t "$CONTAINER_NAME"
