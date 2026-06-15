@@ -43,12 +43,30 @@ public static class ServiceCollectionExtensions
         // 注册 JWKS 配置管理器
         services.AddSingleton<IConfigurationManager<OpenIdConnectConfiguration>>(sp =>
         {
+            var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("Identity.Client.Jwks");
             var httpClient = new HttpClient();
             var retriever = new OpenIdConnectConfigurationRetriever();
-            return new ConfigurationManager<OpenIdConnectConfiguration>(
+            var manager = new ConfigurationManager<OpenIdConnectConfiguration>(
                 jwksEndpoint,
                 retriever,
                 new HttpDocumentRetriever(httpClient) { RequireHttps = options.RequireHttpsForJwks });
+
+            // 启动时主动预热 JWKS，验证连通性
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    logger.LogInformation("预热 JWKS: 正在从 {Endpoint} 获取签名密钥...", jwksEndpoint);
+                    var config = await manager.GetConfigurationAsync(CancellationToken.None);
+                    logger.LogInformation("JWKS 预热成功: 获取到 {Count} 个签名密钥", config.SigningKeys.Count);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "JWKS 预热失败: {Error}", ex.Message);
+                }
+            });
+
+            return manager;
         });
 
         // 注册 JWT Bearer 认证
@@ -80,7 +98,7 @@ public static class ServiceCollectionExtensions
                                 .GetRequiredService<IConfigurationManager<OpenIdConnectConfiguration>>();
                             var config = await configManager.GetConfigurationAsync(context.HttpContext.RequestAborted);
                             context.Options.TokenValidationParameters.IssuerSigningKeys = config.SigningKeys;
-                            logger.LogDebug("JWKS loaded: {KeyCount} signing key(s)", config.SigningKeys.Count);
+                            logger.LogInformation("JWKS loaded: {KeyCount} signing key(s)", config.SigningKeys.Count);
                         }
                         catch (Exception ex)
                         {
