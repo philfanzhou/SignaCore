@@ -125,6 +125,8 @@ public class GrpcServerFixture : IAsyncLifetime
                 builder.UseSetting("ConnectionStrings:Default", $"Data Source={dbPath}");
                 builder.UseSetting("RateLimiting:PermitLimitPerClient", "1000");
                 builder.UseSetting("RateLimiting:WindowSeconds", "60");
+                builder.UseSetting("AdminBootstrap:Username", "");
+                builder.UseSetting("AdminBootstrap:Password", "");
             });
 
         _factory.CreateClient();

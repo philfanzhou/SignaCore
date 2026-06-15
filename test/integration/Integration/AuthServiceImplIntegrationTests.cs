@@ -68,6 +68,17 @@ public class AuthServiceImplIntegrationTests : IAsyncLifetime
         services.AddScoped<ValidatorFactory>();
         services.AddScoped<ClaimsResolver>();
         services.AddScoped<ICallbackService, CallbackService>();
+        services.AddSingleton<CallbackUrlValidator>();
+
+        var smsOptions = new SmsOptions
+        {
+            OtpTtlSeconds = 300,
+            MaxAttempts = 5,
+            LockoutSeconds = 600
+        };
+        services.AddSingleton(smsOptions);
+        services.AddSingleton<IOtpService, InMemoryOtpService>();
+        services.AddSingleton<ISmsSender, LoggingSmsSender>();
 
         services.AddLogging();
 

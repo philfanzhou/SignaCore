@@ -214,28 +214,33 @@ public class SecurityKeyRepository : ISecurityKeyRepository
 
     public async Task<SecurityKeyEntity?> GetActiveKeyAsync()
     {
+        // SQLite does not support server-side DateTimeOffset comparison/orderBy in LINQ;
+        // security_keys table is tiny (< 10 rows), client evaluation is acceptable.
         var now = DateTimeOffset.UtcNow;
-        return await _dbContext.SecurityKeys
-            .Where(k => k.IsActive && k.ExpiresAt > now)
-            .OrderByDescending(k => k.CreatedAt)
-            .FirstOrDefaultAsync();
+        var keys = await _dbContext.SecurityKeys
+            .Where(k => k.IsActive)
+            .ToListAsync();
+        return keys.OrderByDescending(k => k.CreatedAt).FirstOrDefault(k => k.ExpiresAt > now);
     }
 
     public async Task<SecurityKeyEntity?> GetLatestKeyAsync()
     {
-        return await _dbContext.SecurityKeys
-            .OrderByDescending(k => k.CreatedAt)
-            .FirstOrDefaultAsync();
+        // SQLite does not support server-side DateTimeOffset orderBy in LINQ;
+        // security_keys table is tiny (< 10 rows), client evaluation is acceptable.
+        var keys = await _dbContext.SecurityKeys.ToListAsync();
+        return keys.OrderByDescending(k => k.CreatedAt).FirstOrDefault();
     }
 
     public async Task<IReadOnlyList<SecurityKeyEntity>> GetValidKeysAsync()
     {
+        // SQLite does not support server-side DateTimeOffset comparison/orderBy in LINQ;
+        // security_keys table is tiny (< 10 rows), client evaluation is acceptable.
         var now = DateTimeOffset.UtcNow;
-        return await _dbContext.SecurityKeys
-            .Where(k => k.ExpiresAt > now)
+        var keys = await _dbContext.SecurityKeys.ToListAsync();
+        return keys.Where(k => k.ExpiresAt > now)
             .OrderByDescending(k => k.IsActive)
             .ThenByDescending(k => k.CreatedAt)
-            .ToListAsync();
+            .ToList();
     }
 
     public Task AddAsync(SecurityKeyEntity key)

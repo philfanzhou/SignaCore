@@ -77,6 +77,8 @@ public class RegistrationIntegrationTests : IAsyncLifetime
         services.AddScoped<IIdentityValidator, RefreshTokenValidator>();
         services.AddScoped<ValidatorFactory>();
         services.AddScoped<ClaimsResolver>();
+        services.AddScoped<ICallbackService, CallbackService>();
+        services.AddSingleton<CallbackUrlValidator>();
 
         services.AddScoped<IOtpService>(sp =>
         {

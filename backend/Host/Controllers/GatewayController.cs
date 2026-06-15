@@ -134,11 +134,14 @@ public class GatewayController : ControllerBase
         int page,
         int pageSize)
     {
-        var pagedAccounts = await query
+        // SQLite does not support server-side DateTimeOffset orderBy;
+        // client evaluation is used for compatibility.
+        var allAccounts = await query.ToListAsync();
+        var pagedAccounts = allAccounts
             .OrderByDescending(account => account.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .ToListAsync();
+            .ToList();
 
         var accountIds = pagedAccounts.Select(a => a.Id).ToList();
 

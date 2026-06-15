@@ -66,3 +66,4 @@ EncryptedPrivateKeyParams (存储到数据库)
 | 主密钥丢失恢复 | 如果主密钥丢失导致私钥解密失败，旧密钥被标记为非活跃（deactivated），自动生成新的密钥对；所有基于旧密钥签发的 JWT 将失效 |
 | JWKS 速率限制 | JWKS 端点配置独立的速率限制器（FixedWindow 策略，60 次/分钟），防止公钥查询被滥用 |
 | JWKS 多密钥返回 | JWKS 端点返回所有未过期密钥（含已停用但未过期的），确保密钥轮换后旧 token 在过期前仍可验证。`IssuerSigningKeyResolver` 同样使用 `GetValidKeysAsync()`，JWT 库按 `kid` 自动匹配 |
+| SQLite DateTimeOffset 兼容 | `SecurityKeyRepository.GetActiveKeyAsync` 和 `GetValidKeysAsync` 使用客户端求值处理 `ExpiresAt` 比较，因为 SQLite 的 EF Core 提供程序不支持 `DateTimeOffset` 的服务器端 LINQ 转译。security_keys 表数据量极小（通常 < 10 行），客户端过滤无性能影响 |

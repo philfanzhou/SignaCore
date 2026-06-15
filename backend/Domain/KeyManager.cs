@@ -224,7 +224,7 @@ public class KeyManager : IKeyManager
             await unitOfWork.SaveChangesAsync();
         }
 
-        var newKey = await GenerateAndSaveKeyAsync(keyRepo, "RSA key rotated");
+        var newKey = await GenerateAndSaveKeyAsync(keyRepo, unitOfWork, "RSA key rotated");
         lock (_keyLock)
         {
             _currentKey = newKey;
@@ -235,6 +235,7 @@ public class KeyManager : IKeyManager
     {
         using var scope = _scopeFactory.CreateScope();
         var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
+        var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         var keyEntity = await keyRepo.GetActiveKeyAsync();
 
         if (keyEntity != null)
@@ -247,31 +248,29 @@ public class KeyManager : IKeyManager
             catch (CryptographicException ex)
             {
                 _logger.LogWarning(ex, "Failed to decrypt RSA key from database. Master key may have been lost. Re-encrypting with new key pair.");
-                await ForceRegenerateKeyAsync(keyRepo, keyEntity);
+                await ForceRegenerateKeyAsync(keyRepo, unitOfWork, keyEntity);
                 _logger.LogInformation("RSA key re-encrypted. All clients must re-authenticate.");
                 var freshEntity = await keyRepo.GetActiveKeyAsync();
                 return LoadKeyFromEntity(freshEntity!);
             }
         }
 
-        return await GenerateAndSaveKeyAsync(keyRepo, "Generating new RSA key pair");
+        return await GenerateAndSaveKeyAsync(keyRepo, unitOfWork, "Generating new RSA key pair");
     }
 
-    private async Task ForceRegenerateKeyAsync(ISecurityKeyRepository keyRepo, SecurityKeyEntity oldEntity)
+    private async Task ForceRegenerateKeyAsync(ISecurityKeyRepository keyRepo, IUnitOfWork unitOfWork, SecurityKeyEntity oldEntity)
     {
         oldEntity.IsActive = false;
-        using var scope = _scopeFactory.CreateScope();
-        var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         await unitOfWork.SaveChangesAsync();
 
-        var newKey = await GenerateAndSaveKeyAsync(keyRepo, "Master key lost - generating new RSA key pair");
+        var newKey = await GenerateAndSaveKeyAsync(keyRepo, unitOfWork, "Master key lost - generating new RSA key pair");
         lock (_keyLock)
         {
             _currentKey = newKey;
         }
     }
 
-    private async Task<RsaSecurityKey> GenerateAndSaveKeyAsync(ISecurityKeyRepository keyRepo, string logMessage)
+    private async Task<RsaSecurityKey> GenerateAndSaveKeyAsync(ISecurityKeyRepository keyRepo, IUnitOfWork unitOfWork, string logMessage)
     {
         _logger.LogInformation(logMessage);
 
@@ -295,6 +294,7 @@ public class KeyManager : IKeyManager
         };
 
         await keyRepo.AddAsync(keyEntity);
+        await unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("RSA private key encrypted and saved, KeyId: {KeyId}", keyEntity.KeyId);
 
