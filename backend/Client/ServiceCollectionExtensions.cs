@@ -2,6 +2,7 @@ using Grpc.Net.Client;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
@@ -69,10 +70,23 @@ public static class ServiceCollectionExtensions
                 {
                     OnMessageReceived = async context =>
                     {
-                        var configManager = context.HttpContext.RequestServices
-                            .GetRequiredService<IConfigurationManager<OpenIdConnectConfiguration>>();
-                        var config = await configManager.GetConfigurationAsync(context.HttpContext.RequestAborted);
-                        context.Options.TokenValidationParameters.IssuerSigningKeys = config.SigningKeys;
+                        var logger = context.HttpContext.RequestServices
+                            .GetRequiredService<ILoggerFactory>()
+                            .CreateLogger("Identity.Client.Jwks");
+
+                        try
+                        {
+                            var configManager = context.HttpContext.RequestServices
+                                .GetRequiredService<IConfigurationManager<OpenIdConnectConfiguration>>();
+                            var config = await configManager.GetConfigurationAsync(context.HttpContext.RequestAborted);
+                            context.Options.TokenValidationParameters.IssuerSigningKeys = config.SigningKeys;
+                            logger.LogDebug("JWKS loaded: {KeyCount} signing key(s)", config.SigningKeys.Count);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogError(ex, "JWKS fetch failed: {Error}", ex.Message);
+                            throw;
+                        }
                     }
                 };
             });
