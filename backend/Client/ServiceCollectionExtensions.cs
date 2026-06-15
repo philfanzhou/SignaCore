@@ -47,7 +47,7 @@ public static class ServiceCollectionExtensions
             return new ConfigurationManager<OpenIdConnectConfiguration>(
                 jwksEndpoint,
                 retriever,
-                new HttpDocumentRetriever(httpClient));
+                new HttpDocumentRetriever(httpClient) { RequireHttps = options.RequireHttpsForJwks });
         });
 
         // 注册 JWT Bearer 认证

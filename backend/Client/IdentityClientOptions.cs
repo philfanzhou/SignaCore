@@ -43,6 +43,11 @@ public class IdentityClientOptions
     public string AuthEndpointPrefix { get; set; } = "/admin/auth";
 
     /// <summary>
+    /// JWKS 文档检索器是否要求 HTTPS。内网 Docker 部署时设为 false。
+    /// </summary>
+    public bool RequireHttpsForJwks { get; set; } = false;
+
+    /// <summary>
     /// 获取 AppSecret，优先从环境变量读取。
     /// </summary>
     public string GetEffectiveAppSecret() =>
