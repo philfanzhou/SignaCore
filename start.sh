@@ -22,6 +22,7 @@ CONNECTION_STRING="Host=${DB_HOST};Port=${DB_PORT};Database=${DB_NAME};Username=
 
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="Qwer1234"
+SMS_BYPASS_CODE="666666"
 
 DATA_DIR="${SCRIPT_DIR}/data"
 
@@ -56,6 +57,7 @@ docker run -d \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Callback__AllowPrivateAddresses="${CALLBACK_ALLOW_PRIVATE}" \
     -e Callback__AllowedDomains__0="${CALLBACK_ALLOWED_DOMAIN}" \
+    -e Sms__BypassCode="${SMS_BYPASS_CODE}" \
     -v "${DATA_DIR}/master-key:/app/master-key" \
     "$IMAGE_NAME"
 
