@@ -99,9 +99,13 @@ app.MapIdentityAuthEndpoints();
 | 文件 | 用途 |
 |------|------|
 | [IdentityClientOptions.cs](../../backend/Client/IdentityClientOptions.cs) | 配置项定义 |
-| [ServiceCollectionExtensions.cs](../../backend/Client/ServiceCollectionExtensions.cs) | AddIdentityClient() 扩展方法 |
+| [ServiceCollectionExtensions.cs](../../backend/Client/ServiceCollectionExtensions.cs) | AddIdentityClient() 扩展方法 + JwksFetcher |
 | [ApplicationBuilderExtensions.cs](../../backend/Client/ApplicationBuilderExtensions.cs) | UseIdentityClient() + MapIdentityAuthEndpoints() |
 | [AuthEndpoints.cs](../../backend/Client/AuthEndpoints.cs) | 认证端点实现 |
+
+### JWKS 获取机制
+
+JWT 验证需要从 Identity 服务获取 JWKS 公钥。SDK 使用 `JwksFetcher` 类（普通 HttpClient）手动获取并解析 JWKS，不依赖 `ConfigurationManager`（后者在 Docker 容器环境中存在静默失败问题）。密钥缓存 30 分钟，失败不缓存，下次请求重试。
 
 ## 详细设计
 
