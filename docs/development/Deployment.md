@@ -2,7 +2,7 @@
 
 ## 构建与部署
 
-- Dockerfile：`scripts/2.identity/1.build/Dockerfile`
+- Dockerfile：`deploy/Dockerfile`
 - 部署脚本：`scripts/2.identity/2.deploy/start.sh`
 
 ## 配置项
