@@ -87,17 +87,30 @@ public class JwksFetcher
 {
     private readonly string _jwksEndpoint;
     private readonly ILogger<JwksFetcher> _logger;
-    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
+    private readonly HttpClient _httpClient;
 
     private List<SecurityKey>? _cachedKeys;
     private DateTimeOffset _cacheExpiry = DateTimeOffset.MinValue;
     private readonly object _lock = new();
     private readonly TimeSpan _cacheTtl = TimeSpan.FromMinutes(30);
 
-    public JwksFetcher(string jwksEndpoint, ILogger<JwksFetcher> logger)
+    public JwksFetcher(string jwksEndpoint, ILogger<JwksFetcher> logger, HttpClient? httpClient = null)
     {
         _jwksEndpoint = jwksEndpoint;
         _logger = logger;
+        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+    }
+
+    /// <summary>
+    /// 清除缓存，仅用于测试。
+    /// </summary>
+    public void ClearCache()
+    {
+        lock (_lock)
+        {
+            _cachedKeys = null;
+            _cacheExpiry = DateTimeOffset.MinValue;
+        }
     }
 
     public async Task<IList<SecurityKey>> GetSigningKeysAsync()
