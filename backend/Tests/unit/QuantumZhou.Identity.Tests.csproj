@@ -26,18 +26,23 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.11" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
     <PackageReference Include="Grpc.Core.Testing" Version="2.46.6" />
-    <PackageReference Include="Testcontainers.PostgreSql" Version="3.8.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
+
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\backend\Database\QuantumZhou.Identity.Database.csproj" />
-    <ProjectReference Include="..\..\backend\Domain\QuantumZhou.Identity.Domain.csproj" />
-    <ProjectReference Include="..\..\backend\Service\QuantumZhou.Identity.Service.csproj" />
-    <ProjectReference Include="..\..\backend\Host\QuantumZhou.Identity.Host.csproj">
+    <ProjectReference Include="..\..\Database\QuantumZhou.Identity.Database.csproj" />
+    <ProjectReference Include="..\..\Domain\QuantumZhou.Identity.Domain.csproj" />
+    <ProjectReference Include="..\..\Service\QuantumZhou.Identity.Service.csproj" />
+    <ProjectReference Include="..\..\Host\QuantumZhou.Identity.Host.csproj">
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
       <ExcludeAssets>buildTransitive</ExcludeAssets>
     </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="obj\**\*.AssemblyInfo.cs" />
+    <Compile Remove="obj\**\*.AssemblyAttributes.cs" />
+    <Compile Remove="Client\**" />
   </ItemGroup>
 
 </Project>

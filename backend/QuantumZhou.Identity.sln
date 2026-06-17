@@ -13,7 +13,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QuantumZhou.Identity.Servic
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QuantumZhou.Identity.Host", "backend\Host\QuantumZhou.Identity.Host.csproj", "{83EAD099-279E-4A8F-A4A5-E7868850E59A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QuantumZhou.Identity.Tests", "test\unit\QuantumZhou.Identity.Tests.csproj", "{F1B2C3D4-E5F6-7890-ABCD-EF1234567F01}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QuantumZhou.Identity.Tests", "Tests\unit\QuantumZhou.Identity.Tests.csproj", "{F1B2C3D4-E5F6-7890-ABCD-EF1234567F01}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "backend", "backend", "{1AE8ACA6-933B-BF2A-3671-3E2EAC007D16}"
 EndProject
@@ -27,11 +27,11 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "test", "test", "{0C88DD14-F
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Client", "Client", "{94BF2C6E-1A60-14A0-086F-6FECE3786F92}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QuantumZhou.Identity.Client.Tests", "test\unit\Client\QuantumZhou.Identity.Client.Tests.csproj", "{D2753C05-54B6-4D34-B0CF-5BC5033B105B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QuantumZhou.Identity.Client.Tests", "Tests\unit\Client\QuantumZhou.Identity.Client.Tests.csproj", "{D2753C05-54B6-4D34-B0CF-5BC5033B105B}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "integration", "integration", "{8C86A2ED-81A4-EB4F-37AF-255EBAE6B292}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QuantumZhou.Identity.IntegrationTests", "test\integration\QuantumZhou.Identity.IntegrationTests.csproj", "{EA268FC4-557C-46FC-8283-24D6E7182D2F}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "QuantumZhou.Identity.IntegrationTests", "Tests\integration\QuantumZhou.Identity.IntegrationTests.csproj", "{EA268FC4-557C-46FC-8283-24D6E7182D2F}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Database", "Database", "{EE7D5C40-CE64-762A-5D4C-D6892A30AE57}"
 EndProject
