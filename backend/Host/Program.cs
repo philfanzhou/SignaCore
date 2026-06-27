@@ -668,6 +668,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Identity Service API v1"));
 }
+app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseCors("AdminWeb");
 app.UseAuthentication();
 
@@ -714,6 +715,9 @@ app.Use(async (context, next) =>
         var lease = await jwksRateLimiter.AcquireAsync(permitCount: 1, context.RequestAborted);
         if (!lease.IsAcquired)
         {
+            app.Logger.LogWarning(
+                "JWKS rate limit exceeded: ClientIp={ClientIp}, Limit=60/60s",
+                context.Connection.RemoteIpAddress);
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             await context.Response.WriteAsync("Too many requests to JWKS endpoint. Please try again later.");
             return;

@@ -1,4 +1,6 @@
 using Grpc.Core;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using QuantumZhou.Identity.Service;
 using Xunit;
 
@@ -6,11 +8,13 @@ namespace QuantumZhou.Identity.Tests.Service;
 
 public class RateLimitingInterceptorTests
 {
+    private static ILogger<RateLimitingInterceptor> CreateLogger() => NullLogger<RateLimitingInterceptor>.Instance;
+
     [Fact]
     public async Task UnaryServerHandler_WithinLimit_AllowsRequest()
     {
         var options = new RateLimitingOptions { PermitLimitPerClient = 5, WindowSeconds = 60 };
-        var interceptor = new RateLimitingInterceptor(options);
+        var interceptor = new RateLimitingInterceptor(options, CreateLogger());
         var context = new TestServerCallContextImpl();
 
         async Task<string> Continuation(string req, ServerCallContext ctx)
@@ -27,7 +31,7 @@ public class RateLimitingInterceptorTests
     public async Task UnaryServerHandler_ExceedsLimit_ThrowsResourceExhausted()
     {
         var options = new RateLimitingOptions { PermitLimitPerClient = 1, WindowSeconds = 60 };
-        var interceptor = new RateLimitingInterceptor(options);
+        var interceptor = new RateLimitingInterceptor(options, CreateLogger());
         var context = new TestServerCallContextImpl();
 
         async Task<string> Continuation(string req, ServerCallContext ctx)
@@ -49,7 +53,7 @@ public class RateLimitingInterceptorTests
     public async Task UnaryServerHandler_DifferentClientIps_CountedIndependently()
     {
         var options = new RateLimitingOptions { PermitLimitPerClient = 1, WindowSeconds = 60 };
-        var interceptor = new RateLimitingInterceptor(options);
+        var interceptor = new RateLimitingInterceptor(options, CreateLogger());
 
         async Task<string> Continuation(string req, ServerCallContext ctx)
         {
@@ -69,7 +73,7 @@ public class RateLimitingInterceptorTests
     public async Task UnaryServerHandler_WithIpv6Peer_ExtractsIpCorrectly()
     {
         var options = new RateLimitingOptions { PermitLimitPerClient = 1, WindowSeconds = 60 };
-        var interceptor = new RateLimitingInterceptor(options);
+        var interceptor = new RateLimitingInterceptor(options, CreateLogger());
 
         async Task<string> Continuation(string req, ServerCallContext ctx)
         {
@@ -86,7 +90,7 @@ public class RateLimitingInterceptorTests
     public async Task UnaryServerHandler_WhenContinuationThrows_StillDisposesLease()
     {
         var options = new RateLimitingOptions { PermitLimitPerClient = 5, WindowSeconds = 60 };
-        var interceptor = new RateLimitingInterceptor(options);
+        var interceptor = new RateLimitingInterceptor(options, CreateLogger());
         var context = new TestServerCallContextImpl();
 
         async Task<string> Continuation(string req, ServerCallContext ctx)

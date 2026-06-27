@@ -247,9 +247,9 @@ public class KeyManager : IKeyManager
             }
             catch (CryptographicException ex)
             {
-                _logger.LogWarning(ex, "Failed to decrypt RSA key from database. Master key may have been lost. Re-encrypting with new key pair.");
+                _logger.LogError(ex, "Failed to decrypt RSA key from database. Master key may have been lost. Re-encrypting with new key pair. All previously issued JWTs are now invalid; operations team must audit master key provenance.");
                 await ForceRegenerateKeyAsync(keyRepo, unitOfWork, keyEntity);
-                _logger.LogInformation("RSA key re-encrypted. All clients must re-authenticate.");
+                _logger.LogWarning("RSA key re-encrypted after master key loss. All clients must re-authenticate.");
                 var freshEntity = await keyRepo.GetActiveKeyAsync();
                 return LoadKeyFromEntity(freshEntity!);
             }

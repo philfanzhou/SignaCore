@@ -18,6 +18,9 @@ public class SmsSenderTests
         Assert.Single(logger.LogEntries);
         Assert.Contains("12****", logger.LogEntries[0]);
         Assert.DoesNotContain("123456", logger.LogEntries[0]);
+        // Phone must also be masked per ErrorHandling.md sensitive data rules
+        Assert.DoesNotContain("13800138000", logger.LogEntries[0]);
+        Assert.Contains("138****8000", logger.LogEntries[0]);
     }
 
     [Fact]
@@ -57,7 +60,9 @@ public class SmsSenderTests
         catch (InvalidOperationException) { }
 
         Assert.Single(logger.LogEntries);
-        Assert.Contains("13800138000", logger.LogEntries[0]);
+        // Per ErrorHandling.md sensitive data rules, phone must be masked in logs
+        Assert.DoesNotContain("13800138000", logger.LogEntries[0]);
+        Assert.Contains("138****8000", logger.LogEntries[0]);
     }
 
     private class TestLogger<T> : ILogger<T>

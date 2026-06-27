@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Threading.RateLimiting;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
+using Microsoft.Extensions.Logging;
 
 namespace QuantumZhou.Identity.Service;
 
@@ -15,13 +16,15 @@ public class RateLimitingOptions
 public class RateLimitingInterceptor : Interceptor
 {
     private readonly RateLimitingOptions _options;
+    private readonly ILogger<RateLimitingInterceptor> _logger;
     private readonly ConcurrentDictionary<string, (RateLimiter Limiter, DateTime LastAccess)> _limiters = new();
     private readonly object _cleanupLock = new();
     private DateTime _lastCleanup = DateTime.UtcNow;
 
-    public RateLimitingInterceptor(RateLimitingOptions options)
+    public RateLimitingInterceptor(RateLimitingOptions options, ILogger<RateLimitingInterceptor> logger)
     {
         _options = options;
+        _logger = logger;
     }
 
     public override async Task<TResponse> UnaryServerHandler<TRequest, TResponse>(
@@ -48,6 +51,9 @@ public class RateLimitingInterceptor : Interceptor
         var lease = await entry.Limiter.AcquireAsync(permitCount: 1, context.CancellationToken);
         if (!lease.IsAcquired)
         {
+            _logger.LogWarning(
+                "gRPC rate limit exceeded: ClientIp={ClientIp}, Method={Method}, Limit={PermitLimit}/{WindowSeconds}s",
+                clientIp, context.Method, _options.PermitLimitPerClient, _options.WindowSeconds);
             throw new RpcException(new Status(StatusCode.ResourceExhausted, "Rate limit exceeded. Please try again later."));
         }
 

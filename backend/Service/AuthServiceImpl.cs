@@ -244,22 +244,24 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
 
         try
         {
-            var code = await _otpService.GenerateAndSendAsync(request.Phone.Trim(), _smsSender);
-            _logger.LogInformation("SMS verification code sent: Phone={Phone}", request.Phone.Trim());
+            var phone = request.Phone.Trim();
+            var maskedPhone = SensitiveDataMasker.MaskPhone(phone);
+            var code = await _otpService.GenerateAndSendAsync(phone, _smsSender);
+            _logger.LogInformation("SMS verification code sent: Phone={Phone}", maskedPhone);
 
-            await _auditService.RecordLoginAsync(null, request.Phone.Trim(), IdentityConstants.GrantTypeSms, "sms_code_sent",
+            await _auditService.RecordLoginAsync(null, phone, IdentityConstants.GrantTypeSms, "sms_code_sent",
                 context.GetClientIp(), context.GetUserAgent(), null, request.AppId, context.GetCorrelationId());
 
             return new RequestSmsCodeResponse { Success = true, Message = "Verification code sent" };
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning("SMS code request failed: Phone={Phone}, Reason={Reason}", request.Phone, ex.Message);
+            _logger.LogWarning("SMS code request failed: Phone={Phone}, Reason={Reason}", SensitiveDataMasker.MaskPhone(request.Phone), ex.Message);
             return new RequestSmsCodeResponse { Success = false, Message = ex.Message };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "SMS code request exception: Phone={Phone}", request.Phone);
+            _logger.LogError(ex, "SMS code request exception: Phone={Phone}", SensitiveDataMasker.MaskPhone(request.Phone));
             return new RequestSmsCodeResponse { Success = false, Message = "Failed to send verification code" };
         }
     }

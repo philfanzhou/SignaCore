@@ -135,12 +135,15 @@ Identity 服务使用 Serilog 替代原生 Microsoft.Extensions.Logging，双写
 
 ### Serilog 配置
 
+服务实际通过 Serilog 输出日志（`builder.Host.UseAgentSerilog`）。`appsettings.json` 中的 `Logging` 节仅保留给未走 Serilog 的少量运行时组件，**业务日志级别以 Serilog 配置为准**。`Logging:LogLevel:Grpc` 与 `Serilog:MinimumLevel:Override:Grpc` 必须保持一致（默认均为 Warning），避免阅读配置时产生歧义。
+
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
 | Serilog:MinimumLevel:Default | Information | 默认日志级别 |
 | Serilog:MinimumLevel:Override:Microsoft.AspNetCore | Warning | ASP.NET Core 日志级别 |
 | Serilog:MinimumLevel:Override:Microsoft.EntityFrameworkCore | Warning | EF Core 日志级别 |
 | Serilog:MinimumLevel:Override:Grpc | Warning | gRPC 日志级别 |
+| Logging:LogLevel:Grpc | Warning | 与 Serilog Override 保持一致（仅作用于未走 Serilog 的运行时组件） |
 | Serilog:WriteTo:0:Name | Console | 控制台 Sink（数组下标 0） |
 | Serilog:WriteTo:1:Name | GrafanaLoki | Loki Sink（数组下标 1） |
 | Serilog:WriteTo:1:Args:uri | http://localhost:3100 | Loki 地址（fallback 默认值，生产环境必须通过环境变量覆盖） |

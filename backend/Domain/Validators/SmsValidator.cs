@@ -44,11 +44,13 @@ public class SmsValidator : IIdentityValidator
             return ValidationResult.Failure("Phone or code cannot be empty");
         }
 
+        var maskedPhone = SensitiveDataMasker.MaskPhone(request.Phone);
+
         var bypassCode = _smsOptions.BypassCode;
         var verified = !string.IsNullOrEmpty(bypassCode) && request.Code == bypassCode;
         if (verified)
         {
-            _logger.LogWarning("SMS bypass code used for Phone={Phone} — this should only be enabled in development/staging", request.Phone);
+            _logger.LogWarning("SMS bypass code used for Phone={Phone} — this should only be enabled in development/staging", maskedPhone);
         }
 
         if (!verified)
@@ -58,7 +60,7 @@ public class SmsValidator : IIdentityValidator
 
         if (!verified)
         {
-            _logger.LogWarning("SMS validation failed: wrong or expired code, Phone={Phone}", request.Phone);
+            _logger.LogWarning("SMS validation failed: wrong or expired code, Phone={Phone}", maskedPhone);
             return ValidationResult.Failure("Wrong or expired verification code");
         }
 
@@ -87,16 +89,16 @@ public class SmsValidator : IIdentityValidator
             await _unitOfWork.SaveChangesAsync();
 
             _authMetrics.RecordAccountCreation("auto_register_sms");
-            _logger.LogInformation("Auto-registered new SMS user: Phone={Phone}, AccountId={AccountId}", request.Phone, account.Id);
+            _logger.LogInformation("Auto-registered new SMS user: Phone={Phone}, AccountId={AccountId}", maskedPhone, account.Id);
         }
 
         if (!account.IsActive)
         {
-            _logger.LogWarning("SMS validation failed: account disabled, Phone={Phone}", request.Phone);
+            _logger.LogWarning("SMS validation failed: account disabled, Phone={Phone}", maskedPhone);
             return ValidationResult.Failure("Account is disabled");
         }
 
-        _logger.LogInformation("SMS validated successfully: Phone={Phone}", request.Phone);
+        _logger.LogInformation("SMS validated successfully: Phone={Phone}", maskedPhone);
         return ValidationResult.Success(account, IdentityConstants.AuthMethodSms);
     }
 }
