@@ -32,7 +32,7 @@
 
 | 服务 | 接入方式 | 认证端点路径 |
 |------|---------|-------------|
-| ruoyu.docretrieval | Identity.Client 项目引用 | `/admin/auth/*` |
+| ruoyu.doclibrary | Identity.Client 项目引用 | `/admin/auth/*` |
 
 ## 失败语义总结
 

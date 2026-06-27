@@ -20,7 +20,7 @@ namespace QuantumZhou.Identity.Client.Tests;
 /// Tests the JWT Bearer authentication pipeline configured by <see cref="ServiceCollectionExtensions.AddIdentityClient"/>.
 /// Verifies that the OnMessageReceived event correctly fetches JWKS keys via JwksFetcher
 /// and the middleware uses them to validate tokens.
-/// This covers the DocRetrieval JWKS auth scenario (E2E doc 07) and all services
+/// This covers the DocLibrary JWKS auth scenario (E2E doc 07) and all services
 /// using AddIdentityClient, since the auth pipeline is shared infrastructure.
 /// </summary>
 public class JwksAuthPipelineTests : IDisposable
