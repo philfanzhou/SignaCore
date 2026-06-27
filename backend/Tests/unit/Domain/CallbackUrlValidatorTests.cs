@@ -45,7 +45,8 @@ public class CallbackUrlValidatorTests
     [Fact]
     public void Validate_WithIpAddress_ReturnsInvalid()
     {
-        var result = _validator.Validate("http://192.168.1.1/callback");
+        var validator = new CallbackUrlValidator(allowPrivateAddresses: false);
+        var result = validator.Validate("http://192.168.1.1/callback");
 
         Assert.False(result.IsValid);
         Assert.Contains("private/internal IP address", result.ErrorMessage);

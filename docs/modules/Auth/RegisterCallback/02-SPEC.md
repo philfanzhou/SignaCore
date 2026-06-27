@@ -7,7 +7,7 @@
 ## 功能要求清单
 
 - [ ] FR-01: 验证 AppId 和 AppSecret 不为空
-- [ ] FR-02: 验证 CallbackUrl 格式（如非空），包括 URL 有效性、协议限制、私有 IP 检查、域名白名单
+- [ ] FR-02: 验证 CallbackUrl 格式（如非空），包括 URL 有效性、协议限制、可选的私有 IP 禁用、域名白名单
 - [ ] FR-03: 验证 AppId 已注册
 - [ ] FR-04: 验证 AppSecret 匹配（BCrypt）
 - [ ] FR-05: 更新 CallbackUrl 和 CallbackExpiresAt
@@ -30,7 +30,7 @@
 - **Then** 返回 success=false, message 包含 "HTTP or HTTPS"
 
 - **Given** RegisterCallbackRequest 且 CallbackUrl 解析到私有 IP（如 192.168.x.x）
-- **When** AllowPrivateAddresses=false（默认）
+- **When** 显式配置 AllowPrivateAddresses=false
 - **Then** 返回 success=false, message 包含 "private/internal IP address"
 
 - **Given** RegisterCallbackRequest 且 CallbackUrl 域名不在白名单中
@@ -63,7 +63,7 @@
 |------|------|
 | 安全 | AppSecret 使用 BCrypt.Verify 验证 |
 | 安全 | AppSecret 不匹配时记录 Warning 日志 |
-| 安全 | CallbackUrl 验证：仅允许 HTTP/HTTPS 协议、禁止私有 IP（默认）、域名白名单 |
+| 安全 | CallbackUrl 验证：仅允许 HTTP/HTTPS 协议、默认允许私有 IP（可显式禁用）、域名白名单 |
 | 安全 | CallbackUrl DNS 解析使用异步方法（ValidateAsync），避免阻塞请求线程 |
 
 ## 测试策略

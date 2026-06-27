@@ -2,17 +2,14 @@
 set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+DATA_DIR="${SCRIPT_DIR}/data"
 IMAGE_TAG="20260502"
 IMAGE_NAME="quantumzhou.identity:${IMAGE_TAG}"
 CONTAINER_NAME="ruoyu-identity"
 NETWORK_NAME="ruoyu-net"
-
 HTTP_PORT=10891
 
 DB_PROVIDER="PostgreSQL"
-CALLBACK_ALLOW_PRIVATE="true"
-CALLBACK_ALLOWED_DOMAIN="ruoyu-teacher-api"
-
 DB_HOST="ruoyu-postgres"
 DB_PORT="5432"
 DB_NAME="ruoyu_identity"
@@ -22,12 +19,12 @@ CONNECTION_STRING="Host=${DB_HOST};Port=${DB_PORT};Database=${DB_NAME};Username=
 
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="Qwer1234"
+
 SMS_BYPASS_CODE="666666"
 
-DATA_DIR="${SCRIPT_DIR}/data"
+LOKI_URI="http://ruoyu-loki:3100"
 
 docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
-
 if [ -n "$(docker ps -q --filter "name=^/${CONTAINER_NAME}$")" ]; then
     docker stop "$CONTAINER_NAME"
 fi
@@ -55,9 +52,8 @@ docker run -d \
     -e AdminWeb__AdminUsernames__0="${ADMIN_USERNAME}" \
     -e ADMIN_BOOTSTRAP_USERNAME="${ADMIN_USERNAME}" \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
-    -e Callback__AllowPrivateAddresses="${CALLBACK_ALLOW_PRIVATE}" \
-    -e Callback__AllowedDomains__0="${CALLBACK_ALLOWED_DOMAIN}" \
     -e Sms__BypassCode="${SMS_BYPASS_CODE}" \
+    -e Serilog__WriteTo__1__Args__uri="${LOKI_URI}" \
     -v "${DATA_DIR}/master-key:/app/master-key" \
     "$IMAGE_NAME"
 

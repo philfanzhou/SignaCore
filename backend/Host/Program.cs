@@ -155,8 +155,7 @@ builder.Services.AddScoped<ClaimsResolver>();
 
 // ========== 8. Callback Service ==========
 var callbackAllowedDomains = builder.Configuration.GetSection("Callback:AllowedDomains").Get<string[]>() ?? [];
-var callbackAllowPrivate = builder.Configuration.GetValue<bool>("Callback:AllowPrivateAddresses");
-builder.Services.AddSingleton(new CallbackUrlValidator(callbackAllowedDomains, callbackAllowPrivate));
+builder.Services.AddSingleton(new CallbackUrlValidator(callbackAllowedDomains));
 builder.Services.AddScoped<ICallbackService, CallbackService>();
 
 // ========== 9. SMS OTP Services ==========

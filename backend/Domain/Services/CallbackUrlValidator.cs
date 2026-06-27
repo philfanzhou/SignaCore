@@ -7,7 +7,7 @@ public class CallbackUrlValidator
     private readonly HashSet<string> _allowedDomains;
     private readonly bool _allowPrivateAddresses;
 
-    public CallbackUrlValidator(IEnumerable<string>? allowedDomains = null, bool allowPrivateAddresses = false)
+    public CallbackUrlValidator(IEnumerable<string>? allowedDomains = null, bool allowPrivateAddresses = true)
     {
         _allowedDomains = new HashSet<string>(
             allowedDomains ?? Enumerable.Empty<string>(),

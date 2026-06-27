@@ -81,7 +81,8 @@
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
 | Callback:AllowedDomains | [] | 允许的回调域名列表（空=不限制） |
-| Callback:AllowPrivateAddresses | true | 是否允许私有 IP 地址回调 |
+
+> `CallbackUrlValidator` 构造函数默认 `allowPrivateAddresses = true`（允许私有 IP）。如需禁用（例如公网部署），可通过 `Callback:AllowPrivateAddresses: false` 显式覆盖（`Program.cs` 会读取该键并传入构造函数）。默认允许私有 IP 是微服务内网通信的常态。
 
 ## OpenTelemetry 配置
 
