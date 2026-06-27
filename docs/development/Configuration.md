@@ -130,10 +130,60 @@
 
 ## 日志配置
 
+Identity 服务使用 Serilog 替代原生 Microsoft.Extensions.Logging，双写到 Console + Grafana Loki。业务代码中的 `ILogger<T>` 调用无需修改。
+
+### Serilog 配置
+
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
-| Logging:LogLevel:Default | Information | 默认日志级别 |
-| Logging:LogLevel:Microsoft.AspNetCore | Warning | ASP.NET Core 日志级别 |
-| Logging:LogLevel:Microsoft.EntityFrameworkCore | Warning | EF Core 日志级别 |
-| Logging:LogLevel:Grpc | Information | gRPC 日志级别 |
-| Logging:Console:FormatterName | json | 控制台日志格式（JSON 结构化） |
+| Serilog:MinimumLevel:Default | Information | 默认日志级别 |
+| Serilog:MinimumLevel:Override:Microsoft.AspNetCore | Warning | ASP.NET Core 日志级别 |
+| Serilog:MinimumLevel:Override:Microsoft.EntityFrameworkCore | Warning | EF Core 日志级别 |
+| Serilog:MinimumLevel:Override:Grpc | Warning | gRPC 日志级别 |
+| Serilog:WriteTo:0:Name | Console | 控制台 Sink（数组下标 0） |
+| Serilog:WriteTo:1:Name | GrafanaLoki | Loki Sink（数组下标 1） |
+| Serilog:WriteTo:1:Args:uri | http://localhost:3100 | Loki 地址（fallback 默认值，生产环境必须通过环境变量覆盖） |
+| Serilog:WriteTo:1:Args:labels:0:key | service | Loki 标签键 |
+| Serilog:WriteTo:1:Args:labels:0:value | QuantumZhou.Identity | Loki 标签值（service 标签） |
+
+### 日志 Enricher
+
+每条日志自动携带以下字段：
+
+| 字段 | 来源 | 说明 |
+|------|------|------|
+| ServiceName | UseAgentSerilog 参数 | 固定为 `QuantumZhou.Identity` |
+| ServiceVersion | UseAgentSerilog 参数 | 默认 `1.0.0` |
+| InstanceId | Environment.MachineName | 实例标识 |
+| MachineName | Enrichers.Environment | 主机名 |
+| ThreadId | Enrichers.Thread | 线程 ID |
+
+### Loki 地址注入
+
+Loki 地址通过短环境变量 `LOKI_URI` 注入，Program.cs 启动时读取并覆盖 `Serilog:WriteTo:1:Args:uri` 配置键：
+
+| 环境变量 | 示例值 | 说明 |
+|----------|--------|------|
+| LOKI_URI | http://loki.example.com:3100 | Loki 地址（生产环境必须设置） |
+
+> **容错机制**：如果 `LOKI_URI` 未设置，Loki Sink 使用 appsettings.json 中的 fallback 地址 `http://localhost:3100`。Loki 不可达时 Sink 异步重试，不影响服务启动。启动时检测到 `LOKI_URI` 未设置会输出警告日志，但不会阻止服务启动。
+
+### 开发环境覆盖
+
+`appsettings.Development.json` 覆盖以下配置：
+
+| 配置键 | 默认值 | 开发环境值 | 说明 |
+|--------|--------|-----------|------|
+| Serilog:MinimumLevel:Default | Information | Debug | 开发环境输出更详细日志 |
+| Serilog:MinimumLevel:Override:Grpc | Warning | Information | 开发环境输出 gRPC 详细日志 |
+
+> Loki 地址、WriteTo Sinks 等其他配置继承自 `appsettings.json`，开发环境无需重复配置。
+
+### 基础设施
+
+Loki 和 Grafana 通过 `script/env-script/04-loki/start.sh` 和 `script/env-script/05-grafana/start.sh` 启动，数据持久化在脚本目录下的 `data/` 文件夹。
+
+| 组件 | 端口 | 说明 |
+|------|------|------|
+| Loki | 3100 | 日志接收端点 |
+| Grafana | 3000 | 可视化面板（admin/admin），Loki 数据源自动配置 |
