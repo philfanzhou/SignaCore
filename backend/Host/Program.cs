@@ -379,62 +379,6 @@ builder.Services.AddSingleton<AuthMetrics>();
 
 var app = builder.Build();
 
-// ========== Loki Connectivity Check ==========
-// 两阶段探活：
-//   1) /ready  — 进程级（端口监听）
-//   2) push    — 业务级（distributor + ingester 端到端）
-// 仅 WARN，不阻塞启动。详见 docs/development/Configuration.md。
-var effectiveLokiUri = builder.Configuration["Serilog:WriteTo:1:Args:uri"] ?? "(not configured)";
-app.Logger.LogInformation("Serilog Loki Sink configured with uri: {LokiUri}", effectiveLokiUri);
-_ = Task.Run(async () =>
-{
-    try
-    {
-        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-        var response = await httpClient.GetAsync($"{effectiveLokiUri}/ready");
-        if (response.IsSuccessStatusCode)
-        {
-            app.Logger.LogInformation("Loki connectivity check succeeded: {LokiUri} is reachable", effectiveLokiUri);
-        }
-        else
-        {
-            app.Logger.LogWarning("Loki connectivity check failed: {LokiUri} returned HTTP {StatusCode}", effectiveLokiUri, (int)response.StatusCode);
-        }
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogWarning("Loki connectivity check failed: {LokiUri} is not reachable ({ErrorType}: {ErrorMessage})", effectiveLokiUri, ex.GetType().Name, ex.Message);
-    }
-
-    // Push smoke test：覆盖 /ready 探活无法发现的"副本数不足"等业务级故障。
-    // Loki 单实例部署忘记配 replication_factor: 1 时，/ready 仍 200，但 push 返回
-    // 500 "at least N live replicas required"，仅靠 /ready 探活会漏报。
-    try
-    {
-        using var pushClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-        // Loki 接受纳秒时间戳；DateTimeOffset 在 net8.0 BCL 中没有 ToUnixTimeNanoseconds，
-        // 用 UnixEpoch 差值手算。
-        var timestampNs = (DateTimeOffset.UtcNow - DateTimeOffset.UnixEpoch).Ticks * 100;
-        var pushBody = "{\"streams\":[{\"stream\":{\"service\":\"QuantumZhou.Identity.smoketest\"},\"values\":[[\"" + timestampNs + "\",\"startup smoke test\"]]}]}";
-        using var content = new StringContent(pushBody, System.Text.Encoding.UTF8);
-        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
-        var pushResponse = await pushClient.PostAsync($"{effectiveLokiUri}/loki/api/v1/push", content);
-        if (pushResponse.IsSuccessStatusCode)
-        {
-            app.Logger.LogInformation("Loki push smoke test succeeded: {LokiUri} accepted the sample", effectiveLokiUri);
-        }
-        else
-        {
-            var responseBody = await pushResponse.Content.ReadAsStringAsync();
-            app.Logger.LogWarning("Loki push smoke test failed: {LokiUri} returned HTTP {StatusCode} body={ResponseBody}", effectiveLokiUri, (int)pushResponse.StatusCode, responseBody);
-        }
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogWarning("Loki push smoke test failed: {LokiUri} push threw ({ErrorType}: {ErrorMessage})", effectiveLokiUri, ex.GetType().Name, ex.Message);
-    }
-});
-
 app.Logger.LogInformation("Service endpoints configured: gRPC={GrpcPort}, HTTP={HttpPort}", grpcPort, httpPort);
 app.Logger.LogInformation("Database: {Provider}", dbProvider);
 

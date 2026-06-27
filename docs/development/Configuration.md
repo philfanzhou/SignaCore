@@ -191,34 +191,4 @@ Loki 和 Grafana 通过 `script/env-script/04-loki/start.sh` 和 `script/env-scr
 
 Loki 单实例部署的 `replication_factor: 1` 等关键配置详见 `script/env-script/04-loki/Configuration.md`。
 
-### 启动连通性探活（Loki）
-
-服务启动时会异步探测 Loki 可达性，**仅记录警告，不阻塞启动**。两阶段检查：
-
-#### 阶段 1：进程级（HTTP `/ready`）
-
-- **做什么**：对 `LOKI_URI` 发起 `GET /ready` 请求
-- **能发现什么**：Loki 进程是否监听端口、容器是否启动
-- **不能发现什么**：distributor 写入路径是否可用、querier 查询路径是否可用、ring 副本数是否满足
-- **失败行为**：记录 `WARN` 日志 `Loki connectivity check failed: ... is not reachable`
-
-#### 阶段 2：业务级（push smoke test）
-
-- **做什么**：向 `LOKI_URI/loki/api/v1/push` 推送一条最小样本（`{service=QuantumZhou.Identity.smoketest}`）
-- **能发现什么**：distributor 副本数、ingester 副本数、push API 端到端可达
-- **不能发现什么**：querier 查询路径（labels/series）的问题——这需要单独验证，参见 `Verification.md` 的 "Loki smoke test 验证"
-- **失败行为**：记录 `WARN` 日志 `Loki push smoke test failed: ...`，并附 HTTP 状态码与响应体（便于排查 `at least N live replicas required` 等 Loki 内部错误）
-- **不阻塞启动**：业务进程已经能产生日志，推送失败只意味着日志进不去 Loki，不影响对外服务
-
-> **设计动机**：仅靠 `/ready` 探活会漏掉"进程在但服务不可用"的故障（例如 Loki 单实例部署忘了配 `replication_factor: 1`，导致 push 持续 500 但 `/ready` 仍返回 200）。push smoke test 是"以真实路径发一单"的最轻量业务级验证。
->
-> 历史背景：2026-06-27 远程服务器 192.168.55.2 上的 Loki 复现了上述问题——`/ready` 200、push 500 `at least 2 live replicas required, could only find 1`、labels 持续超时。该 commit 同步修复了 Loki 配置和探活策略。
-
-#### 探活失败排查清单
-
-| 现象 | 可能原因 | 处置 |
-|------|----------|------|
-| `/ready` 不可达 | Loki 容器未启动 / 端口未暴露 / 防火墙阻断 / `LOKI_URI` 写错 | 检查 `docker ps`、`docker logs ruoyu-loki`、主机端口、URL |
-| `/ready` 200 但 push 500 | `replication_factor` 缺失（单实例必须设为 1） | 改 `loki-config.yaml` 加 `common.replication_factor: 1` 并重启 Loki |
-| push 200 但 labels 超时 | ingester ring 健康副本数不足 / 单实例下 querier 配置异常 | 检查 `/services`、`/ring` 端点状态 |
-| `LOKI_URI` 未设置告警 | 启动时未注入环境变量 | 检查 `start.sh` 中 `LOKI_URI=...` 行，容器内 `docker exec ... env | grep LOKI` |
+> 历史：2026-06-27 远程服务器上 Loki 复现过"`/ready` 200 但 push 500 `at least 2 live replicas required`"的问题，根因是 `common.replication_factor` 缺失，已在 Loki 配置中显式设为 1 修复。Loki 不可达时 Serilog GrafanaLoki Sink 异步重试，不影响服务启动。
