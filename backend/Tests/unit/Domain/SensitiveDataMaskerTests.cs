@@ -17,6 +17,7 @@ public class SensitiveDataMaskerTests
     [Theory]
     [InlineData("123456", "****")]
     [InlineData("12345", "****")]
+    [InlineData("1234567", "123****4567")]   // length=7: exactly 3+4, no middle chars dropped
     [InlineData("12345678", "123****5678")]
     public void MaskPhone_BoundaryLengths_HandlesCorrectly(string phone, string expected)
     {
@@ -42,6 +43,7 @@ public class SensitiveDataMaskerTests
     [Theory]
     [InlineData("1234567", "****")]
     [InlineData("12345678", "1234****5678")]
+    [InlineData("123456789", "1234****6789")] // length=9: 4+4 + 1 middle char dropped
     public void MaskOpenId_BoundaryLengths_HandlesCorrectly(string openId, string expected)
     {
         Assert.Equal(expected, SensitiveDataMasker.MaskOpenId(openId));

@@ -50,6 +50,35 @@ public class RateLimitingInterceptorTests
     }
 
     [Fact]
+    public async Task UnaryServerHandler_ExceedsLimit_LogsWarningWithClientIpAndLimit()
+    {
+        var logger = new TestLogger<RateLimitingInterceptor>();
+        var options = new RateLimitingOptions { PermitLimitPerClient = 1, WindowSeconds = 60 };
+        var interceptor = new RateLimitingInterceptor(options, logger);
+        var context = new TestServerCallContextImpl(peer: "ipv4:9.9.9.9:5001");
+
+        async Task<string> Continuation(string req, ServerCallContext ctx)
+        {
+            await Task.Delay(1);
+            return "ok";
+        }
+
+        // First request succeeds, no warning yet
+        await interceptor.UnaryServerHandler("request", context, Continuation);
+        Assert.Empty(logger.WarningEntries);
+
+        // Second request triggers rate limit
+        await Assert.ThrowsAsync<RpcException>(() =>
+            interceptor.UnaryServerHandler("request", context, Continuation));
+
+        Assert.Single(logger.WarningEntries);
+        var entry = logger.WarningEntries[0];
+        Assert.Contains("gRPC rate limit exceeded", entry);
+        Assert.Contains("9.9.9.9", entry);
+        Assert.Contains("Limit=1/60s", entry);
+    }
+
+    [Fact]
     public async Task UnaryServerHandler_DifferentClientIps_CountedIndependently()
     {
         var options = new RateLimitingOptions { PermitLimitPerClient = 1, WindowSeconds = 60 };
@@ -111,5 +140,22 @@ public class RateLimitingInterceptorTests
 
         var result = await interceptor.UnaryServerHandler("request", context, SuccessContinuation);
         Assert.Equal("recovered", result);
+    }
+
+    private class TestLogger<T> : ILogger<T>
+    {
+        public List<string> WarningEntries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel == LogLevel.Warning;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                WarningEntries.Add(formatter(state, exception));
+            }
+        }
     }
 }
