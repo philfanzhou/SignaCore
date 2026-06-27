@@ -27,10 +27,7 @@ dotnet run
 
 ```bash
 # 构建镜像
-./scripts/1.build/build.sh
-
-# 部署容器
-./scripts/2.deploy/deploy.sh
+./script/build-script/01-identity.build.sh
 ```
 
 ### 环境要求
@@ -44,16 +41,15 @@ dotnet run
 ## 项目结构
 
 ```
-src/
+backend/
   Contract/         - gRPC Proto 定义（auth.proto）
-  Database/         - EF Core 数据访问层（实体、DbContext、仓储）
+  Database/         - EF Core 数据访问层（实体、DbContext、迁移、仓储）
   Domain/           - 领域层（验证器、密钥管理、Token 服务、指标收集）
   Service/          - gRPC 服务实现（AuthServiceImpl）
   Host/             - ASP.NET Core 宿主与启动配置
-test/               - 单元测试与集成测试
+  Tests/            - 单元测试与集成测试
+admin_frontend/     - Vue 3 + Vite 管理控制台
 docs/               - 设计文档
-scripts/            - 构建和部署脚本
-admin_web/          - Vue 3 + Vite 管理控制台
 ```
 
 ## 核心架构
@@ -110,7 +106,7 @@ sequenceDiagram
 | `otps` | 短信登录一次性密码记录 |
 | `login_attempts` | 登录尝试跟踪和锁定记录 |
 
-详细表结构设计见 [Database.md](docs/Database.md)
+详细表结构设计见 [数据库设计](docs/database/README.md)
 
 ## gRPC 接口
 
@@ -138,7 +134,7 @@ sequenceDiagram
 
 ## 详细设计文档
 
-- [数据库设计](docs/Database.md)
+- [数据库设计](docs/database/README.md)
 
 ## 配置说明
 
@@ -202,7 +198,7 @@ Prometheus 指标端点：`/metrics`
 
 ## 管理工具
 
-项目提供基于 Vue 3 + Vite 的 Web 管理控制台，位于 `admin_web/` 目录，并通过独立端口的 Admin API 访问后端，支持：
+项目提供基于 Vue 3 + Vite 的 Web 管理控制台，位于 `admin_frontend/` 目录，并通过独立端口的 Admin API 访问后端，支持：
 
 - 用户管理（创建、查询、启用/禁用）
 - 应用注册管理
@@ -248,4 +244,4 @@ dotnet ef database update
 
 ### Q: JWKS 端点访问频率限制是多少？
 
-默认 60 次/分钟，超过限制会返回 429 错误。
+默认 20 请求/分钟/客户端，超过限制会返回 429 错误。

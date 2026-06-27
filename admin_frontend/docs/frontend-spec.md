@@ -20,8 +20,6 @@ admin_frontend/
 │   ├── App.vue                          # 主应用（单组件架构）
 │   ├── main.ts                          # 入口文件
 │   ├── style.css                        # 全局样式
-│   ├── components/
-│   │   └── HelloWorld.vue               # 示例组件
 │   └── services/
 │       └── adminApi.ts                  # API 客户端服务
 ├── public/
