@@ -53,7 +53,7 @@ docker run -d \
     -e ADMIN_BOOTSTRAP_USERNAME="${ADMIN_USERNAME}" \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Sms__BypassCode="${SMS_BYPASS_CODE}" \
-    -e Serilog__WriteTo__1__Args__uri="${LOKI_URI}" \
+    -e LOKI_URI="${LOKI_URI}" \
     -v "${DATA_DIR}/master-key:/app/master-key" \
     "$IMAGE_NAME"
 

@@ -19,9 +19,9 @@ using QuantumZhou.Identity.Service;
 var builder = WebApplication.CreateBuilder(args);
 
 // ========== Serilog (Console + Grafana Loki) ==========
-// 通过短环境变量 LOKI_URI 注入 Loki 地址（覆盖 appsettings.json 中的 fallback http://localhost:3100）。
+// LOKI_URI 环境变量注入 Loki 地址（覆盖 appsettings.json 中的 fallback）。
 // Loki Sink 在 uri 为 null 时会抛 ArgumentNullException，配置文件中提供 fallback uri 确保服务能启动。
-// Loki 不可达时 Sink 异步重试，不影响服务运行。LOKI_URI 未设置时使用 fallback 并输出警告，不阻止启动。
+// Loki 不可达时 Sink 异步重试，不影响服务运行。
 var lokiUri = Environment.GetEnvironmentVariable("LOKI_URI");
 if (!string.IsNullOrWhiteSpace(lokiUri))
 {
@@ -379,18 +379,29 @@ builder.Services.AddSingleton<AuthMetrics>();
 
 var app = builder.Build();
 
-// ========== Loki Endpoint Warning ==========
-// 检测 LOKI_URI 环境变量是否设置。若未设置，使用 appsettings.json 中的 fallback (http://localhost:3100)，
-// 服务仍可启动，但日志将无法上报到生产 Loki。仅打印告警，不阻止启动。
-if (string.IsNullOrWhiteSpace(lokiUri))
+// ========== Loki Connectivity Check ==========
+var effectiveLokiUri = builder.Configuration["Serilog:WriteTo:1:Args:uri"] ?? "(not configured)";
+app.Logger.LogInformation("Serilog Loki Sink configured with uri: {LokiUri}", effectiveLokiUri);
+_ = Task.Run(async () =>
 {
-    var fallbackUri = builder.Configuration["Serilog:WriteTo:1:Args:uri"] ?? "http://localhost:3100";
-    app.Logger.LogWarning(
-        "LOKI_URI environment variable not set. Using fallback uri '{FallbackUri}'. " +
-        "Logs will not be shipped to a remote Loki instance. " +
-        "Set LOKI_URI to the Loki address (e.g., http://loki.example.com:3100) in production.",
-        fallbackUri);
-}
+    try
+    {
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+        var response = await httpClient.GetAsync($"{effectiveLokiUri}/ready");
+        if (response.IsSuccessStatusCode)
+        {
+            app.Logger.LogInformation("Loki connectivity check succeeded: {LokiUri} is reachable", effectiveLokiUri);
+        }
+        else
+        {
+            app.Logger.LogWarning("Loki connectivity check failed: {LokiUri} returned HTTP {StatusCode}", effectiveLokiUri, (int)response.StatusCode);
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning("Loki connectivity check failed: {LokiUri} is not reachable ({ErrorType}: {ErrorMessage})", effectiveLokiUri, ex.GetType().Name, ex.Message);
+    }
+});
 
 app.Logger.LogInformation("Service endpoints configured: gRPC={GrpcPort}, HTTP={HttpPort}", grpcPort, httpPort);
 app.Logger.LogInformation("Database: {Provider}", dbProvider);
