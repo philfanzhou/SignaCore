@@ -87,3 +87,29 @@ curl http://localhost:5002/metrics
 ## 8. Swagger UI（仅开发环境）
 
 访问 `http://localhost:5002/swagger`，可浏览 Admin/Gateway/Profile API 文档。
+
+## 9. Loki smoke test 验证
+
+启动日志中应包含 `Loki connectivity check succeeded` 和 `Loki push smoke test succeeded` 两条 INFO 日志。如果只有前者没有后者（或后者失败），按 `Configuration.md` "探活失败排查清单" 排查。
+
+手工验证三阶段：
+
+```bash
+LOKI_URI="http://<host>:3100"
+
+# 1. 进程级
+curl -s "$LOKI_URI/ready"
+# 预期：ready
+
+# 2. 写入（distributor + ingester 端到端）
+curl -s -X POST -H "Content-Type: application/json" \
+  --data '{"streams":[{"stream":{"service":"QuantumZhou.Identity.smoketest"},"values":[["'$(date +%s%N)'","manual test"]]}]}' \
+  "$LOKI_URI/loki/api/v1/push"
+# 预期：204 No Content
+
+# 3. 查询（querier + ingester ring）
+curl -s "$LOKI_URI/loki/api/v1/labels"
+# 预期：200 OK，body 为 JSON 数组
+```
+
+如果步骤 2 返回 500 含 `replicas required` 字样，或步骤 3 持续超时，说明 Loki 端 `replication_factor` 没设对，回到 `script/env-script/04-loki/Configuration.md` 排查。
