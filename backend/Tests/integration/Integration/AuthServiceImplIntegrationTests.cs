@@ -122,25 +122,24 @@ public class AuthServiceImplIntegrationTests : IAsyncLifetime
         var keyManager = CreateMockKeyManager();
         var tokenService = new JwtTokenService(scope.ServiceProvider.GetRequiredService<JwtOptions>());
         var jwtOptions = scope.ServiceProvider.GetRequiredService<JwtOptions>();
-        var refreshTokenOptions = scope.ServiceProvider.GetRequiredService<RefreshTokenOptions>();
         var claimsResolver = scope.ServiceProvider.GetRequiredService<ClaimsResolver>();
         var validatorFactory = scope.ServiceProvider.GetRequiredService<ValidatorFactory>();
         var authMetrics = scope.ServiceProvider.GetRequiredService<AuthMetrics>();
         var logger = NullLogger<AuthServiceImpl>.Instance;
         var passwordPolicy = scope.ServiceProvider.GetRequiredService<IPasswordPolicy>();
         var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
-        var accountRepository = scope.ServiceProvider.GetRequiredService<IAccountRepository>();
         var passwordCredentialRepository = scope.ServiceProvider.GetRequiredService<IPasswordCredentialRepository>();
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         var appRegRepository = scope.ServiceProvider.GetRequiredService<IAppRegistrationRepository>();
-        var refreshTokenRepository = scope.ServiceProvider.GetRequiredService<IRefreshTokenRepository>();
+        var refreshTokenService = scope.ServiceProvider.GetRequiredService<IRefreshTokenService>();
         var gatewayValidator = new GatewayValidationService(appRegRepository, NullLogger<GatewayValidationService>.Instance);
         var auditService = scope.ServiceProvider.GetRequiredService<IAuditService>();
         var callbackUrlValidator = scope.ServiceProvider.GetRequiredService<CallbackUrlValidator>();
         var otpService = scope.ServiceProvider.GetRequiredService<IOtpService>();
         var smsSender = scope.ServiceProvider.GetRequiredService<ISmsSender>();
+        var accountLoginInfoService = scope.ServiceProvider.GetRequiredService<IAccountLoginInfoService>();
 
-        return new AuthServiceImpl(keyManager, tokenService, jwtOptions, refreshTokenOptions, appRegRepository, refreshTokenRepository, claimsResolver, validatorFactory, null, authMetrics, logger, gatewayValidator, callbackUrlValidator, passwordPolicy, passwordHasher, accountRepository, passwordCredentialRepository, unitOfWork, auditService, otpService, smsSender);
+        return new AuthServiceImpl(keyManager, tokenService, jwtOptions, appRegRepository, refreshTokenService, claimsResolver, validatorFactory, null, authMetrics, logger, gatewayValidator, callbackUrlValidator, passwordPolicy, passwordHasher, passwordCredentialRepository, unitOfWork, auditService, otpService, smsSender, accountLoginInfoService);
     }
 
     private IKeyManager CreateMockKeyManager()

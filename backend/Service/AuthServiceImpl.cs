@@ -19,9 +19,8 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
     private readonly IKeyManager _keyManager;
     private readonly ITokenService _tokenService;
     private readonly JwtOptions _jwtOptions;
-    private readonly RefreshTokenOptions _refreshTokenOptions;
     private readonly IAppRegistrationRepository _appRegistrationRepository;
-    private readonly IRefreshTokenRepository _refreshTokenRepository;
+    private readonly IRefreshTokenService _refreshTokenService;
     private readonly ClaimsResolver _claimsResolver;
     private readonly ValidatorFactory _validatorFactory;
     private readonly ICallbackService? _callbackService;
@@ -31,20 +30,19 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
     private readonly CallbackUrlValidator _callbackUrlValidator;
     private readonly IPasswordPolicy _passwordPolicy;
     private readonly IPasswordHasher _passwordHasher;
-    private readonly IAccountRepository _accountRepository;
     private readonly IPasswordCredentialRepository _passwordCredentialRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAuditService _auditService;
     private readonly IOtpService _otpService;
     private readonly ISmsSender _smsSender;
+    private readonly IAccountLoginInfoService _accountLoginInfoService;
 
     public AuthServiceImpl(
         IKeyManager keyManager,
         ITokenService tokenService,
         JwtOptions jwtOptions,
-        RefreshTokenOptions refreshTokenOptions,
         IAppRegistrationRepository appRegistrationRepository,
-        IRefreshTokenRepository refreshTokenRepository,
+        IRefreshTokenService refreshTokenService,
         ClaimsResolver claimsResolver,
         ValidatorFactory validatorFactory,
         ICallbackService? callbackService,
@@ -54,19 +52,18 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
         CallbackUrlValidator callbackUrlValidator,
         IPasswordPolicy passwordPolicy,
         IPasswordHasher passwordHasher,
-        IAccountRepository accountRepository,
         IPasswordCredentialRepository passwordCredentialRepository,
         IUnitOfWork unitOfWork,
         IAuditService auditService,
         IOtpService otpService,
-        ISmsSender smsSender)
+        ISmsSender smsSender,
+        IAccountLoginInfoService accountLoginInfoService)
     {
         _keyManager = keyManager;
         _tokenService = tokenService;
         _jwtOptions = jwtOptions;
-        _refreshTokenOptions = refreshTokenOptions;
         _appRegistrationRepository = appRegistrationRepository;
-        _refreshTokenRepository = refreshTokenRepository;
+        _refreshTokenService = refreshTokenService;
         _claimsResolver = claimsResolver;
         _validatorFactory = validatorFactory;
         _callbackService = callbackService;
@@ -76,12 +73,12 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
         _callbackUrlValidator = callbackUrlValidator;
         _passwordPolicy = passwordPolicy;
         _passwordHasher = passwordHasher;
-        _accountRepository = accountRepository;
         _passwordCredentialRepository = passwordCredentialRepository;
         _unitOfWork = unitOfWork;
         _auditService = auditService;
         _otpService = otpService;
         _smsSender = smsSender;
+        _accountLoginInfoService = accountLoginInfoService;
     }
 
     public override async Task<TokenResponse> GetToken(GetTokenRequest request, ServerCallContext context)
@@ -131,7 +128,7 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
         var accessToken = _tokenService.GenerateJwtToken(claims, rsaKey, _jwtOptions.TokenExpirationHours);
         var expiresAt = DateTimeOffset.UtcNow.AddHours(_jwtOptions.TokenExpirationHours).ToUnixTimeSeconds();
 
-        var newRefreshToken = await HandleRefreshTokenAsync(request.GrantType, credential.RefreshToken, account, request.AppId);
+        var newRefreshToken = await _refreshTokenService.HandleRefreshTokenAsync(request.GrantType, credential.RefreshToken, account, request.AppId);
 
         var roles = claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).ToList();
         var permissions = claims.Where(c => c.Type == IdentityConstants.ClaimPermission).Select(c => c.Value).ToList();
@@ -148,7 +145,7 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
         await _auditService.RecordLoginAsync(account.Id, displayName ?? account.Id.ToString(), request.GrantType, "login_success",
             clientIp, context.GetUserAgent(), null, request.AppId, context.GetCorrelationId());
 
-        await UpdateAccountLoginInfoAsync(account, clientIp, validationResult.AuthMethod ?? request.GrantType);
+        await _accountLoginInfoService.UpdateLoginInfoAsync(account, clientIp, validationResult.AuthMethod ?? request.GrantType);
 
         return new TokenResponse
         {
@@ -220,7 +217,7 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
             return new BoolResponse { Success = false };
         }
 
-        var success = await RevokeRefreshTokenInternalAsync(request.RefreshToken);
+        var success = await _refreshTokenService.RevokeAsync(request.RefreshToken);
         return new BoolResponse { Success = success };
     }
 
@@ -345,32 +342,6 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
         }
     }
 
-    private async Task<string?> HandleRefreshTokenAsync(string grantType, string? existingRefreshToken, AccountEntity account, string? appId)
-    {
-        if (grantType is IdentityConstants.GrantTypePassword or IdentityConstants.GrantTypeSms or IdentityConstants.GrantTypeWechat)
-        {
-            return await GenerateRefreshTokenAsync(account, appId);
-        }
-
-        if (grantType == IdentityConstants.GrantTypeRefreshToken && !string.IsNullOrEmpty(existingRefreshToken))
-        {
-            await RevokeRefreshTokenInternalAsync(existingRefreshToken);
-            return await GenerateRefreshTokenAsync(account, appId);
-        }
-
-        return null;
-    }
-
-    private async Task UpdateAccountLoginInfoAsync(AccountEntity account, string? clientIp, string authMethod)
-    {
-        account.LastLoginAt = DateTimeOffset.UtcNow;
-        account.LastLoginIp = clientIp;
-        account.LastLoginMethod = authMethod;
-        account.TotalLoginCount++;
-        await _accountRepository.UpdateAsync(account);
-        await _unitOfWork.SaveChangesAsync();
-    }
-
     private async Task<TokenResponse> CreateFailureResponseAsync(Stopwatch stopwatch, string grantType,
         string failureReason, string? userMessage, string username, ServerCallContext context, string? appId = null)
     {
@@ -381,35 +352,6 @@ public class AuthServiceImpl : AuthGrpcService.AuthGrpcServiceBase
         await _auditService.RecordLoginAsync(null, username, grantType, "login_failure",
             context.GetClientIp(), context.GetUserAgent(), failureReason, appId, context.GetCorrelationId());
         return new TokenResponse { Success = false, Message = userMessage ?? failureReason };
-    }
-
-    private async Task<string> GenerateRefreshTokenAsync(AccountEntity account, string? appId)
-    {
-        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
-        var refreshToken = new RefreshTokenEntity
-        {
-            Id = Guid.NewGuid(),
-            AccountId = account.Id,
-            TokenValue = token,
-            CreatedAt = DateTimeOffset.UtcNow,
-            ExpiresAt = DateTimeOffset.UtcNow.AddDays(_refreshTokenOptions.RefreshTokenExpirationDays),
-            IsRevoked = false,
-            AppId = appId
-        };
-
-        await _refreshTokenRepository.AddAsync(refreshToken);
-        await _unitOfWork.SaveChangesAsync();
-        return token;
-    }
-
-    private async Task<bool> RevokeRefreshTokenInternalAsync(string token)
-    {
-        var refreshToken = await _refreshTokenRepository.GetByTokenValueAsync(token);
-        if (refreshToken == null) return false;
-
-        refreshToken.IsRevoked = true;
-        await _unitOfWork.SaveChangesAsync();
-        return true;
     }
 
     private sealed record GatewayValidationResult(TokenResponse? Response, AppRegistrationEntity? App, bool IsFailed)

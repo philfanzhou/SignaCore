@@ -31,7 +31,6 @@ public class AuthServiceImplTests
     }
 
     private static JwtOptions CreateJwtOptions() => new() { Issuer = "TestIssuer", Audience = "TestAudience", TokenExpirationHours = 2 };
-    private static RefreshTokenOptions CreateRefreshTokenOptions() => new() { RefreshTokenExpirationDays = 7 };
     private static Mock<IKeyManager> CreateMockKeyManager()
     {
         var mock = new Mock<IKeyManager>();
@@ -62,6 +61,21 @@ public class AuthServiceImplTests
     {
         var mock = new Mock<IRefreshTokenRepository>();
         mock.Setup(r => r.AddAsync(It.IsAny<RefreshTokenEntity>())).Returns(Task.CompletedTask);
+        return mock;
+    }
+    private static Mock<IRefreshTokenService> CreateRefreshTokenServiceMock()
+    {
+        var mock = new Mock<IRefreshTokenService>();
+        mock.Setup(s => s.HandleRefreshTokenAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<AccountEntity>(), It.IsAny<string?>()))
+            .ReturnsAsync("mock_refresh_token");
+        mock.Setup(s => s.RevokeAsync(It.IsAny<string>())).ReturnsAsync(true);
+        return mock;
+    }
+    private static Mock<IAccountLoginInfoService> CreateAccountLoginInfoServiceMock()
+    {
+        var mock = new Mock<IAccountLoginInfoService>();
+        mock.Setup(s => s.UpdateLoginInfoAsync(It.IsAny<AccountEntity>(), It.IsAny<string?>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
         return mock;
     }
     private static Mock<IAppRegistrationRepository> CreateAppRegistrationRepoMock(IdentityDbContext context)
@@ -139,11 +153,10 @@ public class AuthServiceImplTests
     private static AuthServiceImpl CreateService(
         IdentityDbContext context,
         Mock<IAppRegistrationRepository>? appRegRepoMock = null,
-        Mock<IRefreshTokenRepository>? refreshTokenRepoMock = null,
+        Mock<IRefreshTokenService>? refreshTokenServiceMock = null,
         ICallbackService? callbackService = null)
     {
         var appRegMock = appRegRepoMock ?? CreateAppRegistrationRepoMock(context);
-        var refreshTokenMock = refreshTokenRepoMock ?? CreateRefreshTokenRepoMock();
         var validators = Array.Empty<IIdentityValidator>();
         var factory = new ValidatorFactory(validators, NullLogger<ValidatorFactory>.Instance);
         var claimsResolver = new ClaimsResolver(NullLogger<ClaimsResolver>.Instance);
@@ -155,9 +168,8 @@ public class AuthServiceImplTests
             CreateMockKeyManager().Object,
             CreateMockTokenService().Object,
             CreateJwtOptions(),
-            CreateRefreshTokenOptions(),
             appRegMock.Object,
-            refreshTokenMock.Object,
+            (refreshTokenServiceMock ?? CreateRefreshTokenServiceMock()).Object,
             claimsResolver,
             factory,
             callbackService,
@@ -167,12 +179,12 @@ public class AuthServiceImplTests
             callbackUrlValidator,
             CreatePasswordPolicy(),
             CreatePasswordHasher(),
-            CreateAccountRepoMock().Object,
             CreatePasswordCredentialRepoMock().Object,
             CreateUnitOfWorkMock().Object,
             auditServiceMock.Object,
             otpServiceMock.Object,
-            smsSenderMock.Object);
+            smsSenderMock.Object,
+            CreateAccountLoginInfoServiceMock().Object);
     }
 
     private static AuthServiceImpl CreateServiceWithPasswordValidator(
@@ -192,9 +204,8 @@ public class AuthServiceImplTests
             CreateMockKeyManager().Object,
             CreateMockTokenService().Object,
             CreateJwtOptions(),
-            CreateRefreshTokenOptions(),
             appRegRepoMock.Object,
-            refreshTokenRepoMock.Object,
+            CreateRefreshTokenServiceMock().Object,
             claimsResolver,
             factory,
             null,
@@ -204,12 +215,12 @@ public class AuthServiceImplTests
             callbackUrlValidator,
             CreatePasswordPolicy(),
             CreatePasswordHasher(),
-            accountRepoMock.Object,
             passwordRepoMock.Object,
             CreateUnitOfWorkMock().Object,
             CreateAuditServiceMock().Object,
             otpServiceMock.Object,
-            smsSenderMock.Object);
+            smsSenderMock.Object,
+            CreateAccountLoginInfoServiceMock().Object);
     }
 
     private static AuthServiceImpl CreateServiceWithRefreshTokenValidator(
@@ -227,9 +238,8 @@ public class AuthServiceImplTests
             CreateMockKeyManager().Object,
             CreateMockTokenService().Object,
             CreateJwtOptions(),
-            CreateRefreshTokenOptions(),
             appRegRepoMock.Object,
-            refreshTokenRepoMock.Object,
+            CreateRefreshTokenServiceMock().Object,
             claimsResolver,
             factory,
             null,
@@ -239,12 +249,12 @@ public class AuthServiceImplTests
             callbackUrlValidator,
             CreatePasswordPolicy(),
             CreatePasswordHasher(),
-            accountRepoMock.Object,
             CreatePasswordCredentialRepoMock().Object,
             CreateUnitOfWorkMock().Object,
             CreateAuditServiceMock().Object,
             otpServiceMock.Object,
-            smsSenderMock.Object);
+            smsSenderMock.Object,
+            CreateAccountLoginInfoServiceMock().Object);
     }
 
     private static AuthServiceImpl CreateServiceWithOtpMocks(
@@ -261,9 +271,8 @@ public class AuthServiceImplTests
             CreateMockKeyManager().Object,
             CreateMockTokenService().Object,
             CreateJwtOptions(),
-            CreateRefreshTokenOptions(),
             appRegRepoMock.Object,
-            CreateRefreshTokenRepoMock().Object,
+            CreateRefreshTokenServiceMock().Object,
             claimsResolver,
             factory,
             null,
@@ -273,12 +282,12 @@ public class AuthServiceImplTests
             callbackUrlValidator,
             CreatePasswordPolicy(),
             CreatePasswordHasher(),
-            CreateAccountRepoMock().Object,
             CreatePasswordCredentialRepoMock().Object,
             CreateUnitOfWorkMock().Object,
             CreateAuditServiceMock().Object,
             otpService,
-            smsSender);
+            smsSender,
+            CreateAccountLoginInfoServiceMock().Object);
     }
 
     [Fact]
@@ -617,24 +626,17 @@ public class AuthServiceImplTests
     public async Task RevokeRefreshTokenAsync_WithValidToken_ReturnsSuccess()
     {
         var context = CreateInMemoryContext();
-        var accountId = Guid.NewGuid();
-        context.Accounts.Add(new AccountEntity { Id = accountId, IsActive = true, CreatedAt = DateTimeOffset.UtcNow });
-
-        var refreshToken = new RefreshTokenEntity { Id = Guid.NewGuid(), AccountId = accountId, TokenValue = "token_to_revoke", ExpiresAt = DateTimeOffset.UtcNow.AddDays(1), IsRevoked = false, CreatedAt = DateTimeOffset.UtcNow };
-        context.RefreshTokens.Add(refreshToken);
-        await context.SaveChangesAsync();
-
-        var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
-        refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync("token_to_revoke")).ReturnsAsync(refreshToken);
+        var refreshTokenServiceMock = new Mock<IRefreshTokenService>();
+        refreshTokenServiceMock.Setup(s => s.RevokeAsync("token_to_revoke")).ReturnsAsync(true);
         var appRegRepoMock = CreateAppRegistrationRepoMock(context);
-        var service = CreateService(context, appRegRepoMock, refreshTokenRepoMock);
+        var service = CreateService(context, appRegRepoMock, refreshTokenServiceMock);
 
         var request = new RevokeRefreshTokenRequest { RefreshToken = "token_to_revoke" };
 
         var response = await service.RevokeRefreshToken(request, CreateMockServerCallContext());
 
         Assert.True(response.Success);
-        Assert.True(refreshToken.IsRevoked);
+        refreshTokenServiceMock.Verify(s => s.RevokeAsync("token_to_revoke"), Times.Once);
     }
 
     [Fact]
@@ -654,10 +656,10 @@ public class AuthServiceImplTests
     public async Task RevokeRefreshTokenAsync_WithNonExistentToken_ReturnsFailure()
     {
         var context = CreateInMemoryContext();
-        var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
-        refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync("nonexistent")).ReturnsAsync((RefreshTokenEntity?)null);
+        var refreshTokenServiceMock = new Mock<IRefreshTokenService>();
+        refreshTokenServiceMock.Setup(s => s.RevokeAsync("nonexistent")).ReturnsAsync(false);
         var appRegRepoMock = CreateAppRegistrationRepoMock(context);
-        var service = CreateService(context, appRegRepoMock, refreshTokenRepoMock);
+        var service = CreateService(context, appRegRepoMock, refreshTokenServiceMock);
 
         var request = new RevokeRefreshTokenRequest { RefreshToken = "nonexistent" };
 
