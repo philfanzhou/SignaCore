@@ -21,6 +21,76 @@
 - [ ] FR-11: 记录登录审计日志
 - [ ] FR-12: 更新账户登录统计信息
 - [ ] FR-13: 请求短信验证码（RequestSmsCode），支持可选网关验证
+- [ ] FR-14: HTTP `POST /api/auth/token` 端点，与 gRPC `GetToken` 行为一致
+- [ ] FR-15: HTTP `POST /api/auth/sms-code` 端点，与 gRPC `RequestSmsCode` 行为一致
+- [ ] FR-16: HTTP `POST /api/auth/revoke` 端点，与 gRPC `RevokeRefreshToken` 行为一致
+- [ ] FR-17: HTTP `POST /api/auth/callback/register` 端点，与 gRPC `RegisterCallback` 行为一致
+
+## HTTP API 规范（Phase 1 新增）
+
+### POST /api/auth/token
+
+**认证**：可选 AppId/AppSecret 请求头（`X-Admin-AppId` / `X-Admin-AppSecret`），与 gRPC 请求体中的 `app_id` / `app_secret` 等效。
+
+**请求体**（JSON）：
+
+```json
+{
+  "grant_type": "password | sms | wechat_code | refresh_token",
+  "username": "string (grant_type=password 时必填)",
+  "password": "string (grant_type=password 时必填)",
+  "phone": "string (grant_type=sms 时必填)",
+  "code": "string (grant_type=sms 或 wechat_code 时必填)",
+  "refresh_token": "string (grant_type=refresh_token 时必填)"
+}
+```
+
+> AppId/AppSecret 通过请求头传递，不放在请求体中（与 GatewayController 保持一致）。
+
+**响应体**（200 OK，业务成功/失败均返回 200，通过 `success` 字段区分）：
+
+```json
+{
+  "success": true,
+  "message": "",
+  "access_token": "eyJ...",
+  "refresh_token": "rt_...",
+  "expires_in": 7200,
+  "expires_at": 1719900000,
+  "user_info": {
+    "user_id": "uuid",
+    "username": "alice",
+    "phone": "138****0000",
+    "email": "",
+    "client_type": "password",
+    "auth_method": "Password",
+    "roles": ["student"],
+    "permissions": ["read"]
+  }
+}
+```
+
+### POST /api/auth/sms-code
+
+**请求头**：`X-Admin-AppId` / `X-Admin-AppSecret`（可选，用于网关验证）。
+
+**请求体**：`{ "phone": "13800138000" }`
+
+**响应体**：`{ "success": true, "message": "" }`
+
+### POST /api/auth/revoke
+
+**请求体**：`{ "refresh_token": "rt_..." }`
+
+**响应体**：`{ "success": true }`
+
+### POST /api/auth/callback/register
+
+**请求头**：`X-Admin-AppId` / `X-Admin-AppSecret`（必填）。
+
+**请求体**：`{ "callback_url": "http://...", "ttl_seconds": 3600 }`
+
+**响应体**：`{ "success": true, "message": "", "expires_at": 1719900000 }`
 
 ## 详细的验收标准
 

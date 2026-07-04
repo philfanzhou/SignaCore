@@ -4,10 +4,11 @@
 
 | 集成点 | 方向 | 接口类型 | 协议 | 说明 |
 |--------|------|----------|------|------|
-| AuthGrpcService.GetToken | 入 | gRPC | HTTP/2 | 统一 Token 获取接口 |
-| AuthGrpcService.RegisterCallback | 入 | gRPC | HTTP/2 | 业务系统注册回调 |
-| AuthGrpcService.RevokeRefreshToken | 入 | gRPC | HTTP/2 | 吊销刷新令牌 |
-| AuthGrpcService.RequestSmsCode | 入 | gRPC | HTTP/2 | 请求短信验证码 |
+| AuthGrpcService.GetToken | 入 | gRPC | HTTP/2 | 统一 Token 获取接口（Phase 2 将移除） |
+| AuthGrpcService.RegisterCallback | 入 | gRPC | HTTP/2 | 业务系统注册回调（Phase 2 将移除） |
+| AuthGrpcService.RevokeRefreshToken | 入 | gRPC | HTTP/2 | 吊销刷新令牌（Phase 2 将移除） |
+| AuthGrpcService.RequestSmsCode | 入 | gRPC | HTTP/2 | 请求短信验证码（Phase 2 将移除） |
+| Auth API (api/auth/*) | 入 | HTTP REST | HTTP/1.1,2 | 认证接口（token/sms-code/revoke/callback），Phase 1 新增，替代 gRPC |
 | Admin API (api/admin/*) | 入 | HTTP REST | HTTP/1.1,2 | 管理员操作接口（Cookie Auth） |
 | Gateway API (api/gateway/*) | 入 | HTTP REST | HTTP/1.1,2 | 网关用户查询接口（AppId/AppSecret Auth） |
 | Profile API (api/profile/*) | 入 | HTTP REST | HTTP/1.1,2 | 用户个人信息接口（JWT Bearer Auth） |

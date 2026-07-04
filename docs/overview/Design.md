@@ -107,6 +107,38 @@ app.MapIdentityAuthEndpoints();
 
 JWT 验证需要从 Identity 服务获取 JWKS 公钥。SDK 使用 `JwksFetcher` 类（普通 HttpClient）手动获取并解析 JWKS，不依赖 `ConfigurationManager`（后者在 Docker 容器环境中存在静默失败问题）。密钥缓存 30 分钟，失败不缓存，下次请求重试。
 
+## 协议选型决策
+
+### 背景
+
+Identity 服务最初使用 gRPC 作为内部服务间通信协议，HTTP REST 仅用于管理 API、OIDC Discovery、JWKS 和健康检查。经实际运行分析，发现 gRPC 在本场景中带来不必要的客户端复杂度：
+
+- **调用频率极低**：gRPC `GetToken` 仅在登录/SSO/令牌刷新时调用，每次登录 1 次；每次请求的认证校验走 JWT 本地验证（JWKS 缓存 30 分钟），不调用 Identity。gRPC 的性能优势无处发挥。
+- **客户端复杂度高**：调用方需引入 proto 契约依赖、gRPC 通道配置、`RpcException` 处理。User Portal 和 Teacher Portal 的 gRPC 客户端注册代码几乎完全重复。
+- **SDK 形同虚设**：Identity Client SDK 只有 DocLibrary 一个消费者，三个 Portal 均未使用。
+- **OIDC 发现文档已声明 HTTP 端点**：`/.well-known/openid-configuration` 声明 `token_endpoint = /api/auth/token`，但该 HTTP 端点实际不存在——说明设计意图是 HTTP，只是未落地。
+
+### 决策
+
+**Phase 1（当前）**：在 Identity 服务新增 HTTP `/api/auth/*` 端点，与 gRPC 并存。各调用方逐步切换到 HTTP 调用。
+
+**Phase 2（后续）**：删除 gRPC 相关代码（proto、AuthServiceImpl、拦截器、Contract 项目、SDK gRPC 部分），关闭 5001 端口。
+
+### HTTP 端点设计
+
+| 端点 | HTTP 方法 | 对应 gRPC 方法 | 认证方式 | 说明 |
+|------|-----------|---------------|---------|------|
+| `/api/auth/token` | POST | `GetToken` | AppId/AppSecret 头（可选） | OAuth2 grant_type 模式，支持 password/sms/wechat_code/refresh_token |
+| `/api/auth/sms-code` | POST | `RequestSmsCode` | AppId/AppSecret 头（可选） | 请求短信验证码 |
+| `/api/auth/revoke` | POST | `RevokeRefreshToken` | 无（需持有 refresh_token） | 吊销刷新令牌 |
+| `/api/auth/callback/register` | POST | `RegisterCallback` | AppId/AppSecret 头 | 注册业务系统权限回调 URL |
+
+### 兼容性保证
+
+- Phase 1 期间 gRPC 端点 5001 继续保留，不影响现有未迁移的调用方
+- HTTP 端点与 gRPC 端点共享同一套 Domain 层逻辑，行为完全一致
+- 客户端可按自身节奏迁移到 HTTP
+
 ## 详细设计
 
 各功能点的详细设计见 [modules/](../modules/README.md) 目录。
