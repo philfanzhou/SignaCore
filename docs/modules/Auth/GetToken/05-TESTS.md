@@ -1,7 +1,7 @@
 # 统一 Token 获取 — 测试计划 (TESTS)
 
 测试工具：xUnit + Moq
-现有测试文件：test/AuthServiceImplTests.cs, test/PasswordValidatorTests.cs, test/RefreshTokenValidatorTests.cs, test/SmsValidatorTests.cs, test/WechatValidatorTests.cs, test/ValidatorFactoryTests.cs
+现有测试文件：test/unit/Host/Controllers/AuthControllerTests.cs, test/PasswordValidatorTests.cs, test/RefreshTokenValidatorTests.cs, test/SmsValidatorTests.cs, test/WechatValidatorTests.cs, test/ValidatorFactoryTests.cs
 
 ## 单元测试 — Given-When-Then 格式
 
@@ -73,7 +73,7 @@
 
 ## 遗漏的测试场景
 
-- AuthServiceImpl.GetToken 的端到端测试（当前仅有单元测试）
+- AuthController.GetToken 的端到端测试（当前仅有单元测试）
 - 回调权限注入成功/失败的集成测试
 - 网关验证失败时的审计日志记录测试
 - 并发刷新令牌场景测试

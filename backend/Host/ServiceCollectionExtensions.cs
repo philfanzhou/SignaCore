@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Metrics;
@@ -11,7 +12,6 @@ using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Services.Sms;
 using QuantumZhou.Identity.Domain.Services.WeChat;
 using QuantumZhou.Identity.Domain.Validators;
-using QuantumZhou.Identity.Service;
 
 namespace QuantumZhou.Identity.Host;
 
@@ -192,14 +192,38 @@ public static class ServiceCollectionExtensions
         // ========== 12.5. Password Policy ==========
         services.AddSingleton<IPasswordPolicy, DefaultPasswordPolicy>();
 
-        // ========== 13. Rate Limiting Options ==========
-        var rateLimitingOptions = services.RegisterSingleton(new RateLimitingOptions
+        // ========== 13. Rate Limiting (ASP.NET Core built-in) ==========
+        // Per-IP fixed window limiter: 20 requests per 60 seconds per client IP.
+        services.AddRateLimiter(options =>
         {
-            PermitLimitPerClient = int.Parse(configuration["RateLimiting:PermitLimitPerClient"] ?? "20"),
-            WindowSeconds = int.Parse(configuration["RateLimiting:WindowSeconds"] ?? "60"),
-            CleanupIntervalSeconds = int.Parse(configuration["RateLimiting:CleanupIntervalSeconds"] ?? "300")
+            options.AddFixedWindowLimiter("default", opt =>
+            {
+                opt.AutoReplenishment = true;
+                opt.PermitLimit = 20;
+                opt.Window = TimeSpan.FromSeconds(60);
+            });
+            options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<
+                Microsoft.AspNetCore.Http.HttpContext,
+                System.Net.IPAddress>(httpContext =>
+            {
+                var remoteIp = httpContext.Connection.RemoteIpAddress ?? System.Net.IPAddress.Loopback;
+                return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    remoteIp,
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        AutoReplenishment = true,
+                        PermitLimit = 20,
+                        Window = TimeSpan.FromSeconds(60)
+                    });
+            });
+            options.OnRejected = async (context, _) =>
+            {
+                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                context.HttpContext.Response.ContentType = "application/json";
+                await context.HttpContext.Response.WriteAsync(
+                    """{"status":429,"title":"Too Many Requests","detail":"Rate limit exceeded. Please try again later."}""");
+            };
         });
-        services.AddSingleton<RateLimitingInterceptor>();
 
         // ========== 14. Validators (Auto-registered) ==========
         services.AddScoped<IIdentityValidator, PasswordValidator>();
@@ -212,16 +236,6 @@ public static class ServiceCollectionExtensions
 
         // ========== 15. Background Cleanup Service ==========
         services.AddHostedService<CleanupWorker>();
-
-        // ========== 16. gRPC ==========
-        services.AddGrpc(options =>
-        {
-            options.Interceptors.Add<CorrelationIdInterceptor>();
-            options.Interceptors.Add<RateLimitingInterceptor>();
-            options.Interceptors.Add<ExceptionHandlingInterceptor>();
-            options.MaxReceiveMessageSize = int.Parse(configuration["Grpc:MaxReceiveMessageSize"] ?? "4194304");
-            options.MaxSendMessageSize = int.Parse(configuration["Grpc:MaxSendMessageSize"] ?? "4194304");
-        });
 
         // ========== 16. Health Checks ==========
         services.AddHealthChecks()
@@ -342,9 +356,6 @@ public static class ServiceCollectionExtensions
         });
 
         services.AddControllers();
-
-        // ========== 18. Auth Service ==========
-        services.AddScoped<AuthServiceImpl>();
 
         // ========== 18. Auth Metrics ==========
         services.AddSingleton<AuthMetrics>();

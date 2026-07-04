@@ -1,44 +1,20 @@
 using System.Net;
 using System.Net.Http.Json;
-using Microsoft.Extensions.DependencyInjection;
-using Grpc.Core;
-using Grpc.Net.Client;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using QuantumZhou.Identity.Contract.Protos;
+using Microsoft.Extensions.DependencyInjection;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
 using Xunit;
 
 namespace QuantumZhou.Identity.Tests.Integration;
 
-public class GrpcConnectivityTests : IClassFixture<GrpcServerFixture>
+public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
 {
-    private readonly GrpcServerFixture _fixture;
+    private readonly IdentityServerFixture _fixture;
 
-    public GrpcConnectivityTests(GrpcServerFixture fixture)
+    public IdentityHttpEndpointsTests(IdentityServerFixture fixture)
     {
         _fixture = fixture;
-    }
-
-    [Fact]
-    public async Task GrpcChannel_CanConnectAndReceiveResponse()
-    {
-        var channel = _fixture.CreateChannel();
-        var client = new AuthGrpcService.AuthGrpcServiceClient(channel);
-
-        var request = new GetTokenRequest
-        {
-            GrantType = "password",
-            AppId = "nonexistent",
-            AppSecret = "nonexistent",
-            Password = new PasswordCredential { Username = "test", Password = "test" }
-        };
-
-        var response = await client.GetTokenAsync(request);
-
-        Assert.NotNull(response);
-        Assert.False(response.Success);
     }
 
     [Fact]
@@ -100,18 +76,15 @@ public class GrpcConnectivityTests : IClassFixture<GrpcServerFixture>
         Assert.Equal(searchedUser.Phone, batchUser.Phone);
         Assert.Equal(searchedUser.DisplayName, batchUser.DisplayName);
     }
-
 }
 
-public class GrpcServerFixture : IAsyncLifetime
+public class IdentityServerFixture : IAsyncLifetime
 {
     private WebApplicationFactory<Program>? _factory;
     private string? _previousMasterKey;
 
     public async Task InitializeAsync()
     {
-        AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
-
         _previousMasterKey = Environment.GetEnvironmentVariable("RSA_MASTER_KEY");
         Environment.SetEnvironmentVariable("RSA_MASTER_KEY", "test-master-key-for-e2e-testing-only");
 
@@ -123,8 +96,6 @@ public class GrpcServerFixture : IAsyncLifetime
                 builder.UseSetting("Database:Provider", "SQLite");
                 builder.UseSetting("Database:AutoMigrate", "true");
                 builder.UseSetting("ConnectionStrings:Default", $"Data Source={dbPath}");
-                builder.UseSetting("RateLimiting:PermitLimitPerClient", "1000");
-                builder.UseSetting("RateLimiting:WindowSeconds", "60");
                 builder.UseSetting("AdminBootstrap:Username", "");
                 builder.UseSetting("AdminBootstrap:Password", "");
             });
@@ -186,19 +157,6 @@ public class GrpcServerFixture : IAsyncLifetime
         });
 
         await dbContext.SaveChangesAsync();
-    }
-
-    public GrpcChannel CreateChannel()
-    {
-        var httpHandler = _factory!.Server.CreateHandler();
-        var options = new GrpcChannelOptions
-        {
-            MaxReceiveMessageSize = 16 * 1024 * 1024,
-            MaxSendMessageSize = 16 * 1024 * 1024,
-            HttpHandler = httpHandler
-        };
-
-        return GrpcChannel.ForAddress("http://localhost", options);
     }
 
     public async Task DisposeAsync()

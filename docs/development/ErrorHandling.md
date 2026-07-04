@@ -22,13 +22,17 @@ gRPC 服务实现中必须使用标准的状态码，不得自定义状态码：
 2. 错误信息应简洁明确，不包含技术细节
 3. 同一类错误在各服务中使用相同的措辞
 
-## 全局异常拦截器
+## 全局异常中间件 (ExceptionHandlingMiddleware)
 
-所有 gRPC 服务必须注册全局异常拦截器：
+HTTP 路径使用 `ExceptionHandlingMiddleware` 统一捕获未处理异常，将异常映射为 HTTP 状态码和 JSON 错误响应，错误信息脱敏。中间件在 `Program.cs` 中注册，作用于所有 HTTP 控制器（`AuthController` / `AdminController` / `GatewayController` / `ProfileController`）。
 
-- `RpcException` 直接重新抛出，不做包装
-- 领域异常映射为 `InvalidArgument` 或 `FailedPrecondition`
-- 其他未捕获异常统一返回 `Internal`，错误信息脱敏
+### HTTP 异常处理策略
+
+| 异常类型 | HTTP 状态码 | 说明 |
+|----------|------------|------|
+| `ArgumentException` | 400 BadRequest | 请求参数验证失败 |
+| `InvalidOperationException` | 409 Conflict | 业务前置条件不满足 |
+| 其他异常 | 500 Internal Server Error | 服务内部错误，错误信息脱敏 |
 
 ## 参数验证
 
@@ -38,7 +42,6 @@ gRPC 服务实现中必须使用标准的状态码，不得自定义状态码：
 
 - 使用结构化日志占位符，不要使用字符串插值
 - 异常对象必须传入：使用 `LogError(ex, ...)` 而非 `LogError(ex.Message, ...)`
-- RpcException 应记录状态码和详情
 - 预期内的 NotFound 使用 Warning 级别
 - 不记录密码、Token、验证码、AppSecret 等机密信息
 

@@ -1,11 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <PackageReference Include="Grpc.AspNetCore" Version="2.62.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\Contract\QuantumZhou.Identity.Contract.csproj" />
     <ProjectReference Include="..\Database\QuantumZhou.Identity.Database.csproj" />
     <ProjectReference Include="..\Domain\QuantumZhou.Identity.Domain.csproj" />
   </ItemGroup>

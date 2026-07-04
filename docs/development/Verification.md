@@ -28,19 +28,39 @@ curl http://localhost:5002/.well-known/jwks
 
 注意：JWKS 端点有速率限制（60 次/分钟），超出返回 429。
 
-## 4. gRPC 调用验证
+## 4. HTTP 认证 API 验证
 
-使用 `grpcurl`：
+使用 `curl` 调用 `/api/auth/*` 端点：
 
 ```bash
-# 列出服务
-grpcurl -plaintext localhost:5001 list
+# 调用 POST /api/auth/token（密码登录）
+curl -X POST http://localhost:5002/api/auth/token \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-AppId: $TEACHER_PORTAL_APP_ID" \
+  -H "X-Admin-AppSecret: $TEACHER_PORTAL_APP_SECRET" \
+  -d '{"grantType":"password","username":"admin","password":"$ADMIN_BOOTSTRAP_PASSWORD"}'
 
-# 调用 GetToken（密码登录）
-grpcurl -plaintext -d '{"grant_type":"password","username":"admin","password":"$ADMIN_BOOTSTRAP_PASSWORD","app_id":"$TEACHER_PORTAL_APP_ID","app_secret":"$TEACHER_PORTAL_APP_SECRET"}' localhost:5001 QuantumZhou.Identity.AuthGrpcService/GetToken
+# 调用 POST /api/auth/token（刷新令牌）
+curl -X POST http://localhost:5002/api/auth/token \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-AppId: $TEACHER_PORTAL_APP_ID" \
+  -H "X-Admin-AppSecret: $TEACHER_PORTAL_APP_SECRET" \
+  -d '{"grantType":"refresh_token","refreshToken":"<your_refresh_token>"}'
+
+# 调用 POST /api/auth/sms-code（请求短信验证码）
+curl -X POST http://localhost:5002/api/auth/sms-code \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-AppId: $TEACHER_PORTAL_APP_ID" \
+  -H "X-Admin-AppSecret: $TEACHER_PORTAL_APP_SECRET" \
+  -d '{"phone":"13800138000"}'
+
+# 调用 POST /api/auth/revoke（吊销刷新令牌）
+curl -X POST http://localhost:5002/api/auth/revoke \
+  -H "Content-Type: application/json" \
+  -d '{"refreshToken":"<your_refresh_token>"}'
 ```
 
-预期返回 `TokenResponse`，包含 `access_token` 和 `refresh_token`。
+预期返回 JSON `TokenResponse`，包含 `accessToken` 和 `refreshToken` 字段。
 
 ## 5. JWT 验证
 

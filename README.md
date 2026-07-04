@@ -19,7 +19,6 @@ dotnet run
 ```
 
 服务默认监听：
-- gRPC: `http://0.0.0.0:5001`
 - HTTP: `http://0.0.0.0:5002`
 - Admin API: `http://0.0.0.0:5010`
 
@@ -42,11 +41,9 @@ dotnet run
 
 ```
 backend/
-  Contract/         - gRPC Proto 定义（auth.proto）
   Database/         - EF Core 数据访问层（实体、DbContext、迁移、仓储）
   Domain/           - 领域层（验证器、密钥管理、Token 服务、指标收集）
-  Service/          - gRPC 服务实现（AuthServiceImpl）
-  Host/             - ASP.NET Core 宿主与启动配置
+  Host/             - ASP.NET Core 宿主与启动配置（含 Controllers/AuthController）
   Tests/            - 单元测试与集成测试
 admin_frontend/     - Vue 3 + Vite 管理控制台
 docs/               - 设计文档
@@ -108,17 +105,18 @@ sequenceDiagram
 
 详细表结构设计见 [数据库设计](docs/database/README.md)
 
-## gRPC 接口
+## HTTP 认证 API
 
-### AuthGrpcService（认证服务）
+Identity 服务通过 HTTP REST 端点对外提供认证能力（Phase 2 后 gRPC 接口已移除）：
 
-定义文件：`src/Contract/Protos/auth.proto`
+| 端点 | HTTP 方法 | 说明 |
+|---|---|---|
+| `/api/auth/token` | POST | 统一 Token 获取接口（支持多种 grant_type） |
+| `/api/auth/sms-code` | POST | 请求短信验证码 |
+| `/api/auth/revoke` | POST | 吊销刷新令牌 |
+| `/api/auth/callback/register` | POST | 业务系统注册回调 |
 
-| 方法 | 说明 |
-|---|---|
-| `GetToken` | 统一 Token 获取接口（支持多种 grant_type） |
-| `RegisterCallback` | 业务系统注册回调 |
-| `RevokeRefreshToken` | 吊销刷新令牌 |
+AppId/AppSecret 通过 `X-Admin-AppId` / `X-Admin-AppSecret` 请求头传递。详细接口设计见 [Design.md](docs/overview/Design.md)。
 
 ## 安全特性
 

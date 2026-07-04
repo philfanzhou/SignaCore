@@ -10,7 +10,7 @@ public class CorrelationIdMiddlewareTests
     private const string HeaderName = CorrelationIdMiddleware.CorrelationIdHeader;
 
     [Fact]
-    public async Task InvokeAsync_GrpcRequest_SkipsMiddleware()
+    public async Task InvokeAsync_GrpcContentType_NoLongerSkipped()
     {
         var logger = new TestLogger<CorrelationIdMiddleware>();
         var middleware = new CorrelationIdMiddleware(_ => Task.CompletedTask, logger);
@@ -21,9 +21,9 @@ public class CorrelationIdMiddlewareTests
 
         await middleware.InvokeAsync(context);
 
-        // gRPC path must NOT populate response header (CorrelationIdInterceptor handles it)
-        Assert.False(context.Response.Headers.ContainsKey(HeaderName));
-        Assert.Empty(logger.LogEntries);
+        // gRPC skip logic removed in Phase 2; all requests are now handled uniformly
+        Assert.Equal("incoming-grpc-id", context.Response.Headers[HeaderName]);
+        Assert.Equal("incoming-grpc-id", context.Items[CorrelationIdMiddleware.HttpContextItemsKey]);
     }
 
     [Fact]

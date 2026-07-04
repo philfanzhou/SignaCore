@@ -3,12 +3,12 @@
 ## 1. 密码登录流程
 
 ```
-触发条件：客户端通过 Gateway 调用 GetToken(grant_type=password)
+触发条件：客户端通过 Gateway 调用 POST /api/auth/token (grant_type=password)
 
-Client          Gateway        AuthServiceImpl     PasswordValidator    AuditService     DB
+Client          Gateway        AuthController      PasswordValidator    AuditService     DB
   │                │                │                    │                  │             │
-  │──GetToken─────▶│                │                    │                  │             │
-  │                │──GetToken─────▶│                    │                  │             │
+  │──POST /token──▶│                │                    │                  │             │
+  │                │──POST /token──▶│                    │                  │             │
   │                │                │──ValidateGateway──▶│                  │             │
   │                │                │◀──OK───────────────│                  │             │
   │                │                │──ValidateAsync───▶│                  │             │
@@ -31,17 +31,17 @@ Client          Gateway        AuthServiceImpl     PasswordValidator    AuditSer
   │◀──TokenResponse│                │                    │                  │             │
 ```
 
-参与服务：Gateway → AuthServiceImpl → PasswordValidator → CallbackService → AuditService
+参与服务：Gateway → AuthController → PasswordValidator → CallbackService → AuditService
 数据流转：credential 查询 → 密码验证 → Claims 构建 → 回调权限注入 → JWT 签发 → RefreshToken 生成 → 审计记录
 
 ## 2. 短信验证码登录流程
 
 ```
-触发条件：客户端调用 GetToken(grant_type=sms)
+触发条件：客户端调用 POST /api/auth/token (grant_type=sms)
 
-Client      AuthServiceImpl     SmsValidator      OtpService      AccountRepo      DB
+Client      AuthController     SmsValidator      OtpService      AccountRepo      DB
   │              │                   │                │               │             │
-  │──GetToken───▶│                   │                │               │             │
+  │──POST /token▶│                   │                │               │             │
   │              │──ValidateAsync───▶│                │               │             │
   │              │                   │──VerifyAsync──▶│               │             │
   │              │                   │◀──verified─────│               │             │
@@ -62,7 +62,7 @@ Client      AuthServiceImpl     SmsValidator      OtpService      AccountRepo   
 ```
 触发条件：登录成功且请求的 AppId 对应的业务系统注册了 CallbackUrl
 
-AuthServiceImpl     CallbackService      BusinessService
+AuthController    CallbackService      BusinessService
       │                   │                    │
       │──EnrichClaims───▶│                    │
       │                   │──ValidateUrl──────┐│

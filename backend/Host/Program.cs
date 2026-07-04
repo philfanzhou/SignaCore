@@ -8,7 +8,6 @@ using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Host;
 using QuantumZhou.Identity.Host.Controllers;
-using QuantumZhou.Identity.Service;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,18 +25,13 @@ if (!string.IsNullOrWhiteSpace(lokiUri))
 }
 builder.Host.UseAgentSerilog("QuantumZhou.Identity");
 
-var grpcPort = builder.Configuration.GetValue<int?>("Endpoints:Grpc") ?? 5001;
 var httpPort = builder.Configuration.GetValue<int?>("Endpoints:Http") ?? 5002;
 
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenAnyIP(grpcPort, listenOptions =>
-    {
-        listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http2;
-    });
     options.ListenAnyIP(httpPort, listenOptions =>
     {
-        listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2;
+        listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1;
     });
     options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
 });
@@ -51,7 +45,7 @@ var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(builde
 
 var app = builder.Build();
 
-app.Logger.LogInformation("Service endpoints configured: gRPC={GrpcPort}, HTTP={HttpPort}", grpcPort, httpPort);
+app.Logger.LogInformation("Service endpoints configured: HTTP={HttpPort}", httpPort);
 app.Logger.LogInformation("Database: {Provider}", dbProvider);
 
 // ========== HTTPS Warning for Gateway API ==========
@@ -341,6 +335,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Identity Service API v1"));
 }
 app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseCors("AdminWeb");
 app.UseAuthentication();
 
@@ -360,6 +355,7 @@ app.Use(async (context, next) =>
 });
 
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapHealthChecks("/health");
 
@@ -449,8 +445,6 @@ app.MapGet("/.well-known/jwks", async (IKeyManager keyManager) =>
     });
     return Results.Ok(new { keys = jwks });
 });
-
-app.MapGrpcService<AuthServiceImpl>();
 
 app.MapControllers();
 

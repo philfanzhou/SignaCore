@@ -8,16 +8,13 @@
 │  Controllers (Admin/Gateway/Profile) + SPA Hosting   │
 ├─────────────────────────────────────────────────────┤
 │                     Service                          │
-│  AuthServiceImpl + gRPC Interceptors                 │
+│  AuthController（HTTP REST）                          │
 ├─────────────────────────────────────────────────────┤
 │                     Domain                           │
 │  Validators + TokenService + KeyManager + Callback   │
 ├─────────────────────────────────────────────────────┤
 │                    Database                          │
 │  DbContext + Repositories + Entities + Migrations    │
-├─────────────────────────────────────────────────────┤
-│                    Contract                          │
-│  Proto Definitions (auth.proto)                      │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -39,21 +36,17 @@
 ## 项目依赖关系
 
 ```
-Contract ← Database ← Domain ← Service ← Host
-                                    ↑         │
-                                    └─────────┘
-
-Client ← Contract（内部依赖，不暴露给调用方）
+Database ← Domain ← Service ← Host
+                ↑         │
+                └─────────┘
 ```
 
 | 项目 | 依赖 |
 |------|------|
-| QuantumZhou.Identity.Contract | 无（纯 Proto 定义） |
-| QuantumZhou.Identity.Database | Contract |
+| QuantumZhou.Identity.Database | 无 |
 | QuantumZhou.Identity.Domain | Database |
-| QuantumZhou.Identity.Service | Domain, Contract |
-| QuantumZhou.Identity.Host | Service, Domain, Database, Contract |
-| QuantumZhou.Identity.Client | Contract, JwtBearer |
+| QuantumZhou.Identity.Service | Domain |
+| QuantumZhou.Identity.Host | Service, Domain, Database |
 
 ## Client SDK
 
@@ -120,9 +113,14 @@ Identity 服务最初使用 gRPC 作为内部服务间通信协议，HTTP REST �
 
 ### 决策
 
-**Phase 1（当前）**：在 Identity 服务新增 HTTP `/api/auth/*` 端点，与 gRPC 并存。各调用方逐步切换到 HTTP 调用。
+**Phase 1（已完成）**：在 Identity 服务新增 HTTP `/api/auth/*` 端点，与 gRPC 并存。各调用方逐步切换到 HTTP 调用。
 
-**Phase 2（后续）**：删除 gRPC 相关代码（proto、AuthServiceImpl、拦截器、Contract 项目、SDK gRPC 部分），关闭 5001 端口。
+**Phase 2（当前执行）**：删除 gRPC 相关代码，包括：
+- `auth.proto` 与 `QuantumZhou.Identity.Contract` 项目
+- `AuthServiceImpl`（gRPC 服务实现）
+- 3 个 gRPC 拦截器（`CorrelationIdInterceptor`、`RateLimitingInterceptor`、`ExceptionHandlingInterceptor`）
+- `QuantumZhou.Identity.Client` SDK
+- gRPC 端口 5001
 
 ### HTTP 端点设计
 
@@ -138,6 +136,16 @@ Identity 服务最初使用 gRPC 作为内部服务间通信协议，HTTP REST �
 - Phase 1 期间 gRPC 端点 5001 继续保留，不影响现有未迁移的调用方
 - HTTP 端点与 gRPC 端点共享同一套 Domain 层逻辑，行为完全一致
 - 客户端可按自身节奏迁移到 HTTP
+
+## HTTP 中间件
+
+Phase 2 移除 gRPC 拦截器后，HTTP 路径的横切关注点由 ASP.NET Core 中间件承担：
+
+| 中间件 | 来源 | 替代的 gRPC 拦截器 | 说明 |
+|--------|------|--------------------|------|
+| `CorrelationIdMiddleware` | 已存在 | `CorrelationIdInterceptor` | 从请求头 `x-correlation-id` 读取或新建 CorrelationId，写入 `HttpContext.Items` 并通过 `ILogger.BeginScope` 注入日志上下文，响应头回写 |
+| `AddRateLimiter` / `UseRateLimiter` | .NET 8 内置 | `RateLimitingInterceptor` | 使用 .NET 8 内置速率限制框架，配置 `RateLimiterOptions` 替代自定义 gRPC 限流拦截器 |
+| `ExceptionHandlingMiddleware` | 新增 | `ExceptionHandlingInterceptor` | 统一捕获未处理异常，转换为 HTTP 状态码和 JSON 错误响应（详见 [ErrorHandling.md](../development/ErrorHandling.md)） |
 
 ## 详细设计
 
