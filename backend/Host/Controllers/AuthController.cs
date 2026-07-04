@@ -275,12 +275,17 @@ public class AuthController : ControllerBase
     public async Task<ActionResult<RevokeResponse>> RevokeRefreshToken(
         [FromBody] RevokeRequest request)
     {
+        var clientIp = GetClientIp();
+        var correlationId = GetCorrelationId();
+
         if (string.IsNullOrEmpty(request.RefreshToken))
         {
+            _logger.LogWarning("Refresh token revocation failed: empty token, ClientIp={ClientIp}, CorrelationId={CorrelationId}", clientIp, correlationId);
             return Ok(new RevokeResponse { Success = false });
         }
 
         var success = await _refreshTokenService.RevokeAsync(request.RefreshToken);
+        _logger.LogInformation("Refresh token revoked: Success={Success}, ClientIp={ClientIp}, CorrelationId={CorrelationId}", success, clientIp, correlationId);
         return Ok(new RevokeResponse { Success = success });
     }
 
@@ -347,12 +352,17 @@ public class AuthController : ControllerBase
         if (grantType == IdentityConstants.GrantTypeWechat)
             return $"WeChat_{account.Id.ToString()[..8]}";
 
-        return null;
+        // Fallback for password/sms grant types: use account ID prefix to avoid empty display name
+        return $"User_{account.Id.ToString()[..8]}";
     }
 
-    private string? GetAppIdHeader() => Request.Headers[GatewayController.AppIdHeader].FirstOrDefault();
+    private string? GetAppIdHeader() =>
+        HttpContext.Items[GatewayController.AppIdHeader] as string
+        ?? Request.Headers[GatewayController.AppIdHeader].FirstOrDefault();
 
-    private string? GetAppSecretHeader() => Request.Headers[GatewayController.AppSecretHeader].FirstOrDefault();
+    private string? GetAppSecretHeader() =>
+        HttpContext.Items[GatewayController.AppSecretHeader] as string
+        ?? Request.Headers[GatewayController.AppSecretHeader].FirstOrDefault();
 
     private string? GetClientIp() =>
         Request.Headers["X-Forwarded-For"].FirstOrDefault()?.Split(',')[0].Trim()

@@ -37,12 +37,19 @@ public class ExceptionHandlingMiddleware
 
     private static async Task WriteProblemDetailsAsync(HttpContext context, Exception ex)
     {
-        var (status, title, detail) = ex switch
+        // Do not expose raw exception messages to clients — they may contain
+        // internal field names, database details, or stack-like information.
+        // The correlation is via server-side logs (see CorrelationIdMiddleware).
+        var (status, title) = ex switch
         {
-            ArgumentException ae => (StatusCodes.Status400BadRequest, "Bad Request", ae.Message),
-            InvalidOperationException ioe => (StatusCodes.Status409Conflict, "Conflict", ioe.Message),
-            _ => (StatusCodes.Status500InternalServerError, "Internal Server Error", "An internal error occurred.")
+            ArgumentException => (StatusCodes.Status400BadRequest, "Bad Request"),
+            InvalidOperationException => (StatusCodes.Status409Conflict, "Conflict"),
+            _ => (StatusCodes.Status500InternalServerError, "Internal Server Error")
         };
+
+        var detail = status == StatusCodes.Status500InternalServerError
+            ? "An internal error occurred."
+            : "The request could not be processed. See server logs for details.";
 
         context.Response.StatusCode = status;
         context.Response.ContentType = "application/json";

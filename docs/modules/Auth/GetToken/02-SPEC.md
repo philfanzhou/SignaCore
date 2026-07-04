@@ -8,7 +8,7 @@
 
 ## 功能要求清单
 
-- [ ] FR-01: 接受 grant_type 参数，分发到对应的验证器
+- [ ] FR-01: 接受 grantType 参数，分发到对应的验证器
 - [ ] FR-02: 验证网关身份（AppId/AppSecret），无效时拒绝请求；验证成功返回 App 实体，避免二次查询
 - [ ] FR-03: 密码登录验证（PasswordValidator）
 - [ ] FR-04: 短信验证码登录验证（SmsValidator），支持自动注册
@@ -30,18 +30,18 @@
 
 ### POST /api/auth/token
 
-**认证**：可选 AppId/AppSecret 请求头（`X-Admin-AppId` / `X-Admin-AppSecret`），与 gRPC 请求体中的 `app_id` / `app_secret` 等效。
+**认证**：可选 AppId/AppSecret 请求头（`X-Admin-AppId` / `X-Admin-AppSecret`），与 gRPC 请求体中的 `appId` / `appSecret` 等效。
 
 **请求体**（JSON）：
 
 ```json
 {
-  "grant_type": "password | sms | wechat_code | refresh_token",
-  "username": "string (grant_type=password 时必填)",
-  "password": "string (grant_type=password 时必填)",
-  "phone": "string (grant_type=sms 时必填)",
-  "code": "string (grant_type=sms 或 wechat_code 时必填)",
-  "refresh_token": "string (grant_type=refresh_token 时必填)"
+  "grantType": "password | sms | wechat_code | refresh_token",
+  "username": "string (grantType=password 时必填)",
+  "password": "string (grantType=password 时必填)",
+  "phone": "string (grantType=sms 时必填)",
+  "code": "string (grantType=sms 或 wechat_code 时必填)",
+  "refreshToken": "string (grantType=refresh_token 时必填)"
 }
 ```
 
@@ -53,17 +53,17 @@
 {
   "success": true,
   "message": "",
-  "access_token": "eyJ...",
-  "refresh_token": "rt_...",
-  "expires_in": 7200,
-  "expires_at": 1719900000,
-  "user_info": {
-    "user_id": "uuid",
+  "accessToken": "eyJ...",
+  "refreshToken": "rt_...",
+  "expiresIn": 7200,
+  "expiresAt": 1719900000,
+  "userInfo": {
+    "userId": "uuid",
     "username": "alice",
     "phone": "138****0000",
     "email": "",
-    "client_type": "password",
-    "auth_method": "Password",
+    "clientType": "password",
+    "authMethod": "Password",
     "roles": ["student"],
     "permissions": ["read"]
   }
@@ -80,7 +80,7 @@
 
 ### POST /api/auth/revoke
 
-**请求体**：`{ "refresh_token": "rt_..." }`
+**请求体**：`{ "refreshToken": "rt_..." }`
 
 **响应体**：`{ "success": true }`
 
@@ -88,20 +88,20 @@
 
 **请求头**：`X-Admin-AppId` / `X-Admin-AppSecret`（必填）。
 
-**请求体**：`{ "callback_url": "http://...", "ttl_seconds": 3600 }`
+**请求体**：`{ "callbackUrl": "http://...", "ttlSeconds": 3600 }`
 
-**响应体**：`{ "success": true, "message": "", "expires_at": 1719900000 }`
+**响应体**：`{ "success": true, "message": "", "expiresAt": 1719900000 }`
 
 ## 详细的验收标准
 
 ### AC-FR-01: Grant Type 分发
 
 - **Given** 一个 GetToken 请求
-- **When** grant_type 为 "password" / "sms" / "wechat_code" / "refresh_token"
+- **When** grantType 为 "password" / "sms" / "wechat_code" / "refresh_token"
 - **Then** 请求被分发到对应的验证器
 
 - **Given** 一个 GetToken 请求
-- **When** grant_type 为不支持的值
+- **When** grantType 为不支持的值
 - **Then** 返回 success=false, message="unsupported_grant_type"
 
 ### AC-FR-02: 网关验证
@@ -122,7 +122,7 @@
 
 - **Given** 正确的用户名和密码
 - **When** 账户活跃且未锁定
-- **Then** 返回 success=true, access_token, refresh_token, user_info
+- **Then** 返回 success=true, accessToken, refreshToken, userInfo
 
 - **Given** 错误的密码
 - **When** 连续失败未达上限
@@ -158,11 +158,11 @@
 
 ### AC-FR-06: 刷新令牌
 
-- **Given** 有效的 refresh_token
+- **Given** 有效的 refreshToken
 - **When** AppId 匹配
-- **Then** 旧 token 被撤销，返回新的 access_token 和 refresh_token
+- **Then** 旧 token 被撤销，返回新的 accessToken 和 refreshToken
 
-- **Given** refresh_token 的 AppId 与请求 AppId 不匹配
+- **Given** refreshToken 的 AppId 与请求 AppId 不匹配
 - **When** 验证
 - **Then** 返回 success=false, message="Refresh token is not valid for this application"
 

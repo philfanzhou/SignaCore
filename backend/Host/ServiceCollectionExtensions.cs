@@ -193,26 +193,35 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPasswordPolicy, DefaultPasswordPolicy>();
 
         // ========== 13. Rate Limiting (ASP.NET Core built-in) ==========
-        // Per-IP fixed window limiter: 20 requests per 60 seconds per client IP.
+        // Per-IP fixed window limiter: 100 requests per 60 seconds per client IP.
+        // /health, /metrics, /.well-known/jwks are exempt (have their own limits or are infra).
         services.AddRateLimiter(options =>
         {
             options.AddFixedWindowLimiter("default", opt =>
             {
                 opt.AutoReplenishment = true;
-                opt.PermitLimit = 20;
+                opt.PermitLimit = 100;
                 opt.Window = TimeSpan.FromSeconds(60);
             });
             options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<
                 Microsoft.AspNetCore.Http.HttpContext,
                 System.Net.IPAddress>(httpContext =>
             {
+                var path = httpContext.Request.Path.Value ?? string.Empty;
+                // Exempt infrastructure endpoints from global rate limiting
+                if (path == "/health" || path == "/metrics" || path == "/.well-known/jwks")
+                {
+                    return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter(
+                        System.Net.IPAddress.Loopback);
+                }
+
                 var remoteIp = httpContext.Connection.RemoteIpAddress ?? System.Net.IPAddress.Loopback;
                 return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     remoteIp,
                     _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                     {
                         AutoReplenishment = true,
-                        PermitLimit = 20,
+                        PermitLimit = 100,
                         Window = TimeSpan.FromSeconds(60)
                     });
             });

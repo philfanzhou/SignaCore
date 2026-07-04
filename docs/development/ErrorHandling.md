@@ -24,15 +24,17 @@ gRPC 服务实现中必须使用标准的状态码，不得自定义状态码：
 
 ## 全局异常中间件 (ExceptionHandlingMiddleware)
 
-HTTP 路径使用 `ExceptionHandlingMiddleware` 统一捕获未处理异常，将异常映射为 HTTP 状态码和 JSON 错误响应，错误信息脱敏。中间件在 `Program.cs` 中注册，作用于所有 HTTP 控制器（`AuthController` / `AdminController` / `GatewayController` / `ProfileController`）。
+HTTP 路径使用 `ExceptionHandlingMiddleware` 统一捕获未处理异常，将异常映射为 HTTP 状态码和固定的脱敏 JSON 错误响应（不回显原始异常消息）。中间件在 `Program.cs` 中注册，作用于所有 HTTP 控制器（`AuthController` / `AdminController` / `GatewayController` / `ProfileController`）。
 
 ### HTTP 异常处理策略
 
-| 异常类型 | HTTP 状态码 | 说明 |
-|----------|------------|------|
-| `ArgumentException` | 400 BadRequest | 请求参数验证失败 |
-| `InvalidOperationException` | 409 Conflict | 业务前置条件不满足 |
-| 其他异常 | 500 Internal Server Error | 服务内部错误，错误信息脱敏 |
+| 异常类型 | HTTP 状态码 | 响应消息 |
+|----------|------------|---------|
+| `ArgumentException` | 400 BadRequest | "The request could not be processed." |
+| `InvalidOperationException` | 409 Conflict | "The request could not be processed." |
+| 其他异常 | 500 Internal Server Error | "An internal error occurred." |
+
+> 中间件不返回原始异常消息（`ex.Message`），只返回上表中固定的脱敏消息，避免泄漏内部实现细节。原始异常信息通过结构化日志记录，供运维排查。
 
 ## 参数验证
 
@@ -82,13 +84,17 @@ HTTP 控制器（`AdminController` / `GatewayController` / `ProfileController`�
 中间件管道位置（`Program.cs` 中注册顺序）：
 
 ```
-UseSwagger (仅 Development)
-  → UseMiddleware<CorrelationIdMiddleware>()   ← 必须在 CORS / Auth 之前
+UseSwagger / UseSwaggerUI (仅 Development)
+  → UseMiddleware<CorrelationIdMiddleware>()           ← 必须在 CORS / Auth 之前
+  → UseMiddleware<ExceptionHandlingMiddleware>()       ← 新增，统一捕获未处理异常
   → UseCors("AdminWeb")
   → UseAuthentication()
+  → 敏感头脱敏中间件（匿名）                            ← 脱敏 Authorization 等敏感请求头
   → UseAuthorization()
-  → JWKS 限流中间件
-  → MapControllers / MapGrpcService
+  → UseRateLimiter()                                    ← 新增，.NET 8 内置限流
+  → MapHealthChecks("/health")
+  → JWKS 限流中间件（匿名）                              ← JWKS 端点专属限流
+  → MapControllers
 ```
 
 `CorrelationIdMiddleware` 必须在 CORS 与认证之前注册，确保所有下游中间件（含 CORS 预检、认证失败响应）都在 CorrelationId scope 内。gRPC 请求（`Content-Type: application/grpc`）由中间件自动跳过，避免与 `CorrelationIdInterceptor` 重复生成 ID。

@@ -15,17 +15,25 @@
 | WeChat API (/sns/jscode2session) | 出 | HTTP | HTTPS | 微信登录获取 OpenId |
 | Business Service Callback | 出 | HTTP | HTTP/HTTPS | 登录后获取用户角色和权限 |
 
-## Client SDK 集成
+## Client SDK 集成（已废弃）
 
-业务服务通过 `QuantumZhou.Identity.Client` 项目引用接入 Identity 认证。Client SDK 内部使用 gRPC 调用 Identity 的 `GetToken` 接口，对外封装为 HTTP 端点（login/refresh/me/logout）。
+> `QuantumZhou.Identity.Client` SDK 已停止维护，源码已移除，仅保留历史构建产物。业务系统应改为直接调用 Identity 的 HTTP API（`POST /api/auth/token` 等），详见 [GetToken SPEC](../modules/Auth/GetToken/02-SPEC.md)。
 
-### 调用链路
+业务服务曾通过 `QuantumZhou.Identity.Client` 项目引用接入 Identity 认证。Client SDK 内部使用 gRPC 调用 Identity 的 `GetToken` 接口，对外封装为 HTTP 端点（login/refresh/me/logout）。
+
+### 调用链路（历史，已废弃）
 
 ```
 业务前端 → 业务后端 (Client SDK AuthEndpoints) → Identity (gRPC GetToken)
 ```
 
-### 已接入服务
+### 当前推荐调用链路
+
+```
+业务前端 → 业务后端 (AuthController) → Identity (HTTP POST /api/auth/token)
+```
+
+### 曾接入服务
 
 | 服务 | 接入方式 | 认证端点路径 |
 |------|---------|-------------|
