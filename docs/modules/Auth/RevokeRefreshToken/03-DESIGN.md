@@ -4,8 +4,8 @@
 
 ```
 backend/
-├── Contract/Protos/auth.proto              # RevokeRefreshToken RPC 定义
-├── Service/AuthServiceImpl.cs              # RevokeRefreshToken 实现
+├── Host/Controllers/AuthController.cs      # POST /api/auth/revoke HTTP 端点
+├── Domain/Services/RefreshTokenService.cs  # 吊销逻辑
 └── Database/
     ├── Entity/RefreshTokenEntity.cs        # 刷新令牌实体
     └── Repositories/IRepositories.cs       # IRefreshTokenRepository

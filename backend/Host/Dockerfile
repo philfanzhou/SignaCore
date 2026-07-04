@@ -15,7 +15,6 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
 # Copy csproj files first for layer cache optimization
-COPY src/services/QuantumZhou.Identity/backend/Contract/QuantumZhou.Identity.Contract.csproj src/services/QuantumZhou.Identity/backend/Contract/
 COPY src/services/QuantumZhou.Identity/backend/Database/QuantumZhou.Identity.Database.csproj src/services/QuantumZhou.Identity/backend/Database/
 COPY src/services/QuantumZhou.Identity/backend/Domain/QuantumZhou.Identity.Domain.csproj src/services/QuantumZhou.Identity/backend/Domain/
 COPY src/services/QuantumZhou.Identity/backend/Service/QuantumZhou.Identity.Service.csproj src/services/QuantumZhou.Identity/backend/Service/
@@ -35,7 +34,6 @@ RUN mkdir -p /app/master-key && \
     chown -R app:app /app/master-key && \
     chmod -R 755 /app/master-key
 
-EXPOSE 5001
 EXPOSE 5002
 
 ENTRYPOINT ["dotnet", "QuantumZhou.Identity.Host.dll"]

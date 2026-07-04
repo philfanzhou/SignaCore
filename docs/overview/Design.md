@@ -115,7 +115,7 @@ Identity 服务最初使用 gRPC 作为内部服务间通信协议，HTTP REST �
 
 **Phase 1（已完成）**：在 Identity 服务新增 HTTP `/api/auth/*` 端点，与 gRPC 并存。各调用方逐步切换到 HTTP 调用。
 
-**Phase 2（当前执行）**：删除 gRPC 相关代码，包括：
+**Phase 2（已完成）**：删除 gRPC 相关代码，包括：
 - `auth.proto` 与 `QuantumZhou.Identity.Contract` 项目
 - `AuthServiceImpl`（gRPC 服务实现）
 - 3 个 gRPC 拦截器（`CorrelationIdInterceptor`、`RateLimitingInterceptor`、`ExceptionHandlingInterceptor`）
@@ -133,9 +133,9 @@ Identity 服务最初使用 gRPC 作为内部服务间通信协议，HTTP REST �
 
 ### 兼容性保证
 
-- Phase 1 期间 gRPC 端点 5001 继续保留，不影响现有未迁移的调用方
-- HTTP 端点与 gRPC 端点共享同一套 Domain 层逻辑，行为完全一致
-- 客户端可按自身节奏迁移到 HTTP
+- Phase 1 期间 gRPC 端点 5001 曾与 HTTP 并存，Phase 2 已移除 gRPC 端口 5001
+- HTTP 端点与原 gRPC 端点共享同一套 Domain 层逻辑，行为完全一致
+- 所有调用方已完成从 gRPC 到 HTTP 的迁移
 
 ## HTTP 中间件
 

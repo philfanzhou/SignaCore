@@ -4,8 +4,8 @@
 
 ```
 backend/
-├── Contract/Protos/auth.proto              # RegisterCallback RPC 定义
-├── Service/AuthServiceImpl.cs              # RegisterCallback 实现
+├── Host/Controllers/AuthController.cs      # POST /api/auth/callback/register HTTP 端点
+├── Domain/Services/CallbackService.cs      # 回调注册逻辑
 └── Database/
     ├── Entity/AppRegistrationEntity.cs     # 应用注册实体
     └── Repositories/IRepositories.cs       # IAppRegistrationRepository
