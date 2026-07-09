@@ -8,8 +8,8 @@
     "id": "TASK-01",
     "status": "implemented",
     "depends_on": [],
-    "action": "RevokeRefreshToken gRPC 方法实现",
-    "files": ["backend/Service/AuthServiceImpl.cs"],
+    "action": "RevokeRefreshToken HTTP 端点实现",
+    "files": ["backend/Host/Controllers/AuthController.cs"],
     "acceptance": "有效令牌吊销成功；空/不存在令牌返回 false"
   }
 ]

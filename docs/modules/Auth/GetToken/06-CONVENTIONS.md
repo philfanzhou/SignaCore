@@ -2,7 +2,7 @@
 
 ## 命名约定
 
-- gRPC 方法名使用 PascalCase：`GetToken`、`RegisterCallback`
+- HTTP 端点方法名使用 PascalCase：`GetToken`、`RegisterCallback`、`RevokeRefreshToken`、`RequestSmsCode`
 - grant_type 使用 snake_case：`password`、`sms`、`wechat_code`、`refresh_token`
 - AuthMethod 使用 PascalCase：`Password`、`Sms`、`WeChat`、`RefreshToken`
 - 常量定义在 `IdentityConstants` 中

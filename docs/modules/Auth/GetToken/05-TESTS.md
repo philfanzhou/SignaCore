@@ -1,7 +1,7 @@
 # 统一 Token 获取 — 测试计划 (TESTS)
 
 测试工具：xUnit + Moq
-现有测试文件：test/unit/Host/Controllers/AuthControllerTests.cs, test/PasswordValidatorTests.cs, test/RefreshTokenValidatorTests.cs, test/SmsValidatorTests.cs, test/WechatValidatorTests.cs, test/ValidatorFactoryTests.cs
+现有测试文件：backend/Tests/unit/Host/Controllers/AuthControllerTests.cs, backend/Tests/unit/PasswordValidatorTests.cs, backend/Tests/unit/RefreshTokenValidatorTests.cs, backend/Tests/unit/Domain/SmsValidatorTests.cs, backend/Tests/unit/Domain/WechatValidatorTests.cs, backend/Tests/unit/ValidatorFactoryTests.cs
 
 ## 单元测试 — Given-When-Then 格式
 

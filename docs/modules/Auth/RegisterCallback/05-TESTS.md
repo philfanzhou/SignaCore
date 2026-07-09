@@ -7,7 +7,7 @@
 
 ### UT-01 参数为空
 
-- **Given** RegisterCallbackRequest 中 AppId 或 AppSecret 为空
+- **Given** RegisterCallbackHttpRequest 中 AppId 或 AppSecret 为空
 - **When** 调用 RegisterCallback
 - **Then** 返回 success=false, message="AppId and AppSecret are required"
 

@@ -8,17 +8,9 @@
     "id": "TASK-01",
     "status": "implemented",
     "depends_on": [],
-    "action": "RegisterCallback gRPC 方法实现",
-    "files": ["backend/Service/AuthServiceImpl.cs"],
+    "action": "RegisterCallback HTTP 端点实现",
+    "files": ["backend/Host/Controllers/AuthController.cs"],
     "acceptance": "有效请求注册成功；无效请求返回错误"
-  },
-  {
-    "id": "TASK-02",
-    "status": "to_review",
-    "depends_on": [],
-    "action": "RegisterCallback 未验证 CallbackUrl 格式（未调用 CallbackUrlValidator）",
-    "files": ["backend/Service/AuthServiceImpl.cs:L183"],
-    "acceptance": "确认是否应在 RegisterCallback 中验证 CallbackUrl 格式"
   }
 ]
 ```

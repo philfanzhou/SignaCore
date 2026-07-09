@@ -5,20 +5,24 @@
 ```
 backend/
 ├── Host/Controllers/AuthController.cs      # POST /api/auth/revoke HTTP 端点
-├── Domain/Services/RefreshTokenService.cs  # 吊销逻辑
+├── Host/Models/AuthModels.cs               # RevokeRequest / RevokeResponse DTO
+├── Domain/Services/RefreshTokenService.cs  # 吊销逻辑（RevokeAsync）
 └── Database/
     ├── Entity/RefreshTokenEntity.cs        # 刷新令牌实体
-    └── Repositories/IRepositories.cs       # IRefreshTokenRepository
+    └── Repositories/IRefreshTokenRepository.cs
 ```
 
 ## 关键接口签名
 
 ```csharp
-rpc RevokeRefreshToken(RevokeRefreshTokenRequest) returns (BoolResponse);
+// HTTP 端点（AuthController）
+[HttpPost("revoke")]
+public async Task<ActionResult<RevokeResponse>> RevokeRefreshToken(
+    [FromBody] RevokeRequest request)
 
-message RevokeRefreshTokenRequest {
-  string refresh_token = 1;
-}
+// 请求/响应 DTO（见 AuthModels.cs）
+public sealed class RevokeRequest { string RefreshToken; }
+public sealed class RevokeResponse { bool Success; }
 ```
 
 ## 依赖的数据库表
@@ -43,5 +47,5 @@ Set IsRevoked = true
 SaveChangesAsync
     │
     ▼
-BoolResponse { Success = true/false }
+RevokeResponse { Success = true/false }
 ```

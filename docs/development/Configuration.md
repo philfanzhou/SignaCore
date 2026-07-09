@@ -6,8 +6,7 @@
 
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
-| Endpoints:Grpc | 5001 | gRPC 监听端口（HTTP/2 only） |
-| Endpoints:Http | 5002 | HTTP 监听端口（HTTP/1.1 + HTTP/2） |
+| Endpoints:Http | 5002 | HTTP 监听端口（业务/认证，HTTP/1.1 + HTTP/2） |
 
 ## 数据库配置
 
@@ -69,13 +68,6 @@
 | RateLimiting:WindowSeconds | 60 | 速率限制窗口（秒） |
 | RateLimiting:CleanupIntervalSeconds | 300 | 清理过期限流记录的间隔（秒） |
 
-## gRPC 配置
-
-| 配置键 | 默认值 | 说明 |
-|--------|--------|------|
-| Grpc:MaxReceiveMessageSize | 4194304 | 最大接收消息大小（4MB） |
-| Grpc:MaxSendMessageSize | 4194304 | 最大发送消息大小（4MB） |
-
 ## 回调配置
 
 | 配置键 | 默认值 | 说明 |
@@ -135,15 +127,13 @@ Identity 服务使用 Serilog 替代原生 Microsoft.Extensions.Logging，双写
 
 ### Serilog 配置
 
-服务实际通过 Serilog 输出日志（`builder.Host.UseAgentSerilog`）。`appsettings.json` 中的 `Logging` 节仅保留给未走 Serilog 的少量运行时组件，**业务日志级别以 Serilog 配置为准**。`Logging:LogLevel:Grpc` 与 `Serilog:MinimumLevel:Override:Grpc` 必须保持一致（默认均为 Warning），避免阅读配置时产生歧义。
+服务实际通过 Serilog 输出日志（`builder.Host.UseAgentSerilog`）。`appsettings.json` 中的 `Logging` 节仅保留给未走 Serilog 的少量运行时组件，**业务日志级别以 Serilog 配置为准**。
 
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
 | Serilog:MinimumLevel:Default | Information | 默认日志级别 |
 | Serilog:MinimumLevel:Override:Microsoft.AspNetCore | Warning | ASP.NET Core 日志级别 |
 | Serilog:MinimumLevel:Override:Microsoft.EntityFrameworkCore | Warning | EF Core 日志级别 |
-| Serilog:MinimumLevel:Override:Grpc | Warning | gRPC 日志级别 |
-| Logging:LogLevel:Grpc | Warning | 与 Serilog Override 保持一致（仅作用于未走 Serilog 的运行时组件） |
 | Serilog:WriteTo:0:Name | Console | 控制台 Sink（数组下标 0） |
 | Serilog:WriteTo:1:Name | GrafanaLoki | Loki Sink（数组下标 1） |
 | Serilog:WriteTo:1:Args:uri | http://localhost:3100 | Loki 地址（fallback 默认值，生产环境必须通过环境变量覆盖） |
@@ -179,7 +169,6 @@ Loki 地址通过短环境变量 `LOKI_URI` 注入，Program.cs 启动时读取�
 | 配置键 | 默认值 | 开发环境值 | 说明 |
 |--------|--------|-----------|------|
 | Serilog:MinimumLevel:Default | Information | Debug | 开发环境输出更详细日志 |
-| Serilog:MinimumLevel:Override:Grpc | Warning | Information | 开发环境输出 gRPC 详细日志 |
 
 > Loki 地址、WriteTo Sinks 等其他配置继承自 `appsettings.json`，开发环境无需重复配置。
 

@@ -2,7 +2,7 @@
 
 ## 服务定位
 
-QuantumZhou.Identity 是统一身份认证与权限管理中心（Identity Provider），基于 .NET 8 和 gRPC 构建。负责集中处理用户认证、签发标准化 JWT、管理业务系统注册和动态权限注入。
+QuantumZhou.Identity 是统一身份认证与权限管理中心（Identity Provider），基于 .NET 8 构建。负责集中处理用户认证、签发标准化 JWT、管理业务系统注册和动态权限注入。
 
 ## 上下游调用关系
 
@@ -11,19 +11,18 @@ QuantumZhou.Identity 是统一身份认证与权限管理中心（Identity Provi
                     │  Admin Frontend  │
                     │  (Vue 3 + Vite)  │
                     └────────┬─────────┘
-                             │ HTTP (Cookie Auth)
+                             │ HTTP (Cookie Auth) :5010
                              ▼
-┌──────────┐    gRPC     ┌──────────────────────┐    HTTP Callback    ┌──────────────────┐
-│  Gateway  │───────────▶│ QuantumZhou.Identity │───────────────────▶│ Business Services │
-│ (WebApi)  │◀───────────│                      │◀───────────────────│ (Teacher Portal   │
-└──────────┘   JWT Token  │  gRPC :5001         │   Roles/Perms      │  etc.)            │
-                          │  HTTP :5002         │                    └──────────────────┘
-                          └──────────┬───────────┘
-                                     │
-                          ┌──────────▼───────────┐
-                          │    PostgreSQL /       │
-                          │    SQLite             │
-                          └──────────────────────┘
+┌──────────┐    HTTP     ┌──────────────────────────┐    HTTP Callback    ┌──────────────────┐
+│  Gateway │───────────▶│   QuantumZhou.Identity   │───────────────────▶│ Business Services │
+│ (WebApi) │◀───────────│                          │◀───────────────────│ (Teacher Portal   │
+└──────────┘  JWT Token │  HTTP :5002 (业务/认证)  │   Roles/Perms      │  etc.)            │
+                         │  HTTP :5010 (Admin API)  │                    └──────────────────┘
+                         └──────────┬───────────────┘
+                                    │
+                         ┌──────────▼───────────┐
+                         │    PostgreSQL        │
+                         └──────────────────────┘
 
 ┌──────────────┐  HTTP (Bearer JWT)   ┌──────────────────┐
 │  Downstream  │◀─────────────────────│ /.well-known/jwks│
@@ -35,9 +34,9 @@ QuantumZhou.Identity 是统一身份认证与权限管理中心（Identity Provi
 
 | 调用方 | 协议 | 用途 |
 |--------|------|------|
-| Gateway / WebApi | gRPC | 调用 `GetToken` 进行用户登录认证 |
-| Gateway / WebApi | gRPC | 调用 `RegisterCallback` 注册业务系统回调 |
-| Gateway / WebApi | gRPC | 调用 `RevokeRefreshToken` 吊销刷新令牌 |
+| Gateway / WebApi | HTTP | `POST /api/auth/token` 用户登录认证 |
+| Gateway / WebApi | HTTP | `POST /api/auth/callback/register` 注册业务系统回调 |
+| Gateway / WebApi | HTTP | `POST /api/auth/revoke` 吊销刷新令牌 |
 | Admin Frontend (Vue) | HTTP + Cookie | 调用 Admin API 进行用户/应用/令牌管理 |
 | Gateway API Consumer | HTTP + AppId/AppSecret Header | 调用 Gateway API 查询用户信息 |
 
@@ -53,5 +52,5 @@ QuantumZhou.Identity 是统一身份认证与权限管理中心（Identity Provi
 
 - **本服务负责**：用户认证、JWT 签发、刷新令牌管理、业务系统注册、回调权限注入、密钥管理、审计日志
 - **本服务不负责**：用户业务数据管理、业务权限定义（由业务系统通过回调提供）、前端路由和页面渲染
-- **通信协议**：gRPC（内部服务间）、HTTP REST（管理 API、OIDC Discovery、JWKS、健康检查）
-- **端口分配**：gRPC 5001、HTTP 5002
+- **通信协议**：HTTP REST（业务认证、管理 API、OIDC Discovery、JWKS、健康检查）
+- **端口分配**：HTTP 5002（业务/认证）、HTTP 5010（Admin API）

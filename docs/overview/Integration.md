@@ -19,12 +19,12 @@
 
 > `QuantumZhou.Identity.Client` SDK 已停止维护，源码已移除，仅保留历史构建产物。业务系统应改为直接调用 Identity 的 HTTP API（`POST /api/auth/token` 等），详见 [GetToken SPEC](../modules/Auth/GetToken/02-SPEC.md)。
 
-业务服务曾通过 `QuantumZhou.Identity.Client` 项目引用接入 Identity 认证。Client SDK 内部使用 gRPC 调用 Identity 的 `GetToken` 接口，对外封装为 HTTP 端点（login/refresh/me/logout）。
+业务服务曾通过 `QuantumZhou.Identity.Client` 项目引用接入 Identity 认证。Client SDK 内部调用 Identity 的认证接口，对外封装为 HTTP 端点（login/refresh/me/logout）。
 
 ### 调用链路（历史，已废弃）
 
 ```
-业务前端 → 业务后端 (Client SDK AuthEndpoints) → Identity (gRPC GetToken)
+业务前端 → 业务后端 (Client SDK AuthEndpoints) → Identity (GetToken)
 ```
 
 ### 当前推荐调用链路
@@ -54,10 +54,10 @@
 - **降级策略**：继续签发只包含基本身份信息的 JWT，不阻塞登录流程
 - **超时设置**：2 秒（`IdentityConstants.CallbackTimeoutSeconds`）
 
-### 入方向：gRPC 请求失败
+### 入方向：HTTP 请求失败
 
-- **速率限制**：超过限制返回 `StatusCode.ResourceExhausted`
-- **异常处理**：`ExceptionHandlingInterceptor` 将未处理异常转换为 gRPC 状态码
-  - `ArgumentException` → `StatusCode.InvalidArgument`
-  - `InvalidOperationException` → `StatusCode.FailedPrecondition`
-  - 其他 → `StatusCode.Internal`
+- **速率限制**：超过限制返回 HTTP 429 Too Many Requests
+- **异常处理**：`ExceptionHandlingMiddleware` 将未处理异常转换为 HTTP 状态码和脱敏 JSON 错误响应
+  - `ArgumentException` → 400 BadRequest
+  - `InvalidOperationException` → 409 Conflict
+  - 其他 → 500 Internal Server Error

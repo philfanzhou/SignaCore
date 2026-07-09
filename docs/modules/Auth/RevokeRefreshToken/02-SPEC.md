@@ -12,7 +12,7 @@
 ## 详细的验收标准
 
 ### AC-FR-01: 参数验证
-- **Given** RevokeRefreshTokenRequest
+- **Given** RevokeRequest
 - **When** refresh_token 为空
 - **Then** 返回 success=false
 

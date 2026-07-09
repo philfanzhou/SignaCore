@@ -8,8 +8,8 @@
     "id": "TASK-01",
     "status": "implemented",
     "depends_on": [],
-    "action": "GetToken gRPC 方法实现（网关验证 + 验证器分发 + JWT 签发）",
-    "files": ["backend/Service/AuthServiceImpl.cs"],
+    "action": "GetToken HTTP 端点实现（网关验证 + 验证器分发 + JWT 签发）",
+    "files": ["backend/Host/Controllers/AuthController.cs"],
     "acceptance": "密码/短信/微信/刷新令牌四种 grant_type 均可正常获取 token"
   },
   {

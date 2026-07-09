@@ -231,5 +231,5 @@
 - 单元测试覆盖 GatewayValidationService 验证成功返回 App 实体
 - 单元测试覆盖 RequestSmsCode 空手机号/无效网关/正常发送
 - 单元测试覆盖 RegisterCallback 无效 CallbackUrl 拒绝
-- 集成测试覆盖 AuthServiceImpl 的完整登录流程
+- 集成测试覆盖 AuthController 的完整登录流程
 - 错误路径测试：无效凭证、锁定账户、过期令牌、回调失败

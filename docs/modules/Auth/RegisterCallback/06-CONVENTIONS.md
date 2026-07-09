@@ -2,14 +2,14 @@
 
 ## 命名约定
 
-- gRPC 方法名：RegisterCallback
-- 请求消息：RegisterCallbackRequest
-- 响应消息：RegisterCallbackResponse
+- HTTP 端点方法名：`RegisterCallback`（`POST /api/auth/callback/register`）
+- 请求 DTO：`RegisterCallbackHttpRequest`
+- 响应 DTO：`RegisterCallbackHttpResponse`
 
 ## 日志和安全要求
 
 - AppSecret 不匹配：LogWarning，记录 AppId
-- 注册成功：无额外日志（由 gRPC 拦截器记录）
+- 注册成功：无额外日志（由 ASP.NET Core 请求日志中间件记录）
 
 ## 错误消息格式约定
 

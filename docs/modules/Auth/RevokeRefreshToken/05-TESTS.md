@@ -7,7 +7,7 @@
 
 ### UT-01 空令牌
 
-- **Given** RevokeRefreshTokenRequest 中 refresh_token 为空
+- **Given** RevokeRequest 中 refresh_token 为空
 - **When** 调用 RevokeRefreshToken
 - **Then** 返回 success=false
 

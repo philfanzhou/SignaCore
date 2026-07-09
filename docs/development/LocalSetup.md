@@ -45,10 +45,9 @@ dotnet run
 ```
 
 默认端口：
-- gRPC: 5001
-- HTTP: 5002
+- HTTP: 5002（业务/认证）
 
-可通过 `appsettings.json` 的 `Endpoints:Grpc` 和 `Endpoints:Http` 修改。
+HTTP 端口可通过 `appsettings.json` 的 `Endpoints:Http` 修改。
 
 ### 4. 首次启动自动初始化
 

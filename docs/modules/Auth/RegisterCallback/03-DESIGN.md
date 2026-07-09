@@ -4,25 +4,25 @@
 
 ```
 backend/
-├── Host/Controllers/AuthController.cs      # POST /api/auth/callback/register HTTP 端点
-├── Domain/Services/CallbackService.cs      # 回调注册逻辑
+├── Host/Controllers/AuthController.cs         # POST /api/auth/callback/register HTTP 端点
+├── Host/Models/AuthModels.cs                 # RegisterCallbackHttpRequest / RegisterCallbackHttpResponse DTO
+├── Domain/Services/CallbackUrlValidator.cs   # 回调 URL 格式验证
 └── Database/
-    ├── Entity/AppRegistrationEntity.cs     # 应用注册实体
-    └── Repositories/IRepositories.cs       # IAppRegistrationRepository
+    ├── Entity/AppRegistrationEntity.cs        # 应用注册实体
+    └── Repositories/IAppRegistrationRepository.cs
 ```
 
 ## 关键接口签名
 
 ```csharp
-// gRPC
-rpc RegisterCallback(RegisterCallbackRequest) returns (RegisterCallbackResponse);
+// HTTP 端点（AuthController）
+[HttpPost("callback/register")]
+public async Task<ActionResult<RegisterCallbackHttpResponse>> RegisterCallback(
+    [FromBody] RegisterCallbackHttpRequest request)
 
-message RegisterCallbackRequest {
-  string app_id = 1;
-  string app_secret = 2;
-  string callback_url = 3;
-  int32 ttl_seconds = 4;
-}
+// 请求/响应 DTO（见 AuthModels.cs）
+public sealed class RegisterCallbackHttpRequest { string CallbackUrl; int TtlSeconds; }
+public sealed class RegisterCallbackHttpResponse { bool Success; string Message; long ExpiresAt; }
 ```
 
 ## 依赖的数据库表
@@ -56,5 +56,5 @@ Update CallbackUrl + CallbackExpiresAt
 SaveChangesAsync
     │
     ▼
-RegisterCallbackResponse
+RegisterCallbackHttpResponse
 ```

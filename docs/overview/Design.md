@@ -24,7 +24,6 @@
 |------|------|------|
 | .NET | 8.0 | 运行时 |
 | ASP.NET Core | 8.0 | Web 框架 |
-| gRPC | 内置 | 服务间通信 |
 | EF Core | 8.0 | ORM |
 | PostgreSQL | 12+ | 生产数据库 |
 | SQLite | 内置 | 开发数据库 |
@@ -50,7 +49,7 @@ Database ← Domain ← Service ← Host
 
 ## Client SDK
 
-`QuantumZhou.Identity.Client` 是提供给业务服务接入 Identity 认证的 SDK 类库，封装了 gRPC 客户端注册、JWT Bearer 认证配置和认证端点（login/refresh/me/logout），使业务服务只需 3 行代码即可完成认证接入。
+`QuantumZhou.Identity.Client` 是提供给业务服务接入 Identity 认证的 SDK 类库（已废弃），封装了 JWT Bearer 认证配置和认证端点（login/refresh/me/logout），使业务服务只需 3 行代码即可完成认证接入。
 
 ### 接入方式
 
@@ -66,7 +65,7 @@ app.MapIdentityAuthEndpoints();
 // appsettings.json
 {
   "Identity": {
-    "GrpcEndpoint": "http://localhost:5001",
+    "Endpoint": "http://localhost:5002",
     "AppId": "your_app_id",
     "AppSecret": ""
   },
@@ -82,7 +81,7 @@ app.MapIdentityAuthEndpoints();
 
 | 方法 | 路径 | 认证 | 说明 |
 |------|------|------|------|
-| POST | `/admin/auth/login` | AllowAnonymous | 用户名密码登录，代理 gRPC GetToken |
+| POST | `/admin/auth/login` | AllowAnonymous | 用户名密码登录，代理 HTTP POST /api/auth/token |
 | POST | `/admin/auth/refresh` | AllowAnonymous | RefreshToken 刷新 |
 | GET | `/admin/auth/me` | 需认证 | 获取当前用户信息（从 JWT Claims 读取） |
 | POST | `/admin/auth/logout` | 需认证 | 登出（前端清除 Token） |
@@ -94,7 +93,7 @@ app.MapIdentityAuthEndpoints();
 | [IdentityClientOptions.cs](../../backend/Client/IdentityClientOptions.cs) | 配置项定义 |
 | [ServiceCollectionExtensions.cs](../../backend/Client/ServiceCollectionExtensions.cs) | AddIdentityClient() 扩展方法 + JwksFetcher |
 | [ApplicationBuilderExtensions.cs](../../backend/Client/ApplicationBuilderExtensions.cs) | UseIdentityClient() + MapIdentityAuthEndpoints() |
-| [AuthEndpoints.cs](../../backend/Client/AuthEndpoints.cs) | 认证端点实现 |
+| [AuthEndpoints.cs](../../backend/Client/AuthEndpoints.cs) | 认证端点实现（已废弃） |
 
 ### JWKS 获取机制
 
@@ -124,8 +123,10 @@ Identity 服务最初使用 gRPC 作为内部服务间通信协议，HTTP REST �
 
 ### HTTP 端点设计
 
-| 端点 | HTTP 方法 | 对应 gRPC 方法 | 认证方式 | 说明 |
-|------|-----------|---------------|---------|------|
+> Phase 2 已完成 gRPC 移除，下表"对应 gRPC 方法"列仅供历史迁移参考，gRPC 服务已不存在。
+
+| 端点 | HTTP 方法 | 原 gRPC 方法（已移除） | 认证方式 | 说明 |
+|------|-----------|----------------------|---------|------|
 | `/api/auth/token` | POST | `GetToken` | AppId/AppSecret 头（可选） | OAuth2 grant_type 模式，支持 password/sms/wechat_code/refresh_token |
 | `/api/auth/sms-code` | POST | `RequestSmsCode` | AppId/AppSecret 头（可选） | 请求短信验证码 |
 | `/api/auth/revoke` | POST | `RevokeRefreshToken` | 无（需持有 refresh_token） | 吊销刷新令牌 |
@@ -133,9 +134,9 @@ Identity 服务最初使用 gRPC 作为内部服务间通信协议，HTTP REST �
 
 ### 兼容性保证
 
-- Phase 1 期间 gRPC 端点 5001 曾与 HTTP 并存，Phase 2 已移除 gRPC 端口 5001
+- gRPC 协议已于 Phase 2 完全移除（端口 5001、proto 契约、gRPC 服务实现、Client SDK 均已移除）
 - HTTP 端点与原 gRPC 端点共享同一套 Domain 层逻辑，行为完全一致
-- 所有调用方已完成从 gRPC 到 HTTP 的迁移
+- 所有调用方已完成迁移，Identity 服务现为纯 HTTP 服务
 
 ## HTTP 中间件
 
