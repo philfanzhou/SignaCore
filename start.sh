@@ -24,6 +24,12 @@ SMS_BYPASS_CODE="666666"
 
 LOKI_URI="http://ruoyu-loki:3100"
 
+# ===== Portal App Registrations =====
+TEACHER_PORTAL_APP_ID="${TEACHER_PORTAL_APP_ID:-}"
+TEACHER_PORTAL_APP_SECRET="${TEACHER_PORTAL_APP_SECRET:-}"
+ASSISTANT_PORTAL_APP_ID="${ASSISTANT_PORTAL_APP_ID:-}"
+ASSISTANT_PORTAL_APP_SECRET="${ASSISTANT_PORTAL_APP_SECRET:-}"
+
 docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
 if [ -n "$(docker ps -q --filter "name=^/${CONTAINER_NAME}$")" ]; then
     docker stop "$CONTAINER_NAME"
@@ -54,6 +60,10 @@ docker run -d \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Sms__BypassCode="${SMS_BYPASS_CODE}" \
     -e LOKI_URI="${LOKI_URI}" \
+    -e TEACHER_PORTAL_APP_ID="${TEACHER_PORTAL_APP_ID}" \
+    -e TEACHER_PORTAL_APP_SECRET="${TEACHER_PORTAL_APP_SECRET}" \
+    -e ASSISTANT_PORTAL_APP_ID="${ASSISTANT_PORTAL_APP_ID}" \
+    -e ASSISTANT_PORTAL_APP_SECRET="${ASSISTANT_PORTAL_APP_SECRET}" \
     -v "${DATA_DIR}/master-key:/app/master-key" \
     "$IMAGE_NAME"
 

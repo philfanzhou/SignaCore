@@ -270,7 +270,7 @@ if (autoMigrate)
                 ?? builder.Configuration["TeacherPortal:AppId"] ?? string.Empty;
             var teacherAppSecret = Environment.GetEnvironmentVariable("TEACHER_PORTAL_APP_SECRET")
                 ?? builder.Configuration["TeacherPortal:AppSecret"] ?? string.Empty;
-            var teacherCallbackUrl = builder.Configuration["TeacherPortal:CallbackUrl"] ?? "http://localhost:5004/api/auth/callback";
+            var teacherCallbackUrl = builder.Configuration["TeacherPortal:CallbackUrl"] ?? "http://ruoyu-teacher-api:5004/api/auth/callback";
 
             if (!string.IsNullOrWhiteSpace(teacherAppId) && !string.IsNullOrWhiteSpace(teacherAppSecret))
             {
@@ -300,6 +300,43 @@ if (autoMigrate)
             else
             {
                 app.Logger.LogWarning("Teacher Portal app registration skipped: AppId/AppSecret not configured. Set TEACHER_PORTAL_APP_ID and TEACHER_PORTAL_APP_SECRET environment variables or TeacherPortal:AppId/TeacherPortal:AppSecret in configuration.");
+            }
+
+            // Initialize Assistant Portal app registration from configuration (symmetric with Teacher Portal)
+            var assistantAppId = Environment.GetEnvironmentVariable("ASSISTANT_PORTAL_APP_ID")
+                ?? builder.Configuration["AssistantPortal:AppId"] ?? string.Empty;
+            var assistantAppSecret = Environment.GetEnvironmentVariable("ASSISTANT_PORTAL_APP_SECRET")
+                ?? builder.Configuration["AssistantPortal:AppSecret"] ?? string.Empty;
+            var assistantCallbackUrl = builder.Configuration["AssistantPortal:CallbackUrl"] ?? "http://ruoyu-assistant-api:5021/api/auth/callback";
+
+            if (!string.IsNullOrWhiteSpace(assistantAppId) && !string.IsNullOrWhiteSpace(assistantAppSecret))
+            {
+                var existingAssistantApp = await db.AppRegistrations
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(a => a.AppId == assistantAppId);
+                if (existingAssistantApp == null)
+                {
+                    db.AppRegistrations.Add(new AppRegistrationEntity
+                    {
+                        Id = Guid.NewGuid(),
+                        AppId = assistantAppId,
+                        AppSecretHash = BCrypt.Net.BCrypt.HashPassword(assistantAppSecret),
+                        AppName = "Assistant Portal",
+                        CallbackUrl = assistantCallbackUrl,
+                        IsActive = true,
+                        CreatedAt = DateTimeOffset.UtcNow
+                    });
+                    await db.SaveChangesAsync();
+                    app.Logger.LogInformation("Assistant Portal app registration created: AppId={AppId}", assistantAppId);
+                }
+                else
+                {
+                    app.Logger.LogInformation("Assistant Portal app registration already exists: AppId={AppId}", assistantAppId);
+                }
+            }
+            else
+            {
+                app.Logger.LogWarning("Assistant Portal app registration skipped: AppId/AppSecret not configured. Set ASSISTANT_PORTAL_APP_ID and ASSISTANT_PORTAL_APP_SECRET environment variables or AssistantPortal:AppId/AssistantPortal:AppSecret in configuration.");
             }
         }
         catch (Exception ex)
