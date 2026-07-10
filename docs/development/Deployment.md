@@ -71,19 +71,9 @@ export TEACHER_PORTAL_APP_SECRET=your-app-secret
 
 ### Redis 配置
 
-- 容器名: `ruoyu-redis`
+- 容器�? `ruoyu-redis`
 - 密码: `redis123`
 - 网络: `ruoyu-net`
-
-### Assistant Portal 应用注册
-
-```bash
-# 必须设置的环境变量
-export ASSISTANT_PORTAL_APP_ID=your-app-id
-export ASSISTANT_PORTAL_APP_SECRET=your-app-secret
-```
-
-与 Teacher Portal 对称，服务启动时自动注册 app。默认回调地址为 `http://ruoyu-assistant-api:5021/api/auth/callback`（Docker 网络容器名）。若 AppId 或 AppSecret 均未配置时，跳过注册并输出警告日志。
 
 ### 日志配置
 
