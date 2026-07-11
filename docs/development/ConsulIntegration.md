@@ -81,7 +81,6 @@ Identity 的项目级部署脚本 `start.sh` 固定接入 Consul，不再维护�
 Identity 当前只把以下共享运行配置放入 Consul KV：
 
 - `config/ruoyu/serilog.json`：统一日志级别
-- `config/ruoyu/feature-flags.json`：功能开关
 - `config/ruoyu/infrastructure.json`：`Loki:Uri`、`PostgreSql:Host/Port/Username/Password`
 - `config/ruoyu/service-endpoints.json`：共享服务入口
 
@@ -113,7 +112,6 @@ Consul 8500 端口**不暴露公网**，仅映射到宿主机 localhost 用于�
 ```
 config/ruoyu/
 ├── serilog.json            → 统一日志最小级别 / Override
-├── feature-flags.json      → 功能开关
 ├── infrastructure.json     → 共享基础设施地址（PostgreSql/Loki 等）
 └── service-endpoints.json  → 跨服务共享入口地址 / Audience / RequireHttpsMetadata
 ```
@@ -121,11 +119,11 @@ config/ruoyu/
 ### 6.2 KV → IConfiguration 映射
 
 Consul KV Value 必须是 JSON 字符串，且文件内容直接保存真实配置根对象。Identity 的自研 KV Loader 会把 JSON 根对象递归展开为 `:` 分隔的配置键。
+为保证 `script/env-script/06-consul/config/kv/*.json` 具备人工可读性，允许使用保留字段 `__comment` 写注释；Loader 会忽略该字段，不把它写进 `IConfiguration`。
 
 | Consul KV 路径 | IConfiguration Key |
 |---------------|--------------------|
 | `config/ruoyu/serilog.json` | `Serilog:*` |
-| `config/ruoyu/feature-flags.json` | `FeatureFlags:*` |
 | `config/ruoyu/infrastructure.json` | `Loki:*` / `PostgreSql:*`（含 `PostgreSql:Password`） |
 | `config/ruoyu/service-endpoints.json` | `IdentityService:*` / 其他共享入口配置 |
 

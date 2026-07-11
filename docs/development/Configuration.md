@@ -21,7 +21,7 @@
 
 > Consul 配置的详细语义、启动时序、缓存机制、KV 分层策略请见 [ConsulIntegration.md](./ConsulIntegration.md)。
 >
-> **当前约束**：Consul 只承载跨项目共享配置。Identity 启动脚本不再注入数据库主机、端口、用户名、密码和 Loki 地址；`Database:Provider` 使用程序默认值，`Database:Name` 这类项目独有配置可按需由项目 `start.sh` 覆盖。`RSA_MASTER_KEY`、管理员引导密码、AppSecret 等启动密钥仍保留在环境变量或文件。
+> **当前约束**：Consul 只承载跨项目共享配置。Identity 启动脚本不再注入数据库主机、端口、用户名、密码和 Loki 地址；`Database:Provider` 使用程序默认值，`Database:Name`、`FeatureFlags` 这类项目独有配置保留在服务自身配置中。`RSA_MASTER_KEY`、管理员引导密码、AppSecret 等启动密钥仍保留在环境变量或文件。
 
 ---
 
@@ -60,6 +60,13 @@
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
 | RefreshToken:ExpirationDays | 7 | 刷新令牌有效期（天） |
+
+## 功能开关
+
+| 配置键 | 默认值 | 说明 |
+|--------|--------|------|
+| FeatureFlags:EnableNewLogin | true | Identity 新登录流程开关，项目自有配置，不走 Consul |
+| FeatureFlags:EnablePeriodicCheckIn | true | Identity 定时签到相关开关，项目自有配置，不走 Consul |
 
 ## 密码哈希配置
 

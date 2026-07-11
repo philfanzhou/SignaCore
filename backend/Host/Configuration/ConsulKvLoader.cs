@@ -10,6 +10,7 @@ namespace QuantumZhou.Identity.Host.Configuration;
 
 internal sealed class ConsulKvLoader
 {
+    private const string CommentPropertyName = "__comment";
     private readonly ConsulOptions _options;
     private readonly HttpMessageHandler? _handler;
 
@@ -64,6 +65,11 @@ internal sealed class ConsulKvLoader
             case JsonValueKind.Object:
                 foreach (var property in element.EnumerateObject())
                 {
+                    if (string.Equals(property.Name, CommentPropertyName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     var childPrefix = string.IsNullOrEmpty(prefix) ? property.Name : $"{prefix}:{property.Name}";
                     FlattenElement(property.Value, childPrefix, target);
                 }

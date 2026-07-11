@@ -10,7 +10,9 @@ public class ConsulKvLoaderTests
     {
         const string json = """
         {
+          "__comment": "Top-level comment should be ignored.",
           "Serilog": {
+            "__comment": "Serilog settings shared by services.",
             "MinimumLevel": {
               "Default": "Information"
             },
@@ -20,8 +22,8 @@ public class ConsulKvLoaderTests
               }
             ]
           },
-          "FeatureFlags": {
-            "EnableNewLogin": true
+          "Loki": {
+            "Uri": "http://ruoyu-loki:3100"
           }
         }
         """;
@@ -30,7 +32,9 @@ public class ConsulKvLoaderTests
 
         Assert.Equal("Information", flattened["Serilog:MinimumLevel:Default"]);
         Assert.Equal("Console", flattened["Serilog:WriteTo:0:Name"]);
-        Assert.Equal("true", flattened["FeatureFlags:EnableNewLogin"]);
+        Assert.Equal("http://ruoyu-loki:3100", flattened["Loki:Uri"]);
+        Assert.DoesNotContain("__comment", flattened.Keys);
+        Assert.DoesNotContain("Serilog:__comment", flattened.Keys);
     }
 
     [Fact]
