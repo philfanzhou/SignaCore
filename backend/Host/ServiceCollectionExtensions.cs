@@ -47,11 +47,25 @@ public static class ServiceCollectionExtensions
 
         // ========== 1. Database ==========
         var dbProvider = configuration["Database:Provider"] ?? "SQLite";
-        var connectionString = dbProvider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase)
-            ? configuration.GetConnectionString("PostgreSQL")
-                ?? "Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres"
-            : configuration.GetConnectionString("Default")
+        string connectionString;
+        if (dbProvider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase))
+        {
+            var configuredConnectionString = configuration.GetConnectionString("PostgreSQL");
+            var postgreSqlHost = configuration["PostgreSql:Host"];
+            var postgreSqlPort = configuration["PostgreSql:Port"] ?? "5432";
+            var databaseName = configuration["Database:Name"] ?? "quantumzhou_identity";
+            var postgreSqlUsername = configuration["PostgreSql:Username"];
+
+            connectionString = !string.IsNullOrWhiteSpace(postgreSqlHost) &&
+                !string.IsNullOrWhiteSpace(postgreSqlUsername)
+                ? $"Host={postgreSqlHost};Port={postgreSqlPort};Database={databaseName};Username={postgreSqlUsername}"
+                : configuredConnectionString ?? "Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres";
+        }
+        else
+        {
+            connectionString = configuration.GetConnectionString("Default")
                 ?? "Data Source=quantumzhou_identity.db";
+        }
 
         // Add password for PostgreSQL if available via environment variable
         if (dbProvider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase))

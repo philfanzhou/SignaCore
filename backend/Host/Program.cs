@@ -12,11 +12,17 @@ using QuantumZhou.Identity.Host.Controllers;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ========== Consul Configuration Source (CONSUL_MODE=On only) ==========
+// 独立模式（CONSUL_MODE=Off 或未设置）下为 no-op，不引入任何网络调用。
+// Consul 模式下按 _global/_shared/service 三层加载 Consul KV，失败时回退本地缓存。
+builder.Configuration.AddConsulIfEnabled(builder.Configuration);
+
 // ========== Serilog (Console + Grafana Loki) ==========
-// LOKI_URI 环境变量注入 Loki 地址（覆盖 appsettings.json 中的 fallback）。
+// LOKI_URI 环境变量或 Loki:Uri 配置键注入 Loki 地址（覆盖 appsettings.json 中的 fallback）。
 // Loki Sink 在 uri 为 null 时会抛 ArgumentNullException，配置文件中提供 fallback uri 确保服务能启动。
 // Loki 不可达时 Sink 异步重试，不影响服务运行。
-var lokiUri = Environment.GetEnvironmentVariable("LOKI_URI");
+var lokiUri = Environment.GetEnvironmentVariable("LOKI_URI")
+    ?? builder.Configuration["Loki:Uri"];
 if (!string.IsNullOrWhiteSpace(lokiUri))
 {
     builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -24,11 +30,6 @@ if (!string.IsNullOrWhiteSpace(lokiUri))
         ["Serilog:WriteTo:1:Args:uri"] = lokiUri
     });
 }
-
-// ========== Consul Configuration Source (CONSUL_MODE=On only) ==========
-// 独立模式（CONSUL_MODE=Off 或未设置）下为 no-op，不引入任何网络调用。
-// Consul 模式下从本地缓存加载配置（KV 实时加载待 Steeltoe.Configuration.Consul 包发布后启用）。
-builder.Configuration.AddConsulIfEnabled(builder.Configuration);
 
 builder.Host.UseAgentSerilog("QuantumZhou.Identity");
 
@@ -370,6 +371,29 @@ app.UseAuthorization();
 app.UseRateLimiter();
 
 app.MapHealthChecks("/health");
+app.MapGet("/consul/status", (ConsulRuntimeState state) => Results.Ok(state.Snapshot()));
+app.MapPost("/consul/cache/invalidate", (IConfiguration configuration, ConsulRuntimeState state) =>
+{
+    if (!ConsulOptions.IsEnabled(configuration))
+    {
+        return Results.Ok(new
+        {
+            invalidated = false,
+            reason = "Consul mode is off"
+        });
+    }
+
+    var options = ConsulOptions.Bind(configuration);
+    using var cacheService = new ConsulCacheService(options.CacheDirectory);
+    cacheService.Invalidate();
+    state.MarkCacheInvalidated();
+
+    return Results.Ok(new
+    {
+        invalidated = true,
+        cacheDirectory = options.CacheDirectory
+    });
+});
 
 // ========== JWKS Rate Limiting ==========
 var jwksRateLimiter = new System.Threading.RateLimiting.FixedWindowRateLimiter(

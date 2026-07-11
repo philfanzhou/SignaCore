@@ -55,6 +55,8 @@
 -e CONSUL_HOST=host.docker.internal
 -e CONSUL_PORT=8500
 -e CONSUL_SERVICE_NAME=QuantumZhou.Identity
+-e CONSUL_TOKEN=<acl-token>
+-e DB_PASSWORD=<postgres-password>
 ```
 
 ### Consul 缓存目录挂载
@@ -73,7 +75,7 @@ curl http://localhost:8500/v1/catalog/service/QuantumZhou.Identity
 # 检查健康状态
 curl http://localhost:5002/health
 
-# 检查 Consul 连接状态（新增端点）
+# 检查 Consul 连接状态
 curl http://localhost:5002/consul/status
 ```
 

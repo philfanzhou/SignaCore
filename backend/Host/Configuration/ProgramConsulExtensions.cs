@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.CommandLine;
+using Microsoft.Extensions.Configuration.EnvironmentVariables;
+using Microsoft.Extensions.Configuration.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Steeltoe.Discovery.Consul;
 
@@ -26,10 +29,12 @@ public static class ProgramConsulExtensions
     {
         if (!ConsulOptions.IsEnabled(config))
         {
+            ConsulRuntimeState.Instance.MarkDisabled();
             return builder;
         }
 
         var opts = ConsulOptions.Bind(config);
+        var prefixes = ConsulKvLoader.BuildPrefixes(opts);
 
         // 把 CONSUL_TOKEN 注入到 "Consul:Token" 配置节，供 Steeltoe 内置 ConsulOptions 读取。
         // 此处注入到 IConfigurationBuilder，后续 AddConsulDiscoveryIfEnabled 可从 IConfiguration 读到。
@@ -41,40 +46,46 @@ public static class ProgramConsulExtensions
             });
         }
 
-        // 不再内联创建 LoggerFactory（避免每次调用分配+释放资源）。
-        // ConsulCacheService 构造函数支持 logger 为 null（内部使用 null 条件运算符）。
         var cacheService = new ConsulCacheService(opts.CacheDirectory, logger: null);
-
-        // 【未来扩展点】Steeltoe.Configuration.Consul 包发布后，此处插入：
-        // try { builder.AddConsul(c => { c.Host = opts.Host; c.Port = opts.Port; c.FailFast = false; ... }); }
-        // catch (Exception ex) { /* 降级到缓存 */ }
-
-        // 当前阶段：尝试从本地缓存加载（如果存在）
-        if (!opts.EnableCache)
-        {
-            cacheService.Dispose();
-            return builder;
-        }
-
         try
         {
-            var cached = cacheService.Load();
-            if (cached != null && cached.Count > 0)
+            var result = new ConsulKvLoader(opts).Load();
+            InsertSnapshotBeforeEnvironmentSources(builder, result.Snapshot);
+            if (opts.EnableCache && result.Snapshot.Count > 0)
             {
-                builder.AddInMemoryCollection(cached);
+                cacheService.Save(result.Snapshot);
             }
-            // 无缓存文件时静默降级到 appsettings（KV 加载未实现，日志由上层统一处理）
+            ConsulRuntimeState.Instance.MarkLoaded("Consul", result.Snapshot.Count, result.Prefixes, opts.CacheDirectory);
+            return builder;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // 缓存损坏 → 跳过，用 appsettings 启动（静默处理，避免无 logger 时抛出）
+            if (opts.EnableCache)
+            {
+                try
+                {
+                    var cached = cacheService.Load();
+                    if (cached != null && cached.Count > 0)
+                    {
+                        InsertSnapshotBeforeEnvironmentSources(builder, cached);
+                        ConsulRuntimeState.Instance.MarkFallback("Cache", ex.Message, cached.Count, prefixes, opts.CacheDirectory);
+                        return builder;
+                    }
+                }
+                catch (Exception cacheEx)
+                {
+                    ConsulRuntimeState.Instance.MarkFallback("AppSettings", $"{ex.Message}; cache load failed: {cacheEx.Message}", 0, prefixes, opts.CacheDirectory);
+                    return builder;
+                }
+            }
+
+            ConsulRuntimeState.Instance.MarkFallback("AppSettings", ex.Message, 0, prefixes, opts.CacheDirectory);
+            return builder;
         }
         finally
         {
             cacheService.Dispose();
         }
-
-        return builder;
     }
 
     /// <summary>
@@ -88,6 +99,8 @@ public static class ProgramConsulExtensions
         this IServiceCollection services,
         IConfiguration config)
     {
+        services.AddSingleton(ConsulRuntimeState.Instance);
+
         if (!ConsulOptions.IsEnabled(config))
         {
             return services;
@@ -102,6 +115,34 @@ public static class ProgramConsulExtensions
         return services;
     }
 
+    private static void InsertSnapshotBeforeEnvironmentSources(
+        IConfigurationBuilder builder,
+        IDictionary<string, string?> snapshot)
+    {
+        if (snapshot.Count == 0)
+        {
+            return;
+        }
+
+        var source = new MemoryConfigurationSource
+        {
+            InitialData = snapshot
+        };
+
+        var insertIndex = builder.Sources.Count;
+        for (var i = 0; i < builder.Sources.Count; i++)
+        {
+            if (builder.Sources[i] is EnvironmentVariablesConfigurationSource ||
+                builder.Sources[i] is CommandLineConfigurationSource)
+            {
+                insertIndex = i;
+                break;
+            }
+        }
+
+        builder.Sources.Insert(insertIndex, source);
+    }
+
     /// <summary>
     /// 保存 Consul 配置缓存快照（可选，在 Build() 后调用）。
     /// 当前阶段为 no-op：因为 KV 加载未实现，没有数据可缓存。
@@ -114,11 +155,6 @@ public static class ProgramConsulExtensions
             return;
         }
 
-        // 当前阶段 no-op（无 KV 加载源，没有数据可缓存）
-        // 未来扩展：
-        // var opts = ConsulOptions.Bind(config);
-        // var cacheService = new ConsulCacheService(opts.CacheDirectory);
-        // var snapshot = ExtractConsulSnapshot(configRoot);
-        // cacheService.Save(snapshot);
+        // 缓存已在 AddConsulIfEnabled 成功拉取 Consul KV 时即时写入，此处保留为兼容扩展点。
     }
 }
