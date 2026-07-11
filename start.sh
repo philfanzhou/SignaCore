@@ -8,22 +8,17 @@ IMAGE_NAME="quantumzhou.identity:${IMAGE_TAG}"
 CONTAINER_NAME="ruoyu-identity"
 NETWORK_NAME="ruoyu-net"
 HTTP_PORT=10891
+DB_PROVIDER="PostgreSQL"
+DB_NAME="quantumzhou_identity"
 
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="Qwer1234"
 
 SMS_BYPASS_CODE="666666"
 
-# ========== Consul 集成配置（Identity 部署脚本固定走 Consul）==========
-CONSUL_HOST="${CONSUL_HOST:-host.docker.internal}"
-CONSUL_PORT="${CONSUL_PORT:-8500}"
-CONSUL_SERVICE_NAME="${CONSUL_SERVICE_NAME:-QuantumZhou.Identity}"
+# ========== Consul 集成配置（Identity 部署脚本固定接入 Consul）==========
+CONSUL_HTTP_ADDR="${CONSUL_HTTP_ADDR:-host.docker.internal:8500}"
 CONSUL_TOKEN="${CONSUL_TOKEN:-}"
-
-if [ -z "${CONSUL_TOKEN}" ]; then
-    echo "Please set CONSUL_TOKEN before deployment."
-    exit 1
-fi
 
 docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
 if [ -n "$(docker ps -q --filter "name=^/${CONTAINER_NAME}$")" ]; then
@@ -52,10 +47,9 @@ docker run -d \
     -e ADMIN_BOOTSTRAP_USERNAME="${ADMIN_USERNAME}" \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Sms__BypassCode="${SMS_BYPASS_CODE}" \
-    -e CONSUL_MODE=On \
-    -e CONSUL_HOST="${CONSUL_HOST}" \
-    -e CONSUL_PORT="${CONSUL_PORT}" \
-    -e CONSUL_SERVICE_NAME="${CONSUL_SERVICE_NAME}" \
+    -e Database__Provider="${DB_PROVIDER}" \
+    -e Database__Name="${DB_NAME}" \
+    -e CONSUL_HTTP_ADDR="${CONSUL_HTTP_ADDR}" \
     -e CONSUL_TOKEN="${CONSUL_TOKEN}" \
     -v "${DATA_DIR}/master-key:/app/master-key" \
     -v "${DATA_DIR}/consul:/app/data/consul" \

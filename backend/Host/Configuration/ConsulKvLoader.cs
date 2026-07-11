@@ -40,9 +40,7 @@ internal sealed class ConsulKvLoader
     {
         return new[]
         {
-            $"{options.KvPrefix}/_global",
-            $"{options.KvPrefix}/_shared/{options.Profile}",
-            $"{options.KvPrefix}/{options.ServiceName}/{options.Profile}"
+            options.KvPrefix
         };
     }
 

@@ -12,9 +12,8 @@ using QuantumZhou.Identity.Host.Controllers;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ========== Consul Configuration Source (CONSUL_MODE=On only) ==========
-// 独立模式（CONSUL_MODE=Off 或未设置）下为 no-op，不引入任何网络调用。
-// Consul 模式下按 _global/_shared/service 三层加载 Consul KV，失败时回退本地缓存。
+// ========== Consul Configuration Source ==========
+// Identity 固定接入 Consul，按 config/ruoyu 单层共享路径加载 Consul KV，失败时回退本地缓存。
 builder.Configuration.AddConsulIfEnabled(builder.Configuration);
 
 // ========== Serilog (Console + Grafana Loki) ==========
@@ -47,8 +46,8 @@ builder.Services.Configure<Microsoft.Extensions.Hosting.HostOptions>(options =>
     options.ShutdownTimeout = TimeSpan.FromSeconds(30);
 });
 
-// ========== Consul Service Discovery (CONSUL_MODE=On only) ==========
-// 独立模式下为 no-op。Consul 模式下通过 Steeltoe.Discovery.Consul 注册服务实例。
+// ========== Consul Service Discovery ==========
+// 通过 Steeltoe.Discovery.Consul 注册服务实例。
 // 健康检查路径：/health（由 Steeltoe 自动配置），间隔 10s，超时 10s。
 builder.Services.AddConsulDiscoveryIfEnabled(builder.Configuration);
 

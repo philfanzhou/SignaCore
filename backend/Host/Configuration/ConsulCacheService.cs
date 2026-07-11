@@ -98,8 +98,7 @@ public sealed class ConsulCacheService : IDisposable
             var metadata = new CacheMetadata
             {
                 UpdatedAt = DateTimeOffset.UtcNow,
-                ConsulHost = Environment.GetEnvironmentVariable("CONSUL_HOST") ?? "host.docker.internal",
-                ConsulPort = int.TryParse(Environment.GetEnvironmentVariable("CONSUL_PORT"), out var p) ? p : 8500,
+                ConsulAddress = Environment.GetEnvironmentVariable("CONSUL_HTTP_ADDR") ?? "host.docker.internal:8500",
                 KeyCount = data.Count
             };
             var metaJson = JsonSerializer.Serialize(metadata, JsonOptions);
@@ -165,8 +164,7 @@ public sealed class ConsulCacheService : IDisposable
     private sealed class CacheMetadata
     {
         public DateTimeOffset UpdatedAt { get; set; }
-        public string ConsulHost { get; set; } = string.Empty;
-        public int ConsulPort { get; set; }
+        public string ConsulAddress { get; set; } = string.Empty;
         public int KeyCount { get; set; }
     }
 }

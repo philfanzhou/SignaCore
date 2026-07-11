@@ -10,25 +10,25 @@
 
 ## 1. 启动约束
 
-Identity 的项目级部署脚本 `start.sh` 固定以 Consul 模式启动，不再维护“脚本内独立模式 / Consul 模式”双分支。
+Identity 的项目级部署脚本 `start.sh` 固定接入 Consul，不再维护任何启停开关。
 
 当前运行态只有两种：
 
 | 运行态 | 条件 | 说明 |
 |------|------|------|
-| **Consul 正常** | `CONSUL_MODE=On` 且 Consul 可达 | 启动时从 Consul KV 加载配置、注册服务、开启健康检查 |
-| **本地缓存回退** | `CONSUL_MODE=On` 但 Consul 不可达 | 使用上一次成功拉取的缓存文件启动；日志告警但不阻断 |
+| **Consul 正常** | Consul 可达 | 启动时从 Consul KV 加载配置、注册服务、开启健康检查 |
+| **本地缓存回退** | Consul 不可达 | 使用上一次成功拉取的缓存文件启动；日志告警但不阻断 |
 
-> **原则**：Identity 正式部署配置以 Consul KV 为准，`start.sh` 不再注入数据库主机/端口/用户名/密码、Provider、数据库名和 Loki 地址。
+> **原则**：Consul 只承载跨项目共享配置；Identity 的项目独有配置必须保留在 `start.sh` 或项目自身配置中。当前 `start.sh` 只把共享的数据库地址/密码和 Loki 地址交给 Consul，`Database:Provider` 与 `Database:Name` 回到项目脚本。
 
 ## 2. 启动时序
 
 ```
 容器启动 → 加载 appsettings.json（Layer 0 兜底）
-→ 尝试连接 Consul（地址来自 CONSUL_HOST / CONSUL_PORT）
+→ 尝试连接 Consul（地址来自 CONSUL_HTTP_ADDR）
 │
 ├── 成功
-│   → 自研 HTTP KV Loader 按 `_global` → `_shared/{profile}` → `QuantumZhou.Identity/{profile}` 合并配置
+│   → 自研 HTTP KV Loader 按 `config/ruoyu/*` 拉取共享配置
 │   → 生成本地缓存文件 data/consul/cache.json（供下次回退）
 │   → Steeltoe AddConsulDiscovery() 注册服务 + HTTP 健康检查 /health
 │   → 启动原有流程 → 对外服务
@@ -43,13 +43,10 @@ Identity 的项目级部署脚本 `start.sh` 固定以 Consul 模式启动，不
 
 | 变量 | 默认值 | 必需 | 说明 |
 |------|--------|------|------|
-| `CONSUL_MODE` | `On` | 是 | Identity 部署脚本固定注入 `On` |
-| `CONSUL_HOST` | `host.docker.internal` | 否 | Consul HTTP API 地址 |
-| `CONSUL_PORT` | `8500` | 否 | Consul HTTP API 端口 |
-| `CONSUL_SERVICE_NAME` | `QuantumZhou.Identity` | 否 | 注册到 Consul 的服务名 |
+| `CONSUL_HTTP_ADDR` | `host.docker.internal:8500` | 否 | Consul HTTP API 地址，运行时拆成 Host / Port |
+| `CONSUL_SERVICE_NAME` | `QuantumZhou.Identity` | 否 | 注册到 Consul 的服务名；通常使用应用默认值，无需在 `start.sh` 中重复注入 |
 | `CONSUL_SERVICE_ID` | 自动生成 | 否 | 服务实例 ID（多实例需唯一）|
 | `CONSUL_KV_PREFIX` | `config/ruoyu` | 否 | KV 路径前缀 |
-| `CONSUL_PROFILE` | 与 `ASPNETCORE_ENVIRONMENT` 一致 | 否 | KV 路径中的环境段 |
 | `CONSUL_TIMEOUT_MS` | `3000` | 否 | 请求超时（毫秒） |
 | `CONSUL_RETRY_COUNT` | `3` | 否 | 重试次数（指数退避） |
 | `CONSUL_ENABLE_CACHE` | `true` | 否 | 是否启用本地缓存降级 |
@@ -67,7 +64,7 @@ Identity 的项目级部署脚本 `start.sh` 固定以 Consul 模式启动，不
 ```
 1. 命令行参数
 2. 环境变量
-3. Consul KV（按 `_global` → `_shared/{profile}` → `QuantumZhou.Identity/{profile}` 顺序合并）
+3. Consul KV（按 `config/ruoyu/*` 提供共享配置）
 4. 本地缓存文件（Consul 不可达时回退）
 5. appsettings.{Environment}.json
 6. appsettings.json（最低 — 兜底默认值）
@@ -79,13 +76,14 @@ Identity 的项目级部署脚本 `start.sh` 固定以 Consul 模式启动，不
 
 ### 5.1 走 Consul KV
 
-Identity 当前把以下运行配置统一放入 Consul KV：
+Identity 当前只把以下共享运行配置放入 Consul KV：
 
-- `_global`：全局日志级别、全局功能开关
-- `_shared/{profile}`：`Loki:Uri`、`PostgreSql:Host/Port/Username/Password`、共享服务入口
-- `QuantumZhou.Identity/{profile}`：`Database:Provider`、`Database:Name` 以及仅 Identity 自身生效的专属策略
+- `config/ruoyu/serilog.json`：统一日志级别
+- `config/ruoyu/feature-flags.json`：功能开关
+- `config/ruoyu/infrastructure.json`：`Loki:Uri`、`PostgreSql:Host/Port/Username/Password`
+- `config/ruoyu/service-endpoints.json`：共享服务入口
 
-这样做的直接结果是：Identity 的数据库和日志基础设施参数全部从 Consul 拉取，`start.sh` 不再重复维护同一份值。
+这样做的直接结果是：Identity 的共享基础设施参数从 Consul 拉取，而项目独有配置仍留在 `start.sh`，不再把服务私有配置塞进 Consul。
 
 ### 5.2 配合 ACL 使用
 
@@ -112,17 +110,11 @@ Consul 8500 端口**不暴露公网**，仅映射到宿主机 localhost 用于�
 
 ```
 config/ruoyu/
-├── _global/
-│   ├── serilog.json          → 全局日志最小级别 / Override
-│   └── feature-flags.json    → 全局功能开关
-├── _shared/{Profile}/
-│   ├── infrastructure.json    → 共享基础设施地址（PostgreSql/Loki 等非密钥）
-│   └── service-endpoints.json → 跨服务共享入口地址 / Audience / RequireHttpsMetadata
-└── {ServiceName}/{Profile}/
-    └── *.json                → 仅该服务自身生效的专属策略
+├── serilog.json            → 统一日志最小级别 / Override
+├── feature-flags.json      → 功能开关
+├── infrastructure.json     → 共享基础设施地址（PostgreSql/Loki 等）
+└── service-endpoints.json  → 跨服务共享入口地址 / Audience / RequireHttpsMetadata
 ```
-
-`Profile` = `ASPNETCORE_ENVIRONMENT` 的小写（`Production` → `prod`）。
 
 ### 6.2 KV → IConfiguration 映射
 
@@ -130,11 +122,10 @@ Consul KV Value 必须是 JSON 字符串，且文件内容直接保存真实配�
 
 | Consul KV 路径 | IConfiguration Key |
 |---------------|--------------------|
-| `config/ruoyu/_global/serilog.json` | `Serilog:*` |
-| `config/ruoyu/_global/feature-flags.json` | `FeatureFlags:*` |
-| `config/ruoyu/_shared/prod/infrastructure.json` | `Loki:*` / `PostgreSql:*`（含 `PostgreSql:Password`） |
-| `config/ruoyu/_shared/prod/service-endpoints.json` | `IdentityService:*` / 其他共享入口配置 |
-| `config/ruoyu/QuantumZhou.Identity/prod/database.json` | `Database:*` |
+| `config/ruoyu/serilog.json` | `Serilog:*` |
+| `config/ruoyu/feature-flags.json` | `FeatureFlags:*` |
+| `config/ruoyu/infrastructure.json` | `Loki:*` / `PostgreSql:*`（含 `PostgreSql:Password`） |
+| `config/ruoyu/service-endpoints.json` | `IdentityService:*` / 其他共享入口配置 |
 
 ## 7. 本地缓存机制
 
@@ -176,9 +167,9 @@ data/
 >
 > **当前阶段范围**：
 > - `Steeltoe.Discovery.Consul` 负责服务注册
-> - Identity 使用自研 HTTP KV Loader 拉取 `_global/_shared/service` 三层配置
+> - Identity 使用自研 HTTP KV Loader 拉取 `config/ruoyu/*` 共享配置
 > - `ConsulCacheService` 负责成功拉取后的本地缓存和失败回退
-> - 项目级 `start.sh` 固定以 Consul 模式启动
+> - 项目级 `start.sh` 固定接入 Consul
 
 ### 8.2 新增文件
 
@@ -198,7 +189,7 @@ data/
 // 现有代码不变...
 var builder = WebApplication.CreateBuilder(args);
 
-// 新增：Consul 配置注册（根据 CONSUL_MODE 条件启用）
+// 新增：Consul 配置注册（固定启用）
 builder.Configuration.AddConsulIfEnabled(builder.Configuration);
 builder.Services.AddConsulDiscoveryIfEnabled(builder.configuration);
 ```
@@ -212,8 +203,6 @@ public static class ProgramConsulExtensions
 {
     public static IConfigurationBuilder AddConsulIfEnabled(this IConfigurationBuilder builder, IConfiguration config)
     {
-        if (!ConsulOptions.IsEnabled(config)) return builder;
-
         var opts = ConsulOptions.Bind(config);
 
         // ACL token 注入：把 CONSUL_TOKEN 环境变量值注入到 "Consul:Token" 配置节，
@@ -254,8 +243,6 @@ public static class ProgramConsulExtensions
 
     public static IServiceCollection AddConsulDiscoveryIfEnabled(this IServiceCollection services, IConfiguration config)
     {
-        if (!ConsulOptions.IsEnabled(config)) return services;
-
         // Steeltoe.Discovery.Consul 4.2.0：注册 Consul 服务发现客户端
         // ConsulDiscoveryOptions 绑定 "Consul:Discovery:" 节（Host/Port/ServiceName/HealthCheckPath 等）
         // ConsulOptions（Steeltoe 内置）绑定 "Consul:" 节（Host/Port/Scheme/Token）
@@ -275,7 +262,7 @@ public static class ProgramConsulExtensions
 
 ## 9. 服务端点
 
-Consul 模式新增管理端点：
+Consul 集成新增管理端点：
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
@@ -286,8 +273,8 @@ Consul 模式新增管理端点：
 
 ## 10. 健康检查
 
-- **Consul 模式（正常）**：数据库 + Consul 连通性
-- **Consul 模式（降级）**：数据库 + 降级告警
+- **Consul 正常**：数据库 + Consul 连通性
+- **Consul 降级**：数据库 + 降级告警
 
 ```json
 // Consul 模式正常
@@ -306,22 +293,14 @@ Consul 模式新增管理端点：
 ## 11. start.sh 改造
 
 ```bash
-CONSUL_HOST="${CONSUL_HOST:-host.docker.internal}"
-CONSUL_PORT="${CONSUL_PORT:-8500}"
-CONSUL_SERVICE_NAME="${CONSUL_SERVICE_NAME:-QuantumZhou.Identity}"
+CONSUL_HTTP_ADDR="${CONSUL_HTTP_ADDR:-host.docker.internal:8500}"
 CONSUL_TOKEN="${CONSUL_TOKEN:-}"
-
-if [ -z "${CONSUL_TOKEN}" ]; then
-  echo "Please set CONSUL_TOKEN before deployment."
-  exit 1
-fi
 
 docker run -d \
   ...原有参数... \
-  -e CONSUL_MODE=On \
-  -e CONSUL_HOST="${CONSUL_HOST}" \
-  -e CONSUL_PORT="${CONSUL_PORT}" \
-  -e CONSUL_SERVICE_NAME="${CONSUL_SERVICE_NAME}" \
+  -e Database__Provider=PostgreSQL \
+  -e Database__Name=quantumzhou_identity \
+  -e CONSUL_HTTP_ADDR="${CONSUL_HTTP_ADDR}" \
   -e CONSUL_TOKEN="${CONSUL_TOKEN}" \
   "$IMAGE_NAME"
 ```
@@ -343,14 +322,13 @@ CONSUL_HTTP_ADDR=http://localhost:8500
 ./script/env-script/06-consul/start.sh
 
 # 推荐维护的共享配置：
-# - script/env-script/06-consul/config/kv/_shared__prod__infrastructure.json
-# - script/env-script/06-consul/config/kv/_shared__prod__service-endpoints.json
-# - script/env-script/06-consul/config/kv/QuantumZhou.Identity__prod__database.json
+# - script/env-script/06-consul/config/kv/infrastructure.json
+# - script/env-script/06-consul/config/kv/service-endpoints.json
 ```
 
 > 首次部署后沉淀为 `script/env-script/06-consul/start.sh` 统一复用，业务配置内容保存在 `script/env-script/06-consul/config/kv/`，采用扁平文件名编码目标 key。
 
-### 12.3 Identity 容器启动（Consul 模式）
+### 12.3 Identity 容器启动
 
 ```bash
 docker run -d \
@@ -361,10 +339,9 @@ docker run -d \
   -e TZ=Asia/Shanghai \
   -e APP_TITLE="QuantumZhou.Identity" \
   -e ASPNETCORE_ENVIRONMENT=Production \
-  -e CONSUL_MODE=On \
-  -e CONSUL_HOST=host.docker.internal \
-  -e CONSUL_PORT=8500 \
-  -e CONSUL_SERVICE_NAME=QuantumZhou.Identity \
+  -e Database__Provider=PostgreSQL \
+  -e Database__Name=quantumzhou_identity \
+  -e CONSUL_HTTP_ADDR=host.docker.internal:8500 \
   -e CONSUL_TOKEN="<acl-token>" \
   -v "$(pwd)/data/identity/master-key:/app/master-key" \
   -v "$(pwd)/data/identity/consul:/app/data/consul" \
@@ -378,13 +355,13 @@ docker run -d \
 | C1 | 创建 `ConsulCacheService.cs`（本地缓存读写 + 原子替换）| P0 | ✅ 已实现 |
 | C2 | 创建 `ConsulOptions.cs`（强类型配置类）| P0 | ✅ 已实现 |
 | C3 | 创建 `ProgramConsulExtensions.cs`（封装 KV 加载 + 缓存回退 + Steeltoe）| P0 | ✅ 已实现 |
-| C3.1 | 创建 `ConsulKvLoader.cs`（HTTP 拉取 `_global/_shared/service` 三层）| P0 | ✅ 已实现 |
+| C3.1 | 创建 `ConsulKvLoader.cs`（HTTP 拉取 `config/ruoyu/*` 共享配置）| P0 | ✅ 已实现 |
 | C4 | 修改 `Program.cs` 调用 C3 | P0 | ✅ 已实现 |
 | C5 | 在 `csproj` 引入 Steeltoe.Discovery.Consul 4.2.0 | P0 | ✅ 已实现（~~Steeltoe.Configuration.Consul~~ 包不存在） |
-| C6 | 修改 `appsettings.json` 添加 `Consul:` 配置节（Mode=Off 默认值）| P0 | ✅ 已实现 |
+| C6 | 修改 `appsettings.json` 添加 `Consul:` 配置节（不再保留 `Mode` 开关）| P0 | ✅ 已实现 |
 | C7 | 新增 `/consul/status` 和 `/consul/cache/invalidate` 端点 | P1 | 本轮补齐 |
 | C8 | `/health` 端点增加 Consul 连通性检查 | P1 | 当前仍暂缓 |
-| C9 | 修改 `start.sh` 固定以 Consul 模式注入 CONSUL_* 环境变量 | P1 | 本轮收敛 |
+| C9 | 修改 `start.sh` 固定以 Consul 模式注入共享配置入口，并把项目独有配置保留在脚本内 | P1 | 本轮收敛 |
 | C10 | 新增 `data/consul/` 目录挂载 | P0 | ✅ 已实现 |
 | C11 | 单元测试：Consul KV Loader / CacheService | P0 | 本轮补齐最小覆盖 |
 | C12 | 集成测试：Consul 模式完整启动 + 降级切换 | P1 | ⏸ 暂缓（未来 task） |

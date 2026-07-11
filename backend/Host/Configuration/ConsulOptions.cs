@@ -1,22 +1,16 @@
 using System;
+using System.Globalization;
 using Microsoft.Extensions.Configuration;
 
 namespace QuantumZhou.Identity.Host.Configuration;
 
 /// <summary>
 /// Identity Consul 集成强类型配置类。绑定 appsettings.json "Consul:" 节。
-/// 独立模式（Mode=Off）下所有属性均不生效。
 /// 与 Steeltoe.Discovery.Consul 的内置 ConsulOptions 类（Steeltoe.Discovery.Consul.Configuration 命名空间）
 /// 不冲突：本类用于应用层模式判断与缓存目录，Steeltoe 的 ConsulOptions 用于 Consul 客户端连接参数。
 /// </summary>
 public sealed class ConsulOptions
 {
-    /// <summary>
-    /// Consul 集成模式：Off（独立运行，默认）/ On（启用 Consul）。
-    /// 受环境变量 CONSUL_MODE 控制。
-    /// </summary>
-    public string Mode { get; set; } = "Off";
-
     /// <summary>Consul HTTP API 地址。默认 host.docker.internal（宿主机映射）。</summary>
     public string Host { get; set; } = "host.docker.internal";
 
@@ -31,9 +25,6 @@ public sealed class ConsulOptions
 
     /// <summary>KV 路径前缀（未来扩展：KV 配置加载）。默认 config/ruoyu。</summary>
     public string KvPrefix { get; set; } = "config/ruoyu";
-
-    /// <summary>KV 路径中的环境段。为空时与 ASPNETCORE_ENVIRONMENT 一致。</summary>
-    public string? Profile { get; set; }
 
     /// <summary>请求超时（毫秒）。默认 3000。</summary>
     public int TimeoutMs { get; set; } = 3000;
@@ -55,12 +46,11 @@ public sealed class ConsulOptions
     public string? Token { get; set; }
 
     /// <summary>
-    /// 判断是否启用 Consul 集成（Mode == "On"，不区分大小写）。
+    /// 当前项目固定启用 Consul 集成，不再保留 Mode 开关。
     /// </summary>
     public static bool IsEnabled(IConfiguration config)
     {
-        var mode = config["Consul:Mode"] ?? "Off";
-        return string.Equals(mode, "On", StringComparison.OrdinalIgnoreCase);
+        return true;
     }
 
     /// <summary>
@@ -72,9 +62,12 @@ public sealed class ConsulOptions
         var opts = new ConsulOptions();
         config.GetSection("Consul").Bind(opts);
 
-        // 环境变量短名覆盖（CONSUL_MODE / CONSUL_HOST 等）
-        var envMode = Environment.GetEnvironmentVariable("CONSUL_MODE");
-        if (!string.IsNullOrEmpty(envMode)) opts.Mode = envMode;
+        // 环境变量短名覆盖（CONSUL_HTTP_ADDR 优先）
+        var envHttpAddr = Environment.GetEnvironmentVariable("CONSUL_HTTP_ADDR");
+        if (!string.IsNullOrWhiteSpace(envHttpAddr))
+        {
+            ApplyHttpAddressOverride(opts, envHttpAddr);
+        }
 
         var envHost = Environment.GetEnvironmentVariable("CONSUL_HOST");
         if (!string.IsNullOrEmpty(envHost)) opts.Host = envHost;
@@ -91,9 +84,6 @@ public sealed class ConsulOptions
         var envKvPrefix = Environment.GetEnvironmentVariable("CONSUL_KV_PREFIX");
         if (!string.IsNullOrEmpty(envKvPrefix)) opts.KvPrefix = envKvPrefix;
 
-        var envProfile = Environment.GetEnvironmentVariable("CONSUL_PROFILE");
-        if (!string.IsNullOrEmpty(envProfile)) opts.Profile = envProfile;
-
         var envTimeout = Environment.GetEnvironmentVariable("CONSUL_TIMEOUT_MS");
         if (int.TryParse(envTimeout, out var timeout)) opts.TimeoutMs = timeout;
 
@@ -106,17 +96,47 @@ public sealed class ConsulOptions
         var envCacheDir = Environment.GetEnvironmentVariable("CONSUL_CACHE_DIR");
         if (!string.IsNullOrEmpty(envCacheDir)) opts.CacheDirectory = envCacheDir;
 
-        // ACL token（启用 ACL 时必需，独立模式下忽略）
+        // ACL token（启用 ACL 时必需）
         var envToken = Environment.GetEnvironmentVariable("CONSUL_TOKEN");
         if (!string.IsNullOrEmpty(envToken)) opts.Token = envToken;
 
-        // Profile 默认与 ASPNETCORE_ENVIRONMENT 一致（小写）
-        if (string.IsNullOrEmpty(opts.Profile))
+        return opts;
+    }
+
+    private static void ApplyHttpAddressOverride(ConsulOptions options, string httpAddress)
+    {
+        var normalized = httpAddress.Trim();
+        if (Uri.TryCreate($"http://{normalized}", UriKind.Absolute, out var hostPortUri))
         {
-            var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-            opts.Profile = string.IsNullOrEmpty(env) ? "dev" : env.ToLowerInvariant();
+            options.Host = hostPortUri.Host;
+            if (!hostPortUri.IsDefaultPort)
+            {
+                options.Port = hostPortUri.Port;
+            }
+            return;
         }
 
-        return opts;
+        if (Uri.TryCreate(normalized, UriKind.Absolute, out var absoluteUri) &&
+            !string.IsNullOrWhiteSpace(absoluteUri.Host))
+        {
+            options.Host = absoluteUri.Host;
+            if (!absoluteUri.IsDefaultPort)
+            {
+                options.Port = absoluteUri.Port;
+            }
+            return;
+        }
+
+        var lastColonIndex = normalized.LastIndexOf(':');
+        if (lastColonIndex > 0 &&
+            lastColonIndex < normalized.Length - 1 &&
+            int.TryParse(normalized[(lastColonIndex + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var port))
+        {
+            options.Host = normalized[..lastColonIndex];
+            options.Port = port;
+            return;
+        }
+
+        options.Host = normalized;
     }
 }

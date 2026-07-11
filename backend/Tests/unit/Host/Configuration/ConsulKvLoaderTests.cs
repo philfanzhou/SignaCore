@@ -34,22 +34,18 @@ public class ConsulKvLoaderTests
     }
 
     [Fact]
-    public void BuildPrefixes_ReturnsGlobalSharedAndServiceOrder()
+    public void BuildPrefixes_ReturnsSingleSharedPrefix()
     {
         var options = new ConsulOptions
         {
-            KvPrefix = "config/ruoyu",
-            Profile = "prod",
-            ServiceName = "QuantumZhou.Identity"
+            KvPrefix = "config/ruoyu"
         };
 
         var prefixes = ConsulKvLoader.BuildPrefixes(options);
 
         Assert.Equal(
             [
-                "config/ruoyu/_global",
-                "config/ruoyu/_shared/prod",
-                "config/ruoyu/QuantumZhou.Identity/prod"
+                "config/ruoyu"
             ],
             prefixes);
     }

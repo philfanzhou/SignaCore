@@ -9,14 +9,14 @@
 
 | 场景 | 模式 | 配置 |
 |------|------|------|
-| 项目根 `start.sh` / 容器部署 | Consul 模式 | 固定注入 `CONSUL_MODE=On`，业务配置从 Consul KV 提供 |
+| 项目根 `start.sh` / 容器部署 | Consul 集成 | 固定接入 Consul，共享配置从 Consul KV 提供，项目独有配置留在脚本内 |
 | Consul 故障时 | 自动降级 | 使用本地缓存启动，无需切回脚本环境变量注入 |
 
 详见 [ConsulIntegration.md](./ConsulIntegration.md)。
 
 ---
 
-## Consul 模式部署
+## Consul 集成部署
 
 ### 前置条件
 
@@ -26,14 +26,13 @@
 ### start.sh 固定注入的 Consul 参数
 
 ```bash
--e CONSUL_MODE=On
--e CONSUL_HOST=host.docker.internal
--e CONSUL_PORT=8500
--e CONSUL_SERVICE_NAME=QuantumZhou.Identity
+-e CONSUL_HTTP_ADDR=host.docker.internal:8500
 -e CONSUL_TOKEN=<acl-token>
 ```
 
-> 数据库 Provider / 数据库名 / PostgreSQL Host / Port / Username / Password / Loki 地址均由 Consul KV 提供，不再由 `start.sh` 注入。
+> `CONSUL_SERVICE_NAME` 通常使用应用默认值，无需由 `start.sh` 重复注入。
+>
+> `Database:Provider` 和 `Database:Name` 属于 Identity 自有配置，应由 `start.sh` 注入；PostgreSQL Host / Port / Username / Password 和 Loki 地址属于共享基础设施配置，继续由 Consul KV 提供。
 
 ### Consul 缓存目录挂载
 
@@ -81,6 +80,8 @@ curl http://localhost:5002/consul/status
   }
 }
 ```
+
+> 其中 `Database:Provider` / `Database:Name` 由 Identity `start.sh` 注入；`PostgreSql:*` 由 Consul `config/ruoyu/infrastructure.json` 提供。
 
 ---
 
@@ -147,8 +148,8 @@ Identity 服务使用 Serilog，双写 Console + Grafana Loki。详见 [Configur
 ## 健康检查
 
 - 端点：`/health`（端口 5002）
-- **Consul 模式（正常）**：数据库 + Consul 连通性
-- **Consul 模式（降级）**：数据库检查 + 降级告警
+- **Consul 正常**：数据库 + Consul 连通性
+- **Consul 降级**：数据库检查 + 降级告警
 
 ---
 
@@ -156,7 +157,7 @@ Identity 服务使用 Serilog，双写 Console + Grafana Loki。详见 [Configur
 
 - Prometheus 指标端点：`http://<host>:5002/metrics`
 - 已集成 OpenTelemetry（ASP.NET Core、Runtime、HttpClient）
-- Consul 模式下，Consul 自动 HTTP 健康检查 `/health`
+- Consul 集成下，Consul 自动 HTTP 健康检查 `/health`
 
 ---
 

@@ -2,7 +2,7 @@
 
 > 本文档列出所有配置项及其来源。
 >
-> **当前部署脚本优先级**：命令行 > 环境变量 > Consul KV（`_global` → `_shared` → `QuantumZhou.Identity`）> 本地缓存 > appsettings.{Env} > appsettings.json
+> **当前部署脚本优先级**：命令行 > 环境变量 > Consul KV（`config/ruoyu/*`）> 本地缓存 > appsettings.{Env} > appsettings.json
 >
 > 详见 [ConsulIntegration.md](./ConsulIntegration.md)
 
@@ -10,13 +10,10 @@
 
 | 配置键 | 环境变量 | 默认值 | 说明 |
 |--------|---------|--------|------|
-| `Consul:Mode` | `CONSUL_MODE` | `On`（由 `start.sh` 固定注入） | Identity 部署脚本始终以 Consul 模式启动 |
-| `Consul:Host` | `CONSUL_HOST` | `host.docker.internal` | Consul HTTP API 地址 |
-| `Consul:Port` | `CONSUL_PORT` | `8500` | Consul HTTP API 端口 |
-| `Consul:ServiceName` | `CONSUL_SERVICE_NAME` | `QuantumZhou.Identity` | 注册到 Consul 的服务名称 |
+| `Consul:Host` / `Consul:Port` | `CONSUL_HTTP_ADDR` | `host.docker.internal:8500` | 部署侧统一传一个地址字符串，运行时拆成 Host / Port |
+| `Consul:ServiceName` | `CONSUL_SERVICE_NAME` | `QuantumZhou.Identity` | 注册到 Consul 的服务名称；通常使用应用默认值即可 |
 | `Consul:ServiceId` | `CONSUL_SERVICE_ID` | 自动生成 | 服务实例 ID（多实例需唯一）|
 | `Consul:KvPrefix` | `CONSUL_KV_PREFIX` | `config/ruoyu` | KV 路径前缀 |
-| `Consul:Profile` | `CONSUL_PROFILE` | 与 `ASPNETCORE_ENVIRONMENT` 一致 | KV 路径中的环境段 |
 | `Consul:TimeoutMs` | `CONSUL_TIMEOUT_MS` | `3000` | 单次请求超时（毫秒） |
 | `Consul:RetryCount` | `CONSUL_RETRY_COUNT` | `3` | 连接重试次数（指数退避） |
 | `Consul:EnableCache` | `CONSUL_ENABLE_CACHE` | `true` | 是否启用本地缓存兜底 |
@@ -24,7 +21,7 @@
 
 > Consul 配置的详细语义、启动时序、缓存机制、KV 分层策略请见 [ConsulIntegration.md](./ConsulIntegration.md)。
 >
-> **当前约束**：Identity 启动脚本不再注入数据库主机、端口、用户名、密码、Provider、数据库名和 Loki 地址；这些配置统一由 Consul KV 提供。`RSA_MASTER_KEY`、管理员引导密码、AppSecret 等启动密钥仍保留在环境变量或文件。
+> **当前约束**：Consul 只承载跨项目共享配置。Identity 启动脚本不再注入数据库主机、端口、用户名、密码和 Loki 地址；`Database:Provider`、`Database:Name` 这类项目独有配置保留在项目 `start.sh`。`RSA_MASTER_KEY`、管理员引导密码、AppSecret 等启动密钥仍保留在环境变量或文件。
 
 ---
 
@@ -38,15 +35,15 @@
 
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
-| Database:Provider | SQLite | 数据库提供者（SQLite / PostgreSQL） |
-| Database:Name | quantumzhou_identity | 服务自己的 PostgreSQL 数据库名（仅在使用共享 PostgreSql 主机配置时参与拼接） |
+| Database:Provider | SQLite | 数据库提供者（SQLite / PostgreSQL，推荐由项目 `start.sh` 提供） |
+| Database:Name | quantumzhou_identity | 服务自己的 PostgreSQL 数据库名（推荐由项目 `start.sh` 提供） |
 | Database:AutoMigrate | true | 是否自动执行迁移（生产环境建议设为 false） |
 | ConnectionStrings:Default | Data Source=quantumzhou_identity.db | SQLite 连接字符串 |
 | ConnectionStrings:PostgreSQL | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | PostgreSQL 连接字符串 |
-| PostgreSql:Host | localhost | PostgreSQL 主机（推荐由 Consul `_shared/prod/infrastructure.json` 提供） |
-| PostgreSql:Port | 5432 | PostgreSQL 端口（推荐由 Consul `_shared/prod/infrastructure.json` 提供） |
-| PostgreSql:Username | postgres | PostgreSQL 用户名（推荐由 Consul `_shared/prod/infrastructure.json` 提供） |
-| PostgreSql:Password | （空） | PostgreSQL 密码（推荐由 Consul `_shared/prod/infrastructure.json` 提供） |
+| PostgreSql:Host | localhost | PostgreSQL 主机（推荐由 Consul `config/ruoyu/infrastructure.json` 提供） |
+| PostgreSql:Port | 5432 | PostgreSQL 端口（推荐由 Consul `config/ruoyu/infrastructure.json` 提供） |
+| PostgreSql:Username | postgres | PostgreSQL 用户名（推荐由 Consul `config/ruoyu/infrastructure.json` 提供） |
+| PostgreSql:Password | （空） | PostgreSQL 密码（推荐由 Consul `config/ruoyu/infrastructure.json` 提供） |
 
 > PostgreSQL 连接字符串自动追加连接池参数：`Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100;Connection Lifetime=300`。如连接字符串中已包含 `Pooling=` 则不追加。
 
@@ -188,7 +185,7 @@ Loki 地址统一通过 `Loki:Uri` 配置键进入 `Serilog:WriteTo:1:Args:uri`�
 
 | 来源 | 示例值 | 说明 |
 |------|--------|------|
-| `Loki:Uri` 配置键 | http://ruoyu-loki:3100 | 推荐由 Consul `_shared/prod/infrastructure.json` 提供 |
+| `Loki:Uri` 配置键 | http://ruoyu-loki:3100 | 推荐由 Consul `config/ruoyu/infrastructure.json` 提供 |
 
 > **容错机制**：如果 `Loki:Uri` 未设置，Loki Sink 使用 appsettings.json 中的 fallback 地址 `http://localhost:3100`。Loki 不可达时 Sink 异步重试，不影响服务启动。
 
