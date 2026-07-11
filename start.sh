@@ -24,6 +24,18 @@ SMS_BYPASS_CODE="666666"
 
 LOKI_URI="http://ruoyu-loki:3100"
 
+# ========== Consul 集成配置（独立模式默认，不设置 CONSUL_MODE = 独立模式）==========
+CONSUL_MODE="${CONSUL_MODE:-Off}"
+CONSUL_HOST="${CONSUL_HOST:-ruoyu-consul}"
+CONSUL_PORT="${CONSUL_PORT:-8500}"
+CONSUL_SERVICE_NAME="${CONSUL_SERVICE_NAME:-QuantumZhou.Identity}"
+
+# 条件拼接 Consul 环境变量：On 时注入 -e 参数，Off 时为空（独立模式行为不变）
+CONSUL_ENV=""
+if [ "${CONSUL_MODE}" = "On" ]; then
+    CONSUL_ENV="-e CONSUL_MODE=On -e CONSUL_HOST=${CONSUL_HOST} -e CONSUL_PORT=${CONSUL_PORT} -e CONSUL_SERVICE_NAME=${CONSUL_SERVICE_NAME}"
+fi
+
 docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
 if [ -n "$(docker ps -q --filter "name=^/${CONTAINER_NAME}$")" ]; then
     docker stop "$CONTAINER_NAME"
@@ -32,7 +44,7 @@ if [ -n "$(docker ps -aq --filter "name=^/${CONTAINER_NAME}$")" ]; then
     docker rm "$CONTAINER_NAME"
 fi
 
-mkdir -p "$DATA_DIR/master-key"
+mkdir -p "$DATA_DIR/master-key" "$DATA_DIR/consul"
 chown -R 1000:1000 "$DATA_DIR" 2>/dev/null || true
 
 if [ -z "$ADMIN_PASSWORD" ]; then
@@ -54,7 +66,9 @@ docker run -d \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Sms__BypassCode="${SMS_BYPASS_CODE}" \
     -e LOKI_URI="${LOKI_URI}" \
+    ${CONSUL_ENV} \
     -v "${DATA_DIR}/master-key:/app/master-key" \
+    -v "${DATA_DIR}/consul:/app/data/consul" \
     "$IMAGE_NAME"
 
 echo "${CONTAINER_NAME} started"

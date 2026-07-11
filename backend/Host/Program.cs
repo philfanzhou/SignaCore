@@ -7,6 +7,7 @@ using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Host;
+using QuantumZhou.Identity.Host.Configuration;
 using QuantumZhou.Identity.Host.Controllers;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -23,6 +24,12 @@ if (!string.IsNullOrWhiteSpace(lokiUri))
         ["Serilog:WriteTo:1:Args:uri"] = lokiUri
     });
 }
+
+// ========== Consul Configuration Source (CONSUL_MODE=On only) ==========
+// 独立模式（CONSUL_MODE=Off 或未设置）下为 no-op，不引入任何网络调用。
+// Consul 模式下从本地缓存加载配置（KV 实时加载待 Steeltoe.Configuration.Consul 包发布后启用）。
+builder.Configuration.AddConsulIfEnabled(builder.Configuration);
+
 builder.Host.UseAgentSerilog("QuantumZhou.Identity");
 
 var httpPort = builder.Configuration.GetValue<int?>("Endpoints:Http") ?? 5002;
@@ -39,6 +46,11 @@ builder.Services.Configure<Microsoft.Extensions.Hosting.HostOptions>(options =>
 {
     options.ShutdownTimeout = TimeSpan.FromSeconds(30);
 });
+
+// ========== Consul Service Discovery (CONSUL_MODE=On only) ==========
+// 独立模式下为 no-op。Consul 模式下通过 Steeltoe.Discovery.Consul 注册服务实例。
+// 健康检查路径：/health（由 Steeltoe 自动配置），间隔 10s，超时 10s。
+builder.Services.AddConsulDiscoveryIfEnabled(builder.Configuration);
 
 // ========== Infrastructure (DI, gRPC, Auth, CORS, etc.) ==========
 var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(builder.Configuration, builder.Environment);

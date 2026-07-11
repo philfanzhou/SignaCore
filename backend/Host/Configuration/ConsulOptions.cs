@@ -1,0 +1,111 @@
+using System;
+using Microsoft.Extensions.Configuration;
+
+namespace QuantumZhou.Identity.Host.Configuration;
+
+/// <summary>
+/// Identity Consul 集成强类型配置类。绑定 appsettings.json "Consul:" 节。
+/// 独立模式（Mode=Off）下所有属性均不生效。
+/// 与 Steeltoe.Discovery.Consul 的内置 ConsulOptions 类（Steeltoe.Discovery.Consul.Configuration 命名空间）
+/// 不冲突：本类用于应用层模式判断与缓存目录，Steeltoe 的 ConsulOptions 用于 Consul 客户端连接参数。
+/// </summary>
+public sealed class ConsulOptions
+{
+    /// <summary>
+    /// Consul 集成模式：Off（独立运行，默认）/ On（启用 Consul）。
+    /// 受环境变量 CONSUL_MODE 控制。
+    /// </summary>
+    public string Mode { get; set; } = "Off";
+
+    /// <summary>Consul HTTP API 地址。默认 ruoyu-consul（容器名）。</summary>
+    public string Host { get; set; } = "ruoyu-consul";
+
+    /// <summary>Consul HTTP API 端口。默认 8500。</summary>
+    public int Port { get; set; } = 8500;
+
+    /// <summary>注册到 Consul 的服务名。默认 QuantumZhou.Identity。</summary>
+    public string ServiceName { get; set; } = "QuantumZhou.Identity";
+
+    /// <summary>服务实例 ID。为空时由 Steeltoe 自动生成。</summary>
+    public string? ServiceId { get; set; }
+
+    /// <summary>KV 路径前缀（未来扩展：KV 配置加载）。默认 config/ruoyu。</summary>
+    public string KvPrefix { get; set; } = "config/ruoyu";
+
+    /// <summary>KV 路径中的环境段。为空时与 ASPNETCORE_ENVIRONMENT 一致。</summary>
+    public string? Profile { get; set; }
+
+    /// <summary>请求超时（毫秒）。默认 3000。</summary>
+    public int TimeoutMs { get; set; } = 3000;
+
+    /// <summary>连接重试次数。默认 3。</summary>
+    public int RetryCount { get; set; } = 3;
+
+    /// <summary>是否启用本地缓存兜底。默认 true。</summary>
+    public bool EnableCache { get; set; } = true;
+
+    /// <summary>缓存文件目录。默认 ./data/consul。</summary>
+    public string CacheDirectory { get; set; } = "./data/consul";
+
+    /// <summary>
+    /// 判断是否启用 Consul 集成（Mode == "On"，不区分大小写）。
+    /// </summary>
+    public static bool IsEnabled(IConfiguration config)
+    {
+        var mode = config["Consul:Mode"] ?? "Off";
+        return string.Equals(mode, "On", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 从 "Consul:" 节绑定 ConsulOptions 实例。
+    /// 环境变量 CONSUL_* 优先级高于 appsettings.json（通过 __ 分隔符自动映射）。
+    /// </summary>
+    public static ConsulOptions Bind(IConfiguration config)
+    {
+        var opts = new ConsulOptions();
+        config.GetSection("Consul").Bind(opts);
+
+        // 环境变量短名覆盖（CONSUL_MODE / CONSUL_HOST 等）
+        var envMode = Environment.GetEnvironmentVariable("CONSUL_MODE");
+        if (!string.IsNullOrEmpty(envMode)) opts.Mode = envMode;
+
+        var envHost = Environment.GetEnvironmentVariable("CONSUL_HOST");
+        if (!string.IsNullOrEmpty(envHost)) opts.Host = envHost;
+
+        var envPort = Environment.GetEnvironmentVariable("CONSUL_PORT");
+        if (int.TryParse(envPort, out var port)) opts.Port = port;
+
+        var envServiceName = Environment.GetEnvironmentVariable("CONSUL_SERVICE_NAME");
+        if (!string.IsNullOrEmpty(envServiceName)) opts.ServiceName = envServiceName;
+
+        var envServiceId = Environment.GetEnvironmentVariable("CONSUL_SERVICE_ID");
+        if (!string.IsNullOrEmpty(envServiceId)) opts.ServiceId = envServiceId;
+
+        var envKvPrefix = Environment.GetEnvironmentVariable("CONSUL_KV_PREFIX");
+        if (!string.IsNullOrEmpty(envKvPrefix)) opts.KvPrefix = envKvPrefix;
+
+        var envProfile = Environment.GetEnvironmentVariable("CONSUL_PROFILE");
+        if (!string.IsNullOrEmpty(envProfile)) opts.Profile = envProfile;
+
+        var envTimeout = Environment.GetEnvironmentVariable("CONSUL_TIMEOUT_MS");
+        if (int.TryParse(envTimeout, out var timeout)) opts.TimeoutMs = timeout;
+
+        var envRetry = Environment.GetEnvironmentVariable("CONSUL_RETRY_COUNT");
+        if (int.TryParse(envRetry, out var retry)) opts.RetryCount = retry;
+
+        var envEnableCache = Environment.GetEnvironmentVariable("CONSUL_ENABLE_CACHE");
+        if (bool.TryParse(envEnableCache, out var enableCache)) opts.EnableCache = enableCache;
+
+        var envCacheDir = Environment.GetEnvironmentVariable("CONSUL_CACHE_DIR");
+        if (!string.IsNullOrEmpty(envCacheDir)) opts.CacheDirectory = envCacheDir;
+
+        // Profile 默认与 ASPNETCORE_ENVIRONMENT 一致（小写）
+        if (string.IsNullOrEmpty(opts.Profile))
+        {
+            var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+            opts.Profile = string.IsNullOrEmpty(env) ? "dev" : env.ToLowerInvariant();
+        }
+
+        return opts;
+    }
+}

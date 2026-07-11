@@ -176,12 +176,18 @@ data/
 
 ### 8.1 NuGet 依赖
 
-| 包名 | 作用 | 新增 |
-|------|------|------|
-| `Steeltoe.Configuration.Consul` | 从 Consul KV 加载配置到 `IConfiguration` | ✅ 新增 |
-| `Steeltoe.Discovery.Consul` | 服务注册 + 客户端服务发现 | ✅ 新增 |
+| 包名 | 作用 | 新增 | 当前状态 |
+|------|------|------|---------|
+| ~~`Steeltoe.Configuration.Consul`~~ | 从 Consul KV 加载配置到 `IConfiguration` | ✅ 计划新增 | ❌ NuGet 包不存在（Steeltoe 4.x 未提供 Consul KV 配置加载） |
+| `Steeltoe.Discovery.Consul` (4.2.0) | 服务注册 + 客户端服务发现 | ✅ 新增 | ✅ 当前阶段唯一可用包 |
 
-> 不引入 Steeltoe全套（Actuator/Endpoint/Management 等），只引最小必需包。
+> 不引入 Steeltoe 全套（Actuator/Endpoint/Management 等），只引最小必需包。
+>
+> **当前阶段范围**：仅实现服务发现。KV 配置加载降级为"未来扩展点"：
+> - `ConsulCacheService` 类完整实现（原子写入 + 损坏处理）作为占位
+> - `ProgramConsulExtensions.AddConsulIfEnabled` 仅从缓存加载（未来 KV 包发布后在此插入 `AddConsul()`）
+> - `SaveConsulCacheIfEnabled` 暂为 no-op（无 KV 加载源，没有数据可缓存）
+> - 独立模式（CONSUL_MODE=Off）行为与改造前完全一致
 
 ### 8.2 新增文件
 
@@ -207,50 +213,63 @@ builder.Services.AddConsulDiscoveryIfEnabled(builder.configuration);
 
 ### 8.4 扩展方法核心逻辑
 
+> **当前阶段**：`Steeltoe.Configuration.Consul` 包不存在，`AddConsulIfEnabled` 仅从本地缓存加载（占位）。
+> 未来 Steeltoe 发布 KV 配置包后，在 `try` 块中插入 `builder.AddConsul(...)` 即可启用 KV 加载。
+
 ```csharp
 public static class ProgramConsulExtensions
 {
     public static IConfigurationBuilder AddConsulIfEnabled(this IConfigurationBuilder builder, IConfiguration config)
     {
         if (!ConsulOptions.IsEnabled(config)) return builder;
-        
+
         var opts = ConsulOptions.Bind(config);
         var cacheService = new ConsulCacheService(opts.CacheDirectory);
-        
-        try
+
+        // 【未来扩展点】Steeltoe.Configuration.Consul 包发布后，此处插入：
+        // try { builder.AddConsul(c => { c.Host = opts.Host; ... c.FailFast = false; }); }
+        // catch (Exception ex) { /* 降级到缓存 */ }
+
+        // 当前阶段：直接尝试从本地缓存加载（如果存在）
+        if (opts.EnableCache)
         {
-            // 尝试用 Steeltoe 连接 Consul
-            builder.AddConsul(c =>
+            try
             {
-                c.Host = opts.Host;
-                c.Port = opts.Port;
-                c.Prefix = opts.KvPrefix;
-                c.Profile = opts.Profile;
-                c.Name = opts.ServiceName;
-                c.FailFast = false;
-                c.Timeout = opts.TimeoutMs;
-            });
-            
-            // 写入缓存（在 Load() 之后调用 SaveCache）
-            // 注意：Steeltoe AddConsul 是延迟加载，需要在 Build() 后触发缓存写入
-            return builder;
-        }
-        catch (Exception ex)
-        {
-            // Consul 不可用 → 尝试从缓存加载
-            var cached = cacheService.Load();
-            if (cached != null)
-            {
-                builder.AddInMemoryCollection(cached); // 回退到缓存
-                // TODO: Log Warning("Consul unreachable, using local cache")
+                var cached = cacheService.Load();
+                if (cached != null)
+                {
+                    builder.AddInMemoryCollection(cached);
+                    // 日志：使用本地缓存启动（Consul KV 加载暂未实现）
+                }
             }
-            return builder;
+            catch (Exception)
+            {
+                // 缓存损坏 → 跳过，用 appsettings 启动
+            }
         }
+
+        return builder;
+    }
+
+    public static IServiceCollection AddConsulDiscoveryIfEnabled(this IServiceCollection services, IConfiguration config)
+    {
+        if (!ConsulOptions.IsEnabled(config)) return services;
+
+        // Steeltoe.Discovery.Consul 4.2.0：注册 Consul 服务发现客户端
+        // ConsulDiscoveryOptions 绑定 "Consul:Discovery:" 节（Host/Port/ServiceName/HealthCheckPath 等）
+        // ConsulOptions（Steeltoe 内置）绑定 "Consul:" 节（Host/Port/Scheme/Token）
+        services.AddConsulDiscoveryClient();
+
+        return services;
     }
 }
 ```
 
-> Steeltoe 的 KV 拉取实际发生在 `IConfiguration.Build()` 或第一次读取时，不是 `AddConsul()` 调用时。所以异常捕获需要在 `Build()` 前后更精细地处理——详见实施阶段代码。
+> **Steeltoe 4.2.0 API 说明**：
+> - 入口方法：`AddConsulDiscoveryClient(IServiceCollection)`（命名空间 `Steeltoe.Discovery.Consul`）
+> - 配置类：`ConsulDiscoveryOptions`（绑定 `Consul:Discovery:` 节，含 ServiceName/InstanceId/HealthCheckPath 等）
+> - 配置类：`ConsulOptions`（Steeltoe 内置，绑定 `Consul:` 节，含 Host/Port/Scheme/Token）
+> - **不包含** `AddConsul` 配置加载扩展方法（KV 配置加载未实现）
 
 ## 9. 服务端点
 
@@ -356,21 +375,21 @@ docker run -d \
 
 ## 13. 实施 Checklist
 
-| # | 任务 | 优先级 |
-|---|------|--------|
-| C1 | 创建 `ConsulCacheService.cs`（本地缓存读写 + 原子替换）| P0 |
-| C2 | 创建 `ConsulOptions.cs`（强类型配置类）| P0 |
-| C3 | 创建 `ProgramConsulExtensions.cs`（封装 Steeltoe + 降级逻辑）| P0 |
-| C4 | 修改 `Program.cs` 调用 C3 | P0 |
-| C5 | 在 `csproj` 引入 Steeltoe.Configuration.Consul 和 Steeltoe.Discovery.Consul | P0 |
-| C6 | 修改 `appsettings.json` 添加 `Consul:` 配置节（Mode=Off 默认值）| P0 |
-| C7 | 新增 `/consul/status` 和 `/consul/cache/invalidate` 端点 | P1 |
-| C8 | `/health` 端点增加 Consul 连通性检查 | P1 |
-| C9 | 修改 `start.sh` 条件注入 CONSUL_* 环境变量 | P1 |
-| C10 | 新增 `data/consul/` 目录挂载 | P0 |
-| C11 | 单元测试：ConsulCacheService（原子替换 / 损坏回放）| P0 |
-| C12 | 集成测试：Consul 模式完整启动 + 降级切换 | P1 |
-| C13 | 编写 Consul KV 种子脚本 | P2 |
+| # | 任务 | 优先级 | 当前状态 |
+|---|------|--------|---------|
+| C1 | 创建 `ConsulCacheService.cs`（本地缓存读写 + 原子替换）| P0 | ✅ 已实现（占位，等 KV 加载启用后写入缓存） |
+| C2 | 创建 `ConsulOptions.cs`（强类型配置类）| P0 | ✅ 已实现 |
+| C3 | 创建 `ProgramConsulExtensions.cs`（封装 Steeltoe + 降级逻辑）| P0 | ✅ 已实现（AddConsulIfEnabled 仅缓存加载，AddConsulDiscoveryIfEnabled 调用 Steeltoe） |
+| C4 | 修改 `Program.cs` 调用 C3 | P0 | ✅ 已实现 |
+| C5 | 在 `csproj` 引入 Steeltoe.Discovery.Consul 4.2.0 | P0 | ✅ 已实现（~~Steeltoe.Configuration.Consul~~ 包不存在） |
+| C6 | 修改 `appsettings.json` 添加 `Consul:` 配置节（Mode=Off 默认值）| P0 | ✅ 已实现 |
+| C7 | 新增 `/consul/status` 和 `/consul/cache/invalidate` 端点 | P1 | ⏸ 暂缓（未来 task） |
+| C8 | `/health` 端点增加 Consul 连通性检查 | P1 | ⏸ 暂缓（未来 task） |
+| C9 | 修改 `start.sh` 条件注入 CONSUL_* 环境变量 | P1 | ✅ 已实现 |
+| C10 | 新增 `data/consul/` 目录挂载 | P0 | ✅ 已实现 |
+| C11 | 单元测试：ConsulCacheService（原子替换 / 损坏回放）| P0 | ⏸ 暂缓（未来 task，当前阶段缓存为占位） |
+| C12 | 集成测试：Consul 模式完整启动 + 降级切换 | P1 | ⏸ 暂缓（未来 task） |
+| C13 | 编写 Consul KV 种子脚本 | P2 | ✅ 已实现（`script/env-script/06-consul/seed-identity-kv.sh`） |
 
 ## 14. 工作量估计
 
