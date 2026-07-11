@@ -2,10 +2,7 @@
 
 > 本文档列出所有配置项及其来源。
 >
-> **默认配置优先级**（独立模式 / 无 Consul）：
-> 命令行参数 > 环境变量（__ 分隔符）> appsettings.{Environment}.json > appsettings.json > 代码默认值
->
-> **Consul 模式下优先级**：命令行 > 短环境变量（密钥/紧急覆盖）> __ 分隔符环境变量 > Consul KV（`_global` → `_shared` → `QuantumZhou.Identity`）> 本地缓存 > appsettings.{Env} > appsettings.json
+> **当前部署脚本优先级**：命令行 > 环境变量 > Consul KV（`_global` → `_shared` → `QuantumZhou.Identity`）> 本地缓存 > appsettings.{Env} > appsettings.json
 >
 > 详见 [ConsulIntegration.md](./ConsulIntegration.md)
 
@@ -13,7 +10,7 @@
 
 | 配置键 | 环境变量 | 默认值 | 说明 |
 |--------|---------|--------|------|
-| `Consul:Mode` | `CONSUL_MODE` | `Off` | Consul 集成模式：`Off`（独立运行）、`On`（启用 Consul） |
+| `Consul:Mode` | `CONSUL_MODE` | `On`（由 `start.sh` 固定注入） | Identity 部署脚本始终以 Consul 模式启动 |
 | `Consul:Host` | `CONSUL_HOST` | `host.docker.internal` | Consul HTTP API 地址 |
 | `Consul:Port` | `CONSUL_PORT` | `8500` | Consul HTTP API 端口 |
 | `Consul:ServiceName` | `CONSUL_SERVICE_NAME` | `QuantumZhou.Identity` | 注册到 Consul 的服务名称 |
@@ -25,9 +22,9 @@
 | `Consul:EnableCache` | `CONSUL_ENABLE_CACHE` | `true` | 是否启用本地缓存兜底 |
 | `Consul:Token` | `CONSUL_TOKEN` | （空） | Consul ACL token（启用 ACL 时必需） |
 
-> Consul 配置的详细语义、启动时序、缓存机制、密钥策略请见 [ConsulIntegration.md](./ConsulIntegration.md)。
+> Consul 配置的详细语义、启动时序、缓存机制、KV 分层策略请见 [ConsulIntegration.md](./ConsulIntegration.md)。
 >
-> **密钥策略**：非密钥配置走 Consul KV；数据库密码、RSA 主密钥、AppSecret 等密钥继续走环境变量。CI 流水线注入和紧急调试场景仍可用环境变量覆盖 Consul。
+> **当前约束**：Identity 启动脚本不再注入数据库主机、端口、用户名、密码、Provider、数据库名和 Loki 地址；这些配置统一由 Consul KV 提供。`RSA_MASTER_KEY`、管理员引导密码、AppSecret 等启动密钥仍保留在环境变量或文件。
 
 ---
 
@@ -46,10 +43,10 @@
 | Database:AutoMigrate | true | 是否自动执行迁移（生产环境建议设为 false） |
 | ConnectionStrings:Default | Data Source=quantumzhou_identity.db | SQLite 连接字符串 |
 | ConnectionStrings:PostgreSQL | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | PostgreSQL 连接字符串 |
-| PostgreSql:Host | localhost | PostgreSQL 主机（可由 Consul `_shared/prod/infrastructure.json` 提供） |
-| PostgreSql:Port | 5432 | PostgreSQL 端口（可由 Consul `_shared/prod/infrastructure.json` 提供） |
-| PostgreSql:Username | postgres | PostgreSQL 用户名（可由 Consul `_shared/prod/infrastructure.json` 提供） |
-| DB_PASSWORD（环境变量） | - | PostgreSQL 密码，自动追加到连接字符串 |
+| PostgreSql:Host | localhost | PostgreSQL 主机（推荐由 Consul `_shared/prod/infrastructure.json` 提供） |
+| PostgreSql:Port | 5432 | PostgreSQL 端口（推荐由 Consul `_shared/prod/infrastructure.json` 提供） |
+| PostgreSql:Username | postgres | PostgreSQL 用户名（推荐由 Consul `_shared/prod/infrastructure.json` 提供） |
+| PostgreSql:Password | （空） | PostgreSQL 密码（推荐由 Consul `_shared/prod/infrastructure.json` 提供） |
 
 > PostgreSQL 连接字符串自动追加连接池参数：`Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100;Connection Lifetime=300`。如连接字符串中已包含 `Pooling=` 则不追加。
 
@@ -169,7 +166,7 @@ Identity 服务使用 Serilog 替代原生 Microsoft.Extensions.Logging，双写
 | Serilog:MinimumLevel:Override:Microsoft.EntityFrameworkCore | Warning | EF Core 日志级别 |
 | Serilog:WriteTo:0:Name | Console | 控制台 Sink（数组下标 0） |
 | Serilog:WriteTo:1:Name | GrafanaLoki | Loki Sink（数组下标 1） |
-| Serilog:WriteTo:1:Args:uri | http://localhost:3100 | Loki 地址（最终由 `LOKI_URI` 或 `Loki:Uri` 覆盖） |
+| Serilog:WriteTo:1:Args:uri | http://localhost:3100 | Loki 地址（最终由 `Loki:Uri` 覆盖） |
 | Serilog:WriteTo:1:Args:labels:0:key | service | Loki 标签键 |
 | Serilog:WriteTo:1:Args:labels:0:value | QuantumZhou.Identity | Loki 标签值（service 标签） |
 
@@ -187,14 +184,13 @@ Identity 服务使用 Serilog 替代原生 Microsoft.Extensions.Logging，双写
 
 ### Loki 地址注入
 
-Loki 地址支持两种覆盖来源，最终都写入 `Serilog:WriteTo:1:Args:uri`：
+Loki 地址统一通过 `Loki:Uri` 配置键进入 `Serilog:WriteTo:1:Args:uri`：
 
 | 来源 | 示例值 | 说明 |
 |------|--------|------|
-| `LOKI_URI` 环境变量 | http://loki.example.com:3100 | 紧急覆盖 / 独立模式优先 |
 | `Loki:Uri` 配置键 | http://ruoyu-loki:3100 | 推荐由 Consul `_shared/prod/infrastructure.json` 提供 |
 
-> **容错机制**：如果 `LOKI_URI` 和 `Loki:Uri` 都未设置，Loki Sink 使用 appsettings.json 中的 fallback 地址 `http://localhost:3100`。Loki 不可达时 Sink 异步重试，不影响服务启动。
+> **容错机制**：如果 `Loki:Uri` 未设置，Loki Sink 使用 appsettings.json 中的 fallback 地址 `http://localhost:3100`。Loki 不可达时 Sink 异步重试，不影响服务启动。
 
 ### 开发环境覆盖
 

@@ -21,7 +21,7 @@ dotnet restore
 
 **SQLite（默认，零配置）**：无需额外操作，首次启动自动创建 `quantumzhou_identity.db`。
 
-**PostgreSQL**：修改 `backend/Host/appsettings.json`：
+**PostgreSQL**：正式容器启动路径要求由 Consul 提供数据库配置；如仅做本地手工诊断，可临时修改 `backend/Host/appsettings.json`：
 
 ```json
 {
@@ -35,7 +35,7 @@ dotnet restore
 }
 ```
 
-PostgreSQL 密码可通过环境变量 `DB_PASSWORD` 注入，无需写入配置文件。
+项目级 `start.sh` 不再注入 `DB_PASSWORD`；正式部署时请在 Consul KV 中提供 `PostgreSql:Password`。
 
 ### 3. 启动服务
 

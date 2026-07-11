@@ -9,51 +9,20 @@ CONTAINER_NAME="ruoyu-identity"
 NETWORK_NAME="ruoyu-net"
 HTTP_PORT=10891
 
-DB_PROVIDER="PostgreSQL"
-DB_HOST="ruoyu-postgres"
-DB_PORT="5432"
-DB_NAME="quantumzhou_identity"
-DB_USER="postgres"
-DB_PASS="postgres"
-
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="Qwer1234"
 
 SMS_BYPASS_CODE="666666"
 
-LOKI_URI="http://ruoyu-loki:3100"
-
-# ========== Consul 集成配置（独立模式默认，不设置 CONSUL_MODE = 独立模式）==========
-CONSUL_MODE="${CONSUL_MODE:-Off}"
+# ========== Consul 集成配置（Identity 部署脚本固定走 Consul）==========
 CONSUL_HOST="${CONSUL_HOST:-host.docker.internal}"
 CONSUL_PORT="${CONSUL_PORT:-8500}"
 CONSUL_SERVICE_NAME="${CONSUL_SERVICE_NAME:-QuantumZhou.Identity}"
 CONSUL_TOKEN="${CONSUL_TOKEN:-}"
-CONSUL_CONFIG_FILE="${SCRIPT_DIR}/../../../script/env-script/06-consul/config/server.json"
 
-# 条件拼接 Consul 环境变量：On 时注入 -e 参数，Off 时为空（独立模式行为不变）
-CONSUL_ENV=""
-CONFIG_ENV=""
-if [ "${CONSUL_MODE}" = "On" ]; then
-    if [ -z "${CONSUL_TOKEN}" ] && [ -f "${CONSUL_CONFIG_FILE}" ]; then
-        CONSUL_TOKEN="$(sed -n 's/.*"agent"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${CONSUL_CONFIG_FILE}" | head -n 1)"
-    fi
-
-    CONSUL_ENV="-e CONSUL_MODE=On -e CONSUL_HOST=${CONSUL_HOST} -e CONSUL_PORT=${CONSUL_PORT} -e CONSUL_SERVICE_NAME=${CONSUL_SERVICE_NAME}"
-    if [ -n "${CONSUL_TOKEN}" ]; then
-        CONSUL_ENV="${CONSUL_ENV} -e CONSUL_TOKEN=${CONSUL_TOKEN}"
-    fi
-
-    CONFIG_ENV="-e DB_PASSWORD=${DB_PASS}"
-else
-    CONFIG_ENV="\
- -e Database__Provider=${DB_PROVIDER} \
- -e Database__Name=${DB_NAME} \
- -e PostgreSql__Host=${DB_HOST} \
- -e PostgreSql__Port=${DB_PORT} \
- -e PostgreSql__Username=${DB_USER} \
- -e DB_PASSWORD=${DB_PASS} \
- -e LOKI_URI=${LOKI_URI}"
+if [ -z "${CONSUL_TOKEN}" ]; then
+    echo "Please set CONSUL_TOKEN before deployment."
+    exit 1
 fi
 
 docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
@@ -83,8 +52,11 @@ docker run -d \
     -e ADMIN_BOOTSTRAP_USERNAME="${ADMIN_USERNAME}" \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Sms__BypassCode="${SMS_BYPASS_CODE}" \
-    ${CONFIG_ENV} \
-    ${CONSUL_ENV} \
+    -e CONSUL_MODE=On \
+    -e CONSUL_HOST="${CONSUL_HOST}" \
+    -e CONSUL_PORT="${CONSUL_PORT}" \
+    -e CONSUL_SERVICE_NAME="${CONSUL_SERVICE_NAME}" \
+    -e CONSUL_TOKEN="${CONSUL_TOKEN}" \
     -v "${DATA_DIR}/master-key:/app/master-key" \
     -v "${DATA_DIR}/consul:/app/data/consul" \
     "$IMAGE_NAME"

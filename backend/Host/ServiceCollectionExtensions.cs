@@ -67,13 +67,13 @@ public static class ServiceCollectionExtensions
                 ?? "Data Source=quantumzhou_identity.db";
         }
 
-        // Add password for PostgreSQL if available via environment variable
+        // Add password for PostgreSQL if available in configuration
         if (dbProvider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase))
         {
-            var dbPassword = Environment.GetEnvironmentVariable("DB_PASSWORD");
-            if (dbPassword != null && !connectionString.Contains("Password="))
+            var postgreSqlPassword = configuration["PostgreSql:Password"];
+            if (!string.IsNullOrWhiteSpace(postgreSqlPassword) && !connectionString.Contains("Password="))
             {
-                connectionString = $"{connectionString};Password={dbPassword}";
+                connectionString = $"{connectionString};Password={postgreSqlPassword}";
             }
             // 添加连接池配置
             if (!connectionString.Contains("Pooling=", StringComparison.OrdinalIgnoreCase))

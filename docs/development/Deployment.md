@@ -5,38 +5,14 @@
 - Dockerfile：`backend/Host/Dockerfile`
 - 部署脚本：`start.sh`（项目根目录）
 
-## 运行模式选择
+## 启动要求
 
 | 场景 | 模式 | 配置 |
 |------|------|------|
-| 本地开发、CI 测试 | 独立模式（默认） | 不设置 `CONSUL_MODE`，或显式 `CONSUL_MODE=Off` |
-| 生产部署 | Consul 模式 | `CONSUL_MODE=On`，`CONSUL_HOST=host.docker.internal` |
-| Consul 故障时 | 自动降级 | 无需人工干预，自动使用本地缓存启动 |
+| 项目根 `start.sh` / 容器部署 | Consul 模式 | 固定注入 `CONSUL_MODE=On`，业务配置从 Consul KV 提供 |
+| Consul 故障时 | 自动降级 | 使用本地缓存启动，无需切回脚本环境变量注入 |
 
 详见 [ConsulIntegration.md](./ConsulIntegration.md)。
-
----
-
-## 独立模式部署（默认）
-
-无需额外步骤，与改造前一致。
-
-### start.sh 关键参数
-
-```bash
-# 数据库连接（__ 分隔符 → 层级配置）
--e Database__Provider=PostgreSQL
--e ConnectionStrings__PostgreSQL="Host=ruoyu-postgres;Port=5432;Database=ruoyu_identity;Username=postgres"
-
-# 密钥
--e ADMIN_BOOTSTRAP_USERNAME=admin
--e ADMIN_BOOTSTRAP_PASSWORD=YourSecurePassword
-
-# 日志
--e LOKI_URI=http://ruoyu-loki:3100
-
-# 不设置 CONSUL_MODE = 独立模式
-```
 
 ---
 
@@ -47,17 +23,17 @@
 1. Consul 容器已启动（`script/env-script/06-consul/start.sh`）
 2. Consul KV 已推送初始配置（一次性 seed）
 
-### start.sh 添加 Consul 参数
+### start.sh 固定注入的 Consul 参数
 
 ```bash
-# Consul 集成
 -e CONSUL_MODE=On
 -e CONSUL_HOST=host.docker.internal
 -e CONSUL_PORT=8500
 -e CONSUL_SERVICE_NAME=QuantumZhou.Identity
 -e CONSUL_TOKEN=<acl-token>
--e DB_PASSWORD=<postgres-password>
 ```
+
+> 数据库 Provider / 数据库名 / PostgreSQL Host / Port / Username / Password / Loki 地址均由 Consul KV 提供，不再由 `start.sh` 注入。
 
 ### Consul 缓存目录挂载
 
@@ -93,8 +69,15 @@ curl http://localhost:5002/consul/status
 
 ```json
 {
-  "ConnectionStrings": {
-    "Default": "Host=ruoyu-postgres;Port=5432;Database=ruoyu_identity;Username=postgres;Password=postgres"
+  "Database": {
+    "Provider": "PostgreSQL",
+    "Name": "quantumzhou_identity"
+  },
+  "PostgreSql": {
+    "Host": "ruoyu-postgres",
+    "Port": 5432,
+    "Username": "postgres",
+    "Password": "postgres"
   }
 }
 ```
@@ -164,7 +147,6 @@ Identity 服务使用 Serilog，双写 Console + Grafana Loki。详见 [Configur
 ## 健康检查
 
 - 端点：`/health`（端口 5002）
-- **独立模式**：数据库检查
 - **Consul 模式（正常）**：数据库 + Consul 连通性
 - **Consul 模式（降级）**：数据库检查 + 降级告警
 
@@ -216,13 +198,6 @@ docker exec ruoyu-consul consul snapshot restore /tmp/consul-restore.snap
 ---
 
 ## 常见问题排查
-
-### 独立模式
-
-1. 检查服务状态：`curl http://localhost:5002/health`
-2. 查看日志：`docker logs ruoyu-identity | grep -i error`
-3. 检查 KeyManager 初始化：`docker logs ruoyu-identity | grep "KeyManager initialization"`
-4. 验证 JWKS 端点：`curl http://localhost:5002/.well-known/jwks`
 
 ### Consul 模式
 
