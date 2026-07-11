@@ -6,7 +6,7 @@ DATA_DIR="${SCRIPT_DIR}/data"
 IMAGE_NAME="quantumzhou.identity:20260502"
 CONTAINER_NAME="ruoyu-identity"
 NETWORK_NAME="ruoyu-net"
-HTTP_PORT=10891
+HTTP_PORT=5002
 
 CONSUL_HTTP_ADDR="host.docker.internal:8500"
 CONSUL_TOKEN="${CONSUL_TOKEN:-}"
