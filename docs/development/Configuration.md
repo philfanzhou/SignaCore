@@ -22,6 +22,8 @@
 > Consul 配置的详细语义、启动时序、缓存机制、KV 分层策略请见 [ConsulIntegration.md](./ConsulIntegration.md)。
 >
 > **当前约束**：Consul 只承载跨项目共享配置。Identity 启动脚本不再注入数据库主机、端口、用户名、密码和 Loki 地址；`Database:Provider` 使用程序默认值，`Database:Name`、`FeatureFlags` 这类项目独有配置保留在服务自身配置中。`RSA_MASTER_KEY`、管理员引导密码、AppSecret 等启动密钥仍保留在环境变量或文件。
+>
+> **启动诊断日志**：服务启动时会输出 Consul 拉取过程和最终生效配置摘要。`CONSUL_TOKEN`、数据库密码等敏感值只打印脱敏摘要，不打印完整明文。
 
 ---
 
@@ -46,6 +48,8 @@
 | PostgreSql:Password | （空） | PostgreSQL 密码（推荐由 Consul `config/ruoyu/infrastructure.json` 提供） |
 
 > PostgreSQL 连接字符串自动追加连接池参数：`Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100;Connection Lifetime=300`。如连接字符串中已包含 `Pooling=` 则不追加。
+>
+> **排查建议**：如果启动日志仍显示 `PostgreSql:Host=localhost`，优先检查 Consul 拉取日志中的来源字段是否已回退到 `Cache` 或 `AppSettings`，以及 `CONSUL_TOKEN` 是否被识别为有效输入。
 
 ## JWT 配置
 

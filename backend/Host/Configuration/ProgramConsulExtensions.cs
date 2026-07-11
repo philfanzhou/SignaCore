@@ -26,6 +26,8 @@ public static class ProgramConsulExtensions
     {
         var opts = ConsulOptions.Bind(config);
         var prefixes = ConsulKvLoader.BuildPrefixes(opts);
+        StartupDiagnosticsFormatter.WriteBootstrap(
+            $"Consul KV load begin: Address={opts.Host}:{opts.Port}, Prefixes={StartupDiagnosticsFormatter.SummarizePrefixes(prefixes)}, TimeoutMs={opts.TimeoutMs}, RetryCount={opts.RetryCount}, Cache={opts.EnableCache}, Token={StartupDiagnosticsFormatter.MaskSecret(opts.Token)}");
 
         // 把 CONSUL_TOKEN 注入到 "Consul:Token" 配置节，供 Steeltoe 内置 ConsulOptions 读取。
         // 此处注入到 IConfigurationBuilder，后续 AddConsulDiscoveryIfEnabled 可从 IConfiguration 读到。
@@ -47,10 +49,14 @@ public static class ProgramConsulExtensions
                 cacheService.Save(result.Snapshot);
             }
             ConsulRuntimeState.Instance.MarkLoaded("Consul", result.Snapshot.Count, result.Prefixes, opts.CacheDirectory);
+            StartupDiagnosticsFormatter.WriteBootstrap(
+                $"Consul KV load success: Source=Consul, KeyCount={result.Snapshot.Count}, Prefixes={StartupDiagnosticsFormatter.SummarizePrefixes(result.Prefixes)}, CacheDirectory={opts.CacheDirectory}");
             return builder;
         }
         catch (Exception ex)
         {
+            StartupDiagnosticsFormatter.WriteBootstrap(
+                $"Consul KV load failed: Address={opts.Host}:{opts.Port}, Prefixes={StartupDiagnosticsFormatter.SummarizePrefixes(prefixes)}, Error={StartupDiagnosticsFormatter.SummarizeError(ex.Message)}");
             if (opts.EnableCache)
             {
                 try
@@ -60,17 +66,23 @@ public static class ProgramConsulExtensions
                     {
                         InsertSnapshotBeforeEnvironmentSources(builder, cached);
                         ConsulRuntimeState.Instance.MarkFallback("Cache", ex.Message, cached.Count, prefixes, opts.CacheDirectory);
+                        StartupDiagnosticsFormatter.WriteBootstrap(
+                            $"Consul KV fallback: Source=Cache, KeyCount={cached.Count}, CacheDirectory={opts.CacheDirectory}, Error={StartupDiagnosticsFormatter.SummarizeError(ex.Message)}");
                         return builder;
                     }
                 }
                 catch (Exception cacheEx)
                 {
                     ConsulRuntimeState.Instance.MarkFallback("AppSettings", $"{ex.Message}; cache load failed: {cacheEx.Message}", 0, prefixes, opts.CacheDirectory);
+                    StartupDiagnosticsFormatter.WriteBootstrap(
+                        $"Consul KV fallback: Source=AppSettings, CacheDirectory={opts.CacheDirectory}, Error={StartupDiagnosticsFormatter.SummarizeError($"{ex.Message}; cache load failed: {cacheEx.Message}")}");
                     return builder;
                 }
             }
 
             ConsulRuntimeState.Instance.MarkFallback("AppSettings", ex.Message, 0, prefixes, opts.CacheDirectory);
+            StartupDiagnosticsFormatter.WriteBootstrap(
+                $"Consul KV fallback: Source=AppSettings, CacheDirectory={opts.CacheDirectory}, Error={StartupDiagnosticsFormatter.SummarizeError(ex.Message)}");
             return builder;
         }
         finally

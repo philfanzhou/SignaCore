@@ -39,6 +39,15 @@ Identity 的项目级部署脚本 `start.sh` 固定接入 Consul，不再维护�
     │   └── 缓存不存在 → 使用 appsettings.json 默认值启动 + 告警
 ```
 
+### 2.1 启动诊断日志
+
+为便于排查“到底有没有拿到 Consul 配置”这类问题，Identity 启动阶段必须输出两类诊断日志：
+
+- **Consul 拉取过程日志**：在真正访问 Consul KV 前后记录目标地址、KV 前缀、超时、重试次数、是否携带 token，以及最终结果是 `Consul`、`Cache` 还是 `AppSettings`
+- **最终生效配置摘要**：在应用构建完成后记录关键配置的最终值摘要，至少包含 `PostgreSql:Host`、`PostgreSql:Port`、`PostgreSql:Username`、`Database:Name`、`Loki:Uri`、Consul 当前来源
+- **敏感字段脱敏**：`CONSUL_TOKEN`、`PostgreSql:Password`、AppSecret 等敏感值禁止完整写入日志；只允许输出脱敏摘要
+- **失败场景可见**：当 Consul 加载失败且回退到缓存或 `appsettings.json` 时，日志必须明确写出失败原因和当前回退来源，避免仅凭异常堆栈猜测
+
 ## 3. 环境变量
 
 | 变量 | 默认值 | 必需 | 说明 |
@@ -73,6 +82,8 @@ Identity 的项目级部署脚本 `start.sh` 固定接入 Consul，不再维护�
 ```
 
 > **注意**：Consul KV 优先级高于 appsettings，但低于环境变量。当前 `start.sh` 只保留 Consul 连接参数和少数启动密钥类环境变量，不再承担业务配置注入。
+
+> **诊断要求**：启动日志必须能让人直接看出当前 PostgreSQL/Loki 等关键配置究竟来自 Consul、缓存还是 `appsettings.json`；排查时不依赖人工猜测。
 
 ## 5. 配置入 KV 策略
 

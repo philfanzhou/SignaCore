@@ -55,9 +55,34 @@ builder.Services.AddConsulDiscoveryIfEnabled(builder.Configuration);
 var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
+var consulRuntimeState = app.Services.GetRequiredService<ConsulRuntimeState>();
+var consulOptions = ConsulOptions.Bind(app.Configuration);
+
+var effectivePostgreSqlHost = app.Configuration["PostgreSql:Host"];
+var effectivePostgreSqlPort = app.Configuration["PostgreSql:Port"];
+var effectivePostgreSqlUsername = app.Configuration["PostgreSql:Username"];
+var effectivePostgreSqlPassword = app.Configuration["PostgreSql:Password"];
+var effectiveDatabaseName = app.Configuration["Database:Name"];
+var effectiveLokiUri = app.Configuration["Loki:Uri"];
 
 app.Logger.LogInformation("Service endpoints configured: HTTP={HttpPort}", httpPort);
 app.Logger.LogInformation("Database: {Provider}", dbProvider);
+app.Logger.LogInformation(
+    "Consul startup diagnostics: Address={Address}, Token={Token}, Source={Source}, KeyCount={KeyCount}, Prefixes={Prefixes}, LastError={LastError}",
+    $"{consulOptions.Host}:{consulOptions.Port}",
+    StartupDiagnosticsFormatter.MaskSecret(consulOptions.Token),
+    consulRuntimeState.Source,
+    consulRuntimeState.KeyCount,
+    StartupDiagnosticsFormatter.SummarizePrefixes(consulRuntimeState.LoadedPrefixes),
+    StartupDiagnosticsFormatter.SummarizeError(consulRuntimeState.LastError));
+app.Logger.LogInformation(
+    "Effective configuration diagnostics: PostgreSqlHost={PostgreSqlHost}, PostgreSqlPort={PostgreSqlPort}, PostgreSqlUsername={PostgreSqlUsername}, PostgreSqlPassword={PostgreSqlPassword}, DatabaseName={DatabaseName}, LokiUri={LokiUri}",
+    StartupDiagnosticsFormatter.SummarizeValue(effectivePostgreSqlHost),
+    StartupDiagnosticsFormatter.SummarizeValue(effectivePostgreSqlPort),
+    StartupDiagnosticsFormatter.SummarizeValue(effectivePostgreSqlUsername),
+    StartupDiagnosticsFormatter.SummarizePassword(effectivePostgreSqlPassword),
+    StartupDiagnosticsFormatter.SummarizeValue(effectiveDatabaseName),
+    StartupDiagnosticsFormatter.SummarizeValue(effectiveLokiUri));
 
 // ========== HTTPS Warning for Gateway API ==========
 // Gateway API transmits AppSecret via request headers; warn if not running behind HTTPS/TLS.
