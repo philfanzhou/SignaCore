@@ -1,6 +1,32 @@
 # 配置参考 (Configuration)
 
-> 本文档列出所有配置项及其来源。配置优先级：环境变量 > appsettings.json > 代码默认值。
+> 本文档列出所有配置项及其来源。
+>
+> **默认配置优先级**（独立模式 / 无 Consul）：
+> 命令行参数 > 环境变量（__ 分隔符）> appsettings.{Environment}.json > appsettings.json > 代码默认值
+>
+> **Consul 模式下优先级**：命令行 > 短环境变量（密钥）> __ 分隔符环境变量 > Consul KV > 本地缓存 > appsettings.{Env} > appsettings.json
+>
+> 详见 [ConsulIntegration.md](./ConsulIntegration.md)
+
+## Consul 集成配置
+
+| 配置键 | 环境变量 | 默认值 | 说明 |
+|--------|---------|--------|------|
+| `Consul:Mode` | `CONSUL_MODE` | `Off` | Consul 集成模式：`Off`（独立运行）、`On`（启用 Consul） |
+| `Consul:Host` | `CONSUL_HOST` | `ruoyu-consul` | Consul HTTP API 地址 |
+| `Consul:Port` | `CONSUL_PORT` | `8500` | Consul HTTP API 端口 |
+| `Consul:ServiceName` | `CONSUL_SERVICE_NAME` | `QuantumZhou.Identity` | 注册到 Consul 的服务名称 |
+| `Consul:ServiceId` | `CONSUL_SERVICE_ID` | 自动生成 | 服务实例 ID（多实例需唯一）|
+| `Consul:KvPrefix` | `CONSUL_KV_PREFIX` | `config/ruoyu` | KV 路径前缀 |
+| `Consul:Profile` | `CONSUL_PROFILE` | 与 `ASPNETCORE_ENVIRONMENT` 一致 | KV 路径中的环境段 |
+| `Consul:TimeoutMs` | `CONSUL_TIMEOUT_MS` | `3000` | 单次请求超时（毫秒） |
+| `Consul:RetryCount` | `CONSUL_RETRY_COUNT` | `3` | 连接重试次数（指数退避） |
+| `Consul:EnableCache` | `CONSUL_ENABLE_CACHE` | `true` | 是否启用本地缓存兜底 |
+
+> Consul 配置的详细语义、启动时序、缓存机制、密钥安全策略请见 [ConsulIntegration.md](./ConsulIntegration.md)。
+
+---
 
 ## 端口配置
 
@@ -164,7 +190,7 @@ Loki 地址通过短环境变量 `LOKI_URI` 注入，Program.cs 启动时读取�
 
 ### 开发环境覆盖
 
-`appsettings.Development.json` 覆盖以下配置：
+`appsettings.Development.json`（待创建）覆盖以下配置：
 
 | 配置键 | 默认值 | 开发环境值 | 说明 |
 |--------|--------|-----------|------|

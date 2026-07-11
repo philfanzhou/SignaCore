@@ -45,6 +45,7 @@ QuantumZhou.Identity 是统一身份认证与权限管理中心（Identity Provi
 | 依赖 | 类型 | 用途 |
 |------|------|------|
 | PostgreSQL / SQLite | 数据库 | 存储账户、凭证、令牌、密钥等数据 |
+| Consul（可选） | 服务发现 + 配置中心 | 非密钥配置集中管理、服务注册与健康检查；Consul 不可用时自动降级到本地缓存，不影响服务可用性 |
 | WeChat Open Platform API | HTTP | 微信登录时调用 `jscode2session` 获取 OpenId |
 | Business Service Callback | HTTP | 登录后回调业务系统获取用户角色和权限 |
 
