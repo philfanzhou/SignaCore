@@ -78,8 +78,7 @@ Identity 支持三种模式，由环境变量 `CONSUL_MODE` 控制：
 > 独立模式下以上所有变量均不生效，即使设置了也忽略。
 >
 > **ACL token 说明**：当 Consul 集群启用 ACL（`acl.enabled=true`）时，必须设置 `CONSUL_TOKEN` 环境变量，
-> 值为 Consul agent token（默认由 `start.sh` 持久化到 `script/env-script/06-consul/agent.token`，
-> 后续重启优先复用；也可首次通过 `CONSUL_AGENT_TOKEN` 环境变量指定固定值）。
+> 值为 `script/env-script/06-consul/config/server.json` 中的 `acl.tokens.agent`。
 > 未设置时 Steeltoe 客户端将无法通过 ACL 验证，Consul API 调用返回 403。
 
 ## 4. 配置分层（Consul 模式）
@@ -201,7 +200,7 @@ data/
 | `Host/Configuration/ConsulCacheService.cs` | 本地缓存读写（原子替换 + 损坏回放）| ~80 |
 | `Host/Configuration/ProgramConsulExtensions.cs` | 扩展方法：封装 Steeltoe 调用 + 降级逻辑 + ACL token 注入 | ~110 |
 | `Host/Configuration/ConsulOptions.cs` | 强类型配置类（绑定 appsettings.json `Consul:` 节，含 `Token` 属性）| ~120 |
-| `config/server.json.template` | Consul Agent 配置模板（ACL token 为占位符，运行时 sed 替换）| ~20 |
+| `config/server.json` | Consul Agent 配置文件（人工填写 ACL token）| ~20 |
 
 > 总计新增 ~170 行自建代码，其余由 Steeltoe 处理。
 
