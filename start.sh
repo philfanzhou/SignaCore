@@ -11,7 +11,7 @@ HTTP_PORT=5002
 CONSUL_HTTP_ADDR="host.docker.internal:8500"
 CONSUL_TOKEN="${CONSUL_TOKEN:-}"
 
-DB_NAME="quantumzhou_identity"
+DB_NAME="ruoyu_identity"
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="Qwer1234"
 SMS_BYPASS_CODE="666666"
