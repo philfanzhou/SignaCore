@@ -63,7 +63,7 @@ Identity 支持三种模式，由环境变量 `CONSUL_MODE` 控制：
 | 变量 | 默认值 | 必需 | 说明 |
 |------|--------|------|------|
 | `CONSUL_MODE` | `Off` | 否 | `Off` = 独立；`On` = 启用 Consul |
-| `CONSUL_HOST` | `ruoyu-consul` | 否 | Consul HTTP API 地址 |
+| `CONSUL_HOST` | `host.docker.internal` | 否 | Consul HTTP API 地址 |
 | `CONSUL_PORT` | `8500` | 否 | Consul HTTP API 端口 |
 | `CONSUL_SERVICE_NAME` | `QuantumZhou.Identity` | 否 | 注册到 Consul 的服务名 |
 | `CONSUL_SERVICE_ID` | 自动生成 | 否 | 服务实例 ID（多实例需唯一）|
@@ -78,7 +78,8 @@ Identity 支持三种模式，由环境变量 `CONSUL_MODE` 控制：
 > 独立模式下以上所有变量均不生效，即使设置了也忽略。
 >
 > **ACL token 说明**：当 Consul 集群启用 ACL（`acl.enabled=true`）时，必须设置 `CONSUL_TOKEN` 环境变量，
-> 值为 Consul agent token（由 `start.sh` 动态生成或通过 `CONSUL_AGENT_TOKEN` 环境变量指定）。
+> 值为 Consul agent token（默认由 `start.sh` 持久化到 `script/env-script/06-consul/agent.token`，
+> 后续重启优先复用；也可首次通过 `CONSUL_AGENT_TOKEN` 环境变量指定固定值）。
 > 未设置时 Steeltoe 客户端将无法通过 ACL 验证，Consul API 调用返回 403。
 
 ## 4. 配置分层（Consul 模式）
@@ -104,7 +105,7 @@ Identity 支持三种模式，由环境变量 `CONSUL_MODE` 控制：
 
 所有配置统一放入 Consul KV（含密钥）。理由：
 
-- **全部服务运行在本地 Docker 内网**（`ruoyu-net`），无公网暴露面
+- **业务服务运行在本地 Docker 内网**（如 `ruoyu-net`），Consul 通过宿主机 `8500` 端口暴露给容器访问
 - **Consul ACL 控制访问**：匿名 token 无法读取 KV，只有持有正确 token 的客户端可访问
 - **env 并不比 Consul 更安全**：`docker inspect`、`ps -p <pid> -E` 都能看到进程环境变量；Consul 至少还需要 ACL token
 - **审计与版本追溯**：Consul API 天然支持历史版本对比与回滚，env 改动无痕
@@ -200,7 +201,7 @@ data/
 | `Host/Configuration/ConsulCacheService.cs` | 本地缓存读写（原子替换 + 损坏回放）| ~80 |
 | `Host/Configuration/ProgramConsulExtensions.cs` | 扩展方法：封装 Steeltoe 调用 + 降级逻辑 + ACL token 注入 | ~110 |
 | `Host/Configuration/ConsulOptions.cs` | 强类型配置类（绑定 appsettings.json `Consul:` 节，含 `Token` 属性）| ~120 |
-| `config/consul/server.json.template` | Consul Agent 配置模板（ACL token 为占位符，运行时 sed 替换）| ~20 |
+| `config/server.json.template` | Consul Agent 配置模板（ACL token 为占位符，运行时 sed 替换）| ~20 |
 
 > 总计新增 ~170 行自建代码，其余由 Steeltoe 处理。
 
@@ -307,7 +308,7 @@ Consul 模式正常时新增管理端点：
 // Consul 模式正常
 { "status": "Healthy", "results": [
   { "name": "database", "status": "Healthy" },
-  { "name": "consul", "status": "Healthy", "description": "Connected to ruoyu-consul:8500" }
+  { "name": "consul", "status": "Healthy", "description": "Connected to host.docker.internal:8500" }
 ]}
 
 // Consul 模式降级
@@ -322,7 +323,7 @@ Consul 模式正常时新增管理端点：
 ```bash
 # Consul（可选，不设置=保持独立模式）
 CONSUL_MODE="${CONSUL_MODE:-Off}"
-CONSUL_HOST="${CONSUL_HOST:-ruoyu-consul}"
+CONSUL_HOST="${CONSUL_HOST:-host.docker.internal}"
 CONSUL_PORT="${CONSUL_PORT:-8500}"
 CONSUL_SERVICE_NAME="${CONSUL_SERVICE_NAME:-QuantumZhou.Identity}"
 
@@ -356,14 +357,14 @@ script/env-script/06-consul/start.sh    # 新建
 ```bash
 CONSUL_HTTP_ADDR=http://localhost:8500
 
-# 导入版本化 KV 文件
-./script/env-script/06-consul/seed-kv.sh
+# 启动 Consul 并自动导入版本化 KV 文件
+./script/env-script/06-consul/start.sh
 
 # 如有密钥（也可通过 CI/部署脚本一次性注入）
 # consul kv put config/ruoyu/QuantumZhou.Identity/prod/db-connection.json '...'
 ```
 
-> 首次部署后沉淀为 `script/env-script/06-consul/seed-kv.sh` 通用脚本复用，业务配置内容保存在 `script/env-script/06-consul/config/consul/kv/`。
+> 首次部署后沉淀为 `script/env-script/06-consul/start.sh` 统一复用，业务配置内容保存在 `script/env-script/06-consul/config/kv/`，采用扁平文件名编码目标 key。
 
 ### 12.3 Identity 容器启动（Consul 模式）
 
@@ -379,7 +380,7 @@ docker run -d \
   -e Database__Provider=PostgreSQL \
   -e ConnectionStrings__PostgreSQL="Host=ruoyu-postgres;Port=5432;Database=ruoyu_identity;Username=postgres" \
   -e CONSUL_MODE=On \
-  -e CONSUL_HOST=ruoyu-consul \
+  -e CONSUL_HOST=host.docker.internal \
   -e CONSUL_PORT=8500 \
   -e CONSUL_SERVICE_NAME=QuantumZhou.Identity \
   -v "$(pwd)/data/identity/master-key:/app/master-key" \
@@ -403,7 +404,7 @@ docker run -d \
 | C10 | 新增 `data/consul/` 目录挂载 | P0 | ✅ 已实现 |
 | C11 | 单元测试：ConsulCacheService（原子替换 / 损坏回放）| P0 | ⏸ 暂缓（未来 task，当前阶段缓存为占位） |
 | C12 | 集成测试：Consul 模式完整启动 + 降级切换 | P1 | ⏸ 暂缓（未来 task） |
-| C13 | 编写 Consul KV 种子脚本 | P2 | ✅ 已实现（`script/env-script/06-consul/seed-kv.sh` + `config/consul/kv/`） |
+| C13 | 编写 Consul KV 导入逻辑 | P2 | ✅ 已实现（`script/env-script/06-consul/start.sh` 内置导入 + `config/kv/` 扁平文件） |
 
 ## 14. 工作量估计
 

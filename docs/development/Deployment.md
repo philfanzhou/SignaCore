@@ -10,7 +10,7 @@
 | 场景 | 模式 | 配置 |
 |------|------|------|
 | 本地开发、CI 测试 | 独立模式（默认） | 不设置 `CONSUL_MODE`，或显式 `CONSUL_MODE=Off` |
-| 生产部署 | Consul 模式 | `CONSUL_MODE=On`，`CONSUL_HOST=ruoyu-consul` |
+| 生产部署 | Consul 模式 | `CONSUL_MODE=On`，`CONSUL_HOST=host.docker.internal` |
 | Consul 故障时 | 自动降级 | 无需人工干预，自动使用本地缓存启动 |
 
 详见 [ConsulIntegration.md](./ConsulIntegration.md)。
@@ -52,7 +52,7 @@
 ```bash
 # Consul 集成
 -e CONSUL_MODE=On
--e CONSUL_HOST=ruoyu-consul
+-e CONSUL_HOST=host.docker.internal
 -e CONSUL_PORT=8500
 -e CONSUL_SERVICE_NAME=QuantumZhou.Identity
 ```

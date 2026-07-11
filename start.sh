@@ -26,7 +26,7 @@ LOKI_URI="http://ruoyu-loki:3100"
 
 # ========== Consul 集成配置（独立模式默认，不设置 CONSUL_MODE = 独立模式）==========
 CONSUL_MODE="${CONSUL_MODE:-Off}"
-CONSUL_HOST="${CONSUL_HOST:-ruoyu-consul}"
+CONSUL_HOST="${CONSUL_HOST:-host.docker.internal}"
 CONSUL_PORT="${CONSUL_PORT:-8500}"
 CONSUL_SERVICE_NAME="${CONSUL_SERVICE_NAME:-QuantumZhou.Identity}"
 

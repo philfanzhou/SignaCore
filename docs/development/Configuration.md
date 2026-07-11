@@ -14,7 +14,7 @@
 | 配置键 | 环境变量 | 默认值 | 说明 |
 |--------|---------|--------|------|
 | `Consul:Mode` | `CONSUL_MODE` | `Off` | Consul 集成模式：`Off`（独立运行）、`On`（启用 Consul） |
-| `Consul:Host` | `CONSUL_HOST` | `ruoyu-consul` | Consul HTTP API 地址 |
+| `Consul:Host` | `CONSUL_HOST` | `host.docker.internal` | Consul HTTP API 地址 |
 | `Consul:Port` | `CONSUL_PORT` | `8500` | Consul HTTP API 端口 |
 | `Consul:ServiceName` | `CONSUL_SERVICE_NAME` | `QuantumZhou.Identity` | 注册到 Consul 的服务名称 |
 | `Consul:ServiceId` | `CONSUL_SERVICE_ID` | 自动生成 | 服务实例 ID（多实例需唯一）|

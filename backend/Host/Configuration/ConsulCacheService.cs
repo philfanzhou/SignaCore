@@ -98,7 +98,7 @@ public sealed class ConsulCacheService : IDisposable
             var metadata = new CacheMetadata
             {
                 UpdatedAt = DateTimeOffset.UtcNow,
-                ConsulHost = Environment.GetEnvironmentVariable("CONSUL_HOST") ?? "ruoyu-consul",
+                ConsulHost = Environment.GetEnvironmentVariable("CONSUL_HOST") ?? "host.docker.internal",
                 ConsulPort = int.TryParse(Environment.GetEnvironmentVariable("CONSUL_PORT"), out var p) ? p : 8500,
                 KeyCount = data.Count
             };

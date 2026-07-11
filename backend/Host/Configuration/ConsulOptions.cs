@@ -17,8 +17,8 @@ public sealed class ConsulOptions
     /// </summary>
     public string Mode { get; set; } = "Off";
 
-    /// <summary>Consul HTTP API 地址。默认 ruoyu-consul（容器名）。</summary>
-    public string Host { get; set; } = "ruoyu-consul";
+    /// <summary>Consul HTTP API 地址。默认 host.docker.internal（宿主机映射）。</summary>
+    public string Host { get; set; } = "host.docker.internal";
 
     /// <summary>Consul HTTP API 端口。默认 8500。</summary>
     public int Port { get; set; } = 8500;
