@@ -21,7 +21,7 @@
 
 > Consul 配置的详细语义、启动时序、缓存机制、KV 分层策略请见 [ConsulIntegration.md](./ConsulIntegration.md)。
 >
-> **当前约束**：Consul 只承载跨项目共享配置。Identity 启动脚本不再注入数据库主机、端口、用户名、密码和 Loki 地址；`Database:Provider`、`Database:Name` 这类项目独有配置保留在项目 `start.sh`。`RSA_MASTER_KEY`、管理员引导密码、AppSecret 等启动密钥仍保留在环境变量或文件。
+> **当前约束**：Consul 只承载跨项目共享配置。Identity 启动脚本不再注入数据库主机、端口、用户名、密码和 Loki 地址；`Database:Provider` 使用程序默认值，`Database:Name` 这类项目独有配置可按需由项目 `start.sh` 覆盖。`RSA_MASTER_KEY`、管理员引导密码、AppSecret 等启动密钥仍保留在环境变量或文件。
 
 ---
 
@@ -35,8 +35,8 @@
 
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
-| Database:Provider | SQLite | 数据库提供者（SQLite / PostgreSQL，推荐由项目 `start.sh` 提供） |
-| Database:Name | quantumzhou_identity | 服务自己的 PostgreSQL 数据库名（推荐由项目 `start.sh` 提供） |
+| Database:Provider | PostgreSQL | 数据库提供者（默认由项目配置提供，通常无需 `start.sh` 重复注入） |
+| Database:Name | quantumzhou_identity | 服务自己的 PostgreSQL 数据库名（可按需由项目 `start.sh` 覆盖） |
 | Database:AutoMigrate | true | 是否自动执行迁移（生产环境建议设为 false） |
 | ConnectionStrings:Default | Data Source=quantumzhou_identity.db | SQLite 连接字符串 |
 | ConnectionStrings:PostgreSQL | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | PostgreSQL 连接字符串 |
@@ -121,7 +121,7 @@
 
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
-| AdminWeb:AdminUsernames | [] | 允许访问管理端的用户名白名单（空=允许所有） |
+| AdminWeb:AdminUsernames | [] | 允许访问管理端的用户名白名单（空=允许所有，`start.sh` 不再重复注入默认管理员） |
 | AdminWeb:AllowedOrigins | ["http://localhost:5173"] | CORS 允许的前端来源 |
 | AdminBootstrap:Username | admin | 初始管理员用户名 |
 | AdminBootstrap:Password | （空） | 初始管理员密码（生产环境必须通过环境变量配置） |

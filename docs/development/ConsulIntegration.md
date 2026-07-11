@@ -19,7 +19,7 @@ Identity 的项目级部署脚本 `start.sh` 固定接入 Consul，不再维护�
 | **Consul 正常** | Consul 可达 | 启动时从 Consul KV 加载配置、注册服务、开启健康检查 |
 | **本地缓存回退** | Consul 不可达 | 使用上一次成功拉取的缓存文件启动；日志告警但不阻断 |
 
-> **原则**：Consul 只承载跨项目共享配置；Identity 的项目独有配置必须保留在 `start.sh` 或项目自身配置中。当前 `start.sh` 只把共享的数据库地址/密码和 Loki 地址交给 Consul，`Database:Provider` 与 `Database:Name` 回到项目脚本。
+> **原则**：Consul 只承载跨项目共享配置；Identity 的项目独有配置必须保留在 `start.sh`、项目自身配置或程序默认值中。当前 `start.sh` 只把共享的数据库地址/密码和 Loki 地址交给 Consul，`Database:Provider` 使用程序默认值，`Database:Name` 如需覆盖再回到项目脚本。
 
 ## 2. 启动时序
 
@@ -56,6 +56,8 @@ Identity 的项目级部署脚本 `start.sh` 固定接入 Consul，不再维护�
 > **ACL token 说明**：当 Consul 集群启用 ACL（`acl.enabled=true`）时，必须由部署侧显式设置 `CONSUL_TOKEN` 环境变量。
 > Identity 服务不应读取 `script/env-script/06-consul/config/server.json`，因为那是 Consul Agent 自身的启动配置，不属于业务服务职责边界。
 > 未设置时 Steeltoe 客户端将无法通过 ACL 验证，Consul API 调用返回 403。
+>
+> **宿主机别名说明**：当 `CONSUL_HTTP_ADDR` 使用 `host.docker.internal:*` 时，Docker 启动命令必须补 `--add-host=host.docker.internal:host-gateway`。这样在 Linux Docker 下也能把该别名解析到宿主机网关；Mac/Windows Docker Desktop 也可兼容保留这条参数。
 
 ## 4. 配置分层（Consul 模式）
 
@@ -83,7 +85,7 @@ Identity 当前只把以下共享运行配置放入 Consul KV：
 - `config/ruoyu/infrastructure.json`：`Loki:Uri`、`PostgreSql:Host/Port/Username/Password`
 - `config/ruoyu/service-endpoints.json`：共享服务入口
 
-这样做的直接结果是：Identity 的共享基础设施参数从 Consul 拉取，而项目独有配置仍留在 `start.sh`，不再把服务私有配置塞进 Consul。
+这样做的直接结果是：Identity 的共享基础设施参数从 Consul 拉取，而项目独有配置留在项目本地配置或程序默认值中，不再把服务私有配置塞进 Consul。
 
 ### 5.2 配合 ACL 使用
 
@@ -169,7 +171,7 @@ data/
 > - `Steeltoe.Discovery.Consul` 负责服务注册
 > - Identity 使用自研 HTTP KV Loader 拉取 `config/ruoyu/*` 共享配置
 > - `ConsulCacheService` 负责成功拉取后的本地缓存和失败回退
-> - 项目级 `start.sh` 固定接入 Consul
+> - 项目级 `start.sh` 固定接入 Consul，但只保留最少注入项
 
 ### 8.2 新增文件
 
@@ -298,7 +300,7 @@ CONSUL_TOKEN="${CONSUL_TOKEN:-}"
 
 docker run -d \
   ...原有参数... \
-  -e Database__Provider=PostgreSQL \
+  --add-host=host.docker.internal:host-gateway \
   -e Database__Name=quantumzhou_identity \
   -e CONSUL_HTTP_ADDR="${CONSUL_HTTP_ADDR}" \
   -e CONSUL_TOKEN="${CONSUL_TOKEN}" \
@@ -335,16 +337,15 @@ docker run -d \
   --name ruoyu-identity \
   --restart unless-stopped \
   --network ruoyu-net \
+  --add-host=host.docker.internal:host-gateway \
   -p 10891:5002 \
   -e TZ=Asia/Shanghai \
   -e APP_TITLE="QuantumZhou.Identity" \
   -e ASPNETCORE_ENVIRONMENT=Production \
-  -e Database__Provider=PostgreSQL \
   -e Database__Name=quantumzhou_identity \
   -e CONSUL_HTTP_ADDR=host.docker.internal:8500 \
   -e CONSUL_TOKEN="<acl-token>" \
   -v "$(pwd)/data/identity/master-key:/app/master-key" \
-  -v "$(pwd)/data/identity/consul:/app/data/consul" \
   "$IMAGE_NAME"
 ```
 
@@ -362,7 +363,7 @@ docker run -d \
 | C7 | 新增 `/consul/status` 和 `/consul/cache/invalidate` 端点 | P1 | 本轮补齐 |
 | C8 | `/health` 端点增加 Consul 连通性检查 | P1 | 当前仍暂缓 |
 | C9 | 修改 `start.sh` 固定以 Consul 模式注入共享配置入口，并把项目独有配置保留在脚本内 | P1 | 本轮收敛 |
-| C10 | 新增 `data/consul/` 目录挂载 | P0 | ✅ 已实现 |
+| C10 | Consul 缓存目录默认使用容器内 `./data/consul`，宿主机挂载改为按需手动追加 | P0 | ✅ 已收敛 |
 | C11 | 单元测试：Consul KV Loader / CacheService | P0 | 本轮补齐最小覆盖 |
 | C12 | 集成测试：Consul 模式完整启动 + 降级切换 | P1 | ⏸ 暂缓（未来 task） |
 | C13 | 编写 Consul KV 导入逻辑 | P2 | ✅ 已实现（`script/env-script/06-consul/start.sh` 内置导入 + `config/kv/` 扁平文件） |

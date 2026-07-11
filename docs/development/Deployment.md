@@ -32,14 +32,11 @@
 
 > `CONSUL_SERVICE_NAME` 通常使用应用默认值，无需由 `start.sh` 重复注入。
 >
-> `Database:Provider` 和 `Database:Name` 属于 Identity 自有配置，应由 `start.sh` 注入；PostgreSQL Host / Port / Username / Password 和 Loki 地址属于共享基础设施配置，继续由 Consul KV 提供。
-
-### Consul 缓存目录挂载
-
-```bash
-# 新增挂载：Consul 本地缓存（兜底用）
--v "$(pwd)/data/identity/consul:/app/data/consul"
-```
+> `Database:Provider` 使用程序默认值；`Database:Name` 如需覆盖可由 `start.sh` 注入。PostgreSQL Host / Port / Username / Password 和 Loki 地址属于共享基础设施配置，继续由 Consul KV 提供。
+>
+> Consul 本地缓存默认写入容器内 `./data/consul`。`start.sh` 不再默认挂载宿主机目录；如果确实需要在“删除并重建容器”后保留缓存，再手动添加 volume。
+>
+> `CONSUL_HTTP_ADDR` 默认使用 `host.docker.internal:8500`，因此 Docker 启动参数必须补 `--add-host=host.docker.internal:host-gateway`，确保 Linux Docker 也能把该别名解析到宿主机网关。
 
 ### 验证 Consul 集成
 
@@ -81,7 +78,7 @@ curl http://localhost:5002/consul/status
 }
 ```
 
-> 其中 `Database:Provider` / `Database:Name` 由 Identity `start.sh` 注入；`PostgreSql:*` 由 Consul `config/ruoyu/infrastructure.json` 提供。
+> 其中 `Database:Provider` 使用程序默认值，`Database:Name` 可按需由 Identity `start.sh` 覆盖；`PostgreSql:*` 由 Consul `config/ruoyu/infrastructure.json` 提供。
 
 ---
 
