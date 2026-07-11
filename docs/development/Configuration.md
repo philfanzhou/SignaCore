@@ -24,7 +24,9 @@
 | `Consul:RetryCount` | `CONSUL_RETRY_COUNT` | `3` | 连接重试次数（指数退避） |
 | `Consul:EnableCache` | `CONSUL_ENABLE_CACHE` | `true` | 是否启用本地缓存兜底 |
 
-> Consul 配置的详细语义、启动时序、缓存机制、密钥安全策略请见 [ConsulIntegration.md](./ConsulIntegration.md)。
+> Consul 配置的详细语义、启动时序、缓存机制、密钥策略请见 [ConsulIntegration.md](./ConsulIntegration.md)。
+>
+> **密钥策略**：所有配置（含密码、密钥、Secret）统一走 Consul KV + ACL 控制。服务全部运行在本地 Docker 内网，Consul ACL 比环境变量 + `docker inspect` 更安全。CI 流水线注入和紧急调试场景可继续用环境变量覆盖。
 
 ---
 
