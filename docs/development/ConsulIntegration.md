@@ -135,8 +135,7 @@ Consul 8500 端口**不暴露公网**，仅映射到宿主机 localhost 用于�
 config/ruoyu/{ServiceName}/{Profile}/
 ├── serilog.json              → Serilog 完整配置节
 ├── feature-flags.json        → 功能开关
-├── downstream.json           → 下游服务地址
-└── grpc-settings.json        → gRPC 全局策略
+└── downstream.json           → 下游服务地址
 ```
 
 `Profile` = `ASPNETCORE_ENVIRONMENT` 的小写（`Production` → `prod`）。
@@ -357,15 +356,14 @@ script/env-script/06-consul/start.sh    # 新建
 ```bash
 CONSUL_HTTP_ADDR=http://localhost:8500
 
-# 服务级配置
-consul kv put config/ruoyu/QuantumZhou.Identity/prod/serilog.json '{"MinimumLevel":{"Default":"Information"}}'
-consul kv put config/ruoyu/_global/feature-flags.json '{"EnableNewLogin":true}'
+# 导入版本化 KV 文件
+./script/env-script/06-consul/seed-kv.sh
 
 # 如有密钥（也可通过 CI/部署脚本一次性注入）
 # consul kv put config/ruoyu/QuantumZhou.Identity/prod/db-connection.json '...'
 ```
 
-> 首次部署后沉淀为 `script/env-script/06-consul/seed-identity-kv.sh` 脚本复用。
+> 首次部署后沉淀为 `script/env-script/06-consul/seed-kv.sh` 通用脚本复用，业务配置内容保存在 `script/env-script/06-consul/config/consul/kv/`。
 
 ### 12.3 Identity 容器启动（Consul 模式）
 
@@ -405,7 +403,7 @@ docker run -d \
 | C10 | 新增 `data/consul/` 目录挂载 | P0 | ✅ 已实现 |
 | C11 | 单元测试：ConsulCacheService（原子替换 / 损坏回放）| P0 | ⏸ 暂缓（未来 task，当前阶段缓存为占位） |
 | C12 | 集成测试：Consul 模式完整启动 + 降级切换 | P1 | ⏸ 暂缓（未来 task） |
-| C13 | 编写 Consul KV 种子脚本 | P2 | ✅ 已实现（`script/env-script/06-consul/seed-identity-kv.sh`） |
+| C13 | 编写 Consul KV 种子脚本 | P2 | ✅ 已实现（`script/env-script/06-consul/seed-kv.sh` + `config/consul/kv/`） |
 
 ## 14. 工作量估计
 
