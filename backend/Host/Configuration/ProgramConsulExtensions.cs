@@ -43,7 +43,7 @@ public static class ProgramConsulExtensions
         try
         {
             var result = new ConsulKvLoader(opts).Load();
-            InsertSnapshotBeforeEnvironmentSources(builder, result.Snapshot);
+            ApplySnapshotWithExpectedPrecedence(builder, result.Snapshot);
             if (opts.EnableCache && result.Snapshot.Count > 0)
             {
                 cacheService.Save(result.Snapshot);
@@ -64,7 +64,7 @@ public static class ProgramConsulExtensions
                     var cached = cacheService.Load();
                     if (cached != null && cached.Count > 0)
                     {
-                        InsertSnapshotBeforeEnvironmentSources(builder, cached);
+                        ApplySnapshotWithExpectedPrecedence(builder, cached);
                         ConsulRuntimeState.Instance.MarkFallback("Cache", ex.Message, cached.Count, prefixes, opts.CacheDirectory);
                         StartupDiagnosticsFormatter.WriteBootstrap(
                             $"Consul KV fallback: Source=Cache, KeyCount={cached.Count}, CacheDirectory={opts.CacheDirectory}, Error={StartupDiagnosticsFormatter.SummarizeError(ex.Message)}");
@@ -112,7 +112,7 @@ public static class ProgramConsulExtensions
         return services;
     }
 
-    private static void InsertSnapshotBeforeEnvironmentSources(
+    internal static void ApplySnapshotWithExpectedPrecedence(
         IConfigurationBuilder builder,
         IDictionary<string, string?> snapshot)
     {
@@ -121,23 +121,18 @@ public static class ProgramConsulExtensions
             return;
         }
 
-        var source = new MemoryConfigurationSource
-        {
-            InitialData = snapshot
-        };
+        var replaySources = builder.Sources
+            .Where(static source =>
+                source is EnvironmentVariablesConfigurationSource ||
+                source is CommandLineConfigurationSource)
+            .ToArray();
 
-        var insertIndex = builder.Sources.Count;
-        for (var i = 0; i < builder.Sources.Count; i++)
+        builder.AddInMemoryCollection(snapshot);
+
+        foreach (var replaySource in replaySources)
         {
-            if (builder.Sources[i] is EnvironmentVariablesConfigurationSource ||
-                builder.Sources[i] is CommandLineConfigurationSource)
-            {
-                insertIndex = i;
-                break;
-            }
+            builder.Add(replaySource);
         }
-
-        builder.Sources.Insert(insertIndex, source);
     }
 
     /// <summary>
