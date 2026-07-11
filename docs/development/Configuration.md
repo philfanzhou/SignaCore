@@ -42,10 +42,10 @@
 | Database:AutoMigrate | true | 是否自动执行迁移（生产环境建议设为 false） |
 | ConnectionStrings:Default | Data Source=quantumzhou_identity.db | SQLite 连接字符串 |
 | ConnectionStrings:PostgreSQL | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | PostgreSQL 连接字符串 |
-| PostgreSql:Host | localhost | PostgreSQL 主机（推荐由 Consul `config/ruoyu/infrastructure.json` 提供） |
-| PostgreSql:Port | 5432 | PostgreSQL 端口（推荐由 Consul `config/ruoyu/infrastructure.json` 提供） |
-| PostgreSql:Username | postgres | PostgreSQL 用户名（推荐由 Consul `config/ruoyu/infrastructure.json` 提供） |
-| PostgreSql:Password | （空） | PostgreSQL 密码（推荐由 Consul `config/ruoyu/infrastructure.json` 提供） |
+| PostgreSql:Host | localhost | PostgreSQL 主机（推荐由 Consul `config/ruoyu/shared.json` 提供） |
+| PostgreSql:Port | 5432 | PostgreSQL 端口（推荐由 Consul `config/ruoyu/shared.json` 提供） |
+| PostgreSql:Username | postgres | PostgreSQL 用户名（推荐由 Consul `config/ruoyu/shared.json` 提供） |
+| PostgreSql:Password | （空） | PostgreSQL 密码（推荐由 Consul `config/ruoyu/shared.json` 提供） |
 
 > PostgreSQL 连接字符串自动追加连接池参数：`Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100;Connection Lifetime=300`。如连接字符串中已包含 `Pooling=` 则不追加。
 >
@@ -196,7 +196,7 @@ Loki 地址统一通过 `Loki:Uri` 配置键进入 `Serilog:WriteTo:1:Args:uri`�
 
 | 来源 | 示例值 | 说明 |
 |------|--------|------|
-| `Loki:Uri` 配置键 | http://ruoyu-loki:3100 | 推荐由 Consul `config/ruoyu/infrastructure.json` 提供 |
+| `Loki:Uri` 配置键 | http://ruoyu-loki:3100 | 推荐由 Consul `config/ruoyu/shared.json` 提供 |
 
 > **容错机制**：如果 `Loki:Uri` 未设置，Loki Sink 使用 appsettings.json 中的 fallback 地址 `http://localhost:3100`。Loki 不可达时 Sink 异步重试，不影响服务启动。
 

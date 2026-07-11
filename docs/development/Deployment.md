@@ -78,7 +78,7 @@ curl http://localhost:5002/consul/status
 }
 ```
 
-> 其中 `Database:Provider` 使用程序默认值，`Database:Name` 可按需由 Identity `start.sh` 覆盖；`PostgreSql:*` 由 Consul `config/ruoyu/infrastructure.json` 提供。
+> 其中 `Database:Provider` 使用程序默认值，`Database:Name` 可按需由 Identity `start.sh` 覆盖；`PostgreSql:*` 由 Consul `config/ruoyu/shared.json` 提供。
 
 ---
 

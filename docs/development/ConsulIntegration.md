@@ -92,7 +92,7 @@ Identity 的项目级部署脚本 `start.sh` 固定接入 Consul，不再维护�
 Identity 当前只把以下共享运行配置放入 Consul KV：
 
 - `config/ruoyu/serilog.json`：统一日志级别
-- `config/ruoyu/infrastructure.json`：`Loki:Uri`、`PostgreSql:Host/Port/Username/Password`
+- `config/ruoyu/shared.json`：`Loki:Uri`、`PostgreSql:Host/Port/Username/Password`
 - `config/ruoyu/service-endpoints.json`：共享服务入口
 
 这样做的直接结果是：Identity 的共享基础设施参数从 Consul 拉取，而项目独有配置留在项目本地配置或程序默认值中，不再把服务私有配置塞进 Consul。
@@ -123,7 +123,7 @@ Consul 8500 端口**不暴露公网**，仅映射到宿主机 localhost 用于�
 ```
 config/ruoyu/
 ├── serilog.json            → 统一日志最小级别 / Override
-├── infrastructure.json     → 共享基础设施地址（PostgreSql/Loki 等）
+├── shared.json             → 共享基础设施地址（PostgreSql/Loki 等）
 └── service-endpoints.json  → 跨服务共享入口地址 / Audience / RequireHttpsMetadata
 ```
 
@@ -135,7 +135,7 @@ Consul KV Value 必须是 JSON 字符串，且文件内容直接保存真实配�
 | Consul KV 路径 | IConfiguration Key |
 |---------------|--------------------|
 | `config/ruoyu/serilog.json` | `Serilog:*` |
-| `config/ruoyu/infrastructure.json` | `Loki:*` / `PostgreSql:*`（含 `PostgreSql:Password`） |
+| `config/ruoyu/shared.json` | `Loki:*` / `PostgreSql:*`（含 `PostgreSql:Password`） |
 | `config/ruoyu/service-endpoints.json` | `IdentityService:*` / 其他共享入口配置 |
 
 ## 7. 本地缓存机制
@@ -333,7 +333,7 @@ CONSUL_HTTP_ADDR=http://localhost:8500
 ./script/env-script/06-consul/start.sh
 
 # 推荐维护的共享配置：
-# - script/env-script/06-consul/config/kv/infrastructure.json
+# - script/env-script/06-consul/config/kv/shared.json
 # - script/env-script/06-consul/config/kv/service-endpoints.json
 ```
 
