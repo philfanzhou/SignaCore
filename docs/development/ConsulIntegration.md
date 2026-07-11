@@ -73,8 +73,13 @@ Identity 支持三种模式，由环境变量 `CONSUL_MODE` 控制：
 | `CONSUL_RETRY_COUNT` | `3` | 否 | 重试次数（指数退避） |
 | `CONSUL_ENABLE_CACHE` | `true` | 否 | 是否启用本地缓存降级 |
 | `CONSUL_CACHE_DIR` | `./data/consul` | 否 | 缓存文件存放路径 |
+| `CONSUL_TOKEN` | （空） | 否 | Consul ACL token（启用 ACL 时必需）。`ConsulOptions.Bind()` 读取后注入到 `Consul:Token` 配置节，Steeltoe 客户端自动绑定使用 |
 
 > 独立模式下以上所有变量均不生效，即使设置了也忽略。
+>
+> **ACL token 说明**：当 Consul 集群启用 ACL（`acl.enabled=true`）时，必须设置 `CONSUL_TOKEN` 环境变量，
+> 值为 Consul agent token（由 `start.sh` 动态生成或通过 `CONSUL_AGENT_TOKEN` 环境变量指定）。
+> 未设置时 Steeltoe 客户端将无法通过 ACL 验证，Consul API 调用返回 403。
 
 ## 4. 配置分层（Consul 模式）
 
@@ -194,9 +199,9 @@ data/
 | 文件 | 作用 | 行数估算 |
 |------|------|---------|
 | `Host/Configuration/ConsulCacheService.cs` | 本地缓存读写（原子替换 + 损坏回放）| ~80 |
-| `Host/Configuration/ProgramConsulExtensions.cs` | 扩展方法：封装 Steeltoe 调用 + 降级逻辑 | ~60 |
-| `Host/Configuration/ConsulOptions.cs` | 强类型配置类（绑定 appsettings.json `Consul:` 节）| ~20 |
-| `config/consul/server.json` | Consul Agent 配置文件 | ~10 |
+| `Host/Configuration/ProgramConsulExtensions.cs` | 扩展方法：封装 Steeltoe 调用 + 降级逻辑 + ACL token 注入 | ~110 |
+| `Host/Configuration/ConsulOptions.cs` | 强类型配置类（绑定 appsettings.json `Consul:` 节，含 `Token` 属性）| ~120 |
+| `config/consul/server.json.template` | Consul Agent 配置模板（ACL token 为占位符，运行时 sed 替换）| ~20 |
 
 > 总计新增 ~170 行自建代码，其余由 Steeltoe 处理。
 
@@ -224,7 +229,18 @@ public static class ProgramConsulExtensions
         if (!ConsulOptions.IsEnabled(config)) return builder;
 
         var opts = ConsulOptions.Bind(config);
-        var cacheService = new ConsulCacheService(opts.CacheDirectory);
+
+        // ACL token 注入：把 CONSUL_TOKEN 环境变量值注入到 "Consul:Token" 配置节，
+        // 供 Steeltoe 内置 ConsulOptions 读取（Steeltoe 的 AddConsulDiscoveryClient 不接受配置回调）。
+        if (!string.IsNullOrEmpty(opts.Token))
+        {
+            builder.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Consul:Token"] = opts.Token
+            });
+        }
+
+        var cacheService = new ConsulCacheService(opts.CacheDirectory, logger: null);
 
         // 【未来扩展点】Steeltoe.Configuration.Consul 包发布后，此处插入：
         // try { builder.AddConsul(c => { c.Host = opts.Host; ... c.FailFast = false; }); }
@@ -239,7 +255,6 @@ public static class ProgramConsulExtensions
                 if (cached != null)
                 {
                     builder.AddInMemoryCollection(cached);
-                    // 日志：使用本地缓存启动（Consul KV 加载暂未实现）
                 }
             }
             catch (Exception)
@@ -258,6 +273,7 @@ public static class ProgramConsulExtensions
         // Steeltoe.Discovery.Consul 4.2.0：注册 Consul 服务发现客户端
         // ConsulDiscoveryOptions 绑定 "Consul:Discovery:" 节（Host/Port/ServiceName/HealthCheckPath 等）
         // ConsulOptions（Steeltoe 内置）绑定 "Consul:" 节（Host/Port/Scheme/Token）
+        // ACL token 已在 AddConsulIfEnabled 阶段通过 AddInMemoryCollection 注入到 "Consul:Token"
         services.AddConsulDiscoveryClient();
 
         return services;

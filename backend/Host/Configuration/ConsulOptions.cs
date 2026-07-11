@@ -48,6 +48,13 @@ public sealed class ConsulOptions
     public string CacheDirectory { get; set; } = "./data/consul";
 
     /// <summary>
+    /// Consul ACL token（用于访问启用了 ACL 的 Consul 集群）。
+    /// 受环境变量 CONSUL_TOKEN 控制。为空时表示 ACL 未启用或匿名访问。
+    /// 此值会传给 Steeltoe 的 ConsulOptions.Token（Steeltoe.Discovery.Consul 内置）。
+    /// </summary>
+    public string? Token { get; set; }
+
+    /// <summary>
     /// 判断是否启用 Consul 集成（Mode == "On"，不区分大小写）。
     /// </summary>
     public static bool IsEnabled(IConfiguration config)
@@ -98,6 +105,10 @@ public sealed class ConsulOptions
 
         var envCacheDir = Environment.GetEnvironmentVariable("CONSUL_CACHE_DIR");
         if (!string.IsNullOrEmpty(envCacheDir)) opts.CacheDirectory = envCacheDir;
+
+        // ACL token（启用 ACL 时必需，独立模式下忽略）
+        var envToken = Environment.GetEnvironmentVariable("CONSUL_TOKEN");
+        if (!string.IsNullOrEmpty(envToken)) opts.Token = envToken;
 
         // Profile 默认与 ASPNETCORE_ENVIRONMENT 一致（小写）
         if (string.IsNullOrEmpty(opts.Profile))
