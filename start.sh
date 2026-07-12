@@ -15,6 +15,9 @@ DB_NAME="ruoyu_identity"
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="Qwer1234"
 SMS_BYPASS_CODE="666666"
+# 首次部署需要 AutoMigrate=true 让 EF Core 创建 security_keys 等表
+# 详见 docs/deploy-test/03-known-issues.md 的 N5
+AUTO_MIGRATE="${DATABASE_AUTO_MIGRATE:-true}"
 
 docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
 if [ -n "$(docker ps -q --filter "name=^/${CONTAINER_NAME}$")" ]; then
@@ -41,6 +44,7 @@ docker run -d \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Sms__BypassCode="${SMS_BYPASS_CODE}" \
     -e Database__Name="${DB_NAME}" \
+    -e Database__AutoMigrate="${AUTO_MIGRATE}" \
     -v "${DATA_DIR}/master-key:/app/master-key" \
     "$IMAGE_NAME"
 
