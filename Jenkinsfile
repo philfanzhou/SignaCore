@@ -1,19 +1,18 @@
 // Ruoyu.Study - Identity Service Pipeline
 //
 // Per-service pipeline for QuantumZhou.Identity:
-//   1. Preflight — verify docker + repo mount
+//   1. Preflight — verify docker + dotnet + repo access
 //   2. Build    — reuse script/build-script/01-identity.build.sh (docker build)
-//   3. UT       — run unit tests in a throwaway dotnet/sdk:8.0 container
+//   3. UT       — run unit tests directly on host via dotnet SDK 8.0
 //   4. Deploy   — restart the ruoyu-identity container via start.sh
 //   5. Smoke    — health check + admin login
 //
-// The Jenkins controller runs inside Docker and drives the host Docker daemon
-// via the bind-mounted /var/run/docker.sock. The repo is mounted read-only at
-// /srv/repo by script/env-script/07-jenkins/start.sh.
+// Jenkins runs natively on the host (systemd service, not Docker).
+// The repo lives at /mnt/data1/Ruoyu.Study (symlink to /mnt/data1/Ruoyu.Study).
+// dotnet SDK 8.0 is installed at /opt/dotnet (see /etc/profile.d/dotnet.sh).
+// Docker CLI is available because the jenkins user is in the docker group.
 //
 // Build context = repo root (needed because the Dockerfile COPYs ruoyu.common).
-// UT runs against the repo source via a throwaway `dotnet/sdk:8.0` container
-// with the repo mounted at /src:ro and an output dir on the Jenkins workspace.
 
 pipeline {
     agent any
@@ -26,14 +25,19 @@ pipeline {
     }
 
     environment {
-        REPO_DIR         = '/srv/repo'
+        REPO_DIR         = '/mnt/data1/Ruoyu.Study'
         SERVICE_DIR      = "${env.REPO_DIR}/src/services/QuantumZhou.Identity"
         BUILD_SCRIPT     = "${env.REPO_DIR}/script/build-script/01-identity.build.sh"
-        TEST_PROJ       = "${env.SERVICE_DIR}/backend/Tests/unit/QuantumZhou.Identity.Tests.csproj"
+        TEST_PROJ        = "${env.SERVICE_DIR}/backend/Tests/unit/QuantumZhou.Identity.Tests.csproj"
         START_SCRIPT     = "${env.SERVICE_DIR}/start.sh"
         REPORT_DIR       = "${env.WORKSPACE}/reports"
-        // Use Aliyun NuGet mirror for faster restores inside China.
-        NUGET_SOURCE     = 'https://nuget.cdn.azure.cn/v3/index.json'
+        // Use Huawei NuGet mirror for faster restores inside China.
+        NUGET_SOURCE     = 'https://repo.huaweicloud.com/repository/nuget/v3/index.json'
+        // Consul ACL token — required by start.sh to read shared PostgreSQL config
+        // from Consul KV (config/ruoyu/shared.json). Provisioned in Jenkins credentials
+        // as 'consul-acl-token' (Secret text). Value mirrors
+        // script/env-script/06-consul/config/server.json (initial_management).
+        CONSUL_TOKEN     = credentials('consul-acl-token')
     }
 
     stages {
@@ -47,7 +51,10 @@ pipeline {
                     echo "=== Docker access ==="
                     docker info --format 'Server Version: {{.ServerVersion}}'
                     echo ""
-                    echo "=== Repo mount ==="
+                    echo "=== dotnet SDK ==="
+                    dotnet --version
+                    echo ""
+                    echo "=== Repo symlink ==="
                     ls -la "$REPO_DIR" | head -10
                     echo ""
                     echo "=== Identity source tree ==="
@@ -76,29 +83,26 @@ pipeline {
         stage('Unit Test') {
             steps {
                 sh '''
-                    set +e
+                    set -e
                     mkdir -p "$REPORT_DIR"
-                    # Run UT in a throwaway sdk container against the read-only repo.
-                    # Test results are written to the Jenkins workspace via a bind-mount.
-                    docker run --rm \
-                        -v "$REPO_DIR":/src:ro \
-                        -v "$REPORT_DIR":/reports \
-                        -w /src/src/services/QuantumZhou.Identity \
-                        mcr.microsoft.com/dotnet/sdk:8.0 \
-                        bash -c "
-                            set -e
-                            # Use Aliyun NuGet mirror for faster restores in China
-                            dotnet nuget add source $NUGET_SOURCE -n AliyunMirror || true
-                            dotnet test backend/Tests/unit/QuantumZhou.Identity.Tests.csproj \
-                                --configuration Release \
-                                --logger 'trx;logfilename=identity-ut.trx' \
-                                --results-directory /reports \
-                                --no-restore
-                            echo 'UT completed'
-                        " 2>&1 | tee "$REPORT_DIR/ut-console.log"
-                    UT_EXIT=${PIPESTATUS[0]}
-                    echo "UT exit code: $UT_EXIT"
-                    exit $UT_EXIT
+                    cd "$SERVICE_DIR"
+                    # Clean ALL stale obj/bin under ruoyu.common and this service —
+                    # a previous Docker build leaves incomplete project.assets.json
+                    # (empty projectReferences -> CS0234) and missing ref DLLs
+                    # (obj/Release/net8.0/ref/ empty -> CS0006) for every transitively
+                    # restored project, not just Tests.
+                    COMMON_DIR="$REPO_DIR/src/services/ruoyu.common"
+                    find "$COMMON_DIR" -type d \\( -name obj -o -name bin \\) -prune -exec rm -rf {} + 2>/dev/null || true
+                    find "$SERVICE_DIR" -type d \\( -name obj -o -name bin \\) -prune -exec rm -rf {} + 2>/dev/null || true
+                    # Restore + test directly on host (no throwaway container needed).
+                    dotnet restore backend/Tests/unit/QuantumZhou.Identity.Tests.csproj \
+                        --source "$NUGET_SOURCE"
+                    dotnet test backend/Tests/unit/QuantumZhou.Identity.Tests.csproj \
+                        --configuration Release \
+                        --logger 'trx;logfilename=identity-ut.trx' \
+                        --results-directory "$REPORT_DIR" \
+                        --no-restore
+                    echo 'UT completed'
                 '''
             }
         }
@@ -111,11 +115,11 @@ pipeline {
                     # (already built locally), and starts a fresh one.
                     # It is the same script used for manual deployment.
                     cd "$SERVICE_DIR"
+                    # start.sh ends with `docker logs -f`, which blocks. Give it
+                    # 20 seconds to spin up the container, then detach.
                     bash "$START_SCRIPT" &
                     START_PID=$!
-                    # start.sh ends with `docker logs -f`, which blocks. Give it
-                    # 15 seconds to spin up the container, then detach.
-                    sleep 15
+                    sleep 20
                     kill $START_PID 2>/dev/null || true
                     docker ps --filter 'name=ruoyu-identity' --format '{{.Names}} {{.Status}}'
                 '''
@@ -171,7 +175,6 @@ pipeline {
                 '''
             }
             archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
-            junit testResults: 'reports/*.trx', allowEmptyResults: true
         }
         success {
             echo 'Identity pipeline PASSED: build + UT + deploy + smoke'
