@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using QuantumZhou.Identity.Database;
@@ -80,6 +81,10 @@ public static class ServiceCollectionExtensions
             {
                 connectionString = $"{connectionString};Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100;Connection Lifetime=300";
             }
+
+            // Ensure target database exists before registering DbContext.
+            // start.sh only provides Database:Name; the database is auto-created if missing.
+            EnsurePostgreSqlDatabaseCreated(connectionString);
         }
 
         services.AddDbContext<IdentityDbContext>(options =>
@@ -390,5 +395,58 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton(options);
         return options;
+    }
+
+    /// <summary>
+    /// Ensures the target PostgreSQL database exists. If missing, creates it via a maintenance
+    /// connection to the <c>postgres</c> database. This allows <c>start.sh</c> to only provide
+    /// <c>Database:Name</c> without pre-creating the database manually.
+    /// </summary>
+    /// <remarks>
+    /// Failures are logged to <see cref="Console.Error"/> but do not abort startup; the subsequent
+    /// <c>Migrate()</c> call will surface a clear connection error if the database remains unreachable.
+    /// </remarks>
+    internal static void EnsurePostgreSqlDatabaseCreated(string connectionString)
+    {
+        try
+        {
+            var builder = new NpgsqlConnectionStringBuilder(connectionString);
+            var databaseName = builder.Database;
+            if (string.IsNullOrWhiteSpace(databaseName))
+            {
+                return;
+            }
+
+            // Maintenance connection targets the built-in 'postgres' database.
+            var maintenanceBuilder = new NpgsqlConnectionStringBuilder(connectionString)
+            {
+                Database = "postgres",
+                Pooling = false
+            };
+
+            using var connection = new NpgsqlConnection(maintenanceBuilder.ToString());
+            connection.Open();
+
+            using var checkCmd = connection.CreateCommand();
+            checkCmd.CommandText = "SELECT 1 FROM pg_database WHERE datname = @name";
+            checkCmd.Parameters.AddWithValue("@name", databaseName);
+            var exists = checkCmd.ExecuteScalar() != null;
+            if (exists)
+            {
+                return;
+            }
+
+            // CREATE DATABASE does not accept parameters; databaseName originates from trusted
+            // configuration (Database:Name). Quoting with double-quotes guards against SQL reserved words.
+            using var createCmd = connection.CreateCommand();
+            createCmd.CommandText = $"CREATE DATABASE \"{databaseName}\"";
+            createCmd.ExecuteNonQuery();
+            Console.WriteLine($"[Identity] Database '{databaseName}' created automatically.");
+        }
+        catch (Exception ex)
+        {
+            // Do not abort startup; Migrate() will provide a clear error if the DB remains unreachable.
+            Console.Error.WriteLine($"[Identity] EnsurePostgreSqlDatabaseCreated warning: {ex.Message}");
+        }
     }
 }
