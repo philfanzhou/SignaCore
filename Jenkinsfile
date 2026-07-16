@@ -93,7 +93,7 @@ pipeline {
                     # (empty projectReferences -> CS0234) and missing ref DLLs
                     # (obj/Release/net8.0/ref/ empty -> CS0006) for every transitively
                     # restored project, not just Tests.
-                    COMMON_DIR="$REPO_DIR/src/services/ruoyu.common"
+                    COMMON_DIR="$REPO_DIR/src/ruoyu.common"
                     find "$COMMON_DIR" -type d \\( -name obj -o -name bin \\) -prune -exec rm -rf {} + 2>/dev/null || true
                     find "$SERVICE_DIR" -type d \\( -name obj -o -name bin \\) -prune -exec rm -rf {} + 2>/dev/null || true
                     # Restore + test directly on host (no throwaway container needed).
