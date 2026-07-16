@@ -40,6 +40,8 @@ pipeline {
         CONSUL_TOKEN     = credentials('consul-acl-token')
     }
 
+    triggers { pollSCM('H/5 * * * *') }
+
     stages {
         stage('Preflight') {
             steps {
