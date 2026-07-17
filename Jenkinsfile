@@ -7,10 +7,10 @@
 //   4. Deploy   — restart the ruoyu-identity container via start.sh
 //   5. Smoke    — health check + admin login
 //
-// Jenkins runs natively on the host (systemd service, not Docker).
-// The repo lives at /mnt/data1/Ruoyu.Study (symlink to /mnt/data1/Ruoyu.Study).
-// dotnet SDK 8.0 is installed at /opt/dotnet (see /etc/profile.d/dotnet.sh).
-// Docker CLI is available because the jenkins user is in the docker group.
+// Jenkins runs inside the ruoyu-jenkins:custom Docker container (see
+// script/env-script/07-jenkins/). The repo is mounted read-only at /srv/repo.
+// .NET 8 SDK is pre-installed in the custom image. Docker CLI reaches the host
+// daemon via the bind-mounted /var/run/docker.sock.
 //
 // Build context = repo root (needed because the Dockerfile COPYs ruoyu.common).
 
@@ -25,7 +25,7 @@ pipeline {
     }
 
     environment {
-        REPO_DIR         = '/mnt/data1/Ruoyu.Study'
+        REPO_DIR         = "${env.REPO_DIR ?: '/srv/repo'}"
         SERVICE_DIR      = "${env.REPO_DIR}/src/services/QuantumZhou.Identity"
         BUILD_SCRIPT     = "${env.REPO_DIR}/script/build-script/01-identity.build.sh"
         TEST_PROJ        = "${env.SERVICE_DIR}/backend/Tests/unit/QuantumZhou.Identity.Tests.csproj"
