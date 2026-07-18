@@ -25,18 +25,22 @@
 ## 详细的验收标准
 
 ### AC-FR-01: 管理员登录
-- **Given** 有效的用户名和密码
-- **When** 用户名在 AdminUsernames 白名单中（或白名单为空）
+- **Given** 有效的用户名和密码，且用户名为 `AdminBootstrap:Username`（唯一管理员）
+- **When** POST /api/admin/session/login
 - **Then** 签发 Cookie，返回 200
 
-- **Given** 有效的用户名和密码
-- **When** 用户名不在 AdminUsernames 白名单中
-- **Then** 返回 403
+- **Given** 有效的用户名和密码，但用户名 ≠ `AdminBootstrap:Username`
+- **When** POST /api/admin/session/login
+- **Then** 返回 403（bootstrap_admin_required）
+
+- **Given** `AdminBootstrap:Username` 为空，任意有效账号尝试登录
+- **When** POST /api/admin/session/login
+- **Then** 返回 403（fail-closed）
 
 ### AC-FR-02: 获取当前会话
 - **Given** 用户已登录（Cookie 有效）
 - **When** GET /api/admin/session/me
-- **Then** 返回 200，包含 AccountId、Username、IsAuthenticated=true、AdminUsernamesConfigured（白名单是否非空）
+- **Then** 返回 200，包含 AccountId、Username、IsAuthenticated=true
 
 - **Given** 用户未登录或 Cookie 无效
 - **When** GET /api/admin/session/me

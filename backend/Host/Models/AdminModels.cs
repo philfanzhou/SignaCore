@@ -7,8 +7,7 @@ public sealed record AdminLoginRequest(string Username, string Password, bool Re
 public sealed record AdminSessionResponse(
     string AccountId,
     string Username,
-    bool IsAuthenticated,
-    bool AdminUsernamesConfigured);
+    bool IsAuthenticated);
 
 public sealed record AdminPagedResponse<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);
 

@@ -84,7 +84,6 @@ admin_frontend/
 | Session 恢复 | 页面加载时自动验证 Cookie 会话状态 |
 | 登录状态保持 | Cookie 认证，支持持久会话 |
 | 401 处理 | 会话过期时自动重置状态并返回登录页 |
-| 白名单警告 | 后端未配置 AdminUsernames 时显示安全警告 |
 
 **认证流程**：
 1. 页面加载时调用 `/api/admin/session/me` 检查会话
@@ -219,7 +218,6 @@ interface AdminSession {
   accountId: string
   username: string
   isAuthenticated: boolean
-  adminUsernamesConfigured: boolean
 }
 
 interface AdminCreateUserRequest {

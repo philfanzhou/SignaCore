@@ -270,7 +270,6 @@ public static class ServiceCollectionExtensions
             .AddDbContextCheck<IdentityDbContext>("database");
 
         var adminWebOrigins = configuration.GetSection("AdminWeb:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
-        services.Configure<AdminWebOptions>(configuration.GetSection(AdminWebOptions.SectionName));
         services.Configure<AdminBootstrapOptions>(configuration.GetSection(AdminBootstrapOptions.SectionName));
         services.PostConfigure<AdminBootstrapOptions>(options =>
         {

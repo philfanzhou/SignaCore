@@ -37,7 +37,7 @@ public class AdminControllerTests : IDisposable
     private readonly Mock<IAuditLogRepository> _auditLogRepoMock;
     private readonly Mock<IIdentityValidator> _passwordValidatorMock;
     private readonly Mock<IAuthenticationService> _authServiceMock;
-    private readonly AdminWebOptions _adminWebOptions;
+    private readonly AdminBootstrapOptions _bootstrapOptions;
 
     private static readonly Guid AdminId = Guid.NewGuid();
     private const string AdminName = "admin";
@@ -71,7 +71,7 @@ public class AdminControllerTests : IDisposable
         _authServiceMock.Setup(a => a.SignOutAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<AuthenticationProperties>()))
             .Returns(Task.CompletedTask);
 
-        _adminWebOptions = new AdminWebOptions { AdminUsernames = new[] { AdminName } };
+        _bootstrapOptions = new AdminBootstrapOptions { Username = AdminName, Password = "Qwer1234" };
 
         _controller = new AdminController(NullLogger<AdminController>.Instance);
         var httpContext = new DefaultHttpContext
@@ -99,7 +99,7 @@ public class AdminControllerTests : IDisposable
         _controller.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
     }
 
-    private IOptions<AdminWebOptions> CreateOptions() => Options.Create(_adminWebOptions);
+    private IOptions<AdminBootstrapOptions> CreateBootstrapOptions() => Options.Create(_bootstrapOptions);
 
     private ValidatorFactory CreateValidatorFactory()
     {
@@ -113,7 +113,7 @@ public class AdminControllerTests : IDisposable
     {
         var result = await _controller.Login(
             new AdminLoginRequest("", "pwd", false),
-            CreateValidatorFactory(), CreateOptions(), _auditServiceMock.Object);
+            CreateValidatorFactory(), CreateBootstrapOptions(), _auditServiceMock.Object);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         Assert.IsType<AdminApiErrorResponse>(bad.Value);
@@ -125,7 +125,7 @@ public class AdminControllerTests : IDisposable
     {
         var result = await _controller.Login(
             new AdminLoginRequest("user", "", false),
-            CreateValidatorFactory(), CreateOptions(), _auditServiceMock.Object);
+            CreateValidatorFactory(), CreateBootstrapOptions(), _auditServiceMock.Object);
 
         Assert.IsType<BadRequestObjectResult>(result);
         _passwordValidatorMock.Verify(v => v.ValidateAsync(It.IsAny<ValidationRequest>()), Times.Never);
@@ -136,7 +136,7 @@ public class AdminControllerTests : IDisposable
     {
         var result = await _controller.Login(
             new AdminLoginRequest("   ", "   ", false),
-            CreateValidatorFactory(), CreateOptions(), _auditServiceMock.Object);
+            CreateValidatorFactory(), CreateBootstrapOptions(), _auditServiceMock.Object);
 
         Assert.IsType<BadRequestObjectResult>(result);
     }
@@ -149,7 +149,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.Login(
             new AdminLoginRequest("user", "pwd", false),
-            CreateValidatorFactory(), CreateOptions(), _auditServiceMock.Object);
+            CreateValidatorFactory(), CreateBootstrapOptions(), _auditServiceMock.Object);
 
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status401Unauthorized, status.StatusCode);
@@ -160,7 +160,7 @@ public class AdminControllerTests : IDisposable
     }
 
     [Fact]
-    public async Task Login_WhenValidationSucceedsButNotAdmin_Returns403AndRecordsAudit()
+    public async Task Login_WhenValidationSucceedsButNotBootstrapAdmin_Returns403AndRecordsAudit()
     {
         var account = new AccountEntity { Id = Guid.NewGuid() };
         _passwordValidatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
@@ -168,43 +168,40 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.Login(
             new AdminLoginRequest("nonadmin", "pwd", false),
-            CreateValidatorFactory(), CreateOptions(), _auditServiceMock.Object);
+            CreateValidatorFactory(), CreateBootstrapOptions(), _auditServiceMock.Object);
 
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status403Forbidden, status.StatusCode);
         _auditServiceMock.Verify(a => a.RecordLoginAsync(
             account.Id, "nonadmin", "admin_login", "login_failure",
-            It.IsAny<string?>(), It.IsAny<string?>(), "admin_access_denied",
+            It.IsAny<string?>(), It.IsAny<string?>(), "bootstrap_admin_required",
             It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
         _authServiceMock.Verify(a => a.SignInAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()), Times.Never);
     }
 
     [Fact]
-    public async Task Login_WhenAdminUsernamesEmpty_AllowsAnyValidUser()
+    public async Task Login_WhenBootstrapUsernameEmpty_RefusesAllUsers()
     {
-        _adminWebOptions.AdminUsernames = Array.Empty<string>();
+        _bootstrapOptions.Username = string.Empty;
         var account = new AccountEntity { Id = Guid.NewGuid() };
         _passwordValidatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
-            .ReturnsAsync(ValidationResult.Success(account, IdentityConstants.AuthMethodPassword, displayName: "anyuser"));
+            .ReturnsAsync(ValidationResult.Success(account, IdentityConstants.AuthMethodPassword, displayName: AdminName));
 
         var result = await _controller.Login(
-            new AdminLoginRequest("anyuser", "pwd", true),
-            CreateValidatorFactory(), CreateOptions(), _auditServiceMock.Object);
+            new AdminLoginRequest(AdminName, "pwd", true),
+            CreateValidatorFactory(), CreateBootstrapOptions(), _auditServiceMock.Object);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminSessionResponse>(ok.Value);
-        Assert.Equal(account.Id.ToString(), response.AccountId);
-        Assert.Equal("anyuser", response.Username);
-        Assert.False(response.AdminUsernamesConfigured);
-        _authServiceMock.Verify(a => a.SignInAsync(It.IsAny<HttpContext>(), AdminScheme, It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()), Times.Once);
+        var status = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status403Forbidden, status.StatusCode);
         _auditServiceMock.Verify(a => a.RecordLoginAsync(
-            account.Id, "anyuser", "admin_login", "login_success",
-            It.IsAny<string?>(), It.IsAny<string?>(), null,
+            account.Id, AdminName, "admin_login", "login_failure",
+            It.IsAny<string?>(), It.IsAny<string?>(), "bootstrap_admin_required",
             It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
+        _authServiceMock.Verify(a => a.SignInAsync(It.IsAny<HttpContext>(), AdminScheme, It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()), Times.Never);
     }
 
     [Fact]
-    public async Task Login_WithValidAdmin_SignsInAndReturnsSession()
+    public async Task Login_WithBootstrapAdmin_SignsInAndReturnsSession()
     {
         var account = new AccountEntity { Id = Guid.NewGuid() };
         _passwordValidatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
@@ -212,13 +209,13 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.Login(
             new AdminLoginRequest(AdminName, "pwd", false),
-            CreateValidatorFactory(), CreateOptions(), _auditServiceMock.Object);
+            CreateValidatorFactory(), CreateBootstrapOptions(), _auditServiceMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminSessionResponse>(ok.Value);
         Assert.Equal(account.Id.ToString(), response.AccountId);
         Assert.Equal(AdminName, response.Username);
-        Assert.True(response.AdminUsernamesConfigured);
+        Assert.True(response.IsAuthenticated);
         _authServiceMock.Verify(a => a.SignInAsync(It.IsAny<HttpContext>(), AdminScheme, It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()), Times.Once);
     }
 
@@ -228,15 +225,15 @@ public class AdminControllerTests : IDisposable
         var account = new AccountEntity { Id = Guid.NewGuid() };
         _passwordValidatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
             .ReturnsAsync(ValidationResult.Success(account, IdentityConstants.AuthMethodPassword, displayName: null));
-        _adminWebOptions.AdminUsernames = Array.Empty<string>();
 
         var result = await _controller.Login(
-            new AdminLoginRequest("fallbackuser", "pwd", false),
-            CreateValidatorFactory(), CreateOptions(), _auditServiceMock.Object);
+            new AdminLoginRequest(AdminName, "pwd", false),
+            CreateValidatorFactory(), CreateBootstrapOptions(), _auditServiceMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminSessionResponse>(ok.Value);
-        Assert.Equal("fallbackuser", response.Username);
+        Assert.Equal(AdminName, response.Username);
+        Assert.True(response.IsAuthenticated);
     }
 
     #endregion
@@ -247,26 +244,13 @@ public class AdminControllerTests : IDisposable
     public void GetCurrentSession_ReturnsClaimsFromUser()
     {
         SetAdminUser();
-        var result = _controller.GetCurrentSession(CreateOptions());
+        var result = _controller.GetCurrentSession();
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminSessionResponse>(ok.Value);
         Assert.Equal(AdminId.ToString(), response.AccountId);
         Assert.Equal(AdminName, response.Username);
-        Assert.True(response.AdminUsernamesConfigured);
-    }
-
-    [Fact]
-    public void GetCurrentSession_WithEmptyAdminUsernames_ReportsNotConfigured()
-    {
-        SetAdminUser();
-        _adminWebOptions.AdminUsernames = Array.Empty<string>();
-
-        var result = _controller.GetCurrentSession(CreateOptions());
-
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminSessionResponse>(ok.Value);
-        Assert.False(response.AdminUsernamesConfigured);
+        Assert.True(response.IsAuthenticated);
     }
 
     #endregion

@@ -117,4 +117,4 @@ AdminFrontend      AdminController      ValidatorFactory      PasswordValidator
       │◀──200 + Cookie──│                      │                    │
 ```
 
-关键点：管理员登录使用 Cookie 认证（非 JWT），需验证用户名在 AdminUsernames 白名单中（白名单为空时允许所有用户）。
+关键点：管理员登录使用 Cookie 认证（非 JWT），账号用户名必须等于 `AdminBootstrap:Username`（唯一真相源，配置为空则拒绝所有人）。

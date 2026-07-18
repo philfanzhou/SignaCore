@@ -33,7 +33,7 @@
 
 - **Given** 用户已登录，Cookie 有效
 - **When** GET /api/admin/session/me
-- **Then** 返回 200，IsAuthenticated=true，包含 AccountId、Username、AdminUsernamesConfigured
+- **Then** 返回 200，IsAuthenticated=true，包含 AccountId、Username
 
 ### UT-06 登出记录审计日志
 

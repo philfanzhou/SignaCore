@@ -32,7 +32,7 @@ public class AdminController : ControllerBase
     public async Task<IActionResult> Login(
         [FromBody] AdminLoginRequest request,
         [FromServices] ValidatorFactory validatorFactory,
-        [FromServices] IOptions<AdminWebOptions> adminWebOptions,
+        [FromServices] IOptions<AdminBootstrapOptions> bootstrapOptions,
         [FromServices] IAuditService auditService)
     {
         if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
@@ -56,11 +56,13 @@ public class AdminController : ControllerBase
         }
 
         var username = result.DisplayName ?? request.Username.Trim();
-        if (!IsAdminUsernameAllowed(username, adminWebOptions.Value))
+        var configuredAdmin = bootstrapOptions.Value.Username?.Trim();
+        if (string.IsNullOrWhiteSpace(configuredAdmin)
+            || !string.Equals(username, configuredAdmin, StringComparison.OrdinalIgnoreCase))
         {
             await auditService.RecordLoginAsync(result.Account.Id, username, "admin_login", "login_failure",
-                GetClientIp(), HttpContext.Request.Headers.UserAgent, "admin_access_denied");
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "This account is not authorized for admin access." });
+                GetClientIp(), HttpContext.Request.Headers.UserAgent, "bootstrap_admin_required");
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only the bootstrap administrator can sign in to admin web." });
         }
 
         var claims = new List<Claim>
@@ -88,21 +90,19 @@ public class AdminController : ControllerBase
         return Ok(new AdminSessionResponse(
             result.Account.Id.ToString(),
             username,
-            true,
-            AdminUsernamesConfigured: adminWebOptions.Value.AdminUsernames.Length > 0));
+            true));
     }
 
     [HttpGet("session/me")]
     [Authorize(Policy = "AdminSession")]
-    public IActionResult GetCurrentSession([FromServices] IOptions<AdminWebOptions> adminWebOptions)
+    public IActionResult GetCurrentSession()
     {
         var accountId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
         var username = User.Identity?.Name ?? string.Empty;
         return Ok(new AdminSessionResponse(
             accountId,
             username,
-            true,
-            adminWebOptions.Value.AdminUsernames.Length > 0));
+            true));
     }
 
     [HttpPost("session/logout")]
@@ -656,16 +656,5 @@ public class AdminController : ControllerBase
         if (!string.IsNullOrEmpty(forwarded))
             return forwarded.Split(',')[0].Trim();
         return HttpContext.Connection.RemoteIpAddress?.ToString();
-    }
-
-    private static bool IsAdminUsernameAllowed(string username, AdminWebOptions options)
-    {
-        if (options.AdminUsernames.Length == 0)
-        {
-            return true;
-        }
-
-        return options.AdminUsernames.Any(item =>
-            string.Equals(item?.Trim(), username, StringComparison.OrdinalIgnoreCase));
     }
 }

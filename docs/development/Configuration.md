@@ -133,14 +133,16 @@
 
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
-| AdminWeb:AdminUsernames | [] | 允许访问管理端的用户名白名单（空=允许所有，`start.sh` 不再重复注入默认管理员） |
 | AdminWeb:AllowedOrigins | ["http://localhost:5173"] | CORS 允许的前端来源 |
-| AdminBootstrap:Username | admin | 初始管理员用户名。该账号在密码登录时**无条件**获得 `role:admin`（绕过 callback），无论从哪个 portal 登录 |
-| AdminBootstrap:Password | （空） | 初始管理员密码（生产环境必须通过环境变量配置） |
+| AdminBootstrap:Username | admin | 初始管理员用户名，也是**登录 admin_frontend 的唯一账号**。启动时由 `DatabaseInitializer` 在数据库创建该账号 |
+| AdminBootstrap:Password | （空） | 初始管理员密码（生产环境必须通过环境变量配置，禁止留空） |
 | ADMIN_BOOTSTRAP_USERNAME（环境变量） | - | 初始管理员用户名，优先级高于配置文件 |
 | ADMIN_BOOTSTRAP_PASSWORD（环境变量） | - | 初始管理员密码，优先级高于配置文件 |
 
-> **Bootstrap Admin 角色注入**：密码登录时，若 `request.Username` 与 `AdminBootstrap:Username` 相等（`StringComparison.OrdinalIgnoreCase`，且配置非空），Identity 在签发 JWT 前无条件注入 `role=admin`。注入前检查是否已存在该角色，避免重复。SMS/微信登录不触发。这是"超级管理员"账号，**无需配置 admin_portal 的 `AdminUserIds` 白名单**即可获得 admin 角色。
+> **管理员唯一真相源**：管理员身份由 `AdminBootstrap:Username` 单一来源决定，不再维护独立白名单。具体规则：
+> - **admin_frontend 登录**：密码校验通过后，账号用户名必须等于 `AdminBootstrapOptions.Username`（`StringComparison.OrdinalIgnoreCase`），否则 403。配置为空时**拒绝所有人**（fail-closed，不再默认放行）。
+> - **角色注入**：密码登录时，若 `request.Username == AdminBootstrap:Username`（且配置非空），Identity 在签发 JWT 前无条件注入 `role=admin`；注入前检查是否已存在该角色，避免重复。SMS/微信登录不触发。
+> - 不再支持通过白名单"追加"管理员账号；维护 admin 权限 = 维护 `AdminBootstrap:Username` 这一处配置。
 
 ## Bootstrap Apps 配置
 

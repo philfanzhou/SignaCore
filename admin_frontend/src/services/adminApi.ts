@@ -58,7 +58,6 @@ export interface AdminSession {
   accountId: string
   username: string
   isAuthenticated: boolean
-  adminUsernamesConfigured: boolean
 }
 
 class AdminApiClient {
