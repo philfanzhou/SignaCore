@@ -153,6 +153,21 @@
 
 > 当 AppId 和 AppSecret 均未配置时，服务启动时跳过 Teacher Portal 应用注册并输出警告日志。
 
+## Admin Portal 应用注册配置
+
+Admin Portal 登录 Identity 时通过 callback 注入 `role:admin`，需注册应用。
+
+| 配置键 | 默认值 | 说明 |
+|--------|--------|------|
+| AdminPortal:AppId | （空） | Admin Portal 应用 ID |
+| AdminPortal:AppSecret | （空） | Admin Portal 应用密钥 |
+| AdminPortal:CallbackUrl | http://localhost:5020/api/auth/callback | 回调 URL |
+| ADMIN_PORTAL_APP_ID（环境变量） | - | Admin Portal 应用 ID，优先级高于配置文件 |
+| ADMIN_PORTAL_APP_SECRET（环境变量） | - | Admin Portal 应用密钥，优先级高于配置文件 |
+
+> 当 AppId 和 AppSecret 均未配置时，服务启动时跳过 Admin Portal 应用注册并输出警告日志。
+> 仅注册应用不足以获得 `role:admin`，还需在 admin_portal 的 `AdminPortal:AdminUserIds` 中配置对应的 Identity 用户 ID。
+
 ## RSA 主密钥
 
 | 来源 | 优先级 | 说明 |

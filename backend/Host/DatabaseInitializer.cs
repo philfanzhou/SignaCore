@@ -254,6 +254,45 @@ internal static class DatabaseInitializer
                 {
                     logger.LogWarning("Teacher Portal app registration skipped: AppId/AppSecret not configured. Set TEACHER_PORTAL_APP_ID and TEACHER_PORTAL_APP_SECRET environment variables or TeacherPortal:AppId/TeacherPortal:AppSecret in configuration.");
                 }
+
+                // Initialize Admin Portal app registration from configuration.
+                // Admin portal logs into Identity (password grant) to obtain a JWT with role:admin,
+                // then proxies to Teacher/Assistant portals. The callback injects the admin role.
+                var adminAppId = Environment.GetEnvironmentVariable("ADMIN_PORTAL_APP_ID")
+                    ?? configuration["AdminPortal:AppId"] ?? string.Empty;
+                var adminAppSecret = Environment.GetEnvironmentVariable("ADMIN_PORTAL_APP_SECRET")
+                    ?? configuration["AdminPortal:AppSecret"] ?? string.Empty;
+                var adminCallbackUrl = configuration["AdminPortal:CallbackUrl"] ?? "http://localhost:5020/api/auth/callback";
+
+                if (!string.IsNullOrWhiteSpace(adminAppId) && !string.IsNullOrWhiteSpace(adminAppSecret))
+                {
+                    var existingAdminApp = await db.AppRegistrations
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(a => a.AppId == adminAppId);
+                    if (existingAdminApp == null)
+                    {
+                        db.AppRegistrations.Add(new AppRegistrationEntity
+                        {
+                            Id = Guid.NewGuid(),
+                            AppId = adminAppId,
+                            AppSecretHash = BCrypt.Net.BCrypt.HashPassword(adminAppSecret),
+                            AppName = "Admin Portal",
+                            CallbackUrl = adminCallbackUrl,
+                            IsActive = true,
+                            CreatedAt = DateTimeOffset.UtcNow
+                        });
+                        await db.SaveChangesAsync();
+                        logger.LogInformation("Admin Portal app registration created: AppId={AppId}", adminAppId);
+                    }
+                    else
+                    {
+                        logger.LogInformation("Admin Portal app registration already exists: AppId={AppId}", adminAppId);
+                    }
+                }
+                else
+                {
+                    logger.LogWarning("Admin Portal app registration skipped: AppId/AppSecret not configured. Set ADMIN_PORTAL_APP_ID and ADMIN_PORTAL_APP_SECRET environment variables or AdminPortal:AppId/AdminPortal:AppSecret in configuration.");
+                }
             }
             catch (Exception ex)
             {

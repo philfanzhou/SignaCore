@@ -147,6 +147,17 @@ CI 环境（Jenkins）使用固定的测试凭据，由 `start.sh` 硬编码注�
 
 > **生产环境**：必须通过 Admin API (`POST /api/admin/apps`) 为每个业务系统单独注册应用，AppSecret 仅在创建时返回一次。
 
+### Admin Portal 应用注册
+
+Admin Portal 通过 password grant 登录 Identity 获取 JWT，需注册应用以触发 callback 注入 `role:admin`：
+
+```bash
+export ADMIN_PORTAL_APP_ID=your-admin-app-id
+export ADMIN_PORTAL_APP_SECRET=your-admin-app-secret
+```
+
+仅注册应用不足以获得 `role:admin`，还需在 admin_portal 的 `AdminPortal:AdminUserIds` 配置节中列出对应的 Identity 用户 ID。
+
 ### CI 联调验证流程
 
 CI smoke test 依赖以下 Identity 能力（均已在 CI 环境配置）：
@@ -155,6 +166,7 @@ CI smoke test 依赖以下 Identity 能力（均已在 CI 环境配置）：
 2. **SMS 固定验证码**：`SMS_BYPASS_CODE=666666`（任意手机号登录）
 3. **管理员引导账户**：`admin/Qwer1234`（DatabaseInitializer 自动种子）
 4. **应用注册**：`TEACHER_PORTAL_APP_ID/SECRET`（DatabaseInitializer 自动种子）
+5. **Admin 应用注册**：`ADMIN_PORTAL_APP_ID/SECRET`（DatabaseInitializer 自动种子），配合 admin_portal 的 `AdminPortal:AdminUserIds` 注入 `role:admin`
 
 详见 [CI Smoke Test 联调方案](../../../../tests/integration/docs/ci-smoke-test.md)。
 
