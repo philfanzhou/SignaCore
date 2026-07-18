@@ -26,7 +26,7 @@ RSA 密钥对表，用于签名 JWT。私钥使用主密钥（RSA_MASTER_KEY）�
 
 - 密钥轮换周期默认 30 天（`IdentityConstants.KeyRotationDays`）
 - 加密方式：使用 HKDF(SHA256) 从主密钥派生 AES-256 密钥，再用 AES-GCM 加密私钥
-- 主密钥来源优先级：环境变量 `RSA_MASTER_KEY` > 本地文件 `master-key/master-key.json` > 自动生成
+- 主密钥来源优先级：环境变量 `RSA_MASTER_KEY` > 本地文件 `data/master-key/master-key.json` > 自动生成（`master-key/` 子目录由 KeyManager 在写入前自动创建）
 - 同时只有一个 `is_active = true` 的密钥
 - `CleanupWorker` 定期清理过期且非活跃的密钥记录
 - 如果主密钥丢失导致解密失败，`KeyManager` 会自动生成新密钥对（所有已签发的 JWT 将失效）

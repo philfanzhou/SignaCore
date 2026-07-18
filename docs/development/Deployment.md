@@ -124,15 +124,37 @@ export SMS_BYPASS_CODE=666666
 
 ---
 
+## 数据目录挂载
+
+Identity 通过单一 `data/` 目录挂载实现数据持久化。`start.sh` 将宿主机 `${DATA_DIR}`（即 `start.sh` 同级的 `data/` 目录）挂载到容器内 `/app/data`：
+
+```bash
+-v "${DATA_DIR}:/app/data"
+```
+
+`data/` 目录的用途：
+- 持久化 RSA 主密钥：`master-key/master-key.json`（由 `KeyManager` 在写入前自动创建 `master-key/` 子目录）
+- 读取预置应用配置：`bootstrap-apps.json`（可选，文件不存在时跳过预置）
+- Consul 本地缓存：`consul/cache.json`（降级时使用）
+
+`data/` 目录由部署脚本（CI / 生产）管理：
+- 启动容器前 `data/` 目录必须存在（`start.sh` 负责 `mkdir -p "$DATA_DIR"` 并 `chown -R 1000:1000 "$DATA_DIR"`，确保容器内 UID 1000 有写权限）
+- 部署脚本按需往 `data/` 目录写入预置文件（如 `bootstrap-apps.json`）
+- 启动脚本**不感知** `data/` 目录下有哪些具体文件，也**不**创建业务子目录（如 `master-key/`）
+
+> 容器内 ContentRoot 为 `/app`，程序内所有相对路径（`data/master-key/master-key.json`、`data/bootstrap-apps.json`、`data/consul/cache.json`）解析为容器内 `/app/data/...`，与挂载点一致。
+
+---
+
 ## 应用注册预置（Bootstrap Apps）
 
-首次部署时，通过 `data/bootstrap-apps.json` 文件预置基础应用注册信息（如 Teacher Portal、Admin Portal 的应用凭据）。运行时动态管理仍通过 Admin API (`POST /api/admin/apps`) 完成。
+首次部署时，通过 `data/bootstrap-apps.json` 文件预置基础应用注册信息（如 Teacher Portal、Admin Portal 的应用凭据）。该文件位于 `data/` 目录下，随整个 `data/` 目录一并由 `start.sh` 挂载到容器。运行时动态管理仍通过 Admin API (`POST /api/admin/apps`) 完成。
 
 详见 [Configuration.md](./Configuration.md) "Bootstrap Apps 配置"章节。
 
 ### CI 环境测试凭据
 
-CI 环境（Jenkins）在启动 Identity 容器前生成 `data/bootstrap-apps.json` 文件，由 `start.sh` 挂载到容器：
+CI 环境（Jenkins）在启动 Identity 容器前将 `bootstrap-apps.json` 写入 `data/` 目录：
 
 ```bash
 # CI 脚本中生成（凭据由 CI 脚本持有，不进仓库）
@@ -151,9 +173,11 @@ cat > ./data/bootstrap-apps.json <<'EOF'
 EOF
 ```
 
+文件随 `data/` 目录挂载到容器 `/app/data`，程序读取 `data/bootstrap-apps.json`。
+
 > **复用策略**：Teacher Portal 和 Assistant Portal 在 CI 环境中复用同一组凭据。`GatewayValidationService` 仅校验 AppId 注册状态、活跃状态、过期时间和 AppSecret 哈希，不绑定具体业务系统，因此 BFF 共享凭据是安全的。
 
-> **生产环境**：部署脚本生成 `data/bootstrap-apps.json`（`chmod 600`）或通过 Admin API (`POST /api/admin/apps`) 为每个业务系统单独注册应用，AppSecret 仅在创建时返回一次。
+> **生产环境**：部署脚本将 `bootstrap-apps.json` 写入 `data/` 目录（`chmod 600`）或通过 Admin API (`POST /api/admin/apps`) 为每个业务系统单独注册应用，AppSecret 仅在创建时返回一次。
 
 ### Bootstrap Admin 角色注入
 
@@ -172,7 +196,7 @@ CI smoke test 依赖以下 Identity 能力（均已在 CI 环境配置）：
 1. **JWKS 获取**：`GET /.well-known/jwks`（BFF 启动时自动发现）
 2. **SMS 固定验证码**：`SMS_BYPASS_CODE=666666`（任意手机号登录）
 3. **管理员引导账户**：`admin/Qwer1234`（DatabaseInitializer 自动种子）
-4. **应用注册**：`data/bootstrap-apps.json`（DatabaseInitializer 自动种子）
+4. **数据目录挂载**：`data/` 目录（含 `master-key/` 由 KeyManager 自动创建、预置 `bootstrap-apps.json` 由 DatabaseInitializer 自动种子）
 5. **Bootstrap Admin 自动注入**：`AdminBootstrap:Username` 配置的账号密码登录时自动获得 `role:admin`（无需额外配置白名单）
 
 详见 [CI Smoke Test 联调方案](../../../../tests/integration/docs/ci-smoke-test.md)。

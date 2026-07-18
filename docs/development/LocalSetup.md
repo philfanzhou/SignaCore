@@ -59,6 +59,8 @@ HTTP 端口可通过 `appsettings.json` 的 `Endpoints:Http` 修改。
 5. **Bootstrap Apps 预置**（可选）：读取 `data/bootstrap-apps.json` 文件（若存在），预置应用注册信息
 6. **RSA 密钥初始化**：`KeyManager` 生成或加载活跃密钥对
 
+> **数据目录管理**：`data/` 目录（含 `master-key/` 子目录、`bootstrap-apps.json`）由程序自动创建和管理。`KeyManager` 在首次启动时自动创建 `master-key/` 子目录并生成主密钥文件；部署脚本如需预置应用，在启动容器前将 `bootstrap-apps.json` 写入 `data/` 目录。开发者无需手动创建任何业务子目录。
+
 ## 运行测试
 
 ```bash

@@ -355,7 +355,7 @@ docker run -d \
   -e Database__Name=quantumzhou_identity \
   -e CONSUL_HTTP_ADDR=host.docker.internal:8500 \
   -e CONSUL_TOKEN="<acl-token>" \
-  -v "$(pwd)/data/identity/master-key:/app/master-key" \
+  -v "$(pwd)/data/identity:/app/data" \
   "$IMAGE_NAME"
 ```
 

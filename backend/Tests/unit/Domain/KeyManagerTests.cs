@@ -337,7 +337,7 @@ public class KeyManagerTests : IDisposable
         }
 
         // Clean up master key file left by Constructor_NoEnvironmentVariable_GeneratesNewMasterKeyFile
-        var masterKeyDir = Path.Combine(AppContext.BaseDirectory, "master-key");
+        var masterKeyDir = Path.Combine(AppContext.BaseDirectory, "data", "master-key");
         var masterKeyFile = Path.Combine(masterKeyDir, "master-key.json");
         if (File.Exists(masterKeyFile))
         {

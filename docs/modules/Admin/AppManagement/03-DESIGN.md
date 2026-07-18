@@ -70,4 +70,4 @@ Response 200 { AppId, AppSecret (明文) }   ← 明文仅此一次返回
 | AppSecret 仅在创建和重置时返回明文 | 明文 AppSecret 从不存储在数据库中，仅在创建/重置时返回给调用方一次，之后无法再获取 |
 | AppId 格式 | Guid.NewGuid().ToString("N")，生成 32 位十六进制字符串（无连字符），作为应用唯一标识 |
 | TTL 处理逻辑 | TtlSeconds=-1 → CallbackExpiresAt=null（永不过期）；TtlSeconds>0 → ExpiresAt=now+TtlSeconds；其余 → ExpiresAt=now+3600s（默认 1 小时） |
-| Bootstrap Apps 文件路径 | 默认 `/app/data/bootstrap-apps.json`，可通过 `BootstrapApps:FilePath` 配置；文件不存在时跳过（INFO 日志），不影响服务启动 |
+| Bootstrap Apps 文件路径 | 默认 `/app/data/bootstrap-apps.json`，可通过 `BootstrapApps:FilePath` 配置；文件随 `data/` 目录挂载到容器（`start.sh` 挂载 `${DATA_DIR}:/app/data`）；文件不存在时跳过（INFO 日志），不影响服务启动 |

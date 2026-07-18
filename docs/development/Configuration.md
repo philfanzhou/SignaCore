@@ -144,7 +144,7 @@
 
 ## Bootstrap Apps 配置
 
-Identity 启动时通过挂载的 `data/bootstrap-apps.json` 文件预置应用注册信息。该机制用于首次部署时预置基础应用（如 Teacher Portal、Admin Portal 的应用凭据），运行时动态管理仍通过 Admin API (`POST /api/admin/apps`) 完成。
+Identity 启动时通过 `data/bootstrap-apps.json` 文件预置应用注册信息。该文件位于 `data/` 目录下，随整个 `data/` 目录一并由 `start.sh` 挂载到容器 `/app/data`。该机制用于首次部署时预置基础应用（如 Teacher Portal、Admin Portal 的应用凭据），运行时动态管理仍通过 Admin API (`POST /api/admin/apps`) 完成。
 
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
@@ -176,7 +176,7 @@ Identity 启动时通过挂载的 `data/bootstrap-apps.json` 文件预置应用�
 
 **加载机制**：
 
-- 文件由 `start.sh` 通过 `-v` 挂载到容器内 `BootstrapApps:FilePath` 指定路径（默认 `/app/data/bootstrap-apps.json`），挂载为只读（`:ro`）
+- 文件由 `start.sh` 通过 `-v "${DATA_DIR}:/app/data"` 挂载到容器内 `BootstrapApps:FilePath` 指定路径（默认 `/app/data/bootstrap-apps.json`）；部署脚本需在启动容器前将 `bootstrap-apps.json` 写入 `data/` 目录
 - `DatabaseInitializer` 在迁移完成后读取该文件，若 AppId 已存在则跳过（保持幂等）
 - 文件不存在时输出 INFO 日志（该预置机制为可选，不影响服务启动）
 - `appSecret` 支持 Base64 字符（含 `+`、`/`、`=`），JSON 字符串原生支持无需转义
@@ -198,7 +198,7 @@ Identity 启动时通过挂载的 `data/bootstrap-apps.json` 文件预置应用�
 | 来源 | 优先级 | 说明 |
 |------|--------|------|
 | 环境变量 `RSA_MASTER_KEY` | 最高 | Base64 编码的主密钥 |
-| 文件 `master-key/master-key.json` | 中 | 本地文件，格式 `{"Key":"base64..."}` |
+| 文件 `data/master-key/master-key.json` | 中 | 本地文件，格式 `{"Key":"base64..."}`，`master-key/` 子目录由 KeyManager 在写入前自动创建（若不存在） |
 | 自动生成 | 最低 | 首次启动时生成并保存到文件 |
 
 ## 日志配置

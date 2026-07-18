@@ -2,7 +2,7 @@
 
 ## 命名约定
 
-- 主密钥文件：`master-key/master-key.json`
+- 主密钥文件：`data/master-key/master-key.json`（`master-key/` 子目录由 KeyManager 在写入前自动创建）
 - 环境变量：`RSA_MASTER_KEY`
 - JWKS kid：GUID 格式
 

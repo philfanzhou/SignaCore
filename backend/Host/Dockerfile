@@ -30,9 +30,6 @@ RUN dotnet publish "src/services/QuantumZhou.Identity/backend/Host/QuantumZhou.I
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
 COPY --from=backend-build /app/publish .
-RUN mkdir -p /app/master-key && \
-    chown -R app:app /app/master-key && \
-    chmod -R 755 /app/master-key
 
 EXPOSE 5002
 

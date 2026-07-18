@@ -42,7 +42,7 @@ public class KeyManager : IKeyManager
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
-        _masterKeyDirectory = Path.Combine(AppContext.BaseDirectory, "master-key");
+        _masterKeyDirectory = Path.Combine(AppContext.BaseDirectory, "data", "master-key");
         _masterKeyFilePath = Path.Combine(_masterKeyDirectory, "master-key.json");
 
         if (!Directory.Exists(_masterKeyDirectory))
