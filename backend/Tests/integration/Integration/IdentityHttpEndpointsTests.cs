@@ -94,7 +94,6 @@ public class IdentityServerFixture : IAsyncLifetime
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("Database:Provider", "SQLite");
-                builder.UseSetting("Database:AutoMigrate", "true");
                 builder.UseSetting("ConnectionStrings:Default", $"Data Source={dbPath}");
                 builder.UseSetting("AdminBootstrap:Username", "");
                 builder.UseSetting("AdminBootstrap:Password", "");

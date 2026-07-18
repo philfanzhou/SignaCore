@@ -113,8 +113,9 @@ Consul 8500 端口**不暴露公网**，仅映射到宿主机 localhost 用于�
 
 - `RSA_MASTER_KEY`
 - `ADMIN_BOOTSTRAP_USERNAME` / `ADMIN_BOOTSTRAP_PASSWORD`
-- `TEACHER_PORTAL_APP_ID` / `TEACHER_PORTAL_APP_SECRET`
 - `CONSUL_TOKEN`
+
+> 应用预置通过挂载 `data/bootstrap-apps.json` 文件实现，不再通过环境变量注入业务凭据。详见 [Configuration.md](./Configuration.md) "Bootstrap Apps 配置"章节。
 
 ## 6. Consul KV 映射规则
 

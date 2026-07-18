@@ -32,26 +32,28 @@ curl http://localhost:5002/.well-known/jwks
 
 使用 `curl` 调用 `/api/auth/*` 端点：
 
+> 调用 `/api/auth/*` 端点需使用有效的 AppId/AppSecret（从 `data/bootstrap-apps.json` 预置的应用或通过 Admin API 注册的应用获取）。
+
 ```bash
 # 调用 POST /api/auth/token（密码登录）
 curl -X POST http://localhost:5002/api/auth/token \
   -H "Content-Type: application/json" \
-  -H "X-Admin-AppId: $TEACHER_PORTAL_APP_ID" \
-  -H "X-Admin-AppSecret: $TEACHER_PORTAL_APP_SECRET" \
-  -d '{"grantType":"password","username":"admin","password":"$ADMIN_BOOTSTRAP_PASSWORD"}'
+  -H "X-Admin-AppId: <your-app-id>" \
+  -H "X-Admin-AppSecret: <your-app-secret>" \
+  -d '{"grantType":"password","username":"admin","password":"<your-admin-password>"}'
 
 # 调用 POST /api/auth/token（刷新令牌）
 curl -X POST http://localhost:5002/api/auth/token \
   -H "Content-Type: application/json" \
-  -H "X-Admin-AppId: $TEACHER_PORTAL_APP_ID" \
-  -H "X-Admin-AppSecret: $TEACHER_PORTAL_APP_SECRET" \
+  -H "X-Admin-AppId: <your-app-id>" \
+  -H "X-Admin-AppSecret: <your-app-secret>" \
   -d '{"grantType":"refresh_token","refreshToken":"<your_refresh_token>"}'
 
 # 调用 POST /api/auth/sms-code（请求短信验证码）
 curl -X POST http://localhost:5002/api/auth/sms-code \
   -H "Content-Type: application/json" \
-  -H "X-Admin-AppId: $TEACHER_PORTAL_APP_ID" \
-  -H "X-Admin-AppSecret: $TEACHER_PORTAL_APP_SECRET" \
+  -H "X-Admin-AppId: <your-app-id>" \
+  -H "X-Admin-AppSecret: <your-app-secret>" \
   -d '{"phone":"13800138000"}'
 
 # 调用 POST /api/auth/revoke（吊销刷新令牌）

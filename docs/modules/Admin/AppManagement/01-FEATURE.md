@@ -13,6 +13,7 @@
 - AppSecret 仅在创建和重置时返回一次，不存储明文
 - 删除应用后该应用的所有请求将被拒绝
 - 重置密钥后旧密钥立即失效
+- 应用注册有两种方式：**Bootstrap Apps 文件预置**（首次部署一次性预置基础应用）和 **Admin API 动态注册**（运行时管理）。预置机制由 `DatabaseInitializer` 启动时读取 `data/bootstrap-apps.json` 完成，与 Admin API 互不影响
 
 ## 关键验收条件摘要
 

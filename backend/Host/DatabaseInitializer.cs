@@ -218,80 +218,64 @@ internal static class DatabaseInitializer
                     }
                 }
 
-                // Initialize Teacher Portal app registration from configuration
-                var teacherAppId = Environment.GetEnvironmentVariable("TEACHER_PORTAL_APP_ID")
-                    ?? configuration["TeacherPortal:AppId"] ?? string.Empty;
-                var teacherAppSecret = Environment.GetEnvironmentVariable("TEACHER_PORTAL_APP_SECRET")
-                    ?? configuration["TeacherPortal:AppSecret"] ?? string.Empty;
-                var teacherCallbackUrl = configuration["TeacherPortal:CallbackUrl"] ?? "http://localhost:5004/api/auth/callback";
-
-                if (!string.IsNullOrWhiteSpace(teacherAppId) && !string.IsNullOrWhiteSpace(teacherAppSecret))
+                // Seed app registrations from bootstrap-apps.json file (optional pre-seeding mechanism).
+                // The file is mounted by deployment scripts and supports multiple apps.
+                // If the file does not exist, skip silently with INFO log (optional pre-seeding).
+                var bootstrapAppsFilePath = configuration["BootstrapApps:FilePath"] ?? "/app/data/bootstrap-apps.json";
+                if (!string.IsNullOrWhiteSpace(bootstrapAppsFilePath) && File.Exists(bootstrapAppsFilePath))
                 {
-                    var existingTeacherApp = await db.AppRegistrations
-                        .AsNoTracking()
-                        .FirstOrDefaultAsync(a => a.AppId == teacherAppId);
-                    if (existingTeacherApp == null)
+                    try
                     {
-                        db.AppRegistrations.Add(new AppRegistrationEntity
+                        var bootstrapJson = await File.ReadAllTextAsync(bootstrapAppsFilePath);
+                        var bootstrapApps = System.Text.Json.JsonSerializer.Deserialize<BootstrapAppsOptions>(
+                            bootstrapJson,
+                            new System.Text.Json.JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            });
+
+                        if (bootstrapApps?.Apps != null)
                         {
-                            Id = Guid.NewGuid(),
-                            AppId = teacherAppId,
-                            AppSecretHash = BCrypt.Net.BCrypt.HashPassword(teacherAppSecret),
-                            AppName = "Teacher Portal",
-                            CallbackUrl = teacherCallbackUrl,
-                            IsActive = true,
-                            CreatedAt = DateTimeOffset.UtcNow
-                        });
-                        await db.SaveChangesAsync();
-                        logger.LogInformation("Teacher Portal app registration created: AppId={AppId}", teacherAppId);
+                            foreach (var entry in bootstrapApps.Apps)
+                            {
+                                if (string.IsNullOrWhiteSpace(entry.AppId) || string.IsNullOrWhiteSpace(entry.AppSecret))
+                                {
+                                    logger.LogWarning("Bootstrap app entry skipped: AppId or AppSecret is empty.");
+                                    continue;
+                                }
+
+                                var existingApp = await db.AppRegistrations
+                                    .AsNoTracking()
+                                    .FirstOrDefaultAsync(a => a.AppId == entry.AppId);
+                                if (existingApp != null)
+                                {
+                                    logger.LogInformation("Bootstrap app registration already exists: AppId={AppId}, AppName={AppName}", entry.AppId, entry.AppName);
+                                    continue;
+                                }
+
+                                db.AppRegistrations.Add(new AppRegistrationEntity
+                                {
+                                    Id = Guid.NewGuid(),
+                                    AppId = entry.AppId,
+                                    AppSecretHash = BCrypt.Net.BCrypt.HashPassword(entry.AppSecret),
+                                    AppName = entry.AppName,
+                                    CallbackUrl = entry.CallbackUrl,
+                                    IsActive = true,
+                                    CreatedAt = DateTimeOffset.UtcNow
+                                });
+                                await db.SaveChangesAsync();
+                                logger.LogInformation("Bootstrap app registration created: AppId={AppId}, AppName={AppName}", entry.AppId, entry.AppName);
+                            }
+                        }
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        logger.LogInformation("Teacher Portal app registration already exists: AppId={AppId}", teacherAppId);
+                        logger.LogWarning(ex, "Failed to read or process bootstrap apps file: {FilePath}", bootstrapAppsFilePath);
                     }
                 }
                 else
                 {
-                    logger.LogWarning("Teacher Portal app registration skipped: AppId/AppSecret not configured. Set TEACHER_PORTAL_APP_ID and TEACHER_PORTAL_APP_SECRET environment variables or TeacherPortal:AppId/TeacherPortal:AppSecret in configuration.");
-                }
-
-                // Initialize Admin Portal app registration from configuration.
-                // Admin portal logs into Identity (password grant) to obtain a JWT with role:admin,
-                // then proxies to Teacher/Assistant portals. The callback injects the admin role.
-                var adminAppId = Environment.GetEnvironmentVariable("ADMIN_PORTAL_APP_ID")
-                    ?? configuration["AdminPortal:AppId"] ?? string.Empty;
-                var adminAppSecret = Environment.GetEnvironmentVariable("ADMIN_PORTAL_APP_SECRET")
-                    ?? configuration["AdminPortal:AppSecret"] ?? string.Empty;
-                var adminCallbackUrl = configuration["AdminPortal:CallbackUrl"] ?? "http://localhost:5020/api/auth/callback";
-
-                if (!string.IsNullOrWhiteSpace(adminAppId) && !string.IsNullOrWhiteSpace(adminAppSecret))
-                {
-                    var existingAdminApp = await db.AppRegistrations
-                        .AsNoTracking()
-                        .FirstOrDefaultAsync(a => a.AppId == adminAppId);
-                    if (existingAdminApp == null)
-                    {
-                        db.AppRegistrations.Add(new AppRegistrationEntity
-                        {
-                            Id = Guid.NewGuid(),
-                            AppId = adminAppId,
-                            AppSecretHash = BCrypt.Net.BCrypt.HashPassword(adminAppSecret),
-                            AppName = "Admin Portal",
-                            CallbackUrl = adminCallbackUrl,
-                            IsActive = true,
-                            CreatedAt = DateTimeOffset.UtcNow
-                        });
-                        await db.SaveChangesAsync();
-                        logger.LogInformation("Admin Portal app registration created: AppId={AppId}", adminAppId);
-                    }
-                    else
-                    {
-                        logger.LogInformation("Admin Portal app registration already exists: AppId={AppId}", adminAppId);
-                    }
-                }
-                else
-                {
-                    logger.LogWarning("Admin Portal app registration skipped: AppId/AppSecret not configured. Set ADMIN_PORTAL_APP_ID and ADMIN_PORTAL_APP_SECRET environment variables or AdminPortal:AppId/AdminPortal:AppSecret in configuration.");
+                    logger.LogInformation("Bootstrap apps file not found: {FilePath}. Skipping app pre-seeding.", bootstrapAppsFilePath);
                 }
             }
             catch (Exception ex)

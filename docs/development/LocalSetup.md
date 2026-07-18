@@ -26,8 +26,7 @@ dotnet restore
 ```json
 {
   "Database": {
-    "Provider": "PostgreSQL",
-    "AutoMigrate": true
+    "Provider": "PostgreSQL"
   },
   "ConnectionStrings": {
     "PostgreSQL": "Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres"
@@ -51,23 +50,14 @@ HTTP 端口可通过 `appsettings.json` 的 `Endpoints:Http` 修改。
 
 ### 4. 首次启动自动初始化
 
-服务启动时自动执行以下操作（`Database:AutoMigrate = true` 时）：
+服务启动时自动执行以下操作：
 
 1. **数据库迁移**：SQLite 使用 `EnsureCreated()`，PostgreSQL 使用 `Database.Migrate()`
 2. **Schema Reconciliation**（仅 PostgreSQL）：检查并补齐缺失的列（如 `accounts.nickname`）
 3. **Migration Stamping**（仅 PostgreSQL）：如果数据库有表但无迁移历史，自动标记初始迁移
 4. **Admin Bootstrap**：根据 `AdminBootstrap:Username` 和 `AdminBootstrap:Password` 创建初始管理员账户
-5. **Teacher Portal 测试应用**：自动创建 AppId=`a6eab9bd87404c0ababc910114d11a62` 的测试应用
+5. **Bootstrap Apps 预置**（可选）：读取 `data/bootstrap-apps.json` 文件（若存在），预置应用注册信息
 6. **RSA 密钥初始化**：`KeyManager` 生成或加载活跃密钥对
-
-### 5. 禁用自动迁移
-
-生产环境设置 `Database:AutoMigrate = false`，手动执行：
-
-```bash
-cd backend/Database
-dotnet ef database update --project ../Host
-```
 
 ## 运行测试
 

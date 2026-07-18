@@ -39,7 +39,6 @@
 |--------|--------|------|
 | Database:Provider | PostgreSQL | 数据库提供者（默认由项目配置提供，通常无需 `start.sh` 重复注入） |
 | Database:Name | quantumzhou_identity | 服务自己的 PostgreSQL 数据库名（可按需由项目 `start.sh` 覆盖） |
-| Database:AutoMigrate | true | 是否自动执行迁移（生产环境建议设为 false） |
 | ConnectionStrings:Default | Data Source=quantumzhou_identity.db | SQLite 连接字符串 |
 | ConnectionStrings:PostgreSQL | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | PostgreSQL 连接字符串 |
 | PostgreSql:Host | localhost | PostgreSQL 主机（推荐由 Consul `config/ruoyu/shared.json` 提供） |
@@ -143,32 +142,56 @@
 
 > **Bootstrap Admin 角色注入**：密码登录时，若 `request.Username` 与 `AdminBootstrap:Username` 相等（`StringComparison.OrdinalIgnoreCase`，且配置非空），Identity 在签发 JWT 前无条件注入 `role=admin`。注入前检查是否已存在该角色，避免重复。SMS/微信登录不触发。这是"超级管理员"账号，**无需配置 admin_portal 的 `AdminUserIds` 白名单**即可获得 admin 角色。
 
-## Teacher Portal 应用注册配置
+## Bootstrap Apps 配置
+
+Identity 启动时通过挂载的 `data/bootstrap-apps.json` 文件预置应用注册信息。该机制用于首次部署时预置基础应用（如 Teacher Portal、Admin Portal 的应用凭据），运行时动态管理仍通过 Admin API (`POST /api/admin/apps`) 完成。
 
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
-| TeacherPortal:AppId | （空） | Teacher Portal 应用 ID |
-| TeacherPortal:AppSecret | （空） | Teacher Portal 应用密钥 |
-| TeacherPortal:CallbackUrl | http://localhost:5004/api/auth/callback | 回调 URL |
-| TEACHER_PORTAL_APP_ID（环境变量） | - | Teacher Portal 应用 ID，优先级高于配置文件 |
-| TEACHER_PORTAL_APP_SECRET（环境变量） | - | Teacher Portal 应用密钥，优先级高于配置文件 |
+| BootstrapApps:FilePath | /app/data/bootstrap-apps.json | 应用预置文件路径（容器内绝对路径） |
 
-> 当 AppId 和 AppSecret 均未配置时，服务启动时跳过 Teacher Portal 应用注册并输出警告日志。
+**文件格式**（JSON 对象，顶层 `apps` 数组）：
 
-## Admin Portal 应用注册配置
+```json
+{
+  "apps": [
+    {
+      "appId": "a6eab9bd87404c0ababc910114d11a62",
+      "appSecret": "cGzoAwXaP+PahtDqXYVY75IJiPWtfbt/4SIt+WrKoQ=",
+      "appName": "Teacher Portal",
+      "callbackUrl": "http://ruoyu-teacher-api:5004/api/auth/callback"
+    }
+  ]
+}
+```
 
-Admin Portal 登录 Identity 时通过 callback 注入 `role:admin`，需注册应用。
+**字段说明**：
 
-| 配置键 | 默认值 | 说明 |
-|--------|--------|------|
-| AdminPortal:AppId | （空） | Admin Portal 应用 ID |
-| AdminPortal:AppSecret | （空） | Admin Portal 应用密钥 |
-| AdminPortal:CallbackUrl | http://localhost:5020/api/auth/callback | 回调 URL |
-| ADMIN_PORTAL_APP_ID（环境变量） | - | Admin Portal 应用 ID，优先级高于配置文件 |
-| ADMIN_PORTAL_APP_SECRET（环境变量） | - | Admin Portal 应用密钥，优先级高于配置文件 |
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| appId | 是 | 应用唯一标识（32 位十六进制，由 Admin API 创建时生成，预置时需人工指定） |
+| appSecret | 是 | 应用密钥明文（BCrypt 哈希后存储，明文不入库） |
+| appName | 是 | 应用显示名称 |
+| callbackUrl | 否 | 回调 URL（默认空，注册后可按需通过 Admin API 配置） |
 
-> 当 AppId 和 AppSecret 均未配置时，服务启动时跳过 Admin Portal 应用注册并输出警告日志。
-> 仅注册应用不足以获得 `role:admin`，还需在 admin_portal 的 `AdminPortal:AdminUserIds` 中配置对应的 Identity 用户 ID。
+**加载机制**：
+
+- 文件由 `start.sh` 通过 `-v` 挂载到容器内 `BootstrapApps:FilePath` 指定路径（默认 `/app/data/bootstrap-apps.json`），挂载为只读（`:ro`）
+- `DatabaseInitializer` 在迁移完成后读取该文件，若 AppId 已存在则跳过（保持幂等）
+- 文件不存在时输出 INFO 日志（该预置机制为可选，不影响服务启动）
+- `appSecret` 支持 Base64 字符（含 `+`、`/`、`=`），JSON 字符串原生支持无需转义
+
+**与 Admin API 注册应用的差异**：
+
+| 维度 | Bootstrap Apps 文件预置 | Admin API 动态注册 |
+|------|------------------------|-------------------|
+| 使用场景 | 首次部署预置基础应用 | 运行时动态管理 |
+| 调用时机 | `DatabaseInitializer` 启动时一次性加载 | 管理员随时调用 |
+| AppId 生成 | 预置时人工指定（固定值） | `Guid.NewGuid().ToString("N")` |
+| AppSecret 来源 | 预置时人工指定 | 服务端生成 32 字节密码学安全随机 |
+| 文件不存在 | 正常启动，不预置任何应用 | 不适用 |
+
+> **生产环境建议**：通过 Admin API 动态注册应用（AppSecret 仅在创建时返回一次），避免明文 AppSecret 出现在文件中。如使用文件预置，部署脚本应设置 `chmod 600` 限制文件权限。
 
 ## RSA 主密钥
 

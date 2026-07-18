@@ -165,8 +165,8 @@ AppId/AppSecret 通过 `X-Admin-AppId` / `X-Admin-AppSecret` 请求头传递。�
     "PermitLimitPerClient": 20,
     "WindowSeconds": 60
   },
-  "Database": {
-    "AutoMigrate": true
+  "BootstrapApps": {
+    "FilePath": "/app/data/bootstrap-apps.json"
   }
 }
 ```
@@ -232,13 +232,9 @@ dotnet test --collect:"XPlat Code Coverage"
 openssl rand -base64 32
 ```
 
-### Q: 如何禁用数据库自动迁移？
+### Q: 数据库自动迁移是否可禁用？
 
-设置 `Database:AutoMigrate` 为 `false`，然后手动执行：
-
-```bash
-dotnet ef database update
-```
+Identity 服务启动时**无条件自动执行** EF Core 迁移和种子逻辑，无需手动执行迁移命令。
 
 ### Q: JWKS 端点访问频率限制是多少？
 

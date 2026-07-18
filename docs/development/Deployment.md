@@ -124,39 +124,36 @@ export SMS_BYPASS_CODE=666666
 
 ---
 
-## Teacher Portal 应用注册
+## 应用注册预置（Bootstrap Apps）
 
-```bash
-# 必须设置的环境变量
-export TEACHER_PORTAL_APP_ID=your-app-id
-export TEACHER_PORTAL_APP_SECRET=your-app-secret
-```
+首次部署时，通过 `data/bootstrap-apps.json` 文件预置基础应用注册信息（如 Teacher Portal、Admin Portal 的应用凭据）。运行时动态管理仍通过 Admin API (`POST /api/admin/apps`) 完成。
 
-当 AppId 和 AppSecret 均未配置时，服务启动时跳过注册并输出警告日志。
+详见 [Configuration.md](./Configuration.md) "Bootstrap Apps 配置"章节。
 
 ### CI 环境测试凭据
 
-CI 环境（Jenkins）使用固定的测试凭据，由 `start.sh` 硬编码注入，`DatabaseInitializer` 启动时自动种子到 `app_registrations` 表：
+CI 环境（Jenkins）在启动 Identity 容器前生成 `data/bootstrap-apps.json` 文件，由 `start.sh` 挂载到容器：
 
-| 环境变量 | 值 | 用途 |
-|----------|-----|------|
-| `TEACHER_PORTAL_APP_ID` | `a6eab9bd87404c0ababc910114d11a62` | 测试应用标识 |
-| `TEACHER_PORTAL_APP_SECRET` | `cGzoAwXaP+PahtD3qXYVY75IJiPWtfbt/4SIt+WrKoQ=` | 测试应用密钥 |
+```bash
+# CI 脚本中生成（凭据由 CI 脚本持有，不进仓库）
+mkdir -p ./data
+cat > ./data/bootstrap-apps.json <<'EOF'
+{
+  "apps": [
+    {
+      "appId": "a6eab9bd87404c0ababc910114d11a62",
+      "appSecret": "cGzoAwXaP+PahtD3qXYVY75IJiPWtfbt/4SIt+WrKoQ=",
+      "appName": "Teacher Portal",
+      "callbackUrl": "http://ruoyu-teacher-api:5004/api/auth/callback"
+    }
+  ]
+}
+EOF
+```
 
 > **复用策略**：Teacher Portal 和 Assistant Portal 在 CI 环境中复用同一组凭据。`GatewayValidationService` 仅校验 AppId 注册状态、活跃状态、过期时间和 AppSecret 哈希，不绑定具体业务系统，因此 BFF 共享凭据是安全的。
 
-> **生产环境**：必须通过 Admin API (`POST /api/admin/apps`) 为每个业务系统单独注册应用，AppSecret 仅在创建时返回一次。
-
-### Admin Portal 应用注册
-
-Admin Portal 通过 password grant 登录 Identity 获取 JWT，需注册应用以触发 callback 注入 `role:admin`：
-
-```bash
-export ADMIN_PORTAL_APP_ID=your-admin-app-id
-export ADMIN_PORTAL_APP_SECRET=your-admin-app-secret
-```
-
-仅注册应用不足以获得 `role:admin`，还需在 admin_portal 的 `AdminPortal:AdminUserIds` 配置节中列出对应的 Identity 用户 ID。
+> **生产环境**：部署脚本生成 `data/bootstrap-apps.json`（`chmod 600`）或通过 Admin API (`POST /api/admin/apps`) 为每个业务系统单独注册应用，AppSecret 仅在创建时返回一次。
 
 ### Bootstrap Admin 角色注入
 
@@ -175,9 +172,8 @@ CI smoke test 依赖以下 Identity 能力（均已在 CI 环境配置）：
 1. **JWKS 获取**：`GET /.well-known/jwks`（BFF 启动时自动发现）
 2. **SMS 固定验证码**：`SMS_BYPASS_CODE=666666`（任意手机号登录）
 3. **管理员引导账户**：`admin/Qwer1234`（DatabaseInitializer 自动种子）
-4. **应用注册**：`TEACHER_PORTAL_APP_ID/SECRET`（DatabaseInitializer 自动种子）
-5. **Admin 应用注册**：`ADMIN_PORTAL_APP_ID/SECRET`（DatabaseInitializer 自动种子）
-6. **Bootstrap Admin 自动注入**：`AdminBootstrap:Username` 配置的账号密码登录时自动获得 `role:admin`（无需额外配置白名单）
+4. **应用注册**：`data/bootstrap-apps.json`（DatabaseInitializer 自动种子）
+5. **Bootstrap Admin 自动注入**：`AdminBootstrap:Username` 配置的账号密码登录时自动获得 `role:admin`（无需额外配置白名单）
 
 详见 [CI Smoke Test 联调方案](../../../../tests/integration/docs/ci-smoke-test.md)。
 

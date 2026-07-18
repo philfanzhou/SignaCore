@@ -38,4 +38,4 @@
 
 - SQLite 环境使用 `EnsureCreated()` 而非迁移
 - PostgreSQL 环境使用 `Database.Migrate()` 应用迁移
-- 生产环境必须设置 `Database:AutoMigrate = false` 并手动执行 `dotnet ef database update`
+- Identity 服务启动时无条件自动执行 EF Core 迁移和 `DatabaseInitializer` 种子逻辑。生产环境无需手动执行迁移命令
