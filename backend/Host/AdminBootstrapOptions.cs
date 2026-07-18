@@ -1,6 +1,6 @@
 namespace QuantumZhou.Identity.Host;
 
-internal sealed class AdminBootstrapOptions
+public sealed class AdminBootstrapOptions
 {
     public const string SectionName = "AdminBootstrap";
 

@@ -16,6 +16,7 @@
 - 短信验证码有 5 分钟有效期，最多验证 5 次
 - 微信登录不支持自动注册，必须预先绑定
 - 所有请求可通过 AppId/AppSecret 进行网关验证
+- **Bootstrap Admin 角色**：当登录用户名匹配 `AdminBootstrap:Username`（大小写不敏感、配置非空）时，JWT 无条件注入 `role:admin`，绕过 callback 机制。这是"超级管理员"账号，无论从哪个 portal 登录都应获得 admin 角色。注入前检查是否已存在 role=admin，避免重复
 
 ## 关键验收条件摘要
 
@@ -29,6 +30,7 @@
 8. [ ] 网关验证：无效的 AppId/AppSecret 返回错误
 9. [ ] 回调权限注入：成功时 JWT 包含角色和权限；失败时 JWT 仅包含基本信息
 10. [ ] 不支持的 grant_type 返回 "unsupported_grant_type"
+11. [ ] Bootstrap Admin 角色：登录用户名匹配 `AdminBootstrap:Username` 时，JWT 包含 role:admin（无论 callback 是否返回该角色、无论从何 portal 登录）
 
 ## 明确列出"范围外"
 

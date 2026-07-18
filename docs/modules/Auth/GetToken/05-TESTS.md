@@ -71,6 +71,39 @@
 - **When** 调用 GetValidator("unknown")
 - **Then** 抛出 KeyNotFoundException
 
+### UT-12 BootstrapAdminLogin_AlwaysGetsAdminRole
+
+- **Given** `AdminBootstrap:Username = "admin"`，密码登录 `username="admin"`
+- **Given** callback 返回空 roles（模拟从 teacher_portal 登录，未注册为 teacher）
+- **When** 调用 GetToken
+- **Then** 最终 claims 中包含 `role=admin`（bootstrap admin 绕过 callback 注入）
+
+### UT-13 BootstrapAdminLogin_DoesNotDuplicateAdminRole
+
+- **Given** `AdminBootstrap:Username = "admin"`，password 登录 `username="admin"`
+- **Given** callback 返回 `["admin"]`（模拟从 admin_portal 登录，已在白名单）
+- **When** 调用 GetToken
+- **Then** 最终 claims 中 `role=admin` 只出现一次（去重检查）
+
+### UT-14 NonBootstrapAdminLogin_NoAdminRoleInjected
+
+- **Given** `AdminBootstrap:Username = "admin"`，password 登录 `username="regularuser"`
+- **Given** callback 返回空 roles
+- **When** 调用 GetToken
+- **Then** 最终 claims 中不包含 `role=admin`（非 bootstrap admin 不注入）
+
+### UT-15 BootstrapAdminLogin_EmptyConfig_SkipsInjection
+
+- **Given** `AdminBootstrap:Username = ""`（未配置），password 登录 `username="admin"`
+- **When** 调用 GetToken
+- **Then** 不注入 `role=admin`（保持原行为，避免误识别）
+
+### UT-16 BootstrapAdminLogin_CaseInsensitive
+
+- **Given** `AdminBootstrap:Username = "admin"`，password 登录 `username="ADMIN"`（大写）
+- **When** 调用 GetToken
+- **Then** 注入 `role=admin`（大小写不敏感比较）
+
 ## 遗漏的测试场景
 
 - AuthController.GetToken 的端到端测试（当前仅有单元测试）

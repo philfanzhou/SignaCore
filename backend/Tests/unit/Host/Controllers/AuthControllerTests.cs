@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
 using QuantumZhou.Identity.Database;
@@ -13,6 +14,7 @@ using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Services.Sms;
 using QuantumZhou.Identity.Domain.Validators;
+using QuantumZhou.Identity.Host;
 using QuantumZhou.Identity.Host.Controllers;
 using QuantumZhou.Identity.Host.Models;
 using Xunit;
@@ -33,6 +35,10 @@ public class AuthControllerTests
     private readonly Mock<ISmsSender> _smsSenderMock;
     private readonly Mock<IAccountLoginInfoService> _accountLoginInfoServiceMock;
 
+    // Bootstrap admin config: defaults to "admin"; individual tests can override via
+    // CreateBootstrapOptions(Action<AdminBootstrapOptions>).
+    private readonly Mock<IOptions<AdminBootstrapOptions>> _adminBootstrapOptionsMock;
+
     public AuthControllerTests()
     {
         _keyManagerMock = CreateMockKeyManager();
@@ -51,6 +57,16 @@ public class AuthControllerTests
         _otpServiceMock = new Mock<IOtpService>();
         _smsSenderMock = new Mock<ISmsSender>();
         _accountLoginInfoServiceMock = CreateAccountLoginInfoServiceMock();
+        _adminBootstrapOptionsMock = CreateBootstrapOptions();
+    }
+
+    private static Mock<IOptions<AdminBootstrapOptions>> CreateBootstrapOptions(Action<AdminBootstrapOptions>? configure = null)
+    {
+        var options = new AdminBootstrapOptions { Username = "admin" };
+        configure?.Invoke(options);
+        var mock = new Mock<IOptions<AdminBootstrapOptions>>();
+        mock.Setup(o => o.Value).Returns(options);
+        return mock;
     }
 
     private static Mock<IKeyManager> CreateMockKeyManager()
@@ -122,6 +138,11 @@ public class AuthControllerTests
 
     private AuthController CreateController(IIdentityValidator[] validators)
     {
+        return CreateController(validators, _adminBootstrapOptionsMock);
+    }
+
+    private AuthController CreateController(IIdentityValidator[] validators, Mock<IOptions<AdminBootstrapOptions>> bootstrapOptionsMock)
+    {
         var factory = new ValidatorFactory(validators, NullLogger<ValidatorFactory>.Instance);
         var callbackUrlValidator = new CallbackUrlValidator();
         var controller = new AuthController(
@@ -141,11 +162,30 @@ public class AuthControllerTests
             _auditServiceMock.Object,
             _otpServiceMock.Object,
             _smsSenderMock.Object,
-            _accountLoginInfoServiceMock.Object);
+            _accountLoginInfoServiceMock.Object,
+            bootstrapOptionsMock.Object);
         var httpContext = new DefaultHttpContext();
         httpContext.Connection.RemoteIpAddress = IPAddress.Parse("127.0.0.1");
         controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
         return controller;
+    }
+
+    // Class-level field populated by the token service mock callback so tests can assert claims.
+    private List<Claim>? _capturedClaims;
+
+    // Configures the token service mock to capture the claims passed to GenerateJwtToken.
+    private void BeginCaptureGeneratedClaims()
+    {
+        _capturedClaims = null;
+        _tokenServiceMock.Setup(t => t.GenerateJwtToken(It.IsAny<List<Claim>>(), It.IsAny<RsaSecurityKey>(), It.IsAny<int>()))
+            .Callback((List<Claim> claims, RsaSecurityKey _, int __) => _capturedClaims = claims)
+            .Returns("token");
+    }
+
+    private List<Claim> AssertCapturedClaims()
+    {
+        Assert.NotNull(_capturedClaims);
+        return _capturedClaims;
     }
 
     private static OkObjectResult ExtractOkResult<T>(ActionResult<T> actionResult)
@@ -258,5 +298,163 @@ public class AuthControllerTests
         var response = Assert.IsType<RegisterCallbackHttpResponse>(ok.Value!);
         Assert.False(response.Success);
         Assert.Equal("AppId and AppSecret are required", response.Message);
+    }
+
+    // ===== Bootstrap admin role injection tests =====
+
+    [Fact]
+    public async Task BootstrapAdminLogin_AlwaysGetsAdminRole()
+    {
+        // Arrange: bootstrap admin "admin" logs in via password grant; callback returns no roles
+        // (simulates logging in from teacher_portal where the account is not a teacher).
+        var account = CreateTestAccount();
+        var validatorMock = CreatePasswordValidator(account, "admin");
+        var controller = CreateController(new[] { validatorMock.Object });
+        BeginCaptureGeneratedClaims();
+
+        var request = new TokenRequest
+        {
+            GrantType = "password",
+            Username = "admin",
+            Password = "Qwer1234"
+        };
+
+        var actionResult = await controller.GetToken(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<TokenResponse>(ok.Value!);
+        Assert.True(response.Success);
+
+        var claims = AssertCapturedClaims();
+        Assert.Contains(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+    }
+
+    [Fact]
+    public async Task BootstrapAdminLogin_DoesNotDuplicateAdminRole()
+    {
+        // Arrange: bootstrap admin logs in from admin_portal; callback already returns ["admin"].
+        // The injection must deduplicate so role=admin appears only once.
+        var account = CreateTestAccount();
+        var validatorMock = CreatePasswordValidator(account, "admin");
+        var controller = CreateController(new[] { validatorMock.Object }, CreateBootstrapOptions(o => o.Username = "admin"));
+
+        // Inject a callback service that returns role:admin (simulating admin_portal whitelist).
+        var callbackMock = new Mock<ICallbackService>();
+        callbackMock.Setup(c => c.FetchExternalClaimsAsync(It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(new List<Claim> { new(ClaimTypes.Role, "admin") });
+
+        var factory = new ValidatorFactory(new[] { validatorMock.Object }, NullLogger<ValidatorFactory>.Instance);
+        var controllerWithCallback = new AuthController(
+            _keyManagerMock.Object, _tokenServiceMock.Object, _jwtOptions,
+            _appRegistrationRepoMock.Object, _refreshTokenServiceMock.Object, _claimsResolver,
+            factory, callbackMock.Object, CreateAuthMetrics(), NullLogger<AuthController>.Instance,
+            CreateGatewayValidator(_appRegistrationRepoMock), new CallbackUrlValidator(),
+            _unitOfWorkMock.Object, _auditServiceMock.Object, _otpServiceMock.Object,
+            _smsSenderMock.Object, _accountLoginInfoServiceMock.Object,
+            CreateBootstrapOptions(o => o.Username = "admin").Object);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Connection.RemoteIpAddress = IPAddress.Parse("127.0.0.1");
+        // Provide an app with a callback URL so the callback branch executes.
+        // AppSecretHash must BCrypt-verify against the secret sent in the request header.
+        var appReg = new AppRegistrationEntity
+        {
+            CallbackUrl = "http://localhost/api/auth/callback",
+            AppSecretHash = BCrypt.Net.BCrypt.HashPassword("test-app-secret")
+        };
+        _appRegistrationRepoMock.Setup(r => r.GetByAppIdAsync(It.IsAny<string>())).ReturnsAsync(appReg);
+        httpContext.Items["X-Admin-AppId"] = "test-app-id";
+        httpContext.Items["X-Admin-AppSecret"] = "test-app-secret";
+        controllerWithCallback.ControllerContext = new ControllerContext { HttpContext = httpContext };
+
+        var request = new TokenRequest { GrantType = "password", Username = "admin", Password = "Qwer1234" };
+        BeginCaptureGeneratedClaims();
+        var actionResult = await controllerWithCallback.GetToken(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<TokenResponse>(ok.Value!);
+        Assert.True(response.Success);
+
+        var claims = AssertCapturedClaims();
+        Assert.Single(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+    }
+
+    [Fact]
+    public async Task NonBootstrapAdminLogin_NoAdminRoleInjected()
+    {
+        // Arrange: a regular user (not the bootstrap admin) logs in; callback returns no roles.
+        var account = CreateTestAccount();
+        var validatorMock = CreatePasswordValidator(account, "regularuser");
+        var controller = CreateController(new[] { validatorMock.Object });
+
+        var request = new TokenRequest { GrantType = "password", Username = "regularuser", Password = "Qwer1234" };
+        BeginCaptureGeneratedClaims();
+        var actionResult = await controller.GetToken(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<TokenResponse>(ok.Value!);
+        Assert.True(response.Success);
+
+        var claims = AssertCapturedClaims();
+        Assert.DoesNotContain(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+    }
+
+    [Fact]
+    public async Task BootstrapAdminLogin_EmptyConfig_SkipsInjection()
+    {
+        // Arrange: AdminBootstrap:Username is empty (not configured); username "admin" must NOT get the role.
+        var account = CreateTestAccount();
+        var validatorMock = CreatePasswordValidator(account, "admin");
+        var controller = CreateController(new[] { validatorMock.Object }, CreateBootstrapOptions(o => o.Username = ""));
+
+        var request = new TokenRequest { GrantType = "password", Username = "admin", Password = "Qwer1234" };
+        BeginCaptureGeneratedClaims();
+        var actionResult = await controller.GetToken(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<TokenResponse>(ok.Value!);
+        Assert.True(response.Success);
+
+        var claims = AssertCapturedClaims();
+        Assert.DoesNotContain(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+    }
+
+    [Fact]
+    public async Task BootstrapAdminLogin_CaseInsensitive()
+    {
+        // Arrange: bootstrap username is "admin" (lowercase); login uses "ADMIN" (uppercase).
+        var account = CreateTestAccount();
+        var validatorMock = CreatePasswordValidator(account, "ADMIN");
+        var controller = CreateController(new[] { validatorMock.Object }, CreateBootstrapOptions(o => o.Username = "admin"));
+
+        var request = new TokenRequest { GrantType = "password", Username = "ADMIN", Password = "Qwer1234" };
+        BeginCaptureGeneratedClaims();
+        var actionResult = await controller.GetToken(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<TokenResponse>(ok.Value!);
+        Assert.True(response.Success);
+
+        var claims = AssertCapturedClaims();
+        Assert.Contains(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+    }
+
+    private static AccountEntity CreateTestAccount()
+    {
+        return new AccountEntity
+        {
+            Id = Guid.NewGuid(),
+            Nickname = "TestAdmin",
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    private static Mock<IIdentityValidator> CreatePasswordValidator(AccountEntity account, string username)
+    {
+        var validatorMock = new Mock<IIdentityValidator>();
+        validatorMock.SetupGet(v => v.GrantType).Returns("password");
+        validatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
+            .ReturnsAsync(ValidationResult.Success(account, "Password", username));
+        return validatorMock;
     }
 }

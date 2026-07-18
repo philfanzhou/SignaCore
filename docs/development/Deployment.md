@@ -158,6 +158,16 @@ export ADMIN_PORTAL_APP_SECRET=your-admin-app-secret
 
 仅注册应用不足以获得 `role:admin`，还需在 admin_portal 的 `AdminPortal:AdminUserIds` 配置节中列出对应的 Identity 用户 ID。
 
+### Bootstrap Admin 角色注入
+
+`AdminBootstrap:Username` 配置的 bootstrap admin 账号是"超级管理员"，在密码登录时由 Identity **无条件注入** `role:admin`，绕过 callback 机制。因此：
+
+- bootstrap admin **无需配置** `AdminPortal:AdminUserIds` 即可获得 `role:admin`
+- bootstrap admin 无论从哪个 portal（teacher_portal / admin_portal 等）登录，JWT 都包含 `role:admin`
+- 注入前会检查是否已存在 `role=admin`，避免重复
+- 匹配使用大小写不敏感比较（`StringComparison.OrdinalIgnoreCase`）；配置为空时跳过注入，保持原行为
+- `AdminUserIds` 白名单仍保留，用于扩展**非 bootstrap** 的二级管理员账号（需 admin_portal callback 注入）
+
 ### CI 联调验证流程
 
 CI smoke test 依赖以下 Identity 能力（均已在 CI 环境配置）：
@@ -166,7 +176,8 @@ CI smoke test 依赖以下 Identity 能力（均已在 CI 环境配置）：
 2. **SMS 固定验证码**：`SMS_BYPASS_CODE=666666`（任意手机号登录）
 3. **管理员引导账户**：`admin/Qwer1234`（DatabaseInitializer 自动种子）
 4. **应用注册**：`TEACHER_PORTAL_APP_ID/SECRET`（DatabaseInitializer 自动种子）
-5. **Admin 应用注册**：`ADMIN_PORTAL_APP_ID/SECRET`（DatabaseInitializer 自动种子），配合 admin_portal 的 `AdminPortal:AdminUserIds` 注入 `role:admin`
+5. **Admin 应用注册**：`ADMIN_PORTAL_APP_ID/SECRET`（DatabaseInitializer 自动种子）
+6. **Bootstrap Admin 自动注入**：`AdminBootstrap:Username` 配置的账号密码登录时自动获得 `role:admin`（无需额外配置白名单）
 
 详见 [CI Smoke Test 联调方案](../../../../tests/integration/docs/ci-smoke-test.md)。
 

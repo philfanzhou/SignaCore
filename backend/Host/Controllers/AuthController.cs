@@ -3,6 +3,7 @@ using System.Security.Claims;
 using BCrypt.Net;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
@@ -40,6 +41,7 @@ public class AuthController : ControllerBase
     private readonly IOtpService _otpService;
     private readonly ISmsSender _smsSender;
     private readonly IAccountLoginInfoService _accountLoginInfoService;
+    private readonly AdminBootstrapOptions _adminBootstrapOptions;
 
     public AuthController(
         IKeyManager keyManager,
@@ -58,7 +60,8 @@ public class AuthController : ControllerBase
         IAuditService auditService,
         IOtpService otpService,
         ISmsSender smsSender,
-        IAccountLoginInfoService accountLoginInfoService)
+        IAccountLoginInfoService accountLoginInfoService,
+        IOptions<AdminBootstrapOptions> adminBootstrapOptions)
     {
         _keyManager = keyManager;
         _tokenService = tokenService;
@@ -77,6 +80,7 @@ public class AuthController : ControllerBase
         _otpService = otpService;
         _smsSender = smsSender;
         _accountLoginInfoService = accountLoginInfoService;
+        _adminBootstrapOptions = adminBootstrapOptions.Value;
     }
 
     /// <summary>
@@ -171,6 +175,12 @@ public class AuthController : ControllerBase
                 _logger.LogWarning(ex, "Callback request failed, continuing with basic claims: AppId={AppId}", appId);
             }
         }
+
+        // Bootstrap admin super-role: when the login username matches the configured
+        // AdminBootstrap:Username, unconditionally inject role:admin regardless of which
+        // portal the request comes from (bypasses the callback mechanism). Case-insensitive.
+        // Deduplicates: skip if callback already returned role:admin.
+        InjectBootstrapAdminRole(request, claims);
 
         var rsaKey = _keyManager.GetCurrentKey();
         var accessToken = _tokenService.GenerateJwtToken(claims, rsaKey, _jwtOptions.TokenExpirationHours);
@@ -339,6 +349,40 @@ public class AuthController : ControllerBase
             Message = "Registered successfully",
             ExpiresAt = app.CallbackExpiresAt.HasValue ? app.CallbackExpiresAt.Value.ToUnixTimeSeconds() : 0
         });
+    }
+
+    /// <summary>
+    /// If the login username matches <see cref="AdminBootstrapOptions.Username"/> (case-insensitive,
+    /// non-empty config), injects <c>role:admin</c> into <paramref name="claims"/> unless already
+    /// present. This is the "super admin" shortcut that bypasses the portal callback mechanism,
+    /// so the bootstrap admin account always receives the admin role regardless of which portal
+    /// it logs in from. Only meaningful for password grant (where <c>request.Username</c> is set).
+    /// </summary>
+    private void InjectBootstrapAdminRole(TokenRequest request, List<Claim> claims)
+    {
+        var bootstrapUsername = _adminBootstrapOptions.Username;
+        if (string.IsNullOrWhiteSpace(bootstrapUsername))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Username))
+        {
+            return;
+        }
+
+        if (!string.Equals(request.Username.Trim(), bootstrapUsername.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (claims.Any(c => c.Type == ClaimTypes.Role && string.Equals(c.Value, "admin", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        _logger.LogInformation("Injected bootstrap admin role for user {Username}", request.Username);
     }
 
     private static string? ResolveDisplayName(AccountEntity account, string? validationResultDisplayName, string grantType)

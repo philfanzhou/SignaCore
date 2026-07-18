@@ -5,6 +5,7 @@
 ```
 backend/
 ├── Host/Controllers/AuthController.cs  # HTTP REST 控制器（GetToken 入口）
+├── Host/AdminBootstrapOptions.cs        # bootstrap admin 配置（Username/Password）
 ├── Domain/
 │   ├── Validators/
 │   │   ├── IIdentityValidator.cs       # 验证器接口
@@ -117,6 +118,14 @@ CallbackService.FetchExternalClaimsAsync (if CallbackUrl exists)
     │   └── CustomClaims 仅允许白名单类型：department, class_name, grade, subject, school, organization, title
     │
     ▼
+Bootstrap Admin Short-Circuit (after callback, before signing)
+    │   └── 若 AdminBootstrap:Username 配置非空 且 request.Username 与之相等（OrdinalIgnoreCase）
+    │   └── 且 claims 中尚不存在 role=admin
+    │   └── 则注入 new Claim(ClaimTypes.Role, "admin")
+    │   └── 该逻辑绕过 callback，保证 bootstrap admin 从任意 portal 登录都能获得 admin 角色
+    │   └── SMS/微信登录无 Username，不触发此逻辑
+    │
+    ▼
 JwtTokenService.GenerateJwtToken (RSA signing)
     │
     ▼
@@ -143,3 +152,5 @@ TokenResponse
 7. **回调 Claim 注入防护**：`CallbackService` 对外部回调返回的 Claim 施加数量限制（每种类型最多 50 个）和值长度限制（256 字符），CustomClaims 仅允许白名单类型
 8. **SMS 发送器环境隔离**：开发环境使用 `LoggingSmsSender`（掩码记录），生产环境使用 `ThrowingSmsSender`（抛出异常），防止生产环境验证码泄露
 9. **CORS 生产环境保护**：生产环境未配置 `AdminWeb:AllowedOrigins` 时不启用跨域凭据，开发环境默认允许 localhost
+10. **Bootstrap Admin 注入时机在 callback 之后**：callback 可能返回额外角色（如 teacher），这些角色应保留；bootstrap admin 注入仅补充 role=admin，不覆盖已有角色，且通过 `!claims.Any(...)` 去重
+11. **仅 password grant 触发**：`request.Username` 仅在密码登录时有值；SMS/WeChat 的 portal 用户不需要 bootstrap admin 机制
