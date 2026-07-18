@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.CommandLine;
@@ -107,6 +108,27 @@ public static class ProgramConsulExtensions
         // ConsulDiscoveryOptions 自动绑定 "Consul:Discovery:" 节
         // Steeltoe 内置 ConsulOptions 自动绑定 "Consul:" 节（Host/Port/Scheme/Token）
         // Token 已在 AddConsulIfEnabled 阶段通过 AddInMemoryCollection 注入到 "Consul:Token"
+        //
+        // ConsulOptions.Bind resolves the Consul address from CONSUL_HTTP_ADDR /
+        // CONSUL_HOST / CONSUL_PORT environment variables, but Steeltoe's ConsulOptions
+        // only binds from the "Consul:" configuration section and ignores those env vars.
+        // Propagate the resolved host/port into the configuration so Steeltoe connects
+        // to the same Consul address as the KV loader.
+        if (config is IConfigurationBuilder configBuilder)
+        {
+            var opts = ConsulOptions.Bind(config);
+            var overrides = new Dictionary<string, string?>
+            {
+                ["Consul:Host"] = opts.Host,
+                ["Consul:Port"] = opts.Port.ToString(CultureInfo.InvariantCulture)
+            };
+            if (!string.IsNullOrEmpty(opts.Token))
+            {
+                overrides["Consul:Token"] = opts.Token;
+            }
+            configBuilder.AddInMemoryCollection(overrides);
+        }
+
         services.AddConsulDiscoveryClient();
 
         return services;
