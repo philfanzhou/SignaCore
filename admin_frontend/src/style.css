@@ -181,6 +181,10 @@ code {
   width: 34px;
   height: 34px;
   border-radius: 9px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: linear-gradient(135deg, #6366F1, #4F46E5 60%, #3730A3);
   color: #fff;
   font-size: 15px;
@@ -1164,11 +1168,18 @@ table.data-table {
   backdrop-filter: blur(2px);
   z-index: 90;
   opacity: 0;
+  pointer-events: none;
   transition: opacity .22s var(--ease);
 }
 
 .overlay.open {
   opacity: 1;
+  pointer-events: auto;
+}
+
+/* sidebar mask: only used on mobile (<=900px) */
+.sidebar-overlay {
+  display: none;
 }
 
 .drawer {
@@ -1329,23 +1340,35 @@ table.data-table {
   padding: 20px;
 }
 
+/* overlay inside modal-wrap sits below the modal and always accepts clicks */
+.modal-wrap .overlay {
+  z-index: 0;
+  pointer-events: auto;
+  animation: overlay-fade .22s var(--ease) forwards;
+}
+
 .modal {
+  position: relative;
+  z-index: 1;
   width: 460px;
   max-width: 100%;
   background: var(--surface);
   border-radius: 14px;
   box-shadow: var(--shadow-float);
   padding: 26px;
-  transform: scale(.96) translateY(8px);
-  opacity: 0;
-  transition: transform .26s var(--spring), opacity .2s;
   max-height: 88vh;
   overflow-y: auto;
+  animation: modal-pop .26s var(--spring);
 }
 
-.modal.open {
-  transform: scale(1) translateY(0);
-  opacity: 1;
+@keyframes modal-pop {
+  from { transform: scale(.96) translateY(8px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .modal-title {
@@ -1462,59 +1485,53 @@ table.data-table {
   margin-top: 20px;
 }
 
-/* ============ Toast (manual, not Element Plus) ============ */
-#toast-root {
-  position: fixed;
-  top: 18px;
+/* ============ Toast (ElMessage themed to match prototype) ============ */
+.el-message {
+  left: auto;
   right: 18px;
-  z-index: 200;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  pointer-events: none;
-}
-
-.toast {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  transform: none;
+  min-width: 240px;
   padding: 11px 16px;
   border-radius: 10px;
-  min-width: 240px;
   background: var(--ink-1);
+  border: 1px solid var(--ink-line);
+  color: #E7E9F5;
+  box-shadow: var(--shadow-float);
+  animation: toast-in .3s var(--spring);
+}
+
+.el-message .el-message__content {
   color: #E7E9F5;
   font-size: 13px;
-  box-shadow: var(--shadow-float);
-  border: 1px solid var(--ink-line);
-  animation: toast-in .3s var(--spring);
-  pointer-events: auto;
+  line-height: 1.5;
 }
 
-.toast.out {
-  animation: toast-out .22s var(--ease) forwards;
+.el-message .el-message-icon {
+  font-size: 15px;
 }
 
-.toast svg {
-  width: 15px;
-  height: 15px;
-  flex-shrink: 0;
+.el-message--success .el-message-icon { color: #34D399; }
+.el-message--error .el-message-icon { color: #F87171; }
+.el-message--warning .el-message-icon { color: #FBBF24; }
+.el-message--info .el-message-icon { color: #A5B4FC; }
+
+/* EP 默认 .el-message.is-center 为顶部居中（特异性 0,2,0）；以同特异性改为右上角锚定（本文件后加载胜出） */
+.el-message.is-center {
+  left: auto;
+  transform: none;
 }
 
-.toast.success svg {
-  color: #34D399;
+.el-message-fade-enter-from.is-center {
+  transform: translateX(24px);
 }
 
-.toast.error svg {
-  color: #F87171;
+.el-message-fade-leave-to.is-center {
+  transform: translateX(24px);
 }
 
 @keyframes toast-in {
   from { transform: translateX(24px); opacity: 0; }
   to { transform: none; opacity: 1; }
-}
-
-@keyframes toast-out {
-  to { transform: translateX(24px); opacity: 0; }
 }
 
 /* ============ Spinner ============ */
@@ -1557,6 +1574,7 @@ table.data-table {
   .sidebar {
     position: fixed;
     left: 0;
+    z-index: 92;
     transform: translateX(-100%);
     transition: transform .3s var(--ease);
   }
@@ -1564,6 +1582,10 @@ table.data-table {
   .sidebar.open {
     transform: none;
     box-shadow: var(--shadow-float);
+  }
+
+  .sidebar-overlay {
+    display: block;
   }
 
   .hamburger {

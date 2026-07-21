@@ -10,7 +10,6 @@ import {
   type AdminUser,
 } from './services/adminApi'
 
-const appTitle = ref((window as any).__APP_TITLE__ || 'Identity Admin')
 const activeTab = ref('users')
 const loadingUsers = ref(false)
 const loadingApps = ref(false)
@@ -25,8 +24,10 @@ const userTotal = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const latestCreatedAppSecret = ref('')
+const latestSecretAppId = ref('')
 const showSecretDialog = ref(false)
-const secretDialogTitle = ref('')
+const secretCopied = ref(false)
+let secretCopiedTimer: number | undefined
 const resettingSecret = ref(false)
 const deletingApp = ref(false)
 const isAuthenticated = ref(false)
@@ -152,12 +153,17 @@ const tokenForm = reactive({
 const selectedApp = computed(() => apps.value.find((item) => item.appId === callbackForm.appId) ?? null)
 
 /* ============ 抽屉与模态框状态（展示层新增，不调用 API） ============ */
+/* visible 控制挂载、open 控制 .open 类，拆分以驱动进出场过渡（对齐样稿 double-rAF 模式） */
+const userDrawerVisible = ref(false)
 const userDrawerOpen = ref(false)
 const userDrawerUser = ref<AdminUser | null>(null)
 const userDrawerTab = ref<'info'>('info')
+let userDrawerTimer: number | undefined
 
+const appDrawerVisible = ref(false)
 const appDrawerOpen = ref(false)
 const appDrawerApp = ref<AdminApp | null>(null)
+let appDrawerTimer: number | undefined
 
 const editRemarkOpen = ref(false)
 const editRemarkTarget = ref<AdminUser | null>(null)
@@ -202,14 +208,22 @@ function resetAdminState() {
   callbackForm.isActive = true
   tokenForm.refreshToken = ''
   sidebarOpen.value = false
+  if (userDrawerTimer) { window.clearTimeout(userDrawerTimer); userDrawerTimer = undefined }
+  if (appDrawerTimer) { window.clearTimeout(appDrawerTimer); appDrawerTimer = undefined }
   userDrawerOpen.value = false
+  userDrawerVisible.value = false
+  userDrawerUser.value = null
   appDrawerOpen.value = false
+  appDrawerVisible.value = false
+  appDrawerApp.value = null
   editRemarkOpen.value = false
   deleteAppOpen.value = false
   showCreateUserDialog.value = false
   showCreatePhoneUserDialog.value = false
   showCreateAppDialog.value = false
   showSecretDialog.value = false
+  secretCopied.value = false
+  latestSecretAppId.value = ''
 }
 
 function resetCreateUserForm() {
@@ -323,6 +337,12 @@ async function loadUsers() {
     })
     users.value = result.items
     userTotal.value = result.total
+    // keep the open user drawer in sync with the refreshed list
+    const drawerUser = userDrawerUser.value
+    if (drawerUser) {
+      const fresh = result.items.find((item) => item.userId === drawerUser.userId)
+      if (fresh) userDrawerUser.value = fresh
+    }
     updateRefreshTime()
   } catch (error) {
     handleApiError('加载用户列表失败', error)
@@ -331,10 +351,21 @@ async function loadUsers() {
   }
 }
 
+function handleSearch() {
+  page.value = 1
+  loadUsers()
+}
+
 async function loadApps() {
   loadingApps.value = true
   try {
     apps.value = await client.getApps()
+    // keep the open app drawer in sync with the refreshed list
+    const drawerApp = appDrawerApp.value
+    if (drawerApp) {
+      const fresh = apps.value.find((item) => item.appId === drawerApp.appId)
+      if (fresh) appDrawerApp.value = fresh
+    }
     updateRefreshTime()
   } catch (error) {
     handleApiError('加载应用列表失败', error)
@@ -390,25 +421,50 @@ async function handleCreatePhoneUser() {
   }
 }
 
-async function handleToggleUserStatus(user: AdminUser) {
+async function handleToggleUserStatus(user: AdminUser, event?: Event): Promise<boolean> {
   const action = user.isActive ? '禁用' : '启用'
+  const name = user.username || user.displayName || user.userId
+  const revertSwitch = () => {
+    if (event?.target instanceof HTMLInputElement) {
+      event.target.checked = user.isActive
+    }
+  }
   try {
     await ElMessageBox.confirm(
-      `确定要${action}用户 "${user.username}" 吗？`,
+      `确定要${action}用户 "${name}" 吗？`,
       '确认操作',
       { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
     )
   } catch {
-    return
+    revertSwitch()
+    return false
   }
 
   try {
     await client.updateUserStatus(user.userId, !user.isActive)
     ElMessage.success(`用户已${action}`)
     await loadUsers()
+    return true
   } catch (error) {
+    revertSwitch()
     handleApiError(`${action}用户失败`, error)
+    return false
   }
+}
+
+/* drawer 底部启用/禁用按钮：成功后按样稿行为关闭 drawer */
+async function toggleDrawerUserStatus() {
+  const user = userDrawerUser.value
+  if (!user) return
+  const ok = await handleToggleUserStatus(user)
+  if (ok) closeUserDrawer()
+}
+
+/* TTL 输入钳制：至少 1，非法输入回退 1（对齐样稿 Math.max(1, parseInt(...||'1'))；API 换算规则不变）
+   v-model.number 清空输入时运行时会得到 ''（string），故签名放宽为 number | string */
+function normalizeTtlValue(value: number | string): number {
+  const n = Math.floor(Number(value))
+  return Number.isFinite(n) && n >= 1 ? n : 1
 }
 
 async function handleCreateApp() {
@@ -422,8 +478,8 @@ async function handleCreateApp() {
     const ttlSeconds = createAppForm.neverExpire
       ? -1
       : createAppForm.ttlUnit === 'd'
-        ? createAppForm.ttlSeconds * 86400
-        : createAppForm.ttlSeconds * 3600
+        ? normalizeTtlValue(createAppForm.ttlSeconds) * 86400
+        : normalizeTtlValue(createAppForm.ttlSeconds) * 3600
     const result = await client.createApp({
       appName: createAppForm.appName,
       callbackUrl: createAppForm.callbackUrl || undefined,
@@ -433,8 +489,9 @@ async function handleCreateApp() {
     showCreateAppDialog.value = false
     resetCreateAppForm()
     latestCreatedAppSecret.value = result.appSecret
-    secretDialogTitle.value = '应用创建成功'
+    latestSecretAppId.value = result.appId
     secretSavedConfirmed.value = false
+    secretCopied.value = false
     showSecretDialog.value = true
     await loadApps()
   } catch (error) {
@@ -459,8 +516,9 @@ async function handleResetSecret(app: AdminApp) {
   try {
     const result = await client.resetAppSecret(app.appId)
     latestCreatedAppSecret.value = result.appSecret
-    secretDialogTitle.value = '密钥重置成功'
+    latestSecretAppId.value = app.appId
     secretSavedConfirmed.value = false
+    secretCopied.value = false
     showSecretDialog.value = true
     ElMessage.success('Secret 重置成功')
     await loadApps()
@@ -477,9 +535,17 @@ async function handleDeleteApp(app: AdminApp) {
     await client.deleteApp(app.appId)
     ElMessage.success('应用已删除')
     deleteAppOpen.value = false
-    appDrawerOpen.value = false
+    closeAppDrawer()
     deleteAppTarget.value = null
     deleteAppConfirmId.value = ''
+    if (callbackForm.appId === app.appId) {
+      callbackForm.appId = ''
+      callbackForm.callbackUrl = ''
+      callbackForm.ttlSeconds = 2
+      callbackForm.ttlUnit = 'h'
+      callbackForm.neverExpire = false
+      callbackForm.isActive = true
+    }
     await loadApps()
   } catch (error) {
     handleApiError('删除应用失败', error)
@@ -503,7 +569,7 @@ function fillCallbackForm(app: AdminApp) {
       callbackForm.ttlSeconds = remainingSec / 86400
     } else {
       callbackForm.ttlUnit = 'h'
-      callbackForm.ttlSeconds = Math.max(1, Math.floor(remainingSec / 3600))
+      callbackForm.ttlSeconds = Math.max(1, Math.ceil(remainingSec / 3600))
     }
   }
   callbackForm.isActive = app.isActive
@@ -517,10 +583,10 @@ function onAppSelected() {
   }
 }
 
-async function handleSaveCallback() {
+async function handleSaveCallback(): Promise<boolean> {
   if (!callbackForm.appId) {
     ElMessage.warning('请选择一个应用')
-    return
+    return false
   }
 
   savingCallback.value = true
@@ -528,8 +594,8 @@ async function handleSaveCallback() {
     const ttlSeconds = callbackForm.neverExpire
       ? -1
       : callbackForm.ttlUnit === 'd'
-        ? callbackForm.ttlSeconds * 86400
-        : callbackForm.ttlSeconds * 3600
+        ? normalizeTtlValue(callbackForm.ttlSeconds) * 86400
+        : normalizeTtlValue(callbackForm.ttlSeconds) * 3600
     await client.updateCallback(callbackForm.appId, {
       callbackUrl: callbackForm.callbackUrl || undefined,
       ttlSeconds,
@@ -537,11 +603,19 @@ async function handleSaveCallback() {
     })
     ElMessage.success('回调配置保存成功')
     await loadApps()
+    return true
   } catch (error) {
     handleApiError('保存回调配置失败', error)
+    return false
   } finally {
     savingCallback.value = false
   }
+}
+
+/* 应用 drawer"保存配置"：成功后按样稿行为关闭 drawer（回调管理 Tab 仍用 handleSaveCallback，不关闭） */
+async function saveCallbackFromDrawer() {
+  const ok = await handleSaveCallback()
+  if (ok) closeAppDrawer()
 }
 
 async function handleRevokeToken() {
@@ -583,7 +657,8 @@ function formatDate(dateVal: string | number | null | undefined): string {
     }
     if (ts < 10000000000) ts *= 1000
     const d = new Date(ts)
-    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    const p = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
   } catch {
     return String(dateVal)
   }
@@ -594,13 +669,23 @@ function formatTtl(app: AdminApp): string {
   if (!app.callbackExpiresAt) return '永不过期'
   const remainingSec = Math.max(0, Math.floor(app.callbackExpiresAt - Date.now() / 1000))
   if (remainingSec >= 86400 && remainingSec % 86400 === 0) return `${remainingSec / 86400} 天`
-  return `${Math.max(1, Math.floor(remainingSec / 3600))} 小时`
+  return `${Math.max(1, Math.ceil(remainingSec / 3600))} 小时`
+}
+
+function markSecretCopied() {
+  secretCopied.value = true
+  if (secretCopiedTimer) window.clearTimeout(secretCopiedTimer)
+  secretCopiedTimer = window.setTimeout(() => {
+    secretCopied.value = false
+    secretCopiedTimer = undefined
+  }, 1500)
 }
 
 function copySecret(secret: string) {
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(secret).then(() => {
       ElMessage.success('已复制到剪贴板')
+      markSecretCopied()
     }).catch(() => {
       fallbackCopy(secret)
     })
@@ -619,6 +704,7 @@ function fallbackCopy(text: string) {
   try {
     document.execCommand('copy')
     ElMessage.success('已复制到剪贴板')
+    markSecretCopied()
   } catch {
     ElMessage.error('复制失败，请手动选择文本复制')
   } finally {
@@ -660,14 +746,24 @@ function updateNavIndicator() {
 }
 
 function openUserDrawer(user: AdminUser) {
+  if (userDrawerTimer) { window.clearTimeout(userDrawerTimer); userDrawerTimer = undefined }
   userDrawerUser.value = user
   userDrawerTab.value = 'info'
-  userDrawerOpen.value = true
+  userDrawerVisible.value = true
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    userDrawerOpen.value = true
+  }))
 }
 
 function closeUserDrawer() {
+  if (!userDrawerVisible.value) return
   userDrawerOpen.value = false
-  userDrawerUser.value = null
+  if (userDrawerTimer) window.clearTimeout(userDrawerTimer)
+  userDrawerTimer = window.setTimeout(() => {
+    userDrawerVisible.value = false
+    userDrawerUser.value = null
+    userDrawerTimer = undefined
+  }, 300)
 }
 
 function openEditRemarkModal(user: AdminUser) {
@@ -695,14 +791,24 @@ async function saveEditRemark() {
 }
 
 function openAppDrawer(app: AdminApp) {
+  if (appDrawerTimer) { window.clearTimeout(appDrawerTimer); appDrawerTimer = undefined }
   appDrawerApp.value = app
   fillCallbackForm(app)
-  appDrawerOpen.value = true
+  appDrawerVisible.value = true
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    appDrawerOpen.value = true
+  }))
 }
 
 function closeAppDrawer() {
+  if (!appDrawerVisible.value) return
   appDrawerOpen.value = false
-  appDrawerApp.value = null
+  if (appDrawerTimer) window.clearTimeout(appDrawerTimer)
+  appDrawerTimer = window.setTimeout(() => {
+    appDrawerVisible.value = false
+    appDrawerApp.value = null
+    appDrawerTimer = undefined
+  }, 300)
 }
 
 function openDeleteAppModal(app: AdminApp) {
@@ -734,19 +840,54 @@ watch([userTotal, apps, activeAppsCount, disabledAppsCount], () => {
   nextTick(() => runCounters(statGridRef.value))
 })
 
+/* Esc 关闭浮层（样稿行为）：modal 优先于 drawer；ElMessageBox 打开时不拦截 */
+function handleEscapeKey(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (document.querySelector('.el-message-box__wrapper')) return
+  if (showCreateUserDialog.value) { showCreateUserDialog.value = false; return }
+  if (showCreatePhoneUserDialog.value) { showCreatePhoneUserDialog.value = false; return }
+  if (showCreateAppDialog.value) { showCreateAppDialog.value = false; return }
+  if (showSecretDialog.value) { showSecretDialog.value = false; secretSavedConfirmed.value = false; return }
+  if (editRemarkOpen.value) { editRemarkOpen.value = false; return }
+  if (deleteAppOpen.value) { deleteAppOpen.value = false; return }
+  if (userDrawerVisible.value) { closeUserDrawer(); return }
+  if (appDrawerVisible.value) { closeAppDrawer() }
+}
+
+/* 浮层打开期间锁定 body 滚动（样稿行为） */
+const anyFloatingOpen = computed(() =>
+  userDrawerVisible.value || appDrawerVisible.value ||
+  showCreateUserDialog.value || showCreatePhoneUserDialog.value || showCreateAppDialog.value ||
+  showSecretDialog.value || editRemarkOpen.value || deleteAppOpen.value
+)
+watch(anyFloatingOpen, (open) => {
+  document.body.style.overflow = open ? 'hidden' : ''
+})
+
 onMounted(() => {
   restoreSession()
   tickClock()
   clockTimer = window.setInterval(tickClock, 1000)
+  window.addEventListener('keydown', handleEscapeKey)
   nextTick(() => updateNavIndicator())
 })
 
 onUnmounted(() => {
   if (clockTimer) window.clearInterval(clockTimer)
+  if (secretCopiedTimer) window.clearTimeout(secretCopiedTimer)
+  if (userDrawerTimer) window.clearTimeout(userDrawerTimer)
+  if (appDrawerTimer) window.clearTimeout(appDrawerTimer)
+  window.removeEventListener('keydown', handleEscapeKey)
+  document.body.style.overflow = ''
 })
 
 watch(activeTab, () => {
   nextTick(() => updateNavIndicator())
+})
+
+/* 登录/会话恢复后侧边栏才渲染，此时初始化 nav 指示器位置 */
+watch(isAuthenticated, (authed) => {
+  if (authed) nextTick(() => updateNavIndicator())
 })
 </script>
 
@@ -755,8 +896,11 @@ watch(activeTab, () => {
   <div v-if="checkingSession" class="auth-page">
     <div class="auth-card">
       <div class="auth-card-header">
-        <div class="auth-logo">QZ</div>
-        {{ appTitle }}
+        <div class="auth-logo">若</div>
+        <div>
+          欢迎回来
+          <div class="auth-card-header-sub">QuantumZhou.Identity 管理控制台</div>
+        </div>
       </div>
       <div class="auth-card-body">
         <div class="auth-loading">
@@ -845,13 +989,13 @@ watch(activeTab, () => {
           <div class="avatar">{{ getInitials(session?.username || 'A') }}</div>
           <div>
             <div class="name">{{ session?.username || '管理员' }}</div>
-            <div class="role">超级管理员</div>
+            <div class="role">引导超级管理员</div>
           </div>
         </div>
       </div>
     </aside>
 
-    <div class="overlay" :class="{ open: sidebarOpen }" @click="sidebarOpen = false"></div>
+    <div class="overlay sidebar-overlay" :class="{ open: sidebarOpen }" @click="sidebarOpen = false"></div>
 
     <div class="main">
       <header class="topbar">
@@ -937,13 +1081,13 @@ watch(activeTab, () => {
             <div style="display: flex; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; align-items: center">
               <div class="input-wrap" style="flex: 1; min-width: 220px; max-width: 340px">
                 <svg class="input-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" v-html="I.search"></svg>
-                <input v-model="userFilters.username" class="input" placeholder="搜索用户名" @keyup.enter="loadUsers">
+                <input v-model="userFilters.username" class="input" placeholder="搜索用户名" @keyup.enter="handleSearch">
               </div>
               <div class="input-wrap" style="flex: 1; min-width: 220px; max-width: 340px">
                 <svg class="input-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" v-html="I.search"></svg>
-                <input v-model="userFilters.phone" class="input" placeholder="搜索手机号" @keyup.enter="loadUsers">
+                <input v-model="userFilters.phone" class="input" placeholder="搜索手机号" @keyup.enter="handleSearch">
               </div>
-              <button class="btn btn-ghost btn-sm" @click="loadUsers" title="搜索">
+              <button class="btn btn-ghost btn-sm" @click="handleSearch" title="搜索">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" v-html="I.search"></svg>
                 搜索
               </button>
@@ -997,14 +1141,14 @@ watch(activeTab, () => {
                     <td class="mono" style="font-size: 12.5px">{{ user.phone || '-' }}</td>
                     <td>
                       <span class="badge" :class="user.username ? 'indigo' : 'blue'">
-                        <span class="dot"></span>{{ user.username ? '密码账户' : '手机账户' }}
+                        {{ user.username ? '密码账户' : '手机账户' }}
                       </span>
                     </td>
                     <td style="color: var(--text-2); max-width: 200px">{{ user.remark || '-' }}</td>
                     <td style="color: var(--text-3); font-size: 12.5px; font-variant-numeric: tabular-nums">{{ formatDate(user.createdAt) }}</td>
                     <td @click.stop>
                       <label class="switch" :title="user.isActive ? '点击禁用' : '点击启用'">
-                        <input type="checkbox" :checked="user.isActive" @change="handleToggleUserStatus(user)">
+                        <input type="checkbox" :checked="user.isActive" @change="handleToggleUserStatus(user, $event)">
                         <span class="track"></span>
                       </label>
                     </td>
@@ -1014,7 +1158,7 @@ watch(activeTab, () => {
             </div>
 
             <div class="pager">
-              <span class="total">共 {{ userTotal }} 条</span>
+              <span class="total">共 {{ userTotal }} 个账户</span>
               <button :disabled="page <= 1" @click="handlePageChange(page - 1)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(180deg)">
                   <path d="M9 6l6 6-6 6"/>
@@ -1118,12 +1262,6 @@ watch(activeTab, () => {
             <div>
               <div class="page-title">回调管理</div>
               <div class="page-sub">配置 OAuth 回调地址和过期设置</div>
-            </div>
-            <div class="page-actions">
-              <button class="btn btn-ghost" :disabled="savingCallback" @click="handleSaveCallback">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" v-html="I.check"></svg>
-                保存配置
-              </button>
             </div>
           </div>
 
@@ -1249,7 +1387,7 @@ watch(activeTab, () => {
   </div>
 
   <!-- ============ 用户 Drawer ============ -->
-  <template v-if="userDrawerOpen && userDrawerUser">
+  <template v-if="userDrawerVisible && userDrawerUser">
     <div class="overlay" :class="{ open: userDrawerOpen }" @click="closeUserDrawer"></div>
     <div class="drawer" :class="{ open: userDrawerOpen }">
       <div class="drawer-head">
@@ -1289,7 +1427,7 @@ watch(activeTab, () => {
         <button class="btn btn-ghost" @click="closeUserDrawer">关闭</button>
         <button
           :class="userDrawerUser.isActive ? 'btn btn-danger' : 'btn'"
-          @click="handleToggleUserStatus(userDrawerUser); closeUserDrawer()"
+          @click="toggleDrawerUserStatus"
         >
           {{ userDrawerUser.isActive ? '禁用账户' : '启用账户' }}
         </button>
@@ -1298,7 +1436,7 @@ watch(activeTab, () => {
   </template>
 
   <!-- ============ 应用 Drawer ============ -->
-  <template v-if="appDrawerOpen && appDrawerApp">
+  <template v-if="appDrawerVisible && appDrawerApp">
     <div class="overlay" :class="{ open: appDrawerOpen }" @click="closeAppDrawer"></div>
     <div class="drawer" :class="{ open: appDrawerOpen }">
       <div class="drawer-head">
@@ -1358,7 +1496,7 @@ watch(activeTab, () => {
       </div>
       <div class="drawer-foot">
         <button class="btn btn-ghost" @click="closeAppDrawer">取消</button>
-        <button class="btn" :disabled="savingCallback" @click="handleSaveCallback">保存配置</button>
+        <button class="btn" :disabled="savingCallback" @click="saveCallbackFromDrawer">保存配置</button>
       </div>
     </div>
   </template>
@@ -1497,15 +1635,15 @@ watch(activeTab, () => {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" v-html="I.key"></svg>
           </div>
           <div>
-            <div class="modal-title">{{ secretDialogTitle }}</div>
-            <div class="modal-sub" style="margin: 2px 0 0">此密钥仅显示这一次，平台不做明文存储</div>
+            <div class="modal-title">保存你的 App Secret</div>
+            <div class="modal-sub" style="margin: 2px 0 0">应用 <span class="mono">{{ latestSecretAppId }}</span> · 此密钥仅显示这一次，平台不做明文存储</div>
           </div>
         </div>
         <div class="secret-box">
           <code>{{ latestCreatedAppSecret }}</code>
           <button class="copy-btn" @click="copySecret(latestCreatedAppSecret)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" v-html="I.copy"></svg>
-            <span>复制</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" v-html="secretCopied ? I.check : I.copy"></svg>
+            <span>{{ secretCopied ? '已复制' : '复制' }}</span>
           </button>
         </div>
         <label class="check-line">
