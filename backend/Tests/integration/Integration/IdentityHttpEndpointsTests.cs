@@ -88,13 +88,9 @@ public class IdentityServerFixture : IAsyncLifetime
         _previousMasterKey = Environment.GetEnvironmentVariable("RSA_MASTER_KEY");
         Environment.SetEnvironmentVariable("RSA_MASTER_KEY", "test-master-key-for-e2e-testing-only");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), $"identity_test_{Guid.NewGuid():N}.db");
-
         _factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
-                builder.UseSetting("Database:Provider", "SQLite");
-                builder.UseSetting("ConnectionStrings:Default", $"Data Source={dbPath}");
                 builder.UseSetting("AdminBootstrap:Username", "");
                 builder.UseSetting("AdminBootstrap:Password", "");
             });

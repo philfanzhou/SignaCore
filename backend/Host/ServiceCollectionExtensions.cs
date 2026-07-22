@@ -47,62 +47,43 @@ public static class ServiceCollectionExtensions
             });
 
         // ========== 1. Database ==========
-        var dbProvider = configuration["Database:Provider"] ?? "SQLite";
-        string connectionString;
-        if (dbProvider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase))
-        {
-            var configuredConnectionString = configuration.GetConnectionString("PostgreSQL");
-            var postgreSqlHost = configuration["PostgreSql:Host"];
-            var postgreSqlPort = configuration["PostgreSql:Port"] ?? "5432";
-            var databaseName = configuration["Database:Name"] ?? "quantumzhou_identity";
-            var postgreSqlUsername = configuration["PostgreSql:Username"];
+        var dbProvider = "PostgreSQL";
+        var connectionString = configuration.GetConnectionString("PostgreSQL");
+        var postgreSqlHost = configuration["PostgreSql:Host"];
+        var postgreSqlPort = configuration["PostgreSql:Port"] ?? "5432";
+        var databaseName = configuration["Database:Name"] ?? "quantumzhou_identity";
+        var postgreSqlUsername = configuration["PostgreSql:Username"];
 
-            connectionString = !string.IsNullOrWhiteSpace(postgreSqlHost) &&
-                !string.IsNullOrWhiteSpace(postgreSqlUsername)
-                ? $"Host={postgreSqlHost};Port={postgreSqlPort};Database={databaseName};Username={postgreSqlUsername}"
-                : configuredConnectionString ?? "Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres";
-        }
-        else
-        {
-            connectionString = configuration.GetConnectionString("Default")
-                ?? "Data Source=quantumzhou_identity.db";
-        }
+        connectionString = !string.IsNullOrWhiteSpace(postgreSqlHost) &&
+            !string.IsNullOrWhiteSpace(postgreSqlUsername)
+            ? $"Host={postgreSqlHost};Port={postgreSqlPort};Database={databaseName};Username={postgreSqlUsername}"
+            : connectionString ?? "Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres";
 
         // Add password for PostgreSQL if available in configuration
-        if (dbProvider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase))
+        var postgreSqlPassword = configuration["PostgreSql:Password"];
+        if (!string.IsNullOrWhiteSpace(postgreSqlPassword) && !connectionString.Contains("Password="))
         {
-            var postgreSqlPassword = configuration["PostgreSql:Password"];
-            if (!string.IsNullOrWhiteSpace(postgreSqlPassword) && !connectionString.Contains("Password="))
-            {
-                connectionString = $"{connectionString};Password={postgreSqlPassword}";
-            }
-            // 添加连接池配置
-            if (!connectionString.Contains("Pooling=", StringComparison.OrdinalIgnoreCase))
-            {
-                connectionString = $"{connectionString};Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100;Connection Lifetime=300";
-            }
-
-            // Ensure target database exists before registering DbContext.
-            // start.sh only provides Database:Name; the database is auto-created if missing.
-            EnsurePostgreSqlDatabaseCreated(connectionString);
+            connectionString = $"{connectionString};Password={postgreSqlPassword}";
         }
+        // 添加连接池配置
+        if (!connectionString.Contains("Pooling=", StringComparison.OrdinalIgnoreCase))
+        {
+            connectionString = $"{connectionString};Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100;Connection Lifetime=300";
+        }
+
+        // Ensure target database exists before registering DbContext.
+        // start.sh only provides Database:Name; the database is auto-created if missing.
+        EnsurePostgreSqlDatabaseCreated(connectionString);
 
         services.AddDbContext<IdentityDbContext>(options =>
         {
-            if (dbProvider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase))
+            options.UseNpgsql(connectionString, npgsqlOptions =>
             {
-                options.UseNpgsql(connectionString, npgsqlOptions =>
-                {
-                    npgsqlOptions.EnableRetryOnFailure(
-                        maxRetryCount: 3,
-                        maxRetryDelay: TimeSpan.FromSeconds(4),
-                        errorCodesToAdd: null);
-                });
-            }
-            else
-            {
-                options.UseSqlite(connectionString);
-            }
+                npgsqlOptions.EnableRetryOnFailure(
+                    maxRetryCount: 3,
+                    maxRetryDelay: TimeSpan.FromSeconds(4),
+                    errorCodesToAdd: null);
+            });
         });
 
         // ========== 2. HttpClient for Callback ==========
@@ -153,14 +134,7 @@ public static class ServiceCollectionExtensions
             LockoutSeconds = int.Parse(configuration["Sms:LockoutSeconds"] ?? "600"),
             BypassCode = configuration["Sms:BypassCode"] ?? Environment.GetEnvironmentVariable("SMS_BYPASS_CODE")
         });
-        if (dbProvider.Equals("PostgreSQL", StringComparison.OrdinalIgnoreCase))
-        {
-            services.AddScoped<IOtpService, DbOtpService>();
-        }
-        else
-        {
-            services.AddSingleton<IOtpService, InMemoryOtpService>();
-        }
+        services.AddScoped<IOtpService, DbOtpService>();
         // 开发环境使用 LoggingSmsSender，生产环境使用 ThrowingSmsSender 防止验证码泄露
         if (environment.IsDevelopment())
         {

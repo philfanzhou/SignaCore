@@ -56,7 +56,7 @@
 |--------|--------|------|
 | Database:Provider | PostgreSQL | 数据库提供者（默认由项目配置提供，通常无需 `start.sh` 重复注入） |
 | Database:Name | quantumzhou_identity | 服务自己的 PostgreSQL 数据库名（可按需由项目 `start.sh` 覆盖） |
-| ConnectionStrings:Default | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | 默认连接字符串（PostgreSQL；SQLite 模式由 `Database:Provider=SQLite` 切换后按 `Database:Name` 生成文件路径） |
+| ConnectionStrings:Default | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | 默认连接字符串（PostgreSQL） |
 | ConnectionStrings:PostgreSQL | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | PostgreSQL 连接字符串 |
 | PostgreSql:Host | localhost | PostgreSQL 主机（推荐由 Consul `config/ruoyu/shared.json` 提供） |
 | PostgreSql:Port | 5432 | PostgreSQL 端口（推荐由 Consul `config/ruoyu/shared.json` 提供） |
@@ -65,7 +65,7 @@
 
 > PostgreSQL 连接字符串自动追加连接池参数：`Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100;Connection Lifetime=300`。如连接字符串中已包含 `Pooling=` 则不追加。
 >
-> **数据库自动创建**：PostgreSQL 模式下，服务启动时会先用维护连接（连接到 `postgres` 维护数据库）检查目标数据库是否存在；不存在则自动执行 `CREATE DATABASE`。该机制保证 `start.sh` 只需提供 `Database:Name`，无需人工预建数据库。SQLite 模式下由 `EnsureCreated()` 直接创建库表。
+> **数据库自动创建**：服务启动时会先用维护连接（连接到 `postgres` 维护数据库）检查目标数据库是否存在；不存在则自动执行 `CREATE DATABASE`。该机制保证 `start.sh` 只需提供 `Database:Name`，无需人工预建数据库。
 >
 > **排查建议**：如果启动日志仍显示 `PostgreSql:Host=localhost`，优先检查 Consul 拉取日志中的来源字段是否已回退到 `Cache` 或 `AppSettings`，以及 `CONSUL_TOKEN` 是否被识别为有效输入。
 

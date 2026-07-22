@@ -78,8 +78,7 @@ public class UserQueryService : IUserQueryService
         int page,
         int pageSize)
     {
-        // SQLite does not support server-side DateTimeOffset orderBy;
-        // client evaluation is used for compatibility.
+        // Client evaluation is used for compatibility.
         var allAccounts = await query.ToListAsync();
         var pagedAccounts = allAccounts
             .OrderByDescending(account => account.CreatedAt)

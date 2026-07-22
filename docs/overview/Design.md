@@ -25,8 +25,7 @@
 | .NET | 8.0 | 运行时 |
 | ASP.NET Core | 8.0 | Web 框架 |
 | EF Core | 8.0 | ORM |
-| PostgreSQL | 12+ | 生产数据库 |
-| SQLite | 内置 | 开发数据库 |
+| PostgreSQL | 12+ | 数据库 |
 | BCrypt.Net | - | 密码哈希 |
 | OpenTelemetry | - | 可观测性 |
 | JWT | System.IdentityModel | 令牌签发 |

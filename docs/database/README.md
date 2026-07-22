@@ -44,7 +44,4 @@
 
 ## 数据库提供者
 
-支持 SQLite（开发环境）和 PostgreSQL（生产环境），通过 `Database:Provider` 配置切换。
-
-- SQLite：使用 `EnsureCreated()` 初始化
-- PostgreSQL：使用 EF Core Migrations，支持自动迁移和 schema reconciliation
+支持 PostgreSQL，使用 EF Core Migrations，支持自动迁移和 schema reconciliation。

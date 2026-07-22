@@ -21,8 +21,6 @@ dotnet restore
 
 **PostgreSQL（默认）**：`appsettings.json` 默认 `Database:Provider = "PostgreSQL"`，连接串取 `ConnectionStrings:Default`/`PostgreSql:*`（推荐由 Consul `config/ruoyu/shared.json` 提供主机与密码）。本地开发确认 PostgreSQL 可用并修正用户名/密码即可；目标数据库不存在时服务启动会自动 `CREATE DATABASE`。
 
-**SQLite（可选）**：将 `Database:Provider` 改为 `SQLite`，首次启动自动创建 `quantumzhou_identity.db`。
-
 正式容器启动路径要求由 Consul 提供数据库配置；项目级 `start.sh` 不再注入 `DB_PASSWORD`，正式部署时请在 Consul KV 中提供 `PostgreSql:Password`。
 
 ### 3. 启动服务
@@ -41,9 +39,9 @@ HTTP 端口可通过 `appsettings.json` 的 `Endpoints:Http` 修改。
 
 服务启动时自动执行以下操作：
 
-1. **数据库迁移**：SQLite 使用 `EnsureCreated()`，PostgreSQL 使用 `Database.Migrate()`
-2. **Schema Reconciliation**（仅 PostgreSQL）：检查并补齐缺失的列（如 `accounts.nickname`）
-3. **Migration Stamping**（仅 PostgreSQL）：如果数据库有表但无迁移历史，自动标记初始迁移
+1. **数据库迁移**：PostgreSQL 使用 `Database.Migrate()`
+2. **Schema Reconciliation**：检查并补齐缺失的列（如 `accounts.nickname`）
+3. **Migration Stamping**：如果数据库有表但无迁移历史，自动标记初始迁移
 4. **Admin Bootstrap**：根据 `AdminBootstrap:Username` 和 `AdminBootstrap:Password` 创建初始管理员账户
 5. **Bootstrap Apps 预置**（可选）：读取 `data/bootstrap-apps.json` 文件（若存在），预置应用注册信息
 6. **RSA 密钥初始化**：`KeyManager` 生成或加载活跃密钥对

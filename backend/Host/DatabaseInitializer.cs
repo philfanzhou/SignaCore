@@ -24,69 +24,65 @@ internal static class DatabaseInitializer
             var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
             try
             {
-                if (!dbProvider.Equals("SQLite", StringComparison.OrdinalIgnoreCase))
+                try
                 {
+                    var connection = db.Database.GetDbConnection();
+                    await connection.OpenAsync();
+
                     try
                     {
-                        var connection = db.Database.GetDbConnection();
-                        await connection.OpenAsync();
-
-                        try
+                        var missingColumns = new List<(string Table, string Column, string Definition)>
                         {
-                            var missingColumns = new List<(string Table, string Column, string Definition)>
-                            {
-                                ("accounts", "nickname", "TEXT"),
-                            };
+                            ("accounts", "nickname", "TEXT"),
+                        };
 
-                            foreach (var (table, column, definition) in missingColumns)
+                        foreach (var (table, column, definition) in missingColumns)
+                        {
+                            bool columnExists = false;
+                            using (var cmd = connection.CreateCommand())
                             {
-                                bool columnExists = false;
+                                cmd.CommandText = $"SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = '{table}' AND column_name = '{column}'";
+                                var r = await cmd.ExecuteScalarAsync();
+                                columnExists = r != null && Convert.ToInt64(r) > 0;
+                            }
+
+                            if (!columnExists)
+                            {
+                                bool tableExists = false;
                                 using (var cmd = connection.CreateCommand())
                                 {
-                                    cmd.CommandText = $"SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = '{table}' AND column_name = '{column}'";
+                                    cmd.CommandText = $"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = '{table}'";
                                     var r = await cmd.ExecuteScalarAsync();
-                                    columnExists = r != null && Convert.ToInt64(r) > 0;
+                                    tableExists = r != null && Convert.ToInt64(r) > 0;
                                 }
 
-                                if (!columnExists)
+                                if (tableExists)
                                 {
-                                    bool tableExists = false;
-                                    using (var cmd = connection.CreateCommand())
+                                    try
                                     {
-                                        cmd.CommandText = $"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = '{table}'";
-                                        var r = await cmd.ExecuteScalarAsync();
-                                        tableExists = r != null && Convert.ToInt64(r) > 0;
+                                        using var cmd = connection.CreateCommand();
+                                        cmd.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {definition}";
+                                        await cmd.ExecuteNonQueryAsync();
+                                        logger.LogInformation("Reconciled missing column: {Table}.{Column}", table, column);
                                     }
-
-                                    if (tableExists)
+                                    catch (Exception colEx)
                                     {
-                                        try
-                                        {
-                                            using var cmd = connection.CreateCommand();
-                                            cmd.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {definition}";
-                                            await cmd.ExecuteNonQueryAsync();
-                                            logger.LogInformation("Reconciled missing column: {Table}.{Column}", table, column);
-                                        }
-                                        catch (Exception colEx)
-                                        {
-                                            logger.LogWarning(colEx, "Column {Table}.{Column} may already exist, skipping", table, column);
-                                        }
+                                        logger.LogWarning(colEx, "Column {Table}.{Column} may already exist, skipping", table, column);
                                     }
                                 }
                             }
                         }
-                        finally
-                        {
-                            await connection.CloseAsync();
-                        }
                     }
-                    catch (Exception reconEx)
+                    finally
                     {
-                        logger.LogWarning(reconEx, "Schema reconciliation check skipped");
+                        await connection.CloseAsync();
                     }
                 }
+                catch (Exception reconEx)
+                {
+                    logger.LogWarning(reconEx, "Schema reconciliation check skipped");
+                }
 
-                if (!dbProvider.Equals("SQLite", StringComparison.OrdinalIgnoreCase))
                 {
                     var pendingMigrations = db.Database.GetPendingMigrations().ToList();
                     if (pendingMigrations.Any())
@@ -164,14 +160,7 @@ internal static class DatabaseInitializer
                     }
                 }
 
-                if (dbProvider.Equals("SQLite", StringComparison.OrdinalIgnoreCase))
-                {
-                    db.Database.EnsureCreated();
-                }
-                else
-                {
-                    db.Database.Migrate();
-                }
+                db.Database.Migrate();
 
                 var adminUsername = adminBootstrapOptions.Username.Trim();
                 var adminPassword = adminBootstrapOptions.Password;
