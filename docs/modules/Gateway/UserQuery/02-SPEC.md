@@ -20,7 +20,7 @@
 ### AC-FR-01: 搜索用户
 - **Given** 有效的 AppId/AppSecret（通过 X-Admin-AppId / X-Admin-AppSecret 请求头），搜索关键词
 - **When** GET /api/gateway/users/search?username=xxx
-- **Then** 返回匹配的用户列表（分页），包含 UserId、Username、Phone、IsActive、Remark、Nickname、CreatedAt、DisplayName
+- **Then** 返回匹配的用户列表（分页），包含 UserId、Username、Phone、IsActive、Remark、Nickname、CreatedAt、DisplayName、HasPassword
 
 ### AC-FR-01-补充：分页参数
 - **Given** 有效的 AppId/AppSecret
@@ -56,11 +56,11 @@
 
 - **NFR-01 安全性**：所有请求必须通过 `X-Admin-AppId` 和 `X-Admin-AppSecret` 请求头提供凭证，由 `GatewayValidationService.ValidateAsync` 验证；缺少凭证返回 401，无效凭证返回 401
 - **NFR-02 数据约束**：分页 pageSize 最大值为 100（`Math.Min(normalizedPageSize, 100)`），默认 20；page 默认 1
-- **NFR-03 数据脱敏**：查询结果不包含密码哈希等敏感字段，仅返回 UserId、Username、Phone、IsActive、Remark、Nickname、CreatedAt、DisplayName
+- **NFR-03 数据脱敏**：查询结果不包含密码哈希等敏感字段，仅返回 UserId、Username、Phone、IsActive、Remark、Nickname、CreatedAt、DisplayName、HasPassword（布尔，标识账户是否持有密码凭据，不含任何凭据内容）
 - **NFR-04 凭证验证流程**：AppId 查找注册记录 → 检查 App 是否激活 → 检查是否过期 → BCrypt 验证 AppSecret
 
 ## 测试策略
 
-- 当前仅 GatewayValidationService 有单元测试
-- GatewayController 端到端测试待补充
-- 建议优先补充：搜索分页测试、批量查询顺序测试、无效 GUID 过滤测试
+- `UserQueryServiceTests`：查询与投影逻辑（搜索过滤、分页、HasPassword 判据、DisplayName 兜底、批量保序/无效 GUID 过滤/去重）
+- `GatewayControllerTests`：端点行为（401 凭证分支、分页规范化、批量保序，注入真实 UserQueryService + EF InMemory）
+- `GatewayValidationServiceTests`：AppId/AppSecret 校验

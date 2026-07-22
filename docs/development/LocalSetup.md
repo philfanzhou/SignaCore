@@ -5,7 +5,7 @@
 | 依赖 | 版本要求 | 说明 |
 |------|----------|------|
 | .NET SDK | 8.0+ | `dotnet --version` 验证 |
-| PostgreSQL | 12+（可选） | 生产数据库；不安装时默认使用 SQLite |
+| PostgreSQL | 12+ | 默认数据库（`appsettings.json` 中 `Database:Provider = "PostgreSQL"`），本地开发需安装或指向可用实例 |
 | Node.js | 18+（可选） | 仅管理前端开发时需要 |
 
 ## 快速启动
@@ -19,22 +19,11 @@ dotnet restore
 
 ### 2. 数据库配置
 
-**SQLite（默认，零配置）**：无需额外操作，首次启动自动创建 `quantumzhou_identity.db`。
+**PostgreSQL（默认）**：`appsettings.json` 默认 `Database:Provider = "PostgreSQL"`，连接串取 `ConnectionStrings:Default`/`PostgreSql:*`（推荐由 Consul `config/ruoyu/shared.json` 提供主机与密码）。本地开发确认 PostgreSQL 可用并修正用户名/密码即可；目标数据库不存在时服务启动会自动 `CREATE DATABASE`。
 
-**PostgreSQL**：正式容器启动路径要求由 Consul 提供数据库配置；如仅做本地手工诊断，可临时修改 `backend/Host/appsettings.json`：
+**SQLite（可选）**：将 `Database:Provider` 改为 `SQLite`，首次启动自动创建 `quantumzhou_identity.db`。
 
-```json
-{
-  "Database": {
-    "Provider": "PostgreSQL"
-  },
-  "ConnectionStrings": {
-    "PostgreSQL": "Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres"
-  }
-}
-```
-
-项目级 `start.sh` 不再注入 `DB_PASSWORD`；正式部署时请在 Consul KV 中提供 `PostgreSql:Password`。
+正式容器启动路径要求由 Consul 提供数据库配置；项目级 `start.sh` 不再注入 `DB_PASSWORD`，正式部署时请在 Consul KV 中提供 `PostgreSql:Password`。
 
 ### 3. 启动服务
 
@@ -65,8 +54,8 @@ HTTP 端口可通过 `appsettings.json` 的 `Endpoints:Http` 修改。
 
 ```bash
 # 单元测试
-dotnet test test/unit/QuantumZhou.Identity.Tests.csproj
+dotnet test backend/Tests/unit/QuantumZhou.Identity.Tests.csproj
 
 # 集成测试（需要运行中的服务）
-dotnet test test/integration/QuantumZhou.Identity.IntegrationTests.csproj
+dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj
 ```

@@ -1,7 +1,7 @@
 # 用户管理 — 测试计划 (TESTS)
 
 测试工具：xUnit + Moq
-现有测试文件：当前无 AdminController 专项测试
+现有测试文件：`backend/Tests/unit/Host/Controllers/AdminControllerTests.cs`（含 GetUsers 的 HasPassword 判据用例 `GetUsers_HasPassword_ReflectsPasswordCredential`）
 
 ## 单元测试 — Given-When-Then 格式
 
@@ -45,7 +45,13 @@
 
 - **Given** 数据库中存在用户名为 "testuser" 的用户
 - **When** GET /api/admin/users?username=test
-- **Then** 返回 200，结果中包含用户名含 "test" 的用户，每条记录包含 UserId/Username/Phone/IsActive/Remark/Nickname/CreatedAt/DisplayName
+- **Then** 返回 200，结果中包含用户名含 "test" 的用户，每条记录包含 UserId/Username/Phone/IsActive/Remark/Nickname/CreatedAt/DisplayName/HasPassword
+
+### UT-07b 查询用户列表 HasPassword 判据
+
+- **Given** 一个持有密码凭据的账户 + 一个仅有短信登录（user_logins, provider=sms）的账户
+- **When** GET /api/admin/users
+- **Then** 前者 `HasPassword=true`（密码账户），后者 `HasPassword=false`（手机账户，其 Username 回退为手机号但不影响类型判定）
 
 ### UT-08 修改备注用户不存在返回 404
 
@@ -67,4 +73,4 @@
 
 ## 遗漏的测试场景
 
-- 当前无 AdminController 的单元测试 [待补充]
+- 用户登录历史、审计日志查询的边界用例 [待补充]

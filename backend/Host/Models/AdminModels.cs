@@ -9,18 +9,6 @@ public sealed record AdminSessionResponse(
     string Username,
     bool IsAuthenticated);
 
-public sealed record AdminPagedResponse<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);
-
-public sealed record AdminUserListItemResponse(
-    string UserId,
-    string Username,
-    string Phone,
-    bool IsActive,
-    string Remark,
-    string? Nickname,
-    long CreatedAt,
-    string DisplayName);
-
 public sealed record AdminCreateUserRequest(string Username, string Password, string? DisplayName, string? Remark, string? Nickname);
 
 public sealed record AdminCreatePhoneUserRequest(string Phone, string? DisplayName, string? Remark, string? Nickname);

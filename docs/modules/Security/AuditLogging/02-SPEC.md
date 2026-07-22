@@ -29,6 +29,8 @@
 - **Then** 写入 `audit_logs` 表，包含 action、targetType、targetId、actorId、actorName、description、clientIp、correlationId，before/after 快照以 camelCase JSON 格式存储
 
 ### AC-FR-03: 查询审计日志
+> 本端点规格的唯一事实源在此；Admin/AppManagement/02-SPEC.md 的 FR-07 仅为索引引用。
+
 - **Given** 管理员需要检索审计记录
 - **When** 请求 `GET /api/admin/audit-logs`
 - **Then** 支持按 action、targetType、targetId、actorId 筛选，支持分页返回结果

@@ -16,6 +16,7 @@ export interface AdminUser {
   nickname: string | null
   createdAt: number
   displayName: string
+  hasPassword: boolean
 }
 
 export interface AdminApp {
@@ -68,10 +69,6 @@ class AdminApiClient {
       timeout: 15000,
       withCredentials: true,
     })
-  }
-
-  async testConnection(): Promise<void> {
-    await this.getCurrentSession()
   }
 
   async login(payload: { username: string; password: string; rememberMe: boolean }) {

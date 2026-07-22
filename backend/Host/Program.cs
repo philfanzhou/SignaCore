@@ -9,6 +9,7 @@ using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Host;
 using QuantumZhou.Identity.Host.Configuration;
 using QuantumZhou.Identity.Host.Controllers;
+using QuantumZhou.Identity.Host.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -129,16 +130,7 @@ app.UseAuthentication();
 // Strips X-Admin-AppSecret from the request headers after authentication
 // so that downstream logging/middleware cannot accidentally log the secret value.
 // The secret has already been consumed by GatewayController.ValidateGatewayRequestAsync.
-app.Use(async (context, next) =>
-{
-    if (context.Request.Headers.TryGetValue(GatewayController.AppSecretHeader, out var secretValue))
-    {
-        // Store the secret in HttpContext.Items for controller access, then remove from headers
-        context.Items[GatewayController.AppSecretHeader] = secretValue.ToString();
-        context.Request.Headers.Remove(GatewayController.AppSecretHeader);
-    }
-    await next();
-});
+app.UseMiddleware<SensitiveHeaderRedactionMiddleware>();
 
 app.UseAuthorization();
 app.UseRateLimiter();
@@ -238,20 +230,7 @@ app.MapGet("/.well-known/openid-configuration", (HttpContext httpContext, IConfi
 app.MapGet("/.well-known/jwks", async (IKeyManager keyManager) =>
 {
     var keys = await keyManager.GetValidKeysAsync();
-    var jwks = keys.Select(key =>
-    {
-        var rsa = key.Rsa ?? throw new InvalidOperationException("Key is not RSA");
-        var parameters = rsa.ExportParameters(false);
-        return new
-        {
-            kty = "RSA",
-            use = "sig",
-            kid = key.KeyId,
-            alg = "RS256",
-            n = Base64UrlEncoder.Encode(parameters.Modulus!),
-            e = Base64UrlEncoder.Encode(parameters.Exponent!)
-        };
-    });
+    var jwks = keys.Select(JwksMapper.ToJwk);
     return Results.Ok(new { keys = jwks });
 });
 
@@ -282,9 +261,7 @@ app.MapWhen(context =>
                 if (File.Exists(filePath))
                 {
                     var content = await File.ReadAllTextAsync(filePath);
-                    content = content.Replace("__APP_TITLE__", appTitle);
-                    // Inject global variable for Vue app to read at runtime
-                    content = content.Replace("</head>", $"<script>window.__APP_TITLE__ = '{appTitle.Replace("'", "\\'")}';</script></head>");
+                    content = AdminSpaTitleInjector.Inject(content, appTitle);
                     context.Response.ContentType = "text/html; charset=utf-8";
                     await context.Response.WriteAsync(content);
                     return;

@@ -1,7 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using QuantumZhou.Identity.Database;
-using QuantumZhou.Identity.Domain;
+using QuantumZhou.Identity.Domain.Models;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Host.Models;
 
@@ -35,7 +33,7 @@ public class GatewayController : ControllerBase
         [FromQuery] string? phone,
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
-        [FromServices] IdentityDbContext dbContext,
+        [FromServices] IUserQueryService userQueryService,
         [FromServices] GatewayValidationService gatewayValidationService)
     {
         var authError = await ValidateGatewayRequestAsync(gatewayValidationService);
@@ -53,25 +51,7 @@ public class GatewayController : ControllerBase
 
         normalizedPageSize = Math.Min(normalizedPageSize, 100);
 
-        var searchTerm = username?.Trim();
-        var phoneTerm = phone?.Trim();
-
-        var query = dbContext.Accounts
-            .AsNoTracking()
-            .Where(account =>
-                (string.IsNullOrWhiteSpace(searchTerm) ||
-                 dbContext.PasswordCredentials.Any(credential =>
-                     credential.AccountId == account.Id &&
-                     EF.Functions.Like(credential.Username, $"%{searchTerm}%")) ||
-                 EF.Functions.Like(account.Remark ?? string.Empty, $"%{searchTerm}%")) &&
-                (string.IsNullOrWhiteSpace(phoneTerm) ||
-                 dbContext.UserLogins.Any(login =>
-                     login.AccountId == account.Id &&
-                     login.ProviderName == IdentityConstants.AuthMethodSms &&
-                     EF.Functions.Like(login.ProviderUserId, $"%{phoneTerm}%"))));
-
-        var total = await query.CountAsync();
-        var users = await ProjectUsersAsync(query, dbContext, normalizedPage, normalizedPageSize);
+        var (users, total) = await userQueryService.SearchUsersAsync(username, phone, normalizedPage, normalizedPageSize);
 
         return Ok(new AdminPagedResponse<AdminUserListItemResponse>(
             users,
@@ -83,7 +63,7 @@ public class GatewayController : ControllerBase
     [HttpPost("users/batch")]
     public async Task<IActionResult> GetUsersByIds(
         [FromBody] List<string>? userIds,
-        [FromServices] IdentityDbContext dbContext,
+        [FromServices] IUserQueryService userQueryService,
         [FromServices] GatewayValidationService gatewayValidationService)
     {
         var authError = await ValidateGatewayRequestAsync(gatewayValidationService);
@@ -97,85 +77,9 @@ public class GatewayController : ControllerBase
             return Ok(new List<AdminUserListItemResponse>());
         }
 
-        var orderedUserIds = userIds
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var parsedUserIds = orderedUserIds
-            .Select(id => Guid.TryParse(id, out var parsedId) ? parsedId : (Guid?)null)
-            .Where(id => id.HasValue)
-            .Select(id => id!.Value)
-            .ToList();
-
-        if (parsedUserIds.Count == 0)
-        {
-            return Ok(new List<AdminUserListItemResponse>());
-        }
-
-        var query = dbContext.Accounts
-            .AsNoTracking()
-            .Where(account => parsedUserIds.Contains(account.Id));
-
-        var users = await ProjectUsersAsync(query, dbContext, page: 1, pageSize: parsedUserIds.Count);
-        var userMap = users.ToDictionary(item => item.UserId, StringComparer.OrdinalIgnoreCase);
-
-        var orderedUsers = orderedUserIds
-            .Where(userMap.ContainsKey)
-            .Select(id => userMap[id])
-            .ToList();
+        var orderedUsers = await userQueryService.GetUsersByIdsAsync(userIds);
 
         return Ok(orderedUsers);
-    }
-
-    private async Task<List<AdminUserListItemResponse>> ProjectUsersAsync(
-        IQueryable<Database.Entity.AccountEntity> query,
-        IdentityDbContext dbContext,
-        int page,
-        int pageSize)
-    {
-        // SQLite does not support server-side DateTimeOffset orderBy;
-        // client evaluation is used for compatibility.
-        var allAccounts = await query.ToListAsync();
-        var pagedAccounts = allAccounts
-            .OrderByDescending(account => account.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToList();
-
-        var accountIds = pagedAccounts.Select(a => a.Id).ToList();
-
-        var credentials = await dbContext.PasswordCredentials
-            .AsNoTracking()
-            .Where(c => accountIds.Contains(c.AccountId))
-            .ToDictionaryAsync(c => c.AccountId, c => c.Username);
-
-        var phones = await dbContext.UserLogins
-            .AsNoTracking()
-            .Where(l => accountIds.Contains(l.AccountId) && l.ProviderName == IdentityConstants.AuthMethodSms)
-            .ToDictionaryAsync(l => l.AccountId, l => l.ProviderUserId);
-
-        return pagedAccounts.Select(account =>
-        {
-            var username = credentials.GetValueOrDefault(account.Id);
-            var phone = phones.GetValueOrDefault(account.Id);
-            var name = username ?? phone ?? string.Empty;
-            var displayName = !string.IsNullOrWhiteSpace(account.Nickname)
-                ? account.Nickname
-                : (!string.IsNullOrWhiteSpace(username)
-                    ? username
-                    : (!string.IsNullOrWhiteSpace(phone) ? phone : account.Id.ToString()[..8]));
-            return new AdminUserListItemResponse(
-                account.Id.ToString(),
-                name,
-                phone ?? string.Empty,
-                account.IsActive,
-                account.Remark ?? string.Empty,
-                account.Nickname,
-                account.CreatedAt.ToUnixTimeSeconds(),
-                displayName);
-        })
-            .ToList();
     }
 
     private async Task<IActionResult?> ValidateGatewayRequestAsync(GatewayValidationService gatewayValidationService)

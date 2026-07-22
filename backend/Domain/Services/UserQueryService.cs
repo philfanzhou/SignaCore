@@ -117,7 +117,8 @@ public class UserQueryService : IUserQueryService
                 account.Remark ?? string.Empty,
                 account.Nickname,
                 account.CreatedAt.ToUnixTimeSeconds(),
-                displayName);
+                displayName,
+                credentials.ContainsKey(account.Id));
         })
             .ToList();
     }

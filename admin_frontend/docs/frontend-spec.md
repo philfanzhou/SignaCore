@@ -17,17 +17,52 @@
 ```
 admin_frontend/
 ├── src/
-│   ├── App.vue                          # 主应用（单组件架构）
-│   ├── main.ts                          # 入口文件
-│   ├── style.css                        # 全局样式 + Design Token
-│   └── services/
-│       └── adminApi.ts                  # API 客户端服务
+│   ├── App.vue                          # 组装根（会话三分支 + 组件组装 + 生命周期接线）
+│   ├── main.ts                          # 入口文件（按顺序 import 9 个样式文件）
+│   ├── env.d.ts                         # window.__APP_TITLE__ 类型声明
+│   ├── components/                      # 展示组件（零 props，直接从 composable 取状态）
+│   │   ├── AuthView.vue                 # 会话检查页 + 登录页
+│   │   ├── AppSidebar.vue               # 侧边栏（brand/nav/底部署名 + 移动遮罩 + nav 指示器）
+│   │   ├── AppTopbar.vue                # 顶部栏（汉堡/面包屑/刷新/环境标签/时钟/登出）
+│   │   ├── StatBar.vue                  # 统计栏（4 卡片 + 数字滚动动效）
+│   │   ├── UsersTab.vue                 # 用户管理 tab
+│   │   ├── AppsTab.vue                  # 应用注册 tab
+│   │   ├── CallbacksTab.vue             # 回调管理 tab
+│   │   ├── TokensTab.vue                # 令牌管理 tab
+│   │   ├── UserDrawer.vue               # 用户 drawer
+│   │   ├── AppDrawer.vue                # 应用 drawer
+│   │   └── modals/                      # 6 个模态框（创建密码/手机账户、注册应用、密钥显示、编辑备注、删除应用确认）
+│   ├── composables/                     # 模块级单例状态与逻辑（域 → useSession → sessionHooks 单向依赖）
+│   │   ├── sessionHooks.ts              # 注册表：resetAllDomains / loadAllDomains / refreshAll
+│   │   ├── useSession.ts                # 会话域 + 401 管线 + appTitle
+│   │   ├── useUsers.ts                  # 用户域（含用户 drawer、备注 modal、开户 modal×2）
+│   │   ├── useApps.ts                   # 应用域（含应用 drawer、回调表单、密钥/删除 modal 组）
+│   │   ├── useTokens.ts                 # 令牌吊销
+│   │   ├── useViewNav.ts                # activeTab / sidebarOpen / viewLeaving / navigateTo
+│   │   ├── useClock.ts                  # 顶栏时钟
+│   │   └── useOverlay.ts                # Esc 层级 + body 滚动锁定（initialized 守卫）
+│   ├── services/
+│   │   ├── adminApi.ts                  # API 客户端（类型 + AdminApiClient）
+│   │   └── apiClient.ts                 # 单一 axios 实例（adminClient）
+│   ├── utils/
+│   │   ├── icons.ts                     # 线性 SVG 图标字典（I）
+│   │   └── format.ts                    # formatDate / formatTtl / getInitials / normalizeTtlValue
+│   └── styles/                          # 全局样式（无 scoped，main.ts 按级联顺序引入）
+│       ├── tokens.css                   # Design Token（:root 变量）
+│       ├── base.css                     # reset / 滚动条 / body
+│       ├── auth.css                     # 登录/会话检查页
+│       ├── layout.css                   # app-shell / sidebar / topbar
+│       ├── components.css               # 卡片/按钮/输入/徽章/chip/表格/switch/统计卡/分页/空态/告警
+│       ├── overlays.css                 # drawer / modal
+│       ├── toast.css                    # ElMessage 全局覆写（必须在 element-plus css 之后）
+│       ├── utilities.css                # spinner / section-gap
+│       └── responsive.css               # 响应式断点（最后加载）
 ├── public/
 │   └── favicon.svg                      # 图标
 └── package.json
 ```
 
-> **架构说明**：Identity Admin 采用单组件架构，所有页面、抽屉、对话框和交互逻辑都内联在 `App.vue` 中，无路由、无状态管理库、无独立组件文件。本次重设计仅改展示层，不拆分组件。
+> **架构说明**：组件 + composable 单例架构（2026-07-22 由 1714 行单组件拆分，行为零变化）。无路由、无状态管理库、无路径 alias；跨组件共享状态经 composable 模块级单例（`useXxx()` 返回同一状态），依赖方向固定为"域 composable → useSession → sessionHooks"，域在模块顶层 `registerSessionHooks({ reset, load })` 自注册，useSession 的 `resetAdminState` 与登录/会话恢复路径经注册表回到各域，避免循环依赖。drawer 状态并入所属域 composable（用户 drawer→useUsers，应用 drawer+回调表单→useApps）；模板 ref 与效果代码同组件绑定（nav 指示器→AppSidebar，数字滚动→StatBar）。
 
 ---
 
@@ -72,7 +107,7 @@ admin_frontend/
 ┌─────────────────────────────────────────────────────────────┐
 │  侧边栏（深色渐变，固定 248px）                                │
 │  ┌──────────────────────┐                                   │
-│  │ 若愚 Logo + 副标题    │                                   │
+│  │ 身份卡图标 + 服务名 + 副标题 │                                │
 │  ├──────────────────────┤                                   │
 │  │ QuantumZhou.Identity │  ← 系统标签（仅展示，无切换器）    │
 │  │ ▸ 用户管理            │  ← 激活态有左侧高亮条 + 背景胶囊   │
@@ -113,6 +148,23 @@ admin_frontend/
 | 编辑备注 | 用户 drawer 中"编辑"按钮 | 备注 textarea |
 | 删除应用确认 | 应用 drawer 中"删除应用"按钮 | 输入 App ID 确认（输入正确才能永久删除） |
 
+### 品牌与标题来源（2026-07-21 去业务化 + 标题参数化修正）
+
+Identity 是面向任意系统提供鉴权能力的通用服务，管理控制台**不得**出现具体业务方品牌（如"若愚学习平台"）。所有标题（浏览器 tab、侧边栏 brand、登录页副标题）**统一来自运行时注入的 `APP_TITLE`**，禁止在前端硬编码，以便同一镜像适配不同项目部署：
+
+```
+start.sh 传参 -e APP_TITLE="${CONTAINER_NAME}"
+  → 后端 Program.cs 读取 APP_TITLE 配置（缺省 "QuantumZhou.Identity"）
+  → 运行时替换 index.html 的 <title>__APP_TITLE__</title> 占位符（浏览器 tab 标题）
+  → 注入 <script>window.__APP_TITLE__ = '...'</script> 到 <head>
+  → 前端 appTitle = window.__APP_TITLE__ || 'QuantumZhou.Identity'（前端兜底值）
+```
+
+- `index.html` 必须保留 `<title>__APP_TITLE__</title>` 占位符，**禁止**替换为硬编码文案（否则后端运行时注入失效）
+- 侧边栏 brand：渐变方块内为线性身份卡 SVG 图标（非汉字"若"），主文案为 `{{ appTitle }}`，副标题固定为 `管理控制台`
+- 登录页 / 会话检查页：`auth-logo` 同样使用身份卡 SVG 图标，副标题为 `{{ appTitle }} 管理控制台`
+- `window.__APP_TITLE__` 的 TS 声明位于 `src/env.d.ts`
+
 ---
 
 ## 功能模块详细说明
@@ -147,7 +199,7 @@ admin_frontend/
 **用户表格列**（按样稿）：
 - 用户（头像 + 昵称/用户名）
 - 手机号
-- 类型（密码账户 / 手机账户，由 `username` 是否为空推导）
+- 类型（密码账户 / 手机账户，由后端返回的 `hasPassword` 判定：`true` = 密码账户（indigo 徽章），`false` = 手机账户（blue 徽章）。**禁止**再用 `username` 是否为空推导——后端对手机账户的 `username` 字段回退返回手机号，判空恒为真，曾导致手机账户全部误显示为"密码账户"）
 - 备注
 - 创建时间
 - 状态（switch 开关，stopPropagation 防止触发 drawer）
@@ -263,6 +315,7 @@ interface AdminUser {
   nickname: string | null
   createdAt: number
   displayName: string
+  hasPassword: boolean   // 是否存在密码凭据：true=密码账户，false=手机账户
 }
 
 interface AdminApp {
@@ -609,6 +662,53 @@ interface AdminUpdateCallbackRequest {
 - **位置**：`App.vue` `formatDate`
 - **修复**：月/日/时/分统一 padStart(2,'0')，分隔符统一为 `-`（输出 `2025-09-02 10:24`）。
 - **状态**：✅ 已修复（2026-07-21，`npm run build` 通过，vue-tsc 零类型错误）
+
+---
+
+## 修复记录（2026-07-21 品牌去业务化 + 账户类型判据修正）
+
+> 背景：①Identity 定位是面向任意系统的通用鉴权服务，管理控制台残留业务方品牌"若 / 若愚学习平台"；②用户列表/详情的账户类型用 `username` 判空推导，但后端 `AdminUserListItemResponse.Username` 对手机账户回退返回手机号（`username ?? phone`），导致存量手机账户全部误显示为"密码账户"。本轮后端 DTO 新增 `HasPassword` 字段（存在密码凭据 = 密码账户），前端统一改用该字段。
+
+#### G1: 品牌绑定具体业务（"若 / 若愚学习平台"），且标题未走 APP_TITLE 参数化
+
+- **问题**：侧边栏 brand（`brand-mark` 汉字"若" + `brand-text`"若愚学习平台"）、登录页/会话检查页 `auth-logo`（汉字"若"）硬编码业务方品牌；Identity 作为通用鉴权服务不应绑定任何具体业务。且既有需求是所有标题来自 `start.sh` 的 `APP_TITLE` 参数（后端 `Program.cs` 已实现运行时注入 `__APP_TITLE__` 占位符 + `window.__APP_TITLE__` 全局变量），但前端从未消费该变量，`index.html` 的 `<title>__APP_TITLE__</title>` 占位符还一度被误改为硬编码文案（会导致后端替换失效）。
+- **位置**：`App.vue` 会话检查页/登录页头部、侧边栏 brand；`index.html` title；新增 `src/env.d.ts`
+- **预期**：品牌仅体现部署方通过 `APP_TITLE` 注入的标题，图标为中性的身份卡线性 SVG；浏览器 tab 标题由后端替换占位符生成，页面内标题与 tab 同源。
+- **修复**：`index.html` 恢复 `<title>__APP_TITLE__</title>` 占位符；新增 `env.d.ts` 声明 `window.__APP_TITLE__`；`App.vue` 以 `appTitle = window.__APP_TITLE__ || 'QuantumZhou.Identity'` 读取，brand 主文案与登录页/会话检查页副标题统一改用 `appTitle`；`brand-mark` / `auth-logo` 内汉字"若"替换为身份卡 SVG 图标（沿用图标系统 stroke 1.6 规范）。
+- **状态**：✅ 已修复（2026-07-21，`npm run build` 通过，vue-tsc 零类型错误）
+
+#### G2: 手机账户类型误显示为"密码账户"
+
+- **问题**：用户表格"类型"徽章与用户 drawer"账户类型"均按 `user.username` 是否非空推导。后端投影 `name = username ?? phone`，手机账户的 `username` 返回手机号（恒非空），所有手机账户显示为"密码账户"。
+- **位置**：`App.vue` 用户表格类型列、用户 drawer KV 网格；后端 `AdminController.GetUsers` / `UserQueryService.ProjectUsersAsync` 投影；`AdminUserListItemResponse`（Host 与 Domain 两份同构定义）
+- **预期**：账户类型以后端权威字段为准——存在密码凭据（password_credentials）= 密码账户，否则 = 手机账户。
+- **修复**：`AdminUserListItemResponse` 新增 `HasPassword`（两份定义同步），投影以 `credentials.ContainsKey(account.Id)` 填充；前端 `AdminUser` 类型加 `hasPassword`，列表徽章文案/配色与 drawer 账户类型统一改用 `hasPassword`。
+- **状态**：✅ 已修复（2026-07-21，后端单元测试 264 通过含新增 HasPassword 判据用例，`npm run build` 通过，vue-tsc 零类型错误）
+
+---
+
+## 重构记录（2026-07-22 大文件拆分 + 死代码清理）
+
+> 背景：`App.vue`（1714 行单组件）与 `style.css`（1622 行）是可维护性主要瓶颈。本轮按"行为零变化"铁律完成结构重组：状态/方法/模板/样式逐块搬运，不改变任何交互与视觉。
+
+#### R1: App.vue 单组件拆分（1714 行 → 约 80 行组装根 + 16 组件 + 8 composable + 2 utils）
+
+- **拆分方案**：composable 模块级单例承载状态与逻辑（useSession / useUsers / useApps / useTokens / useViewNav / useClock / useOverlay / sessionHooks 注册表），组件零 props 直接从 composable 解构；依赖方向"域 → useSession → sessionHooks"单向无环。
+- **关键裁定**：drawer 状态并入域 composable（避免 loadXxx 同步 drawer 与 drawer 操作回写列表的循环依赖）；回调域并入 useApps（callbackForm 被回调 tab 与应用 drawer 双向共用）；nav 指示器归 AppSidebar、数字滚动归 StatBar（模板 ref 与效果同组件绑定）。
+- **等价简化（行为不变）**：navigateTo 不再显式 `nextTick(updateNavIndicator)`（watch(activeTab) 必然触发同一更新）；计数 watch 仅在 StatBar 挂载期间激活。
+- **状态**：✅ 已完成（2026-07-22，`npm run build` 通过，vue-tsc 零类型错误）
+
+#### R2: style.css 拆分（1622 行 → styles/ 9 文件）
+
+- **拆分方案**：tokens / base / auth / layout / components / overlays / toast / utilities / responsive，main.ts 按级联顺序 import；全部样式无 scoped，顺序与原单文件一致（已用逐字节 diff 验证拼接后与原文件完全一致）。toast.css（`.el-message.is-center` 覆写）保持在 element-plus css 之后，responsive.css 最后。
+- **状态**：✅ 已完成（2026-07-22）
+
+#### R3: 死代码清理
+
+- **前端逻辑**：`lastRefreshTime` / `updateRefreshTime`（只写不读）及其在 loadUsers/loadApps 中的调用；`adminApi.testConnection`（无调用方）。
+- **CSS 死类**（grep 确认零模板引用后删除）：`.checkbox-wrap`、`.badge.amber`、`.badge.red`、`.trend-up`、`.trend-down`、`.form-group` 半选择器（保留 `.field` 半选择器）。
+- **依赖移除**：`pinia`、`vue-router`、`@element-plus/icons-vue`（已安装但从未在 src 中引用；锁文件已更新）。
+- **状态**：✅ 已完成（2026-07-22，`npm run build` 通过）
 
 ---
 

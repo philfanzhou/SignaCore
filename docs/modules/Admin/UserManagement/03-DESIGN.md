@@ -78,5 +78,5 @@ Response 200
 |------|------|
 | 管理员认证使用 Cookie（非 JWT） | 管理端为浏览器场景，Cookie 更安全（HttpOnly 防 XSS），且携带 admin_access claim 用于鉴权中间件校验 |
 | 唯一真相源判定登录是否允许 | 登录校验用户名 == `AdminBootstrapOptions.Username`（即数据库中 seed 管理员账号）；配置为空时拒绝所有人（fail-closed），不再维护独立白名单数组 |
-| GetUsers 内存分页 | 由于 EF Core 子查询限制，查询用户列表时先 ToList() 加载到内存，再 Skip/Take 分页 |
+| GetUsers 内存分页 | 由于 EF Core 子查询限制，查询用户列表时先 ToList() 加载到内存，再 Skip/Take 分页（实现在 `IUserQueryService.ProjectUsersAsync`，与 Gateway 端共用的唯一投影，2026-07-21 收敛） |
 | Admin Session Cookie 安全属性 | HttpOnly=true、SameSite=Lax、SecurePolicy=SameAsRequest，防止 XSS 和 CSRF |

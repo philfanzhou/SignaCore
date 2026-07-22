@@ -10,6 +10,7 @@ using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain;
+using QuantumZhou.Identity.Domain.Models;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Host.Models;
@@ -123,7 +124,7 @@ public class AdminController : ControllerBase
         [FromQuery] string? phone,
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
-        [FromServices] IdentityDbContext dbContext)
+        [FromServices] IUserQueryService userQueryService)
     {
         var normalizedPage = page.GetValueOrDefault(1) < 1 ? 1 : page.GetValueOrDefault(1);
         var normalizedPageSize = pageSize.GetValueOrDefault(20);
@@ -134,65 +135,9 @@ public class AdminController : ControllerBase
 
         normalizedPageSize = Math.Min(normalizedPageSize, 100);
 
-        var searchTerm = username?.Trim();
+        var (users, total) = await userQueryService.SearchUsersAsync(username, phone, normalizedPage, normalizedPageSize);
 
-        var query = dbContext.Accounts
-            .AsNoTracking()
-            .Where(account =>
-                (string.IsNullOrWhiteSpace(searchTerm) ||
-                 dbContext.PasswordCredentials.Any(credential =>
-                     credential.AccountId == account.Id &&
-                     EF.Functions.Like(credential.Username, $"%{searchTerm}%")) ||
-                 EF.Functions.Like(account.Remark, $"%{searchTerm}%")) &&
-                (string.IsNullOrWhiteSpace(phone) ||
-                 dbContext.UserLogins.Any(login =>
-                     login.AccountId == account.Id &&
-                     login.ProviderName == IdentityConstants.AuthMethodSms &&
-                     EF.Functions.Like(login.ProviderUserId, $"%{phone}%"))));
-
-        var total = await query.CountAsync();
-
-        var pagedAccounts = await query
-            .OrderByDescending(account => account.CreatedAt)
-            .Skip((normalizedPage - 1) * normalizedPageSize)
-            .Take(normalizedPageSize)
-            .ToListAsync();
-
-        var accountIds = pagedAccounts.Select(a => a.Id).ToList();
-
-        var credentials = await dbContext.PasswordCredentials
-            .AsNoTracking()
-            .Where(c => accountIds.Contains(c.AccountId))
-            .ToDictionaryAsync(c => c.AccountId, c => c.Username);
-
-        var phones = await dbContext.UserLogins
-            .AsNoTracking()
-            .Where(l => accountIds.Contains(l.AccountId) && l.ProviderName == IdentityConstants.AuthMethodSms)
-            .ToDictionaryAsync(l => l.AccountId, l => l.ProviderUserId);
-
-        var items = pagedAccounts.Select(account =>
-        {
-            var username = credentials.GetValueOrDefault(account.Id);
-            var phone = phones.GetValueOrDefault(account.Id);
-            var name = username ?? phone ?? string.Empty;
-            var displayName = !string.IsNullOrWhiteSpace(account.Nickname)
-                ? account.Nickname
-                : (!string.IsNullOrWhiteSpace(username)
-                    ? username
-                    : (!string.IsNullOrWhiteSpace(phone) ? phone : account.Id.ToString()[..8]));
-            return new AdminUserListItemResponse(
-                account.Id.ToString(),
-                name,
-                phone ?? string.Empty,
-                account.IsActive,
-                account.Remark ?? string.Empty,
-                account.Nickname,
-                account.CreatedAt.ToUnixTimeSeconds(),
-                displayName);
-        })
-            .ToList();
-
-        return Ok(new AdminPagedResponse<AdminUserListItemResponse>(items, total, normalizedPage, normalizedPageSize));
+        return Ok(new AdminPagedResponse<AdminUserListItemResponse>(users, total, normalizedPage, normalizedPageSize));
     }
 
     [HttpPost("users")]

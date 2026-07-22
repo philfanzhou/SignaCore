@@ -104,7 +104,14 @@ curl http://localhost:5002/api/admin/users -b cookies.txt
 curl http://localhost:5002/metrics
 ```
 
-预期返回 Prometheus 格式的指标，包含 `auth_login_total`、`auth_login_duration` 等。
+预期返回 Prometheus 格式的指标。业务指标由 `AuthMetrics`（backend/Domain/AuthMetrics.cs）定义，Prometheus 导出后点号转为下划线：
+
+| 指标名 | 类型 | 标签 | 说明 |
+|--------|------|------|------|
+| `auth_login_success_total` | counter | `grant_type` | 登录成功次数 |
+| `auth_login_failure_total` | counter | `grant_type`、`reason` | 登录失败次数 |
+| `auth_login_duration` | histogram | `grant_type` | 登录请求耗时（ms） |
+| `auth_account_creation_total` | counter | `source` | 账户创建次数 |
 
 ## 8. Swagger UI（仅开发环境）
 
@@ -112,7 +119,7 @@ curl http://localhost:5002/metrics
 
 ## 9. Loki smoke test 验证
 
-启动日志中应包含 `Loki connectivity check succeeded` 和 `Loki push smoke test succeeded` 两条 INFO 日志。如果只有前者没有后者（或后者失败），按 `Configuration.md` "探活失败排查清单" 排查。
+启动日志中应包含 `Loki connectivity check succeeded` 和 `Loki push smoke test succeeded` 两条 INFO 日志。如果只有前者没有后者（或后者失败），按 `Configuration.md` "Loki 地址注入" 一节的容错机制说明与下方手工验证三阶段排查。
 
 手工验证三阶段：
 

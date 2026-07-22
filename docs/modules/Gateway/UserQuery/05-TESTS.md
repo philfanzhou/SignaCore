@@ -1,7 +1,10 @@
 # 网关用户查询 — 测试计划 (TESTS)
 
-测试工具：xUnit + Moq
-现有测试文件：test/Domain/Services/GatewayValidationServiceTests.cs
+测试工具：xUnit + Moq + EF Core InMemory
+现有测试文件：
+- `backend/Tests/unit/Domain/Services/GatewayValidationServiceTests.cs`（网关凭证校验）
+- `backend/Tests/unit/Domain/Services/UserQueryServiceTests.cs`（查询与投影唯一实现：搜索过滤/分页/HasPassword/DisplayName 兜底链/批量保序/无效 GUID 过滤/去重）
+- `backend/Tests/unit/Host/Controllers/GatewayControllerTests.cs`（端点：401 凭证分支/过滤/分页规范化/批量保序，经真实 UserQueryService + InMemory）
 
 ## 单元测试
 
@@ -49,15 +52,7 @@
 
 ## 遗漏的测试场景
 
-- GatewayController 端到端测试（搜索、批量查询）
-- 搜索结果分页边界测试（page=0 应规范化为 1，pageSize=0 应规范化为 20）
-- 搜索结果分页上限测试（pageSize > 100 应被截断为 100）
-- 批量查询空列表返回空数组
-- 批量查询结果保持请求顺序（包含不存在的 ID）
-- 批量查询去重测试（重复 ID 只查询一次）
-- 无效 AppSecret 返回 401（GatewayValidationService 验证失败）
-- App 已禁用返回 401
-- App 已过期返回 401
 - 搜索同时提供 username 和 phone 时的 AND 逻辑
 - 搜索无匹配结果返回空列表
-- ProjectUsersAsync 中 DisplayName 计算逻辑的各分支测试
+- App 已禁用返回 401
+- App 已过期返回 401

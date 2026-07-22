@@ -32,8 +32,6 @@ public class DbOtpService : IOtpService
             {
                 throw new InvalidOperationException($"Too many attempts. Please try again in {(int)remaining.TotalSeconds} seconds.");
             }
-            await _otpRepository.RemoveAsync(existing);
-            await _unitOfWork.SaveChangesAsync();
         }
 
         var code = RandomNumberGenerator.GetInt32(100000, 999999).ToString();

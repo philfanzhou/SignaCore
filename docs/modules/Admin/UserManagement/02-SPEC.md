@@ -44,7 +44,7 @@
 
 - **Given** 用户未登录或 Cookie 无效
 - **When** GET /api/admin/session/me
-- **Then** 返回 200，IsAuthenticated=false，其余字段为空
+- **Then** 返回 401（该端点带 `[Authorize(Policy = "AdminSession")]`，由认证中间件拦截，前端 axios 拦截后重置回登录页）
 
 ### AC-FR-03: 管理员登出
 - **Given** 用户已登录
@@ -54,7 +54,8 @@
 ### AC-FR-04: 查询用户列表
 - **Given** 用户已登录为管理员
 - **When** GET /api/admin/users?username=xxx&phone=yyy&page=1&pageSize=20
-- **Then** 返回 200，支持 username 和 phone 模糊搜索，分页（默认 pageSize=20，最大 100），每条记录包含 UserId、Username、Phone、IsActive、Remark、Nickname、CreatedAt、DisplayName
+- **Then** 返回 200，支持 username 和 phone 模糊搜索，分页（默认 pageSize=20，最大 100），每条记录包含 UserId、Username、Phone、IsActive、Remark、Nickname、CreatedAt、DisplayName、HasPassword
+- **字段语义**：`HasPassword` 表示该账户是否存在密码凭据（password_credentials 中有记录），是"密码账户 / 手机账户"类型展示的唯一判据——`true` = 密码账户，`false` = 手机账户（短信验证码登录）。`Username` 对无密码凭据的账户回退为手机号，**不得**再用 `Username` 是否为空推导账户类型。
 
 ### AC-FR-05: 创建密码用户
 - **Given** 用户名和密码不为空，密码符合策略，用户名不重复

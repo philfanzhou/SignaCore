@@ -51,17 +51,19 @@
 
 ### AC-FR-06: 吊销刷新令牌
 - **Given** 刷新令牌存在
-- **When** POST /api/admin/tokens/revoke { token }
+- **When** POST /api/admin/tokens/revoke { refreshToken }
 - **Then** 吊销该令牌，记录审计日志，返回 200
 
 - **Given** 刷新令牌不存在
-- **When** POST /api/admin/tokens/revoke { token }
+- **When** POST /api/admin/tokens/revoke { refreshToken }
 - **Then** 返回 400
 
 ### AC-FR-07: 查看审计日志
+> 本端点的唯一事实源为 [Security/AuditLogging](../../Security/AuditLogging/02-SPEC.md)（FR-03），此处仅索引，不重复定义规格。
+
 - **Given** 管理员已登录
 - **When** GET /api/admin/audit-logs?action=xxx&targetType=yyy&targetId=zzz&actorId=www&page=1&pageSize=20
-- **Then** 返回 200，支持按 action、targetType、targetId、actorId 过滤，分页结果
+- **Then** 返回 200，支持按 action、targetType、targetId、actorId 过滤，分页结果（详见 AuditLogging 模块）
 
 ## 非功能需求
 

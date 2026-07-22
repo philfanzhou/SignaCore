@@ -10,4 +10,5 @@ public sealed record AdminUserListItemResponse(
     string Remark,
     string? Nickname,
     long CreatedAt,
-    string DisplayName);
+    string DisplayName,
+    bool HasPassword);

@@ -7,6 +7,7 @@ using Moq;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
+using QuantumZhou.Identity.Domain.Models;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Host.Controllers;
 using QuantumZhou.Identity.Host.Models;
@@ -17,6 +18,7 @@ namespace QuantumZhou.Identity.Tests.Host.Controllers;
 public class GatewayControllerTests : IDisposable
 {
     private readonly IdentityDbContext _dbContext;
+    private readonly UserQueryService _userQueryService;
     private readonly GatewayController _controller;
     private readonly Mock<IAppRegistrationRepository> _appRepoMock;
 
@@ -26,6 +28,7 @@ public class GatewayControllerTests : IDisposable
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options;
         _dbContext = new IdentityDbContext(options);
+        _userQueryService = new UserQueryService(_dbContext);
 
         _appRepoMock = new Mock<IAppRegistrationRepository>();
         var validationService = new GatewayValidationService(_appRepoMock.Object, NullLogger<GatewayValidationService>.Instance);
@@ -115,7 +118,7 @@ public class GatewayControllerTests : IDisposable
     {
         SetGatewayHeaders(null, "secret");
 
-        var result = await _controller.SearchUsers(null, null, null, null, _dbContext, CreateValidationService());
+        var result = await _controller.SearchUsers(null, null, null, null, _userQueryService, CreateValidationService());
 
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status401Unauthorized, status.StatusCode);
@@ -128,7 +131,7 @@ public class GatewayControllerTests : IDisposable
     {
         SetGatewayHeaders("app", null);
 
-        var result = await _controller.SearchUsers(null, null, null, null, _dbContext, CreateValidationService());
+        var result = await _controller.SearchUsers(null, null, null, null, _userQueryService, CreateValidationService());
 
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status401Unauthorized, status.StatusCode);
@@ -140,7 +143,7 @@ public class GatewayControllerTests : IDisposable
         SetGatewayHeaders("wrongapp", "wrongsecret");
         // No app registered, so validation will fail
 
-        var result = await _controller.SearchUsers(null, null, null, null, _dbContext, CreateValidationService());
+        var result = await _controller.SearchUsers(null, null, null, null, _userQueryService, CreateValidationService());
 
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status401Unauthorized, status.StatusCode);
@@ -155,7 +158,7 @@ public class GatewayControllerTests : IDisposable
         var acc2 = SeedAccount(nickname: "Bob");
         SeedPasswordCredential(acc1.Id, "alice123");
 
-        var result = await _controller.SearchUsers(null, null, null, null, _dbContext, CreateValidationService());
+        var result = await _controller.SearchUsers(null, null, null, null, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -175,7 +178,7 @@ public class GatewayControllerTests : IDisposable
         SeedPasswordCredential(acc1.Id, "alice123");
         SeedPasswordCredential(acc2.Id, "bob456");
 
-        var result = await _controller.SearchUsers("alice", null, null, null, _dbContext, CreateValidationService());
+        var result = await _controller.SearchUsers("alice", null, null, null, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -193,7 +196,7 @@ public class GatewayControllerTests : IDisposable
         SeedSmsLogin(acc1.Id, "13800000001");
         SeedSmsLogin(acc2.Id, "13900000002");
 
-        var result = await _controller.SearchUsers(null, "138", null, null, _dbContext, CreateValidationService());
+        var result = await _controller.SearchUsers(null, "138", null, null, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -211,7 +214,7 @@ public class GatewayControllerTests : IDisposable
             SeedAccount(nickname: $"User{i}");
         }
 
-        var result = await _controller.SearchUsers(null, null, 1, 2, _dbContext, CreateValidationService());
+        var result = await _controller.SearchUsers(null, null, 1, 2, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -227,7 +230,7 @@ public class GatewayControllerTests : IDisposable
         RegisterValidApp();
         SeedAccount();
 
-        var result = await _controller.SearchUsers(null, null, -1, 10, _dbContext, CreateValidationService());
+        var result = await _controller.SearchUsers(null, null, -1, 10, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -241,7 +244,7 @@ public class GatewayControllerTests : IDisposable
         RegisterValidApp();
         SeedAccount();
 
-        var result = await _controller.SearchUsers(null, null, 1, -5, _dbContext, CreateValidationService());
+        var result = await _controller.SearchUsers(null, null, 1, -5, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -255,7 +258,7 @@ public class GatewayControllerTests : IDisposable
         RegisterValidApp();
         SeedAccount();
 
-        var result = await _controller.SearchUsers(null, null, 1, 500, _dbContext, CreateValidationService());
+        var result = await _controller.SearchUsers(null, null, 1, 500, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -267,7 +270,7 @@ public class GatewayControllerTests : IDisposable
     {
         SetGatewayHeaders(null, null);
 
-        var result = await _controller.GetUsersByIds(new List<string> { Guid.NewGuid().ToString() }, _dbContext, CreateValidationService());
+        var result = await _controller.GetUsersByIds(new List<string> { Guid.NewGuid().ToString() }, _userQueryService, CreateValidationService());
 
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status401Unauthorized, status.StatusCode);
@@ -279,7 +282,7 @@ public class GatewayControllerTests : IDisposable
         SetGatewayHeaders("testapp", "testsecret");
         RegisterValidApp();
 
-        var result = await _controller.GetUsersByIds(null, _dbContext, CreateValidationService());
+        var result = await _controller.GetUsersByIds(null, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var list = Assert.IsType<List<AdminUserListItemResponse>>(ok.Value);
@@ -292,7 +295,7 @@ public class GatewayControllerTests : IDisposable
         SetGatewayHeaders("testapp", "testsecret");
         RegisterValidApp();
 
-        var result = await _controller.GetUsersByIds(new List<string>(), _dbContext, CreateValidationService());
+        var result = await _controller.GetUsersByIds(new List<string>(), _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var list = Assert.IsType<List<AdminUserListItemResponse>>(ok.Value);
@@ -305,7 +308,7 @@ public class GatewayControllerTests : IDisposable
         SetGatewayHeaders("testapp", "testsecret");
         RegisterValidApp();
 
-        var result = await _controller.GetUsersByIds(new List<string> { "not-a-guid", "also-bad" }, _dbContext, CreateValidationService());
+        var result = await _controller.GetUsersByIds(new List<string> { "not-a-guid", "also-bad" }, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var list = Assert.IsType<List<AdminUserListItemResponse>>(ok.Value);
@@ -323,7 +326,7 @@ public class GatewayControllerTests : IDisposable
         SeedPasswordCredential(acc2.Id, "bob");
 
         var ids = new List<string> { acc2.Id.ToString(), acc1.Id.ToString() };
-        var result = await _controller.GetUsersByIds(ids, _dbContext, CreateValidationService());
+        var result = await _controller.GetUsersByIds(ids, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var list = Assert.IsType<List<AdminUserListItemResponse>>(ok.Value);
@@ -341,7 +344,7 @@ public class GatewayControllerTests : IDisposable
         var acc1 = SeedAccount(nickname: "Alice");
 
         var ids = new List<string> { acc1.Id.ToString(), acc1.Id.ToString(), acc1.Id.ToString() };
-        var result = await _controller.GetUsersByIds(ids, _dbContext, CreateValidationService());
+        var result = await _controller.GetUsersByIds(ids, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var list = Assert.IsType<List<AdminUserListItemResponse>>(ok.Value);
@@ -356,7 +359,7 @@ public class GatewayControllerTests : IDisposable
         var acc1 = SeedAccount(nickname: "Alice");
 
         var ids = new List<string> { "  ", acc1.Id.ToString(), "" };
-        var result = await _controller.GetUsersByIds(ids, _dbContext, CreateValidationService());
+        var result = await _controller.GetUsersByIds(ids, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var list = Assert.IsType<List<AdminUserListItemResponse>>(ok.Value);

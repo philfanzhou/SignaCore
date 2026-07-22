@@ -11,6 +11,7 @@ using Moq;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
+using QuantumZhou.Identity.Domain.Models;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Host;
@@ -301,12 +302,35 @@ public class AdminControllerTests : IDisposable
         _dbContext.PasswordCredentials.Add(new PasswordCredentialEntity { Id = Guid.NewGuid(), AccountId = acc1.Id, Username = "alice", PasswordHash = "h", CreatedAt = DateTimeOffset.UtcNow });
         await _dbContext.SaveChangesAsync();
 
-        var result = await _controller.GetUsers(null, null, null, null, _dbContext);
+        var result = await _controller.GetUsers(null, null, null, null, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
         Assert.Equal(2, response.Total);
         Assert.Equal(2, response.Items.Count);
+    }
+
+    [Fact]
+    public async Task GetUsers_HasPassword_ReflectsPasswordCredential()
+    {
+        var passwordAccount = new AccountEntity { Id = Guid.NewGuid(), IsActive = true, CreatedAt = DateTimeOffset.UtcNow };
+        var phoneAccount = new AccountEntity { Id = Guid.NewGuid(), IsActive = true, CreatedAt = DateTimeOffset.UtcNow };
+        _dbContext.Accounts.AddRange(passwordAccount, phoneAccount);
+        _dbContext.PasswordCredentials.Add(new PasswordCredentialEntity { Id = Guid.NewGuid(), AccountId = passwordAccount.Id, Username = "alice", PasswordHash = "h", CreatedAt = DateTimeOffset.UtcNow });
+        _dbContext.UserLogins.Add(new UserLoginEntity { Id = Guid.NewGuid(), AccountId = phoneAccount.Id, ProviderName = IdentityConstants.AuthMethodSms, ProviderUserId = "13800001234" });
+        await _dbContext.SaveChangesAsync();
+
+        var result = await _controller.GetUsers(null, null, null, null, new UserQueryService(_dbContext));
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        Assert.Equal(2, response.Items.Count);
+        var passwordItem = Assert.Single(response.Items, i => i.UserId == passwordAccount.Id.ToString());
+        Assert.True(passwordItem.HasPassword);
+        var phoneItem = Assert.Single(response.Items, i => i.UserId == phoneAccount.Id.ToString());
+        Assert.False(phoneItem.HasPassword);
+        // Phone-only accounts fall back to the phone number as Username; type must not be derived from it.
+        Assert.Equal("13800001234", phoneItem.Username);
     }
 
     [Fact]
@@ -318,7 +342,7 @@ public class AdminControllerTests : IDisposable
         _dbContext.PasswordCredentials.Add(new PasswordCredentialEntity { Id = Guid.NewGuid(), AccountId = acc1.Id, Username = "alice", PasswordHash = "h", CreatedAt = DateTimeOffset.UtcNow });
         await _dbContext.SaveChangesAsync();
 
-        var result = await _controller.GetUsers("alice", null, null, null, _dbContext);
+        var result = await _controller.GetUsers("alice", null, null, null, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -334,7 +358,7 @@ public class AdminControllerTests : IDisposable
         _dbContext.Accounts.AddRange(acc1, acc2);
         await _dbContext.SaveChangesAsync();
 
-        var result = await _controller.GetUsers("VIP", null, null, null, _dbContext);
+        var result = await _controller.GetUsers("VIP", null, null, null, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -349,7 +373,7 @@ public class AdminControllerTests : IDisposable
         _dbContext.UserLogins.Add(new UserLoginEntity { Id = Guid.NewGuid(), AccountId = acc1.Id, ProviderName = IdentityConstants.AuthMethodSms, ProviderUserId = "13800001234" });
         await _dbContext.SaveChangesAsync();
 
-        var result = await _controller.GetUsers(null, "1380000", null, null, _dbContext);
+        var result = await _controller.GetUsers(null, "1380000", null, null, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -366,7 +390,7 @@ public class AdminControllerTests : IDisposable
         }
         await _dbContext.SaveChangesAsync();
 
-        var result = await _controller.GetUsers(null, null, 2, 2, _dbContext);
+        var result = await _controller.GetUsers(null, null, 2, 2, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -381,7 +405,7 @@ public class AdminControllerTests : IDisposable
         _dbContext.Accounts.Add(new AccountEntity { Id = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow });
         await _dbContext.SaveChangesAsync();
 
-        var result = await _controller.GetUsers(null, null, 0, 10, _dbContext);
+        var result = await _controller.GetUsers(null, null, 0, 10, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -394,7 +418,7 @@ public class AdminControllerTests : IDisposable
         _dbContext.Accounts.Add(new AccountEntity { Id = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow });
         await _dbContext.SaveChangesAsync();
 
-        var result = await _controller.GetUsers(null, null, 1, 500, _dbContext);
+        var result = await _controller.GetUsers(null, null, 1, 500, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
@@ -408,7 +432,7 @@ public class AdminControllerTests : IDisposable
         _dbContext.Accounts.Add(acc);
         await _dbContext.SaveChangesAsync();
 
-        var result = await _controller.GetUsers(null, null, null, null, _dbContext);
+        var result = await _controller.GetUsers(null, null, null, null, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);

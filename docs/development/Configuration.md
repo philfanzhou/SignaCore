@@ -31,7 +31,24 @@
 
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
-| Endpoints:Http | 5002 | HTTP 监听端口（业务/认证，HTTP/1.1 + HTTP/2） |
+| Endpoints:Http | 5002 | HTTP 监听端口（业务/认证，仅 HTTP/1.1，见 Program.cs `listenOptions.Protocols = HttpProtocols.Http1`） |
+
+> 历史键 `Endpoints:AdminApi` 从未被代码读取（死配置），已于 2026-07-22 从 appsettings.json 移除。
+
+## 管理前端标题（APP_TITLE）
+
+管理控制台（admin_frontend）的浏览器 tab 标题与页面内标题（侧边栏 brand、登录页副标题）统一来自运行时注入的 `APP_TITLE`，同一镜像可适配不同项目部署：
+
+| 配置键 | 环境变量 | 默认值 | 说明 |
+|--------|---------|--------|------|
+| APP_TITLE | `APP_TITLE` | `QuantumZhou.Identity` | 管理控制台标题；`start.sh` 传 `-e APP_TITLE="${CONTAINER_NAME}"` |
+
+**注入机制**（Program.cs "Static files & SPA for Admin Web" 段）：
+
+- 仅在 HTTP 端口且非 `/api`、`/.well-known`、`/health`、`/metrics` 路径下生效（SPA 静态托管分支）
+- 请求 `/index.html` 时：将文件中 `<title>__APP_TITLE__</title>` 占位符替换为 `APP_TITLE` 值（浏览器 tab 标题），并向 `</head>` 前注入 `<script>window.__APP_TITLE__ = '...'</script>` 全局变量（`'` 转义为 `\'`）
+- 前端以 `window.__APP_TITLE__ || 'QuantumZhou.Identity'` 读取（vite dev 直出时走后端代理或取兜底值），页面内标题与 tab 标题同源
+- `index.html` 中的 `__APP_TITLE__` 占位符**不得**替换为硬编码文案，否则运行时注入失效
 
 ## 数据库配置
 
@@ -39,7 +56,7 @@
 |--------|--------|------|
 | Database:Provider | PostgreSQL | 数据库提供者（默认由项目配置提供，通常无需 `start.sh` 重复注入） |
 | Database:Name | quantumzhou_identity | 服务自己的 PostgreSQL 数据库名（可按需由项目 `start.sh` 覆盖） |
-| ConnectionStrings:Default | Data Source=quantumzhou_identity.db | SQLite 连接字符串 |
+| ConnectionStrings:Default | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | 默认连接字符串（PostgreSQL；SQLite 模式由 `Database:Provider=SQLite` 切换后按 `Database:Name` 生成文件路径） |
 | ConnectionStrings:PostgreSQL | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | PostgreSQL 连接字符串 |
 | PostgreSql:Host | localhost | PostgreSQL 主机（推荐由 Consul `config/ruoyu/shared.json` 提供） |
 | PostgreSql:Port | 5432 | PostgreSQL 端口（推荐由 Consul `config/ruoyu/shared.json` 提供） |
@@ -101,11 +118,13 @@
 
 ## 速率限制配置
 
-| 配置键 | 默认值 | 说明 |
-|--------|--------|------|
-| RateLimiting:PermitLimitPerClient | 20 | 每个 IP 每窗口允许的请求数 |
-| RateLimiting:WindowSeconds | 60 | 速率限制窗口（秒） |
-| RateLimiting:CleanupIntervalSeconds | 300 | 清理过期限流记录的间隔（秒） |
+限流在代码中硬编码（`ServiceCollectionExtensions.cs` "Rate Limiting" 段），**无配置键**，调整需改代码：
+
+| 项 | 值 | 说明 |
+|----|----|----|
+| 全局限流 | 100 次 / 60 秒 / 客户端 IP | 固定窗口 + AutoReplenishment；超限返回 429 JSON（`{"status":429,"title":"Too Many Requests",...}`） |
+| 豁免路径 | `/health`、`/metrics`、`/.well-known/jwks` | 基础设施端点不进入全局限流 |
+| JWKS 端点独立限流 | 60 次 / 60 秒（Program.cs FixedWindowRateLimiter） | 见下文"运行时配置" |
 
 ## 回调配置
 
@@ -159,7 +178,7 @@ Identity 启动时通过 `data/bootstrap-apps.json` 文件预置应用注册信�
   "apps": [
     {
       "appId": "a6eab9bd87404c0ababc910114d11a62",
-      "appSecret": "cGzoAwXaP+PahtDqXYVY75IJiPWtfbt/4SIt+WrKoQ=",
+      "appSecret": "cGzoAwXaP+PahtD3qXYVY75IJiPWtfbt/4SIt+WrKoQ=",
       "appName": "Teacher Portal",
       "callbackUrl": "http://ruoyu-teacher-api:5004/api/auth/callback"
     }

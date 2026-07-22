@@ -1,0 +1,79 @@
+/* ============ Auth Page ============ */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(1200px 600px at 20% -10%, rgba(99,102,241,.08), transparent 60%), var(--bg);
+}
+
+.auth-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  width: 400px;
+  max-width: 100%;
+  overflow: hidden;
+  box-shadow: var(--shadow-float);
+}
+
+.auth-card-header {
+  padding: 26px 28px 0;
+  font-weight: 650;
+  font-size: 18px;
+  letter-spacing: -.2px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text);
+}
+
+.auth-card-header-sub {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-3);
+  margin-top: 2px;
+  letter-spacing: 0;
+}
+
+.auth-card-body {
+  padding: 20px 28px 28px;
+}
+
+.auth-loading {
+  text-align: center;
+  color: var(--text-2);
+  padding: 40px 0;
+  font-size: 13.5px;
+}
+
+.auth-subtitle {
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 4px 0 22px;
+}
+
+.auth-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #6366F1, #4F46E5 60%, #3730A3);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  box-shadow: 0 4px 12px -2px rgba(99,102,241,.5), inset 0 1px 0 rgba(255,255,255,.22);
+}
+
+.auth-spinner {
+  width: 32px;
+  height: 32px;
+  margin: 0 auto 12px;
+  color: var(--primary);
+}
+

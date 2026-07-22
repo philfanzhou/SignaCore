@@ -4,39 +4,25 @@
 
 ```
 backend/Host/Controllers/GatewayController.cs
+backend/Domain/Services/IUserQueryService.cs     (查询接口，Admin/Gateway 共用)
+backend/Domain/Services/UserQueryService.cs      (查询与投影唯一实现)
 backend/Domain/Services/GatewayValidationService.cs
-backend/Host/Models/AdminModels.cs          (AdminUserListItemResponse, AdminPagedResponse, etc.)
-backend/Database/IdentityConstants.cs       (AuthMethodSms)
+backend/Domain/Models/AdminModels.cs             (AdminUserListItemResponse, AdminPagedResponse 唯一定义)
+backend/Database/IdentityConstants.cs            (AuthMethodSms)
 ```
 
 ## 关键接口签名和数据结构定义
 
 ```csharp
-// GatewayController.cs
-[Route("api/gateway")]
-[ApiController]
-public class GatewayController : ControllerBase
+// Domain/Services/IUserQueryService.cs —— Admin/Gateway 两端用户查询的唯一实现
+public interface IUserQueryService
 {
-    private const string AppIdHeader = "X-Admin-AppId";
-    private const string AppSecretHeader = "X-Admin-AppSecret";
-
-    [HttpGet("users/search")]
-    public async Task<IActionResult> SearchUsers(
-        [FromQuery] string? username,
-        [FromQuery] string? phone,
-        [FromQuery] int? page,
-        [FromQuery] int? pageSize,
-        [FromServices] IdentityDbContext dbContext,
-        [FromServices] GatewayValidationService gatewayValidationService);
-
-    [HttpPost("users/batch")]
-    public async Task<IActionResult> GetUsersByIds(
-        [FromBody] List<string>? userIds,
-        [FromServices] IdentityDbContext dbContext,
-        [FromServices] GatewayValidationService gatewayValidationService);
+    Task<(List<AdminUserListItemResponse> Users, int Total)> SearchUsersAsync(
+        string? username, string? phone, int page, int pageSize);
+    Task<List<AdminUserListItemResponse>> GetUsersByIdsAsync(List<string> userIds);
 }
 
-// AdminModels.cs
+// Domain/Models/AdminModels.cs —— DTO 唯一定义处（原 Host/Models 重复定义已删除，两端统一引用 Domain 版）
 public sealed record AdminPagedResponse<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);
 
 public sealed record AdminUserListItemResponse(
@@ -47,8 +33,11 @@ public sealed record AdminUserListItemResponse(
     string Remark,
     string? Nickname,
     long CreatedAt,
-    string DisplayName);
+    string DisplayName,
+    bool HasPassword);
 ```
+
+> **收敛说明（2026-07-21）**：`AdminController.GetUsers`、`GatewayController.SearchUsers`/`GetUsersByIds` 曾各自内联一份相同的查询+投影逻辑（曾因此漏改 Gateway 一处导致 HasPassword 不一致）。现已收敛为三端统一注入 `IUserQueryService`，Controller 仅负责参数规范化（page/pageSize 钳制）与鉴权。
 
 ## 数据流/调用链
 
@@ -64,12 +53,13 @@ Client ──GET /api/gateway/users/search──▶ GatewayController
   │                                         │        └─ 无效 → 401
   │                                         │
   │                                         │  2. 规范化分页参数 (page默认1, pageSize默认20, 上限100)
-  │                                         │  3. 构建 EF Core 查询 (Accounts + PasswordCredentials + UserLogins)
-  │                                         │  4. query.CountAsync() → total
-  │                                         │  5. ProjectUsersAsync(query, dbContext, page, pageSize)
-  │                                         │     ├─ ToListAsync() → 内存分页
-  │                                         │     ├─ OrderByDescending(CreatedAt).Skip().Take()
-  │                                         │     └─ 投影为 AdminUserListItemResponse
+  │                                         │  3. userQueryService.SearchUsersAsync()
+  │                                         │     ├─ 构建 EF Core 查询 (Accounts + PasswordCredentials + UserLogins)
+  │                                         │     ├─ query.CountAsync() → total
+  │                                         │     └─ ProjectUsersAsync(query, page, pageSize)
+  │                                         │        ├─ ToListAsync() → 内存分页
+  │                                         │        ├─ OrderByDescending(CreatedAt).Skip().Take()
+  │                                         │        └─ 投影为 AdminUserListItemResponse（含 HasPassword）
   │                                         │
   ◀─────────────────────────────────────── Ok(AdminPagedResponse<AdminUserListItemResponse>)
 ```
@@ -80,13 +70,14 @@ Client ──POST /api/gateway/users/batch──▶ GatewayController
   │                                         │
   │  Headers: X-Admin-AppId, X-Admin-AppSecret
   │  Body: ["id1", "id2", ...]             │  1. ValidateGatewayRequestAsync() (同上)
-  │                                         │  2. userIds 为 null/空 → 返回 []
-  │                                         │  3. 过滤空白、去重(Distinct, OrdinalIgnoreCase)
-  │                                         │  4. Guid.TryParse → 过滤无效 GUID
-  │                                         │  5. 查询 Accounts (Where parsedUserIds.Contains)
-  │                                         │  6. ProjectUsersAsync() → 投影
-  │                                         │  7. 构建 userMap (UserId → AdminUserListItemResponse)
-  │                                         │  8. 按 orderedUserIds 顺序输出结果
+  │                                         │  2. userQueryService.GetUsersByIdsAsync()
+  │                                         │     ├─ userIds 为 null/空 → 返回 []
+  │                                         │     ├─ 过滤空白、去重(Distinct, OrdinalIgnoreCase)
+  │                                         │     ├─ Guid.TryParse → 过滤无效 GUID
+  │                                         │     ├─ 查询 Accounts (Where parsedUserIds.Contains)
+  │                                         │     ├─ ProjectUsersAsync() → 投影
+  │                                         │     ├─ 构建 userMap (UserId → AdminUserListItemResponse)
+  │                                         │     └─ 按 orderedUserIds 顺序输出结果
   │                                         │
   ◀─────────────────────────────────────── Ok(List<AdminUserListItemResponse>)
 ```
@@ -101,8 +92,9 @@ Client ──POST /api/gateway/users/batch──▶ GatewayController
 ## 关键设计决策
 
 1. **内存分页**：`ProjectUsersAsync` 中先 `ToListAsync()` 加载全部过滤结果到内存，再 `OrderByDescending(CreatedAt).Skip().Take()` 分页。这是当前实现方式，在大数据量场景下可能有性能问题
-2. **相同投影逻辑**：`ProjectUsersAsync` 方法与 AdminController 使用相同的投影逻辑，生成 `AdminUserListItemResponse`，确保管理端和网关端返回一致的用户数据结构
+2. **唯一投影实现**：`UserQueryService.ProjectUsersAsync` 是 Admin/Gateway 两端用户查询投影的唯一实现（2026-07-21 收敛，此前两处内联重复），确保管理端和网关端返回一致的用户数据结构
 3. **DisplayName 计算规则**：优先使用 Nickname → 其次 Username → 其次 Phone → 最后取 Id 前 8 位
+4. **HasPassword 为账户类型唯一判据**：`HasPassword = credentials.ContainsKey(account.Id)`（存在密码凭据即为密码账户）。`Username` 字段对无密码凭据的账户回退为手机号（`username ?? phone`），因此**不能**用 `Username` 是否为空推导账户类型——历史 bug：手机账户的 `Username` 返回手机号，前端据此全部显示为"密码账户"
 4. **批量查询保持请求顺序**：通过 `orderedUserIds` 和 `userMap` 确保返回结果按请求中 ID 的顺序排列，不存在的 ID 不出现在结果中
 5. **无效 GUID 过滤**：批量查询时，非 GUID 格式的字符串会被 `Guid.TryParse` 过滤，不会导致查询错误
 6. **凭证验证**：`GatewayValidationService.ValidateAsync` 依次验证 AppSecret 非空 → AppId 已注册 → App 已激活 → App 未过期 → BCrypt 验证 AppSecret

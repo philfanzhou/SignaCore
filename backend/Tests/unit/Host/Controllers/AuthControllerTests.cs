@@ -300,6 +300,291 @@ public class AuthControllerTests
         Assert.Equal("AppId and AppSecret are required", response.Message);
     }
 
+    // ===== GetToken failure branches =====
+
+    [Fact]
+    public async Task GetToken_GatewayValidationFails_ReturnsFailureAndAuditsWithAppId()
+    {
+        var controller = CreateController(Array.Empty<IIdentityValidator>());
+        controller.HttpContext.Request.Headers["X-Admin-AppId"] = "unregistered-app";
+        controller.HttpContext.Request.Headers["X-Admin-AppSecret"] = "any-secret";
+        // _appRegistrationRepoMock.GetByAppIdAsync returns null by default -> "AppId not registered"
+
+        var request = new TokenRequest { GrantType = "password", Username = "alice", Password = "x" };
+
+        var actionResult = await controller.GetToken(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<TokenResponse>(ok.Value!);
+        Assert.False(response.Success);
+        Assert.Equal("AppId not registered", response.Message);
+        _auditServiceMock.Verify(a => a.RecordLoginAsync(
+            null, "unknown", "password", "login_failure",
+            It.IsAny<string?>(), It.IsAny<string?>(), "AppId not registered",
+            "unregistered-app", It.IsAny<string?>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetToken_ValidatorFails_ReturnsFailureAndAuditsUnknownFallback()
+    {
+        var validatorMock = new Mock<IIdentityValidator>();
+        validatorMock.SetupGet(v => v.GrantType).Returns("sms");
+        validatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
+            .ReturnsAsync(ValidationResult.Failure("invalid code"));
+        var controller = CreateController(new[] { validatorMock.Object });
+
+        // Username/Phone/Code all null -> failedUsername falls back to "unknown"
+        var request = new TokenRequest { GrantType = "sms" };
+
+        var actionResult = await controller.GetToken(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<TokenResponse>(ok.Value!);
+        Assert.False(response.Success);
+        Assert.Equal("invalid code", response.Message);
+        _auditServiceMock.Verify(a => a.RecordLoginAsync(
+            null, "unknown", "sms", "login_failure",
+            It.IsAny<string?>(), It.IsAny<string?>(), "invalid code",
+            It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetToken_ValidatorFails_UsesPhoneAsFailedUsername()
+    {
+        var validatorMock = new Mock<IIdentityValidator>();
+        validatorMock.SetupGet(v => v.GrantType).Returns("sms");
+        validatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
+            .ReturnsAsync(ValidationResult.Failure("invalid code"));
+        var controller = CreateController(new[] { validatorMock.Object });
+
+        var request = new TokenRequest { GrantType = "sms", Phone = "13800138000" };
+
+        var actionResult = await controller.GetToken(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        Assert.False(Assert.IsType<TokenResponse>(ok.Value!).Success);
+        _auditServiceMock.Verify(a => a.RecordLoginAsync(
+            null, "13800138000", "sms", "login_failure",
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
+    }
+
+    // ===== RequestSmsCode branches =====
+
+    [Fact]
+    public async Task RequestSmsCode_Success_ReturnsSentAndAudits()
+    {
+        _otpServiceMock.Setup(o => o.GenerateAndSendAsync("13800138000", _smsSenderMock.Object))
+            .ReturnsAsync("123456");
+        var controller = CreateController(Array.Empty<IIdentityValidator>());
+
+        var request = new SmsCodeRequest { Phone = "13800138000" };
+
+        var actionResult = await controller.RequestSmsCode(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<SmsCodeResponse>(ok.Value!);
+        Assert.True(response.Success);
+        _auditServiceMock.Verify(a => a.RecordLoginAsync(
+            null, "13800138000", "sms", "sms_code_sent",
+            It.IsAny<string?>(), It.IsAny<string?>(), null,
+            It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RequestSmsCode_GatewayValidationFails_ReturnsFailure()
+    {
+        var controller = CreateController(Array.Empty<IIdentityValidator>());
+        controller.HttpContext.Request.Headers["X-Admin-AppId"] = "unregistered-app";
+        controller.HttpContext.Request.Headers["X-Admin-AppSecret"] = "any-secret";
+
+        var request = new SmsCodeRequest { Phone = "13800138000" };
+
+        var actionResult = await controller.RequestSmsCode(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<SmsCodeResponse>(ok.Value!);
+        Assert.False(response.Success);
+        Assert.Equal("AppId not registered", response.Message);
+        _otpServiceMock.Verify(o => o.GenerateAndSendAsync(It.IsAny<string>(), It.IsAny<ISmsSender>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RequestSmsCode_OtpLocked_ReturnsLockMessage()
+    {
+        _otpServiceMock.Setup(o => o.GenerateAndSendAsync(It.IsAny<string>(), It.IsAny<ISmsSender>()))
+            .ThrowsAsync(new InvalidOperationException("Too many attempts. Please try again in 590 seconds."));
+        var controller = CreateController(Array.Empty<IIdentityValidator>());
+
+        var request = new SmsCodeRequest { Phone = "13800138000" };
+
+        var actionResult = await controller.RequestSmsCode(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<SmsCodeResponse>(ok.Value!);
+        Assert.False(response.Success);
+        Assert.Equal("Too many attempts. Please try again in 590 seconds.", response.Message);
+    }
+
+    [Fact]
+    public async Task RequestSmsCode_UnexpectedException_ReturnsGenericMessage()
+    {
+        _otpServiceMock.Setup(o => o.GenerateAndSendAsync(It.IsAny<string>(), It.IsAny<ISmsSender>()))
+            .ThrowsAsync(new Exception("smtp down"));
+        var controller = CreateController(Array.Empty<IIdentityValidator>());
+
+        var request = new SmsCodeRequest { Phone = "13800138000" };
+
+        var actionResult = await controller.RequestSmsCode(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<SmsCodeResponse>(ok.Value!);
+        Assert.False(response.Success);
+        Assert.Equal("Failed to send verification code", response.Message);
+    }
+
+    // ===== RevokeRefreshToken branches =====
+
+    [Fact]
+    public async Task RevokeRefreshToken_TokenFound_ReturnsTrue()
+    {
+        _refreshTokenServiceMock.Setup(s => s.RevokeAsync("rt-1")).ReturnsAsync(true);
+        var controller = CreateController(Array.Empty<IIdentityValidator>());
+
+        var actionResult = await controller.RevokeRefreshToken(new RevokeRequest { RefreshToken = "rt-1" });
+
+        var ok = ExtractOkResult(actionResult);
+        Assert.True(Assert.IsType<RevokeResponse>(ok.Value!).Success);
+    }
+
+    [Fact]
+    public async Task RevokeRefreshToken_TokenMissing_ReturnsFalse()
+    {
+        _refreshTokenServiceMock.Setup(s => s.RevokeAsync("missing")).ReturnsAsync(false);
+        var controller = CreateController(Array.Empty<IIdentityValidator>());
+
+        var actionResult = await controller.RevokeRefreshToken(new RevokeRequest { RefreshToken = "missing" });
+
+        var ok = ExtractOkResult(actionResult);
+        Assert.False(Assert.IsType<RevokeResponse>(ok.Value!).Success);
+    }
+
+    // ===== RegisterCallback branches =====
+
+    [Fact]
+    public async Task RegisterCallback_InvalidUrl_ReturnsError()
+    {
+        var controller = CreateController(Array.Empty<IIdentityValidator>());
+        controller.HttpContext.Request.Headers["X-Admin-AppId"] = "app-1";
+        controller.HttpContext.Request.Headers["X-Admin-AppSecret"] = "secret";
+
+        var request = new RegisterCallbackHttpRequest { CallbackUrl = "not a url", TtlSeconds = 3600 };
+
+        var actionResult = await controller.RegisterCallback(request);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<RegisterCallbackHttpResponse>(ok.Value!);
+        Assert.False(response.Success);
+        Assert.StartsWith("Invalid callback URL", response.Message);
+    }
+
+    [Fact]
+    public async Task RegisterCallback_AppNotRegistered_ReturnsError()
+    {
+        var controller = CreateController(Array.Empty<IIdentityValidator>());
+        controller.HttpContext.Request.Headers["X-Admin-AppId"] = "unknown-app";
+        controller.HttpContext.Request.Headers["X-Admin-AppSecret"] = "secret";
+
+        var request = new RegisterCallbackHttpRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = 3600 };
+
+        var actionResult = await controller.RegisterCallback(request);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<RegisterCallbackHttpResponse>(ok.Value!);
+        Assert.False(response.Success);
+        Assert.Equal("AppId not registered", response.Message);
+    }
+
+    [Fact]
+    public async Task RegisterCallback_SecretMismatch_ReturnsError()
+    {
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "app-1",
+            AppSecretHash = BCrypt.Net.BCrypt.HashPassword("real-secret"),
+            AppName = "App",
+            IsActive = true
+        };
+        _appRegistrationRepoMock.Setup(r => r.GetByAppIdAsync("app-1")).ReturnsAsync(app);
+        var controller = CreateController(Array.Empty<IIdentityValidator>());
+        controller.HttpContext.Request.Headers["X-Admin-AppId"] = "app-1";
+        controller.HttpContext.Request.Headers["X-Admin-AppSecret"] = "wrong-secret";
+
+        var request = new RegisterCallbackHttpRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = 3600 };
+
+        var actionResult = await controller.RegisterCallback(request);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<RegisterCallbackHttpResponse>(ok.Value!);
+        Assert.False(response.Success);
+        Assert.Equal("AppSecret mismatch", response.Message);
+    }
+
+    [Fact]
+    public async Task RegisterCallback_Success_UsesDefaultTtlWhenNonPositive()
+    {
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "app-1",
+            AppSecretHash = BCrypt.Net.BCrypt.HashPassword("real-secret"),
+            AppName = "App",
+            IsActive = true
+        };
+        _appRegistrationRepoMock.Setup(r => r.GetByAppIdAsync("app-1")).ReturnsAsync(app);
+        var controller = CreateController(Array.Empty<IIdentityValidator>());
+        controller.HttpContext.Request.Headers["X-Admin-AppId"] = "app-1";
+        controller.HttpContext.Request.Headers["X-Admin-AppSecret"] = "real-secret";
+
+        var request = new RegisterCallbackHttpRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = 0 };
+
+        var actionResult = await controller.RegisterCallback(request);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<RegisterCallbackHttpResponse>(ok.Value!);
+        Assert.True(response.Success);
+        Assert.True(response.ExpiresAt > DateTimeOffset.UtcNow.AddSeconds(IdentityConstants.DefaultCallbackTtlSeconds - 60).ToUnixTimeSeconds());
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RegisterCallback_NeverExpire_ReturnsZeroExpiresAt()
+    {
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "app-1",
+            AppSecretHash = BCrypt.Net.BCrypt.HashPassword("real-secret"),
+            AppName = "App",
+            IsActive = true
+        };
+        _appRegistrationRepoMock.Setup(r => r.GetByAppIdAsync("app-1")).ReturnsAsync(app);
+        var controller = CreateController(Array.Empty<IIdentityValidator>());
+        controller.HttpContext.Request.Headers["X-Admin-AppId"] = "app-1";
+        controller.HttpContext.Request.Headers["X-Admin-AppSecret"] = "real-secret";
+
+        var request = new RegisterCallbackHttpRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = IdentityConstants.CallbackTtlNeverExpire };
+
+        var actionResult = await controller.RegisterCallback(request);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<RegisterCallbackHttpResponse>(ok.Value!);
+        Assert.True(response.Success);
+        Assert.Equal(0, response.ExpiresAt);
+        Assert.Null(app.CallbackExpiresAt);
+    }
+
     // ===== Bootstrap admin role injection tests =====
 
     [Fact]

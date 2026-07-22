@@ -71,3 +71,4 @@
   - 密钥轮换：验证轮换后旧密钥标记为非活跃，新密钥成为活跃密钥
   - 私钥加密：验证 AES-256-GCM 加密流程，HKDF 密钥派生正确性
   - 主密钥丢失恢复：验证解密失败时自动生成新密钥对并记录日志
+- 单元测试：`Tests/unit/Host/JwksMapperTests.cs`（JWKS 映射：kty/use/kid/alg 固定值、n/e Base64Url 编码、非 RSA 密钥抛错）

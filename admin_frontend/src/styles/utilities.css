@@ -1,0 +1,29 @@
+/* ============ Spinner ============ */
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.loading-state {
+  text-align: center;
+  padding: 44px 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.loading-state .spinner {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 10px;
+  color: var(--primary);
+}
+
+/* ============ Section Gap ============ */
+.section-gap {
+  margin-top: 16px;
+}
+

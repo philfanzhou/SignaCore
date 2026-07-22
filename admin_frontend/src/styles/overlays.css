@@ -1,0 +1,325 @@
+/* ============ Drawer ============ */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(13,15,30,.42);
+  backdrop-filter: blur(2px);
+  z-index: 90;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .22s var(--ease);
+}
+
+.overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* sidebar mask: only used on mobile (<=900px) */
+.sidebar-overlay {
+  display: none;
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 520px;
+  max-width: 94vw;
+  z-index: 95;
+  background: var(--bg);
+  box-shadow: var(--shadow-float);
+  transform: translateX(36px);
+  opacity: 0;
+  transition: transform .3s var(--ease), opacity .25s var(--ease);
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer.open {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+.drawer-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px 24px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer-title {
+  font-size: 16.5px;
+  font-weight: 650;
+  letter-spacing: -.2px;
+  color: var(--text);
+}
+
+.drawer-sub {
+  font-size: 12.5px;
+  color: var(--text-3);
+  margin-top: 3px;
+}
+
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 22px 24px 40px;
+}
+
+.drawer-foot {
+  padding: 14px 24px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  transition: all .15s;
+  flex-shrink: 0;
+}
+
+.icon-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.mini-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 18px;
+  width: fit-content;
+}
+
+.mini-tab {
+  padding: 5px 14px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  transition: all .16s var(--ease);
+}
+
+.mini-tab.active {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 500;
+  box-shadow: 0 1px 3px rgba(22,25,39,.1);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px 14px;
+  font-size: 13px;
+}
+
+.kv dt {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.kv dd {
+  color: var(--text);
+}
+
+.danger-zone {
+  border: 1px solid var(--danger-line);
+  border-radius: var(--r-card);
+  padding: 18px;
+  background: var(--danger-soft);
+  margin-top: 16px;
+}
+
+.danger-zone .dz-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.danger-zone .dz-desc {
+  font-size: 12px;
+  color: #B45454;
+  margin: 4px 0 12px;
+}
+
+.danger-zone .dz-title + .dz-title {
+  margin-top: 14px;
+}
+
+/* ============ Modal ============ */
+.modal-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+/* overlay inside modal-wrap sits below the modal and always accepts clicks */
+.modal-wrap .overlay {
+  z-index: 0;
+  pointer-events: auto;
+  animation: overlay-fade .22s var(--ease) forwards;
+}
+
+.modal {
+  position: relative;
+  z-index: 1;
+  width: 460px;
+  max-width: 100%;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow-float);
+  padding: 26px;
+  max-height: 88vh;
+  overflow-y: auto;
+  animation: modal-pop .26s var(--spring);
+}
+
+@keyframes modal-pop {
+  from { transform: scale(.96) translateY(8px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -.2px;
+  color: var(--text);
+}
+
+.modal-sub {
+  font-size: 12.5px;
+  color: var(--text-3);
+  margin: 4px 0 18px;
+}
+
+.modal-head-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.modal-head-ico {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-head-ico.warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.modal-head-ico.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.modal-head-ico.primary {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.modal-head-ico svg {
+  width: 17px;
+  height: 17px;
+}
+
+.secret-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 14px;
+  border-radius: 8px;
+  background: #0F1122;
+  color: #E7E9F5;
+  font-family: var(--mono);
+  font-size: 13px;
+  margin: 14px 0;
+}
+
+.secret-box code {
+  flex: 1;
+  overflow-x: auto;
+  white-space: nowrap;
+  letter-spacing: .3px;
+  font-family: var(--mono);
+}
+
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #A5B4FC;
+  flex-shrink: 0;
+  transition: color .15s;
+}
+
+.copy-btn:hover {
+  color: #fff;
+}
+
+.copy-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.check-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.check-line input {
+  accent-color: var(--primary);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
