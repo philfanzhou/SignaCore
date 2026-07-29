@@ -41,6 +41,7 @@ public class AuthController : ControllerBase
     private readonly IOtpService _otpService;
     private readonly ISmsSender _smsSender;
     private readonly IAccountLoginInfoService _accountLoginInfoService;
+    private readonly IAccountRepository _accountRepository;
     private readonly AdminBootstrapOptions _adminBootstrapOptions;
 
     public AuthController(
@@ -61,6 +62,7 @@ public class AuthController : ControllerBase
         IOtpService otpService,
         ISmsSender smsSender,
         IAccountLoginInfoService accountLoginInfoService,
+        IAccountRepository accountRepository,
         IOptions<AdminBootstrapOptions> adminBootstrapOptions)
     {
         _keyManager = keyManager;
@@ -80,6 +82,7 @@ public class AuthController : ControllerBase
         _otpService = otpService;
         _smsSender = smsSender;
         _accountLoginInfoService = accountLoginInfoService;
+        _accountRepository = accountRepository;
         _adminBootstrapOptions = adminBootstrapOptions.Value;
     }
 
@@ -176,11 +179,14 @@ public class AuthController : ControllerBase
             }
         }
 
-        // Bootstrap admin super-role: when the login username matches the configured
-        // AdminBootstrap:Username, unconditionally inject role:admin regardless of which
-        // portal the request comes from (bypasses the callback mechanism). Case-insensitive.
-        // Deduplicates: skip if callback already returned role:admin.
-        InjectBootstrapAdminRole(request, claims);
+        // Bootstrap admin super-role: when the authenticated account is the one configured by
+        // AdminBootstrap:Username, unconditionally inject role:admin regardless of which portal the
+        // request comes from (bypasses the callback mechanism). For password grant the already-
+        // validated request.Username is compared; for refresh_token grant the authenticated
+        // AccountEntity.Id is compared against the bootstrap account id (request body username is
+        // ignored to prevent escalation). SMS/WeChat grants are not triggered. Deduplicates: skip if
+        // callback already returned role:admin.
+        await InjectBootstrapAdminRoleAsync(request, account, claims);
 
         var rsaKey = _keyManager.GetCurrentKey();
         var accessToken = _tokenService.GenerateJwtToken(claims, rsaKey, _jwtOptions.TokenExpirationHours);
@@ -352,13 +358,29 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// If the login username matches <see cref="AdminBootstrapOptions.Username"/> (case-insensitive,
-    /// non-empty config), injects <c>role:admin</c> into <paramref name="claims"/> unless already
-    /// present. This is the "super admin" shortcut that bypasses the portal callback mechanism,
-    /// so the bootstrap admin account always receives the admin role regardless of which portal
-    /// it logs in from. Only meaningful for password grant (where <c>request.Username</c> is set).
+    /// Injects <c>role:admin</c> into <paramref name="claims"/> when the authenticated account is
+    /// the bootstrap admin configured by <see cref="AdminBootstrapOptions.Username"/>, unless the
+    /// role is already present. This is the "super admin" shortcut that bypasses the portal callback
+    /// mechanism, so the bootstrap admin account always receives the admin role regardless of which
+    /// portal it logs in from or refreshes through.
+    /// <para>
+    /// Identity is resolved from the already-validated account, never from client-controlled request
+    /// fields:
+    /// <list type="bullet">
+    /// <item><c>password</c> grant: compares the password-validated <c>request.Username</c> with the
+    /// configured bootstrap username (case-insensitive).</item>
+    /// <item><c>refresh_token</c> grant: resolves the bootstrap account via
+    /// <see cref="IAccountRepository.GetByPasswordCredentialUsernameAsync"/> and compares its id with
+    /// the authenticated <paramref name="authenticatedAccount"/> id. The request body username is
+    /// intentionally ignored so a regular account cannot escalate by forging <c>username=admin</c>.</item>
+    /// <item><c>sms</c>/<c>wechat_code</c> grants: bootstrap admin injection is not triggered.</item>
+    /// </list>
+    /// </para>
     /// </summary>
-    private void InjectBootstrapAdminRole(TokenRequest request, List<Claim> claims)
+    private async Task InjectBootstrapAdminRoleAsync(
+        TokenRequest request,
+        AccountEntity authenticatedAccount,
+        List<Claim> claims)
     {
         var bootstrapUsername = _adminBootstrapOptions.Username;
         if (string.IsNullOrWhiteSpace(bootstrapUsername))
@@ -366,23 +388,47 @@ public class AuthController : ControllerBase
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(request.Username))
+        var isBootstrapAdmin = false;
+
+        if (request.GrantType == IdentityConstants.GrantTypePassword)
+        {
+            isBootstrapAdmin =
+                !string.IsNullOrWhiteSpace(request.Username)
+                && string.Equals(
+                    request.Username.Trim(),
+                    bootstrapUsername.Trim(),
+                    StringComparison.OrdinalIgnoreCase);
+        }
+        else if (request.GrantType == IdentityConstants.GrantTypeRefreshToken)
+        {
+            var bootstrapAccount =
+                await _accountRepository.GetByPasswordCredentialUsernameAsync(
+                    bootstrapUsername.Trim());
+
+            isBootstrapAdmin =
+                bootstrapAccount != null
+                && bootstrapAccount.Id == authenticatedAccount.Id;
+        }
+
+        if (!isBootstrapAdmin)
         {
             return;
         }
 
-        if (!string.Equals(request.Username.Trim(), bootstrapUsername.Trim(), StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (claims.Any(c => c.Type == ClaimTypes.Role && string.Equals(c.Value, "admin", StringComparison.OrdinalIgnoreCase)))
+        if (claims.Any(claim =>
+                claim.Type == ClaimTypes.Role
+                && string.Equals(
+                    claim.Value,
+                    "admin",
+                    StringComparison.OrdinalIgnoreCase)))
         {
             return;
         }
 
         claims.Add(new Claim(ClaimTypes.Role, "admin"));
-        _logger.LogInformation("Injected bootstrap admin role for user {Username}", request.Username);
+        _logger.LogInformation(
+            "Injected bootstrap admin role for account {AccountId}",
+            authenticatedAccount.Id);
     }
 
     private static string? ResolveDisplayName(AccountEntity account, string? validationResultDisplayName, string grantType)

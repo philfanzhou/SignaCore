@@ -34,6 +34,7 @@ public class AuthControllerTests
     private readonly Mock<IOtpService> _otpServiceMock;
     private readonly Mock<ISmsSender> _smsSenderMock;
     private readonly Mock<IAccountLoginInfoService> _accountLoginInfoServiceMock;
+    private readonly Mock<IAccountRepository> _accountRepositoryMock;
 
     // Bootstrap admin config: defaults to "admin"; individual tests can override via
     // CreateBootstrapOptions(Action<AdminBootstrapOptions>).
@@ -57,6 +58,7 @@ public class AuthControllerTests
         _otpServiceMock = new Mock<IOtpService>();
         _smsSenderMock = new Mock<ISmsSender>();
         _accountLoginInfoServiceMock = CreateAccountLoginInfoServiceMock();
+        _accountRepositoryMock = new Mock<IAccountRepository>();
         _adminBootstrapOptionsMock = CreateBootstrapOptions();
     }
 
@@ -163,6 +165,7 @@ public class AuthControllerTests
             _otpServiceMock.Object,
             _smsSenderMock.Object,
             _accountLoginInfoServiceMock.Object,
+            _accountRepositoryMock.Object,
             bootstrapOptionsMock.Object);
         var httpContext = new DefaultHttpContext();
         httpContext.Connection.RemoteIpAddress = IPAddress.Parse("127.0.0.1");
@@ -635,7 +638,7 @@ public class AuthControllerTests
             factory, callbackMock.Object, CreateAuthMetrics(), NullLogger<AuthController>.Instance,
             CreateGatewayValidator(_appRegistrationRepoMock), new CallbackUrlValidator(),
             _unitOfWorkMock.Object, _auditServiceMock.Object, _otpServiceMock.Object,
-            _smsSenderMock.Object, _accountLoginInfoServiceMock.Object,
+            _smsSenderMock.Object, _accountLoginInfoServiceMock.Object, _accountRepositoryMock.Object,
             CreateBootstrapOptions(o => o.Username = "admin").Object);
         var httpContext = new DefaultHttpContext();
         httpContext.Connection.RemoteIpAddress = IPAddress.Parse("127.0.0.1");
@@ -723,6 +726,149 @@ public class AuthControllerTests
         Assert.Contains(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
     }
 
+    // ===== Bootstrap admin refresh role preservation tests =====
+
+    [Fact]
+    public async Task BootstrapAdminRefresh_PreservesAdminRoleWithoutUsername()
+    {
+        // Arrange: bootstrap admin "admin" refreshes via refresh_token grant; request.Username is NOT set.
+        // The refresh validator returns the bootstrap account; the account repository lookup for "admin"
+        // returns the same account. Identity must re-inject role=admin based on account id comparison,
+        // not request.Username (which is empty).
+        var bootstrapAccount = CreateTestAccount();
+        _accountRepositoryMock
+            .Setup(r => r.GetByPasswordCredentialUsernameAsync("admin"))
+            .ReturnsAsync(bootstrapAccount);
+
+        var validatorMock = CreateRefreshValidator(bootstrapAccount);
+        var controller = CreateController(new[] { validatorMock.Object });
+        BeginCaptureGeneratedClaims();
+
+        var request = new TokenRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = "existing-refresh-token"
+            // Username intentionally not set: refresh grant does not carry a username.
+        };
+
+        var actionResult = await controller.GetToken(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<TokenResponse>(ok.Value!);
+        Assert.True(response.Success);
+
+        var claims = AssertCapturedClaims();
+        Assert.Contains(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+        Assert.Single(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+    }
+
+    [Fact]
+    public async Task RegularUserRefresh_WithBootstrapUsername_DoesNotReceiveAdminRole()
+    {
+        // Arrange: a regular (non-bootstrap) account refreshes; the request maliciously carries
+        // Username = "admin" to try to escalate. The account repository lookup for "admin" returns
+        // a distinct bootstrap account. Identity must NOT inject role=admin because the refresh
+        // grant compares the authenticated AccountEntity.Id, not request.Username.
+        var regularAccount = CreateTestAccount();
+        var bootstrapAccount = CreateTestAccount();
+        Assert.NotEqual(regularAccount.Id, bootstrapAccount.Id);
+
+        _accountRepositoryMock
+            .Setup(r => r.GetByPasswordCredentialUsernameAsync("admin"))
+            .ReturnsAsync(bootstrapAccount);
+
+        var validatorMock = CreateRefreshValidator(regularAccount);
+        var controller = CreateController(new[] { validatorMock.Object });
+        BeginCaptureGeneratedClaims();
+
+        var request = new TokenRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = "regular-refresh-token",
+            Username = "admin" // malicious: client-controlled, must not grant admin role.
+        };
+
+        var actionResult = await controller.GetToken(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<TokenResponse>(ok.Value!);
+        Assert.True(response.Success);
+
+        var claims = AssertCapturedClaims();
+        Assert.DoesNotContain(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+    }
+
+    [Fact]
+    public async Task BootstrapAccountSmsLogin_DoesNotReceiveBootstrapAdminRole()
+    {
+        // Arrange: the SMS validator returns the bootstrap account itself; the account repository
+        // lookup for "admin" returns the same account. SMS grant must NOT trigger bootstrap admin
+        // injection, so role=admin is absent (callback returns no roles).
+        var bootstrapAccount = CreateTestAccount();
+        _accountRepositoryMock
+            .Setup(r => r.GetByPasswordCredentialUsernameAsync("admin"))
+            .ReturnsAsync(bootstrapAccount);
+
+        var validatorMock = new Mock<IIdentityValidator>();
+        validatorMock.SetupGet(v => v.GrantType).Returns(IdentityConstants.GrantTypeSms);
+        validatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
+            .ReturnsAsync(ValidationResult.Success(bootstrapAccount, "Sms", "TestUser"));
+
+        var controller = CreateController(new[] { validatorMock.Object });
+        BeginCaptureGeneratedClaims();
+
+        var request = new TokenRequest
+        {
+            GrantType = IdentityConstants.GrantTypeSms,
+            Phone = "13800138000",
+            Code = "666666"
+        };
+
+        var actionResult = await controller.GetToken(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<TokenResponse>(ok.Value!);
+        Assert.True(response.Success);
+
+        var claims = AssertCapturedClaims();
+        Assert.DoesNotContain(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+    }
+
+    [Fact]
+    public async Task BootstrapAccountWechatLogin_DoesNotReceiveBootstrapAdminRole()
+    {
+        // Arrange: the WeChat validator returns the bootstrap account itself; the account repository
+        // lookup for "admin" returns the same account. wechat_code grant must NOT trigger bootstrap
+        // admin injection, so role=admin is absent (callback returns no roles).
+        var bootstrapAccount = CreateTestAccount();
+        _accountRepositoryMock
+            .Setup(r => r.GetByPasswordCredentialUsernameAsync("admin"))
+            .ReturnsAsync(bootstrapAccount);
+
+        var validatorMock = new Mock<IIdentityValidator>();
+        validatorMock.SetupGet(v => v.GrantType).Returns(IdentityConstants.GrantTypeWechat);
+        validatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
+            .ReturnsAsync(ValidationResult.Success(bootstrapAccount, "Wechat", "TestUser"));
+
+        var controller = CreateController(new[] { validatorMock.Object });
+        BeginCaptureGeneratedClaims();
+
+        var request = new TokenRequest
+        {
+            GrantType = IdentityConstants.GrantTypeWechat,
+            Code = "wechat-code"
+        };
+
+        var actionResult = await controller.GetToken(request, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<TokenResponse>(ok.Value!);
+        Assert.True(response.Success);
+
+        var claims = AssertCapturedClaims();
+        Assert.DoesNotContain(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+    }
+
     private static AccountEntity CreateTestAccount()
     {
         return new AccountEntity
@@ -740,6 +886,15 @@ public class AuthControllerTests
         validatorMock.SetupGet(v => v.GrantType).Returns("password");
         validatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
             .ReturnsAsync(ValidationResult.Success(account, "Password", username));
+        return validatorMock;
+    }
+
+    private static Mock<IIdentityValidator> CreateRefreshValidator(AccountEntity account)
+    {
+        var validatorMock = new Mock<IIdentityValidator>();
+        validatorMock.SetupGet(v => v.GrantType).Returns(IdentityConstants.GrantTypeRefreshToken);
+        validatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
+            .ReturnsAsync(ValidationResult.Success(account, "Refresh", null));
         return validatorMock;
     }
 }
