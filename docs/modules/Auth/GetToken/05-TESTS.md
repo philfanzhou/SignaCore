@@ -104,6 +104,30 @@
 - **When** 调用 GetToken
 - **Then** 注入 `role=admin`（大小写不敏感比较）
 
+### UT-17 BootstrapAdminRefresh_PreservesAdminRoleWithoutUsername
+
+- **Given** `AdminBootstrap:Username = "admin"`；refresh validator 返回 `bootstrapAccount`；`IAccountRepository.GetByPasswordCredentialUsernameAsync("admin")` 返回同一 `bootstrapAccount`；`request.GrantType = "refresh_token"`；`request.RefreshToken` 有值；`request.Username` 未设置
+- **When** 调用 GetToken
+- **Then** `response.Success = true`；生成 JWT 的 claims 包含且只包含一个 `role=admin`
+
+### UT-18 RegularUserRefresh_WithBootstrapUsername_DoesNotReceiveAdminRole
+
+- **Given** `AdminBootstrap:Username = "admin"`；refresh validator 返回 `regularAccount`；`IAccountRepository.GetByPasswordCredentialUsernameAsync("admin")` 返回 `bootstrapAccount`；`regularAccount.Id != bootstrapAccount.Id`；refresh 请求恶意附带 `Username = "admin"`
+- **When** 调用 GetToken
+- **Then** `response.Success = true`；生成 JWT 的 claims 不包含 `role=admin`
+
+### UT-19 BootstrapAccountSmsLogin_DoesNotReceiveBootstrapAdminRole
+
+- **Given** `AdminBootstrap:Username = "admin"`；sms grant validator 返回的账户恰好是 bootstrap account（`AccountEntity.Id` 与 `GetByPasswordCredentialUsernameAsync("admin")` 返回的账户 ID 相等）；callback 返回空 roles
+- **When** 调用 GetToken(grantType="sms")
+- **Then** 生成 JWT 的 claims 不包含 `role=admin`（sms grant 不触发 bootstrap admin 注入）
+
+### UT-20 BootstrapAccountWechatLogin_DoesNotReceiveBootstrapAdminRole
+
+- **Given** `AdminBootstrap:Username = "admin"`；wechat_code grant validator 返回的账户恰好是 bootstrap account；callback 返回空 roles
+- **When** 调用 GetToken(grantType="wechat_code")
+- **Then** 生成 JWT 的 claims 不包含 `role=admin`（wechat_code grant 不触发 bootstrap admin 注入）
+
 ## 遗漏的测试场景
 
 - AuthController.GetToken 的端到端测试（当前仅有单元测试）

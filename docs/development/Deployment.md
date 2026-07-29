@@ -181,13 +181,17 @@ EOF
 
 ### Bootstrap Admin 角色注入
 
-`AdminBootstrap:Username` 配置的 bootstrap admin 账号是"超级管理员"，在密码登录时由 Identity **无条件注入** `role:admin`，绕过 callback 机制。因此：
+`AdminBootstrap:Username` 配置的 bootstrap admin 账号是"超级管理员"，在密码登录和刷新令牌换票时由 Identity **无条件注入** `role:admin`，绕过 callback 机制。因此：
 
 - bootstrap admin **无需配置** `AdminPortal:AdminUserIds` 即可获得 `role:admin`
 - bootstrap admin 无论从哪个 portal（teacher_portal / admin_portal 等）登录，JWT 都包含 `role:admin`
+- bootstrap admin 使用 Refresh Token 换票后，新 JWT **仍包含** `role:admin`（refresh grant 使用已验证账户 ID 与 bootstrap 账户 ID 比较，不依赖请求体 `username`）
 - 注入前会检查是否已存在 `role=admin`，避免重复
 - 匹配使用大小写不敏感比较（`StringComparison.OrdinalIgnoreCase`）；配置为空时跳过注入，保持原行为
+- SMS/微信 grant 不触发 bootstrap admin 注入，bootstrap account 身份不扩大到这两类 grant
 - `AdminUserIds` 白名单仍保留，用于扩展**非 bootstrap** 的二级管理员账号（需 admin_portal callback 注入）
+
+> **DocLibrary 自动刷新会话**：DocLibrary 管理后台在 Access Token 到期后只提交 Refresh Token（不补传用户名）调用 `POST /api/auth/token`。由于 Identity 在 refresh grant 中基于已验证账户 ID 重新识别 bootstrap admin，DocLibrary 管理员会话可以连续刷新而不丢失 `role=admin`，同时普通账户无法通过伪造 `username=admin` 提权。
 
 ### CI 联调验证流程
 

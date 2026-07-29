@@ -118,12 +118,17 @@ CallbackService.FetchExternalClaimsAsync (if CallbackUrl exists)
     │   └── CustomClaims 仅允许白名单类型：department, class_name, grade, subject, school, organization, title
     │
     ▼
-Bootstrap Admin Short-Circuit (after callback, before signing)
-    │   └── 若 AdminBootstrap:Username 配置非空 且 request.Username 与之相等（OrdinalIgnoreCase）
-    │   └── 且 claims 中尚不存在 role=admin
+Bootstrap Admin Role Injection (after callback, before signing) — async
+    │   └── 若 AdminBootstrap:Username 配置非空：
+    │       ├── password grant: 已通过密码验证的 request.Username 与配置值相等（OrdinalIgnoreCase）→ 视为 bootstrap admin
+    │       ├── refresh_token grant: 通过 IAccountRepository.GetByPasswordCredentialUsernameAsync(bootstrapUsername)
+    │       │   取得 bootstrap 账户，与 RefreshTokenValidator 已验证出的 AccountEntity.Id 比较；相等 → 视为 bootstrap admin
+    │       │   （不读取 refresh 请求体中的 username，防止伪造提权）
+    │       └── sms/wechat_code grant: 不触发 bootstrap admin 注入
+    │   └── 已视为 bootstrap admin 且 claims 中尚不存在 role=admin
     │   └── 则注入 new Claim(ClaimTypes.Role, "admin")
-    │   └── 该逻辑绕过 callback，保证 bootstrap admin 从任意 portal 登录都能获得 admin 角色
-    │   └── SMS/微信登录无 Username，不触发此逻辑
+    │   └── 该逻辑绕过 callback，保证 bootstrap admin 从任意 portal 登录及刷新都获得 admin 角色
+    │   └── 需要 IAccountRepository 依赖（仅在 refresh grant 分支查询）
     │
     ▼
 JwtTokenService.GenerateJwtToken (RSA signing)
@@ -153,4 +158,8 @@ TokenResponse
 8. **SMS 发送器环境隔离**：开发环境使用 `LoggingSmsSender`（掩码记录），生产环境使用 `ThrowingSmsSender`（抛出异常），防止生产环境验证码泄露
 9. **CORS 生产环境保护**：生产环境未配置 `AdminWeb:AllowedOrigins` 时不启用跨域凭据，开发环境默认允许 localhost
 10. **Bootstrap Admin 注入时机在 callback 之后**：callback 可能返回额外角色（如 teacher），这些角色应保留；bootstrap admin 注入仅补充 role=admin，不覆盖已有角色，且通过 `!claims.Any(...)` 去重
-11. **仅 password grant 触发**：`request.Username` 仅在密码登录时有值；SMS/WeChat 的 portal 用户不需要 bootstrap admin 机制
+11. **password / refresh_token 两类 grant 触发**：
+    - **password grant** 使用已通过密码验证的 `request.Username` 与 `AdminBootstrap:Username` 比较（大小写不敏感）。
+    - **refresh_token grant** 不信任请求体 `username`，改用 `IAccountRepository.GetByPasswordCredentialUsernameAsync(bootstrapUsername)` 取得 bootstrap 账户，再与 RefreshTokenValidator 已验证出的 `AccountEntity.Id` 比较。这保证 bootstrap admin 刷新 Access Token 时仍保留 `role=admin`，同时普通账户无法通过在 refresh 请求体伪造 `username=admin` 提权。
+    - **sms/wechat_code grant** 不触发 bootstrap admin 注入，bootstrap account 身份不扩大到这两类 grant。
+    - 注入方法为 `async Task`，因为 refresh 分支需要查询仓储。

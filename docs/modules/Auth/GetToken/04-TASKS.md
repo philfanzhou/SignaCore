@@ -53,6 +53,24 @@
     "acceptance": "回调成功注入 claims；回调失败降级为基本 JWT"
   },
   {
+    "id": "TASK-09",
+    "status": "implemented",
+    "depends_on": ["TASK-01", "TASK-05"],
+    "action": "Bootstrap admin refresh 角色保持：将 InjectBootstrapAdminRole 改为异步 InjectBootstrapAdminRoleAsync，注入 IAccountRepository；refresh_token grant 使用已验证 AccountEntity.Id 与 AdminBootstrap:Username 对应账户 ID 比较，不读取请求体 username；sms/wechat_code grant 不触发注入",
+    "files": [
+      "backend/Host/Controllers/AuthController.cs",
+      "backend/Tests/unit/Host/Controllers/AuthControllerTests.cs"
+    ],
+    "acceptance": [
+      "Bootstrap admin 密码登录 JWT 包含且仅包含一个 role=admin",
+      "Bootstrap admin 使用 Refresh Token 换票后新 JWT 仍包含且仅包含一个 role=admin",
+      "普通账户 refresh 请求附带 username=admin 不能获得 role=admin",
+      "SMS/微信 grant 即使账户是 bootstrap account 也不注入 role=admin",
+      "AdminBootstrap:Username 为空时不注入 role=admin",
+      "callback 已返回 role=admin 时不重复添加"
+    ]
+  },
+  {
     "id": "TASK-07",
     "status": "to_review",
     "depends_on": [],

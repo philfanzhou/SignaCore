@@ -16,7 +16,11 @@
 - 短信验证码有 5 分钟有效期，最多验证 5 次
 - 微信登录不支持自动注册，必须预先绑定
 - 所有请求可通过 AppId/AppSecret 进行网关验证
-- **Bootstrap Admin 角色**：当登录用户名匹配 `AdminBootstrap:Username`（大小写不敏感、配置非空）时，JWT 无条件注入 `role:admin`，绕过 callback 机制。这是"超级管理员"账号，无论从哪个 portal 登录都应获得 admin 角色。注入前检查是否已存在 role=admin，避免重复
+- **Bootstrap Admin 角色**：`AdminBootstrap:Username` 配置的 bootstrap admin 账号是"超级管理员"，无论从哪个 portal 登录都应获得 `role:admin`。注入前检查是否已存在 role=admin，避免重复。角色判断规则：
+  - **password grant**：使用已通过密码验证的 `request.Username` 与 `AdminBootstrap:Username` 比较（大小写不敏感、配置非空）。
+  - **refresh_token grant**：使用 RefreshTokenValidator 已验证出的 `AccountEntity.Id`，与 `AdminBootstrap:Username` 对应的密码账户 ID 比较；**不**读取 refresh 请求体中的 `username`，避免普通账户伪造 `username=admin` 提权。
+  - **sms/wechat_code grant**：不触发 bootstrap admin 注入。
+  - 绕过 callback 机制，但 callback 已返回 `role=admin` 时不重复添加。
 
 ## 关键验收条件摘要
 
@@ -30,7 +34,11 @@
 8. [ ] 网关验证：无效的 AppId/AppSecret 返回错误
 9. [ ] 回调权限注入：成功时 JWT 包含角色和权限；失败时 JWT 仅包含基本信息
 10. [ ] 不支持的 grant_type 返回 "unsupported_grant_type"
-11. [ ] Bootstrap Admin 角色：登录用户名匹配 `AdminBootstrap:Username` 时，JWT 包含 role:admin（无论 callback 是否返回该角色、无论从何 portal 登录）
+11. [ ] Bootstrap Admin 角色（password grant）：登录用户名匹配 `AdminBootstrap:Username` 时，JWT 包含 role:admin（无论 callback 是否返回该角色、无论从何 portal 登录）
+12. [ ] Bootstrap Admin 角色（refresh_token grant）：当 refresh_token 对应的已验证账户是 `AdminBootstrap:Username` 对应账户时，新 JWT 必须继续包含 role:admin（不依赖 refresh 请求体中的 username）
+13. [ ] 普通账户伪造提权防护：普通账户即使在 refresh 请求体中附带 `username=admin`，也不能获得 `role=admin`
+14. [ ] SMS/微信 grant 边界：sms/wechat_code grant 即使账户恰好是 bootstrap account，也不因本次修改自动获得管理员角色
+15. [ ] Bootstrap Admin 角色去重：callback 已返回 `role=admin` 时，JWT claims 中 `role=admin` 只出现一次
 
 ## 明确列出"范围外"
 

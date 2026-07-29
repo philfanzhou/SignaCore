@@ -160,7 +160,10 @@
 
 > **管理员唯一真相源**：管理员身份由 `AdminBootstrap:Username` 单一来源决定，不再维护独立白名单。具体规则：
 > - **admin_frontend 登录**：密码校验通过后，账号用户名必须等于 `AdminBootstrapOptions.Username`（`StringComparison.OrdinalIgnoreCase`），否则 403。配置为空时**拒绝所有人**（fail-closed，不再默认放行）。
-> - **角色注入**：密码登录时，若 `request.Username == AdminBootstrap:Username`（且配置非空），Identity 在签发 JWT 前无条件注入 `role=admin`；注入前检查是否已存在该角色，避免重复。SMS/微信登录不触发。
+> - **角色注入**：
+>   - **password grant**：若 `request.Username == AdminBootstrap:Username`（且配置非空），Identity 在签发 JWT 前无条件注入 `role=admin`；注入前检查是否已存在该角色，避免重复。
+>   - **refresh_token grant**：使用 RefreshTokenValidator 已验证出的 `AccountEntity.Id` 与 `AdminBootstrap:Username` 对应的密码账户 ID 比较；相等则注入 `role=admin`。**不**读取 refresh 请求体中的 `username`，普通账户无法通过伪造 `username=admin` 提权。这保证 bootstrap admin 刷新 Access Token 后仍保留管理员角色。
+>   - **sms/wechat_code grant**：不触发 bootstrap admin 注入。
 > - 不再支持通过白名单"追加"管理员账号；维护 admin 权限 = 维护 `AdminBootstrap:Username` 这一处配置。
 
 ## Bootstrap Apps 配置

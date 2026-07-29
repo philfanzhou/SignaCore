@@ -168,6 +168,18 @@
 - **When** 验证
 - **Then** 返回 success=false, message="Refresh token is not valid for this application"
 
+- **Given** `AdminBootstrap:Username` 配置非空，refresh_token 对应的已验证账户与该配置对应的密码账户是同一账户
+- **When** 调用 GetToken(grantType="refresh_token")
+- **Then** 新 JWT 包含 `role=admin`，且 `role=admin` 在 claims 中只出现一次
+
+- **Given** 普通账户的 refresh_token，且请求体恶意附带 `username=admin`（与 `AdminBootstrap:Username` 相同）
+- **When** 调用 GetToken(grantType="refresh_token")
+- **Then** 新 JWT **不**包含 `role=admin`（refresh grant 不读取请求体 `username`，只比较已验证的 `AccountEntity.Id`）
+
+- **Given** SMS/微信 grant 对应的账户恰好是 bootstrap account
+- **When** 调用 GetToken(grantType="sms" 或 "wechat_code")
+- **Then** 不触发 bootstrap admin 注入，JWT 角色完全由 callback 决定
+
 ### AC-FR-08: 回调权限注入
 
 - **Given** 登录成功且 AppId 对应的业务系统有 CallbackUrl
@@ -217,6 +229,8 @@
 | 安全 | 回调超时 2 秒；JWKS 端点速率限制 60 次/分钟 |
 | 安全 | 回调返回 Claim 数量限制：每种类型最多 50 个，值长度不超过 256 字符 |
 | 安全 | CustomClaims 仅允许白名单类型：department, class_name, grade, subject, school, organization, title |
+| 安全 | Bootstrap admin refresh 角色保持：refresh_token grant 使用已验证的 `AccountEntity.Id` 与 `AdminBootstrap:Username` 对应账户 ID 比较；**不**读取 refresh 请求体 `username`，普通账户无法通过伪造 `username=admin` 提权 |
+| 安全 | SMS/微信 grant 不触发 bootstrap admin 注入，bootstrap account 身份不扩大到这两类 grant |
 | 安全 | 生产环境使用 ThrowingSmsSender，开发环境使用 LoggingSmsSender（掩码记录） |
 | 安全 | 生产环境未配置 AdminWeb:AllowedOrigins 时不启用跨域凭据 |
 | 可靠性 | 回调失败降级为基本 JWT，不阻塞登录 |
