@@ -27,7 +27,7 @@ public sealed class RevokeResponse { bool Success; }
 
 ## 依赖的数据库表
 
-- [refresh_tokens](../../database/tables/refresh_tokens.md) — 查找令牌并标记 IsRevoked
+- [refresh_tokens](../../../database/tables/refresh_tokens.md) — 查找令牌并标记 IsRevoked
 
 ## 数据流
 

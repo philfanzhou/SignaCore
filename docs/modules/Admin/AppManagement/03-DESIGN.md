@@ -27,9 +27,9 @@ backend/
 
 ## 依赖的数据库表
 
-- [app_registrations](../../database/tables/app_registrations.md)
-- [refresh_tokens](../../database/tables/refresh_tokens.md)
-- [audit_logs](../../database/tables/audit_logs.md)
+- [app_registrations](../../../database/tables/app_registrations.md)
+- [refresh_tokens](../../../database/tables/refresh_tokens.md)
+- [audit_logs](../../../database/tables/audit_logs.md)
 
 ## 数据流/调用链
 

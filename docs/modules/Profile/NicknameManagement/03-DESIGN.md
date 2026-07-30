@@ -66,7 +66,7 @@ Client ──PATCH /api/profile/nickname──▶ ProfileController
 
 ## 依赖的数据库表
 
-- [accounts](../../database/tables/accounts.md)
+- [accounts](../../../database/tables/accounts.md)
 
 ## 关键设计决策
 

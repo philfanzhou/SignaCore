@@ -27,7 +27,7 @@ public sealed class RegisterCallbackHttpResponse { bool Success; string Message;
 
 ## 依赖的数据库表
 
-- [app_registrations](../../database/tables/app_registrations.md) — 更新 CallbackUrl 和 CallbackExpiresAt
+- [app_registrations](../../../database/tables/app_registrations.md) — 更新 CallbackUrl 和 CallbackExpiresAt
 
 ## 数据流
 

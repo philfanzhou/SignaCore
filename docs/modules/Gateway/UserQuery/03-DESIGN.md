@@ -84,10 +84,10 @@ Client ──POST /api/gateway/users/batch──▶ GatewayController
 
 ## 依赖的数据库表
 
-- [accounts](../../database/tables/accounts.md)
-- [password_credentials](../../database/tables/password_credentials.md)
-- [user_logins](../../database/tables/user_logins.md)
-- [app_registrations](../../database/tables/app_registrations.md)（网关验证）
+- [accounts](../../../database/tables/accounts.md)
+- [password_credentials](../../../database/tables/password_credentials.md)
+- [user_logins](../../../database/tables/user_logins.md)
+- [app_registrations](../../../database/tables/app_registrations.md)（网关验证）
 
 ## 关键设计决策
 

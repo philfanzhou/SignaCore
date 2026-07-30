@@ -46,58 +46,6 @@ Database ← Domain ← Service ← Host
 | QuantumZhou.Identity.Service | Domain |
 | QuantumZhou.Identity.Host | Service, Domain, Database |
 
-## Client SDK
-
-`QuantumZhou.Identity.Client` 是提供给业务服务接入 Identity 认证的 SDK 类库（已废弃），封装了 JWT Bearer 认证配置和认证端点（login/refresh/me/logout），使业务服务只需 3 行代码即可完成认证接入。
-
-### 接入方式
-
-```csharp
-// Program.cs
-builder.Services.AddIdentityClient(builder.Configuration);
-// ...
-app.UseIdentityClient();
-app.MapIdentityAuthEndpoints();
-```
-
-```json
-// appsettings.json
-{
-  "Identity": {
-    "Endpoint": "http://localhost:5002",
-    "AppId": "your_app_id",
-    "AppSecret": ""
-  },
-  "Jwt": {
-    "Issuer": "QuantumZhou.Identity",
-    "Audience": "QuantumZhou.microservices",
-    "JwksEndpoint": "http://localhost:5002/.well-known/jwks"
-  }
-}
-```
-
-### 提供的端点
-
-| 方法 | 路径 | 认证 | 说明 |
-|------|------|------|------|
-| POST | `/admin/auth/login` | AllowAnonymous | 用户名密码登录，代理 HTTP POST /api/auth/token |
-| POST | `/admin/auth/refresh` | AllowAnonymous | RefreshToken 刷新 |
-| GET | `/admin/auth/me` | 需认证 | 获取当前用户信息（从 JWT Claims 读取） |
-| POST | `/admin/auth/logout` | 需认证 | 登出（前端清除 Token） |
-
-### 关键源文件
-
-| 文件 | 用途 |
-|------|------|
-| [IdentityClientOptions.cs](../../backend/Client/IdentityClientOptions.cs) | 配置项定义 |
-| [ServiceCollectionExtensions.cs](../../backend/Client/ServiceCollectionExtensions.cs) | AddIdentityClient() 扩展方法 + JwksFetcher |
-| [ApplicationBuilderExtensions.cs](../../backend/Client/ApplicationBuilderExtensions.cs) | UseIdentityClient() + MapIdentityAuthEndpoints() |
-| [AuthEndpoints.cs](../../backend/Client/AuthEndpoints.cs) | 认证端点实现（已废弃） |
-
-### JWKS 获取机制
-
-JWT 验证需要从 Identity 服务获取 JWKS 公钥。SDK 使用 `JwksFetcher` 类（普通 HttpClient）手动获取并解析 JWKS，不依赖 `ConfigurationManager`（后者在 Docker 容器环境中存在静默失败问题）。密钥缓存 30 分钟，失败不缓存，下次请求重试。
-
 ## 协议选型决策
 
 ### 背景

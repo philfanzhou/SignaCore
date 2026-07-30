@@ -36,11 +36,11 @@ backend/
 
 ## 依赖的数据库表
 
-- [accounts](../../database/tables/accounts.md)
-- [password_credentials](../../database/tables/password_credentials.md)
-- [user_logins](../../database/tables/user_logins.md)
-- [login_histories](../../database/tables/login_histories.md)
-- [audit_logs](../../database/tables/audit_logs.md)
+- [accounts](../../../database/tables/accounts.md)
+- [password_credentials](../../../database/tables/password_credentials.md)
+- [user_logins](../../../database/tables/user_logins.md)
+- [login_histories](../../../database/tables/login_histories.md)
+- [audit_logs](../../../database/tables/audit_logs.md)
 
 ## 数据流/调用链
 

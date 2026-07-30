@@ -22,8 +22,8 @@ public interface IAuditService {
 
 ## 依赖的数据库表
 
-- [login_histories](../../database/tables/login_histories.md)
-- [audit_logs](../../database/tables/audit_logs.md)
+- [login_histories](../../../database/tables/login_histories.md)
+- [audit_logs](../../../database/tables/audit_logs.md)
 
 ## 数据流/调用链
 

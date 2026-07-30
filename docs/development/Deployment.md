@@ -203,7 +203,7 @@ CI smoke test 依赖以下 Identity 能力（均已在 CI 环境配置）：
 4. **数据目录挂载**：`data/` 目录（含 `master-key/` 由 KeyManager 自动创建、预置 `bootstrap-apps.json` 由 DatabaseInitializer 自动种子）
 5. **Bootstrap Admin 自动注入**：`AdminBootstrap:Username` 配置的账号密码登录时自动获得 `role:admin`（无需额外配置白名单）
 
-详见 [CI Smoke Test 联调方案](../../../../tests/integration/docs/ci-smoke-test.md)。
+详见 [CI Smoke Test 联调方案](../../../../../tests/integration/docs/ci-smoke-test.md)。
 
 ---
 

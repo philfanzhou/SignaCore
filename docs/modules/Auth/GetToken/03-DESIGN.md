@@ -78,13 +78,13 @@ public interface ICallbackService {
 
 ## 依赖的数据库表/字段/索引
 
-- [accounts](../../database/tables/accounts.md) — 账户查询和登录信息更新
-- [password_credentials](../../database/tables/password_credentials.md) — 密码凭证验证
-- [user_logins](../../database/tables/user_logins.md) — 外部登录绑定查询
-- [refresh_tokens](../../database/tables/refresh_tokens.md) — 刷新令牌生成和验证
-- [app_registrations](../../database/tables/app_registrations.md) — 网关验证和回调配置
-- [login_attempts](../../database/tables/login_attempts.md) — 登录失败计数和锁定
-- [login_histories](../../database/tables/login_histories.md) — 登录审计记录
+- [accounts](../../../database/tables/accounts.md) — 账户查询和登录信息更新
+- [password_credentials](../../../database/tables/password_credentials.md) — 密码凭证验证
+- [user_logins](../../../database/tables/user_logins.md) — 外部登录绑定查询
+- [refresh_tokens](../../../database/tables/refresh_tokens.md) — 刷新令牌生成和验证
+- [app_registrations](../../../database/tables/app_registrations.md) — 网关验证和回调配置
+- [login_attempts](../../../database/tables/login_attempts.md) — 登录失败计数和锁定
+- [login_histories](../../../database/tables/login_histories.md) — 登录审计记录
 
 ## 数据流/调用链
 

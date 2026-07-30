@@ -21,7 +21,7 @@ public interface IKeyManager {
 
 ## 依赖的数据库表
 
-- [security_keys](../../database/tables/security_keys.md)
+- [security_keys](../../../database/tables/security_keys.md)
 
 ## 加密流程
 
