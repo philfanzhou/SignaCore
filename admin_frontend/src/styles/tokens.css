@@ -1,0 +1,56 @@
+/* ============ Design Tokens ============ */
+:root {
+  /* 主色 - Indigo */
+  --primary: #4F46E5;
+  --primary-hover: #4338CA;
+  --primary-soft: #EEF2FF;
+  --primary-line: #C7D2FE;
+
+  /* 侧边栏深色 */
+  --ink-0: #0D0F1E;
+  --ink-1: #141731;
+  --ink-2: #1D2142;
+  --ink-line: #262B52;
+  --ink-text: #E7E9F5;
+  --ink-text-2: #9BA1C4;
+  --ink-text-3: #5D6388;
+
+  /* 中性 */
+  --bg: #F5F6F8;
+  --surface: #FFFFFF;
+  --surface-2: #F8F9FC;
+  --border: #E5E7EF;
+  --border-2: #EEF0F6;
+  --text: #161927;
+  --text-2: #586076;
+  --text-3: #9AA0B6;
+
+  /* 语义色 */
+  --success: #10B981; --success-soft: #ECFDF5; --success-line: #A7F3D0;
+  --warning: #D97706; --warning-soft: #FFFBEB; --warning-line: #FDE68A;
+  --danger: #EF4444;  --danger-soft: #FEF2F2;  --danger-line: #FECACA;
+  --info: #0EA5E9;    --info-soft: #F0F9FF;    --info-line: #BAE6FD;
+
+  /* 圆角 */
+  --r-card: 12px;
+  --r-btn: 8px;
+  --r-input: 6px;
+
+  /* 阴影 */
+  --shadow-hover: 0 6px 16px -6px rgba(22,25,39,.12), 0 2px 4px -2px rgba(22,25,39,.06);
+  --shadow-float: 0 16px 40px -12px rgba(22,25,39,.18), 0 4px 10px -4px rgba(22,25,39,.08);
+
+  /* 动效曲线 */
+  --ease: cubic-bezier(.22,.61,.36,1);
+  --spring: cubic-bezier(.34,1.35,.44,1);
+
+  /* 等宽字体 */
+  --mono: ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Consolas,monospace;
+
+  /* 兼容旧变量名（部分 Element Plus 调用可能依赖） */
+  --primary-color: var(--primary);
+  --success-color: var(--success);
+  --danger-color: var(--danger);
+  --warning-color: var(--warning);
+  --info-color: var(--info);
+}

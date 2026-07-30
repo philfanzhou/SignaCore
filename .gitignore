@@ -1,0 +1,75 @@
+## .NET
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+*.cache
+*.nupkg
+*.snk
+*.swp
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.pidb
+*.mono
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]uild/
+*.Build.csdef
+*.Publish.xml
+*.pubxml
+
+## ASP.NET
+appsettings.Development.json
+appsettings.*.json
+!appsettings.Production.json
+!.gitignore
+*.env
+.env.local
+.env.*.local
+
+## Visual Studio
+.vs/
+*.userprefs
+*.sln.ide/
+
+## Rider
+.idea/
+*.sln.iml
+*.sln.DotSettings.user
+
+## VS Code
+.vscode/
+*.code-workspace
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Docker
+.docker/
+
+## Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.trx
+
+## Entity Framework Migrations
+# Uncomment if you don't want to track migrations
+# **/Migrations/
+
+## SQLite database files
+*.db
+*.db-shm
+*.db-wal

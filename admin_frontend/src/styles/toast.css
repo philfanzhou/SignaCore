@@ -1,0 +1,49 @@
+/* ============ Toast (ElMessage themed to match prototype) ============ */
+.el-message {
+  left: auto;
+  right: 18px;
+  transform: none;
+  min-width: 240px;
+  padding: 11px 16px;
+  border-radius: 10px;
+  background: var(--ink-1);
+  border: 1px solid var(--ink-line);
+  color: #E7E9F5;
+  box-shadow: var(--shadow-float);
+  animation: toast-in .3s var(--spring);
+}
+
+.el-message .el-message__content {
+  color: #E7E9F5;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.el-message .el-message-icon {
+  font-size: 15px;
+}
+
+.el-message--success .el-message-icon { color: #34D399; }
+.el-message--error .el-message-icon { color: #F87171; }
+.el-message--warning .el-message-icon { color: #FBBF24; }
+.el-message--info .el-message-icon { color: #A5B4FC; }
+
+/* EP 默认 .el-message.is-center 为顶部居中（特异性 0,2,0）；以同特异性改为右上角锚定（本文件后加载胜出） */
+.el-message.is-center {
+  left: auto;
+  transform: none;
+}
+
+.el-message-fade-enter-from.is-center {
+  transform: translateX(24px);
+}
+
+.el-message-fade-leave-to.is-center {
+  transform: translateX(24px);
+}
+
+@keyframes toast-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
