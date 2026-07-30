@@ -19,7 +19,7 @@ Identity 的项目级部署脚本 `start.sh` 固定接入 Consul，不再维护�
 | **Consul 正常** | Consul 可达 | 启动时从 Consul KV 加载配置、注册服务、开启健康检查 |
 | **本地缓存回退** | Consul 不可达 | 使用上一次成功拉取的缓存文件启动；日志告警但不阻断 |
 
-> **原则**：Consul 只承载跨项目共享配置；Identity 的项目独有配置必须保留在 `start.sh`、项目自身配置或程序默认值中。当前 `start.sh` 只把共享的数据库地址/密码和 Loki 地址交给 Consul，`Database:Provider` 使用程序默认值，`Database:Name` 如需覆盖再回到项目脚本。
+> **原则**：Consul 只承载跨项目共享配置；Identity 的数据库选择和完整连接字符串由 `start.sh` 或部署环境通过新的 `Database__*` 变量提供。共享快照中的旧 `PostgreSql:*` 会被 Identity 过滤。
 
 ## 2. 启动时序
 
@@ -44,8 +44,8 @@ Identity 的项目级部署脚本 `start.sh` 固定接入 Consul，不再维护�
 为便于排查“到底有没有拿到 Consul 配置”这类问题，Identity 启动阶段必须输出两类诊断日志：
 
 - **Consul 拉取过程日志**：在真正访问 Consul KV 前后记录目标地址、KV 前缀、超时、重试次数、是否携带 token，以及最终结果是 `Consul`、`Cache` 还是 `AppSettings`
-- **最终生效配置摘要**：在应用构建完成后记录关键配置的最终值摘要，至少包含 `PostgreSql:Host`、`PostgreSql:Port`、`PostgreSql:Username`、`Database:Name`、`Loki:Uri`、Consul 当前来源
-- **敏感字段脱敏**：`CONSUL_TOKEN`、`PostgreSql:Password`、AppSecret 等敏感值禁止完整写入日志；只允许输出脱敏摘要
+- **最终生效配置摘要**：在应用构建完成后记录 `Database:Provider`、`Database:ServerVersion`、`Loki:Uri` 和 Consul 当前来源
+- **敏感字段脱敏**：`CONSUL_TOKEN`、`Database:ConnectionString`、AppSecret 等敏感值禁止完整写入日志
 - **失败场景可见**：当 Consul 加载失败且回退到缓存或 `appsettings.json` 时，日志必须明确写出失败原因和当前回退来源，避免仅凭异常堆栈猜测
 
 ## 3. 环境变量
@@ -92,7 +92,7 @@ Identity 的项目级部署脚本 `start.sh` 固定接入 Consul，不再维护�
 Identity 当前只把以下共享运行配置放入 Consul KV：
 
 - `config/ruoyu/serilog.json`：统一日志级别
-- `config/ruoyu/shared.json`：`Loki:Uri`、`PostgreSql:Host/Port/Username/Password`
+- `config/ruoyu/shared.json`：`Loki:Uri` 等共享基础设施配置；Identity 过滤其中的旧数据库键
 - `config/ruoyu/service-endpoints.json`：共享服务入口
 
 这样做的直接结果是：Identity 的共享基础设施参数从 Consul 拉取，而项目独有配置留在项目本地配置或程序默认值中，不再把服务私有配置塞进 Consul。
@@ -124,7 +124,7 @@ Consul 8500 端口**不暴露公网**，仅映射到宿主机 localhost 用于�
 ```
 config/ruoyu/
 ├── serilog.json            → 统一日志最小级别 / Override
-├── shared.json             → 共享基础设施地址（PostgreSql/Loki 等）
+├── shared.json             → 共享基础设施地址（Identity 使用其中的 Loki 等非数据库配置）
 └── service-endpoints.json  → 跨服务共享入口地址 / Audience / RequireHttpsMetadata
 ```
 
@@ -136,7 +136,7 @@ Consul KV Value 必须是 JSON 字符串，且文件内容直接保存真实配�
 | Consul KV 路径 | IConfiguration Key |
 |---------------|--------------------|
 | `config/ruoyu/serilog.json` | `Serilog:*` |
-| `config/ruoyu/shared.json` | `Loki:*` / `PostgreSql:*`（含 `PostgreSql:Password`） |
+| `config/ruoyu/shared.json` | `Loki:*` 等共享配置；Identity 过滤旧数据库键 |
 | `config/ruoyu/service-endpoints.json` | `IdentityService:*` / 其他共享入口配置 |
 
 ## 7. 本地缓存机制
@@ -311,7 +311,9 @@ CONSUL_TOKEN="${CONSUL_TOKEN:-}"
 docker run -d \
   ...原有参数... \
   --add-host=host.docker.internal:host-gateway \
-  -e Database__Name=quantumzhou_identity \
+  -e Database__Provider=PostgreSQL \
+  -e Database__ServerVersion=15 \
+  -e 'Database__ConnectionString=Host=ruoyu-postgres;Port=5432;Database=quantumzhou_identity;Username=postgres;Password=postgres' \
   -e CONSUL_HTTP_ADDR="${CONSUL_HTTP_ADDR}" \
   -e CONSUL_TOKEN="${CONSUL_TOKEN}" \
   "$IMAGE_NAME"
@@ -352,7 +354,9 @@ docker run -d \
   -e TZ=Asia/Shanghai \
   -e APP_TITLE="QuantumZhou.Identity" \
   -e ASPNETCORE_ENVIRONMENT=Production \
-  -e Database__Name=quantumzhou_identity \
+  -e Database__Provider=PostgreSQL \
+  -e Database__ServerVersion=15 \
+  -e 'Database__ConnectionString=Host=ruoyu-postgres;Port=5432;Database=quantumzhou_identity;Username=postgres;Password=postgres' \
   -e CONSUL_HTTP_ADDR=host.docker.internal:8500 \
   -e CONSUL_TOKEN="<acl-token>" \
   -v "$(pwd)/data/identity:/app/data" \

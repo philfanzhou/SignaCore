@@ -7,8 +7,26 @@ public class IdentityDbContextFactory : IDesignTimeDbContextFactory<IdentityDbCo
 {
     public IdentityDbContext CreateDbContext(string[] args)
     {
+        var databaseOptions = new DatabaseOptions
+        {
+            Provider = Environment.GetEnvironmentVariable("Database__Provider")
+                ?? "PostgreSQL",
+            ServerVersion = Environment.GetEnvironmentVariable(
+                    "Database__ServerVersion")
+                ?? "15",
+            ConnectionString = Environment.GetEnvironmentVariable(
+                    "Database__ConnectionString")
+                ?? "Host=localhost;Database=quantumzhou_identity;Username=postgres;Password=postgres"
+        };
+
+        if (databaseOptions.ProviderKind != DatabaseProvider.PostgreSql)
+        {
+            throw new InvalidOperationException(
+                "PostgreSQL migrations require Database__Provider=PostgreSQL.");
+        }
+
         var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
-        optionsBuilder.UseNpgsql("Host=localhost;Database=quantumzhou_identity;Username=postgres;Password=postgres");
+        optionsBuilder.UseIdentityDatabase(databaseOptions);
 
         return new IdentityDbContext(optionsBuilder.Options);
     }

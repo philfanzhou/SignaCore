@@ -32,7 +32,7 @@
 
 > `CONSUL_SERVICE_NAME` 通常使用应用默认值，无需由 `start.sh` 重复注入。
 >
-> `Database:Provider` 使用程序默认值；`Database:Name` 如需覆盖可由 `start.sh` 注入。PostgreSQL Host / Port / Username / Password 和 Loki 地址属于共享基础设施配置，继续由 Consul KV 提供。
+> `start.sh` 使用 `Database__Provider`、`Database__ServerVersion` 和 `Database__ConnectionString` 注入完整数据库配置。数据库选择属于 Identity 项目级配置，不再从 Consul 的共享 `PostgreSql:*` 键拼装。
 >
 > Consul 本地缓存默认写入容器内 `./data/consul`。`start.sh` 不再默认挂载宿主机目录；如果确实需要在“删除并重建容器”后保留缓存，再手动添加 volume。
 >
@@ -67,18 +67,13 @@ curl http://localhost:5002/consul/status
 {
   "Database": {
     "Provider": "PostgreSQL",
-    "Name": "quantumzhou_identity"
-  },
-  "PostgreSql": {
-    "Host": "ruoyu-postgres",
-    "Port": 5432,
-    "Username": "postgres",
-    "Password": "postgres"
+    "ServerVersion": "15",
+    "ConnectionString": "Host=ruoyu-postgres;Port=5432;Database=quantumzhou_identity;Username=postgres;Password=postgres"
   }
 }
 ```
 
-> 其中 `Database:Provider` 使用程序默认值，`Database:Name` 可按需由 Identity `start.sh` 覆盖；`PostgreSql:*` 由 Consul `config/ruoyu/shared.json` 提供。
+> 三个数据库配置键必须作为一个整体提供。SQLite 不配置 `ServerVersion`，连接字符串使用实例本地文件路径。
 
 ---
 

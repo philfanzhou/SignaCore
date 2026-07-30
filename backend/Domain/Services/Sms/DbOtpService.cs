@@ -38,7 +38,7 @@ public class DbOtpService : IOtpService
 
         if (existing != null)
         {
-            await _otpRepository.RemoveAsync(existing);
+            await _otpRepository.RemoveByPhoneAsync(phone);
         }
 
         var otp = new OtpEntity
@@ -48,7 +48,7 @@ public class DbOtpService : IOtpService
             Code = code,
             ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(_options.OtpTtlSeconds),
             Attempts = 0,
-            LockoutUntil = DateTimeOffset.MinValue,
+            LockoutUntil = DateTimeOffset.UnixEpoch,
             CreatedAt = DateTimeOffset.UtcNow
         };
         await _otpRepository.AddAsync(otp);
@@ -74,46 +74,55 @@ public class DbOtpService : IOtpService
 
         if (entry.ExpiresAt < DateTimeOffset.UtcNow)
         {
-            await _otpRepository.RemoveAsync(entry);
-            await _unitOfWork.SaveChangesAsync();
+            await _otpRepository.RemoveExpiredAsync(phone, DateTimeOffset.UtcNow);
             _logger.LogWarning("OTP verification failed: Phone={Phone}, Reason=Expired", maskedPhone);
             return false;
         }
 
-        entry.Attempts++;
-
-        if (entry.Attempts >= _options.MaxAttempts)
+        var utcNow = DateTimeOffset.UtcNow;
+        if (entry.Code == code &&
+            await _otpRepository.TryConsumeAsync(
+                phone,
+                code,
+                utcNow,
+                _options.MaxAttempts))
         {
-            entry.LockoutUntil = DateTimeOffset.UtcNow.AddSeconds(_options.LockoutSeconds);
-            await _unitOfWork.SaveChangesAsync();
-            _logger.LogWarning("OTP verification failed: Phone={Phone}, Reason=Too many attempts, locked for {Lockout}s", maskedPhone, _options.LockoutSeconds);
+            _logger.LogInformation("OTP verified successfully: Phone={Phone}", maskedPhone);
+            return true;
+        }
+
+        var affectedRows = await _otpRepository.IncrementFailedAttemptsAsync(
+            phone,
+            utcNow,
+            _options.MaxAttempts,
+            utcNow.AddSeconds(_options.LockoutSeconds));
+        if (affectedRows == 0)
+        {
+            _logger.LogWarning(
+                "OTP verification failed: Phone={Phone}, Reason=OTP changed or locked",
+                maskedPhone);
             return false;
         }
 
-        var success = entry.Code == code;
-
-        if (!success)
+        var updatedEntry = await _otpRepository.GetByPhoneAsync(phone);
+        if (updatedEntry?.Attempts >= _options.MaxAttempts)
         {
-            await _unitOfWork.SaveChangesAsync();
-            _logger.LogWarning("OTP verification failed: Phone={Phone}, Attempts={Attempts}", maskedPhone, entry.Attempts);
-        }
-        else
-        {
-            await _otpRepository.RemoveAsync(entry);
-            await _unitOfWork.SaveChangesAsync();
-            _logger.LogInformation("OTP verified successfully: Phone={Phone}", maskedPhone);
+            _logger.LogWarning(
+                "OTP verification failed: Phone={Phone}, Reason=Too many attempts, locked for {Lockout}s",
+                maskedPhone,
+                _options.LockoutSeconds);
+            return false;
         }
 
-        return success;
+        _logger.LogWarning(
+            "OTP verification failed: Phone={Phone}, Attempts={Attempts}",
+            maskedPhone,
+            updatedEntry?.Attempts);
+        return false;
     }
 
     public async Task InvalidateAsync(string phone)
     {
-        var entry = await _otpRepository.GetByPhoneAsync(phone);
-        if (entry != null)
-        {
-            await _otpRepository.RemoveAsync(entry);
-            await _unitOfWork.SaveChangesAsync();
-        }
+        await _otpRepository.RemoveByPhoneAsync(phone);
     }
 }

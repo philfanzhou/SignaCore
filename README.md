@@ -32,8 +32,8 @@ dotnet run
 ### 环境要求
 
 - .NET 8 SDK
-- PostgreSQL 12+
-- 环境变量 `DB_PASSWORD`（用于 PostgreSQL 数据库密码，生产环境必须设置）
+- PostgreSQL 15+（默认）、MySQL 8.0/8.4、MariaDB 10.11/11.4，或单实例本地文件 SQLite
+- 环境变量 `Database__Provider`、`Database__ServerVersion` 和 `Database__ConnectionString`
 - 环境变量 `RSA_MASTER_KEY`（用于 RSA 私钥加密，生产环境必须设置）
   - 生成示例：`openssl rand -base64 32`
 
@@ -42,6 +42,8 @@ dotnet run
 ```
 backend/
   Database/         - EF Core 数据访问层（实体、DbContext、迁移、仓储）
+  Database.Migrations.MySql/  - MySQL 与 MariaDB 迁移链
+  Database.Migrations.Sqlite/ - SQLite 迁移链
   Domain/           - 领域层（验证器、密钥管理、Token 服务、指标收集）
   Host/             - ASP.NET Core 宿主与启动配置（含 Controllers/AuthController）
   Tests/            - 单元测试与集成测试
@@ -140,8 +142,10 @@ AppId/AppSecret 通过 `X-Admin-AppId` / `X-Admin-AppSecret` 请求头传递。�
 
 ```json
 {
-  "ConnectionStrings": {
-    "Default": "Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres"
+  "Database": {
+    "Provider": "PostgreSQL",
+    "ServerVersion": "15",
+    "ConnectionString": "Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres;Password=postgres"
   },
   "Jwt": {
     "Issuer": "QuantumZhou.Identity",
@@ -175,7 +179,9 @@ AppId/AppSecret 通过 `X-Admin-AppId` / `X-Admin-AppSecret` 请求头传递。�
 
 | 变量名 | 说明 | 是否必须 |
 |---|---|---|
-| `DB_PASSWORD` | PostgreSQL 数据库密码 | 生产环境必须 |
+| `Database__Provider` | `PostgreSQL`、`MySQL`、`MariaDB` 或 `SQLite` | 是 |
+| `Database__ServerVersion` | 数据库服务器版本；SQLite 不得设置 | 非 SQLite 必须 |
+| `Database__ConnectionString` | 所选 Provider 的完整连接字符串 | 是 |
 | `RSA_MASTER_KEY` | RSA 私钥加密主密钥 | 生产环境必须 |
 
 ## 监控与指标

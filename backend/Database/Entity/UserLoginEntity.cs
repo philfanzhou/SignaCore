@@ -13,6 +13,7 @@ public class UserLoginEntity
 
     /// <summary>External provider name (e.g., "WeChat", "Google").</summary>
     public string ProviderName { get; set; } = string.Empty;
+    public string ProviderNameNormalized { get; set; } = string.Empty;
 
     /// <summary>User's unique ID in the external provider (e.g., WeChat OpenId).</summary>
     public string ProviderUserId { get; set; } = string.Empty;

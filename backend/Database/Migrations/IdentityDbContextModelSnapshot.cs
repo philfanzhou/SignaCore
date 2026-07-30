@@ -17,7 +17,7 @@ namespace QuantumZhou.Identity.Database.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "8.0.4")
+                .HasAnnotation("ProductVersion", "8.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -29,7 +29,7 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<DateTime>("CreatedAt")
+                    b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
@@ -37,7 +37,7 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_active");
 
-                    b.Property<DateTime?>("LastLoginAt")
+                    b.Property<DateTimeOffset?>("LastLoginAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("last_login_at");
 
@@ -56,10 +56,20 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("nickname");
 
+                    b.Property<string>("NicknameNormalized")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("nickname_normalized");
+
                     b.Property<string>("Remark")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
                         .HasColumnName("remark");
+
+                    b.Property<string>("RemarkNormalized")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("remark_normalized");
 
                     b.Property<int>("TotalLoginCount")
                         .HasColumnType("integer")
@@ -83,6 +93,12 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("app_id");
 
+                    b.Property<string>("AppIdNormalized")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("app_id_normalized");
+
                     b.Property<string>("AppName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -95,7 +111,7 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("character varying(256)")
                         .HasColumnName("app_secret_hash");
 
-                    b.Property<DateTime?>("CallbackExpiresAt")
+                    b.Property<DateTimeOffset?>("CallbackExpiresAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("callback_expires_at");
 
@@ -104,7 +120,7 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("callback_url");
 
-                    b.Property<DateTime>("CreatedAt")
+                    b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
@@ -114,7 +130,7 @@ namespace QuantumZhou.Identity.Database.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AppId")
+                    b.HasIndex("AppIdNormalized")
                         .IsUnique();
 
                     b.ToTable("app_registrations", (string)null);
@@ -221,9 +237,15 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("username");
 
+                    b.Property<string>("UsernameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("username_normalized");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("Username")
+                    b.HasIndex("UsernameNormalized")
                         .IsUnique();
 
                     b.ToTable("login_attempts", (string)null);
@@ -335,7 +357,8 @@ namespace QuantumZhou.Identity.Database.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Phone");
+                    b.HasIndex("Phone")
+                        .IsUnique();
 
                     b.ToTable("otps", (string)null);
                 });
@@ -351,7 +374,7 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("account_id");
 
-                    b.Property<DateTime>("CreatedAt")
+                    b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
@@ -367,11 +390,17 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("username");
 
+                    b.Property<string>("UsernameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("username_normalized");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AccountId");
 
-                    b.HasIndex("Username")
+                    b.HasIndex("UsernameNormalized")
                         .IsUnique();
 
                     b.ToTable("password_credentials", (string)null);
@@ -393,11 +422,11 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("app_id");
 
-                    b.Property<DateTime>("CreatedAt")
+                    b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
-                    b.Property<DateTime>("ExpiresAt")
+                    b.Property<DateTimeOffset>("ExpiresAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("expires_at");
 
@@ -426,7 +455,7 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<DateTime>("CreatedAt")
+                    b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
@@ -442,7 +471,7 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("character varying(256)")
                         .HasColumnName("encryption_salt");
 
-                    b.Property<DateTime>("ExpiresAt")
+                    b.Property<DateTimeOffset>("ExpiresAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("expires_at");
 
@@ -493,6 +522,12 @@ namespace QuantumZhou.Identity.Database.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("provider_name");
 
+                    b.Property<string>("ProviderNameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("provider_name_normalized");
+
                     b.Property<string>("ProviderUserId")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -503,7 +538,7 @@ namespace QuantumZhou.Identity.Database.Migrations
 
                     b.HasIndex("AccountId");
 
-                    b.HasIndex("ProviderName", "ProviderUserId")
+                    b.HasIndex("ProviderNameNormalized", "ProviderUserId")
                         .IsUnique();
 
                     b.ToTable("user_logins", (string)null);

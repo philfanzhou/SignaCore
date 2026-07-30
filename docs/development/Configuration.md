@@ -21,7 +21,7 @@
 
 > Consul 配置的详细语义、启动时序、缓存机制、KV 分层策略请见 [ConsulIntegration.md](./ConsulIntegration.md)。
 >
-> **当前约束**：Consul 只承载跨项目共享配置。Identity 启动脚本不再注入数据库主机、端口、用户名、密码和 Loki 地址；`Database:Provider` 使用程序默认值，`Database:Name`、`FeatureFlags` 这类项目独有配置保留在服务自身配置中。`RSA_MASTER_KEY`、管理员引导密码、AppSecret 等启动密钥仍保留在环境变量或文件。
+> **当前约束**：数据库选择是 Identity 项目级配置，由 `Database__Provider`、`Database__ServerVersion` 和 `Database__ConnectionString` 注入。Consul 共享快照中的旧 `PostgreSql:*` 键会被 Identity 过滤，不参与数据库配置。`RSA_MASTER_KEY`、管理员引导密码、AppSecret 等启动密钥仍保留在环境变量或文件。
 >
 > **启动诊断日志**：服务启动时会输出 Consul 拉取过程和最终生效配置摘要。`CONSUL_TOKEN`、数据库密码等敏感值只打印脱敏摘要，不打印完整明文。
 
@@ -52,22 +52,35 @@
 
 ## 数据库配置
 
-| 配置键 | 默认值 | 说明 |
-|--------|--------|------|
-| Database:Provider | PostgreSQL | 数据库提供者（默认由项目配置提供，通常无需 `start.sh` 重复注入） |
-| Database:Name | quantumzhou_identity | 服务自己的 PostgreSQL 数据库名（可按需由项目 `start.sh` 覆盖） |
-| ConnectionStrings:Default | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | 默认连接字符串（PostgreSQL） |
-| ConnectionStrings:PostgreSQL | Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres | PostgreSQL 连接字符串 |
-| PostgreSql:Host | localhost | PostgreSQL 主机（推荐由 Consul `config/ruoyu/shared.json` 提供） |
-| PostgreSql:Port | 5432 | PostgreSQL 端口（推荐由 Consul `config/ruoyu/shared.json` 提供） |
-| PostgreSql:Username | postgres | PostgreSQL 用户名（推荐由 Consul `config/ruoyu/shared.json` 提供） |
-| PostgreSql:Password | （空） | PostgreSQL 密码（推荐由 Consul `config/ruoyu/shared.json` 提供） |
+| 配置键 | 环境变量 | 要求 |
+|--------|---------|------|
+| `Database:Provider` | `Database__Provider` | 必填；只允许 `PostgreSQL`、`MySQL`、`MariaDB`、`SQLite` |
+| `Database:ServerVersion` | `Database__ServerVersion` | PostgreSQL、MySQL、MariaDB 必填；SQLite 禁止配置 |
+| `Database:ConnectionString` | `Database__ConnectionString` | 必填；唯一连接字符串入口 |
 
-> PostgreSQL 连接字符串自动追加连接池参数：`Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100;Connection Lifetime=300`。如连接字符串中已包含 `Pooling=` 则不追加。
->
-> **数据库自动创建**：服务启动时会先用维护连接（连接到 `postgres` 维护数据库）检查目标数据库是否存在；不存在则自动执行 `CREATE DATABASE`。该机制保证 `start.sh` 只需提供 `Database:Name`，无需人工预建数据库。
->
-> **排查建议**：如果启动日志仍显示 `PostgreSql:Host=localhost`，优先检查 Consul 拉取日志中的来源字段是否已回退到 `Cache` 或 `AppSettings`，以及 `CONSUL_TOKEN` 是否被识别为有效输入。
+支持矩阵：
+
+| Provider | 支持版本 | 部署边界 |
+|----------|----------|----------|
+| PostgreSQL | 15+ | 默认选择，支持单实例和多实例 |
+| MySQL | 8.0、8.4 | 支持单实例和多实例 |
+| MariaDB | 10.11、11.4 | 支持单实例和多实例 |
+| SQLite | 随 EF Core provider 交付 | 仅限单实例、本地磁盘文件 |
+
+SQLite 示例：
+
+```json
+{
+  "Database": {
+    "Provider": "SQLite",
+    "ConnectionString": "Data Source=/app/data/identity.db"
+  }
+}
+```
+
+旧键 `PostgreSql:*`、`ConnectionStrings:Default`、`ConnectionStrings:PostgreSQL` 和 `Database:Name` 不再受支持。它们出现在本地配置或环境变量时会阻止启动；Consul 共享快照中的旧键会在进入 Identity 配置前过滤。
+
+服务会自动创建目标数据库并执行迁移。PostgreSQL 使用 advisory lock，MySQL/MariaDB 使用 `GET_LOCK` 串行化多实例迁移；SQLite 依赖单实例部署契约。完整连接字符串和密码不会写入日志。
 
 ## JWT 配置
 

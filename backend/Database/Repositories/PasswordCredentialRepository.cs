@@ -15,8 +15,9 @@ public class PasswordCredentialRepository : IPasswordCredentialRepository
 
     public async Task<PasswordCredentialEntity?> GetByUsernameAsync(string username)
     {
+        var normalizedUsername = IdentityValueNormalizer.Normalize(username);
         return await _dbContext.PasswordCredentials
-            .FirstOrDefaultAsync(c => c.Username == username);
+            .FirstOrDefaultAsync(c => c.UsernameNormalized == normalizedUsername);
     }
 
     public async Task<PasswordCredentialEntity?> GetByAccountIdAsync(Guid accountId)
@@ -33,6 +34,8 @@ public class PasswordCredentialRepository : IPasswordCredentialRepository
 
     public async Task<bool> ExistsByUsernameAsync(string username)
     {
-        return await _dbContext.PasswordCredentials.AnyAsync(c => c.Username == username);
+        var normalizedUsername = IdentityValueNormalizer.Normalize(username);
+        return await _dbContext.PasswordCredentials
+            .AnyAsync(c => c.UsernameNormalized == normalizedUsername);
     }
 }

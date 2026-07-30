@@ -53,22 +53,25 @@ public class RefreshTokenServiceTests
     public async Task HandleRefreshTokenAsync_RefreshGrant_RevokesExistingThenGenerates()
     {
         var account = CreateAccount();
-        var existing = new RefreshTokenEntity
-        {
-            Id = Guid.NewGuid(),
-            AccountId = account.Id,
-            TokenValue = "old-token",
-            IsRevoked = false
-        };
-        _repoMock.Setup(r => r.GetByTokenValueAsync("old-token")).ReturnsAsync(existing);
+        _repoMock
+            .Setup(r => r.TryRotateAsync("old-token", It.IsAny<RefreshTokenEntity>()))
+            .ReturnsAsync(true);
 
         var token = await _service.HandleRefreshTokenAsync(
             IdentityConstants.GrantTypeRefreshToken, "old-token", account, null);
 
         Assert.NotNull(token);
         Assert.NotEqual("old-token", token);
-        Assert.True(existing.IsRevoked);
-        _repoMock.Verify(r => r.AddAsync(It.Is<RefreshTokenEntity>(t => t.TokenValue == token)), Times.Once);
+        _repoMock.Verify(
+            r => r.TryRotateAsync(
+                "old-token",
+                It.Is<RefreshTokenEntity>(replacement =>
+                    replacement.AccountId == account.Id &&
+                    replacement.TokenValue == token &&
+                    !replacement.IsRevoked)),
+            Times.Once);
+        _repoMock.Verify(r => r.AddAsync(It.IsAny<RefreshTokenEntity>()), Times.Never);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -91,22 +94,23 @@ public class RefreshTokenServiceTests
     }
 
     [Fact]
-    public async Task RevokeAsync_TokenFound_MarksRevokedAndSaves()
+    public async Task RevokeAsync_TokenFound_AtomicallyRevokes()
     {
-        var entity = new RefreshTokenEntity { Id = Guid.NewGuid(), TokenValue = "t", IsRevoked = false };
-        _repoMock.Setup(r => r.GetByTokenValueAsync("t")).ReturnsAsync(entity);
+        _repoMock.Setup(r => r.TryRevokeAsync("t")).ReturnsAsync(true);
 
         var result = await _service.RevokeAsync("t");
 
         Assert.True(result);
-        Assert.True(entity.IsRevoked);
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _repoMock.Verify(r => r.TryRevokeAsync("t"), Times.Once);
+        _unitOfWorkMock.Verify(
+            u => u.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
     public async Task RevokeAsync_TokenNotFound_ReturnsFalseWithoutSaving()
     {
-        _repoMock.Setup(r => r.GetByTokenValueAsync("missing")).ReturnsAsync((RefreshTokenEntity?)null);
+        _repoMock.Setup(r => r.TryRevokeAsync("missing")).ReturnsAsync(false);
 
         var result = await _service.RevokeAsync("missing");
 

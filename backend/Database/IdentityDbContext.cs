@@ -1,9 +1,20 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using QuantumZhou.Identity.Database.Entity;
+
 namespace QuantumZhou.Identity.Database;
 
 public class IdentityDbContext : DbContext
 {
+    private static readonly ValueConverter<DateTimeOffset, DateTime> UtcDateTimeConverter = new(
+        value => value.UtcDateTime,
+        value => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc)));
+
+    private static readonly ValueConverter<DateTimeOffset, long> UnixMicrosecondsConverter = new(
+        value => (value.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / 10,
+        value => DateTimeOffset.UnixEpoch.AddTicks(value * 10));
+
     public IdentityDbContext(DbContextOptions<IdentityDbContext> options) : base(options)
     {
     }
@@ -19,9 +30,33 @@ public class IdentityDbContext : DbContext
     public DbSet<LoginHistoryEntity> LoginHistories => Set<LoginHistoryEntity>();
     public DbSet<AuditLogEntity> AuditLogs => Set<AuditLogEntity>();
 
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ApplyNormalizedValues();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        ApplyNormalizedValues();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        if (string.Equals(
+            Database.ProviderName,
+            "Pomelo.EntityFrameworkCore.MySql",
+            StringComparison.Ordinal))
+        {
+            modelBuilder
+                .HasCharSet("utf8mb4")
+                .UseCollation("utf8mb4_bin");
+        }
 
         modelBuilder.Entity<AccountEntity>(entity =>
         {
@@ -29,10 +64,12 @@ public class IdentityDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.IsActive).HasColumnName("is_active");
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamptz");
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
             entity.Property(e => e.Remark).HasColumnName("remark").HasMaxLength(IdentityConstants.MaxRemarkLength);
+            entity.Property(e => e.RemarkNormalized).HasColumnName("remark_normalized").HasMaxLength(IdentityConstants.MaxRemarkLength);
             entity.Property(e => e.Nickname).HasColumnName("nickname").HasMaxLength(IdentityConstants.MaxNicknameLength);
-            entity.Property(e => e.LastLoginAt).HasColumnName("last_login_at").HasColumnType("timestamptz");
+            entity.Property(e => e.NicknameNormalized).HasColumnName("nickname_normalized").HasMaxLength(IdentityConstants.MaxNicknameLength);
+            ConfigureInstant(entity.Property(e => e.LastLoginAt).HasColumnName("last_login_at"));
             entity.Property(e => e.LastLoginIp).HasColumnName("last_login_ip").HasMaxLength(IdentityConstants.MaxClientIpLength);
             entity.Property(e => e.LastLoginMethod).HasColumnName("last_login_method").HasMaxLength(IdentityConstants.MaxAuthMethodLength);
             entity.Property(e => e.TotalLoginCount).HasColumnName("total_login_count");
@@ -45,9 +82,10 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AccountId).HasColumnName("account_id");
             entity.Property(e => e.Username).HasColumnName("username").HasMaxLength(IdentityConstants.MaxUsernameLength);
+            entity.Property(e => e.UsernameNormalized).HasColumnName("username_normalized").HasMaxLength(IdentityConstants.MaxUsernameLength);
             entity.Property(e => e.PasswordHash).HasColumnName("password_hash").HasMaxLength(IdentityConstants.MaxPasswordHashLength);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamptz");
-            entity.HasIndex(e => e.Username).IsUnique();
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            entity.HasIndex(e => e.UsernameNormalized).IsUnique();
             entity.HasIndex(e => e.AccountId);
         });
 
@@ -58,8 +96,9 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AccountId).HasColumnName("account_id");
             entity.Property(e => e.ProviderName).HasColumnName("provider_name").HasMaxLength(IdentityConstants.MaxProviderNameLength);
+            entity.Property(e => e.ProviderNameNormalized).HasColumnName("provider_name_normalized").HasMaxLength(IdentityConstants.MaxProviderNameLength);
             entity.Property(e => e.ProviderUserId).HasColumnName("provider_user_id").HasMaxLength(IdentityConstants.MaxProviderUserIdLength);
-            entity.HasIndex(e => new { e.ProviderName, e.ProviderUserId }).IsUnique();
+            entity.HasIndex(e => new { e.ProviderNameNormalized, e.ProviderUserId }).IsUnique();
             entity.HasIndex(e => e.AccountId);
         });
 
@@ -70,9 +109,9 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AccountId).HasColumnName("account_id");
             entity.Property(e => e.TokenValue).HasColumnName("token_value").HasMaxLength(IdentityConstants.MaxRefreshTokenLength);
-            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at").HasColumnType("timestamptz");
+            ConfigureInstant(entity.Property(e => e.ExpiresAt).HasColumnName("expires_at"));
             entity.Property(e => e.IsRevoked).HasColumnName("is_revoked");
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamptz");
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
             entity.Property(e => e.AppId).HasColumnName("app_id").HasMaxLength(IdentityConstants.MaxAppIdLength);
             entity.HasIndex(e => e.TokenValue).IsUnique();
         });
@@ -83,13 +122,14 @@ public class IdentityDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AppId).HasColumnName("app_id").HasMaxLength(IdentityConstants.MaxAppIdLength);
+            entity.Property(e => e.AppIdNormalized).HasColumnName("app_id_normalized").HasMaxLength(IdentityConstants.MaxAppIdLength);
             entity.Property(e => e.AppSecretHash).HasColumnName("app_secret_hash").HasMaxLength(IdentityConstants.MaxPasswordHashLength);
             entity.Property(e => e.AppName).HasColumnName("app_name").HasMaxLength(IdentityConstants.MaxAppNameLength);
             entity.Property(e => e.CallbackUrl).HasColumnName("callback_url").HasMaxLength(IdentityConstants.MaxCallbackUrlLength);
             entity.Property(e => e.IsActive).HasColumnName("is_active");
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamptz");
-            entity.Property(e => e.CallbackExpiresAt).HasColumnName("callback_expires_at").HasColumnType("timestamptz");
-            entity.HasIndex(e => e.AppId).IsUnique();
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            ConfigureInstant(entity.Property(e => e.CallbackExpiresAt).HasColumnName("callback_expires_at"));
+            entity.HasIndex(e => e.AppIdNormalized).IsUnique();
         });
 
         modelBuilder.Entity<SecurityKeyEntity>(entity =>
@@ -102,8 +142,8 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.PublicKeyModulus).HasColumnName("public_key_modulus").HasMaxLength(IdentityConstants.MaxPublicKeyModulusLength);
             entity.Property(e => e.EncryptedPrivateKeyParams).HasColumnName("encrypted_private_key_params").HasMaxLength(IdentityConstants.MaxEncryptedKeyLength);
             entity.Property(e => e.EncryptionSalt).HasColumnName("encryption_salt").HasMaxLength(IdentityConstants.MaxEncryptionSaltLength);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamptz");
-            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at").HasColumnType("timestamptz");
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            ConfigureInstant(entity.Property(e => e.ExpiresAt).HasColumnName("expires_at"));
             entity.Property(e => e.IsActive).HasColumnName("is_active");
             entity.HasIndex(e => e.KeyId).IsUnique();
         });
@@ -115,11 +155,11 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.Phone).HasColumnName("phone").HasMaxLength(20);
             entity.Property(e => e.Code).HasColumnName("code").HasMaxLength(10);
-            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at").HasColumnType("timestamptz");
+            ConfigureInstant(entity.Property(e => e.ExpiresAt).HasColumnName("expires_at"));
             entity.Property(e => e.Attempts).HasColumnName("attempts");
-            entity.Property(e => e.LockoutUntil).HasColumnName("lockout_until").HasColumnType("timestamptz");
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamptz");
-            entity.HasIndex(e => e.Phone);
+            ConfigureInstant(entity.Property(e => e.LockoutUntil).HasColumnName("lockout_until"));
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            entity.HasIndex(e => e.Phone).IsUnique();
         });
 
         modelBuilder.Entity<LoginAttemptEntity>(entity =>
@@ -128,10 +168,11 @@ public class IdentityDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.Username).HasColumnName("username").HasMaxLength(IdentityConstants.MaxUsernameLength);
-            entity.Property(e => e.LastAttemptAt).HasColumnName("last_attempt_at").HasColumnType("timestamptz");
+            entity.Property(e => e.UsernameNormalized).HasColumnName("username_normalized").HasMaxLength(IdentityConstants.MaxUsernameLength);
+            ConfigureInstant(entity.Property(e => e.LastAttemptAt).HasColumnName("last_attempt_at"));
             entity.Property(e => e.FailedAttempts).HasColumnName("failed_attempts");
-            entity.Property(e => e.LockoutUntil).HasColumnName("lockout_until").HasColumnType("timestamptz");
-            entity.HasIndex(e => e.Username).IsUnique();
+            ConfigureInstant(entity.Property(e => e.LockoutUntil).HasColumnName("lockout_until"));
+            entity.HasIndex(e => e.UsernameNormalized).IsUnique();
         });
 
         modelBuilder.Entity<LoginHistoryEntity>(entity =>
@@ -148,7 +189,7 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.FailureReason).HasColumnName("failure_reason").HasMaxLength(IdentityConstants.MaxFailureReasonLength);
             entity.Property(e => e.AppId).HasColumnName("app_id").HasMaxLength(IdentityConstants.MaxAppIdLength);
             entity.Property(e => e.CorrelationId).HasColumnName("correlation_id").HasMaxLength(64);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamptz");
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
             entity.HasIndex(e => e.AccountId);
             entity.HasIndex(e => e.CreatedAt);
             entity.HasIndex(e => e.ClientIp);
@@ -169,11 +210,79 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.Description).HasColumnName("description").HasMaxLength(IdentityConstants.MaxAuditDescriptionLength);
             entity.Property(e => e.ClientIp).HasColumnName("client_ip").HasMaxLength(IdentityConstants.MaxClientIpLength);
             entity.Property(e => e.CorrelationId).HasColumnName("correlation_id").HasMaxLength(64);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("timestamptz");
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
             entity.HasIndex(e => new { e.TargetType, e.TargetId, e.CreatedAt });
             entity.HasIndex(e => new { e.ActorId, e.CreatedAt });
             entity.HasIndex(e => new { e.Action, e.CreatedAt });
             entity.HasIndex(e => e.CreatedAt);
         });
+    }
+
+    private void ConfigureInstant(PropertyBuilder property)
+    {
+        var providerName = Database.ProviderName;
+
+        if (string.Equals(
+            providerName,
+            "Microsoft.EntityFrameworkCore.Sqlite",
+            StringComparison.Ordinal))
+        {
+            property.HasConversion(UnixMicrosecondsConverter);
+            return;
+        }
+
+        if (string.Equals(
+            providerName,
+            "Pomelo.EntityFrameworkCore.MySql",
+            StringComparison.Ordinal))
+        {
+            property
+                .HasConversion(UtcDateTimeConverter)
+                .HasColumnType("datetime(6)")
+                .HasPrecision(6);
+            return;
+        }
+
+        property.HasColumnType("timestamptz");
+    }
+
+    private void ApplyNormalizedValues()
+    {
+        foreach (var entry in ChangeTracker.Entries<AccountEntity>()
+                     .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            entry.Entity.NicknameNormalized =
+                IdentityValueNormalizer.NormalizeNullable(entry.Entity.Nickname);
+            entry.Entity.RemarkNormalized =
+                IdentityValueNormalizer.NormalizeNullable(entry.Entity.Remark);
+        }
+
+        foreach (var entry in ChangeTracker.Entries<PasswordCredentialEntity>()
+                     .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            entry.Entity.UsernameNormalized =
+                IdentityValueNormalizer.Normalize(entry.Entity.Username);
+        }
+
+        foreach (var entry in ChangeTracker.Entries<LoginAttemptEntity>()
+                     .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            entry.Entity.UsernameNormalized =
+                IdentityValueNormalizer.Normalize(entry.Entity.Username);
+        }
+
+        foreach (var entry in ChangeTracker.Entries<AppRegistrationEntity>()
+                     .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            entry.Entity.AppIdNormalized =
+                IdentityValueNormalizer.Normalize(entry.Entity.AppId);
+        }
+
+        foreach (var entry in ChangeTracker.Entries<UserLoginEntity>()
+                     .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            entry.Entity.ProviderNameNormalized =
+                IdentityValueNormalizer.Normalize(entry.Entity.ProviderName);
+        }
     }
 }

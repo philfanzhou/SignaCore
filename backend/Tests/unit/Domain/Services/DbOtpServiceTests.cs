@@ -58,7 +58,7 @@ public class DbOtpServiceTests
 
         var code = await _service.GenerateAndSendAsync("13800138000", _smsSenderMock.Object);
 
-        _otpRepoMock.Verify(r => r.RemoveAsync(existing), Times.Once);
+        _otpRepoMock.Verify(r => r.RemoveByPhoneAsync(existing.Phone), Times.Once);
         _otpRepoMock.Verify(r => r.AddAsync(It.Is<OtpEntity>(o => o.Code == code)), Times.Once);
     }
 
@@ -88,7 +88,7 @@ public class DbOtpServiceTests
         var code = await _service.GenerateAndSendAsync("13800138000", _smsSenderMock.Object);
 
         Assert.Equal(6, code.Length);
-        _otpRepoMock.Verify(r => r.RemoveAsync(existing), Times.Once);
+        _otpRepoMock.Verify(r => r.RemoveByPhoneAsync(existing.Phone), Times.Once);
         _otpRepoMock.Verify(r => r.AddAsync(It.Is<OtpEntity>(o => o.Code == code)), Times.Once);
     }
 
@@ -111,7 +111,11 @@ public class DbOtpServiceTests
         var result = await _service.VerifyAsync("13800138000", "123456");
 
         Assert.False(result);
-        _otpRepoMock.Verify(r => r.RemoveAsync(entry), Times.Once);
+        _otpRepoMock.Verify(
+            r => r.RemoveExpiredAsync(
+                entry.Phone,
+                It.IsAny<DateTimeOffset>()),
+            Times.Once);
     }
 
     [Fact]
@@ -119,12 +123,26 @@ public class DbOtpServiceTests
     {
         var entry = CreateEntry("13800138000", attempts: 0);
         _otpRepoMock.Setup(r => r.GetByPhoneAsync("13800138000")).ReturnsAsync(entry);
+        _otpRepoMock
+            .Setup(r => r.IncrementFailedAttemptsAsync(
+                entry.Phone,
+                It.IsAny<DateTimeOffset>(),
+                _options.MaxAttempts,
+                It.IsAny<DateTimeOffset>()))
+            .Callback(() => entry.Attempts++)
+            .ReturnsAsync(1);
 
         var result = await _service.VerifyAsync("13800138000", "000000");
 
         Assert.False(result);
         Assert.Equal(1, entry.Attempts);
-        _otpRepoMock.Verify(r => r.RemoveAsync(It.IsAny<OtpEntity>()), Times.Never);
+        _otpRepoMock.Verify(
+            r => r.TryConsumeAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<DateTimeOffset>(),
+                It.IsAny<int>()),
+            Times.Never);
     }
 
     [Fact]
@@ -132,6 +150,19 @@ public class DbOtpServiceTests
     {
         var entry = CreateEntry("13800138000", attempts: 2);
         _otpRepoMock.Setup(r => r.GetByPhoneAsync("13800138000")).ReturnsAsync(entry);
+        _otpRepoMock
+            .Setup(r => r.IncrementFailedAttemptsAsync(
+                entry.Phone,
+                It.IsAny<DateTimeOffset>(),
+                _options.MaxAttempts,
+                It.IsAny<DateTimeOffset>()))
+            .Callback<string, DateTimeOffset, int, DateTimeOffset>(
+                (_, _, _, lockoutUntil) =>
+                {
+                    entry.Attempts++;
+                    entry.LockoutUntil = lockoutUntil;
+                })
+            .ReturnsAsync(1);
 
         var result = await _service.VerifyAsync("13800138000", "000000");
 
@@ -145,11 +176,24 @@ public class DbOtpServiceTests
     {
         var entry = CreateEntry("13800138000", attempts: 1);
         _otpRepoMock.Setup(r => r.GetByPhoneAsync("13800138000")).ReturnsAsync(entry);
+        _otpRepoMock
+            .Setup(r => r.TryConsumeAsync(
+                entry.Phone,
+                entry.Code,
+                It.IsAny<DateTimeOffset>(),
+                _options.MaxAttempts))
+            .ReturnsAsync(true);
 
         var result = await _service.VerifyAsync("13800138000", "123456");
 
         Assert.True(result);
-        _otpRepoMock.Verify(r => r.RemoveAsync(entry), Times.Once);
+        _otpRepoMock.Verify(
+            r => r.TryConsumeAsync(
+                entry.Phone,
+                entry.Code,
+                It.IsAny<DateTimeOffset>(),
+                _options.MaxAttempts),
+            Times.Once);
     }
 
     [Fact]
@@ -160,8 +204,10 @@ public class DbOtpServiceTests
 
         await _service.InvalidateAsync("13800138000");
 
-        _otpRepoMock.Verify(r => r.RemoveAsync(entry), Times.Once);
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _otpRepoMock.Verify(r => r.RemoveByPhoneAsync(entry.Phone), Times.Once);
+        _unitOfWorkMock.Verify(
+            u => u.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -171,6 +217,6 @@ public class DbOtpServiceTests
 
         await _service.InvalidateAsync("13800138000");
 
-        _otpRepoMock.Verify(r => r.RemoveAsync(It.IsAny<OtpEntity>()), Times.Never);
+        _otpRepoMock.Verify(r => r.RemoveByPhoneAsync("13800138000"), Times.Once);
     }
 }

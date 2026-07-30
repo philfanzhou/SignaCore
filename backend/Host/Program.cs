@@ -59,11 +59,8 @@ var app = builder.Build();
 var consulRuntimeState = app.Services.GetRequiredService<ConsulRuntimeState>();
 var consulOptions = ConsulOptions.Bind(app.Configuration);
 
-var effectivePostgreSqlHost = app.Configuration["PostgreSql:Host"];
-var effectivePostgreSqlPort = app.Configuration["PostgreSql:Port"];
-var effectivePostgreSqlUsername = app.Configuration["PostgreSql:Username"];
-var effectivePostgreSqlPassword = app.Configuration["PostgreSql:Password"];
-var effectiveDatabaseName = app.Configuration["Database:Name"];
+var effectiveDatabaseProvider = app.Configuration["Database:Provider"];
+var effectiveDatabaseServerVersion = app.Configuration["Database:ServerVersion"];
 var effectiveLokiUri = app.Configuration["Loki:Uri"];
 
 app.Logger.LogInformation("Service endpoints configured: HTTP={HttpPort}", httpPort);
@@ -77,12 +74,9 @@ app.Logger.LogInformation(
     StartupDiagnosticsFormatter.SummarizePrefixes(consulRuntimeState.LoadedPrefixes),
     StartupDiagnosticsFormatter.SummarizeError(consulRuntimeState.LastError));
 app.Logger.LogInformation(
-    "Effective configuration diagnostics: PostgreSqlHost={PostgreSqlHost}, PostgreSqlPort={PostgreSqlPort}, PostgreSqlUsername={PostgreSqlUsername}, PostgreSqlPassword={PostgreSqlPassword}, DatabaseName={DatabaseName}, LokiUri={LokiUri}",
-    StartupDiagnosticsFormatter.SummarizeValue(effectivePostgreSqlHost),
-    StartupDiagnosticsFormatter.SummarizeValue(effectivePostgreSqlPort),
-    StartupDiagnosticsFormatter.SummarizeValue(effectivePostgreSqlUsername),
-    StartupDiagnosticsFormatter.SummarizePassword(effectivePostgreSqlPassword),
-    StartupDiagnosticsFormatter.SummarizeValue(effectiveDatabaseName),
+    "Effective configuration diagnostics: DatabaseProvider={DatabaseProvider}, DatabaseServerVersion={DatabaseServerVersion}, LokiUri={LokiUri}",
+    StartupDiagnosticsFormatter.SummarizeValue(effectiveDatabaseProvider),
+    StartupDiagnosticsFormatter.SummarizeValue(effectiveDatabaseServerVersion),
     StartupDiagnosticsFormatter.SummarizeValue(effectiveLokiUri));
 
 // ========== HTTPS Warning for Gateway API ==========
@@ -99,7 +93,7 @@ if (!hasHttpsEndpoint)
 // ========== 18. Database Initialization (must happen before KeyManager) ==========
 // Auto migration is always enabled. DatabaseInitializer handles migrations,
 // schema reconciliation, admin bootstrap, and optional bootstrap-apps.json pre-seeding.
-await DatabaseInitializer.InitializeAsync(app.Services, dbProvider, builder.Configuration);
+await DatabaseInitializer.InitializeAsync(app.Services, builder.Configuration);
 
 // ========== Wait for KeyManager initialization before accepting requests ==========
 var keyManager = app.Services.GetRequiredService<IKeyManager>();

@@ -35,6 +35,9 @@
 | 20260502033006 | AddLoginHistoryAndAuditLog - 添加登录历史和审计日志表 | [migrations.md](./migrations.md) |
 | 20260502155149 | FixTimestampColumnTypes - 修复时间戳列类型 | [migrations.md](./migrations.md) |
 | 20260504150448 | AddAppIdToRefreshToken - 刷新令牌添加 AppId | [migrations.md](./migrations.md) |
+| 20260730134106 | AddNormalizedIdentityValues - 增加规范化列 | [migrations.md](./migrations.md) |
+| 20260730134156 | EnforceNormalizedIdentityValues - 回填后收紧规范化约束 | [migrations.md](./migrations.md) |
+| 20260730135237 | EnforceSingleOtpPerPhone - OTP 手机号唯一约束 | [migrations.md](./migrations.md) |
 
 详细迁移历史见 [migrations.md](./migrations.md)
 
@@ -44,4 +47,4 @@
 
 ## 数据库提供者
 
-支持 PostgreSQL，使用 EF Core Migrations，支持自动迁移和 schema reconciliation。
+使用 EF Core 8 作为唯一 ORM，支持 PostgreSQL 15+、MySQL 8.0/8.4、MariaDB 10.11/11.4 和 SQLite。PostgreSQL 是默认选择并保留既有迁移历史；MySQL/MariaDB 与 SQLite 使用独立迁移程序集。SQLite 仅支持单实例和本地磁盘文件。

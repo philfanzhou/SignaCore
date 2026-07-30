@@ -44,14 +44,15 @@ public static class ProgramConsulExtensions
         try
         {
             var result = new ConsulKvLoader(opts).Load();
-            ApplySnapshotWithExpectedPrecedence(builder, result.Snapshot);
-            if (opts.EnableCache && result.Snapshot.Count > 0)
+            var snapshot = RemoveLegacyDatabaseKeys(result.Snapshot);
+            ApplySnapshotWithExpectedPrecedence(builder, snapshot);
+            if (opts.EnableCache && snapshot.Count > 0)
             {
-                cacheService.Save(result.Snapshot);
+                cacheService.Save(snapshot);
             }
-            ConsulRuntimeState.Instance.MarkLoaded("Consul", result.Snapshot.Count, result.Prefixes, opts.CacheDirectory);
+            ConsulRuntimeState.Instance.MarkLoaded("Consul", snapshot.Count, result.Prefixes, opts.CacheDirectory);
             StartupDiagnosticsFormatter.WriteBootstrap(
-                $"Consul KV load success: Source=Consul, KeyCount={result.Snapshot.Count}, Prefixes={StartupDiagnosticsFormatter.SummarizePrefixes(result.Prefixes)}, CacheDirectory={opts.CacheDirectory}");
+                $"Consul KV load success: Source=Consul, KeyCount={snapshot.Count}, Prefixes={StartupDiagnosticsFormatter.SummarizePrefixes(result.Prefixes)}, CacheDirectory={opts.CacheDirectory}");
             return builder;
         }
         catch (Exception ex)
@@ -65,10 +66,11 @@ public static class ProgramConsulExtensions
                     var cached = cacheService.Load();
                     if (cached != null && cached.Count > 0)
                     {
-                        ApplySnapshotWithExpectedPrecedence(builder, cached);
-                        ConsulRuntimeState.Instance.MarkFallback("Cache", ex.Message, cached.Count, prefixes, opts.CacheDirectory);
+                        var snapshot = RemoveLegacyDatabaseKeys(cached);
+                        ApplySnapshotWithExpectedPrecedence(builder, snapshot);
+                        ConsulRuntimeState.Instance.MarkFallback("Cache", ex.Message, snapshot.Count, prefixes, opts.CacheDirectory);
                         StartupDiagnosticsFormatter.WriteBootstrap(
-                            $"Consul KV fallback: Source=Cache, KeyCount={cached.Count}, CacheDirectory={opts.CacheDirectory}, Error={StartupDiagnosticsFormatter.SummarizeError(ex.Message)}");
+                            $"Consul KV fallback: Source=Cache, KeyCount={snapshot.Count}, CacheDirectory={opts.CacheDirectory}, Error={StartupDiagnosticsFormatter.SummarizeError(ex.Message)}");
                         return builder;
                     }
                 }
@@ -155,6 +157,27 @@ public static class ProgramConsulExtensions
         {
             builder.Add(replaySource);
         }
+    }
+
+    internal static Dictionary<string, string?> RemoveLegacyDatabaseKeys(
+        IDictionary<string, string?> snapshot)
+    {
+        return snapshot
+            .Where(pair =>
+                !pair.Key.StartsWith("PostgreSql:", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(pair.Key, "Database:Name", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(
+                    pair.Key,
+                    "ConnectionStrings:Default",
+                    StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(
+                    pair.Key,
+                    "ConnectionStrings:PostgreSQL",
+                    StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(
+                pair => pair.Key,
+                pair => pair.Value,
+                StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>

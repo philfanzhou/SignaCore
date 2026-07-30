@@ -7,6 +7,22 @@ namespace QuantumZhou.Identity.Tests.Host.Configuration;
 public class ProgramConsulExtensionsTests
 {
     [Fact]
+    public void RemoveLegacyDatabaseKeys_PreservesNonDatabaseSharedValues()
+    {
+        var snapshot = ProgramConsulExtensions.RemoveLegacyDatabaseKeys(
+            new Dictionary<string, string?>
+            {
+                ["PostgreSql:Host"] = "ruoyu-postgres",
+                ["Database:Name"] = "legacy",
+                ["Loki:Uri"] = "http://ruoyu-loki:3100"
+            });
+
+        Assert.False(snapshot.ContainsKey("PostgreSql:Host"));
+        Assert.False(snapshot.ContainsKey("Database:Name"));
+        Assert.Equal("http://ruoyu-loki:3100", snapshot["Loki:Uri"]);
+    }
+
+    [Fact]
     public void ApplySnapshotWithExpectedPrecedence_OverridesAppSettings()
     {
         var builder = new ConfigurationManager();

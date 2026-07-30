@@ -5,7 +5,7 @@
 | 依赖 | 版本要求 | 说明 |
 |------|----------|------|
 | .NET SDK | 8.0+ | `dotnet --version` 验证 |
-| PostgreSQL | 12+ | 默认数据库（`appsettings.json` 中 `Database:Provider = "PostgreSQL"`），本地开发需安装或指向可用实例 |
+| 关系数据库 | PostgreSQL 15+、MySQL 8.0/8.4、MariaDB 10.11/11.4 或 SQLite | PostgreSQL 是默认选择；SQLite 可用于无服务器的单实例本地开发 |
 | Node.js | 18+（可选） | 仅管理前端开发时需要 |
 
 ## 快速启动
@@ -19,9 +19,30 @@ dotnet restore
 
 ### 2. 数据库配置
 
-**PostgreSQL（默认）**：`appsettings.json` 默认 `Database:Provider = "PostgreSQL"`，连接串取 `ConnectionStrings:Default`/`PostgreSql:*`（推荐由 Consul `config/ruoyu/shared.json` 提供主机与密码）。本地开发确认 PostgreSQL 可用并修正用户名/密码即可；目标数据库不存在时服务启动会自动 `CREATE DATABASE`。
+数据库统一使用 `Database` 配置节。PostgreSQL 示例：
 
-正式容器启动路径要求由 Consul 提供数据库配置；项目级 `start.sh` 不再注入 `DB_PASSWORD`，正式部署时请在 Consul KV 中提供 `PostgreSql:Password`。
+```json
+{
+  "Database": {
+    "Provider": "PostgreSQL",
+    "ServerVersion": "15",
+    "ConnectionString": "Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres;Password=postgres"
+  }
+}
+```
+
+不希望安装数据库服务器时，可以改用本地文件 SQLite：
+
+```json
+{
+  "Database": {
+    "Provider": "SQLite",
+    "ConnectionString": "Data Source=./data/identity.db"
+  }
+}
+```
+
+SQLite 只支持单服务实例和实例本地磁盘。旧数据库配置键没有兼容分支。
 
 ### 3. 启动服务
 
@@ -39,9 +60,9 @@ HTTP 端口可通过 `appsettings.json` 的 `Endpoints:Http` 修改。
 
 服务启动时自动执行以下操作：
 
-1. **数据库迁移**：PostgreSQL 使用 `Database.Migrate()`
-2. **Schema Reconciliation**：检查并补齐缺失的列（如 `accounts.nickname`）
-3. **Migration Stamping**：如果数据库有表但无迁移历史，自动标记初始迁移
+1. **数据库建库与迁移**：根据 Provider 选择独立迁移链并持有数据库迁移锁
+2. **PostgreSQL 兼容处理**：保留既有 schema reconciliation 与迁移历史 stamping
+3. **规范化升级**：现有 PostgreSQL 数据先检测大小写碰撞，再回填规范化列并收紧约束
 4. **Admin Bootstrap**：根据 `AdminBootstrap:Username` 和 `AdminBootstrap:Password` 创建初始管理员账户
 5. **Bootstrap Apps 预置**（可选）：读取 `data/bootstrap-apps.json` 文件（若存在），预置应用注册信息
 6. **RSA 密钥初始化**：`KeyManager` 生成或加载活跃密钥对
@@ -56,4 +77,9 @@ dotnet test backend/Tests/unit/QuantumZhou.Identity.Tests.csproj
 
 # 集成测试（需要运行中的服务）
 dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj
+
+# 四数据库契约矩阵（需要 Docker）
+RUN_IDENTITY_DATABASE_CONTRACTS=true \
+dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj \
+  --filter 'FullyQualifiedName~DatabaseContractTests'
 ```

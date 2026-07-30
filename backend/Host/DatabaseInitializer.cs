@@ -11,7 +11,6 @@ internal static class DatabaseInitializer
 {
     public static async Task InitializeAsync(
         IServiceProvider serviceProvider,
-        string dbProvider,
         IConfiguration configuration)
     {
         var logger = serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("QuantumZhou.Identity.Host.DatabaseInitializer");
@@ -19,11 +18,18 @@ internal static class DatabaseInitializer
         using (var scope = serviceProvider.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var databaseOptions = scope.ServiceProvider.GetRequiredService<DatabaseOptions>();
             var adminBootstrapOptions = scope.ServiceProvider.GetRequiredService<IOptions<AdminBootstrapOptions>>().Value;
             var passwordPolicy = scope.ServiceProvider.GetRequiredService<IPasswordPolicy>();
             var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
             try
             {
+                await DatabaseProvisioner.EnsureDatabaseExistsAsync(databaseOptions);
+                await using var migrationLock =
+                    await DatabaseProvisioner.AcquireMigrationLockAsync(databaseOptions);
+
+                if (databaseOptions.ProviderKind == DatabaseProvider.PostgreSql)
+                {
                 try
                 {
                     var connection = db.Database.GetDbConnection();
@@ -160,9 +166,13 @@ internal static class DatabaseInitializer
                     }
                 }
 
-                db.Database.Migrate();
+                }
+
+                await IdentityNormalizationMigration.MigrateAsync(db, databaseOptions);
 
                 var adminUsername = adminBootstrapOptions.Username.Trim();
+                var normalizedAdminUsername =
+                    IdentityValueNormalizer.Normalize(adminUsername);
                 var adminPassword = adminBootstrapOptions.Password;
                 if (!string.IsNullOrWhiteSpace(adminUsername) || !string.IsNullOrWhiteSpace(adminPassword))
                 {
@@ -178,7 +188,8 @@ internal static class DatabaseInitializer
 
                     var existingCredential = await db.PasswordCredentials
                         .AsNoTracking()
-                        .FirstOrDefaultAsync(item => item.Username == adminUsername);
+                        .FirstOrDefaultAsync(
+                            item => item.UsernameNormalized == normalizedAdminUsername);
 
                     if (existingCredential == null)
                     {
@@ -235,7 +246,9 @@ internal static class DatabaseInitializer
 
                                 var existingApp = await db.AppRegistrations
                                     .AsNoTracking()
-                                    .FirstOrDefaultAsync(a => a.AppId == entry.AppId);
+                                    .FirstOrDefaultAsync(
+                                        app => app.AppIdNormalized ==
+                                            IdentityValueNormalizer.Normalize(entry.AppId));
                                 if (existingApp != null)
                                 {
                                     logger.LogInformation("Bootstrap app registration already exists: AppId={AppId}, AppName={AppName}", entry.AppId, entry.AppName);

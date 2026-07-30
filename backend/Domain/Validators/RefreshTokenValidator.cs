@@ -54,7 +54,8 @@ public class RefreshTokenValidator : IIdentityValidator
         // teacher_portal (using teacher_portal's AppId) to mint a token carrying the
         // teacher role via teacher_portal's callback.
         if (!string.IsNullOrEmpty(refreshToken.AppId) && !string.IsNullOrEmpty(request.AppId)
-            && refreshToken.AppId != request.AppId)
+            && IdentityValueNormalizer.Normalize(refreshToken.AppId) !=
+                IdentityValueNormalizer.Normalize(request.AppId))
         {
             _logger.LogInformation(
                 "Cross-app refresh token exchange: TokenAppId={TokenAppId}, RequestAppId={RequestAppId}, AccountId={AccountId}",

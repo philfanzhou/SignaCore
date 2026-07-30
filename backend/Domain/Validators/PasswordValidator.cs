@@ -69,7 +69,7 @@ public class PasswordValidator : IIdentityValidator
         if (!_passwordHasher.VerifyPassword(request.Password, credential.PasswordHash))
         {
             _logger.LogWarning("Password validation failed: wrong password, Username={Username}", request.Username);
-            await RecordFailedAttemptAsync(loginAttempt, request.Username);
+            await RecordFailedAttemptAsync(request.Username);
             return ValidationResult.Failure("Wrong username or password");
         }
 
@@ -83,36 +83,16 @@ public class PasswordValidator : IIdentityValidator
         return ValidationResult.Success(account, IdentityConstants.AuthMethodPassword, credential.Username);
     }
 
-    private async Task RecordFailedAttemptAsync(LoginAttemptEntity? loginAttempt, string username)
+    private async Task RecordFailedAttemptAsync(string username)
     {
         var now = DateTimeOffset.UtcNow;
-
-        if (loginAttempt == null)
+        var loginAttempt = await _loginAttemptRepository.RecordFailureAsync(username, now);
+        if (loginAttempt.LockoutUntil > now)
         {
-            loginAttempt = new LoginAttemptEntity
-            {
-                Id = Guid.NewGuid(),
-                Username = username,
-                LastAttemptAt = now,
-                FailedAttempts = 1,
-                LockoutUntil = null
-            };
-            await _loginAttemptRepository.AddAsync(loginAttempt);
+            _logger.LogWarning(
+                "Account locked due to too many failed attempts, Username={Username}, LockoutUntil={LockoutUntil}",
+                username,
+                loginAttempt.LockoutUntil);
         }
-        else
-        {
-            loginAttempt.LastAttemptAt = now;
-            loginAttempt.FailedAttempts++;
-
-            if (loginAttempt.FailedAttempts >= IdentityConstants.MaxFailedLoginAttempts)
-            {
-                loginAttempt.LockoutUntil = now.AddMinutes(IdentityConstants.LoginLockoutMinutes);
-                _logger.LogWarning(
-                    "Account locked due to too many failed attempts, Username={Username}, LockoutUntil={LockoutUntil}",
-                    username, loginAttempt.LockoutUntil);
-            }
-        }
-
-        await _unitOfWork.SaveChangesAsync();
     }
 }

@@ -29,6 +29,7 @@ pipeline {
         SERVICE_DIR      = "${env.REPO_DIR}/src/services/QuantumZhou.Identity"
         BUILD_SCRIPT     = "${env.REPO_DIR}/script/build-script/01-identity.build.sh"
         TEST_PROJ        = "${env.SERVICE_DIR}/backend/Tests/unit/QuantumZhou.Identity.Tests.csproj"
+        INTEGRATION_PROJ = "${env.SERVICE_DIR}/backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj"
         START_SCRIPT     = "${env.SERVICE_DIR}/start.sh"
         REPORT_DIR       = "${env.WORKSPACE}/reports"
         // Use Huawei NuGet mirror for faster restores inside China.
@@ -105,6 +106,27 @@ pipeline {
                         --results-directory "$REPORT_DIR" \
                         --no-restore
                     echo 'UT completed'
+                '''
+            }
+        }
+
+        stage('Database Contract Test') {
+            steps {
+                sh '''
+                    set -e
+                    mkdir -p "$REPORT_DIR"
+                    cd "$SERVICE_DIR"
+                    dotnet restore "$INTEGRATION_PROJ" \
+                        --source "$NUGET_SOURCE"
+                    RUN_IDENTITY_DATABASE_CONTRACTS=true \
+                    TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal \
+                    dotnet test "$INTEGRATION_PROJ" \
+                        --configuration Release \
+                        --filter 'FullyQualifiedName~DatabaseContractTests' \
+                        --logger 'trx;logfilename=identity-database-contracts.trx' \
+                        --results-directory "$REPORT_DIR" \
+                        --no-restore
+                    echo 'Database contract matrix completed'
                 '''
             }
         }

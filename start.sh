@@ -11,10 +11,20 @@ Port="5002"
 CONSUL_HTTP_ADDR="host.docker.internal:8500"
 CONSUL_TOKEN="${CONSUL_TOKEN:-}"
 
-DB_NAME="ruoyu_identity"
+DB_PROVIDER="${DB_PROVIDER:-PostgreSQL}"
+DB_SERVER_VERSION="${DB_SERVER_VERSION:-15}"
+DB_CONNECTION_STRING="${DB_CONNECTION_STRING:-Host=ruoyu-postgres;Port=5432;Database=ruoyu_identity;Username=postgres;Password=postgres}"
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="Qwer1234"
 SMS_BYPASS_CODE="666666"
+
+DATABASE_ENV_ARGS=(
+    -e "Database__Provider=${DB_PROVIDER}"
+    -e "Database__ConnectionString=${DB_CONNECTION_STRING}"
+)
+if [ "$DB_PROVIDER" != "SQLite" ]; then
+    DATABASE_ENV_ARGS+=(-e "Database__ServerVersion=${DB_SERVER_VERSION}")
+fi
 
 docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
 if [ -n "$(docker ps -q --filter "name=^/${CONTAINER_NAME}$")" ]; then
@@ -40,7 +50,7 @@ docker run -d \
     -e ADMIN_BOOTSTRAP_USERNAME="${ADMIN_USERNAME}" \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Sms__BypassCode="${SMS_BYPASS_CODE}" \
-    -e Database__Name="${DB_NAME}" \
+    "${DATABASE_ENV_ARGS[@]}" \
     -v "${DATA_DIR}:/app/data" \
     "$IMAGE_NAME"
 

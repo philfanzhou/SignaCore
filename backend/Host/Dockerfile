@@ -16,6 +16,8 @@ WORKDIR /src
 
 # Copy csproj files first for layer cache optimization
 COPY src/services/QuantumZhou.Identity/backend/Database/QuantumZhou.Identity.Database.csproj src/services/QuantumZhou.Identity/backend/Database/
+COPY src/services/QuantumZhou.Identity/backend/Database.Migrations.MySql/QuantumZhou.Identity.Database.Migrations.MySql.csproj src/services/QuantumZhou.Identity/backend/Database.Migrations.MySql/
+COPY src/services/QuantumZhou.Identity/backend/Database.Migrations.Sqlite/QuantumZhou.Identity.Database.Migrations.Sqlite.csproj src/services/QuantumZhou.Identity/backend/Database.Migrations.Sqlite/
 COPY src/services/QuantumZhou.Identity/backend/Domain/QuantumZhou.Identity.Domain.csproj src/services/QuantumZhou.Identity/backend/Domain/
 COPY src/services/QuantumZhou.Identity/backend/Service/QuantumZhou.Identity.Service.csproj src/services/QuantumZhou.Identity/backend/Service/
 COPY src/services/QuantumZhou.Identity/backend/Host/QuantumZhou.Identity.Host.csproj src/services/QuantumZhou.Identity/backend/Host/

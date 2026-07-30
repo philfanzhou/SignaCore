@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using Npgsql;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using QuantumZhou.Identity.Database;
@@ -47,43 +46,12 @@ public static class ServiceCollectionExtensions
             });
 
         // ========== 1. Database ==========
-        var dbProvider = "PostgreSQL";
-        var connectionString = configuration.GetConnectionString("PostgreSQL");
-        var postgreSqlHost = configuration["PostgreSql:Host"];
-        var postgreSqlPort = configuration["PostgreSql:Port"] ?? "5432";
-        var databaseName = configuration["Database:Name"] ?? "quantumzhou_identity";
-        var postgreSqlUsername = configuration["PostgreSql:Username"];
-
-        connectionString = !string.IsNullOrWhiteSpace(postgreSqlHost) &&
-            !string.IsNullOrWhiteSpace(postgreSqlUsername)
-            ? $"Host={postgreSqlHost};Port={postgreSqlPort};Database={databaseName};Username={postgreSqlUsername}"
-            : connectionString ?? "Host=localhost;Port=5432;Database=quantumzhou_identity;Username=postgres";
-
-        // Add password for PostgreSQL if available in configuration
-        var postgreSqlPassword = configuration["PostgreSql:Password"];
-        if (!string.IsNullOrWhiteSpace(postgreSqlPassword) && !connectionString.Contains("Password="))
-        {
-            connectionString = $"{connectionString};Password={postgreSqlPassword}";
-        }
-        // 添加连接池配置
-        if (!connectionString.Contains("Pooling=", StringComparison.OrdinalIgnoreCase))
-        {
-            connectionString = $"{connectionString};Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100;Connection Lifetime=300";
-        }
-
-        // Ensure target database exists before registering DbContext.
-        // start.sh only provides Database:Name; the database is auto-created if missing.
-        EnsurePostgreSqlDatabaseCreated(connectionString);
+        var databaseOptions = BindDatabaseOptions(configuration);
+        services.AddSingleton(databaseOptions);
 
         services.AddDbContext<IdentityDbContext>(options =>
         {
-            options.UseNpgsql(connectionString, npgsqlOptions =>
-            {
-                npgsqlOptions.EnableRetryOnFailure(
-                    maxRetryCount: 3,
-                    maxRetryDelay: TimeSpan.FromSeconds(4),
-                    errorCodesToAdd: null);
-            });
+            options.UseIdentityDatabase(databaseOptions);
         });
 
         // ========== 2. HttpClient for Callback ==========
@@ -361,7 +329,7 @@ public static class ServiceCollectionExtensions
         // ========== 18. Auth Metrics ==========
         services.AddSingleton<AuthMetrics>();
 
-        return (jwtOptions, dbProvider);
+        return (jwtOptions, databaseOptions.Provider);
     }
 
     private static T RegisterSingleton<T>(this IServiceCollection services, T options) where T : class
@@ -370,56 +338,36 @@ public static class ServiceCollectionExtensions
         return options;
     }
 
-    /// <summary>
-    /// Ensures the target PostgreSQL database exists. If missing, creates it via a maintenance
-    /// connection to the <c>postgres</c> database. This allows <c>start.sh</c> to only provide
-    /// <c>Database:Name</c> without pre-creating the database manually.
-    /// </summary>
-    /// <remarks>
-    /// Failures are logged to <see cref="Console.Error"/> but do not abort startup; the subsequent
-    /// <c>Migrate()</c> call will surface a clear connection error if the database remains unreachable.
-    /// </remarks>
-    internal static void EnsurePostgreSqlDatabaseCreated(string connectionString)
+    internal static DatabaseOptions BindDatabaseOptions(IConfiguration configuration)
     {
-        try
+        var legacyKeys = new[]
         {
-            var builder = new NpgsqlConnectionStringBuilder(connectionString);
-            var databaseName = builder.Database;
-            if (string.IsNullOrWhiteSpace(databaseName))
-            {
-                return;
-            }
+            "Database:Name",
+            "ConnectionStrings:Default",
+            "ConnectionStrings:PostgreSQL"
+        };
 
-            // Maintenance connection targets the built-in 'postgres' database.
-            var maintenanceBuilder = new NpgsqlConnectionStringBuilder(connectionString)
-            {
-                Database = "postgres",
-                Pooling = false
-            };
+        var configuredLegacyKeys = legacyKeys
+            .Where(key => configuration[key] is not null)
+            .ToList();
 
-            using var connection = new NpgsqlConnection(maintenanceBuilder.ToString());
-            connection.Open();
-
-            using var checkCmd = connection.CreateCommand();
-            checkCmd.CommandText = "SELECT 1 FROM pg_database WHERE datname = @name";
-            checkCmd.Parameters.AddWithValue("@name", databaseName);
-            var exists = checkCmd.ExecuteScalar() != null;
-            if (exists)
-            {
-                return;
-            }
-
-            // CREATE DATABASE does not accept parameters; databaseName originates from trusted
-            // configuration (Database:Name). Quoting with double-quotes guards against SQL reserved words.
-            using var createCmd = connection.CreateCommand();
-            createCmd.CommandText = $"CREATE DATABASE \"{databaseName}\"";
-            createCmd.ExecuteNonQuery();
-            Console.WriteLine($"[Identity] Database '{databaseName}' created automatically.");
-        }
-        catch (Exception ex)
+        if (configuration.GetSection("PostgreSql").GetChildren().Any())
         {
-            // Do not abort startup; Migrate() will provide a clear error if the DB remains unreachable.
-            Console.Error.WriteLine($"[Identity] EnsurePostgreSqlDatabaseCreated warning: {ex.Message}");
+            configuredLegacyKeys.Add("PostgreSql:*");
         }
+
+        if (configuredLegacyKeys.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Legacy database configuration is not supported: {string.Join(", ", configuredLegacyKeys)}.");
+        }
+
+        var options = configuration
+            .GetRequiredSection(DatabaseOptions.SectionName)
+            .Get<DatabaseOptions>()
+            ?? throw new InvalidOperationException("Database configuration is required.");
+
+        options.Validate();
+        return options;
     }
 }

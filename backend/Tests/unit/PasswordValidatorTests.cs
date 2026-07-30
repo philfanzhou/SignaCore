@@ -20,6 +20,16 @@ public class PasswordValidatorTests
     {
         var mock = new Mock<ILoginAttemptRepository>();
         mock.Setup(r => r.GetByUsernameAsync(It.IsAny<string>())).ReturnsAsync((LoginAttemptEntity?)null);
+        mock.Setup(r => r.RecordFailureAsync(
+                It.IsAny<string>(),
+                It.IsAny<DateTimeOffset>()))
+            .ReturnsAsync((string username, DateTimeOffset utcNow) => new LoginAttemptEntity
+            {
+                Id = Guid.NewGuid(),
+                Username = username,
+                LastAttemptAt = utcNow,
+                FailedAttempts = 1
+            });
         return mock;
     }
 

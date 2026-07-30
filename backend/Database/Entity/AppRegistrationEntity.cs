@@ -11,6 +11,7 @@ public class AppRegistrationEntity
 
     /// <summary>Unique identifier for the business service.</summary>
     public string AppId { get; set; } = string.Empty;
+    public string AppIdNormalized { get; set; } = string.Empty;
 
     /// <summary>BCrypt hash of AppSecret. Used for validation.</summary>
     public string AppSecretHash { get; set; } = string.Empty;

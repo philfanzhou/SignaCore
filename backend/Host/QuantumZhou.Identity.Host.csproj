@@ -37,6 +37,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Database.Migrations.MySql\QuantumZhou.Identity.Database.Migrations.MySql.csproj" />
+    <ProjectReference Include="..\Database.Migrations.Sqlite\QuantumZhou.Identity.Database.Migrations.Sqlite.csproj" />
     <ProjectReference Include="..\Service\QuantumZhou.Identity.Service.csproj" />
   </ItemGroup>
 

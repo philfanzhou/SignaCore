@@ -13,6 +13,7 @@ public class PasswordCredentialEntity
 
     /// <summary>Unique username for this credential.</summary>
     public string Username { get; set; } = string.Empty;
+    public string UsernameNormalized { get; set; } = string.Empty;
 
     /// <summary>BCrypt/Aargon2 hash of the password.</summary>
     public string PasswordHash { get; set; } = string.Empty;

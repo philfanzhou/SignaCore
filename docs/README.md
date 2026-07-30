@@ -11,3 +11,4 @@ QuantumZhou.Identity 是认证与身份服务，负责令牌签发、回调注�
 | [Integration/](./Integration/README.md) | 外部系统交互 |
 | [database/](./database/README.md) | 数据结构与数据主责 |
 | [development/](./development/README.md) | 开发执行支持 |
+| [adr/](./adr/README.md) | 上下文内部架构决策 |

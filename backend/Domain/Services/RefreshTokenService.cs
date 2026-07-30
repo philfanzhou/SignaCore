@@ -30,8 +30,10 @@ public class RefreshTokenService : IRefreshTokenService
 
         if (grantType == IdentityConstants.GrantTypeRefreshToken && !string.IsNullOrEmpty(existingRefreshToken))
         {
-            await RevokeAsync(existingRefreshToken);
-            return await GenerateRefreshTokenAsync(account, appId);
+            var replacement = CreateRefreshToken(account, appId);
+            return await _refreshTokenRepository.TryRotateAsync(existingRefreshToken, replacement)
+                ? replacement.TokenValue
+                : null;
         }
 
         return null;
@@ -39,30 +41,28 @@ public class RefreshTokenService : IRefreshTokenService
 
     public async Task<bool> RevokeAsync(string token)
     {
-        var refreshToken = await _refreshTokenRepository.GetByTokenValueAsync(token);
-        if (refreshToken == null) return false;
-
-        refreshToken.IsRevoked = true;
-        await _unitOfWork.SaveChangesAsync();
-        return true;
+        return await _refreshTokenRepository.TryRevokeAsync(token);
     }
 
     private async Task<string> GenerateRefreshTokenAsync(AccountEntity account, string? appId)
     {
-        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
-        var refreshToken = new RefreshTokenEntity
+        var refreshToken = CreateRefreshToken(account, appId);
+        await _refreshTokenRepository.AddAsync(refreshToken);
+        await _unitOfWork.SaveChangesAsync();
+        return refreshToken.TokenValue;
+    }
+
+    private RefreshTokenEntity CreateRefreshToken(AccountEntity account, string? appId)
+    {
+        return new RefreshTokenEntity
         {
             Id = Guid.NewGuid(),
             AccountId = account.Id,
-            TokenValue = token,
+            TokenValue = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
             CreatedAt = DateTimeOffset.UtcNow,
             ExpiresAt = DateTimeOffset.UtcNow.AddDays(_refreshTokenOptions.RefreshTokenExpirationDays),
             IsRevoked = false,
             AppId = appId
         };
-
-        await _refreshTokenRepository.AddAsync(refreshToken);
-        await _unitOfWork.SaveChangesAsync();
-        return token;
     }
 }

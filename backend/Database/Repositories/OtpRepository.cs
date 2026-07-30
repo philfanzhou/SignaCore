@@ -24,9 +24,55 @@ public class OtpRepository : IOtpRepository
         return Task.CompletedTask;
     }
 
-    public Task RemoveAsync(OtpEntity otp)
+    public async Task<int> RemoveByPhoneAsync(string phone)
     {
-        _dbContext.Otps.Remove(otp);
-        return Task.CompletedTask;
+        return await _dbContext.Otps
+            .Where(otp => otp.Phone == phone)
+            .ExecuteDeleteAsync();
+    }
+
+    public async Task<int> RemoveExpiredAsync(string phone, DateTimeOffset utcNow)
+    {
+        return await _dbContext.Otps
+            .Where(otp => otp.Phone == phone && otp.ExpiresAt < utcNow)
+            .ExecuteDeleteAsync();
+    }
+
+    public async Task<bool> TryConsumeAsync(
+        string phone,
+        string code,
+        DateTimeOffset utcNow,
+        int maxAttempts)
+    {
+        var affectedRows = await _dbContext.Otps
+            .Where(otp =>
+                otp.Phone == phone &&
+                otp.Code == code &&
+                otp.ExpiresAt >= utcNow &&
+                otp.LockoutUntil <= utcNow &&
+                otp.Attempts < maxAttempts)
+            .ExecuteDeleteAsync();
+        return affectedRows == 1;
+    }
+
+    public async Task<int> IncrementFailedAttemptsAsync(
+        string phone,
+        DateTimeOffset utcNow,
+        int maxAttempts,
+        DateTimeOffset lockoutUntil)
+    {
+        return await _dbContext.Otps
+            .Where(otp =>
+                otp.Phone == phone &&
+                otp.ExpiresAt >= utcNow &&
+                otp.LockoutUntil <= utcNow &&
+                otp.Attempts < maxAttempts)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(otp => otp.Attempts, otp => otp.Attempts + 1)
+                .SetProperty(
+                    otp => otp.LockoutUntil,
+                    otp => otp.Attempts + 1 >= maxAttempts
+                        ? lockoutUntil
+                        : otp.LockoutUntil));
     }
 }

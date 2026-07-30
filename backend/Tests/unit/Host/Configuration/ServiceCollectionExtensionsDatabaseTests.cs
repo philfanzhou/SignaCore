@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Configuration;
+using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Host;
 using Xunit;
 
@@ -5,39 +7,131 @@ namespace QuantumZhou.Identity.Tests.Host.Configuration;
 
 public class ServiceCollectionExtensionsDatabaseTests
 {
-    [Fact]
-    public void EnsurePostgreSqlDatabaseCreated_WhenConnectionStringLacksDatabase_DoesNotThrow()
+    public static TheoryData<string, string?, string, DatabaseProvider> ValidConfigurations => new()
     {
-        // A connection string without an explicit Database key should be a no-op,
-        // not an exception. NpgsqlConnectionStringBuilder.Database returns null/empty.
-        var cs = "Host=localhost;Port=5432;Username=postgres;Password=postgres";
+        {
+            "PostgreSQL",
+            "15",
+            "Host=localhost;Database=identity;Username=postgres;Password=test",
+            DatabaseProvider.PostgreSql
+        },
+        {
+            "MySQL",
+            "8.4",
+            "Server=localhost;Database=identity;User=root;Password=test",
+            DatabaseProvider.MySql
+        },
+        {
+            "MariaDB",
+            "11.4",
+            "Server=localhost;Database=identity;User=root;Password=test",
+            DatabaseProvider.MariaDb
+        },
+        {
+            "SQLite",
+            null,
+            "Data Source=identity.db",
+            DatabaseProvider.Sqlite
+        }
+    };
 
-        var exception = Record.Exception(() =>
-            ServiceCollectionExtensions.EnsurePostgreSqlDatabaseCreated(cs));
+    [Theory]
+    [MemberData(nameof(ValidConfigurations))]
+    public void BindDatabaseOptions_WithSupportedProvider_ReturnsValidatedOptions(
+        string provider,
+        string? serverVersion,
+        string connectionString,
+        DatabaseProvider expectedProvider)
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Database:Provider"] = provider,
+            ["Database:ServerVersion"] = serverVersion,
+            ["Database:ConnectionString"] = connectionString
+        });
 
-        Assert.Null(exception);
+        var options = ServiceCollectionExtensions.BindDatabaseOptions(configuration);
+
+        Assert.Equal(expectedProvider, options.ProviderKind);
+        Assert.Equal(connectionString, options.ConnectionString);
+    }
+
+    [Theory]
+    [InlineData("Database:Name")]
+    [InlineData("ConnectionStrings:Default")]
+    [InlineData("ConnectionStrings:PostgreSQL")]
+    [InlineData("PostgreSql:Host")]
+    public void BindDatabaseOptions_WithLegacyKey_Throws(string legacyKey)
+    {
+        var values = ValidPostgreSqlConfiguration();
+        values[legacyKey] = "legacy";
+        var configuration = BuildConfiguration(values);
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => ServiceCollectionExtensions.BindDatabaseOptions(configuration));
+
+        Assert.Contains("Legacy database configuration", exception.Message);
     }
 
     [Fact]
-    public void EnsurePostgreSqlDatabaseCreated_WhenServerUnreachable_DoesNotThrow()
+    public void BindDatabaseOptions_WithUnknownProvider_Throws()
     {
-        // Pointing at an unreachable host on a reserved port guarantees the connection
-        // fails fast. The method must swallow the error so Migrate() can surface it later.
-        var cs = "Host=127.0.0.1;Port=1;Database=ruoyu_identity_test;Username=postgres;Password=postgres;Timeout=1";
+        var values = ValidPostgreSqlConfiguration();
+        values["Database:Provider"] = "postgres";
+        var configuration = BuildConfiguration(values);
 
-        var exception = Record.Exception(() =>
-            ServiceCollectionExtensions.EnsurePostgreSqlDatabaseCreated(cs));
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => ServiceCollectionExtensions.BindDatabaseOptions(configuration));
 
-        Assert.Null(exception);
+        Assert.Contains("Database.Provider", exception.Message);
     }
 
     [Fact]
-    public void EnsurePostgreSqlDatabaseCreated_WhenMalformedConnectionString_DoesNotThrow()
+    public void BindDatabaseOptions_WithSqliteServerVersion_Throws()
     {
-        // Malformed input must not crash startup; the method degrades gracefully.
-        var exception = Record.Exception(() =>
-            ServiceCollectionExtensions.EnsurePostgreSqlDatabaseCreated("not a connection string"));
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Database:Provider"] = "SQLite",
+            ["Database:ServerVersion"] = "3",
+            ["Database:ConnectionString"] = "Data Source=identity.db"
+        });
 
-        Assert.Null(exception);
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => ServiceCollectionExtensions.BindDatabaseOptions(configuration));
+
+        Assert.Contains("must not be configured", exception.Message);
+    }
+
+    [Fact]
+    public void BindDatabaseOptions_WithInMemorySqlite_Throws()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Database:Provider"] = "SQLite",
+            ["Database:ConnectionString"] = "Data Source=:memory:"
+        });
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => ServiceCollectionExtensions.BindDatabaseOptions(configuration));
+
+        Assert.Contains("local database file", exception.Message);
+    }
+
+    private static Dictionary<string, string?> ValidPostgreSqlConfiguration()
+    {
+        return new Dictionary<string, string?>
+        {
+            ["Database:Provider"] = "PostgreSQL",
+            ["Database:ServerVersion"] = "15",
+            ["Database:ConnectionString"] =
+                "Host=localhost;Database=identity;Username=postgres;Password=test"
+        };
+    }
+
+    private static IConfiguration BuildConfiguration(Dictionary<string, string?> values)
+    {
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(values)
+            .Build();
     }
 }

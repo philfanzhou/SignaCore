@@ -25,6 +25,34 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         return Task.CompletedTask;
     }
 
+    public async Task<bool> TryRevokeAsync(string tokenValue)
+    {
+        var affectedRows = await _dbContext.RefreshTokens
+            .Where(token => token.TokenValue == tokenValue && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.IsRevoked, true));
+        return affectedRows == 1;
+    }
+
+    public async Task<bool> TryRotateAsync(string tokenValue, RefreshTokenEntity replacement)
+    {
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        var affectedRows = await _dbContext.RefreshTokens
+            .Where(token => token.TokenValue == tokenValue && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.IsRevoked, true));
+
+        if (affectedRows != 1)
+        {
+            return false;
+        }
+
+        _dbContext.RefreshTokens.Add(replacement);
+        await _dbContext.SaveChangesAsync();
+        await transaction.CommitAsync();
+        return true;
+    }
+
     public Task RemoveRangeAsync(IEnumerable<RefreshTokenEntity> tokens)
     {
         _dbContext.RefreshTokens.RemoveRange(tokens);

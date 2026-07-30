@@ -17,8 +17,12 @@ public class UserQueryService : IUserQueryService
     public async Task<(List<AdminUserListItemResponse> Users, int Total)> SearchUsersAsync(
         string? username, string? phone, int page, int pageSize)
     {
-        var searchTerm = username?.Trim();
+        var searchTerm = string.IsNullOrWhiteSpace(username)
+            ? null
+            : IdentityValueNormalizer.Normalize(username.Trim());
         var phoneTerm = phone?.Trim();
+        var smsProviderName =
+            IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms);
 
         var query = _dbContext.Accounts
             .AsNoTracking()
@@ -26,12 +30,19 @@ public class UserQueryService : IUserQueryService
                 (string.IsNullOrWhiteSpace(searchTerm) ||
                  _dbContext.PasswordCredentials.Any(credential =>
                      credential.AccountId == account.Id &&
-                     EF.Functions.Like(credential.Username, $"%{searchTerm}%")) ||
-                 EF.Functions.Like(account.Remark ?? string.Empty, $"%{searchTerm}%")) &&
+                     EF.Functions.Like(
+                         credential.UsernameNormalized ?? string.Empty,
+                         $"%{searchTerm}%")) ||
+                 EF.Functions.Like(
+                     account.NicknameNormalized ?? string.Empty,
+                     $"%{searchTerm}%") ||
+                 EF.Functions.Like(
+                     account.RemarkNormalized ?? string.Empty,
+                     $"%{searchTerm}%")) &&
                 (string.IsNullOrWhiteSpace(phoneTerm) ||
                  _dbContext.UserLogins.Any(login =>
                      login.AccountId == account.Id &&
-                     login.ProviderName == IdentityConstants.AuthMethodSms &&
+                     login.ProviderNameNormalized == smsProviderName &&
                      EF.Functions.Like(login.ProviderUserId, $"%{phoneTerm}%"))));
 
         var total = await query.CountAsync();
@@ -78,13 +89,11 @@ public class UserQueryService : IUserQueryService
         int page,
         int pageSize)
     {
-        // Client evaluation is used for compatibility.
-        var allAccounts = await query.ToListAsync();
-        var pagedAccounts = allAccounts
+        var pagedAccounts = await query
             .OrderByDescending(account => account.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .ToList();
+            .ToListAsync();
 
         var accountIds = pagedAccounts.Select(a => a.Id).ToList();
 
@@ -95,7 +104,10 @@ public class UserQueryService : IUserQueryService
 
         var phones = await _dbContext.UserLogins
             .AsNoTracking()
-            .Where(l => accountIds.Contains(l.AccountId) && l.ProviderName == IdentityConstants.AuthMethodSms)
+            .Where(l =>
+                accountIds.Contains(l.AccountId) &&
+                l.ProviderNameNormalized ==
+                    IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms))
             .ToDictionaryAsync(l => l.AccountId, l => l.ProviderUserId);
 
         return pagedAccounts.Select(account =>

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
@@ -82,20 +83,32 @@ public class IdentityServerFixture : IAsyncLifetime
 {
     private WebApplicationFactory<Program>? _factory;
     private string? _previousMasterKey;
+    private string? _databasePath;
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync()
     {
         _previousMasterKey = Environment.GetEnvironmentVariable("RSA_MASTER_KEY");
         Environment.SetEnvironmentVariable("RSA_MASTER_KEY", "test-master-key-for-e2e-testing-only");
+        _databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"quantum-identity-http-{Guid.NewGuid():N}.db");
+        var connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = _databasePath
+        }.ConnectionString;
 
         _factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("AdminBootstrap:Username", "");
                 builder.UseSetting("AdminBootstrap:Password", "");
+                builder.UseSetting("Database:Provider", "SQLite");
+                builder.UseSetting("Database:ServerVersion", "");
+                builder.UseSetting("Database:ConnectionString", connectionString);
             });
 
         _factory.CreateClient();
+        return Task.CompletedTask;
     }
 
     public HttpClient CreateHttpClient()
@@ -154,10 +167,16 @@ public class IdentityServerFixture : IAsyncLifetime
         await dbContext.SaveChangesAsync();
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
         _factory?.Dispose();
+        SqliteConnection.ClearAllPools();
+        if (_databasePath != null && File.Exists(_databasePath))
+        {
+            File.Delete(_databasePath);
+        }
         Environment.SetEnvironmentVariable("RSA_MASTER_KEY", _previousMasterKey);
+        return Task.CompletedTask;
     }
 }
 

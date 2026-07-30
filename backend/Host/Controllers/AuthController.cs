@@ -159,6 +159,22 @@ public class AuthController : ControllerBase
 
         var account = validationResult.Account!;
         var displayName = ResolveDisplayName(account, validationResult.DisplayName, request.GrantType);
+        var newRefreshToken = await _refreshTokenService.HandleRefreshTokenAsync(
+            request.GrantType, request.RefreshToken, account, appId);
+
+        if (request.GrantType == IdentityConstants.GrantTypeRefreshToken && newRefreshToken == null)
+        {
+            stopwatch.Stop();
+            _authMetrics.RecordLoginFailure(request.GrantType, "invalid_grant");
+            _authMetrics.RecordLoginDuration(stopwatch.Elapsed.TotalMilliseconds, request.GrantType);
+            _logger.LogWarning(
+                "Refresh token rotation failed because the token was already consumed: AccountId={AccountId}, AppId={AppId}",
+                account.Id, appId ?? "N/A");
+            await _auditService.RecordLoginAsync(account.Id, displayName ?? account.Id.ToString(),
+                request.GrantType, "login_failure", clientIp, userAgent, "invalid_grant", appId, correlationId);
+            return Ok(new TokenResponse { Success = false, Message = "invalid_grant" });
+        }
+
         var claims = _claimsResolver.ResolveBasicClaims(account, displayName);
         claims.Add(new Claim(IdentityConstants.ClaimAuthMethod, validationResult.AuthMethod ?? request.GrantType));
 
@@ -191,9 +207,6 @@ public class AuthController : ControllerBase
         var rsaKey = _keyManager.GetCurrentKey();
         var accessToken = _tokenService.GenerateJwtToken(claims, rsaKey, _jwtOptions.TokenExpirationHours);
         var expiresAt = DateTimeOffset.UtcNow.AddHours(_jwtOptions.TokenExpirationHours).ToUnixTimeSeconds();
-
-        var newRefreshToken = await _refreshTokenService.HandleRefreshTokenAsync(
-            request.GrantType, request.RefreshToken, account, appId);
 
         var roles = claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).ToList();
         var permissions = claims.Where(c => c.Type == IdentityConstants.ClaimPermission).Select(c => c.Value).ToList();

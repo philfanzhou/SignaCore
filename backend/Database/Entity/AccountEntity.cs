@@ -17,9 +17,11 @@ public class AccountEntity
 
     /// <summary>Admin remark for identifying the account purpose or owner.</summary>
     public string? Remark { get; set; }
+    public string? RemarkNormalized { get; set; }
 
     /// <summary>User-defined display name / nickname.</summary>
     public string? Nickname { get; set; }
+    public string? NicknameNormalized { get; set; }
 
     public DateTimeOffset? LastLoginAt { get; set; }
 

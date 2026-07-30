@@ -15,7 +15,9 @@ public class AppRegistrationRepository : IAppRegistrationRepository
 
     public async Task<AppRegistrationEntity?> GetByAppIdAsync(string appId)
     {
-        return await _dbContext.AppRegistrations.FirstOrDefaultAsync(a => a.AppId == appId);
+        var normalizedAppId = IdentityValueNormalizer.Normalize(appId);
+        return await _dbContext.AppRegistrations
+            .FirstOrDefaultAsync(a => a.AppIdNormalized == normalizedAppId);
     }
 
     public Task AddAsync(AppRegistrationEntity app)

@@ -763,6 +763,39 @@ public class AuthControllerTests
     }
 
     [Fact]
+    public async Task RefreshTokenRotation_WhenTokenWasAlreadyConsumed_DoesNotIssueAccessToken()
+    {
+        var account = CreateTestAccount();
+        var validatorMock = CreateRefreshValidator(account);
+        _refreshTokenServiceMock
+            .Setup(service => service.HandleRefreshTokenAsync(
+                IdentityConstants.GrantTypeRefreshToken,
+                "consumed-refresh-token",
+                account,
+                It.IsAny<string?>()))
+            .ReturnsAsync((string?)null);
+        var controller = CreateController(new[] { validatorMock.Object });
+
+        var actionResult = await controller.GetToken(new TokenRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = "consumed-refresh-token"
+        }, CancellationToken.None);
+
+        var ok = ExtractOkResult(actionResult);
+        var response = Assert.IsType<TokenResponse>(ok.Value!);
+        Assert.False(response.Success);
+        Assert.Equal("invalid_grant", response.Message);
+        Assert.True(string.IsNullOrEmpty(response.AccessToken));
+        _tokenServiceMock.Verify(
+            service => service.GenerateJwtToken(
+                It.IsAny<List<Claim>>(),
+                It.IsAny<RsaSecurityKey>(),
+                It.IsAny<int>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task RegularUserRefresh_WithBootstrapUsername_DoesNotReceiveAdminRole()
     {
         // Arrange: a regular (non-bootstrap) account refreshes; the request maliciously carries

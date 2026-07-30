@@ -20,16 +20,20 @@ public class AccountRepository : IAccountRepository
 
     public async Task<AccountEntity?> GetByLoginProviderAsync(string providerName, string providerUserId)
     {
+        var normalizedProviderName = IdentityValueNormalizer.Normalize(providerName);
         return await _dbContext.UserLogins
-            .Where(l => l.ProviderName == providerName && l.ProviderUserId == providerUserId)
+            .Where(l =>
+                l.ProviderNameNormalized == normalizedProviderName &&
+                l.ProviderUserId == providerUserId)
             .Join(_dbContext.Accounts, l => l.AccountId, a => a.Id, (_, a) => a)
             .FirstOrDefaultAsync();
     }
 
     public async Task<AccountEntity?> GetByPasswordCredentialUsernameAsync(string username)
     {
+        var normalizedUsername = IdentityValueNormalizer.Normalize(username);
         return await _dbContext.PasswordCredentials
-            .Where(c => c.Username == username)
+            .Where(c => c.UsernameNormalized == normalizedUsername)
             .Join(_dbContext.Accounts, c => c.AccountId, a => a.Id, (_, a) => a)
             .FirstOrDefaultAsync();
     }

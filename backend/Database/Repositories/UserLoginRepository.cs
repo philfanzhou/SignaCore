@@ -15,14 +15,21 @@ public class UserLoginRepository : IUserLoginRepository
 
     public async Task<UserLoginEntity?> GetByProviderAsync(string providerName, string providerUserId)
     {
+        var normalizedProviderName = IdentityValueNormalizer.Normalize(providerName);
         return await _dbContext.UserLogins
-            .FirstOrDefaultAsync(l => l.ProviderName == providerName && l.ProviderUserId == providerUserId);
+            .FirstOrDefaultAsync(l =>
+                l.ProviderNameNormalized == normalizedProviderName &&
+                l.ProviderUserId == providerUserId);
     }
 
     public async Task<UserLoginEntity?> GetBySmsPhoneAsync(string phone)
     {
+        var normalizedProviderName =
+            IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms);
         return await _dbContext.UserLogins
-            .FirstOrDefaultAsync(l => l.ProviderName == IdentityConstants.AuthMethodSms && l.ProviderUserId == phone);
+            .FirstOrDefaultAsync(l =>
+                l.ProviderNameNormalized == normalizedProviderName &&
+                l.ProviderUserId == phone);
     }
 
     public Task AddAsync(UserLoginEntity userLogin)
