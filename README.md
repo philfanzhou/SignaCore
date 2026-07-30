@@ -1,6 +1,6 @@
 # QuantumZhou.Identity
 
-统一身份与鉴权微服务（Identity Provider），基于 .NET 8 和 gRPC 构建，负责集中处理用户认证并签发标准化 JWT。
+统一身份与鉴权微服务（Identity Provider），基于 .NET 8 和 HTTP API 构建，负责集中处理用户认证并签发标准化 JWT。
 
 ## 设计原则
 
@@ -14,19 +14,19 @@
 ### 开发环境运行
 
 ```bash
-cd src/Host
+cd backend/Host
 dotnet run
 ```
 
 服务默认监听：
 - HTTP: `http://0.0.0.0:5002`
-- Admin API: `http://0.0.0.0:5010`
+- Admin API 与管理控制台复用 HTTP 端口 `5002`
 
 ### Docker 部署
 
 ```bash
 # 构建镜像
-./script/build-script/01-identity.build.sh
+bash build.sh
 ```
 
 ### 环境要求
@@ -63,18 +63,18 @@ sequenceDiagram
     participant Service as 业务微服务
 
     Client->>Gateway: 登录请求（账密/验证码/微信）
-    Gateway->>Auth: gRPC GetToken
+    Gateway->>Auth: HTTP POST /api/auth/token
     Auth->>Auth: 验证凭据，签发 JWT
     Auth-->>Gateway: 返回 AccessToken + RefreshToken
     Gateway-->>Client: 返回 Token
 
     Client->>Gateway: 业务请求（携带 Bearer Token）
-    Gateway->>Service: gRPC 调用（Token 透传）
+    Gateway->>Service: 业务请求（Token 透传）
     Service->>Service: 本地 JwtBearer 校验签名
     Service-->>Gateway: 返回业务数据
 ```
 
-- **纯内部 gRPC 服务**：不直接暴露公网，通过网关层调用
+- **HTTP 身份服务**：通过标准 Token、OIDC discovery 和 JWKS 端点提供认证能力
 - **零代码引用隔离**：业务微服务无需引用 Identity 程序集，仅通过 `/.well-known/jwks` 拉取公钥
 - **动态回调权限注入**：业务系统可注册回调接口，Identity 在签发 Token 时动态获取业务权限并注入 JWT
 - **管理接口**：管理员能力统一通过独立端口的 Web Admin API 提供，支持用户管理、应用注册、回调管理和令牌吊销
@@ -130,7 +130,7 @@ AppId/AppSecret 通过 `X-Admin-AppId` / `X-Admin-AppSecret` 请求头传递。�
 - **结构化日志**：所有核心服务均注入 `ILogger`，记录认证、回调、密钥操作等安全事件
 - **登录锁定**：支持登录失败次数限制和账户锁定（可配置）
 - **网关验证**：所有请求必须通过 AppId/AppSecret 验证
-- **速率限制**：gRPC 请求和 JWKS 端点均支持速率限制（默认 20 请求/分钟/客户端）
+- **速率限制**：认证请求和 JWKS 端点均支持速率限制（默认 20 请求/分钟/客户端）
 
 ## 详细设计文档
 
@@ -211,7 +211,7 @@ Prometheus 指标端点：`/metrics`
 
 开发模式下：
 
-- 后端 Admin API 默认地址：`http://localhost:5010`
+- 后端 Admin API 默认地址：`http://localhost:5002`
 - 前端开发服务器默认地址：`http://localhost:5173`
 - 管理端请求头需要携带 `X-Admin-AppId` 和 `X-Admin-AppSecret`
 - 管理端不再提供单独的 gRPC 接口

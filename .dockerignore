@@ -1,0 +1,12 @@
+.git
+.gitignore
+.idea
+.vscode
+admin_frontend/node_modules
+admin_frontend/dist
+backend/**/bin
+backend/**/obj
+backend/**/TestResults
+data
+*.user
+*.suo

@@ -1,18 +1,16 @@
-// Ruoyu.Study - Identity Service Pipeline
+// QuantumZhou.Identity - Service Pipeline
 //
 // Per-service pipeline for QuantumZhou.Identity:
 //   1. Preflight — verify docker + dotnet + repo access
-//   2. Build    — reuse script/build-script/01-identity.build.sh (docker build)
+//   2. Build    — build the standalone repository image
 //   3. UT       — run unit tests directly on host via dotnet SDK 8.0
 //   4. Deploy   — restart the ruoyu-identity container via start.sh
 //   5. Smoke    — health check + admin login
 //
-// Jenkins runs inside the ruoyu-jenkins:custom Docker container (see
-// script/env-script/07-jenkins/). The repo is mounted read-only at /srv/repo.
-// .NET 8 SDK is pre-installed in the custom image. Docker CLI reaches the host
-// daemon via the bind-mounted /var/run/docker.sock.
+// The repository is mounted read-only at /srv/repo by default. .NET 8 SDK,
+// Docker CLI, and access to the host Docker socket are required on the agent.
 //
-// Build context = repo root (needed because the Dockerfile COPYs ruoyu.common).
+// Build context = this repository root.
 
 pipeline {
     agent any
@@ -26,8 +24,8 @@ pipeline {
 
     environment {
         REPO_DIR         = "${env.REPO_DIR ?: '/srv/repo'}"
-        SERVICE_DIR      = "${env.REPO_DIR}/src/services/QuantumZhou.Identity"
-        BUILD_SCRIPT     = "${env.REPO_DIR}/script/build-script/01-identity.build.sh"
+        SERVICE_DIR      = "${env.REPO_DIR ?: '/srv/repo'}"
+        BUILD_SCRIPT     = "${env.REPO_DIR ?: '/srv/repo'}/build.sh"
         TEST_PROJ        = "${env.SERVICE_DIR}/backend/Tests/unit/QuantumZhou.Identity.Tests.csproj"
         INTEGRATION_PROJ = "${env.SERVICE_DIR}/backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj"
         START_SCRIPT     = "${env.SERVICE_DIR}/start.sh"
@@ -57,7 +55,7 @@ pipeline {
                     echo "=== dotnet SDK ==="
                     dotnet --version
                     echo ""
-                    echo "=== Repo symlink ==="
+                    echo "=== Repository ==="
                     ls -la "$REPO_DIR" | head -10
                     echo ""
                     echo "=== Identity source tree ==="
@@ -76,7 +74,7 @@ pipeline {
             steps {
                 sh '''
                     set -e
-                    cd "$REPO_DIR"
+                    cd "$SERVICE_DIR"
                     bash "$BUILD_SCRIPT"
                     docker images quantumzhou.identity --format '{{.Repository}}:{{.Tag}} {{.CreatedSince}} {{.Size}}'
                 '''
@@ -89,13 +87,7 @@ pipeline {
                     set -e
                     mkdir -p "$REPORT_DIR"
                     cd "$SERVICE_DIR"
-                    # Clean ALL stale obj/bin under ruoyu.common and this service —
-                    # a previous Docker build leaves incomplete project.assets.json
-                    # (empty projectReferences -> CS0234) and missing ref DLLs
-                    # (obj/Release/net8.0/ref/ empty -> CS0006) for every transitively
-                    # restored project, not just Tests.
-                    COMMON_DIR="$REPO_DIR/src/ruoyu.common"
-                    find "$COMMON_DIR" -type d \\( -name obj -o -name bin \\) -prune -exec rm -rf {} + 2>/dev/null || true
+                    # Clean stale local build outputs before restoring.
                     find "$SERVICE_DIR" -type d \\( -name obj -o -name bin \\) -prune -exec rm -rf {} + 2>/dev/null || true
                     # Restore + test directly on host (no throwaway container needed).
                     dotnet restore backend/Tests/unit/QuantumZhou.Identity.Tests.csproj \

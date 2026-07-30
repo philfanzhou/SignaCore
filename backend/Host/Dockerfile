@@ -4,9 +4,9 @@ ARG NPM_REGISTRY=https://mirrors.huaweicloud.com/repository/npm/
 ENV npm_config_registry=${NPM_REGISTRY}
 ENV npm_config_replace_registry_host=always
 WORKDIR /app
-COPY src/services/QuantumZhou.Identity/admin_frontend/package*.json ./
+COPY admin_frontend/package*.json ./
 RUN npm ci --registry=${NPM_REGISTRY}
-COPY src/services/QuantumZhou.Identity/admin_frontend/ ./
+COPY admin_frontend/ ./
 RUN npm run build
 
 # ========== Stage 2: Build & Publish Backend ==========
@@ -15,18 +15,18 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
 # Copy csproj files first for layer cache optimization
-COPY src/services/QuantumZhou.Identity/backend/Database/QuantumZhou.Identity.Database.csproj src/services/QuantumZhou.Identity/backend/Database/
-COPY src/services/QuantumZhou.Identity/backend/Database.Migrations.MySql/QuantumZhou.Identity.Database.Migrations.MySql.csproj src/services/QuantumZhou.Identity/backend/Database.Migrations.MySql/
-COPY src/services/QuantumZhou.Identity/backend/Database.Migrations.Sqlite/QuantumZhou.Identity.Database.Migrations.Sqlite.csproj src/services/QuantumZhou.Identity/backend/Database.Migrations.Sqlite/
-COPY src/services/QuantumZhou.Identity/backend/Domain/QuantumZhou.Identity.Domain.csproj src/services/QuantumZhou.Identity/backend/Domain/
-COPY src/services/QuantumZhou.Identity/backend/Service/QuantumZhou.Identity.Service.csproj src/services/QuantumZhou.Identity/backend/Service/
-COPY src/services/QuantumZhou.Identity/backend/Host/QuantumZhou.Identity.Host.csproj src/services/QuantumZhou.Identity/backend/Host/
-RUN dotnet restore "src/services/QuantumZhou.Identity/backend/Host/QuantumZhou.Identity.Host.csproj"
+COPY backend/Database/QuantumZhou.Identity.Database.csproj backend/Database/
+COPY backend/Database.Migrations.MySql/QuantumZhou.Identity.Database.Migrations.MySql.csproj backend/Database.Migrations.MySql/
+COPY backend/Database.Migrations.Sqlite/QuantumZhou.Identity.Database.Migrations.Sqlite.csproj backend/Database.Migrations.Sqlite/
+COPY backend/Domain/QuantumZhou.Identity.Domain.csproj backend/Domain/
+COPY backend/Service/QuantumZhou.Identity.Service.csproj backend/Service/
+COPY backend/Host/QuantumZhou.Identity.Host.csproj backend/Host/
+RUN dotnet restore "backend/Host/QuantumZhou.Identity.Host.csproj"
 
 # Copy source code and publish
-COPY src/services/QuantumZhou.Identity/ src/services/QuantumZhou.Identity/
-COPY --from=frontend-build /app/dist src/services/QuantumZhou.Identity/backend/Host/wwwroot
-RUN dotnet publish "src/services/QuantumZhou.Identity/backend/Host/QuantumZhou.Identity.Host.csproj" -c $BUILD_CONFIGURATION -o /app/publish --no-restore /p:UseAppHost=false
+COPY backend/ backend/
+COPY --from=frontend-build /app/dist backend/Host/wwwroot
+RUN dotnet publish "backend/Host/QuantumZhou.Identity.Host.csproj" -c $BUILD_CONFIGURATION -o /app/publish --no-restore /p:UseAppHost=false
 
 # ========== Stage 3: Runtime ==========
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
