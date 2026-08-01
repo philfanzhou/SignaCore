@@ -104,6 +104,8 @@ sequenceDiagram
 | `security_keys` | RSA 密钥对（私钥加密存储） |
 | `otps` | 短信登录一次性密码记录 |
 | `login_attempts` | 登录尝试跟踪和锁定记录 |
+| `login_histories` | 登录历史记录（保留 90 天） |
+| `audit_logs` | 审计日志（保留 365 天） |
 
 详细表结构设计见 [数据库设计](docs/database/README.md)
 
@@ -130,7 +132,7 @@ AppId/AppSecret 通过 `X-Admin-AppId` / `X-Admin-AppSecret` 请求头传递。�
 - **结构化日志**：所有核心服务均注入 `ILogger`，记录认证、回调、密钥操作等安全事件
 - **登录锁定**：支持登录失败次数限制和账户锁定（可配置）
 - **网关验证**：所有请求必须通过 AppId/AppSecret 验证
-- **速率限制**：认证请求和 JWKS 端点均支持速率限制（默认 20 请求/分钟/客户端）
+- **速率限制**：全局按客户端 IP 限流 100 请求/分钟，JWKS 端点另有独立限流 60 请求/分钟；`/health`、`/metrics`、`/.well-known/jwks` 不进入全局限流。限流参数在代码中硬编码，无配置键
 
 ## 详细设计文档
 
@@ -164,10 +166,6 @@ AppId/AppSecret 通过 `X-Admin-AppId` / `X-Admin-AppSecret` 请求头传递。�
     "AppId": "",
     "AppSecret": "",
     "ApiBaseUrl": "https://api.weixin.qq.com"
-  },
-  "RateLimiting": {
-    "PermitLimitPerClient": 20,
-    "WindowSeconds": 60
   },
   "BootstrapApps": {
     "FilePath": "/app/data/bootstrap-apps.json"
@@ -244,4 +242,4 @@ Identity 服务启动时**无条件自动执行** EF Core 迁移和种子逻辑�
 
 ### Q: JWKS 端点访问频率限制是多少？
 
-默认 20 请求/分钟/客户端，超过限制会返回 429 错误。
+60 请求/分钟，超过限制会返回 429 错误。该端点不受全局限流（100 请求/分钟/客户端 IP）约束。

@@ -1,0 +1,99 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+QuantumZhou.Identity 是统一身份与鉴权微服务（.NET 8 + ASP.NET Core），负责集中认证并签发 RS256 JWT；业务微服务只通过 `/.well-known/jwks` 拉公钥本地校验，不引用本仓库任何程序集。仓库文档、注释与提交信息以中文为主。
+
+## 常用命令
+
+```bash
+# 运行（默认 HTTP 5002，Admin API / 管理控制台 SPA 复用同一端口）
+cd backend/Host && dotnet run
+
+# 构建镜像（多阶段：Vue 前端 → dotnet publish；构建上下文是仓库根）
+bash build.sh
+
+# 部署（停旧容器 → 起新容器 → 跟随日志；末尾 docker logs -f 会阻塞）
+bash start.sh
+
+# 单元测试
+dotnet test backend/Tests/unit/QuantumZhou.Identity.Tests.csproj
+
+# 跑单个测试
+dotnet test backend/Tests/unit/QuantumZhou.Identity.Tests.csproj --filter 'FullyQualifiedName~KeyManagerTests'
+
+# 数据库契约测试矩阵（PostgreSQL/MySQL/MariaDB via Testcontainers + 文件 SQLite），默认跳过
+RUN_IDENTITY_DATABASE_CONTRACTS=true \
+dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj \
+  --filter 'FullyQualifiedName~DatabaseContractTests'
+
+# 管理前端
+cd admin_frontend && npm install && npm run dev   # :5173，代理到 :5002
+```
+
+CI（Jenkinsfile）：Preflight → 构建镜像 → 单元测试 → 数据库契约矩阵 → `start.sh` 部署 → smoke（OIDC discovery + admin 登录）。
+
+## 架构要点
+
+### 项目分层
+
+`Host`（ASP.NET Core 宿主、Controllers、中间件、启动初始化）→ `Domain`（validators、KeyManager、TokenService、各类 Service）→ `Database`（EF Core 实体 / DbContext / 仓储 / PostgreSQL 迁移链）。`Database.Migrations.MySql` 与 `Database.Migrations.Sqlite` 只装迁移。`backend/Service` 是空壳项目（只有 csproj，无源码），不要往里加东西。
+
+`Host` 对两个测试程序集开放 `InternalsVisibleTo`，`Program` 声明为 `public partial class`，供 `WebApplicationFactory` 集成测试使用。
+
+### 认证：grant_type 策略模式
+
+`IIdentityValidator` 每个实现声明一个 `GrantType`，在 `ServiceCollectionExtensions` 里注册为 `IIdentityValidator`，`ValidatorFactory` 由注入的集合自动建字典。**新增登录方式只需实现接口 + 注册一行 DI，不改 AuthController**。已实现 `password` / `refresh_token`，`sms` / `wechat_code` 是骨架（缺短信网关与微信开放平台配置）。
+
+三套并存的调用者身份模型，别混：
+
+| 面向 | 认证方式 | 端点 |
+|---|---|---|
+| 业务网关 / 微服务 | `X-Admin-AppId` + `X-Admin-AppSecret` 头（BCrypt 校验，`GatewayValidationService`） | `/api/auth/*`、`/api/gateway/*` |
+| 管理控制台 | Cookie `qz_admin_session` + `AdminSession` 授权策略（要求 `admin_access` claim） | `/api/admin/*` |
+| 终端用户 | JwtBearer + `UserProfile` 策略 | `/api/profile/*` |
+
+`/api/auth/token` 失败时返回 **HTTP 200 + `TokenResponse{Success=false, Message=...}`**，不是 4xx；错误文案是契约，见 `docs/modules/Auth/GetToken/06-CONVENTIONS.md`。`/api/auth/token` 上的 AppId 头是可选的：带了就校验，不带则跳过网关校验（DocLibrary 的 refresh 流程依赖这一点）。
+
+### 多数据库 Provider
+
+单一镜像，启动时按 `Database:Provider`（`PostgreSQL` / `MySQL` / `MariaDB` / `SQLite`）选一个 provider，不支持运行时切换、不做跨库搬迁。三条独立迁移链：
+
+| Provider | 迁移程序集 |
+|---|---|
+| PostgreSQL（默认） | `QuantumZhou.Identity.Database` |
+| MySQL / MariaDB | `QuantumZhou.Identity.Database.Migrations.MySql` |
+| SQLite | `QuantumZhou.Identity.Database.Migrations.Sqlite` |
+
+**改实体必须同时给三条链加迁移**，每个迁移项目各自带 `IDesignTimeDbContextFactory`（通过 `Database__Provider` / `Database__ServerVersion` / `Database__ConnectionString` 环境变量取连接信息）。迁移必须 expand-contract，保证滚动部署时相邻版本共存。SQLite 只支持单实例 + 实例本地磁盘。
+
+配置契约见 `docs/adr/0001-multi-provider-persistence.md`：旧键（`PostgreSql:*`、`ConnectionStrings:Default`、`Database:Name`）会在 `BindDatabaseOptions` 里直接抛异常，没有兼容分支；配置缺失一律 fail-fast，不猜不降级。
+
+### 大小写规范化
+
+需要大小写不敏感的值（登录用户名、锁定用户名、AppId、ProviderName、昵称/备注搜索）统一用 `IdentityValueNormalizer.Normalize`（`FormC` + `ToUpperInvariant`）写入 `*_normalized` 列，唯一索引和查询走规范化列，**不依赖数据库 collation**；原始值保留展示。Refresh Token、AppSecret、`ProviderUserId`、`kid`、CorrelationId 保持大小写敏感。写涉及这些字段的查询时，永远比对 `XxxNormalized`。
+
+### 启动顺序（`Program.cs`）
+
+1. `AddConsulIfEnabled` 从 Consul KV `config/ruoyu`（含 `identity.json`）加载配置，失败回退本地缓存（`./data/consul`）；Consul 固定启用，`CONSUL_HTTP_ADDR` / `CONSUL_TOKEN` 等环境变量覆盖。
+2. Serilog（Console + Loki，地址来自 `Loki:Uri`）。
+3. `AddIdentityInfrastructure`：DI、限流、CORS、认证策略、OpenTelemetry。
+4. `DatabaseInitializer.InitializeAsync`：建库 → 取 provider 级迁移锁（PG `pg_advisory_lock`，MySQL/MariaDB `GET_LOCK`）→ PostgreSQL schema reconciliation 与迁移历史 stamping → `IdentityNormalizationMigration`（碰撞预检 + 回填后再 `MigrateAsync`）→ bootstrap admin → 可选 `bootstrap-apps.json` 预置。迁移**无条件自动执行**，失败即启动失败。
+5. `await keyManager.InitializationCompleted` 后才接请求，随后挂上 JwtBearer 的 `IssuerSigningKeyResolver`。
+
+`data/` 目录（`master-key/`、`consul/`）由程序自建。RSA 私钥用 AES-GCM 加密存库，主密钥优先取环境变量 `RSA_MASTER_KEY`，缺失时落到 `data/master-key/master-key.json`（生产必须显式设置）。
+
+### 中间件顺序（不要随意调整）
+
+`CorrelationIdMiddleware` → `ExceptionHandlingMiddleware` → `UseCors` → `UseAuthentication` → `SensitiveHeaderRedactionMiddleware` → `UseAuthorization` → `UseRateLimiter` → `/health` → JWKS 专属限流 → `MapControllers`。CorrelationId 必须最靠前（CORS 预检和认证失败响应也要在 scope 内）；脱敏中间件必须在认证之后（`X-Admin-AppSecret` 此时已被消费）。SPA 静态文件通过 `MapWhen` 兜底，排除 `/api`、`/.well-known`、`/health`、`/metrics`。
+
+## 编码约定
+
+- 异常不回显给调用方：`ExceptionHandlingMiddleware` 把 `ArgumentException`→400、`InvalidOperationException`→409、其他→500，响应体是固定脱敏文案，原始异常只进结构化日志。
+- 日志用结构化占位符，异常传对象（`LogError(ex, ...)`）。手机号、微信 OpenId 必须过 `Domain.SensitiveDataMasker`；Token / AppSecret / 验证码 / 密码一律不记录。数据库字段不受此约束。
+- 限流拒绝要打 Warning，带 ClientIp 与命中的限流策略。
+- 常量放 `Database/IdentityConstants.cs`；grant_type 用 snake_case，AuthMethod 用 PascalCase。
+
+## 文档地图
+
+`docs/README.md` 是索引。改功能前先看对应模块目录 `docs/modules/<域>/<功能>/`（01-FEATURE → 06-CONVENTIONS 六件套）；`docs/overview/` 服务级总览，`docs/database/` 表结构与迁移史，`docs/development/`（LocalSetup / Verification / ErrorHandling），`docs/adr/` 架构决策。`CONTEXT.md` 定义限界上下文用语——本仓库只有 **Account / Credential / Token / App Registration**，不出现 Student、Teacher、Role 等业务身份概念。
