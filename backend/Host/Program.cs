@@ -10,6 +10,7 @@ using QuantumZhou.Identity.Host;
 using QuantumZhou.Identity.Host.Configuration;
 using QuantumZhou.Identity.Host.Controllers;
 using QuantumZhou.Identity.Host.Middleware;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,6 +32,20 @@ if (!string.IsNullOrWhiteSpace(lokiUri))
 }
 
 builder.Host.UseAgentSerilog("QuantumZhou.Identity");
+
+// 未处理异常会让进程立刻退出，而 Loki Sink 是批量异步投递的，缓冲区里的日志
+// （包括致命异常本身）会整批丢失，只能进容器 stdout。正常关停时 host 释放
+// logger 会刷盘，这里补上崩溃退出这条路径，让启动失败的原因也能进 Loki。
+// UseAgentSerilog 使用默认的 preserveStaticLogger: false，Log.Logger 即宿主实际使用的 logger。
+AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+{
+    if (args.ExceptionObject is Exception exception)
+    {
+        Log.Fatal(exception, "Application terminated unexpectedly");
+    }
+
+    Log.CloseAndFlush();
+};
 
 var httpPort = builder.Configuration.GetValue<int?>("Endpoints:Http") ?? 5002;
 

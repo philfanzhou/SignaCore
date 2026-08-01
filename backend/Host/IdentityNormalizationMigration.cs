@@ -60,10 +60,42 @@ internal static class IdentityNormalizationMigration
         await dbContext.Database.MigrateAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// 把 expand 迁移新增的 *_normalized 列从 NULL 填成非空值。
+    /// expand 迁移只加列不回填，而实体把这些列映射为非空 string，
+    /// 存量行会在下面的 ToListAsync 上抛 "Column '...' is null"，
+    /// 导致回填代码被它自己要回填的 NULL 卡死（空库无行，所以只在有数据的库上暴露）。
+    /// 这里写入的值随后会被 C# 侧用 IdentityValueNormalizer 重算覆盖，
+    /// 唯一性校验也始终基于源列重算，因此本步骤只需保证列非空。
+    /// </summary>
+    private static async Task SeedNormalizedColumnsAsync(
+        IdentityDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            UPDATE password_credentials
+               SET username_normalized = upper(normalize(username, NFC))
+             WHERE username_normalized IS NULL;
+            UPDATE login_attempts
+               SET username_normalized = upper(normalize(username, NFC))
+             WHERE username_normalized IS NULL;
+            UPDATE app_registrations
+               SET app_id_normalized = upper(normalize(app_id, NFC))
+             WHERE app_id_normalized IS NULL;
+            UPDATE user_logins
+               SET provider_name_normalized = upper(normalize(provider_name, NFC))
+             WHERE provider_name_normalized IS NULL;
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
     private static async Task ValidateAndBackfillAsync(
         IdentityDbContext dbContext,
         CancellationToken cancellationToken)
     {
+        await SeedNormalizedColumnsAsync(dbContext, cancellationToken);
+
         var credentials = await dbContext.PasswordCredentials
             .ToListAsync(cancellationToken);
         EnsureUnique(
