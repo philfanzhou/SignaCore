@@ -13,6 +13,7 @@ using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Models;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Validators;
+using QuantumZhou.Identity.Host.Http;
 using QuantumZhou.Identity.Host.Models;
 
 namespace QuantumZhou.Identity.Host.Controllers;
@@ -586,11 +587,5 @@ public class AdminController : ControllerBase
         return (actorId, nameClaim);
     }
 
-    private string? GetClientIp()
-    {
-        var forwarded = HttpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault();
-        if (!string.IsNullOrEmpty(forwarded))
-            return forwarded.Split(',')[0].Trim();
-        return HttpContext.Connection.RemoteIpAddress?.ToString();
-    }
+    private string? GetClientIp() => HttpContext.GetClientIp();
 }

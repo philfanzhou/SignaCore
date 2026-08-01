@@ -11,6 +11,7 @@ using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Services.Sms;
 using QuantumZhou.Identity.Domain.Validators;
+using QuantumZhou.Identity.Host.Http;
 using QuantumZhou.Identity.Host.Models;
 
 namespace QuantumZhou.Identity.Host.Controllers;
@@ -501,27 +502,13 @@ public class AuthController : ControllerBase
         return $"User_{account.Id.ToString()[..8]}";
     }
 
-    private string? GetAppIdHeader() =>
-        HttpContext.Items[GatewayController.AppIdHeader] as string
-        ?? Request.Headers[GatewayController.AppIdHeader].FirstOrDefault();
+    private string? GetAppIdHeader() => HttpContext.GetAppId();
 
-    private string? GetAppSecretHeader() =>
-        HttpContext.Items[GatewayController.AppSecretHeader] as string
-        ?? Request.Headers[GatewayController.AppSecretHeader].FirstOrDefault();
+    private string? GetAppSecretHeader() => HttpContext.GetAppSecret();
 
-    private string? GetClientIp() =>
-        Request.Headers["X-Forwarded-For"].FirstOrDefault()?.Split(',')[0].Trim()
-        ?? HttpContext.Connection.RemoteIpAddress?.ToString();
+    private string? GetClientIp() => HttpContext.GetClientIp();
 
-    private string? GetUserAgent() => Request.Headers.UserAgent.ToString();
+    private string? GetUserAgent() => HttpContext.GetUserAgent();
 
-    /// <summary>
-    /// 取本次请求的 CorrelationId。必须复用 <see cref="CorrelationIdMiddleware"/> 已经生成、
-    /// 并写入响应头与日志 scope 的那一个，不能在这里另生成——否则调用方没带 x-correlation-id 时，
-    /// 审计表里记的 ID 和日志/响应头里的 ID 不是同一个，事后无法串起来。
-    /// </summary>
-    private string GetCorrelationId() =>
-        HttpContext.Items[CorrelationIdMiddleware.HttpContextItemsKey] as string
-        ?? Request.Headers[CorrelationIdMiddleware.CorrelationIdHeader].FirstOrDefault()
-        ?? Guid.NewGuid().ToString("N");
+    private string GetCorrelationId() => HttpContext.GetCorrelationId();
 }

@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +9,7 @@ using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain.Models;
 using QuantumZhou.Identity.Domain.Services;
+using QuantumZhou.Identity.Host.Http;
 using QuantumZhou.Identity.Host.Controllers;
 using QuantumZhou.Identity.Host.Models;
 using Xunit;
@@ -47,15 +48,15 @@ public class GatewayControllerTests : IDisposable
 
     private void SetGatewayHeaders(string? appId, string? appSecret)
     {
-        _controller.HttpContext.Request.Headers.Remove(GatewayController.AppIdHeader);
-        _controller.HttpContext.Request.Headers.Remove(GatewayController.AppSecretHeader);
+        _controller.HttpContext.Request.Headers.Remove(IdentityHeaders.AppId);
+        _controller.HttpContext.Request.Headers.Remove(IdentityHeaders.AppSecret);
         if (appId != null)
         {
-            _controller.HttpContext.Request.Headers[GatewayController.AppIdHeader] = appId;
+            _controller.HttpContext.Request.Headers[IdentityHeaders.AppId] = appId;
         }
         if (appSecret != null)
         {
-            _controller.HttpContext.Request.Headers[GatewayController.AppSecretHeader] = appSecret;
+            _controller.HttpContext.Request.Headers[IdentityHeaders.AppSecret] = appSecret;
         }
     }
 

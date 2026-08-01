@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using QuantumZhou.Identity.Domain.Models;
 using QuantumZhou.Identity.Domain.Services;
+using QuantumZhou.Identity.Host.Http;
 using QuantumZhou.Identity.Host.Models;
 
 namespace QuantumZhou.Identity.Host.Controllers;
@@ -17,9 +18,6 @@ namespace QuantumZhou.Identity.Host.Controllers;
 [ApiController]
 public class GatewayController : ControllerBase
 {
-    internal const string AppIdHeader = "X-Admin-AppId";
-    internal const string AppSecretHeader = "X-Admin-AppSecret";
-
     private readonly ILogger<GatewayController> _logger;
 
     public GatewayController(ILogger<GatewayController> logger)
@@ -85,10 +83,8 @@ public class GatewayController : ControllerBase
                 HttpContext.Connection.RemoteIpAddress);
         }
 
-        var appId = HttpContext.Request.Headers[AppIdHeader].FirstOrDefault();
-        // AppSecret is moved from headers to HttpContext.Items by the sensitive header redaction middleware
-        var appSecret = HttpContext.Items[AppSecretHeader] as string
-            ?? HttpContext.Request.Headers[AppSecretHeader].FirstOrDefault();
+        var appId = HttpContext.GetAppId();
+        var appSecret = HttpContext.GetAppSecret();
 
         if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(appSecret))
         {
