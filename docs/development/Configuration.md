@@ -21,7 +21,7 @@
 
 > Consul 配置的详细语义、启动时序、缓存机制、KV 分层策略请见 [ConsulIntegration.md](./ConsulIntegration.md)。
 >
-> **当前约束**：数据库选择是 Identity 项目级配置，由 `Database__Provider`、`Database__ServerVersion` 和 `Database__ConnectionString` 注入。Consul 共享快照中的旧 `PostgreSql:*` 键会被 Identity 过滤，不参与数据库配置。`RSA_MASTER_KEY`、管理员引导密码、AppSecret 等启动密钥仍保留在环境变量或文件。
+> **当前约束**：容器部署的数据库配置由 Consul `config/ruoyu/identity.json` 提供，使用 `Database:Provider`、`Database:ServerVersion` 和 `Database:ConnectionString`。环境变量 `Database__*` 仅用于显式覆盖；Consul 共享快照中的旧 `PostgreSql:*` 键会被 Identity 过滤，不参与数据库配置。`RSA_MASTER_KEY`、管理员引导密码、AppSecret 等启动密钥仍保留在环境变量或文件。
 >
 > **启动诊断日志**：服务启动时会输出 Consul 拉取过程和最终生效配置摘要。`CONSUL_TOKEN`、数据库密码等敏感值只打印脱敏摘要，不打印完整明文。
 

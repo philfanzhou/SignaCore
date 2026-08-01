@@ -32,7 +32,7 @@
 
 > `CONSUL_SERVICE_NAME` 通常使用应用默认值，无需由 `start.sh` 重复注入。
 >
-> `start.sh` 使用 `Database__Provider`、`Database__ServerVersion` 和 `Database__ConnectionString` 注入完整数据库配置。数据库选择属于 Identity 项目级配置，不再从 Consul 的共享 `PostgreSql:*` 键拼装。
+> `start.sh` 不注入任何 `Database__*` 环境变量。Identity 从 Consul 的 `config/ruoyu/identity.json` 读取完整的 `Database:Provider`、`Database:ServerVersion` 和 `Database:ConnectionString`；这会覆盖 `appsettings.json` 中仅用于本地开发的回退值。旧的共享 `PostgreSql:*` 键会被 Identity 忽略。
 >
 > Consul 本地缓存默认写入容器内 `./data/consul`。`start.sh` 不再默认挂载宿主机目录；如果确实需要在“删除并重建容器”后保留缓存，再手动添加 volume。
 >
@@ -63,12 +63,14 @@ curl http://localhost:5002/consul/status
 
 ## 数据库连接
 
+`script/env-script/06-consul/config/kv/identity.json`：
+
 ```json
 {
   "Database": {
     "Provider": "PostgreSQL",
     "ServerVersion": "15",
-    "ConnectionString": "Host=ruoyu-postgres;Port=5432;Database=quantumzhou_identity;Username=postgres;Password=postgres"
+    "ConnectionString": "Host=ruoyu-postgres;Port=5432;Database=ruoyu_identity;Username=postgres;Password=postgres"
   }
 }
 ```

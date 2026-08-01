@@ -19,7 +19,7 @@ Identity 的项目级部署脚本 `start.sh` 固定接入 Consul，不再维护�
 | **Consul 正常** | Consul 可达 | 启动时从 Consul KV 加载配置、注册服务、开启健康检查 |
 | **本地缓存回退** | Consul 不可达 | 使用上一次成功拉取的缓存文件启动；日志告警但不阻断 |
 
-> **原则**：Consul 只承载跨项目共享配置；Identity 的数据库选择和完整连接字符串由 `start.sh` 或部署环境通过新的 `Database__*` 变量提供。共享快照中的旧 `PostgreSql:*` 会被 Identity 过滤。
+> **原则**：Consul 同时承载共享配置与 Identity 的数据库配置。`config/ruoyu/identity.json` 提供完整的 `Database` 节；`start.sh` 不注入 `Database__*`。共享快照中的旧 `PostgreSql:*` 会被 Identity 过滤。
 
 ## 2. 启动时序
 
@@ -311,9 +311,6 @@ CONSUL_TOKEN="${CONSUL_TOKEN:-}"
 docker run -d \
   ...原有参数... \
   --add-host=host.docker.internal:host-gateway \
-  -e Database__Provider=PostgreSQL \
-  -e Database__ServerVersion=15 \
-  -e 'Database__ConnectionString=Host=ruoyu-postgres;Port=5432;Database=quantumzhou_identity;Username=postgres;Password=postgres' \
   -e CONSUL_HTTP_ADDR="${CONSUL_HTTP_ADDR}" \
   -e CONSUL_TOKEN="${CONSUL_TOKEN}" \
   "$IMAGE_NAME"
@@ -338,6 +335,7 @@ CONSUL_HTTP_ADDR=http://localhost:8500
 # 推荐维护的共享配置：
 # - script/env-script/06-consul/config/kv/shared.json
 # - script/env-script/06-consul/config/kv/service-endpoints.json
+# - script/env-script/06-consul/config/kv/identity.json
 ```
 
 > 首次部署后沉淀为 `script/env-script/06-consul/start.sh` 统一复用，业务配置内容保存在 `script/env-script/06-consul/config/kv/`，采用扁平文件名编码目标 key。
@@ -354,9 +352,6 @@ docker run -d \
   -e TZ=Asia/Shanghai \
   -e APP_TITLE="QuantumZhou.Identity" \
   -e ASPNETCORE_ENVIRONMENT=Production \
-  -e Database__Provider=PostgreSQL \
-  -e Database__ServerVersion=15 \
-  -e 'Database__ConnectionString=Host=ruoyu-postgres;Port=5432;Database=quantumzhou_identity;Username=postgres;Password=postgres' \
   -e CONSUL_HTTP_ADDR=host.docker.internal:8500 \
   -e CONSUL_TOKEN="<acl-token>" \
   -v "$(pwd)/data/identity:/app/data" \

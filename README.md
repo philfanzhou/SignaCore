@@ -33,7 +33,7 @@ bash build.sh
 
 - .NET 8 SDK
 - PostgreSQL 15+（默认）、MySQL 8.0/8.4、MariaDB 10.11/11.4，或单实例本地文件 SQLite
-- 环境变量 `Database__Provider`、`Database__ServerVersion` 和 `Database__ConnectionString`
+- Consul KV `config/ruoyu/identity.json` 中的 `Database:Provider`、`Database:ServerVersion` 和 `Database:ConnectionString`（容器部署）
 - 环境变量 `RSA_MASTER_KEY`（用于 RSA 私钥加密，生产环境必须设置）
   - 生成示例：`openssl rand -base64 32`
 
@@ -179,9 +179,9 @@ AppId/AppSecret 通过 `X-Admin-AppId` / `X-Admin-AppSecret` 请求头传递。�
 
 | 变量名 | 说明 | 是否必须 |
 |---|---|---|
-| `Database__Provider` | `PostgreSQL`、`MySQL`、`MariaDB` 或 `SQLite` | 是 |
-| `Database__ServerVersion` | 数据库服务器版本；SQLite 不得设置 | 非 SQLite 必须 |
-| `Database__ConnectionString` | 所选 Provider 的完整连接字符串 | 是 |
+| `Database__Provider` | `PostgreSQL`、`MySQL`、`MariaDB` 或 `SQLite`；仅用于显式覆盖 Consul | 否 |
+| `Database__ServerVersion` | 数据库服务器版本；SQLite 不得设置；仅用于显式覆盖 Consul | 非 SQLite 覆盖时必须 |
+| `Database__ConnectionString` | 所选 Provider 的完整连接字符串；仅用于显式覆盖 Consul | 否 |
 | `RSA_MASTER_KEY` | RSA 私钥加密主密钥 | 生产环境必须 |
 
 ## 监控与指标
