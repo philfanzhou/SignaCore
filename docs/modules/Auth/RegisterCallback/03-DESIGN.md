@@ -4,7 +4,7 @@
 
 ```
 backend/
-├── Host/Controllers/AuthController.cs         # POST /api/auth/callback/register HTTP 端点
+├── Host/Controllers/CallbackRegistrationController.cs         # POST /api/auth/callback/register HTTP 端点
 ├── Host/Models/AuthModels.cs                 # RegisterCallbackRequest / RegisterCallbackResponse DTO
 ├── Domain/Services/CallbackUrlValidator.cs   # 回调 URL 格式验证
 └── Database/
@@ -15,7 +15,7 @@ backend/
 ## 关键接口签名
 
 ```csharp
-// HTTP 端点（AuthController）
+// HTTP 端点（CallbackRegistrationController）
 [HttpPost("callback/register")]
 public async Task<ActionResult<RegisterCallbackResponse>> RegisterCallback(
     [FromBody] RegisterCallbackRequest request)

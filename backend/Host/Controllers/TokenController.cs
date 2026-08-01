@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Security.Claims;
-using BCrypt.Net;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -9,7 +8,6 @@ using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Services;
-using QuantumZhou.Identity.Domain.Services.Sms;
 using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Host.Http;
 using QuantumZhou.Identity.Host.Models;
@@ -17,73 +15,59 @@ using QuantumZhou.Identity.Host.Models;
 namespace QuantumZhou.Identity.Host.Controllers;
 
 /// <summary>
-/// 认证 API。AppId/AppSecret 通过 X-Admin-AppId / X-Admin-AppSecret 请求头传递（与 GatewayController 一致）；
-/// 在 /api/auth/token 上这两个头是可选的，带了才做网关校验。
+/// POST /api/auth/token —— 签发 access token。
+/// AppId/AppSecret 通过 X-Admin-AppId / X-Admin-AppSecret 请求头传递，在本端点上是**可选的**：
+/// 带了才做网关校验（DocLibrary 的 refresh 流程依赖这一点）。
 /// </summary>
 [Route("api/auth")]
 [ApiController]
-public class AuthController : ControllerBase
+public class TokenController : ControllerBase
 {
     private readonly IKeyManager _keyManager;
     private readonly ITokenService _tokenService;
     private readonly JwtOptions _jwtOptions;
-    private readonly IAppRegistrationRepository _appRegistrationRepository;
     private readonly IRefreshTokenService _refreshTokenService;
     private readonly ClaimsResolver _claimsResolver;
     private readonly ValidatorFactory _validatorFactory;
     private readonly ICallbackService? _callbackService;
     private readonly AuthMetrics _authMetrics;
-    private readonly ILogger<AuthController> _logger;
     private readonly GatewayValidationService _gatewayValidator;
-    private readonly CallbackUrlValidator _callbackUrlValidator;
-    private readonly IUnitOfWork _unitOfWork;
     private readonly IAuditService _auditService;
-    private readonly IOtpService _otpService;
-    private readonly ISmsSender _smsSender;
     private readonly IAccountLoginInfoService _accountLoginInfoService;
     private readonly IAccountRepository _accountRepository;
     private readonly AdminBootstrapOptions _adminBootstrapOptions;
+    private readonly ILogger<TokenController> _logger;
 
-    public AuthController(
+    public TokenController(
         IKeyManager keyManager,
         ITokenService tokenService,
         JwtOptions jwtOptions,
-        IAppRegistrationRepository appRegistrationRepository,
         IRefreshTokenService refreshTokenService,
         ClaimsResolver claimsResolver,
         ValidatorFactory validatorFactory,
         ICallbackService? callbackService,
         AuthMetrics authMetrics,
-        ILogger<AuthController> logger,
         GatewayValidationService gatewayValidator,
-        CallbackUrlValidator callbackUrlValidator,
-        IUnitOfWork unitOfWork,
         IAuditService auditService,
-        IOtpService otpService,
-        ISmsSender smsSender,
         IAccountLoginInfoService accountLoginInfoService,
         IAccountRepository accountRepository,
-        IOptions<AdminBootstrapOptions> adminBootstrapOptions)
+        IOptions<AdminBootstrapOptions> adminBootstrapOptions,
+        ILogger<TokenController> logger)
     {
         _keyManager = keyManager;
         _tokenService = tokenService;
         _jwtOptions = jwtOptions;
-        _appRegistrationRepository = appRegistrationRepository;
         _refreshTokenService = refreshTokenService;
         _claimsResolver = claimsResolver;
         _validatorFactory = validatorFactory;
         _callbackService = callbackService;
         _authMetrics = authMetrics;
-        _logger = logger;
         _gatewayValidator = gatewayValidator;
-        _callbackUrlValidator = callbackUrlValidator;
-        _unitOfWork = unitOfWork;
         _auditService = auditService;
-        _otpService = otpService;
-        _smsSender = smsSender;
         _accountLoginInfoService = accountLoginInfoService;
         _accountRepository = accountRepository;
         _adminBootstrapOptions = adminBootstrapOptions.Value;
+        _logger = logger;
     }
 
     /// <summary>
@@ -97,17 +81,17 @@ public class AuthController : ControllerBase
         [FromBody] TokenRequest request,
         CancellationToken cancellationToken)
     {
-        var appId = GetAppIdHeader();
-        var appSecret = GetAppSecretHeader();
+        var appId = HttpContext.GetAppId();
+        var appSecret = HttpContext.GetAppSecret();
         var context = new TokenRequestContext(
             request.GrantType,
-            GetClientIp(),
-            GetUserAgent(),
+            HttpContext.GetClientIp(),
+            HttpContext.GetUserAgent(),
             appId,
-            GetCorrelationId(),
+            HttpContext.GetCorrelationId(),
             Stopwatch.StartNew());
 
-        // Gateway validation (optional, only if AppId header is present)
+        // 网关校验：只有带了 AppId 头才做
         AppRegistrationEntity? app = null;
         if (!string.IsNullOrEmpty(appId))
         {
@@ -197,13 +181,6 @@ public class AuthController : ControllerBase
             }
         }
 
-        // Bootstrap admin super-role: when the authenticated account is the one configured by
-        // AdminBootstrap:Username, unconditionally inject role:admin regardless of which portal the
-        // request comes from (bypasses the callback mechanism). For password grant the already-
-        // validated request.Username is compared; for refresh_token grant the authenticated
-        // AccountEntity.Id is compared against the bootstrap account id (request body username is
-        // ignored to prevent escalation). SMS/WeChat grants are not triggered. Deduplicates: skip if
-        // callback already returned role:admin.
         await InjectBootstrapAdminRoleAsync(request, account, claims);
 
         var rsaKey = _keyManager.GetCurrentKey();
@@ -290,146 +267,18 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/auth/sms-code — 申请短信验证码。
-    /// </summary>
-    [HttpPost("sms-code")]
-    [AllowAnonymous]
-    public async Task<ActionResult<SmsCodeResponse>> RequestSmsCode(
-        [FromBody] SmsCodeRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(request.Phone))
-        {
-            return Ok(new SmsCodeResponse { Success = false, Message = "Phone number is required" });
-        }
-
-        var appId = GetAppIdHeader();
-        var appSecret = GetAppSecretHeader();
-
-        if (!string.IsNullOrEmpty(appId))
-        {
-            var gatewayResult = await _gatewayValidator.ValidateAsync(appId, appSecret);
-            if (!gatewayResult.IsSuccess)
-            {
-                _logger.LogWarning("SMS code request gateway validation failed: AppId={AppId}, Reason={Reason}", appId, gatewayResult.ErrorMessage);
-                return Ok(new SmsCodeResponse { Success = false, Message = gatewayResult.ErrorMessage });
-            }
-        }
-
-        try
-        {
-            var phone = request.Phone.Trim();
-            var maskedPhone = SensitiveDataMasker.MaskPhone(phone);
-            await _otpService.GenerateAndSendAsync(phone, _smsSender);
-            _logger.LogInformation("SMS verification code sent: Phone={Phone}", maskedPhone);
-
-            await _auditService.RecordLoginAsync(null, phone, IdentityConstants.GrantTypeSms, "sms_code_sent",
-                GetClientIp(), GetUserAgent(), null, appId, GetCorrelationId());
-
-            return Ok(new SmsCodeResponse { Success = true, Message = "Verification code sent" });
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogWarning("SMS code request failed: Phone={Phone}, Reason={Reason}", SensitiveDataMasker.MaskPhone(request.Phone), ex.Message);
-            return Ok(new SmsCodeResponse { Success = false, Message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "SMS code request exception: Phone={Phone}", SensitiveDataMasker.MaskPhone(request.Phone));
-            return Ok(new SmsCodeResponse { Success = false, Message = "Failed to send verification code" });
-        }
-    }
-
-    /// <summary>
-    /// POST /api/auth/revoke — 撤销 refresh token。
-    /// </summary>
-    [HttpPost("revoke")]
-    [AllowAnonymous]
-    public async Task<ActionResult<RevokeResponse>> RevokeRefreshToken(
-        [FromBody] RevokeRequest request)
-    {
-        var clientIp = GetClientIp();
-        var correlationId = GetCorrelationId();
-
-        if (string.IsNullOrEmpty(request.RefreshToken))
-        {
-            _logger.LogWarning("Refresh token revocation failed: empty token, ClientIp={ClientIp}, CorrelationId={CorrelationId}", clientIp, correlationId);
-            return Ok(new RevokeResponse { Success = false });
-        }
-
-        var success = await _refreshTokenService.RevokeAsync(request.RefreshToken);
-        _logger.LogInformation("Refresh token revoked: Success={Success}, ClientIp={ClientIp}, CorrelationId={CorrelationId}", success, clientIp, correlationId);
-        return Ok(new RevokeResponse { Success = success });
-    }
-
-    /// <summary>
-    /// POST /api/auth/callback/register — 注册业务系统的 claims 回调 URL。
-    /// </summary>
-    [HttpPost("callback/register")]
-    [AllowAnonymous]
-    public async Task<ActionResult<RegisterCallbackResponse>> RegisterCallback(
-        [FromBody] RegisterCallbackRequest request)
-    {
-        var appId = GetAppIdHeader();
-        var appSecret = GetAppSecretHeader();
-
-        if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(appSecret))
-        {
-            return Ok(new RegisterCallbackResponse { Success = false, Message = "AppId and AppSecret are required" });
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.CallbackUrl))
-        {
-            var urlValidation = _callbackUrlValidator.Validate(request.CallbackUrl);
-            if (!urlValidation.IsValid)
-            {
-                return Ok(new RegisterCallbackResponse { Success = false, Message = $"Invalid callback URL: {urlValidation.ErrorMessage}" });
-            }
-        }
-
-        var app = await _appRegistrationRepository.GetByAppIdAsync(appId);
-        if (app == null)
-        {
-            return Ok(new RegisterCallbackResponse { Success = false, Message = "AppId not registered" });
-        }
-
-        if (!BCrypt.Net.BCrypt.Verify(appSecret, app.AppSecretHash))
-        {
-            _logger.LogWarning("Callback registration failed: AppId={AppId}, Reason=AppSecret mismatch", appId);
-            return Ok(new RegisterCallbackResponse { Success = false, Message = "AppSecret mismatch" });
-        }
-
-        app.CallbackUrl = request.CallbackUrl;
-        app.CallbackExpiresAt = request.TtlSeconds == IdentityConstants.CallbackTtlNeverExpire
-            ? null
-            : DateTimeOffset.UtcNow.AddSeconds(request.TtlSeconds > 0 ? request.TtlSeconds : IdentityConstants.DefaultCallbackTtlSeconds);
-        await _unitOfWork.SaveChangesAsync();
-
-        return Ok(new RegisterCallbackResponse
-        {
-            Success = true,
-            Message = "Registered successfully",
-            ExpiresAt = app.CallbackExpiresAt.HasValue ? app.CallbackExpiresAt.Value.ToUnixTimeSeconds() : 0
-        });
-    }
-
-    /// <summary>
-    /// Injects <c>role:admin</c> into <paramref name="claims"/> when the authenticated account is
-    /// the bootstrap admin configured by <see cref="AdminBootstrapOptions.Username"/>, unless the
-    /// role is already present. This is the "super admin" shortcut that bypasses the portal callback
-    /// mechanism, so the bootstrap admin account always receives the admin role regardless of which
-    /// portal it logs in from or refreshes through.
+    /// 当已认证账号就是 <see cref="AdminBootstrapOptions.Username"/> 配置的 bootstrap admin 时，
+    /// 无条件注入 <c>role:admin</c>（已存在则跳过）。这是绕过门户回调机制的"超管"捷径，
+    /// 使 bootstrap admin 无论从哪个门户登录或刷新都能拿到 admin 角色。
     /// <para>
-    /// Identity is resolved from the already-validated account, never from client-controlled request
-    /// fields:
+    /// 身份一律从已校验的账号推导，绝不信任客户端可控的请求字段：
     /// <list type="bullet">
-    /// <item><c>password</c> grant: compares the password-validated <c>request.Username</c> with the
-    /// configured bootstrap username (case-insensitive).</item>
-    /// <item><c>refresh_token</c> grant: resolves the bootstrap account via
-    /// <see cref="IAccountRepository.GetByPasswordCredentialUsernameAsync"/> and compares its id with
-    /// the authenticated <paramref name="authenticatedAccount"/> id. The request body username is
-    /// intentionally ignored so a regular account cannot escalate by forging <c>username=admin</c>.</item>
-    /// <item><c>sms</c>/<c>wechat_code</c> grants: bootstrap admin injection is not triggered.</item>
+    /// <item><c>password</c>：比对已通过密码校验的 <c>request.Username</c> 与配置的用户名（忽略大小写）。</item>
+    /// <item><c>refresh_token</c>：通过
+    /// <see cref="IAccountRepository.GetByPasswordCredentialUsernameAsync"/> 解析出 bootstrap 账号，
+    /// 与已认证的 <paramref name="authenticatedAccount"/> 比对 Id。请求体里的 username 被刻意忽略，
+    /// 防止普通账号伪造 <c>username=admin</c> 提权。</item>
+    /// <item><c>sms</c> / <c>wechat_code</c>：不触发注入。</item>
     /// </list>
     /// </para>
     /// </summary>
@@ -498,17 +347,7 @@ public class AuthController : ControllerBase
         if (grantType == IdentityConstants.GrantTypeWechat)
             return $"WeChat_{account.Id.ToString()[..8]}";
 
-        // Fallback for password/sms grant types: use account ID prefix to avoid empty display name
+        // password/sms 的兜底：用账号 ID 前缀，避免空显示名
         return $"User_{account.Id.ToString()[..8]}";
     }
-
-    private string? GetAppIdHeader() => HttpContext.GetAppId();
-
-    private string? GetAppSecretHeader() => HttpContext.GetAppSecret();
-
-    private string? GetClientIp() => HttpContext.GetClientIp();
-
-    private string? GetUserAgent() => HttpContext.GetUserAgent();
-
-    private string GetCorrelationId() => HttpContext.GetCorrelationId();
 }

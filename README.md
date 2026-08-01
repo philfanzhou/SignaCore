@@ -45,7 +45,7 @@ backend/
   Database.Migrations.MySql/  - MySQL 与 MariaDB 迁移链
   Database.Migrations.Sqlite/ - SQLite 迁移链
   Domain/           - 领域层（验证器、密钥管理、Token 服务、指标收集）
-  Host/             - ASP.NET Core 宿主与启动配置（含 Controllers/AuthController）
+  Host/             - ASP.NET Core 宿主与启动配置（Controllers/ 下 /api/auth 拆为 Token、SmsCode、TokenRevocation、CallbackRegistration 四个控制器）
   Tests/            - 单元测试与集成测试
 admin_frontend/     - Vue 3 + Vite 管理控制台
 docs/               - 设计文档

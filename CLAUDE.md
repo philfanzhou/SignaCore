@@ -43,7 +43,7 @@ CI（Jenkinsfile）：Preflight → 构建镜像 → 单元测试 → 数据库�
 
 ### 认证：grant_type 策略模式
 
-`IIdentityValidator` 每个实现声明一个 `GrantType`，在 `ServiceCollectionExtensions` 里注册为 `IIdentityValidator`，`ValidatorFactory` 由注入的集合自动建字典。**新增登录方式只需实现接口 + 注册一行 DI，不改 AuthController**。已实现 `password` / `refresh_token`，`sms` / `wechat_code` 是骨架（缺短信网关与微信开放平台配置）。
+`IIdentityValidator` 每个实现声明一个 `GrantType`，在 `ServiceCollectionExtensions` 里注册为 `IIdentityValidator`，`ValidatorFactory` 由注入的集合自动建字典。**新增登录方式只需实现接口 + 注册一行 DI，不改 TokenController**。已实现 `password` / `refresh_token`，`sms` / `wechat_code` 是骨架（缺短信网关与微信开放平台配置）。
 
 三套并存的调用者身份模型，别混：
 

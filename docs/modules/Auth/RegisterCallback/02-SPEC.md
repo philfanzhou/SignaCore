@@ -71,4 +71,4 @@
 - 单元测试覆盖参数验证、AppId 查找、AppSecret 验证、TTL 处理
 - 单元测试覆盖 CallbackUrl 验证：无效 URL、非 HTTP 协议、私有 IP、域名白名单
 - 单元测试覆盖 CallbackUrlValidator.ValidateAsync 异步方法
-- 测试文件：`backend/Tests/unit/Host/Controllers/AuthControllerTests.cs`、`backend/Tests/unit/Domain/CallbackUrlValidatorTests.cs`
+- 测试文件：`backend/Tests/unit/Host/Controllers/CallbackRegistrationControllerTests.cs`、`backend/Tests/unit/Domain/CallbackUrlValidatorTests.cs`

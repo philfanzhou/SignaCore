@@ -70,7 +70,7 @@
 }
 ```
 
-> 注：`userInfo.phone`/`email`/`clientType` 当前实现不填充（恒为空字符串），`AuthController` 仅设置 UserId/Username/AuthMethod/Roles/Permissions。
+> 注：`userInfo.phone`/`email`/`clientType` 当前实现不填充（恒为空字符串），`TokenController` 仅设置 UserId/Username/AuthMethod/Roles/Permissions。
 
 ### POST /api/auth/sms-code
 
@@ -245,9 +245,9 @@
 - 单元测试覆盖 CallbackUrlValidator 同步/异步验证方法
 - 单元测试覆盖 LoggingSmsSender 掩码记录和 ThrowingSmsSender 抛异常
 - 单元测试覆盖 GatewayValidationService 验证成功返回 App 实体
-- 单元测试覆盖 AuthController 全部 4 个 action 的成功与失败分支（网关校验失败、验证器失败含 unknown 回退、OTP 锁定透传、回调注册各分支，见 `AuthControllerTests`）
+- 单元测试覆盖 TokenController 全部 4 个 action 的成功与失败分支（网关校验失败、验证器失败含 unknown 回退、OTP 锁定透传、回调注册各分支，见 `TokenControllerTests`）
 - 单元测试覆盖 RefreshTokenService（签发/轮换/吊销）、DbOtpService（锁定/过期/尝试计数）、AccountLoginInfoService、WechatApiClient
 - 单元测试覆盖 RequestSmsCode 空手机号/无效网关/正常发送
 - 单元测试覆盖 RegisterCallback 无效 CallbackUrl 拒绝
-- 集成测试覆盖 AuthController 的完整登录流程
+- 集成测试覆盖 TokenController 的完整登录流程
 - 错误路径测试：无效凭证、锁定账户、过期令牌、回调失败
