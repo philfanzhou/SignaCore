@@ -96,12 +96,15 @@ public class AuthController : ControllerBase
         [FromBody] TokenRequest request,
         CancellationToken cancellationToken)
     {
-        var stopwatch = Stopwatch.StartNew();
         var appId = GetAppIdHeader();
         var appSecret = GetAppSecretHeader();
-        var clientIp = GetClientIp();
-        var userAgent = GetUserAgent();
-        var correlationId = GetCorrelationId();
+        var context = new TokenRequestContext(
+            request.GrantType,
+            GetClientIp(),
+            GetUserAgent(),
+            appId,
+            GetCorrelationId(),
+            Stopwatch.StartNew());
 
         // Gateway validation (optional, only if AppId header is present)
         AppRegistrationEntity? app = null;
@@ -110,26 +113,24 @@ public class AuthController : ControllerBase
             var gatewayResult = await _gatewayValidator.ValidateAsync(appId, appSecret);
             if (!gatewayResult.IsSuccess)
             {
-                stopwatch.Stop();
-                _authMetrics.RecordLoginFailure(request.GrantType, "gateway_validation_failed");
-                _authMetrics.RecordLoginDuration(stopwatch.Elapsed.TotalMilliseconds, request.GrantType);
                 _logger.LogWarning("Gateway validation failed: AppId={AppId}, Reason={Reason}", appId, gatewayResult.ErrorMessage);
-                await _auditService.RecordLoginAsync(null, "unknown", request.GrantType, "login_failure",
-                    clientIp, userAgent, gatewayResult.ErrorMessage, appId, correlationId);
-                return Ok(new TokenResponse { Success = false, Message = gatewayResult.ErrorMessage });
+                return await FailAsync(
+                    context,
+                    metricReason: "gateway_validation_failed",
+                    responseMessage: gatewayResult.ErrorMessage,
+                    auditFailureReason: gatewayResult.ErrorMessage);
             }
             app = gatewayResult.App;
         }
 
         if (!_validatorFactory.IsSupportedGrantType(request.GrantType))
         {
-            stopwatch.Stop();
-            _authMetrics.RecordLoginFailure(request.GrantType, "unsupported_grant_type");
-            _authMetrics.RecordLoginDuration(stopwatch.Elapsed.TotalMilliseconds, request.GrantType);
             _logger.LogWarning("Unsupported grant_type: {GrantType}", request.GrantType);
-            await _auditService.RecordLoginAsync(null, "unknown", request.GrantType, "login_failure",
-                clientIp, userAgent, $"unsupported_grant_type: {request.GrantType}", appId, correlationId);
-            return Ok(new TokenResponse { Success = false, Message = "unsupported_grant_type" });
+            return await FailAsync(
+                context,
+                metricReason: "unsupported_grant_type",
+                responseMessage: "unsupported_grant_type",
+                auditFailureReason: $"unsupported_grant_type: {request.GrantType}");
         }
 
         var validator = _validatorFactory.GetValidator(request.GrantType);
@@ -146,14 +147,14 @@ public class AuthController : ControllerBase
 
         if (!validationResult.IsSuccess)
         {
-            var failedUsername = request.Username ?? request.Phone ?? request.Code ?? "unknown";
-            stopwatch.Stop();
-            _authMetrics.RecordLoginFailure(request.GrantType, validationResult.ErrorMessage ?? "authentication_failed");
-            _authMetrics.RecordLoginDuration(stopwatch.Elapsed.TotalMilliseconds, request.GrantType);
             _logger.LogWarning("Authentication failed: GrantType={GrantType}, Reason={Reason}", request.GrantType, validationResult.ErrorMessage);
-            await _auditService.RecordLoginAsync(null, failedUsername, request.GrantType, "login_failure",
-                clientIp, userAgent, validationResult.ErrorMessage, appId, correlationId);
-            return Ok(new TokenResponse { Success = false, Message = validationResult.ErrorMessage ?? "authentication_failed" });
+            return await FailAsync(
+                context,
+                metricReason: validationResult.ErrorMessage ?? "authentication_failed",
+                responseMessage: validationResult.ErrorMessage ?? "authentication_failed",
+                // 审计里刻意保留原始的 null，与 metric/响应的兜底文案不同
+                auditFailureReason: validationResult.ErrorMessage,
+                auditUsername: request.Username ?? request.Phone ?? request.Code ?? "unknown");
         }
 
         var account = validationResult.Account!;
@@ -163,15 +164,16 @@ public class AuthController : ControllerBase
 
         if (request.GrantType == IdentityConstants.GrantTypeRefreshToken && newRefreshToken == null)
         {
-            stopwatch.Stop();
-            _authMetrics.RecordLoginFailure(request.GrantType, "invalid_grant");
-            _authMetrics.RecordLoginDuration(stopwatch.Elapsed.TotalMilliseconds, request.GrantType);
             _logger.LogWarning(
                 "Refresh token rotation failed because the token was already consumed: AccountId={AccountId}, AppId={AppId}",
                 account.Id, appId ?? "N/A");
-            await _auditService.RecordLoginAsync(account.Id, displayName ?? account.Id.ToString(),
-                request.GrantType, "login_failure", clientIp, userAgent, "invalid_grant", appId, correlationId);
-            return Ok(new TokenResponse { Success = false, Message = "invalid_grant" });
+            return await FailAsync(
+                context,
+                metricReason: "invalid_grant",
+                responseMessage: "invalid_grant",
+                auditFailureReason: "invalid_grant",
+                auditUsername: displayName ?? account.Id.ToString(),
+                accountId: account.Id);
         }
 
         var claims = _claimsResolver.ResolveBasicClaims(account, displayName);
@@ -210,18 +212,18 @@ public class AuthController : ControllerBase
         var roles = claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).ToList();
         var permissions = claims.Where(c => c.Type == IdentityConstants.ClaimPermission).Select(c => c.Value).ToList();
 
-        stopwatch.Stop();
+        context.Stopwatch.Stop();
         _authMetrics.RecordLoginSuccess(request.GrantType);
-        _authMetrics.RecordLoginDuration(stopwatch.Elapsed.TotalMilliseconds, request.GrantType);
+        _authMetrics.RecordLoginDuration(context.Stopwatch.Elapsed.TotalMilliseconds, request.GrantType);
 
         _logger.LogInformation(
             "Token issued: AccountId={AccountId}, GrantType={GrantType}, AppId={AppId}",
             account.Id, request.GrantType, appId ?? "N/A");
 
         await _auditService.RecordLoginAsync(account.Id, displayName ?? account.Id.ToString(), request.GrantType, "login_success",
-            clientIp, userAgent, null, appId, correlationId);
+            context.ClientIp, context.UserAgent, null, appId, context.CorrelationId);
 
-        await _accountLoginInfoService.UpdateLoginInfoAsync(account, clientIp, validationResult.AuthMethod ?? request.GrantType);
+        await _accountLoginInfoService.UpdateLoginInfoAsync(account, context.ClientIp, validationResult.AuthMethod ?? request.GrantType);
 
         return Ok(new TokenResponse
         {
@@ -240,6 +242,50 @@ public class AuthController : ControllerBase
                 Permissions = permissions
             }
         });
+    }
+
+    /// <summary>
+    /// 一次 /api/auth/token 请求里埋点与审计共用的横切数据，入口处算一次往下传。
+    /// </summary>
+    private sealed record TokenRequestContext(
+        string GrantType,
+        string? ClientIp,
+        string? UserAgent,
+        string? AppId,
+        string? CorrelationId,
+        Stopwatch Stopwatch);
+
+    /// <summary>
+    /// /api/auth/token 的统一失败出口：停表 → 记失败指标 → 记耗时 → 写审计 → 返回
+    /// HTTP 200 + Success=false。这五步顺序固定且缺一不可，新增失败分支时只调用本方法，
+    /// 不要再手写一遍（历史上四个分支各抄了一份）。
+    /// <para>
+    /// <paramref name="metricReason"/>、<paramref name="auditFailureReason"/>、
+    /// <paramref name="responseMessage"/> 是三个**可以互不相同**的值，不要合并：
+    /// 例如 unsupported_grant_type 分支的审计原因带具体 grant_type 后缀，而响应文案不带；
+    /// 校验失败分支的审计原因允许为 null，而响应文案有兜底。响应文案是对外契约，
+    /// 见 docs/modules/Auth/GetToken/06-CONVENTIONS.md。
+    /// </para>
+    /// </summary>
+    private async Task<ActionResult<TokenResponse>> FailAsync(
+        TokenRequestContext context,
+        string metricReason,
+        string? responseMessage,
+        string? auditFailureReason,
+        string auditUsername = "unknown",
+        Guid? accountId = null)
+    {
+        context.Stopwatch.Stop();
+        _authMetrics.RecordLoginFailure(context.GrantType, metricReason);
+        _authMetrics.RecordLoginDuration(context.Stopwatch.Elapsed.TotalMilliseconds, context.GrantType);
+
+        await _auditService.RecordLoginAsync(
+            accountId, auditUsername, context.GrantType, "login_failure",
+            context.ClientIp, context.UserAgent, auditFailureReason, context.AppId, context.CorrelationId);
+
+        // 网关校验失败时 ErrorMessage 可能为 null，此处保持既有行为（序列化为 null），
+        // 不擅自兜底成空串——响应体形状是对外契约。
+        return Ok(new TokenResponse { Success = false, Message = responseMessage! });
     }
 
     /// <summary>
