@@ -2,7 +2,7 @@ namespace QuantumZhou.Identity.Database;
 
 public static class IdentityConstants
 {
-    public const int BCryptWorkFactor = 12;
+    public const int BCryptWorkFactor = 11;
 
     public const int MaxFailedLoginAttempts = 5;
     public const int LoginLockoutMinutes = 15;

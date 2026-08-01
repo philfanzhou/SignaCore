@@ -98,16 +98,15 @@ SQLite 示例：
 
 ## 功能开关
 
-| 配置键 | 默认值 | 说明 |
-|--------|--------|------|
-| FeatureFlags:EnableNewLogin | true | Identity 新登录流程开关，项目自有配置，不走 Consul |
-| FeatureFlags:EnablePeriodicCheckIn | true | Identity 定时签到相关开关，项目自有配置，不走 Consul |
+Identity 没有功能开关配置。
+
+> 历史键 `FeatureFlags:EnableNewLogin`、`FeatureFlags:EnablePeriodicCheckIn` 从未被代码读取（单体导入时遗留的死配置，签到属于业务侧而非本上下文），已于 2026-08-01 从 appsettings.json 移除。
 
 ## 密码哈希配置
 
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
-| PasswordHasher:WorkFactor | 11 | BCrypt WorkFactor（越高越安全，越慢） |
+| PasswordHasher:WorkFactor | 11 | BCrypt WorkFactor（越高越安全，越慢）。默认值取自 `IdentityConstants.BCryptWorkFactor` |
 
 ## 短信 OTP 配置
 
@@ -144,8 +143,9 @@ SQLite 示例：
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
 | Callback:AllowedDomains | [] | 允许的回调域名列表（空=不限制） |
+| Callback:AllowPrivateAddresses | true | 是否允许回调 URL 指向或解析到私有/内网 IP |
 
-> `CallbackUrlValidator` 构造函数默认 `allowPrivateAddresses = true`（允许私有 IP）。如需禁用（例如公网部署），可通过 `Callback:AllowPrivateAddresses: false` 显式覆盖（`Program.cs` 会读取该键并传入构造函数）。默认允许私有 IP 是微服务内网通信的常态。
+> 默认允许私有 IP 是微服务内网通信的常态。公网部署可设为 `false`，此时 `CallbackUrlValidator` 会拒绝主机为私有 IP、或 DNS 解析到私有 IP 的回调 URL（10/172.16-31/192.168/127/0/169.254 网段与 IPv6 link-local、site-local）。该键由 `ServiceCollectionExtensions.AddIdentityInfrastructure` 读取并传入构造函数。
 
 ## OpenTelemetry 配置
 

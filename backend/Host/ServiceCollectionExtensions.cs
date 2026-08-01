@@ -75,7 +75,9 @@ public static class ServiceCollectionExtensions
         // ========== 6. Password Hasher ==========
         services.RegisterSingleton(new PasswordHasherOptions
         {
-            WorkFactor = int.Parse(configuration["PasswordHasher:WorkFactor"] ?? "11")
+            WorkFactor = configuration.GetValue(
+                "PasswordHasher:WorkFactor",
+                IdentityConstants.BCryptWorkFactor)
         });
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
 
@@ -91,7 +93,9 @@ public static class ServiceCollectionExtensions
 
         // ========== 8. Callback Service ==========
         var callbackAllowedDomains = configuration.GetSection("Callback:AllowedDomains").Get<string[]>() ?? [];
-        services.AddSingleton(new CallbackUrlValidator(callbackAllowedDomains));
+        // 默认允许私有地址：微服务回调走内网是常态。公网部署可显式设为 false 拒绝解析到内网的回调 URL。
+        var callbackAllowPrivateAddresses = configuration.GetValue("Callback:AllowPrivateAddresses", true);
+        services.AddSingleton(new CallbackUrlValidator(callbackAllowedDomains, callbackAllowPrivateAddresses));
         services.AddScoped<ICallbackService, CallbackService>();
 
         // ========== 9. SMS OTP Services ==========
