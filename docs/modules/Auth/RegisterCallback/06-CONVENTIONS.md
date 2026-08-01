@@ -3,8 +3,8 @@
 ## 命名约定
 
 - HTTP 端点方法名：`RegisterCallback`（`POST /api/auth/callback/register`）
-- 请求 DTO：`RegisterCallbackHttpRequest`
-- 响应 DTO：`RegisterCallbackHttpResponse`
+- 请求 DTO：`RegisterCallbackRequest`
+- 响应 DTO：`RegisterCallbackResponse`
 
 ## 日志和安全要求
 

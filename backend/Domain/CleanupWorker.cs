@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using QuantumZhou.Identity.Domain.Keys;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Repositories;
 

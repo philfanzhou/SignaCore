@@ -5,7 +5,7 @@
 ```
 触发条件：客户端通过 Gateway 调用 POST /api/auth/token (grant_type=password)
 
-Client          Gateway        AuthController      PasswordValidator    AuditService     DB
+Client          Gateway        TokenController      PasswordValidator    AuditService     DB
   │                │                │                    │                  │             │
   │──POST /token──▶│                │                    │                  │             │
   │                │──POST /token──▶│                    │                  │             │
@@ -31,7 +31,7 @@ Client          Gateway        AuthController      PasswordValidator    AuditSer
   │◀──TokenResponse│                │                    │                  │             │
 ```
 
-参与服务：Gateway → AuthController → PasswordValidator → CallbackService → AuditService
+参与服务：Gateway → TokenController → PasswordValidator → CallbackService → AuditService
 数据流转：credential 查询 → 密码验证 → Claims 构建 → 回调权限注入 → JWT 签发 → RefreshToken 生成 → 审计记录
 
 ## 2. 短信验证码登录流程
@@ -39,7 +39,7 @@ Client          Gateway        AuthController      PasswordValidator    AuditSer
 ```
 触发条件：客户端调用 POST /api/auth/token (grant_type=sms)
 
-Client      AuthController     SmsValidator      OtpService      AccountRepo      DB
+Client      TokenController     SmsValidator      OtpService      AccountRepo      DB
   │              │                   │                │               │             │
   │──POST /token▶│                   │                │               │             │
   │              │──ValidateAsync───▶│                │               │             │
@@ -62,7 +62,7 @@ Client      AuthController     SmsValidator      OtpService      AccountRepo    
 ```
 触发条件：登录成功且请求的 AppId 对应的业务系统注册了 CallbackUrl
 
-AuthController    CallbackService      BusinessService
+TokenController    CallbackService      BusinessService
       │                   │                    │
       │──EnrichClaims───▶│                    │
       │                   │──ValidateUrl──────┐│

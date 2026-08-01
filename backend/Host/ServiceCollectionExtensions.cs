@@ -8,6 +8,7 @@ using OpenTelemetry.Trace;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain;
+using QuantumZhou.Identity.Domain.Keys;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Services.Sms;
 using QuantumZhou.Identity.Domain.Services.WeChat;
@@ -22,7 +23,7 @@ public static class ServiceCollectionExtensions
         IConfiguration configuration,
         IHostEnvironment environment)
     {
-        // ========== OpenTelemetry & Metrics ==========
+        // ---- OpenTelemetry & Metrics ----
         services.AddOpenTelemetry()
             .WithMetrics(metrics =>
             {
@@ -45,7 +46,7 @@ public static class ServiceCollectionExtensions
                 }
             });
 
-        // ========== 1. Database ==========
+        // ---- Database ----
         var databaseOptions = BindDatabaseOptions(configuration);
         services.AddSingleton(databaseOptions);
 
@@ -54,13 +55,16 @@ public static class ServiceCollectionExtensions
             options.UseIdentityDatabase(databaseOptions);
         });
 
-        // ========== 2. HttpClient for Callback ==========
+        // ---- HttpClient for Callback ----
         services.AddHttpClient("Callback");
 
-        // ========== 3. RSA Key Manager ==========
+        // ---- RSA Key Manager ----
+        // 主密钥来源与私钥加解密是两个独立关注点，KeyManager 只负责密钥生命周期编排。
+        services.AddSingleton<IMasterKeyProvider, FileMasterKeyProvider>();
+        services.AddSingleton<IPrivateKeyProtector, AesGcmPrivateKeyProtector>();
         services.AddSingleton<IKeyManager, KeyManager>();
 
-        // ========== 4. JWT Options ==========
+        // ---- JWT Options ----
         var jwtOptions = services.RegisterSingleton(new JwtOptions
         {
             Issuer = configuration["Jwt:Issuer"] ?? "QuantumZhou.Identity",
@@ -69,10 +73,10 @@ public static class ServiceCollectionExtensions
         });
         jwtOptions.Validate();
 
-        // ========== 5. Token Service ==========
+        // ---- Token Service ----
         services.AddSingleton<ITokenService, JwtTokenService>();
 
-        // ========== 6. Password Hasher ==========
+        // ---- Password Hasher ----
         services.RegisterSingleton(new PasswordHasherOptions
         {
             WorkFactor = configuration.GetValue(
@@ -81,24 +85,24 @@ public static class ServiceCollectionExtensions
         });
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
 
-        // ========== 6. Refresh Token Options ==========
+        // ---- Refresh Token Options ----
         var refreshTokenOptions = services.RegisterSingleton(new RefreshTokenOptions
         {
             RefreshTokenExpirationDays = int.Parse(configuration["RefreshToken:ExpirationDays"] ?? "7")
         });
         refreshTokenOptions.Validate();
 
-        // ========== 7. Claims Resolver ==========
+        // ---- Claims Resolver ----
         services.AddScoped<ClaimsResolver>();
 
-        // ========== 8. Callback Service ==========
+        // ---- Callback Service ----
         var callbackAllowedDomains = configuration.GetSection("Callback:AllowedDomains").Get<string[]>() ?? [];
         // 默认允许私有地址：微服务回调走内网是常态。公网部署可显式设为 false 拒绝解析到内网的回调 URL。
         var callbackAllowPrivateAddresses = configuration.GetValue("Callback:AllowPrivateAddresses", true);
         services.AddSingleton(new CallbackUrlValidator(callbackAllowedDomains, callbackAllowPrivateAddresses));
         services.AddScoped<ICallbackService, CallbackService>();
 
-        // ========== 9. SMS OTP Services ==========
+        // ---- SMS OTP Services ----
         var smsOptions = services.RegisterSingleton(new SmsOptions
         {
             OtpTtlSeconds = int.Parse(configuration["Sms:OtpTtlSeconds"] ?? "300"),
@@ -117,7 +121,7 @@ public static class ServiceCollectionExtensions
             services.AddSingleton<ISmsSender, ThrowingSmsSender>();
         }
 
-        // ========== 11. WeChat API Client ==========
+        // ---- WeChat API Client ----
         var wechatOptions = services.RegisterSingleton(new WechatOptions
         {
             AppId = configuration["WeChat:AppId"] ?? string.Empty,
@@ -130,7 +134,7 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(10);
         });
 
-        // ========== 12. Repository Layer ==========
+        // ---- Repository Layer ----
         services.AddScoped<IAccountRepository, AccountRepository>();
         services.AddScoped<IPasswordCredentialRepository, PasswordCredentialRepository>();
         services.AddScoped<IUserLoginRepository, UserLoginRepository>();
@@ -144,20 +148,20 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAuditService, AuditService>();
         services.AddScoped<IUnitOfWork, EfCoreUnitOfWork>();
 
-        // ========== 12.5. Gateway Validation Service ==========
+        // ---- Gateway Validation Service ----
         services.AddScoped<GatewayValidationService>();
 
-        // ========== 12.6. User Query Service ==========
+        // ---- User Query Service ----
         services.AddScoped<IUserQueryService, UserQueryService>();
 
-        // ========== 12.7. Refresh Token Service ==========
+        // ---- Refresh Token Service ----
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddScoped<IAccountLoginInfoService, AccountLoginInfoService>();
 
-        // ========== 12.5. Password Policy ==========
+        // ---- Password Policy ----
         services.AddSingleton<IPasswordPolicy, DefaultPasswordPolicy>();
 
-        // ========== 13. Rate Limiting (ASP.NET Core built-in) ==========
+        // ---- Rate Limiting (ASP.NET Core built-in) ----
         // Per-IP fixed window limiter: 100 requests per 60 seconds per client IP.
         // /health, /metrics, /.well-known/jwks are exempt (have their own limits or are infra).
         services.AddRateLimiter(options =>
@@ -199,19 +203,19 @@ public static class ServiceCollectionExtensions
             };
         });
 
-        // ========== 14. Validators (Auto-registered) ==========
+        // ---- Validators (Auto-registered) ----
         services.AddScoped<IIdentityValidator, PasswordValidator>();
         services.AddScoped<IIdentityValidator, SmsValidator>();
         services.AddScoped<IIdentityValidator, WechatValidator>();
         services.AddScoped<IIdentityValidator, RefreshTokenValidator>();
 
-        // ========== 14. Validator Factory (auto-builds dictionary from injected validators) ==========
+        // ---- Validator Factory (auto-builds dictionary from injected validators) ----
         services.AddScoped<ValidatorFactory>();
 
-        // ========== 15. Background Cleanup Service ==========
+        // ---- Background Cleanup Service ----
         services.AddHostedService<CleanupWorker>();
 
-        // ========== 16. Health Checks ==========
+        // ---- Health Checks ----
         services.AddHealthChecks()
             .AddDbContextCheck<IdentityDbContext>("database");
 
@@ -330,7 +334,7 @@ public static class ServiceCollectionExtensions
 
         services.AddControllers();
 
-        // ========== 18. Auth Metrics ==========
+        // ---- Auth Metrics ----
         services.AddSingleton<AuthMetrics>();
 
         return (jwtOptions, databaseOptions.Provider);

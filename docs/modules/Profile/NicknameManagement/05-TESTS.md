@@ -15,13 +15,13 @@
 
 - **Given** 有效的 JWT Bearer Token，数据库中存在对应账户，请求体 Nickname = "新昵称"（≤100 字符）
 - **When** 调用 `UpdateNickname`
-- **Then** 返回 200 OK，AdminOperationResponse.Success = true，数据库中 Nickname 更新为 "新昵称"（Trim 后）
+- **Then** 返回 200 OK，OperationResponse.Success = true，数据库中 Nickname 更新为 "新昵称"（Trim 后）
 
 ### UT-03: 昵称超过最大长度
 
 - **Given** 有效的 JWT Bearer Token，数据库中存在对应账户，请求体 Nickname 长度 > 100 字符（`IdentityConstants.MaxNicknameLength`）
 - **When** 调用 `UpdateNickname`
-- **Then** 返回 400 BadRequest，AdminApiErrorResponse.Message 包含 "Nickname cannot exceed 100 characters."，数据库中 Nickname 未变更
+- **Then** 返回 400 BadRequest，ErrorResponse.Message 包含 "Nickname cannot exceed 100 characters."，数据库中 Nickname 未变更
 
 ### UT-04: 清除昵称（设为 null/空字符串）
 

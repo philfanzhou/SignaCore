@@ -10,9 +10,13 @@ public static class IdentityConstants
     public const int CallbackTimeoutSeconds = 2;
 
     public const int KeyRotationDays = 30;
-    public const string MasterKeyInfo = "QuantumZhou.Identity.KeyProtection";
-    public const string KeyProtectionLabel = "RSA-Private-Key-Encryption";
-    public const string KeyEncryptLabel = "RSA-Private-Key-Encrypt";
+
+    // HKDF 派生参数。名字标出各自在 HKDF.DeriveKey(hash, ikm, len, salt, info) 里的位置——
+    // 之前叫 MasterKeyInfo 的那个其实传在 salt 位上。
+    // 这些字面值参与密钥派生，改值会导致存量 RSA 私钥无法解密，只能改名不能改值。
+    public const string MasterKeyHkdfSalt = "QuantumZhou.Identity.KeyProtection";
+    public const string MasterKeyHkdfInfo = "RSA-Private-Key-Encryption";
+    public const string PrivateKeyHkdfInfo = "RSA-Private-Key-Encrypt";
 
     public const int CleanupIntervalHours = 24;
 

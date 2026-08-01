@@ -48,7 +48,7 @@
 
 - **Given** 请求未携带 X-Admin-AppId 或 X-Admin-AppSecret 请求头
 - **When** GET /api/gateway/users/search 或 POST /api/gateway/users/batch
-- **Then** 返回 401 Unauthorized，AdminApiErrorResponse.Message = "Missing gateway credentials."
+- **Then** 返回 401 Unauthorized，ErrorResponse.Message = "Missing gateway credentials."
 
 ## 遗漏的测试场景
 

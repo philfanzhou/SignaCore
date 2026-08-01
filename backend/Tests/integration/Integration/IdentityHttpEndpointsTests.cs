@@ -39,6 +39,84 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         Assert.Contains("keys", content);
     }
 
+    /// <summary>
+    /// 锁定对外 HTTP 路由清单。/api/auth 下四个端点原本在同一个 AuthController 上，
+    /// 后来按职责拆成四个 controller——路由必须一个不多、一个不少、也不能重复注册
+    /// （重复注册在 ASP.NET Core 里要到实际请求时才会抛 AmbiguousMatchException）。
+    /// </summary>
+    [Theory]
+    [InlineData("POST", "api/auth/token")]
+    [InlineData("POST", "api/auth/sms-code")]
+    [InlineData("POST", "api/auth/revoke")]
+    [InlineData("POST", "api/auth/callback/register")]
+    [InlineData("GET", "api/gateway/users/search")]
+    [InlineData("POST", "api/gateway/users/batch")]
+    public void PublicRoutes_AreRegisteredExactlyOnce(string httpMethod, string routeTemplate)
+    {
+        var endpoints = _fixture.Services
+            .GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>()
+            .Endpoints
+            .OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>()
+            .Where(endpoint =>
+                string.Equals(endpoint.RoutePattern.RawText, routeTemplate, StringComparison.OrdinalIgnoreCase)
+                && (endpoint.Metadata
+                        .GetMetadata<Microsoft.AspNetCore.Routing.IHttpMethodMetadata>()
+                        ?.HttpMethods.Contains(httpMethod, StringComparer.OrdinalIgnoreCase) ?? false))
+            .ToList();
+
+        Assert.Single(endpoints);
+    }
+
+    [Fact]
+    public async Task TokenEndpoint_WithUnsupportedGrantType_ReturnsHttp200WithFailureBody()
+    {
+        using var http = _fixture.CreateHttpClient();
+
+        var response = await http.PostAsJsonAsync("/api/auth/token", new { grantType = "no_such_grant" });
+
+        // 失败也返回 200 + Success=false 是对外契约，见 docs/modules/Auth/GetToken/06-CONVENTIONS.md
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("unsupported_grant_type", body);
+    }
+
+    [Fact]
+    public async Task SmsCodeEndpoint_WithEmptyPhone_ReturnsHttp200WithFailureBody()
+    {
+        using var http = _fixture.CreateHttpClient();
+
+        var response = await http.PostAsJsonAsync("/api/auth/sms-code", new { phone = "" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Phone number is required", body);
+    }
+
+    [Fact]
+    public async Task RevokeEndpoint_WithEmptyToken_ReturnsHttp200WithFailureBody()
+    {
+        using var http = _fixture.CreateHttpClient();
+
+        var response = await http.PostAsJsonAsync("/api/auth/revoke", new { refreshToken = "" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("false", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CallbackRegisterEndpoint_WithoutCredentials_ReturnsHttp200WithFailureBody()
+    {
+        using var http = _fixture.CreateHttpClient();
+
+        var response = await http.PostAsJsonAsync("/api/auth/callback/register",
+            new { callbackUrl = "http://example.com/cb", ttlSeconds = 3600 });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("AppId and AppSecret are required", body);
+    }
+
     [Fact]
     public async Task GatewayUserQueries_SearchAndBatchReturnSameUsers()
     {
@@ -105,6 +183,14 @@ public class IdentityServerFixture : IAsyncLifetime
                 builder.UseSetting("Database:Provider", "SQLite");
                 builder.UseSetting("Database:ServerVersion", "");
                 builder.UseSetting("Database:ConnectionString", connectionString);
+
+                // 测试宿主不向 Consul 注册服务实例。本机没有 Consul，注册与注销都会失败，
+                // 而注销发生在 host 关停期间——异常会从 _factory.Dispose() 冒出去，
+                // 被 xUnit 记为 "Test Class Cleanup Failure"，把本类所有测试染成失败
+                // （即使断言全部通过）。这曾是一个偶发的假失败。
+                builder.UseSetting("Consul:Discovery:Enabled", "false");
+                builder.UseSetting("Consul:Discovery:Register", "false");
+                builder.UseSetting("Consul:Discovery:Deregister", "false");
             });
 
         _factory.CreateClient();
@@ -115,6 +201,8 @@ public class IdentityServerFixture : IAsyncLifetime
     {
         return _factory!.CreateClient();
     }
+
+    public IServiceProvider Services => _factory!.Services;
 
     public async Task SeedGatewayAppAsync(string appId, string appSecret)
     {

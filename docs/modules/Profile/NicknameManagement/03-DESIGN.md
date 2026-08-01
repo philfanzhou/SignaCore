@@ -61,7 +61,7 @@ Client ──PATCH /api/profile/nickname──▶ ProfileController
   │                                       │  5. accountRepository.UpdateAsync(account)
   │                                       │  6. unitOfWork.SaveChangesAsync()
   │                                       │
-  ◀───────────────────────────────────── Ok(AdminOperationResponse)
+  ◀───────────────────────────────────── Ok(OperationResponse)
 ```
 
 ## 依赖的数据库表

@@ -4,7 +4,7 @@
 
 ```
 backend/
-├── Host/Controllers/AuthController.cs  # HTTP REST 控制器（GetToken 入口）
+├── Host/Controllers/TokenController.cs  # HTTP REST 控制器（GetToken 入口）
 ├── Host/AdminBootstrapOptions.cs        # bootstrap admin 配置（Username/Password）
 ├── Domain/
 │   ├── Validators/
@@ -37,10 +37,10 @@ backend/
 ## 关键接口签名和数据结构定义
 
 ```csharp
-// HTTP 端点（AuthController）
+// HTTP 端点（TokenController）
 [Route("api/auth")]
 [ApiController]
-public class AuthController : ControllerBase
+public class TokenController : ControllerBase
 {
     [HttpPost("token")]              // GetToken（统一 Token 获取）
     [HttpPost("sms-code")]           // RequestSmsCode（请求短信验证码）
@@ -153,7 +153,7 @@ TokenResponse
 3. **刷新令牌一次性使用**：使用后立即撤销并生成新令牌，降低令牌泄露风险
 4. **短信登录自动注册**：降低注册门槛，首次短信登录自动创建账户
 5. **微信登录不自动注册**：微信 OpenId 需预先绑定到已有账户，防止未授权访问
-6. **GatewayAuthResult 携带 App 实体**：`GatewayValidationService.ValidateAsync` 验证成功后返回 `AppRegistrationEntity`，避免 `AuthController` 二次查询
+6. **GatewayAuthResult 携带 App 实体**：`GatewayValidationService.ValidateAsync` 验证成功后返回 `AppRegistrationEntity`，避免 `TokenController` 二次查询
 7. **回调 Claim 注入防护**：`CallbackService` 对外部回调返回的 Claim 施加数量限制（每种类型最多 50 个）和值长度限制（256 字符），CustomClaims 仅允许白名单类型
 8. **SMS 发送器环境隔离**：开发环境使用 `LoggingSmsSender`（掩码记录），生产环境使用 `ThrowingSmsSender`（抛出异常），防止生产环境验证码泄露
 9. **CORS 生产环境保护**：生产环境未配置 `AdminWeb:AllowedOrigins` 时不启用跨域凭据，开发环境默认允许 localhost

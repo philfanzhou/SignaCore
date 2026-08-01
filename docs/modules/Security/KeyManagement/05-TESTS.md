@@ -1,7 +1,14 @@
 # RSA 密钥管理 — 测试计划 (TESTS)
 
 测试工具：xUnit + Moq
-现有测试文件：test/KeyManagerTests.cs
+现有测试文件：
+- `backend/Tests/unit/Domain/KeyManagerTests.cs`（生命周期编排）
+- `backend/Tests/unit/Domain/Keys/AesGcmPrivateKeyProtectorTests.cs`（加密格式契约）
+- `backend/Tests/unit/Domain/Keys/FileMasterKeyProviderTests.cs`（主密钥来源优先级）
+
+> 后两者与 `KeyManagerTests` 同属 xUnit collection `MasterKeyState`，因为它们共享
+> 进程级状态（环境变量 `RSA_MASTER_KEY` 与 `data/master-key/master-key.json`），
+> 并行执行会互相踩。
 
 ## 单元测试
 

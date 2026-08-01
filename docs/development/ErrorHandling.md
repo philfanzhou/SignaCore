@@ -22,7 +22,7 @@ HTTP API 使用标准状态码：
 
 ## 全局异常中间件 (ExceptionHandlingMiddleware)
 
-HTTP 路径使用 `ExceptionHandlingMiddleware` 统一捕获未处理异常，将异常映射为 HTTP 状态码和固定的脱敏 JSON 错误响应（不回显原始异常消息）。中间件在 `Program.cs` 中注册，作用于所有 HTTP 控制器（`AuthController` / `AdminController` / `GatewayController` / `ProfileController`）。
+HTTP 路径使用 `ExceptionHandlingMiddleware` 统一捕获未处理异常，将异常映射为 HTTP 状态码和固定的脱敏 JSON 错误响应（不回显原始异常消息）。中间件在 `Program.cs` 中注册，作用于所有 HTTP 控制器（`TokenController` / `SmsCodeController` / `TokenRevocationController` / `CallbackRegistrationController` / `AdminController` / `GatewayController` / `ProfileController`）。
 
 ### HTTP 异常处理策略
 
@@ -73,7 +73,7 @@ HTTP 路径使用 `ExceptionHandlingMiddleware` 统一捕获未处理异常，�
 
 HTTP 路径由 `CorrelationIdMiddleware`（ASP.NET Core 中间件）从请求头 `x-correlation-id` 读取或新建，写入 `HttpContext.Items` 并通过 `ILogger.BeginScope` 注入日志上下文；响应头回写 `x-correlation-id` 便于调用方关联。
 
-HTTP 控制器（`AuthController` / `AdminController` / `GatewayController` / `ProfileController`）必须在该中间件作用范围内。
+HTTP 控制器（`TokenController` / `SmsCodeController` / `TokenRevocationController` / `CallbackRegistrationController` / `AdminController` / `GatewayController` / `ProfileController`）必须在该中间件作用范围内。
 
 中间件管道位置（`Program.cs` 中注册顺序）：
 

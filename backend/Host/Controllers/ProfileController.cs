@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using QuantumZhou.Identity.Database;
@@ -54,14 +54,14 @@ public class ProfileController : ControllerBase
 
         if (request.Nickname is not null && request.Nickname.Trim().Length > IdentityConstants.MaxNicknameLength)
         {
-            return BadRequest(new AdminApiErrorResponse($"Nickname cannot exceed {IdentityConstants.MaxNicknameLength} characters."));
+            return BadRequest(new ErrorResponse($"Nickname cannot exceed {IdentityConstants.MaxNicknameLength} characters."));
         }
 
         account.Nickname = string.IsNullOrWhiteSpace(request.Nickname) ? null : request.Nickname.Trim();
         await accountRepository.UpdateAsync(account);
         await unitOfWork.SaveChangesAsync();
 
-        return Ok(new AdminOperationResponse(true, "Nickname updated."));
+        return Ok(new OperationResponse(true, "Nickname updated."));
     }
 
     private Guid? GetAccountId()

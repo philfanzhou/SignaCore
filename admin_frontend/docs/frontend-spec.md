@@ -299,7 +299,7 @@ start.sh 传参 -e APP_TITLE="${CONTAINER_NAME}"
 ## 核心类型定义（不变）
 
 ```typescript
-interface AdminPagedResponse<T> {
+interface PagedResponse<T> {
   items: T[]
   total: number
   page: number

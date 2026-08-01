@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Models;
@@ -14,7 +14,7 @@ public class UserQueryService : IUserQueryService
         _dbContext = dbContext;
     }
 
-    public async Task<(List<AdminUserListItemResponse> Users, int Total)> SearchUsersAsync(
+    public async Task<(List<UserListItemResponse> Users, int Total)> SearchUsersAsync(
         string? username, string? phone, int page, int pageSize)
     {
         var searchTerm = string.IsNullOrWhiteSpace(username)
@@ -51,7 +51,7 @@ public class UserQueryService : IUserQueryService
         return (users, total);
     }
 
-    public async Task<List<AdminUserListItemResponse>> GetUsersByIdsAsync(List<string> userIds)
+    public async Task<List<UserListItemResponse>> GetUsersByIdsAsync(List<string> userIds)
     {
         var orderedUserIds = userIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -66,7 +66,7 @@ public class UserQueryService : IUserQueryService
 
         if (parsedUserIds.Count == 0)
         {
-            return new List<AdminUserListItemResponse>();
+            return new List<UserListItemResponse>();
         }
 
         var query = _dbContext.Accounts
@@ -84,7 +84,7 @@ public class UserQueryService : IUserQueryService
         return orderedUsers;
     }
 
-    private async Task<List<AdminUserListItemResponse>> ProjectUsersAsync(
+    private async Task<List<UserListItemResponse>> ProjectUsersAsync(
         IQueryable<Database.Entity.AccountEntity> query,
         int page,
         int pageSize)
@@ -120,7 +120,7 @@ public class UserQueryService : IUserQueryService
                 : (!string.IsNullOrWhiteSpace(username)
                     ? username
                     : (!string.IsNullOrWhiteSpace(phone) ? phone : account.Id.ToString()[..8]));
-            return new AdminUserListItemResponse(
+            return new UserListItemResponse(
                 account.Id.ToString(),
                 name,
                 phone ?? string.Empty,

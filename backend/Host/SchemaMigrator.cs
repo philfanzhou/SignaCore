@@ -6,7 +6,12 @@ using QuantumZhou.Identity.Database.Entity;
 
 namespace QuantumZhou.Identity.Host;
 
-internal static class IdentityNormalizationMigration
+/// <summary>
+/// 全库 schema 迁移入口——所有 provider 的 EF 迁移都从这里跑。
+/// PostgreSQL 走 expand-contract 路径：先跑 expand 迁移、做归一化碰撞预检并回填
+/// <c>*_normalized</c> 列，再 <c>MigrateAsync</c> 补齐剩余迁移；其余 provider 直接 <c>MigrateAsync</c>。
+/// </summary>
+internal static class SchemaMigrator
 {
     private const string ExpandMigrationId =
         "20260730134106_AddNormalizedIdentityValues";

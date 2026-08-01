@@ -1,0 +1,84 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using QuantumZhou.Identity.Database;
+using QuantumZhou.Identity.Database.Repositories;
+// CallbackUrlValidator 的命名空间是 QuantumZhou.Identity.Domain，尽管文件在 Domain/Services/ 下
+using QuantumZhou.Identity.Domain;
+using QuantumZhou.Identity.Host.Http;
+using QuantumZhou.Identity.Host.Models;
+
+namespace QuantumZhou.Identity.Host.Controllers;
+
+/// <summary>
+/// POST /api/auth/callback/register —— 业务系统注册自己的 claims 回调 URL。
+/// 与 <see cref="TokenController"/> 不同，本端点 AppId/AppSecret 是**必填**的。
+/// </summary>
+[Route("api/auth")]
+[ApiController]
+public class CallbackRegistrationController : ControllerBase
+{
+    private readonly IAppRegistrationRepository _appRegistrationRepository;
+    private readonly CallbackUrlValidator _callbackUrlValidator;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<CallbackRegistrationController> _logger;
+
+    public CallbackRegistrationController(
+        IAppRegistrationRepository appRegistrationRepository,
+        CallbackUrlValidator callbackUrlValidator,
+        IUnitOfWork unitOfWork,
+        ILogger<CallbackRegistrationController> logger)
+    {
+        _appRegistrationRepository = appRegistrationRepository;
+        _callbackUrlValidator = callbackUrlValidator;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
+    [HttpPost("callback/register")]
+    [AllowAnonymous]
+    public async Task<ActionResult<RegisterCallbackResponse>> RegisterCallback(
+        [FromBody] RegisterCallbackRequest request)
+    {
+        var appId = HttpContext.GetAppId();
+        var appSecret = HttpContext.GetAppSecret();
+
+        if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(appSecret))
+        {
+            return Ok(new RegisterCallbackResponse { Success = false, Message = "AppId and AppSecret are required" });
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.CallbackUrl))
+        {
+            var urlValidation = _callbackUrlValidator.Validate(request.CallbackUrl);
+            if (!urlValidation.IsValid)
+            {
+                return Ok(new RegisterCallbackResponse { Success = false, Message = $"Invalid callback URL: {urlValidation.ErrorMessage}" });
+            }
+        }
+
+        var app = await _appRegistrationRepository.GetByAppIdAsync(appId);
+        if (app == null)
+        {
+            return Ok(new RegisterCallbackResponse { Success = false, Message = "AppId not registered" });
+        }
+
+        if (!BCrypt.Net.BCrypt.Verify(appSecret, app.AppSecretHash))
+        {
+            _logger.LogWarning("Callback registration failed: AppId={AppId}, Reason=AppSecret mismatch", appId);
+            return Ok(new RegisterCallbackResponse { Success = false, Message = "AppSecret mismatch" });
+        }
+
+        app.CallbackUrl = request.CallbackUrl;
+        app.CallbackExpiresAt = request.TtlSeconds == IdentityConstants.CallbackTtlNeverExpire
+            ? null
+            : DateTimeOffset.UtcNow.AddSeconds(request.TtlSeconds > 0 ? request.TtlSeconds : IdentityConstants.DefaultCallbackTtlSeconds);
+        await _unitOfWork.SaveChangesAsync();
+
+        return Ok(new RegisterCallbackResponse
+        {
+            Success = true,
+            Message = "Registered successfully",
+            ExpiresAt = app.CallbackExpiresAt.HasValue ? app.CallbackExpiresAt.Value.ToUnixTimeSeconds() : 0
+        });
+    }
+}

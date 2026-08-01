@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using QuantumZhou.Identity.Domain.Models;
 using QuantumZhou.Identity.Domain.Services;
+using QuantumZhou.Identity.Host.Http;
 using QuantumZhou.Identity.Host.Models;
 
 namespace QuantumZhou.Identity.Host.Controllers;
@@ -17,9 +18,6 @@ namespace QuantumZhou.Identity.Host.Controllers;
 [ApiController]
 public class GatewayController : ControllerBase
 {
-    internal const string AppIdHeader = "X-Admin-AppId";
-    internal const string AppSecretHeader = "X-Admin-AppSecret";
-
     private readonly ILogger<GatewayController> _logger;
 
     public GatewayController(ILogger<GatewayController> logger)
@@ -42,22 +40,15 @@ public class GatewayController : ControllerBase
             return authError;
         }
 
-        var normalizedPage = page.GetValueOrDefault(1) < 1 ? 1 : page.GetValueOrDefault(1);
-        var normalizedPageSize = pageSize.GetValueOrDefault(20);
-        if (normalizedPageSize < 1)
-        {
-            normalizedPageSize = 20;
-        }
+        var paging = PageRequest.Normalize(page, pageSize);
 
-        normalizedPageSize = Math.Min(normalizedPageSize, 100);
+        var (users, total) = await userQueryService.SearchUsersAsync(username, phone, paging.Page, paging.PageSize);
 
-        var (users, total) = await userQueryService.SearchUsersAsync(username, phone, normalizedPage, normalizedPageSize);
-
-        return Ok(new AdminPagedResponse<AdminUserListItemResponse>(
+        return Ok(new PagedResponse<UserListItemResponse>(
             users,
             total,
-            normalizedPage,
-            normalizedPageSize));
+            paging.Page,
+            paging.PageSize));
     }
 
     [HttpPost("users/batch")]
@@ -74,7 +65,7 @@ public class GatewayController : ControllerBase
 
         if (userIds == null || userIds.Count == 0)
         {
-            return Ok(new List<AdminUserListItemResponse>());
+            return Ok(new List<UserListItemResponse>());
         }
 
         var orderedUsers = await userQueryService.GetUsersByIdsAsync(userIds);
@@ -92,20 +83,18 @@ public class GatewayController : ControllerBase
                 HttpContext.Connection.RemoteIpAddress);
         }
 
-        var appId = HttpContext.Request.Headers[AppIdHeader].FirstOrDefault();
-        // AppSecret is moved from headers to HttpContext.Items by the sensitive header redaction middleware
-        var appSecret = HttpContext.Items[AppSecretHeader] as string
-            ?? HttpContext.Request.Headers[AppSecretHeader].FirstOrDefault();
+        var appId = HttpContext.GetAppId();
+        var appSecret = HttpContext.GetAppSecret();
 
         if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(appSecret))
         {
-            return StatusCode(StatusCodes.Status401Unauthorized, new AdminApiErrorResponse("Missing gateway credentials."));
+            return StatusCode(StatusCodes.Status401Unauthorized, new ErrorResponse("Missing gateway credentials."));
         }
 
         var validation = await gatewayValidationService.ValidateAsync(appId, appSecret);
         if (!validation.IsSuccess)
         {
-            return StatusCode(StatusCodes.Status401Unauthorized, new AdminApiErrorResponse(validation.ErrorMessage ?? "Gateway authentication failed."));
+            return StatusCode(StatusCodes.Status401Unauthorized, new ErrorResponse(validation.ErrorMessage ?? "Gateway authentication failed."));
         }
 
         return null;

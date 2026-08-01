@@ -1,3 +1,5 @@
+using QuantumZhou.Identity.Host.Http;
+
 namespace QuantumZhou.Identity.Host.Middleware;
 
 /// <summary>
@@ -16,10 +18,10 @@ public class SensitiveHeaderRedactionMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (context.Request.Headers.TryGetValue(Controllers.GatewayController.AppSecretHeader, out var secretValue))
+        if (context.Request.Headers.TryGetValue(IdentityHeaders.AppSecret, out var secretValue))
         {
-            context.Items[Controllers.GatewayController.AppSecretHeader] = secretValue.ToString();
-            context.Request.Headers.Remove(Controllers.GatewayController.AppSecretHeader);
+            context.Items[IdentityHeaders.AppSecret] = secretValue.ToString();
+            context.Request.Headers.Remove(IdentityHeaders.AppSecret);
         }
 
         await _next(context);

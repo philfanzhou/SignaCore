@@ -1,4 +1,4 @@
-namespace QuantumZhou.Identity.Host.Models;
+﻿namespace QuantumZhou.Identity.Host.Models;
 
 /// <summary>
 /// HTTP request body for POST /api/auth/token (OAuth2 grant_type mode).
@@ -75,7 +75,7 @@ public sealed class RevokeResponse
 /// <summary>
 /// HTTP request body for POST /api/auth/callback/register.
 /// </summary>
-public sealed class RegisterCallbackHttpRequest
+public sealed class RegisterCallbackRequest
 {
     public string CallbackUrl { get; set; } = string.Empty;
     public int TtlSeconds { get; set; }
@@ -84,7 +84,7 @@ public sealed class RegisterCallbackHttpRequest
 /// <summary>
 /// HTTP response body for POST /api/auth/callback/register.
 /// </summary>
-public sealed class RegisterCallbackHttpResponse
+public sealed class RegisterCallbackResponse
 {
     public bool Success { get; set; }
     public string Message { get; set; } = string.Empty;

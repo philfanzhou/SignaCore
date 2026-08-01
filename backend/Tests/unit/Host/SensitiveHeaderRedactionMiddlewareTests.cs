@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using QuantumZhou.Identity.Host.Http;
 using QuantumZhou.Identity.Host.Controllers;
 using QuantumZhou.Identity.Host.Middleware;
 using Xunit;
@@ -17,13 +18,13 @@ public class SensitiveHeaderRedactionMiddlewareTests
             return Task.CompletedTask;
         });
         var context = new DefaultHttpContext();
-        context.Request.Headers[GatewayController.AppSecretHeader] = "super-secret";
+        context.Request.Headers[IdentityHeaders.AppSecret] = "super-secret";
 
         await middleware.InvokeAsync(context);
 
         Assert.True(nextCalled);
-        Assert.Equal("super-secret", context.Items[GatewayController.AppSecretHeader]);
-        Assert.False(context.Request.Headers.ContainsKey(GatewayController.AppSecretHeader));
+        Assert.Equal("super-secret", context.Items[IdentityHeaders.AppSecret]);
+        Assert.False(context.Request.Headers.ContainsKey(IdentityHeaders.AppSecret));
     }
 
     [Fact]
@@ -40,6 +41,6 @@ public class SensitiveHeaderRedactionMiddlewareTests
         await middleware.InvokeAsync(context);
 
         Assert.True(nextCalled);
-        Assert.False(context.Items.ContainsKey(GatewayController.AppSecretHeader));
+        Assert.False(context.Items.ContainsKey(IdentityHeaders.AppSecret));
     }
 }

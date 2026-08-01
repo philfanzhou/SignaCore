@@ -5,6 +5,7 @@ using Moq;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain;
+using QuantumZhou.Identity.Domain.Keys;
 using Xunit;
 
 namespace QuantumZhou.Identity.Tests.Domain;

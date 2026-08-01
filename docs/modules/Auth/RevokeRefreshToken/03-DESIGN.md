@@ -4,7 +4,7 @@
 
 ```
 backend/
-├── Host/Controllers/AuthController.cs      # POST /api/auth/revoke HTTP 端点
+├── Host/Controllers/TokenRevocationController.cs      # POST /api/auth/revoke HTTP 端点
 ├── Host/Models/AuthModels.cs               # RevokeRequest / RevokeResponse DTO
 ├── Domain/Services/RefreshTokenService.cs  # 吊销逻辑（RevokeAsync）
 └── Database/
@@ -15,7 +15,7 @@ backend/
 ## 关键接口签名
 
 ```csharp
-// HTTP 端点（AuthController）
+// HTTP 端点（TokenRevocationController）
 [HttpPost("revoke")]
 public async Task<ActionResult<RevokeResponse>> RevokeRefreshToken(
     [FromBody] RevokeRequest request)

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
@@ -117,7 +117,7 @@ public class AdminControllerTests : IDisposable
             CreateValidatorFactory(), CreateBootstrapOptions(), _auditServiceMock.Object);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.IsType<AdminApiErrorResponse>(bad.Value);
+        Assert.IsType<ErrorResponse>(bad.Value);
         _passwordValidatorMock.Verify(v => v.ValidateAsync(It.IsAny<ValidationRequest>()), Times.Never);
     }
 
@@ -266,7 +266,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.Logout(_auditServiceMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminOperationResponse>(ok.Value);
+        var response = Assert.IsType<OperationResponse>(ok.Value);
         Assert.True(response.Success);
         _authServiceMock.Verify(a => a.SignOutAsync(It.IsAny<HttpContext>(), AdminScheme, It.IsAny<AuthenticationProperties>()), Times.Once);
         _auditServiceMock.Verify(a => a.RecordActionAsync(
@@ -282,7 +282,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.Logout(_auditServiceMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        Assert.True(Assert.IsType<AdminOperationResponse>(ok.Value).Success);
+        Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
         _auditServiceMock.Verify(a => a.RecordActionAsync(
             "admin_logout", "Session", "unknown",
             null, null, "Admin logged out", It.IsAny<string?>(),
@@ -305,7 +305,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUsers(null, null, null, null, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(2, response.Total);
         Assert.Equal(2, response.Items.Count);
     }
@@ -323,7 +323,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUsers(null, null, null, null, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(2, response.Items.Count);
         var passwordItem = Assert.Single(response.Items, i => i.UserId == passwordAccount.Id.ToString());
         Assert.True(passwordItem.HasPassword);
@@ -345,7 +345,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUsers("alice", null, null, null, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(1, response.Total);
         Assert.Equal("alice", response.Items[0].Username);
     }
@@ -361,7 +361,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUsers("VIP", null, null, null, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(1, response.Total);
     }
 
@@ -376,7 +376,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUsers(null, "1380000", null, null, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(1, response.Total);
         Assert.Equal("13800001234", response.Items[0].Phone);
     }
@@ -393,7 +393,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUsers(null, null, 2, 2, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(5, response.Total);
         Assert.Equal(2, response.Items.Count);
         Assert.Equal(2, response.Page);
@@ -408,7 +408,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUsers(null, null, 0, 10, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(1, response.Page);
     }
 
@@ -421,7 +421,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUsers(null, null, 1, 500, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(100, response.PageSize);
     }
 
@@ -435,7 +435,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUsers(null, null, null, null, new UserQueryService(_dbContext));
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(acc.Id.ToString()[..8], response.Items[0].DisplayName);
     }
 
@@ -484,7 +484,7 @@ public class AdminControllerTests : IDisposable
             _unitOfWorkMock.Object, _auditServiceMock.Object);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
-        var err = Assert.IsType<AdminApiErrorResponse>(bad.Value);
+        var err = Assert.IsType<ErrorResponse>(bad.Value);
         Assert.Equal("too weak", err.Message);
     }
 
@@ -504,7 +504,7 @@ public class AdminControllerTests : IDisposable
             _unitOfWorkMock.Object, _auditServiceMock.Object);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Contains("already exists", Assert.IsType<AdminApiErrorResponse>(bad.Value).Message);
+        Assert.Contains("already exists", Assert.IsType<ErrorResponse>(bad.Value).Message);
     }
 
     [Fact]
@@ -591,7 +591,7 @@ public class AdminControllerTests : IDisposable
             _unitOfWorkMock.Object, _auditServiceMock.Object);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Contains("already registered", Assert.IsType<AdminApiErrorResponse>(bad.Value).Message);
+        Assert.Contains("already registered", Assert.IsType<ErrorResponse>(bad.Value).Message);
     }
 
     [Fact]
@@ -650,7 +650,7 @@ public class AdminControllerTests : IDisposable
             new AdminUpdateRemarkRequest("new remark"), _accountRepoMock.Object, _unitOfWorkMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        Assert.True(Assert.IsType<AdminOperationResponse>(ok.Value).Success);
+        Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
         Assert.Equal("new remark", account.Remark);
         _accountRepoMock.Verify();
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
@@ -742,7 +742,7 @@ public class AdminControllerTests : IDisposable
             new AdminUpdateStatusRequest(true), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminOperationResponse>(ok.Value);
+        var response = Assert.IsType<OperationResponse>(ok.Value);
         Assert.Contains("enabled", response.Message);
         Assert.True(account.IsActive);
         _auditServiceMock.Verify(a => a.RecordActionAsync(
@@ -762,7 +762,7 @@ public class AdminControllerTests : IDisposable
             new AdminUpdateStatusRequest(false), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminOperationResponse>(ok.Value);
+        var response = Assert.IsType<OperationResponse>(ok.Value);
         Assert.Contains("disabled", response.Message);
         Assert.False(account.IsActive);
         _auditServiceMock.Verify(a => a.RecordActionAsync(
@@ -958,7 +958,7 @@ public class AdminControllerTests : IDisposable
             _appRegRepoMock.Object, _unitOfWorkMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        Assert.True(Assert.IsType<AdminOperationResponse>(ok.Value).Success);
+        Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
         Assert.Null(app.CallbackUrl);
         Assert.Null(app.CallbackExpiresAt);
         Assert.True(app.IsActive);
@@ -1023,7 +1023,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.DeleteApp("a", _appRegRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        Assert.True(Assert.IsType<AdminOperationResponse>(ok.Value).Success);
+        Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
         _appRegRepoMock.Verify();
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         _auditServiceMock.Verify(a => a.RecordActionAsync(
@@ -1097,7 +1097,7 @@ public class AdminControllerTests : IDisposable
             _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Contains("not found", Assert.IsType<AdminApiErrorResponse>(bad.Value).Message);
+        Assert.Contains("not found", Assert.IsType<ErrorResponse>(bad.Value).Message);
     }
 
     [Fact]
@@ -1113,7 +1113,7 @@ public class AdminControllerTests : IDisposable
             _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        Assert.True(Assert.IsType<AdminOperationResponse>(ok.Value).Success);
+        Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
         Assert.True(token.IsRevoked);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         _auditServiceMock.Verify(a => a.RecordActionAsync(
@@ -1165,7 +1165,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUserLoginHistory(userId, null, null, _loginHistoryRepoMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
         Assert.Equal(2, response.Items.Count);
         Assert.Equal("Password", response.Items[0].AuthMethod);
         Assert.Equal("login_success", response.Items[0].EventType);
@@ -1173,6 +1173,27 @@ public class AdminControllerTests : IDisposable
         Assert.Equal("ua", response.Items[0].UserAgent);
         Assert.Null(response.Items[0].FailureReason);
         Assert.Equal("bad code", response.Items[1].FailureReason);
+    }
+
+    [Fact]
+    public async Task GetUserLoginHistory_TotalComesFromRepositoryCount_NotPageSize()
+    {
+        SetAdminUser();
+        var userId = Guid.NewGuid();
+        _loginHistoryRepoMock.Setup(r => r.CountByAccountIdAsync(userId)).ReturnsAsync(137);
+        _loginHistoryRepoMock.Setup(r => r.GetByAccountIdAsync(userId, 20, 0))
+            .ReturnsAsync(new List<LoginHistoryEntity>
+            {
+                new() { Id = Guid.NewGuid(), AccountId = userId, AuthMethod = "Password", EventType = "login_success" }
+            });
+
+        var result = await _controller.GetUserLoginHistory(userId, null, null, _loginHistoryRepoMock.Object);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<PagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
+        // 回归防护：这里曾经返回 items.Count（当前页条数），前端据此算出的总页数永远是 1。
+        Assert.Equal(137, response.Total);
+        Assert.Single(response.Items);
     }
 
     [Fact]
@@ -1185,7 +1206,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUserLoginHistory(userId, 3, 10, _loginHistoryRepoMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
         Assert.Equal(3, response.Page);
         Assert.Equal(10, response.PageSize);
     }
@@ -1200,7 +1221,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUserLoginHistory(userId, 0, 20, _loginHistoryRepoMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
         Assert.Equal(1, response.Page);
     }
 
@@ -1214,7 +1235,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetUserLoginHistory(userId, 1, 500, _loginHistoryRepoMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
         Assert.Equal(100, response.PageSize);
     }
 
@@ -1241,7 +1262,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetAuditLogs(null, null, null, null, null, null, _auditLogRepoMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminAuditLogItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
         Assert.Single(response.Items);
         Assert.Equal("account_created", response.Items[0].Action);
         Assert.Equal("Account", response.Items[0].TargetType);
@@ -1250,6 +1271,40 @@ public class AdminControllerTests : IDisposable
         Assert.Equal(AdminName, response.Items[0].ActorName);
         Assert.Equal("1.2.3.4", response.Items[0].ClientIp);
         Assert.Equal("corr", response.Items[0].CorrelationId);
+    }
+
+    [Fact]
+    public async Task GetAuditLogs_TotalComesFromRepositoryCount_NotPageSize()
+    {
+        SetAdminUser();
+        _auditLogRepoMock.Setup(r => r.CountAsync(null, null, null, null)).ReturnsAsync(84);
+        _auditLogRepoMock.Setup(r => r.QueryAsync(null, null, null, null, 20, 0))
+            .ReturnsAsync(new List<AuditLogEntity>
+            {
+                new() { Id = Guid.NewGuid(), Action = "account_created", TargetType = "Account", TargetId = "abc" }
+            });
+
+        var result = await _controller.GetAuditLogs(null, null, null, null, null, null, _auditLogRepoMock.Object);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
+        // 回归防护：同上，Total 必须是过滤后的总条数，不是当前页条数。
+        Assert.Equal(84, response.Total);
+        Assert.Single(response.Items);
+    }
+
+    [Fact]
+    public async Task GetAuditLogs_CountReceivesSameFiltersAsQuery()
+    {
+        SetAdminUser();
+        var actorId = Guid.NewGuid();
+        _auditLogRepoMock.Setup(r => r.CountAsync("login", "Session", "target1", actorId)).ReturnsAsync(3);
+        _auditLogRepoMock.Setup(r => r.QueryAsync("login", "Session", "target1", actorId, 10, 10))
+            .ReturnsAsync(new List<AuditLogEntity>());
+
+        await _controller.GetAuditLogs("login", "Session", "target1", actorId, 2, 10, _auditLogRepoMock.Object);
+
+        _auditLogRepoMock.Verify(r => r.CountAsync("login", "Session", "target1", actorId), Times.Once);
     }
 
     [Fact]
@@ -1263,7 +1318,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetAuditLogs("login", "Session", "target1", actorId, 2, 10, _auditLogRepoMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminAuditLogItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
         Assert.Equal(2, response.Page);
         Assert.Equal(10, response.PageSize);
         _auditLogRepoMock.Verify(r => r.QueryAsync("login", "Session", "target1", actorId, 10, 10), Times.Once);
@@ -1279,9 +1334,11 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.GetAuditLogs(null, null, null, null, -1, 0, _auditLogRepoMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminAuditLogItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
         Assert.Equal(1, response.Page);
-        Assert.Equal(1, response.PageSize);
+        // pageSize<1 视为未指定，回落到默认 20（与 /api/admin/users、/api/gateway/users/search 一致）。
+        // 改统一走 PageRequest.Normalize 之前，这里曾经因为写法不同而返回 1。
+        Assert.Equal(PageRequest.DefaultPageSize, response.PageSize);
     }
 
     #endregion

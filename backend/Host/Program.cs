@@ -4,6 +4,7 @@ using Microsoft.IdentityModel.Tokens;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Domain;
+using QuantumZhou.Identity.Domain.Keys;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Host;
@@ -14,11 +15,11 @@ using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ========== Consul Configuration Source ==========
+// ---- Consul Configuration Source ----
 // Identity 固定接入 Consul，按 config/ruoyu 单层共享路径加载 Consul KV，失败时回退本地缓存。
 builder.Configuration.AddConsulIfEnabled(builder.Configuration);
 
-// ========== Serilog (Console + Grafana Loki) ==========
+// ---- Serilog (Console + Grafana Loki) ----
 // Loki 地址统一来自配置键 Loki:Uri（优先由 Consul KV 提供），覆盖 appsettings.json 中的 fallback。
 // Loki Sink 在 uri 为 null 时会抛 ArgumentNullException，配置文件中提供 fallback uri 确保服务能启动。
 // Loki 不可达时 Sink 异步重试，不影响服务运行。
@@ -62,12 +63,12 @@ builder.Services.Configure<Microsoft.Extensions.Hosting.HostOptions>(options =>
     options.ShutdownTimeout = TimeSpan.FromSeconds(30);
 });
 
-// ========== Consul Service Discovery ==========
+// ---- Consul Service Discovery ----
 // 通过 Steeltoe.Discovery.Consul 注册服务实例。
 // 健康检查路径：/health（由 Steeltoe 自动配置），间隔 10s，超时 10s。
 builder.Services.AddConsulDiscoveryIfEnabled(builder.Configuration);
 
-// ========== Infrastructure (DI, gRPC, Auth, CORS, etc.) ==========
+// ---- Infrastructure (DI, Auth, CORS, 限流, OpenTelemetry) ----
 var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
@@ -94,7 +95,7 @@ app.Logger.LogInformation(
     StartupDiagnosticsFormatter.SummarizeValue(effectiveDatabaseServerVersion),
     StartupDiagnosticsFormatter.SummarizeValue(effectiveLokiUri));
 
-// ========== HTTPS Warning for Gateway API ==========
+// ---- HTTPS Warning for Gateway API ----
 // Gateway API transmits AppSecret via request headers; warn if not running behind HTTPS/TLS.
 // Note: Kestrel configured via ConfigureKestrel may not populate app.Urls; this is a best-effort check.
 var hasHttpsEndpoint = app.Urls.Any(url => url.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
@@ -105,17 +106,17 @@ if (!hasHttpsEndpoint)
         "In production, enable HTTPS or ensure TLS termination at the reverse proxy.");
 }
 
-// ========== 18. Database Initialization (must happen before KeyManager) ==========
+// ---- Database Initialization (must happen before KeyManager) ----
 // Auto migration is always enabled. DatabaseInitializer handles migrations,
 // schema reconciliation, admin bootstrap, and optional bootstrap-apps.json pre-seeding.
 await DatabaseInitializer.InitializeAsync(app.Services, builder.Configuration);
 
-// ========== Wait for KeyManager initialization before accepting requests ==========
+// ---- Wait for KeyManager initialization before accepting requests ----
 var keyManager = app.Services.GetRequiredService<IKeyManager>();
 await keyManager.InitializationCompleted;
 app.Logger.LogInformation("KeyManager initialization verified");
 
-// ========== Configure JWT Bearer signing key resolver after KeyManager is ready ==========
+// ---- Configure JWT Bearer signing key resolver after KeyManager is ready ----
 var jwtBearerOptions = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<JwtBearerOptions>>();
 var bearerOptions = jwtBearerOptions.Get(JwtBearerDefaults.AuthenticationScheme);
 bearerOptions.TokenValidationParameters.IssuerSigningKeyResolver = (_, _, _, _) =>
@@ -124,7 +125,7 @@ bearerOptions.TokenValidationParameters.IssuerSigningKeyResolver = (_, _, _, _) 
     return new SecurityKey[] { key };
 };
 
-// ========== 19. Health Check Endpoint ==========
+// ---- Swagger（仅开发环境）----
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -135,7 +136,7 @@ app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseCors("AdminWeb");
 app.UseAuthentication();
 
-// ========== Sensitive Header Redaction Middleware ==========
+// ---- Sensitive Header Redaction Middleware ----
 // Strips X-Admin-AppSecret from the request headers after authentication
 // so that downstream logging/middleware cannot accidentally log the secret value.
 // The secret has already been consumed by GatewayController.ValidateGatewayRequestAsync.
@@ -169,7 +170,7 @@ app.MapPost("/consul/cache/invalidate", (IConfiguration configuration, ConsulRun
     });
 });
 
-// ========== JWKS Rate Limiting ==========
+// ---- JWKS Rate Limiting ----
 var jwksRateLimiter = new System.Threading.RateLimiting.FixedWindowRateLimiter(
     new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
     {
@@ -215,7 +216,7 @@ app.Use(async (context, next) =>
     }
 });
 
-// ========== OIDC Discovery ==========
+// ---- OIDC Discovery ----
 app.MapGet("/.well-known/openid-configuration", (HttpContext httpContext, IConfiguration configuration) =>
 {
     var httpPort = configuration.GetValue("Endpoints:Http", 5002);
@@ -235,7 +236,7 @@ app.MapGet("/.well-known/openid-configuration", (HttpContext httpContext, IConfi
     });
 });
 
-// ========== JWKS Discovery ==========
+// ---- JWKS Discovery ----
 app.MapGet("/.well-known/jwks", async (IKeyManager keyManager) =>
 {
     var keys = await keyManager.GetValidKeysAsync();
@@ -245,10 +246,10 @@ app.MapGet("/.well-known/jwks", async (IKeyManager keyManager) =>
 
 app.MapControllers();
 
-// ========== Prometheus Metrics Endpoint ==========
+// ---- Prometheus Metrics Endpoint ----
 app.MapPrometheusScrapingEndpoint();
 
-// ========== Static files & SPA for Admin Web (HTTP port only) ==========
+// ---- Static files & SPA for Admin Web (HTTP port only) ----
 var appTitle = builder.Configuration["APP_TITLE"] ?? "QuantumZhou.Identity";
 app.MapWhen(context =>
     context.Connection.LocalPort == httpPort &&

@@ -5,10 +5,9 @@
 ```
 ┌─────────────────────────────────────────────────────┐
 │                      Host                            │
-│  Controllers (Admin/Gateway/Profile) + SPA Hosting   │
-├─────────────────────────────────────────────────────┤
-│                     Service                          │
-│  AuthController（HTTP REST）                          │
+│  Controllers (Token/SmsCode/TokenRevocation/         │
+│   CallbackRegistration/Admin/Gateway/Profile)        │
+│  + Middleware + SPA Hosting                          │
 ├─────────────────────────────────────────────────────┤
 │                     Domain                           │
 │  Validators + TokenService + KeyManager + Callback   │

@@ -1,6 +1,6 @@
 namespace QuantumZhou.Identity.Host.Models;
 
-public sealed record AdminApiErrorResponse(string Message);
+// 仅管理控制台（/api/admin/*）使用的请求/响应。三个调用面共用的通用响应见 ApiModels.cs。
 
 public sealed record AdminLoginRequest(string Username, string Password, bool RememberMe);
 
@@ -49,8 +49,6 @@ public sealed record AdminUpdateCallbackRequest(string? CallbackUrl, int TtlSeco
 
 public sealed record AdminRevokeRefreshTokenRequest(string RefreshToken);
 
-public sealed record AdminOperationResponse(bool Success, string Message);
-
 public sealed record AdminLoginHistoryItemResponse(
     string AuthMethod,
     string EventType,
@@ -70,11 +68,3 @@ public sealed record AdminAuditLogItemResponse(
     string? ClientIp,
     string? CorrelationId,
     long CreatedAt);
-
-public sealed record ProfileResponse(
-    string UserId,
-    string? Nickname,
-    bool IsActive,
-    long CreatedAt);
-
-public sealed record UpdateProfileNicknameRequest(string? Nickname);
