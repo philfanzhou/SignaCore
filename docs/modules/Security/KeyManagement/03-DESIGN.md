@@ -3,9 +3,16 @@
 ## 文件结构
 
 ```
-backend/Domain/KeyManager.cs
+backend/Domain/Keys/KeyManager.cs               # 密钥生命周期编排（加载/轮换/对外提供）
+backend/Domain/Keys/IMasterKeyProvider.cs       # 主密钥来源抽象
+backend/Domain/Keys/FileMasterKeyProvider.cs    # 环境变量 → 文件 → 生成
+backend/Domain/Keys/IPrivateKeyProtector.cs     # 私钥静态加密抽象
+backend/Domain/Keys/AesGcmPrivateKeyProtector.cs # AES-GCM + HKDF 实现
 backend/Host/Program.cs (JWKS 端点配置)
 ```
+
+三者职责分离：`KeyManager` 不接触任何密钥字节，主密钥从哪来、私钥怎么加解密
+分别由 `IMasterKeyProvider` 与 `IPrivateKeyProtector` 决定。
 
 ## 关键接口签名
 
@@ -17,7 +24,19 @@ public interface IKeyManager {
     Task RotateKeyAsync();
     Task InitializationCompleted { get; }
 }
+
+public interface IMasterKeyProvider {
+    byte[] GetMasterKey();
+}
+
+public interface IPrivateKeyProtector {
+    (string EncryptedKey, string Salt) Protect(byte[] pkcs8PrivateKey);
+    byte[] Unprotect(string encryptedKey, string salt);
+}
 ```
+
+> 加密字节格式（`nonce(12) || tag(16) || ciphertext`，salt 分列存储）是**持久化契约**，
+> 由 `AesGcmPrivateKeyProtectorTests` 用独立重写的参考实现双向交叉验证。
 
 ## 依赖的数据库表
 

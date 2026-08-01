@@ -9,10 +9,12 @@ using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain;
+using QuantumZhou.Identity.Domain.Keys;
 using Xunit;
 
 namespace QuantumZhou.Identity.Tests.Domain;
 
+[Collection(QuantumZhou.Identity.Tests.Domain.Keys.MasterKeyStateCollection.Name)]
 public class KeyManagerTests : IDisposable
 {
     private string? _previousMasterKey;
@@ -44,6 +46,14 @@ public class KeyManagerTests : IDisposable
         Environment.SetEnvironmentVariable("RSA_MASTER_KEY", "test_master_key_for_unit_tests_only_32bytes!");
         _envVarSet = true;
     }
+
+    /// <summary>
+    /// 生产用的真实加解密实现（配合当前进程的 RSA_MASTER_KEY / 密钥文件）。
+    /// 加解密逻辑本身另有 AesGcmPrivateKeyProtectorTests 覆盖，这里只是让 KeyManager 能跑起来。
+    /// </summary>
+    private static IPrivateKeyProtector CreateProtector() =>
+        new AesGcmPrivateKeyProtector(
+            new FileMasterKeyProvider(NullLogger<FileMasterKeyProvider>.Instance));
 
     private const int AesNonceSize = 12;
     private const int AesTagSize = 16;
@@ -92,7 +102,7 @@ public class KeyManagerTests : IDisposable
         var scopeFactoryMock = CreateMockScopeFactory();
         var logger = NullLogger<KeyManager>.Instance;
 
-        var keyManager = new KeyManager(scopeFactoryMock.Object, logger);
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
 
         Assert.NotNull(keyManager);
         Assert.NotNull(keyManager.InitializationCompleted);
@@ -110,7 +120,7 @@ public class KeyManagerTests : IDisposable
         var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock);
         var logger = NullLogger<KeyManager>.Instance;
 
-        var keyManager = new KeyManager(scopeFactoryMock.Object, logger);
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
         await keyManager.InitializationCompleted;
 
         var key = keyManager.GetCurrentKey();
@@ -135,7 +145,7 @@ public class KeyManagerTests : IDisposable
         var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock, unitOfWorkMock);
         var logger = NullLogger<KeyManager>.Instance;
 
-        var keyManager = new KeyManager(scopeFactoryMock.Object, logger);
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
         await keyManager.InitializationCompleted;
 
         var key = keyManager.GetCurrentKey();
@@ -159,7 +169,7 @@ public class KeyManagerTests : IDisposable
         var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock);
         var logger = NullLogger<KeyManager>.Instance;
 
-        var keyManager = new KeyManager(scopeFactoryMock.Object, logger);
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
         await keyManager.InitializationCompleted;
 
         Assert.True(await keyManager.NeedsKeyRotationAsync());
@@ -178,7 +188,7 @@ public class KeyManagerTests : IDisposable
         var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock);
         var logger = NullLogger<KeyManager>.Instance;
 
-        var keyManager = new KeyManager(scopeFactoryMock.Object, logger);
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
         await keyManager.InitializationCompleted;
 
         Assert.False(await keyManager.NeedsKeyRotationAsync());
@@ -200,7 +210,7 @@ public class KeyManagerTests : IDisposable
         var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock, unitOfWorkMock);
         var logger = NullLogger<KeyManager>.Instance;
 
-        var keyManager = new KeyManager(scopeFactoryMock.Object, logger);
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
         await keyManager.InitializationCompleted;
 
         Assert.True(await keyManager.NeedsKeyRotationAsync());
@@ -219,7 +229,7 @@ public class KeyManagerTests : IDisposable
         var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock);
         var logger = NullLogger<KeyManager>.Instance;
 
-        var keyManager = new KeyManager(scopeFactoryMock.Object, logger);
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
         await keyManager.InitializationCompleted;
         var originalKeyId = keyManager.GetCurrentKey().KeyId;
 
@@ -247,7 +257,7 @@ public class KeyManagerTests : IDisposable
         var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock, unitOfWorkMock);
         var logger = NullLogger<KeyManager>.Instance;
 
-        var keyManager = new KeyManager(scopeFactoryMock.Object, logger);
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
         await keyManager.InitializationCompleted;
 
         await keyManager.RotateKeyAsync();
@@ -276,7 +286,7 @@ public class KeyManagerTests : IDisposable
         var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock, unitOfWorkMock);
         var logger = NullLogger<KeyManager>.Instance;
 
-        var keyManager = new KeyManager(scopeFactoryMock.Object, logger);
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
         await keyManager.InitializationCompleted;
 
         await keyManager.RotateKeyAsync();
@@ -315,7 +325,7 @@ public class KeyManagerTests : IDisposable
         var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock, unitOfWorkMock);
         var logger = new TestLogger<KeyManager>();
 
-        var keyManager = new KeyManager(scopeFactoryMock.Object, logger);
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
         await keyManager.InitializationCompleted;
 
         // Per KeyManagement 02-SPEC.md AC-FR-06: master key loss must log Error (not Warning)

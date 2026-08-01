@@ -66,7 +66,7 @@
 
 ## 测试策略
 
-- 单元测试：`test/Domain/KeyManagerTests.cs`
+- 单元测试：`backend/Tests/unit/Domain/KeyManagerTests.cs` 与 `backend/Tests/unit/Domain/Keys/`
   - 密钥生成：验证生成的密钥为 RSA 2048-bit，且私钥已加密存储
   - 密钥轮换：验证轮换后旧密钥标记为非活跃，新密钥成为活跃密钥
   - 私钥加密：验证 AES-256-GCM 加密流程，HKDF 密钥派生正确性

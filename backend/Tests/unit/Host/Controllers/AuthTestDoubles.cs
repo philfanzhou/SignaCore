@@ -10,6 +10,7 @@ using Moq;
 using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain;
+using QuantumZhou.Identity.Domain.Keys;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Host;
 using Xunit;

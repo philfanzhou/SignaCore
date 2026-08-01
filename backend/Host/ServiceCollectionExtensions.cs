@@ -8,6 +8,7 @@ using OpenTelemetry.Trace;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain;
+using QuantumZhou.Identity.Domain.Keys;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Services.Sms;
 using QuantumZhou.Identity.Domain.Services.WeChat;
@@ -58,6 +59,9 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient("Callback");
 
         // ---- RSA Key Manager ----
+        // 主密钥来源与私钥加解密是两个独立关注点，KeyManager 只负责密钥生命周期编排。
+        services.AddSingleton<IMasterKeyProvider, FileMasterKeyProvider>();
+        services.AddSingleton<IPrivateKeyProtector, AesGcmPrivateKeyProtector>();
         services.AddSingleton<IKeyManager, KeyManager>();
 
         // ---- JWT Options ----
