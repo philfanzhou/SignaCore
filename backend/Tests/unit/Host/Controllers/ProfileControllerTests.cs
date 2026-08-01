@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -147,7 +147,7 @@ public class ProfileControllerTests
         var result = await controller.UpdateNickname(new UpdateProfileNicknameRequest(longNickname), accountRepo.Object, unitOfWork.Object);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
-        var err = Assert.IsType<AdminApiErrorResponse>(bad.Value);
+        var err = Assert.IsType<ErrorResponse>(bad.Value);
         Assert.Contains("Nickname cannot exceed", err.Message);
         unitOfWork.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -166,7 +166,7 @@ public class ProfileControllerTests
         var result = await controller.UpdateNickname(new UpdateProfileNicknameRequest("NewName"), accountRepo.Object, unitOfWork.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminOperationResponse>(ok.Value);
+        var response = Assert.IsType<OperationResponse>(ok.Value);
         Assert.True(response.Success);
         Assert.Equal("NewName", account.Nickname);
         accountRepo.Verify();
@@ -186,7 +186,7 @@ public class ProfileControllerTests
         var result = await controller.UpdateNickname(new UpdateProfileNicknameRequest("   "), accountRepo.Object, unitOfWork.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        Assert.True(Assert.IsType<AdminOperationResponse>(ok.Value).Success);
+        Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
         Assert.Null(account.Nickname);
         unitOfWork.Verify();
     }
@@ -204,7 +204,7 @@ public class ProfileControllerTests
         var result = await controller.UpdateNickname(new UpdateProfileNicknameRequest(null), accountRepo.Object, unitOfWork.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        Assert.True(Assert.IsType<AdminOperationResponse>(ok.Value).Success);
+        Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
         Assert.Null(account.Nickname);
         unitOfWork.Verify();
     }

@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using QuantumZhou.Identity.Database;
@@ -31,7 +31,7 @@ public class WechatValidatorTests
         var result = await validator.ValidateAsync(new ValidationRequest
         {
             GrantType = IdentityConstants.GrantTypeWechat,
-            WechatCode = "valid_code"
+            Code = "valid_code"
         });
 
         Assert.True(result.IsSuccess);
@@ -49,7 +49,7 @@ public class WechatValidatorTests
         var result = await validator.ValidateAsync(new ValidationRequest
         {
             GrantType = IdentityConstants.GrantTypeWechat,
-            WechatCode = ""
+            Code = ""
         });
 
         Assert.False(result.IsSuccess);
@@ -70,7 +70,7 @@ public class WechatValidatorTests
         var result = await validator.ValidateAsync(new ValidationRequest
         {
             GrantType = IdentityConstants.GrantTypeWechat,
-            WechatCode = "unbound_code"
+            Code = "unbound_code"
         });
 
         Assert.False(result.IsSuccess);
@@ -94,7 +94,7 @@ public class WechatValidatorTests
         var result = await validator.ValidateAsync(new ValidationRequest
         {
             GrantType = IdentityConstants.GrantTypeWechat,
-            WechatCode = "valid_code"
+            Code = "valid_code"
         });
 
         Assert.False(result.IsSuccess);
@@ -113,7 +113,7 @@ public class WechatValidatorTests
         var result = await validator.ValidateAsync(new ValidationRequest
         {
             GrantType = IdentityConstants.GrantTypeWechat,
-            WechatCode = "invalid_code"
+            Code = "invalid_code"
         });
 
         Assert.False(result.IsSuccess);

@@ -16,34 +16,34 @@
 ## 详细的验收标准
 
 ### AC-FR-01: 参数验证
-- **Given** RegisterCallbackHttpRequest
+- **Given** RegisterCallbackRequest
 - **When** AppId 或 AppSecret 为空
 - **Then** 返回 success=false, message="AppId and AppSecret are required"
 
 ### AC-FR-02: CallbackUrl 验证
-- **Given** RegisterCallbackHttpRequest 且 CallbackUrl 非空
+- **Given** RegisterCallbackRequest 且 CallbackUrl 非空
 - **When** CallbackUrl 不是有效的绝对 URL
 - **Then** 返回 success=false, message 包含 "Invalid callback URL"
 
-- **Given** RegisterCallbackHttpRequest 且 CallbackUrl 使用 ftp:// 等非 HTTP/HTTPS 协议
+- **Given** RegisterCallbackRequest 且 CallbackUrl 使用 ftp:// 等非 HTTP/HTTPS 协议
 - **When** 验证
 - **Then** 返回 success=false, message 包含 "HTTP or HTTPS"
 
-- **Given** RegisterCallbackHttpRequest 且 CallbackUrl 解析到私有 IP（如 192.168.x.x）
+- **Given** RegisterCallbackRequest 且 CallbackUrl 解析到私有 IP（如 192.168.x.x）
 - **When** 显式配置 AllowPrivateAddresses=false
 - **Then** 返回 success=false, message 包含 "private/internal IP address"
 
-- **Given** RegisterCallbackHttpRequest 且 CallbackUrl 域名不在白名单中
+- **Given** RegisterCallbackRequest 且 CallbackUrl 域名不在白名单中
 - **When** 配置了 AllowedDomains
 - **Then** 返回 success=false, message 包含 "not in the allowed domains list"
 
 ### AC-FR-03: AppId 验证
-- **Given** RegisterCallbackHttpRequest
+- **Given** RegisterCallbackRequest
 - **When** AppId 未注册
 - **Then** 返回 success=false, message="AppId not registered"
 
 ### AC-FR-04: AppSecret 验证
-- **Given** RegisterCallbackHttpRequest
+- **Given** RegisterCallbackRequest
 - **When** AppSecret 不匹配
 - **Then** 返回 success=false, message="AppSecret mismatch"
 

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
@@ -289,7 +289,7 @@ public class AuthControllerTests
         var controller = CreateController(Array.Empty<IIdentityValidator>());
         // Intentionally do not set X-Admin-AppId / X-Admin-AppSecret headers
 
-        var request = new RegisterCallbackHttpRequest
+        var request = new RegisterCallbackRequest
         {
             CallbackUrl = "http://example.com/callback",
             TtlSeconds = 3600
@@ -298,7 +298,7 @@ public class AuthControllerTests
         var actionResult = await controller.RegisterCallback(request);
 
         var ok = ExtractOkResult(actionResult);
-        var response = Assert.IsType<RegisterCallbackHttpResponse>(ok.Value!);
+        var response = Assert.IsType<RegisterCallbackResponse>(ok.Value!);
         Assert.False(response.Success);
         Assert.Equal("AppId and AppSecret are required", response.Message);
     }
@@ -325,6 +325,27 @@ public class AuthControllerTests
             null, "unknown", "password", "login_failure",
             It.IsAny<string?>(), It.IsAny<string?>(), "AppId not registered",
             "unregistered-app", It.IsAny<string?>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetToken_AuditsCorrelationIdProducedByMiddleware()
+    {
+        var validatorMock = new Mock<IIdentityValidator>();
+        validatorMock.SetupGet(v => v.GrantType).Returns("sms");
+        validatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
+            .ReturnsAsync(ValidationResult.Failure("invalid code"));
+        var controller = CreateController(new[] { validatorMock.Object });
+
+        // CorrelationIdMiddleware 在管道最前面把 ID 放进 HttpContext.Items，
+        // 请求头上没有。Controller 必须复用它，而不是自己 Guid.NewGuid()。
+        controller.HttpContext.Items[CorrelationIdMiddleware.HttpContextItemsKey] = "corr-from-middleware";
+
+        await controller.GetToken(new TokenRequest { GrantType = "sms" }, CancellationToken.None);
+
+        _auditServiceMock.Verify(a => a.RecordLoginAsync(
+            It.IsAny<Guid?>(), It.IsAny<string>(), "sms", "login_failure",
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<string?>(), "corr-from-middleware"), Times.Once);
     }
 
     [Fact]
@@ -481,12 +502,12 @@ public class AuthControllerTests
         controller.HttpContext.Request.Headers["X-Admin-AppId"] = "app-1";
         controller.HttpContext.Request.Headers["X-Admin-AppSecret"] = "secret";
 
-        var request = new RegisterCallbackHttpRequest { CallbackUrl = "not a url", TtlSeconds = 3600 };
+        var request = new RegisterCallbackRequest { CallbackUrl = "not a url", TtlSeconds = 3600 };
 
         var actionResult = await controller.RegisterCallback(request);
 
         var ok = ExtractOkResult(actionResult);
-        var response = Assert.IsType<RegisterCallbackHttpResponse>(ok.Value!);
+        var response = Assert.IsType<RegisterCallbackResponse>(ok.Value!);
         Assert.False(response.Success);
         Assert.StartsWith("Invalid callback URL", response.Message);
     }
@@ -498,12 +519,12 @@ public class AuthControllerTests
         controller.HttpContext.Request.Headers["X-Admin-AppId"] = "unknown-app";
         controller.HttpContext.Request.Headers["X-Admin-AppSecret"] = "secret";
 
-        var request = new RegisterCallbackHttpRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = 3600 };
+        var request = new RegisterCallbackRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = 3600 };
 
         var actionResult = await controller.RegisterCallback(request);
 
         var ok = ExtractOkResult(actionResult);
-        var response = Assert.IsType<RegisterCallbackHttpResponse>(ok.Value!);
+        var response = Assert.IsType<RegisterCallbackResponse>(ok.Value!);
         Assert.False(response.Success);
         Assert.Equal("AppId not registered", response.Message);
     }
@@ -524,12 +545,12 @@ public class AuthControllerTests
         controller.HttpContext.Request.Headers["X-Admin-AppId"] = "app-1";
         controller.HttpContext.Request.Headers["X-Admin-AppSecret"] = "wrong-secret";
 
-        var request = new RegisterCallbackHttpRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = 3600 };
+        var request = new RegisterCallbackRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = 3600 };
 
         var actionResult = await controller.RegisterCallback(request);
 
         var ok = ExtractOkResult(actionResult);
-        var response = Assert.IsType<RegisterCallbackHttpResponse>(ok.Value!);
+        var response = Assert.IsType<RegisterCallbackResponse>(ok.Value!);
         Assert.False(response.Success);
         Assert.Equal("AppSecret mismatch", response.Message);
     }
@@ -550,12 +571,12 @@ public class AuthControllerTests
         controller.HttpContext.Request.Headers["X-Admin-AppId"] = "app-1";
         controller.HttpContext.Request.Headers["X-Admin-AppSecret"] = "real-secret";
 
-        var request = new RegisterCallbackHttpRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = 0 };
+        var request = new RegisterCallbackRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = 0 };
 
         var actionResult = await controller.RegisterCallback(request);
 
         var ok = ExtractOkResult(actionResult);
-        var response = Assert.IsType<RegisterCallbackHttpResponse>(ok.Value!);
+        var response = Assert.IsType<RegisterCallbackResponse>(ok.Value!);
         Assert.True(response.Success);
         Assert.True(response.ExpiresAt > DateTimeOffset.UtcNow.AddSeconds(IdentityConstants.DefaultCallbackTtlSeconds - 60).ToUnixTimeSeconds());
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
@@ -577,12 +598,12 @@ public class AuthControllerTests
         controller.HttpContext.Request.Headers["X-Admin-AppId"] = "app-1";
         controller.HttpContext.Request.Headers["X-Admin-AppSecret"] = "real-secret";
 
-        var request = new RegisterCallbackHttpRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = IdentityConstants.CallbackTtlNeverExpire };
+        var request = new RegisterCallbackRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = IdentityConstants.CallbackTtlNeverExpire };
 
         var actionResult = await controller.RegisterCallback(request);
 
         var ok = ExtractOkResult(actionResult);
-        var response = Assert.IsType<RegisterCallbackHttpResponse>(ok.Value!);
+        var response = Assert.IsType<RegisterCallbackResponse>(ok.Value!);
         Assert.True(response.Success);
         Assert.Equal(0, response.ExpiresAt);
         Assert.Null(app.CallbackExpiresAt);

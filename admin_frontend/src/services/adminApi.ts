@@ -1,6 +1,6 @@
 import axios, { type AxiosInstance } from 'axios'
 
-export interface AdminPagedResponse<T> {
+export interface PagedResponse<T> {
   items: T[]
   total: number
   page: number
@@ -86,7 +86,7 @@ class AdminApiClient {
   }
 
   async getUsers(params: { username?: string; phone?: string; page?: number; pageSize?: number }) {
-    const response = await this.client.get<AdminPagedResponse<AdminUser>>('/api/admin/users', { params })
+    const response = await this.client.get<PagedResponse<AdminUser>>('/api/admin/users', { params })
     return response.data
   }
 

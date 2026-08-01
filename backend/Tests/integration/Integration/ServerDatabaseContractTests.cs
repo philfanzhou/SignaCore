@@ -1,4 +1,4 @@
-using DotNet.Testcontainers.Containers;
+﻿using DotNet.Testcontainers.Containers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -93,7 +93,7 @@ public sealed class ServerDatabaseContractTests
                     ({credentialId}, {accountId}, {"LegacyUser"}, {"hash"}, {DateTimeOffset.UtcNow});
                 """);
 
-            await IdentityNormalizationMigration.MigrateAsync(
+            await SchemaMigrator.MigrateAsync(
                 context,
                 databaseOptions);
 
@@ -230,7 +230,7 @@ public sealed class ServerDatabaseContractTests
             var credentialRepository =
                 new PasswordCredentialRepository(queryContext);
             var credential =
-                await credentialRepository.GetByUsernameAsync("CAFÉ");
+                await credentialRepository.GetByUsernameAsync("CAF脡");
             Assert.NotNull(credential);
 
             var account = await queryContext.Accounts

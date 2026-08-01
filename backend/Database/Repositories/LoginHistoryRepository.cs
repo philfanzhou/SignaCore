@@ -29,6 +29,13 @@ public class LoginHistoryRepository : ILoginHistoryRepository
             .ToListAsync();
     }
 
+    public async Task<int> CountByAccountIdAsync(Guid accountId)
+    {
+        return await _dbContext.LoginHistories
+            .Where(h => h.AccountId == accountId)
+            .CountAsync();
+    }
+
     public async Task<int> RemoveOlderThanAsync(DateTimeOffset cutoff)
     {
         return await _dbContext.LoginHistories

@@ -10,7 +10,8 @@ using QuantumZhou.Identity.Database.Repositories;
 
 namespace QuantumZhou.Identity.Domain;
 
-public class MasterKeyInfo
+/// <summary>data/master-key/master-key.json 的文件结构。</summary>
+public class MasterKeyFile
 {
     public string EncodedKey { get; set; } = string.Empty;
     public DateTimeOffset GeneratedAt { get; set; }
@@ -84,8 +85,8 @@ public class KeyManager : IKeyManager
                 HashAlgorithmName.SHA256,
                 Encoding.UTF8.GetBytes(envMasterKey),
                 32,
-                Encoding.UTF8.GetBytes(IdentityConstants.MasterKeyInfo),
-                Encoding.UTF8.GetBytes(IdentityConstants.KeyProtectionLabel));
+                Encoding.UTF8.GetBytes(IdentityConstants.MasterKeyHkdfSalt),
+                Encoding.UTF8.GetBytes(IdentityConstants.MasterKeyHkdfInfo));
             _logger.LogInformation("Using RSA master key from environment variable");
             return derivedKey;
         }
@@ -112,7 +113,7 @@ public class KeyManager : IKeyManager
         try
         {
             var json = File.ReadAllText(_masterKeyFilePath);
-            var info = JsonSerializer.Deserialize<MasterKeyInfo>(json);
+            var info = JsonSerializer.Deserialize<MasterKeyFile>(json);
             if (info == null || string.IsNullOrEmpty(info.EncodedKey))
             {
                 return null;
@@ -133,7 +134,7 @@ public class KeyManager : IKeyManager
             rng.GetBytes(keyBytes);
         }
 
-        var info = new MasterKeyInfo
+        var info = new MasterKeyFile
         {
             EncodedKey = Convert.ToBase64String(keyBytes),
             GeneratedAt = DateTimeOffset.UtcNow
@@ -144,15 +145,6 @@ public class KeyManager : IKeyManager
 
         _logger.LogInformation("New RSA master key generated and saved to {Path}", _masterKeyFilePath);
         return keyBytes;
-    }
-
-    public async Task<RsaSecurityKey> GetCurrentKeyAsync()
-    {
-        await _initializationTcs.Task;
-        lock (_keyLock)
-        {
-            return _currentKey!;
-        }
     }
 
     public async Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync()
@@ -321,7 +313,7 @@ public class KeyManager : IKeyManager
             _masterKey,
             32,
             saltBytes,
-            Encoding.UTF8.GetBytes(IdentityConstants.KeyEncryptLabel));
+            Encoding.UTF8.GetBytes(IdentityConstants.PrivateKeyHkdfInfo));
 
         using var aes = new AesGcm(encryptKey, AesTagSize);
         var nonce = RandomNumberGenerator.GetBytes(AesNonceSize);
@@ -343,7 +335,7 @@ public class KeyManager : IKeyManager
             _masterKey,
             32,
             saltBytes,
-            Encoding.UTF8.GetBytes(IdentityConstants.KeyEncryptLabel));
+            Encoding.UTF8.GetBytes(IdentityConstants.PrivateKeyHkdfInfo));
 
         using var aes = new AesGcm(encryptKey, AesTagSize);
 

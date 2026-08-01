@@ -59,7 +59,7 @@ public class KeyManagerTests : IDisposable
             masterKey,
             32,
             saltBytes,
-            Encoding.UTF8.GetBytes(IdentityConstants.KeyEncryptLabel));
+            Encoding.UTF8.GetBytes(IdentityConstants.PrivateKeyHkdfInfo));
 
         using var aes = new AesGcm(encryptKey, AesTagSize);
         var nonce = RandomNumberGenerator.GetBytes(AesNonceSize);
@@ -80,8 +80,8 @@ public class KeyManagerTests : IDisposable
             HashAlgorithmName.SHA256,
             Encoding.UTF8.GetBytes(envKey),
             32,
-            Encoding.UTF8.GetBytes(IdentityConstants.MasterKeyInfo),
-            Encoding.UTF8.GetBytes(IdentityConstants.KeyProtectionLabel));
+            Encoding.UTF8.GetBytes(IdentityConstants.MasterKeyHkdfSalt),
+            Encoding.UTF8.GetBytes(IdentityConstants.MasterKeyHkdfInfo));
     }
 
     [Fact]

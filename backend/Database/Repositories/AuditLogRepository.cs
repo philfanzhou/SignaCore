@@ -21,6 +21,20 @@ public class AuditLogRepository : IAuditLogRepository
 
     public async Task<List<AuditLogEntity>> QueryAsync(string? action, string? targetType, string? targetId, Guid? actorId, int pageSize, int skip)
     {
+        return await Filter(action, targetType, targetId, actorId)
+            .OrderByDescending(a => a.CreatedAt)
+            .Skip(skip)
+            .Take(pageSize)
+            .ToListAsync();
+    }
+
+    public async Task<int> CountAsync(string? action, string? targetType, string? targetId, Guid? actorId)
+    {
+        return await Filter(action, targetType, targetId, actorId).CountAsync();
+    }
+
+    private IQueryable<AuditLogEntity> Filter(string? action, string? targetType, string? targetId, Guid? actorId)
+    {
         var query = _dbContext.AuditLogs.AsQueryable();
 
         if (!string.IsNullOrEmpty(action))
@@ -35,11 +49,7 @@ public class AuditLogRepository : IAuditLogRepository
         if (actorId.HasValue)
             query = query.Where(a => a.ActorId == actorId.Value);
 
-        return await query
-            .OrderByDescending(a => a.CreatedAt)
-            .Skip(skip)
-            .Take(pageSize)
-            .ToListAsync();
+        return query;
     }
 
     public async Task<int> RemoveOlderThanAsync(DateTimeOffset cutoff)

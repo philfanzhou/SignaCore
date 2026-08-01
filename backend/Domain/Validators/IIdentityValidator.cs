@@ -14,11 +14,12 @@ public class ValidationRequest
     public string? Username { get; set; }
     public string? Password { get; set; }
     public string? Phone { get; set; }
+
+    /// <summary>短信验证码或微信 code，按 <see cref="GrantType"/> 解释。</summary>
     public string? Code { get; set; }
-    public string? WechatCode { get; set; }
+
     public string? RefreshToken { get; set; }
     public string? AppId { get; set; }
-    public string? AppSecret { get; set; }
 }
 
 public class ValidationResult

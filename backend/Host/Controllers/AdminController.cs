@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -38,7 +38,7 @@ public class AdminController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
         {
-            return BadRequest(new AdminApiErrorResponse("Username and password cannot be empty."));
+            return BadRequest(new ErrorResponse("Username and password cannot be empty."));
         }
 
         var validator = validatorFactory.GetValidator(IdentityConstants.GrantTypePassword);
@@ -114,7 +114,7 @@ public class AdminController : ControllerBase
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         await auditService.RecordActionAsync("admin_logout", "Session", actorId?.ToString() ?? "unknown",
             actorId, actorName, "Admin logged out", GetClientIp());
-        return Ok(new AdminOperationResponse(true, "Logged out successfully."));
+        return Ok(new OperationResponse(true, "Logged out successfully."));
     }
 
     [HttpGet("users")]
@@ -126,18 +126,11 @@ public class AdminController : ControllerBase
         [FromQuery] int? pageSize,
         [FromServices] IUserQueryService userQueryService)
     {
-        var normalizedPage = page.GetValueOrDefault(1) < 1 ? 1 : page.GetValueOrDefault(1);
-        var normalizedPageSize = pageSize.GetValueOrDefault(20);
-        if (normalizedPageSize < 1)
-        {
-            normalizedPageSize = 20;
-        }
+        var paging = PageRequest.Normalize(page, pageSize);
 
-        normalizedPageSize = Math.Min(normalizedPageSize, 100);
+        var (users, total) = await userQueryService.SearchUsersAsync(username, phone, paging.Page, paging.PageSize);
 
-        var (users, total) = await userQueryService.SearchUsersAsync(username, phone, normalizedPage, normalizedPageSize);
-
-        return Ok(new AdminPagedResponse<AdminUserListItemResponse>(users, total, normalizedPage, normalizedPageSize));
+        return Ok(new PagedResponse<UserListItemResponse>(users, total, paging.Page, paging.PageSize));
     }
 
     [HttpPost("users")]
@@ -153,17 +146,17 @@ public class AdminController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
         {
-            return BadRequest(new AdminApiErrorResponse("Username and password cannot be empty."));
+            return BadRequest(new ErrorResponse("Username and password cannot be empty."));
         }
 
         if (!passwordPolicy.Validate(request.Password, out var policyError))
         {
-            return BadRequest(new AdminApiErrorResponse(policyError));
+            return BadRequest(new ErrorResponse(policyError));
         }
 
         if (await passwordCredentialRepository.ExistsByUsernameAsync(request.Username))
         {
-            return BadRequest(new AdminApiErrorResponse("Username already exists."));
+            return BadRequest(new ErrorResponse("Username already exists."));
         }
 
         var account = new AccountEntity
@@ -217,12 +210,12 @@ public class AdminController : ControllerBase
         [FromServices] IAuditService auditService)
     {
         if (string.IsNullOrWhiteSpace(request.Phone))
-            return BadRequest(new AdminApiErrorResponse("Phone number is required."));
+            return BadRequest(new ErrorResponse("Phone number is required."));
 
         var phone = request.Phone.Trim();
         var existingLogin = await userLoginRepository.GetBySmsPhoneAsync(phone);
         if (existingLogin != null)
-            return BadRequest(new AdminApiErrorResponse("Phone number already registered."));
+            return BadRequest(new ErrorResponse("Phone number already registered."));
 
         var account = new AccountEntity
         {
@@ -275,14 +268,14 @@ public class AdminController : ControllerBase
         var account = await accountRepository.GetByIdAsync(userId);
         if (account == null)
         {
-            return NotFound(new AdminApiErrorResponse("User not found."));
+            return NotFound(new ErrorResponse("User not found."));
         }
 
         account.Remark = request.Remark?.Trim();
         await accountRepository.UpdateAsync(account);
         await unitOfWork.SaveChangesAsync();
 
-        return Ok(new AdminOperationResponse(true, "Remark updated."));
+        return Ok(new OperationResponse(true, "Remark updated."));
     }
 
     [HttpPatch("users/{userId:guid}/nickname")]
@@ -296,14 +289,14 @@ public class AdminController : ControllerBase
         var account = await accountRepository.GetByIdAsync(userId);
         if (account == null)
         {
-            return NotFound(new AdminApiErrorResponse("User not found."));
+            return NotFound(new ErrorResponse("User not found."));
         }
 
         account.Nickname = string.IsNullOrWhiteSpace(request.Nickname) ? null : request.Nickname.Trim();
         await accountRepository.UpdateAsync(account);
         await unitOfWork.SaveChangesAsync();
 
-        return Ok(new AdminOperationResponse(true, "Nickname updated."));
+        return Ok(new OperationResponse(true, "Nickname updated."));
     }
 
     [HttpPatch("users/{userId:guid}/status")]
@@ -318,7 +311,7 @@ public class AdminController : ControllerBase
         var account = await accountRepository.GetByIdAsync(userId);
         if (account == null)
         {
-            return NotFound(new AdminApiErrorResponse("User not found."));
+            return NotFound(new ErrorResponse("User not found."));
         }
 
         var beforeStatus = account.IsActive;
@@ -336,7 +329,7 @@ public class AdminController : ControllerBase
             before: new { IsActive = beforeStatus },
             after: new { IsActive = request.IsActive });
 
-        return Ok(new AdminOperationResponse(true, request.IsActive ? "User enabled." : "User disabled."));
+        return Ok(new OperationResponse(true, request.IsActive ? "User enabled." : "User disabled."));
     }
 
     [HttpGet("apps")]
@@ -381,7 +374,7 @@ public class AdminController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.AppName))
         {
-            return BadRequest(new AdminApiErrorResponse("App name cannot be empty."));
+            return BadRequest(new ErrorResponse("App name cannot be empty."));
         }
 
         var newAppId = Guid.NewGuid().ToString("N");
@@ -425,7 +418,7 @@ public class AdminController : ControllerBase
         var app = await appRegistrationRepository.GetByAppIdAsync(appId);
         if (app == null)
         {
-            return NotFound(new AdminApiErrorResponse("App not found."));
+            return NotFound(new ErrorResponse("App not found."));
         }
 
         if (string.IsNullOrWhiteSpace(request.CallbackUrl))
@@ -444,7 +437,7 @@ public class AdminController : ControllerBase
         app.IsActive = request.IsActive;
         await unitOfWork.SaveChangesAsync();
 
-        return Ok(new AdminOperationResponse(true, "Callback configuration updated."));
+        return Ok(new OperationResponse(true, "Callback configuration updated."));
     }
 
     [HttpDelete("apps/{appId}")]
@@ -458,7 +451,7 @@ public class AdminController : ControllerBase
         var app = await appRegistrationRepository.GetByAppIdAsync(appId);
         if (app == null)
         {
-            return NotFound(new AdminApiErrorResponse("App not found."));
+            return NotFound(new ErrorResponse("App not found."));
         }
 
         await appRegistrationRepository.DeleteAsync(app);
@@ -468,7 +461,7 @@ public class AdminController : ControllerBase
         await auditService.RecordActionAsync("app_deleted", "AppRegistration", appId,
             actorId, actorName, $"Admin deleted app: {app.AppName}", GetClientIp());
 
-        return Ok(new AdminOperationResponse(true, "App deleted."));
+        return Ok(new OperationResponse(true, "App deleted."));
     }
 
     [HttpPost("apps/{appId}/reset-secret")]
@@ -482,7 +475,7 @@ public class AdminController : ControllerBase
         var app = await appRegistrationRepository.GetByAppIdAsync(appId);
         if (app == null)
         {
-            return NotFound(new AdminApiErrorResponse("App not found."));
+            return NotFound(new ErrorResponse("App not found."));
         }
 
         var newAppSecret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
@@ -511,13 +504,13 @@ public class AdminController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.RefreshToken))
         {
-            return BadRequest(new AdminApiErrorResponse("Refresh token cannot be empty."));
+            return BadRequest(new ErrorResponse("Refresh token cannot be empty."));
         }
 
         var refreshToken = await refreshTokenRepository.GetByTokenValueAsync(request.RefreshToken.Trim());
         if (refreshToken == null)
         {
-            return BadRequest(new AdminApiErrorResponse("Refresh token not found."));
+            return BadRequest(new ErrorResponse("Refresh token not found."));
         }
 
         refreshToken.IsRevoked = true;
@@ -527,7 +520,7 @@ public class AdminController : ControllerBase
         await auditService.RecordActionAsync("refresh_token_revoked", "RefreshToken", refreshToken.AccountId.ToString(),
             actorId, actorName, "Admin revoked refresh token", GetClientIp());
 
-        return Ok(new AdminOperationResponse(true, "Refresh token revoked."));
+        return Ok(new OperationResponse(true, "Refresh token revoked."));
     }
 
     [HttpGet("users/{userId:guid}/login-history")]
@@ -538,11 +531,10 @@ public class AdminController : ControllerBase
         [FromQuery] int? pageSize,
         [FromServices] ILoginHistoryRepository loginHistoryRepository)
     {
-        var normalizedPage = page.GetValueOrDefault(1) < 1 ? 1 : page.GetValueOrDefault(1);
-        var normalizedPageSize = Math.Min(Math.Max(pageSize.GetValueOrDefault(20), 1), 100);
-        var skip = (normalizedPage - 1) * normalizedPageSize;
+        var paging = PageRequest.Normalize(page, pageSize);
 
-        var histories = await loginHistoryRepository.GetByAccountIdAsync(userId, normalizedPageSize, skip);
+        var total = await loginHistoryRepository.CountByAccountIdAsync(userId);
+        var histories = await loginHistoryRepository.GetByAccountIdAsync(userId, paging.PageSize, paging.Skip);
 
         var items = histories.Select(h => new AdminLoginHistoryItemResponse(
             h.AuthMethod,
@@ -553,7 +545,7 @@ public class AdminController : ControllerBase
             h.AppId,
             h.CreatedAt.ToUnixTimeSeconds())).ToList();
 
-        return Ok(new AdminPagedResponse<AdminLoginHistoryItemResponse>(items, items.Count, normalizedPage, normalizedPageSize));
+        return Ok(new PagedResponse<AdminLoginHistoryItemResponse>(items, total, paging.Page, paging.PageSize));
     }
 
     [HttpGet("audit-logs")]
@@ -567,11 +559,10 @@ public class AdminController : ControllerBase
         [FromQuery] int? pageSize,
         [FromServices] IAuditLogRepository auditLogRepository)
     {
-        var normalizedPage = page.GetValueOrDefault(1) < 1 ? 1 : page.GetValueOrDefault(1);
-        var normalizedPageSize = Math.Min(Math.Max(pageSize.GetValueOrDefault(20), 1), 100);
-        var skip = (normalizedPage - 1) * normalizedPageSize;
+        var paging = PageRequest.Normalize(page, pageSize);
 
-        var logs = await auditLogRepository.QueryAsync(action, targetType, targetId, actorId, normalizedPageSize, skip);
+        var total = await auditLogRepository.CountAsync(action, targetType, targetId, actorId);
+        var logs = await auditLogRepository.QueryAsync(action, targetType, targetId, actorId, paging.PageSize, paging.Skip);
 
         var items = logs.Select(l => new AdminAuditLogItemResponse(
             l.Action,
@@ -584,7 +575,7 @@ public class AdminController : ControllerBase
             l.CorrelationId,
             l.CreatedAt.ToUnixTimeSeconds())).ToList();
 
-        return Ok(new AdminPagedResponse<AdminAuditLogItemResponse>(items, items.Count, normalizedPage, normalizedPageSize));
+        return Ok(new PagedResponse<AdminAuditLogItemResponse>(items, total, paging.Page, paging.PageSize));
     }
 
     private (Guid? ActorId, string? ActorName) GetAdminIdentity()

@@ -22,13 +22,13 @@ public class WechatValidator : IIdentityValidator
 
     public async Task<ValidationResult> ValidateAsync(ValidationRequest request)
     {
-        if (string.IsNullOrEmpty(request.WechatCode))
+        if (string.IsNullOrEmpty(request.Code))
         {
             _logger.LogWarning("WeChat validation failed: code is empty");
             return ValidationResult.Failure("WeChat code cannot be empty");
         }
 
-        var openId = await _wechatApiClient.CodeToSessionAsync(request.WechatCode);
+        var openId = await _wechatApiClient.CodeToSessionAsync(request.Code);
         if (string.IsNullOrEmpty(openId))
         {
             _logger.LogWarning("WeChat validation failed: failed to get OpenId");

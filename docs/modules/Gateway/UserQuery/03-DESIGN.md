@@ -7,7 +7,8 @@ backend/Host/Controllers/GatewayController.cs
 backend/Domain/Services/IUserQueryService.cs     (查询接口，Admin/Gateway 共用)
 backend/Domain/Services/UserQueryService.cs      (查询与投影唯一实现)
 backend/Domain/Services/GatewayValidationService.cs
-backend/Domain/Models/AdminModels.cs             (AdminUserListItemResponse, AdminPagedResponse 唯一定义)
+backend/Domain/Models/UserListItemResponse.cs    (UserListItemResponse 唯一定义)
+backend/Domain/Models/PagedResponse.cs           (PagedResponse<T>、PageRequest 分页归一化)
 backend/Database/IdentityConstants.cs            (AuthMethodSms)
 ```
 
@@ -17,15 +18,15 @@ backend/Database/IdentityConstants.cs            (AuthMethodSms)
 // Domain/Services/IUserQueryService.cs —— Admin/Gateway 两端用户查询的唯一实现
 public interface IUserQueryService
 {
-    Task<(List<AdminUserListItemResponse> Users, int Total)> SearchUsersAsync(
+    Task<(List<UserListItemResponse> Users, int Total)> SearchUsersAsync(
         string? username, string? phone, int page, int pageSize);
-    Task<List<AdminUserListItemResponse>> GetUsersByIdsAsync(List<string> userIds);
+    Task<List<UserListItemResponse>> GetUsersByIdsAsync(List<string> userIds);
 }
 
 // Domain/Models/AdminModels.cs —— DTO 唯一定义处（原 Host/Models 重复定义已删除，两端统一引用 Domain 版）
-public sealed record AdminPagedResponse<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);
+public sealed record PagedResponse<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);
 
-public sealed record AdminUserListItemResponse(
+public sealed record UserListItemResponse(
     string UserId,
     string Username,
     string Phone,
@@ -59,9 +60,9 @@ Client ──GET /api/gateway/users/search──▶ GatewayController
   │                                         │     └─ ProjectUsersAsync(query, page, pageSize)
   │                                         │        ├─ ToListAsync() → 内存分页
   │                                         │        ├─ OrderByDescending(CreatedAt).Skip().Take()
-  │                                         │        └─ 投影为 AdminUserListItemResponse（含 HasPassword）
+  │                                         │        └─ 投影为 UserListItemResponse（含 HasPassword）
   │                                         │
-  ◀─────────────────────────────────────── Ok(AdminPagedResponse<AdminUserListItemResponse>)
+  ◀─────────────────────────────────────── Ok(PagedResponse<UserListItemResponse>)
 ```
 
 ### GetUsersByIds
@@ -76,10 +77,10 @@ Client ──POST /api/gateway/users/batch──▶ GatewayController
   │                                         │     ├─ Guid.TryParse → 过滤无效 GUID
   │                                         │     ├─ 查询 Accounts (Where parsedUserIds.Contains)
   │                                         │     ├─ ProjectUsersAsync() → 投影
-  │                                         │     ├─ 构建 userMap (UserId → AdminUserListItemResponse)
+  │                                         │     ├─ 构建 userMap (UserId → UserListItemResponse)
   │                                         │     └─ 按 orderedUserIds 顺序输出结果
   │                                         │
-  ◀─────────────────────────────────────── Ok(List<AdminUserListItemResponse>)
+  ◀─────────────────────────────────────── Ok(List<UserListItemResponse>)
 ```
 
 ## 依赖的数据库表

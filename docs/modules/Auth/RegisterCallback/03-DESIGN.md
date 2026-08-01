@@ -5,7 +5,7 @@
 ```
 backend/
 ├── Host/Controllers/AuthController.cs         # POST /api/auth/callback/register HTTP 端点
-├── Host/Models/AuthModels.cs                 # RegisterCallbackHttpRequest / RegisterCallbackHttpResponse DTO
+├── Host/Models/AuthModels.cs                 # RegisterCallbackRequest / RegisterCallbackResponse DTO
 ├── Domain/Services/CallbackUrlValidator.cs   # 回调 URL 格式验证
 └── Database/
     ├── Entity/AppRegistrationEntity.cs        # 应用注册实体
@@ -17,12 +17,12 @@ backend/
 ```csharp
 // HTTP 端点（AuthController）
 [HttpPost("callback/register")]
-public async Task<ActionResult<RegisterCallbackHttpResponse>> RegisterCallback(
-    [FromBody] RegisterCallbackHttpRequest request)
+public async Task<ActionResult<RegisterCallbackResponse>> RegisterCallback(
+    [FromBody] RegisterCallbackRequest request)
 
 // 请求/响应 DTO（见 AuthModels.cs）
-public sealed class RegisterCallbackHttpRequest { string CallbackUrl; int TtlSeconds; }
-public sealed class RegisterCallbackHttpResponse { bool Success; string Message; long ExpiresAt; }
+public sealed class RegisterCallbackRequest { string CallbackUrl; int TtlSeconds; }
+public sealed class RegisterCallbackResponse { bool Success; string Message; long ExpiresAt; }
 ```
 
 ## 依赖的数据库表
@@ -56,5 +56,5 @@ Update CallbackUrl + CallbackExpiresAt
 SaveChangesAsync
     │
     ▼
-RegisterCallbackHttpResponse
+RegisterCallbackResponse
 ```

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -122,7 +122,7 @@ public class GatewayControllerTests : IDisposable
 
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status401Unauthorized, status.StatusCode);
-        var err = Assert.IsType<AdminApiErrorResponse>(status.Value);
+        var err = Assert.IsType<ErrorResponse>(status.Value);
         Assert.Contains("Missing gateway credentials", err.Message);
     }
 
@@ -161,7 +161,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.SearchUsers(null, null, null, null, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(2, response.Total);
         Assert.Equal(2, response.Items.Count);
         Assert.Equal(1, response.Page);
@@ -181,7 +181,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.SearchUsers("alice", null, null, null, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(1, response.Total);
         Assert.Equal("alice123", response.Items[0].Username);
     }
@@ -199,7 +199,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.SearchUsers(null, "138", null, null, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(1, response.Total);
         Assert.Contains("138", response.Items[0].Phone);
     }
@@ -217,7 +217,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.SearchUsers(null, null, 1, 2, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(5, response.Total);
         Assert.Equal(2, response.Items.Count);
         Assert.Equal(2, response.PageSize);
@@ -233,7 +233,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.SearchUsers(null, null, -1, 10, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(1, response.Page);
     }
 
@@ -247,7 +247,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.SearchUsers(null, null, 1, -5, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(20, response.PageSize);
     }
 
@@ -261,7 +261,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.SearchUsers(null, null, 1, 500, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<AdminPagedResponse<AdminUserListItemResponse>>(ok.Value);
+        var response = Assert.IsType<PagedResponse<UserListItemResponse>>(ok.Value);
         Assert.Equal(100, response.PageSize);
     }
 
@@ -285,7 +285,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.GetUsersByIds(null, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var list = Assert.IsType<List<AdminUserListItemResponse>>(ok.Value);
+        var list = Assert.IsType<List<UserListItemResponse>>(ok.Value);
         Assert.Empty(list);
     }
 
@@ -298,7 +298,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.GetUsersByIds(new List<string>(), _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var list = Assert.IsType<List<AdminUserListItemResponse>>(ok.Value);
+        var list = Assert.IsType<List<UserListItemResponse>>(ok.Value);
         Assert.Empty(list);
     }
 
@@ -311,7 +311,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.GetUsersByIds(new List<string> { "not-a-guid", "also-bad" }, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var list = Assert.IsType<List<AdminUserListItemResponse>>(ok.Value);
+        var list = Assert.IsType<List<UserListItemResponse>>(ok.Value);
         Assert.Empty(list);
     }
 
@@ -329,7 +329,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.GetUsersByIds(ids, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var list = Assert.IsType<List<AdminUserListItemResponse>>(ok.Value);
+        var list = Assert.IsType<List<UserListItemResponse>>(ok.Value);
         Assert.Equal(2, list.Count);
         // Order should match input order
         Assert.Equal(acc2.Id.ToString(), list[0].UserId);
@@ -347,7 +347,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.GetUsersByIds(ids, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var list = Assert.IsType<List<AdminUserListItemResponse>>(ok.Value);
+        var list = Assert.IsType<List<UserListItemResponse>>(ok.Value);
         Assert.Single(list);
     }
 
@@ -362,7 +362,7 @@ public class GatewayControllerTests : IDisposable
         var result = await _controller.GetUsersByIds(ids, _userQueryService, CreateValidationService());
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var list = Assert.IsType<List<AdminUserListItemResponse>>(ok.Value);
+        var list = Assert.IsType<List<UserListItemResponse>>(ok.Value);
         Assert.Single(list);
     }
 

@@ -16,9 +16,8 @@ using QuantumZhou.Identity.Host.Models;
 namespace QuantumZhou.Identity.Host.Controllers;
 
 /// <summary>
-/// HTTP REST authentication API — Phase 1 replacement for gRPC AuthGrpcService.
-/// Shares the same Domain layer logic as AuthServiceImpl.
-/// AppId/AppSecret are passed via X-Admin-AppId / X-Admin-AppSecret headers (same as GatewayController).
+/// 认证 API。AppId/AppSecret 通过 X-Admin-AppId / X-Admin-AppSecret 请求头传递（与 GatewayController 一致）；
+/// 在 /api/auth/token 上这两个头是可选的，带了才做网关校验。
 /// </summary>
 [Route("api/auth")]
 [ApiController]
@@ -87,8 +86,9 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/auth/token — Unified token acquisition (OAuth2 grant_type mode).
-    /// Replaces gRPC AuthGrpcService.GetToken.
+    /// POST /api/auth/token — 统一发 token（OAuth2 grant_type 模式）。
+    /// 失败时返回 HTTP 200 + Success=false，不是 4xx；错误文案是契约，
+    /// 见 docs/modules/Auth/GetToken/06-CONVENTIONS.md。
     /// </summary>
     [HttpPost("token")]
     [AllowAnonymous]
@@ -140,7 +140,6 @@ public class AuthController : ControllerBase
             Password = request.Password,
             Phone = request.Phone,
             Code = request.Code,
-            WechatCode = request.Code,
             RefreshToken = request.RefreshToken,
             AppId = appId
         });
@@ -244,8 +243,7 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/auth/sms-code — Request SMS verification code.
-    /// Replaces gRPC AuthGrpcService.RequestSmsCode.
+    /// POST /api/auth/sms-code — 申请短信验证码。
     /// </summary>
     [HttpPost("sms-code")]
     [AllowAnonymous]
@@ -296,8 +294,7 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/auth/revoke — Revoke a refresh token.
-    /// Replaces gRPC AuthGrpcService.RevokeRefreshToken.
+    /// POST /api/auth/revoke — 撤销 refresh token。
     /// </summary>
     [HttpPost("revoke")]
     [AllowAnonymous]
@@ -319,20 +316,19 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/auth/callback/register — Register a business system's callback URL.
-    /// Replaces gRPC AuthGrpcService.RegisterCallback.
+    /// POST /api/auth/callback/register — 注册业务系统的 claims 回调 URL。
     /// </summary>
     [HttpPost("callback/register")]
     [AllowAnonymous]
-    public async Task<ActionResult<RegisterCallbackHttpResponse>> RegisterCallback(
-        [FromBody] RegisterCallbackHttpRequest request)
+    public async Task<ActionResult<RegisterCallbackResponse>> RegisterCallback(
+        [FromBody] RegisterCallbackRequest request)
     {
         var appId = GetAppIdHeader();
         var appSecret = GetAppSecretHeader();
 
         if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(appSecret))
         {
-            return Ok(new RegisterCallbackHttpResponse { Success = false, Message = "AppId and AppSecret are required" });
+            return Ok(new RegisterCallbackResponse { Success = false, Message = "AppId and AppSecret are required" });
         }
 
         if (!string.IsNullOrWhiteSpace(request.CallbackUrl))
@@ -340,20 +336,20 @@ public class AuthController : ControllerBase
             var urlValidation = _callbackUrlValidator.Validate(request.CallbackUrl);
             if (!urlValidation.IsValid)
             {
-                return Ok(new RegisterCallbackHttpResponse { Success = false, Message = $"Invalid callback URL: {urlValidation.ErrorMessage}" });
+                return Ok(new RegisterCallbackResponse { Success = false, Message = $"Invalid callback URL: {urlValidation.ErrorMessage}" });
             }
         }
 
         var app = await _appRegistrationRepository.GetByAppIdAsync(appId);
         if (app == null)
         {
-            return Ok(new RegisterCallbackHttpResponse { Success = false, Message = "AppId not registered" });
+            return Ok(new RegisterCallbackResponse { Success = false, Message = "AppId not registered" });
         }
 
         if (!BCrypt.Net.BCrypt.Verify(appSecret, app.AppSecretHash))
         {
             _logger.LogWarning("Callback registration failed: AppId={AppId}, Reason=AppSecret mismatch", appId);
-            return Ok(new RegisterCallbackHttpResponse { Success = false, Message = "AppSecret mismatch" });
+            return Ok(new RegisterCallbackResponse { Success = false, Message = "AppSecret mismatch" });
         }
 
         app.CallbackUrl = request.CallbackUrl;
@@ -362,7 +358,7 @@ public class AuthController : ControllerBase
             : DateTimeOffset.UtcNow.AddSeconds(request.TtlSeconds > 0 ? request.TtlSeconds : IdentityConstants.DefaultCallbackTtlSeconds);
         await _unitOfWork.SaveChangesAsync();
 
-        return Ok(new RegisterCallbackHttpResponse
+        return Ok(new RegisterCallbackResponse
         {
             Success = true,
             Message = "Registered successfully",
@@ -473,6 +469,13 @@ public class AuthController : ControllerBase
 
     private string? GetUserAgent() => Request.Headers.UserAgent.ToString();
 
+    /// <summary>
+    /// 取本次请求的 CorrelationId。必须复用 <see cref="CorrelationIdMiddleware"/> 已经生成、
+    /// 并写入响应头与日志 scope 的那一个，不能在这里另生成——否则调用方没带 x-correlation-id 时，
+    /// 审计表里记的 ID 和日志/响应头里的 ID 不是同一个，事后无法串起来。
+    /// </summary>
     private string GetCorrelationId() =>
-        Request.Headers["x-correlation-id"].FirstOrDefault() ?? Guid.NewGuid().ToString("N");
+        HttpContext.Items[CorrelationIdMiddleware.HttpContextItemsKey] as string
+        ?? Request.Headers[CorrelationIdMiddleware.CorrelationIdHeader].FirstOrDefault()
+        ?? Guid.NewGuid().ToString("N");
 }

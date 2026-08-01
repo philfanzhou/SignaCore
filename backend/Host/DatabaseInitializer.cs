@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
@@ -168,7 +168,7 @@ internal static class DatabaseInitializer
 
                 }
 
-                await IdentityNormalizationMigration.MigrateAsync(db, databaseOptions);
+                await SchemaMigrator.MigrateAsync(db, databaseOptions);
 
                 var adminUsername = adminBootstrapOptions.Username.Trim();
                 var normalizedAdminUsername =

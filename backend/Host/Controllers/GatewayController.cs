@@ -42,22 +42,15 @@ public class GatewayController : ControllerBase
             return authError;
         }
 
-        var normalizedPage = page.GetValueOrDefault(1) < 1 ? 1 : page.GetValueOrDefault(1);
-        var normalizedPageSize = pageSize.GetValueOrDefault(20);
-        if (normalizedPageSize < 1)
-        {
-            normalizedPageSize = 20;
-        }
+        var paging = PageRequest.Normalize(page, pageSize);
 
-        normalizedPageSize = Math.Min(normalizedPageSize, 100);
+        var (users, total) = await userQueryService.SearchUsersAsync(username, phone, paging.Page, paging.PageSize);
 
-        var (users, total) = await userQueryService.SearchUsersAsync(username, phone, normalizedPage, normalizedPageSize);
-
-        return Ok(new AdminPagedResponse<AdminUserListItemResponse>(
+        return Ok(new PagedResponse<UserListItemResponse>(
             users,
             total,
-            normalizedPage,
-            normalizedPageSize));
+            paging.Page,
+            paging.PageSize));
     }
 
     [HttpPost("users/batch")]
@@ -74,7 +67,7 @@ public class GatewayController : ControllerBase
 
         if (userIds == null || userIds.Count == 0)
         {
-            return Ok(new List<AdminUserListItemResponse>());
+            return Ok(new List<UserListItemResponse>());
         }
 
         var orderedUsers = await userQueryService.GetUsersByIdsAsync(userIds);
@@ -99,13 +92,13 @@ public class GatewayController : ControllerBase
 
         if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(appSecret))
         {
-            return StatusCode(StatusCodes.Status401Unauthorized, new AdminApiErrorResponse("Missing gateway credentials."));
+            return StatusCode(StatusCodes.Status401Unauthorized, new ErrorResponse("Missing gateway credentials."));
         }
 
         var validation = await gatewayValidationService.ValidateAsync(appId, appSecret);
         if (!validation.IsSuccess)
         {
-            return StatusCode(StatusCodes.Status401Unauthorized, new AdminApiErrorResponse(validation.ErrorMessage ?? "Gateway authentication failed."));
+            return StatusCode(StatusCodes.Status401Unauthorized, new ErrorResponse(validation.ErrorMessage ?? "Gateway authentication failed."));
         }
 
         return null;
