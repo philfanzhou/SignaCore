@@ -61,11 +61,10 @@ HTTP 端口可通过 `appsettings.json` 的 `Endpoints:Http` 修改。
 服务启动时自动执行以下操作：
 
 1. **数据库建库与迁移**：根据 Provider 选择独立迁移链并持有数据库迁移锁
-2. **PostgreSQL 兼容处理**：保留既有 schema reconciliation 与迁移历史 stamping
-3. **规范化升级**：现有 PostgreSQL 数据先检测大小写碰撞，再回填规范化列并收紧约束
-4. **Admin Bootstrap**：根据 `AdminBootstrap:Username` 和 `AdminBootstrap:Password` 创建初始管理员账户
-5. **Bootstrap Apps 预置**（可选）：读取 `data/bootstrap-apps.json` 文件（若存在），预置应用注册信息
-6. **RSA 密钥初始化**：`KeyManager` 生成或加载活跃密钥对
+2. **规范化升级**：现有 PostgreSQL 数据先检测大小写碰撞，再回填规范化列并收紧约束
+3. **Admin Bootstrap**：根据 `AdminBootstrap:Username` 和 `AdminBootstrap:Password` 创建初始管理员账户
+4. **Bootstrap Apps 预置**（可选）：读取 `data/bootstrap-apps.json` 文件（若存在），预置应用注册信息
+5. **RSA 密钥初始化**：`KeyManager` 生成或加载活跃密钥对
 
 > **数据目录管理**：`data/` 目录（含 `master-key/` 子目录、`bootstrap-apps.json`）由程序自动创建和管理。`KeyManager` 在首次启动时自动创建 `master-key/` 子目录并生成主密钥文件；部署脚本如需预置应用，在启动容器前将 `bootstrap-apps.json` 写入 `data/` 目录。开发者无需手动创建任何业务子目录。
 

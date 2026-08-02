@@ -31,6 +31,6 @@
 
 ## 特殊说明
 
-- `nickname` 字段通过迁移 `FixTimestampColumnTypes` 后添加的 PostgreSQL schema reconciliation 逻辑确保存在
+- `nickname` 字段由 `InitialCreate` 迁移创建（曾有一段启动时补列的兼容逻辑，已确认为死代码并删除，见 [migrations.md](../migrations.md)）
 - 昵称和备注搜索使用规范化列，不依赖数据库默认 collation
 - 登录统计字段（`last_login_at`、`last_login_ip`、`last_login_method`、`total_login_count`）由 `AccountLoginInfoService.UpdateLoginInfoAsync` 更新

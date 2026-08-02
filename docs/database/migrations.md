@@ -48,11 +48,21 @@ PostgreSQL 收缩阶段：启动器使用 `.NET Normalize(FormC) + ToUpperInvari
 | MySQL / MariaDB | `QuantumZhou.Identity.Database.Migrations.MySql` | 共用迁移源码，分别运行契约测试 |
 | SQLite | `QuantumZhou.Identity.Database.Migrations.Sqlite` | 使用本地文件数据库和 64 位 Unix 微秒时间 |
 
-## PostgreSQL Schema Reconciliation
+## 已移除的历史兼容逻辑
 
-在 `Program.cs` 中，启动时对 PostgreSQL 数据库执行 schema reconciliation：
-- 检查 `accounts.nickname` 列是否存在，不存在则通过 `ALTER TABLE` 添加
-- 如果数据库有表但无迁移历史，自动 stamp 初始迁移
+`DatabaseInitializer` 曾包含两段一次性升级代码，均已删除：
+
+- **`accounts.nickname` 列补齐**：该列自 `20260502023354_InitialCreate` 起就由迁移创建，
+  对任何由迁移建出来的库都不会触发。
+- **迁移历史 stamping**：为"有表但 `__EFMigrationsHistory` 为空"的手工建库补盖初始迁移戳。
+  现存库均已有完整迁移历史。
+
+删除依据：生产 Loki 日志跨 14 天、10 次启动，两段代码的全部日志（含两个吞异常的
+`catch` 的 Warning）零命中，而同期 `Applying N pending migrations` 有命中，
+证明代码路径被求值过、只是条件恒不成立。
+
+若将来仍需从无迁移历史的手工建库接管，正确做法是 `dotnet ef migrations script`
+离线出脚本，或显式 `INSERT` 迁移戳，而不是在启动路径上做隐式修补。
 
 ## 注意事项
 
