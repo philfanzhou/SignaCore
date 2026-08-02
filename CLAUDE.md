@@ -78,7 +78,7 @@ CI（Jenkinsfile）：Preflight → 构建镜像 → 单元测试 → 数据库�
 1. `AddConsulIfEnabled` 从 Consul KV `config/ruoyu`（含 `identity.json`）加载配置，失败回退本地缓存（`./data/consul`）；Consul 固定启用，`CONSUL_HTTP_ADDR` / `CONSUL_TOKEN` 等环境变量覆盖。
 2. Serilog（Console + Loki，地址来自 `Loki:Uri`）。
 3. `AddIdentityInfrastructure`：DI、限流、CORS、认证策略、OpenTelemetry。
-4. `DatabaseInitializer.InitializeAsync`：建库 → 取 provider 级迁移锁（PG `pg_advisory_lock`，MySQL/MariaDB `GET_LOCK`）→ PostgreSQL schema reconciliation 与迁移历史 stamping → `SchemaMigrator`（碰撞预检 + 回填后再 `MigrateAsync`）→ bootstrap admin → 可选 `bootstrap-apps.json` 预置。迁移**无条件自动执行**，失败即启动失败。
+4. `DatabaseInitializer.InitializeAsync`：建库 → 取 provider 级迁移锁（PG `pg_advisory_lock`，MySQL/MariaDB `GET_LOCK`）→ `SchemaMigrator`（碰撞预检 + 回填后再 `MigrateAsync`）→ bootstrap admin → 可选 `bootstrap-apps.json` 预置。迁移**无条件自动执行**，失败即启动失败。
 5. `await keyManager.InitializationCompleted` 后才接请求，随后挂上 JwtBearer 的 `IssuerSigningKeyResolver`。
 
 `data/` 目录（`master-key/`、`consul/`）由程序自建。RSA 私钥用 AES-GCM 加密存库，主密钥优先取环境变量 `RSA_MASTER_KEY`，缺失时落到 `data/master-key/master-key.json`（生产必须显式设置）。
