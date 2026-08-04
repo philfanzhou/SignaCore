@@ -47,6 +47,22 @@ public class SecurityKeyRepository : ISecurityKeyRepository
         return Task.CompletedTask;
     }
 
+    public async Task<int> DeactivateAllActiveAsync()
+    {
+        // security_keys 行数极少（< 10），走变更跟踪而不是 ExecuteUpdateAsync：
+        // 这样停用旧密钥与插入新密钥能合并进调用方的同一次 SaveChanges。
+        var activeKeys = await _dbContext.SecurityKeys
+            .Where(k => k.IsActive)
+            .ToListAsync();
+
+        foreach (var key in activeKeys)
+        {
+            key.IsActive = false;
+        }
+
+        return activeKeys.Count;
+    }
+
     public Task RemoveRangeAsync(IEnumerable<SecurityKeyEntity> keys)
     {
         _dbContext.SecurityKeys.RemoveRange(keys);

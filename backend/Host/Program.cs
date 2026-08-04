@@ -119,11 +119,11 @@ app.Logger.LogInformation("KeyManager initialization verified");
 // ---- Configure JWT Bearer signing key resolver after KeyManager is ready ----
 var jwtBearerOptions = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<JwtBearerOptions>>();
 var bearerOptions = jwtBearerOptions.Get(JwtBearerDefaults.AuthenticationScheme);
-bearerOptions.TokenValidationParameters.IssuerSigningKeyResolver = (_, _, _, _) =>
-{
-    var key = keyManager.GetCurrentKey();
-    return new SecurityKey[] { key };
-};
+// 返回全部未过期密钥（与 JWKS 发布的是同一批），而不是只返回当前签名密钥：
+// 否则轮换瞬间，本服务会拒掉自己刚签发、仍在有效期内的旧密钥 token，而下游微服务却认。
+// GetValidationKeys 是纯内存快照，不做 DB 往返。
+bearerOptions.TokenValidationParameters.IssuerSigningKeyResolver =
+    (_, _, _, _) => keyManager.GetValidationKeys();
 
 // ---- Swagger（仅开发环境）----
 if (app.Environment.IsDevelopment())

@@ -19,6 +19,22 @@ public class KeyManagerTests : IDisposable
 {
     private string? _previousMasterKey;
     private bool _envVarSet;
+
+    /// <summary>
+    /// 统一的仓储 mock 工厂：预置 <c>GetValidKeysAsync</c> 返回空集合。
+    /// <para>
+    /// Moq 4.20 对 <c>Task&lt;IReadOnlyList&lt;T&gt;&gt;</c> 的默认返回是 null 而不是空集合，
+    /// 而 KeyManager 初始化时必定调用它来刷新校验密钥快照，不预置就会 NRE。
+    /// 需要具体返回值的用例在拿到 mock 后再 Setup 一次覆盖即可。
+    /// </para>
+    /// </summary>
+    private static Mock<ISecurityKeyRepository> CreateKeyRepoMock()
+    {
+        var mock = new Mock<ISecurityKeyRepository>();
+        mock.Setup(r => r.GetValidKeysAsync()).ReturnsAsync(Array.Empty<SecurityKeyEntity>());
+        return mock;
+    }
+
     private static Mock<IServiceScopeFactory> CreateMockScopeFactory(
         Mock<ISecurityKeyRepository>? keyRepoMock = null,
         Mock<IUnitOfWork>? unitOfWorkMock = null)
@@ -29,7 +45,7 @@ public class KeyManagerTests : IDisposable
 
         serviceProviderMock
             .Setup(sp => sp.GetService(typeof(ISecurityKeyRepository)))
-            .Returns((keyRepoMock ?? new Mock<ISecurityKeyRepository>()).Object);
+            .Returns((keyRepoMock ?? CreateKeyRepoMock()).Object);
         serviceProviderMock
             .Setup(sp => sp.GetService(typeof(IUnitOfWork)))
             .Returns((unitOfWorkMock ?? new Mock<IUnitOfWork>()).Object);
@@ -114,7 +130,7 @@ public class KeyManagerTests : IDisposable
         SetEnvironmentMasterKey();
 
         var keyEntity = CreateTestSecurityKeyEntity();
-        var keyRepoMock = new Mock<ISecurityKeyRepository>();
+        var keyRepoMock = CreateKeyRepoMock();
         keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(keyEntity);
 
         var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock);
@@ -135,7 +151,7 @@ public class KeyManagerTests : IDisposable
     {
         SetEnvironmentMasterKey();
 
-        var keyRepoMock = new Mock<ISecurityKeyRepository>();
+        var keyRepoMock = CreateKeyRepoMock();
         keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync((SecurityKeyEntity?)null);
         keyRepoMock.Setup(r => r.AddAsync(It.IsAny<SecurityKeyEntity>())).Returns(Task.CompletedTask);
 
@@ -162,7 +178,7 @@ public class KeyManagerTests : IDisposable
         SetEnvironmentMasterKey();
 
         var keyEntity = CreateTestSecurityKeyEntity(expired: true);
-        var keyRepoMock = new Mock<ISecurityKeyRepository>();
+        var keyRepoMock = CreateKeyRepoMock();
         keyRepoMock.Setup(r => r.GetLatestKeyAsync()).ReturnsAsync(keyEntity);
         keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(keyEntity);
 
@@ -181,7 +197,7 @@ public class KeyManagerTests : IDisposable
         SetEnvironmentMasterKey();
 
         var keyEntity = CreateTestSecurityKeyEntity();
-        var keyRepoMock = new Mock<ISecurityKeyRepository>();
+        var keyRepoMock = CreateKeyRepoMock();
         keyRepoMock.Setup(r => r.GetLatestKeyAsync()).ReturnsAsync(keyEntity);
         keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(keyEntity);
 
@@ -199,7 +215,7 @@ public class KeyManagerTests : IDisposable
     {
         SetEnvironmentMasterKey();
 
-        var keyRepoMock = new Mock<ISecurityKeyRepository>();
+        var keyRepoMock = CreateKeyRepoMock();
         keyRepoMock.Setup(r => r.GetLatestKeyAsync()).ReturnsAsync((SecurityKeyEntity?)null);
         keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync((SecurityKeyEntity?)null);
         keyRepoMock.Setup(r => r.AddAsync(It.IsAny<SecurityKeyEntity>())).Returns(Task.CompletedTask);
@@ -222,7 +238,7 @@ public class KeyManagerTests : IDisposable
         SetEnvironmentMasterKey();
 
         var keyEntity = CreateTestSecurityKeyEntity();
-        var keyRepoMock = new Mock<ISecurityKeyRepository>();
+        var keyRepoMock = CreateKeyRepoMock();
         keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(keyEntity);
         keyRepoMock.Setup(r => r.GetLatestKeyAsync()).ReturnsAsync(keyEntity);
 
@@ -247,7 +263,7 @@ public class KeyManagerTests : IDisposable
         var oldKey = CreateTestSecurityKeyEntity(expiresInDays: 5);
         oldKey.KeyId = "old-key";
 
-        var keyRepoMock = new Mock<ISecurityKeyRepository>();
+        var keyRepoMock = CreateKeyRepoMock();
         keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(oldKey);
         keyRepoMock.Setup(r => r.AddAsync(It.IsAny<SecurityKeyEntity>())).Returns(Task.CompletedTask);
 
@@ -276,8 +292,9 @@ public class KeyManagerTests : IDisposable
         var oldKey = CreateTestSecurityKeyEntity(expiresInDays: 5);
         oldKey.KeyId = "old-key-to-deactivate";
 
-        var keyRepoMock = new Mock<ISecurityKeyRepository>();
+        var keyRepoMock = CreateKeyRepoMock();
         keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(oldKey);
+        keyRepoMock.Setup(r => r.DeactivateAllActiveAsync()).ReturnsAsync(1);
         keyRepoMock.Setup(r => r.AddAsync(It.IsAny<SecurityKeyEntity>())).Returns(Task.CompletedTask);
 
         var unitOfWorkMock = new Mock<IUnitOfWork>();
@@ -291,8 +308,97 @@ public class KeyManagerTests : IDisposable
 
         await keyManager.RotateKeyAsync();
 
-        Assert.False(oldKey.IsActive);
+        keyRepoMock.Verify(r => r.DeactivateAllActiveAsync(), Times.Once);
         unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    /// <summary>
+    /// 密钥已过期时 <c>GetActiveKeyAsync</c> 因带 <c>ExpiresAt &gt; now</c> 过滤而返回 null。
+    /// 停用必须走 <c>DeactivateAllActiveAsync</c>——否则旧行永远卡在 IsActive=true，
+    /// 而 <c>RemoveExpiredInactiveAsync</c> 只删 !IsActive，每轮换一次就多一条清不掉的僵尸行。
+    /// </summary>
+    [Fact]
+    public async Task RotateKey_WhenActiveKeyAlreadyExpired_StillDeactivatesStaleRows()
+    {
+        SetEnvironmentMasterKey();
+
+        var keyRepoMock = CreateKeyRepoMock();
+        keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync((SecurityKeyEntity?)null);
+        keyRepoMock.Setup(r => r.DeactivateAllActiveAsync()).ReturnsAsync(1);
+        keyRepoMock.Setup(r => r.AddAsync(It.IsAny<SecurityKeyEntity>())).Returns(Task.CompletedTask);
+
+        var unitOfWorkMock = new Mock<IUnitOfWork>();
+        unitOfWorkMock.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+
+        var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock, unitOfWorkMock);
+        var logger = NullLogger<KeyManager>.Instance;
+
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
+        await keyManager.InitializationCompleted;
+
+        await keyManager.RotateKeyAsync();
+
+        keyRepoMock.Verify(r => r.DeactivateAllActiveAsync(), Times.Once);
+        keyRepoMock.Verify(r => r.AddAsync(It.Is<SecurityKeyEntity>(k => k.IsActive)), Times.AtLeastOnce);
+    }
+
+    /// <summary>
+    /// 回归：轮换必须在密钥过期**之前**触发（SPEC AC-FR-04/05，剩余寿命不足一半即轮换）。
+    /// 此前的实现是 <c>ExpiresAt &lt; now</c>，只有过期后才返回 true，而 JWKS 只发布未过期密钥，
+    /// 于是过期到下次 CleanupWorker tick 之间 JWKS 返回空数组，下游全部验签失败。
+    /// </summary>
+    [Fact]
+    public async Task NeedsKeyRotation_WhenKeyPastHalfLifeButNotExpired_ReturnsTrue()
+    {
+        SetEnvironmentMasterKey();
+
+        // 30 天寿命的密钥只剩 10 天 —— 已过半衰期，但远未过期
+        var keyEntity = CreateTestSecurityKeyEntity(expiresInDays: 10);
+        var keyRepoMock = CreateKeyRepoMock();
+        keyRepoMock.Setup(r => r.GetLatestKeyAsync()).ReturnsAsync(keyEntity);
+        keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(keyEntity);
+
+        var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock);
+        var logger = NullLogger<KeyManager>.Instance;
+
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
+        await keyManager.InitializationCompleted;
+
+        Assert.True(await keyManager.NeedsKeyRotationAsync());
+    }
+
+    /// <summary>
+    /// <c>IssuerSigningKeyResolver</c> 用的快照必须包含全部未过期密钥，而不只是当前签名密钥，
+    /// 否则轮换瞬间本服务会拒掉自己刚签发、仍在有效期内的旧密钥 token，而下游微服务却认。
+    /// </summary>
+    [Fact]
+    public async Task GetValidationKeys_ReturnsAllValidKeys_NotOnlyCurrentKey()
+    {
+        SetEnvironmentMasterKey();
+
+        var activeKey = CreateTestSecurityKeyEntity();
+        activeKey.KeyId = "current-key";
+
+        var retiredButValidKey = CreateTestSecurityKeyEntity(expiresInDays: 12);
+        retiredButValidKey.KeyId = "retired-but-still-valid";
+        retiredButValidKey.IsActive = false;
+
+        var keyRepoMock = CreateKeyRepoMock();
+        keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(activeKey);
+        keyRepoMock.Setup(r => r.GetValidKeysAsync())
+            .ReturnsAsync(new[] { activeKey, retiredButValidKey });
+
+        var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock);
+        var logger = NullLogger<KeyManager>.Instance;
+
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
+        await keyManager.InitializationCompleted;
+
+        var validationKeys = keyManager.GetValidationKeys();
+
+        Assert.Equal(2, validationKeys.Count);
+        Assert.Contains(validationKeys, k => k.KeyId == "current-key");
+        Assert.Contains(validationKeys, k => k.KeyId == "retired-but-still-valid");
     }
 
     [Fact]
@@ -310,7 +416,7 @@ public class KeyManagerTests : IDisposable
         // GetActiveKeyAsync call returns it (encrypted with the new master key, decryptable)
         SecurityKeyEntity? capturedFreshEntity = null;
 
-        var keyRepoMock = new Mock<ISecurityKeyRepository>();
+        var keyRepoMock = CreateKeyRepoMock();
         keyRepoMock.SetupSequence(r => r.GetActiveKeyAsync())
             .ReturnsAsync(corruptedEntity)
             .ReturnsAsync(() => capturedFreshEntity!);

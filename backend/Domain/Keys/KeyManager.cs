@@ -11,6 +11,13 @@ namespace QuantumZhou.Identity.Domain.Keys;
 public interface IKeyManager
 {
     RsaSecurityKey GetCurrentKey();
+
+    /// <summary>
+    /// JwtBearer 校验用的密钥快照——同步、纯内存，不做 DB 往返（每个已认证请求都会调用）。
+    /// 内容与 JWKS 发布的是同一批密钥，见 <see cref="KeyManager.GetValidationKeys"/>。
+    /// </summary>
+    IReadOnlyList<SecurityKey> GetValidationKeys();
+
     Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync();
     Task<bool> NeedsKeyRotationAsync();
     Task RotateKeyAsync();
@@ -46,6 +53,7 @@ public class KeyManager : IKeyManager
     private readonly TaskCompletionSource<bool> _initializationTcs = new();
     private readonly object _keyLock = new();
     private RsaSecurityKey? _currentKey;
+    private IReadOnlyList<SecurityKey> _validationKeys = Array.Empty<SecurityKey>();
 
     public Task InitializationCompleted => _initializationTcs.Task;
 
@@ -70,6 +78,9 @@ public class KeyManager : IKeyManager
         {
             var key = await LoadOrCreateKeyAsync();
             SetCurrentKey(key);
+            // 必须在 SetResult 之前刷快照，否则第一批请求会拿到空的校验密钥集。
+            // 这里只能调不等待 TCS 的私有版本，公开的 GetValidKeysAsync 会死锁。
+            await RefreshValidationKeysAsync();
             _initializationTcs.SetResult(true);
             _logger.LogInformation("KeyManager initialization completed");
         }
@@ -100,9 +111,51 @@ public class KeyManager : IKeyManager
         }
     }
 
+    /// <summary>
+    /// JwtBearer 的 <c>IssuerSigningKeyResolver</c> 走这里，返回本实例已知的**全部**未过期密钥，
+    /// 而不只是当前签名密钥：轮换后旧密钥签发的 token 仍在有效期内、JWKS 也还在发布它们，
+    /// 本服务自己的 /api/profile/* 不能比下游微服务更严格。JWT 库按 <c>kid</c> 自动匹配。
+    /// <para>
+    /// 快照在初始化与轮换时刷新，新鲜度与 <see cref="GetCurrentKey"/> 一致——每请求读库对这个
+    /// 调用频次来说不可接受。快照意外为空时兜底返回当前密钥，避免退化成"全部 401"。
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<SecurityKey> GetValidationKeys()
+    {
+        lock (_keyLock)
+        {
+            if (_validationKeys.Count > 0)
+            {
+                return _validationKeys;
+            }
+
+            return _currentKey is null
+                ? Array.Empty<SecurityKey>()
+                : new SecurityKey[] { _currentKey };
+        }
+    }
+
+    private async Task RefreshValidationKeysAsync()
+    {
+        var keys = await LoadValidKeysAsync();
+        lock (_keyLock)
+        {
+            _validationKeys = keys.Cast<SecurityKey>().ToList();
+        }
+    }
+
     public async Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync()
     {
         await _initializationTcs.Task;
+        return await LoadValidKeysAsync();
+    }
+
+    /// <summary>
+    /// 从库里读全部未过期密钥。不等待 <see cref="InitializationCompleted"/>，
+    /// 因此初始化流程内部也能调用。
+    /// </summary>
+    private async Task<IReadOnlyList<RsaSecurityKey>> LoadValidKeysAsync()
+    {
         using var scope = _scopeFactory.CreateScope();
         var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
         var keyEntities = await keyRepo.GetValidKeysAsync();
@@ -123,6 +176,19 @@ public class KeyManager : IKeyManager
         return keys;
     }
 
+    /// <summary>
+    /// 轮换窗口：剩余寿命不足总寿命的一半即进入（SPEC AC-FR-04/05）。
+    /// <para>
+    /// <see cref="NeedsKeyRotationAsync"/> 与 <see cref="RotateKeyAsync"/> 必须共用这一个判断。
+    /// 此前二者阈值不同——前者是"已过期"、后者是"剩余不足一半"——于是轮换只可能发生在密钥
+    /// **过期之后**，而 JWKS 只发布未过期的密钥（<c>GetValidKeysAsync</c> 过滤 <c>ExpiresAt &gt; now</c>），
+    /// 从密钥过期到 CleanupWorker 下一次 tick（最长 24h）之间 JWKS 会返回空数组，
+    /// 下游微服务拿不到任何公钥、全部 token 验签失败，而本服务仍在用内存里那把过期密钥继续签发。
+    /// </para>
+    /// </summary>
+    private static bool IsInRotationWindow(SecurityKeyEntity key, DateTimeOffset utcNow) =>
+        key.ExpiresAt <= utcNow.AddDays(IdentityConstants.KeyRotationDays / 2.0);
+
     public async Task<bool> NeedsKeyRotationAsync()
     {
         using var scope = _scopeFactory.CreateScope();
@@ -131,7 +197,7 @@ public class KeyManager : IKeyManager
 
         if (keyEntity == null) return true;
 
-        return keyEntity.ExpiresAt < DateTimeOffset.UtcNow;
+        return IsInRotationWindow(keyEntity, DateTimeOffset.UtcNow);
     }
 
     public async Task RotateKeyAsync()
@@ -142,7 +208,7 @@ public class KeyManager : IKeyManager
 
         var existingKey = await keyRepo.GetActiveKeyAsync();
 
-        if (existingKey != null && existingKey.ExpiresAt > DateTimeOffset.UtcNow.AddDays(IdentityConstants.KeyRotationDays / 2))
+        if (existingKey != null && !IsInRotationWindow(existingKey, DateTimeOffset.UtcNow))
         {
             _logger.LogDebug("Active key still has sufficient lifetime, skipping rotation");
             return;
@@ -150,13 +216,17 @@ public class KeyManager : IKeyManager
 
         _logger.LogInformation("Rotating RSA key pair");
 
-        if (existingKey != null)
+        // 停用所有 IsActive 行，而不是只停用 GetActiveKeyAsync 返回的那一条：后者带过期过滤，
+        // 密钥过期后返回 null，旧行会永远留在 IsActive=true 且被 RemoveExpiredInactiveAsync 漏掉。
+        // 不在这里 SaveChanges——与下面新密钥的插入合并成一次提交，中途不出现零个活跃密钥。
+        var deactivatedCount = await keyRepo.DeactivateAllActiveAsync();
+        if (deactivatedCount > 0)
         {
-            existingKey.IsActive = false;
-            await unitOfWork.SaveChangesAsync();
+            _logger.LogInformation("Deactivating {Count} previously active key(s)", deactivatedCount);
         }
 
         SetCurrentKey(await GenerateAndSaveKeyAsync(keyRepo, unitOfWork, KeyGenerationReason.Rotation));
+        await RefreshValidationKeysAsync();
     }
 
     private async Task<RsaSecurityKey> LoadOrCreateKeyAsync()
