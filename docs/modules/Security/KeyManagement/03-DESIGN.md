@@ -91,4 +91,6 @@ EncryptedPrivateKeyParams (存储到数据库)
 | 启动阻塞 | 服务启动时阻塞等待 `KeyManager.InitializationCompleted`，在密钥初始化完成前不接受任何请求 |
 | 主密钥丢失恢复 | 如果主密钥丢失导致私钥解密失败，旧密钥被标记为非活跃（deactivated），自动生成新的密钥对；所有基于旧密钥签发的 JWT 将失效。该场景视为严重安全事件，必须记录 **Error 级别日志**（不是 Warning），便于在 Loki 仪表盘上立即识别并触发运维介入审计主密钥来源 |
 | JWKS 速率限制 | JWKS 端点配置独立的速率限制器（FixedWindow 策略，60 次/分钟），防止公钥查询被滥用。触发拒绝时输出 Warning 日志，含客户端 IP |
-| JWKS 多密钥返回 | JWKS 端点返回所有未过期密钥（含已停用但未过期的），确保密钥轮换后旧 token 在过期前仍可验证。`IssuerSigningKeyResolver` 同样使用 `GetValidKeysAsync()`，JWT 库按 `kid` 自动匹配 |
+| JWKS 多密钥返回 | JWKS 端点返回所有未过期密钥（含已停用但未过期的），确保密钥轮换后旧 token 在过期前仍可验证。`IssuerSigningKeyResolver` 同样使用全部有效密钥（`IKeyManager.GetValidationKeys()` 内存快照，避免每请求读库），JWT 库按 `kid` 自动匹配 |
+| 轮换在半衰期触发，不等过期 | `NeedsKeyRotationAsync` 与 `RotateKeyAsync` 共用 `IsInRotationWindow`（剩余寿命 ≤ 总寿命一半）。**二者阈值必须一致**：若检查用"已过期"、执行用"剩余不足一半"，轮换只会发生在密钥过期之后，而 JWKS 只发布未过期密钥，从过期到 CleanupWorker 下次 tick（最长 24h）之间 JWKS 返回空数组，下游全部验签失败，同时本服务仍在用内存里那把过期密钥继续签发、健康检查全绿。回归覆盖见 `KeyRotationTimelineTests` |
+| 停用走 `DeactivateAllActiveAsync` | 不能只停用 `GetActiveKeyAsync()` 返回的那一条——该方法带 `ExpiresAt > now` 过滤，密钥过期后返回 null，旧行会永远卡在 `is_active=true`，而 `RemoveExpiredInactiveAsync` 只删 `!is_active`，清不掉。停用不单独 SaveChanges，与新密钥插入合并成一次提交，中途不出现零个活跃密钥 |
