@@ -5,17 +5,16 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 DATA_DIR="${SCRIPT_DIR}/data"
 IMAGE_NAME="quantumzhou.identity:20260502"
 CONTAINER_NAME="ruoyu-identity"
-NETWORK_NAME="ruoyu-net"
 Port="5002"
+HOST_IP="192.168.100.10"
 
-CONSUL_HTTP_ADDR="host.docker.internal:8500"
+CONSUL_HTTP_ADDR="${HOST_IP}:8500"
 CONSUL_TOKEN="${CONSUL_TOKEN:-}"
 
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="Qwer1234"
 SMS_BYPASS_CODE="666666"
 
-docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
 if [ -n "$(docker ps -q --filter "name=^/${CONTAINER_NAME}$")" ]; then
     docker stop "$CONTAINER_NAME"
 fi
@@ -29,18 +28,16 @@ chown -R 1000:1000 "$DATA_DIR" 2>/dev/null || true
 docker run -d \
     --name "$CONTAINER_NAME" \
     --restart unless-stopped \
-    --network "$NETWORK_NAME" \
-    --add-host=host.docker.internal:host-gateway \
     -p "${Port}:5002" \
     -e TZ=Asia/Shanghai \
     -e APP_TITLE="${CONTAINER_NAME}" \
     -e CONSUL_HTTP_ADDR="${CONSUL_HTTP_ADDR}" \
     -e CONSUL_TOKEN="${CONSUL_TOKEN}" \
+    -e Consul__Discovery__PreferIPAddress=true \
+    -e Consul__Discovery__IPAddress="${HOST_IP}" \
+    -e Consul__Discovery__Port="${Port}" \
     -e ADMIN_BOOTSTRAP_USERNAME="${ADMIN_USERNAME}" \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Sms__BypassCode="${SMS_BYPASS_CODE}" \
     -v "${DATA_DIR}:/app/data" \
     "$IMAGE_NAME"
-
-echo "${CONTAINER_NAME} started"
-docker logs -f -t "$CONTAINER_NAME"
