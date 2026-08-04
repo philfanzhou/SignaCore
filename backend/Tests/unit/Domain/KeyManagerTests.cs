@@ -401,6 +401,63 @@ public class KeyManagerTests : IDisposable
         Assert.Contains(validationKeys, k => k.KeyId == "retired-but-still-valid");
     }
 
+    /// <summary>
+    /// 校验密钥快照挂在单例上、生命周期与进程等长，而验签只需要公钥——
+    /// 私钥没有理由常驻其中。导出私钥参数应当抛 CryptographicException。
+    /// </summary>
+    [Fact]
+    public async Task GetValidationKeys_ContainsPublicKeysOnly()
+    {
+        SetEnvironmentMasterKey();
+
+        var activeKey = CreateTestSecurityKeyEntity();
+        activeKey.KeyId = "public-only-check";
+
+        var keyRepoMock = CreateKeyRepoMock();
+        keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(activeKey);
+        keyRepoMock.Setup(r => r.GetValidKeysAsync()).ReturnsAsync(new[] { activeKey });
+
+        var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock);
+        var logger = NullLogger<KeyManager>.Instance;
+
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), logger);
+        await keyManager.InitializationCompleted;
+
+        var rsaKey = Assert.IsType<RsaSecurityKey>(Assert.Single(keyManager.GetValidationKeys()));
+
+        // 公钥可用（验签所需）
+        var publicParameters = rsaKey.Rsa!.ExportParameters(includePrivateParameters: false);
+        Assert.NotNull(publicParameters.Modulus);
+        Assert.NotNull(publicParameters.Exponent);
+
+        // 私钥不在里面
+        Assert.Throws<CryptographicException>(
+            () => rsaKey.Rsa!.ExportParameters(includePrivateParameters: true));
+    }
+
+    /// <summary>
+    /// JwksMapper.ToJwk 要求 <c>RsaSecurityKey.Rsa</c> 非 null（见 JwksMapperTests）。
+    /// 公钥复制若图省事写成 <c>new RsaSecurityKey(RSAParameters)</c>，该属性会是 null，
+    /// JWKS 端点直接 500。
+    /// </summary>
+    [Fact]
+    public async Task GetValidationKeys_KeysExposeRsaInstance_ForJwksMapper()
+    {
+        SetEnvironmentMasterKey();
+
+        var activeKey = CreateTestSecurityKeyEntity();
+        var keyRepoMock = CreateKeyRepoMock();
+        keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(activeKey);
+        keyRepoMock.Setup(r => r.GetValidKeysAsync()).ReturnsAsync(new[] { activeKey });
+
+        var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock);
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), NullLogger<KeyManager>.Instance);
+        await keyManager.InitializationCompleted;
+
+        var rsaKey = Assert.IsType<RsaSecurityKey>(Assert.Single(keyManager.GetValidationKeys()));
+        Assert.NotNull(rsaKey.Rsa);
+    }
+
     [Fact]
     public async Task Initialization_WhenMasterKeyLost_LogsErrorAndRegeneratesKey()
     {

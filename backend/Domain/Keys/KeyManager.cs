@@ -119,6 +119,10 @@ public class KeyManager : IKeyManager
     /// 快照在初始化与轮换时刷新，新鲜度与 <see cref="GetCurrentKey"/> 一致——每请求读库对这个
     /// 调用频次来说不可接受。快照意外为空时兜底返回当前密钥，避免退化成"全部 401"。
     /// </para>
+    /// <para>
+    /// 快照里只有公钥：验签不需要私钥，而这个字段挂在单例上、生命周期与进程等长。
+    /// 兜底分支返回的 <see cref="_currentKey"/> 仍带私钥，但那是签发用的密钥，本来就得常驻。
+    /// </para>
     /// </summary>
     public IReadOnlyList<SecurityKey> GetValidationKeys()
     {
@@ -138,10 +142,37 @@ public class KeyManager : IKeyManager
     private async Task RefreshValidationKeysAsync()
     {
         var keys = await LoadValidKeysAsync();
+
+        // 验签只需要公钥。LoadValidKeysAsync 返回的是带私钥的密钥（解密成功与否同时充当
+        // "本实例是否仍掌握这把密钥"的准入判据，见 LoadValidKeysAsync 的注释），这里只取公钥部分
+        // 存进快照——快照是单例上的长生命周期字段，没有理由让私钥常驻其中。
+        var publicOnlyKeys = new List<SecurityKey>(keys.Count);
+        foreach (var key in keys)
+        {
+            publicOnlyKeys.Add(ToPublicOnlyKey(key));
+            // 私钥副本用完即弃，不等 GC 的终结器
+            key.Rsa?.Dispose();
+        }
+
         lock (_keyLock)
         {
-            _validationKeys = keys.Cast<SecurityKey>().ToList();
+            // 刻意不释放上一份快照：并发请求可能正持有从 GetValidationKeys 拿到的引用，
+            // 释放会让验签中途抛 ObjectDisposedException。轮换 15 天才一次，交给 GC。
+            _validationKeys = publicOnlyKeys;
         }
+    }
+
+    /// <summary>
+    /// 复制出一把只含公钥的 <see cref="RsaSecurityKey"/>。
+    /// 用 <see cref="RSA.ImportParameters"/> 而非直接 <c>new RsaSecurityKey(RSAParameters)</c>：
+    /// 后者的 <c>Rsa</c> 属性为 null，会让 <c>JwksMapper.ToJwk</c> 抛异常，
+    /// 也不符合调用方对该属性可用的预期。
+    /// </summary>
+    private static RsaSecurityKey ToPublicOnlyKey(RsaSecurityKey key)
+    {
+        var publicRsa = RSA.Create();
+        publicRsa.ImportParameters(key.Rsa!.ExportParameters(includePrivateParameters: false));
+        return new RsaSecurityKey(publicRsa) { KeyId = key.KeyId };
     }
 
     public async Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync()
@@ -153,6 +184,13 @@ public class KeyManager : IKeyManager
     /// <summary>
     /// 从库里读全部未过期密钥。不等待 <see cref="InitializationCompleted"/>，
     /// 因此初始化流程内部也能调用。
+    /// <para>
+    /// 这里**必须**走私钥解密（<see cref="LoadKeyFromEntity"/>）而不是直接读
+    /// <c>PublicKeyModulus</c> / <c>PublicKeyExponent</c> 明文列：解密成功与否同时充当
+    /// "本实例是否仍掌握这把私钥"的准入判据。主密钥一旦变更，用旧主密钥保护的密钥就解不开——
+    /// 此时那把私钥可能仍在他人手中，其公钥绝不能继续出现在 JWKS 里，否则等于替对方背书。
+    /// 解不开的密钥记 Warning 后跳过，见 AC-FR-06。
+    /// </para>
     /// </summary>
     private async Task<IReadOnlyList<RsaSecurityKey>> LoadValidKeysAsync()
     {
