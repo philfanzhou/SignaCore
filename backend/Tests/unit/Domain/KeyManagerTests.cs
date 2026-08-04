@@ -443,6 +443,10 @@ public class KeyManagerTests : IDisposable
         // Recovery: a new key was generated and saved
         keyRepoMock.Verify(r => r.AddAsync(It.Is<SecurityKeyEntity>(k => k.IsActive)), Times.Once);
         Assert.NotNull(keyManager.GetCurrentKey());
+
+        // 与 RotateKeyAsync 同一不变量：停用走集合操作，而不是只改 GetActiveKeyAsync 返回的那一条。
+        // 单条停用会漏掉历史僵尸行，且其独立的 SaveChanges 会留下"零个活跃密钥"的中间态。
+        keyRepoMock.Verify(r => r.DeactivateAllActiveAsync(), Times.Once);
     }
 
     public void Dispose()

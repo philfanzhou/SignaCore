@@ -220,12 +220,16 @@ public class KeyManager : IKeyManager
         // 密钥过期后返回 null，旧行会永远留在 IsActive=true 且被 RemoveExpiredInactiveAsync 漏掉。
         // 不在这里 SaveChanges——与下面新密钥的插入合并成一次提交，中途不出现零个活跃密钥。
         var deactivatedCount = await keyRepo.DeactivateAllActiveAsync();
-        if (deactivatedCount > 0)
-        {
-            _logger.LogInformation("Deactivating {Count} previously active key(s)", deactivatedCount);
-        }
 
         SetCurrentKey(await GenerateAndSaveKeyAsync(keyRepo, unitOfWork, KeyGenerationReason.Rotation));
+
+        // 停用是在上面那次 SaveChanges 里才落库的，日志必须等提交完成后再发：
+        // 提交失败时不能留下一条"已停用 N 把密钥"、而实际已回滚的记录去误导排查。
+        if (deactivatedCount > 0)
+        {
+            _logger.LogInformation("Deactivated {Count} previously active key(s)", deactivatedCount);
+        }
+
         await RefreshValidationKeysAsync();
     }
 
@@ -252,8 +256,10 @@ public class KeyManager : IKeyManager
                 "Failed to decrypt RSA key from database. Master key may have been lost. Re-encrypting with new key pair. " +
                 "All previously issued JWTs are now invalid; operations team must audit master key provenance.");
 
-            keyEntity.IsActive = false;
-            await unitOfWork.SaveChangesAsync();
+            // 与 RotateKeyAsync 用同一套停用方式，维持"库里有且只有一条 IsActive"的不变量：
+            // 单条 keyEntity.IsActive = false 既漏掉历史僵尸行，其独立的 SaveChanges 也会在
+            // 后续生成失败时留下"零个活跃密钥"的中间态。
+            await keyRepo.DeactivateAllActiveAsync();
             var newKey = await GenerateAndSaveKeyAsync(keyRepo, unitOfWork, KeyGenerationReason.MasterKeyLost);
             SetCurrentKey(newKey);
 

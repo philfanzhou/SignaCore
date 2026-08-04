@@ -95,6 +95,9 @@ public sealed class KeyRotationTimelineTests : IDisposable
     {
         await _keyManager.InitializationCompleted;
 
+        var rotationCount = 0;
+        var lastKeyId = _keyManager.GetCurrentKey().KeyId;
+
         // 45 天覆盖到第三次轮换，确认稳态而不只是第一轮
         for (var day = 1; day <= 45; day++)
         {
@@ -113,7 +116,19 @@ public sealed class KeyRotationTimelineTests : IDisposable
             Assert.True(
                 (await _keyManager.GetValidKeysAsync()).Count > 0,
                 $"第 {day} 天、CleanupWorker tick 之后 JWKS 为空");
+
+            var currentKeyId = _keyManager.GetCurrentKey().KeyId;
+            if (currentKeyId != lastKeyId)
+            {
+                rotationCount++;
+                lastKeyId = currentKeyId;
+            }
         }
+
+        // 上界同样是回归点：一个「每次 tick 都轮换」的实现照样能让 JWKS 全程非空，
+        // 但会每天换一次密钥——表膨胀，且 15 天新旧重叠期的设计意图丢失。
+        // 30 天寿命 + 半衰期轮换 = 每 15 天一次，45 天内期望 3 次。
+        Assert.InRange(rotationCount, 2, 4);
     }
 
     /// <summary>
