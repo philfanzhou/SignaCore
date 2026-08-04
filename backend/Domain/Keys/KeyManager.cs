@@ -121,21 +121,37 @@ public class KeyManager : IKeyManager
     /// </para>
     /// <para>
     /// 快照里只有公钥：验签不需要私钥，而这个字段挂在单例上、生命周期与进程等长。
-    /// 兜底分支返回的 <see cref="_currentKey"/> 仍带私钥，但那是签发用的密钥，本来就得常驻。
+    /// 当前签名密钥 <see cref="_currentKey"/> 仍带私钥并被无条件并入返回值，但那是签发用的
+    /// 密钥，本来就得常驻。
     /// </para>
     /// </summary>
     public IReadOnlyList<SecurityKey> GetValidationKeys()
     {
         lock (_keyLock)
         {
-            if (_validationKeys.Count > 0)
+            if (_currentKey is null)
             {
                 return _validationKeys;
             }
 
-            return _currentKey is null
-                ? Array.Empty<SecurityKey>()
-                : new SecurityKey[] { _currentKey };
+            // 正常路径：刷新成功的快照必然含当前密钥，直接返回，无额外分配。
+            foreach (var key in _validationKeys)
+            {
+                if (key.KeyId == _currentKey.KeyId)
+                {
+                    return _validationKeys;
+                }
+            }
+
+            // 当前签名密钥必须**永远**在校验集里。快照只在初始化与轮换时刷新，
+            // 而 RotateKeyAsync 是先 SetCurrentKey 再刷快照：刷新一旦抛异常，
+            // _currentKey 已是新密钥而快照还是旧的那份——它非空，所以"空则兜底"救不了，
+            // 服务会拒掉自己刚签发的每一个 token，直到下次轮换（15 天）或重启，
+            // 且异常被 CleanupWorker 吞成一条日志，健康检查全绿。
+            var withCurrentKey = new List<SecurityKey>(_validationKeys.Count + 1);
+            withCurrentKey.AddRange(_validationKeys);
+            withCurrentKey.Add(_currentKey);
+            return withCurrentKey;
         }
     }
 
@@ -189,7 +205,13 @@ public class KeyManager : IKeyManager
     /// <c>PublicKeyModulus</c> / <c>PublicKeyExponent</c> 明文列：解密成功与否同时充当
     /// "本实例是否仍掌握这把私钥"的准入判据。主密钥一旦变更，用旧主密钥保护的密钥就解不开——
     /// 此时那把私钥可能仍在他人手中，其公钥绝不能继续出现在 JWKS 里，否则等于替对方背书。
-    /// 解不开的密钥记 Warning 后跳过，见 AC-FR-06。
+    /// 解不开的密钥记 Warning 后跳过。
+    /// </para>
+    /// <para>
+    /// **所有权契约**：每次调用都构造全新的 <see cref="RsaSecurityKey"/>，不复用、不缓存，
+    /// 调用方独占所有权并可自行释放（<see cref="RefreshValidationKeysAsync"/> 就依赖这一点）。
+    /// 若将来在此处加缓存，必须同步改掉那边的 Dispose，否则 JWKS 请求会撞
+    /// <see cref="ObjectDisposedException"/>。
     /// </para>
     /// </summary>
     private async Task<IReadOnlyList<RsaSecurityKey>> LoadValidKeysAsync()

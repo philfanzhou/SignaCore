@@ -430,9 +430,42 @@ public class KeyManagerTests : IDisposable
         Assert.NotNull(publicParameters.Modulus);
         Assert.NotNull(publicParameters.Exponent);
 
-        // 私钥不在里面
-        Assert.Throws<CryptographicException>(
+        // 私钥不在里面。用 ThrowsAny 而非 Throws：后者要求异常类型精确匹配，而
+        // Windows(RSACng) 与 Linux(RSAOpenSsl) 抛的可能是 CryptographicException 的不同派生类，
+        // CI 跑在 Linux 上、本地开发在 Windows 上，精确匹配会让测试在换平台时无谓地红。
+        Assert.ThrowsAny<CryptographicException>(
             () => rsaKey.Rsa!.ExportParameters(includePrivateParameters: true));
+    }
+
+    /// <summary>
+    /// 当前签名密钥必须**永远**在校验集里。<c>RotateKeyAsync</c> 是先 <c>SetCurrentKey</c>
+    /// 再刷快照，刷新一旦失败，快照会停在不含当前密钥的旧内容上——它非空，所以"空则兜底"
+    /// 救不了，服务会拒掉自己刚签发的每一个 token，且异常被 CleanupWorker 吞成一条日志。
+    /// </summary>
+    [Fact]
+    public async Task GetValidationKeys_AlwaysIncludesCurrentKey_EvenWhenSnapshotIsStale()
+    {
+        SetEnvironmentMasterKey();
+
+        var currentKey = CreateTestSecurityKeyEntity();
+        currentKey.KeyId = "current-signing-key";
+
+        var staleEntry = CreateTestSecurityKeyEntity(expiresInDays: 20);
+        staleEntry.KeyId = "stale-snapshot-entry";
+
+        var keyRepoMock = CreateKeyRepoMock();
+        keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(currentKey);
+        // 快照非空、但不含当前签名密钥——模拟刷新失败后残留的旧快照
+        keyRepoMock.Setup(r => r.GetValidKeysAsync()).ReturnsAsync(new[] { staleEntry });
+
+        var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock);
+        var keyManager = new KeyManager(scopeFactoryMock.Object, CreateProtector(), NullLogger<KeyManager>.Instance);
+        await keyManager.InitializationCompleted;
+
+        var keyIds = keyManager.GetValidationKeys().Select(k => k.KeyId).ToList();
+
+        Assert.Contains("current-signing-key", keyIds);
+        Assert.Contains("stale-snapshot-entry", keyIds);
     }
 
     /// <summary>

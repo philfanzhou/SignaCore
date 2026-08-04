@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.IdentityModel.Tokens;
 using Moq;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
@@ -202,6 +203,33 @@ public sealed class KeyRotationTimelineTests : IDisposable
             .ToListAsync();
 
         Assert.Empty(staleRows);
+    }
+
+    /// <summary>
+    /// 轮换时刻意**不**释放上一份校验密钥快照：并发请求可能正持有 <c>GetValidationKeys</c>
+    /// 返回的引用，释放会让验签中途抛 <see cref="ObjectDisposedException"/>。
+    /// <para>
+    /// 不需要真起并发——"拿到引用 → 轮换 → 引用仍可用"就足以覆盖这个决策。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ValidationKeys_PreviousSnapshotStaysUsableAfterRotation()
+    {
+        await _keyManager.InitializationCompleted;
+
+        // 模拟一个正在处理中的请求：先拿到引用，之后才发生轮换
+        var heldByInFlightRequest = _keyManager.GetValidationKeys();
+        Assert.NotEmpty(heldByInFlightRequest);
+
+        await AdvanceKeyAgeAsync(16);
+        await _keyManager.RotateKeyAsync();
+
+        foreach (var key in heldByInFlightRequest.Cast<RsaSecurityKey>())
+        {
+            // 不抛 ObjectDisposedException 即为通过
+            var parameters = key.Rsa!.ExportParameters(includePrivateParameters: false);
+            Assert.NotNull(parameters.Modulus);
+        }
     }
 
     /// <summary>轮换后校验密钥快照要立刻跟上，包含新旧两把——不能等下次重启。</summary>
