@@ -136,14 +136,16 @@ public class TokenController : ControllerBase
             _logger.LogWarning("Authentication failed: GrantType={GrantType}, Reason={Reason}", request.GrantType, validationResult.ErrorMessage);
             return await FailAsync(
                 context,
-                metricReason: validationResult.ErrorMessage ?? "authentication_failed",
-                responseMessage: validationResult.ErrorMessage ?? "authentication_failed",
-                // 审计里刻意保留原始的 null，与 metric/响应的兜底文案不同
+                metricReason: validationResult.ErrorMessage,
+                responseMessage: validationResult.ErrorMessage,
                 auditFailureReason: validationResult.ErrorMessage,
                 auditUsername: request.Username ?? request.Phone ?? request.Code ?? "unknown");
         }
 
-        var account = validationResult.Account!;
+        // 在成功分支入口一次性捕获：MemberNotNullWhen 给出的非空流状态在跨越
+        // 后面的 await（回调取外部 claims）之后不再保留，捕获成局部变量最省事。
+        var account = validationResult.Account;
+        var authMethod = validationResult.AuthMethod;
         var displayName = ResolveDisplayName(account, validationResult.DisplayName, request.GrantType);
         var newRefreshToken = await _refreshTokenService.HandleRefreshTokenAsync(
             request.GrantType, request.RefreshToken, account, appId);
@@ -163,7 +165,7 @@ public class TokenController : ControllerBase
         }
 
         var claims = _claimsResolver.ResolveBasicClaims(account, displayName);
-        claims.Add(new Claim(IdentityConstants.ClaimAuthMethod, validationResult.AuthMethod ?? request.GrantType));
+        claims.Add(new Claim(IdentityConstants.ClaimAuthMethod, authMethod));
 
         if (app?.CallbackUrl != null && _callbackService != null)
         {
@@ -216,7 +218,7 @@ public class TokenController : ControllerBase
             {
                 UserId = account.Id.ToString(),
                 Username = displayName ?? string.Empty,
-                AuthMethod = validationResult.AuthMethod ?? request.GrantType,
+                AuthMethod = authMethod,
                 Roles = roles,
                 Permissions = permissions
             }

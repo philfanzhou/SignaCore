@@ -94,7 +94,7 @@ public class GatewayController : ControllerBase
         var validation = await gatewayValidationService.ValidateAsync(appId, appSecret);
         if (!validation.IsSuccess)
         {
-            return StatusCode(StatusCodes.Status401Unauthorized, new ErrorResponse(validation.ErrorMessage ?? "Gateway authentication failed."));
+            return StatusCode(StatusCodes.Status401Unauthorized, new ErrorResponse(validation.ErrorMessage));
         }
 
         return null;
