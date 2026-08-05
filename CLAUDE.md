@@ -31,7 +31,9 @@ dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.cspr
 cd admin_frontend && npm install && npm run dev   # :5173，代理到 :5002
 ```
 
-CI（Jenkinsfile）：Preflight → 构建镜像 → 单元测试 → 数据库契约矩阵 → `start.sh` 部署 → smoke（OIDC discovery + admin 登录）。
+CI（`.github/workflows/ci.yml`，唯一流水线）：`build-test` 跑 GitHub 托管 runner（构建镜像 → 单元测试 → 数据库契约矩阵），`deploy` 跑内网 self-hosted runner（`build.sh` → `start.sh` → smoke）。
+
+**本仓库是 public repo**：凭据（管理员密码、短信绕过码与白名单、AppSecret）一律不写进脚本或文档，由 CI 密钥库注入；workflow 日志全网可读，smoke 阶段不得回显 token 或响应体。`deploy` job 只在本仓库 main 分支的 push 上触发——public 仓库 + self-hosted runner 意味着 fork PR 能在部署机上执行代码，那三条 `if` 护栏不要动。
 
 ## 架构要点
 

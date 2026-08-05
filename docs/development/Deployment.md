@@ -108,16 +108,70 @@ export ADMIN_BOOTSTRAP_PASSWORD=YourSecurePassword
 
 `appsettings.json` 中 `AdminBootstrap:Password` 默认为空，`PostConfigure` 从环境变量覆盖。
 
+> **只对全新库生效**：`DatabaseInitializer.EnsureBootstrapAdminAsync` 是幂等的——同名账号已存在就跳过。
+> 改 `ADMIN_BOOTSTRAP_PASSWORD` **不会**改掉已有 admin 的密码，轮换必须走管理控制台改密。
+
 ---
 
-## SMS 绕过验证码（仅限开发/预发布）
+## 部署凭据注入
+
+`start.sh` 不内置任何凭据（本仓库是 public repo，写死等同公开）。以下变量在脚本最前面展开，
+**缺值时在停止旧容器之前就退出**，正在运行的容器不受影响：
+
+| 环境变量 | 必填 | 缺失行为 | 说明 |
+|---|---|---|---|
+| `ADMIN_BOOTSTRAP_PASSWORD` | 是（非空） | 部署失败 | 初始管理员密码 |
+| `SMS_BYPASS_CODE` | 是（可为空串） | 部署失败 | 短信绕过码；显式设为空串即关闭绕过 |
+| `SMS_BYPASS_PHONES` | 是（可为空串） | 部署失败 | 绕过白名单，逗号分隔；空串即关闭绕过 |
+| `ADMIN_BOOTSTRAP_USERNAME` | 否 | 默认 `admin` | 初始管理员用户名 |
+| `CONSUL_TOKEN` | 否 | 默认空 | Consul ACL token |
+
+`${VAR:?}`（必填非空）与 `${VAR?}`（必须设置，允许空串）的区别是刻意的：关闭短信绕过不需要改脚本，
+设个空 secret 即可。
+
+### CI/CD（GitHub Actions）
+
+`.github/workflows/ci.yml` 是本仓库唯一的流水线（原 Jenkins 流水线已移除），分两个 job：
+
+| job | runner | 触发 |
+|---|---|---|
+| `build-test` | `ubuntu-latest`（托管） | push + PR，含 fork PR |
+| `deploy` | `[self-hosted, linux, identity-prod]` | 仅本仓库 main 分支的 push |
+
+部署机上的 runner 需要打 `identity-prod` 标签，并具备 docker 权限和仓库目录写权限。
+
+> **public 仓库 + self-hosted runner 是高危组合**：陌生人 fork 后改 workflow 提 PR，就可能在部署机上执行任意代码。
+> `deploy` job 的三条 `if` 护栏（仅 push、仅 main、仅本仓库）是唯一屏障，不要为了"方便测试"放宽。
+> 另外 public 仓库的 workflow 日志全网可读，smoke 阶段禁止回显响应体（含 access token）。
+
+仓库 Secrets（Settings → Secrets and variables → Actions）：`ADMIN_BOOTSTRAP_PASSWORD`、
+`SMS_BYPASS_CODE`、`SMS_BYPASS_PHONES`、`CONSUL_TOKEN`。未创建的 secret 展开为空串，
+对两个 SMS 变量而言即"绕过关闭"。
+
+`deploy` job 是唯一的自动部署入口。手工部署仍然可以直接在部署机上跑 `bash start.sh`，
+前提是先在 shell 里 export 上表那几个变量。
+
+---
+
+## SMS 绕过验证码
+
+绕过码用于免真实短信网关的联调与 CI smoke（生产环境 `ISmsSender` 是 `ThrowingSmsSender`，发不出真实短信）。
+**绕过码必须配合手机号白名单使用**，两者缺一则绕过整体禁用：
 
 ```bash
-# 开发环境可设置绕过码，生产环境必须留空
-export SMS_BYPASS_CODE=666666
+export SMS_BYPASS_CODE=<从密钥库取，不写进仓库>
+export SMS_BYPASS_PHONES=13800138000,13900139000
 ```
 
-`Sms:BypassCode` 和 `SMS_BYPASS_CODE` 为空时，绕过逻辑完全禁用。
+行为约定：
+
+- `Sms:BypassCode` 为空 **或** `Sms:BypassPhones` 为空 → 绕过完全禁用（配了码没配名单不等于放行所有号码）。
+- 白名单外的号码即使提交了正确的绕过码，也会落回正常 OTP 校验并失败。
+- 绕过路径不经过 `DbOtpService`，`MaxAttempts` / `LockoutSeconds` 对它无效——白名单是唯一收口手段，
+  名单里只能放测试号码。
+- `/api/auth/token` 是匿名端点且 AppId 头可选，因此白名单里的每个号码等价于一个「知道绕过码即可登录」的账号。
+
+配置项说明见 [Configuration.md](./Configuration.md)（含 Consul 与环境变量的优先级陷阱）。
 
 ---
 
@@ -151,17 +205,17 @@ Identity 通过单一 `data/` 目录挂载实现数据持久化。`start.sh` 将
 
 ### CI 环境测试凭据
 
-CI 环境（Jenkins）在启动 Identity 容器前将 `bootstrap-apps.json` 写入 `data/` 目录：
+CI 环境在启动 Identity 容器前将 `bootstrap-apps.json` 写入 `data/` 目录，凭据从 CI 密钥库读取：
 
 ```bash
-# CI 脚本中生成（凭据由 CI 脚本持有，不进仓库）
+# 凭据由 CI 密钥库持有，不进仓库（本仓库是 public repo）
 mkdir -p ./data
-cat > ./data/bootstrap-apps.json <<'EOF'
+cat > ./data/bootstrap-apps.json <<EOF
 {
   "apps": [
     {
-      "appId": "a6eab9bd87404c0ababc910114d11a62",
-      "appSecret": "cGzoAwXaP+PahtD3qXYVY75IJiPWtfbt/4SIt+WrKoQ=",
+      "appId": "${TEACHER_PORTAL_APP_ID}",
+      "appSecret": "${TEACHER_PORTAL_APP_SECRET}",
       "appName": "Teacher Portal",
       "callbackUrl": "http://ruoyu-teacher-api:5004/api/auth/callback"
     }
@@ -195,8 +249,11 @@ EOF
 CI smoke test 依赖以下 Identity 能力（均已在 CI 环境配置）：
 
 1. **JWKS 获取**：`GET /.well-known/jwks`（BFF 启动时自动发现）
-2. **SMS 固定验证码**：`SMS_BYPASS_CODE=666666`（任意手机号登录）
-3. **管理员引导账户**：`admin/Qwer1234`（DatabaseInitializer 自动种子）
+2. **SMS 固定验证码**：`SMS_BYPASS_CODE` + `SMS_BYPASS_PHONES`，均由 CI 的密钥库注入。
+   只有白名单内的测试号码能用绕过码登录——**不再是任意手机号**。Ruoyu.Study 侧的 smoke
+   如果用了名单外的号码，需要把该号码加进 `SMS_BYPASS_PHONES` 或改用真实 OTP 流程。
+3. **管理员引导账户**：用户名 `admin`，密码由 `ADMIN_BOOTSTRAP_PASSWORD` 注入（DatabaseInitializer 自动种子，
+   仅对全新库生效；已存在的 admin 不会被改写，改密要走管理控制台）
 4. **数据目录挂载**：`data/` 目录（含 `master-key/` 由 KeyManager 自动创建、预置 `bootstrap-apps.json` 由 DatabaseInitializer 自动种子）
 5. **Bootstrap Admin 自动注入**：`AdminBootstrap:Username` 配置的账号密码登录时自动获得 `role:admin`（无需额外配置白名单）
 
