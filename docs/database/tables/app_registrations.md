@@ -29,4 +29,5 @@
 - 回调地址支持 TTL 机制：`TtlSeconds = -1` 表示永不过期，否则默认 3600 秒
 - `callback_expires_at` 为 NULL 时表示永不过期
 - `CleanupWorker` 定期将过期的应用注册标记为不活跃
-- 启动时自动创建 Teacher Portal 测试应用（AppId: `a6eab9bd87404c0ababc910114d11a62`）
+- 启动时可通过 `data/bootstrap-apps.json` 预置应用注册，AppId 已存在则跳过（幂等）。
+  预置内容由部署方提供，Identity 不内置任何具体业务应用（见 [Configuration.md](../../development/Configuration.md) "Bootstrap Apps 配置"）

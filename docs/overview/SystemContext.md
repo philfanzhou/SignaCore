@@ -15,8 +15,8 @@ QuantumZhou.Identity 是统一身份认证与权限管理中心（Identity Provi
                              ▼
 ┌──────────┐    HTTP     ┌──────────────────────────┐    HTTP Callback    ┌──────────────────┐
 │  Gateway │───────────▶│   QuantumZhou.Identity   │───────────────────▶│ Business Services │
-│ (WebApi) │◀───────────│                          │◀───────────────────│ (Teacher Portal   │
-└──────────┘  JWT Token │  HTTP :5002 (业务/认证)  │   Roles/Perms      │  etc.)            │
+│ (WebApi) │◀───────────│                          │◀───────────────────│ (各业务 BFF)      │
+└──────────┘  JWT Token │  HTTP :5002 (业务/认证)  │   Roles/Perms      │                   │
                          │  HTTP :5010 (Admin API)  │                    └──────────────────┘
                          └──────────┬───────────────┘
                                     │

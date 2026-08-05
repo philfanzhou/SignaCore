@@ -64,7 +64,7 @@
     "email": "",
     "clientType": "",
     "authMethod": "Password",
-    "roles": ["student"],
+    "roles": ["<业务系统返回的角色>"],
     "permissions": ["read"]
   }
 }

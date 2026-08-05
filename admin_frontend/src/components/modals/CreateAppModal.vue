@@ -27,7 +27,7 @@ const {
         </div>
         <div class="field">
           <label>应用名称</label>
-          <input v-model="createAppForm.appName" class="input" style="width: 100%" placeholder="如 学生门户" @keyup.enter="handleCreateApp">
+          <input v-model="createAppForm.appName" class="input" style="width: 100%" placeholder="如 业务门户" @keyup.enter="handleCreateApp">
         </div>
         <div class="field">
           <label>回调地址（可选）</label>

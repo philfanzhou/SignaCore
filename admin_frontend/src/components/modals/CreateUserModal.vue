@@ -35,7 +35,7 @@ const {
         </div>
         <div class="field">
           <label>备注</label>
-          <input v-model="createUserForm.remark" class="input" style="width: 100%" placeholder="如 初二(3)班 英语教师">
+          <input v-model="createUserForm.remark" class="input" style="width: 100%" placeholder="如 运营账号">
         </div>
         <div class="modal-actions">
           <button class="btn btn-ghost" @click="showCreateUserDialog = false">取消</button>

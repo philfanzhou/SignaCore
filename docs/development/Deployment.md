@@ -199,7 +199,7 @@ Identity 通过单一 `data/` 目录挂载实现数据持久化。`start.sh` 将
 
 ## 应用注册预置（Bootstrap Apps）
 
-首次部署时，通过 `data/bootstrap-apps.json` 文件预置基础应用注册信息（如 Teacher Portal、Admin Portal 的应用凭据）。该文件位于 `data/` 目录下，随整个 `data/` 目录一并由 `start.sh` 挂载到容器。运行时动态管理仍通过 Admin API (`POST /api/admin/apps`) 完成。
+首次部署时，通过 `data/bootstrap-apps.json` 文件预置基础应用注册信息（各业务 BFF、管理控制台的应用凭据）。该文件位于 `data/` 目录下，随整个 `data/` 目录一并由 `start.sh` 挂载到容器。运行时动态管理仍通过 Admin API (`POST /api/admin/apps`) 完成。
 
 详见 [Configuration.md](./Configuration.md) "Bootstrap Apps 配置"章节。
 
@@ -214,10 +214,10 @@ cat > ./data/bootstrap-apps.json <<EOF
 {
   "apps": [
     {
-      "appId": "${TEACHER_PORTAL_APP_ID}",
-      "appSecret": "${TEACHER_PORTAL_APP_SECRET}",
-      "appName": "Teacher Portal",
-      "callbackUrl": "http://ruoyu-teacher-api:5004/api/auth/callback"
+      "appId": "${PORTAL_APP_ID}",
+      "appSecret": "${PORTAL_APP_SECRET}",
+      "appName": "${PORTAL_APP_NAME}",
+      "callbackUrl": "http://${PORTAL_BFF_HOST}:5004/api/auth/callback"
     }
   ]
 }
@@ -226,7 +226,7 @@ EOF
 
 文件随 `data/` 目录挂载到容器 `/app/data`，程序读取 `data/bootstrap-apps.json`。
 
-> **复用策略**：Teacher Portal 和 Assistant Portal 在 CI 环境中复用同一组凭据。`GatewayValidationService` 仅校验 AppId 注册状态、活跃状态、过期时间和 AppSecret 哈希，不绑定具体业务系统，因此 BFF 共享凭据是安全的。
+> **复用策略**：多个业务 BFF 在 CI 环境中可复用同一组凭据。`GatewayValidationService` 仅校验 AppId 注册状态、活跃状态、过期时间和 AppSecret 哈希，不绑定具体业务系统，因此 BFF 共享凭据是安全的。
 
 > **生产环境**：部署脚本将 `bootstrap-apps.json` 写入 `data/` 目录（`chmod 600`）或通过 Admin API (`POST /api/admin/apps`) 为每个业务系统单独注册应用，AppSecret 仅在创建时返回一次。
 
@@ -235,7 +235,7 @@ EOF
 `AdminBootstrap:Username` 配置的 bootstrap admin 账号是"超级管理员"，在密码登录和刷新令牌换票时由 Identity **无条件注入** `role:admin`，绕过 callback 机制。因此：
 
 - bootstrap admin **无需配置** `AdminPortal:AdminUserIds` 即可获得 `role:admin`
-- bootstrap admin 无论从哪个 portal（teacher_portal / admin_portal 等）登录，JWT 都包含 `role:admin`
+- bootstrap admin 无论从哪个业务应用登录，JWT 都包含 `role:admin`
 - bootstrap admin 使用 Refresh Token 换票后，新 JWT **仍包含** `role:admin`（refresh grant 使用已验证账户 ID 与 bootstrap 账户 ID 比较，不依赖请求体 `username`）
 - 注入前会检查是否已存在 `role=admin`，避免重复
 - 匹配使用大小写不敏感比较（`StringComparison.OrdinalIgnoreCase`）；配置为空时跳过注入，保持原行为

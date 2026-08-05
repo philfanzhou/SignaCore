@@ -9,7 +9,7 @@ HTTP API 使用标准状态码：
 | 400 BadRequest | 请求参数验证失败 | ID 格式无效、必填字段为空 |
 | 401 Unauthorized | 认证失败 | Token 无效或过期 |
 | 403 Forbidden | 权限不足 | 越权访问 |
-| 404 NotFound | 请求的资源不存在 | 学生不存在、错题不存在 |
+| 404 NotFound | 请求的资源不存在 | 账户不存在、应用注册不存在 |
 | 409 Conflict | 业务前置条件不满足 | 重复提交、状态冲突 |
 | 429 TooManyRequests | 资源限制 | 限流、配额耗尽 |
 | 500 InternalServerError | 服务内部错误 | 数据库异常、未预期的错误 |

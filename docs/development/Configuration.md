@@ -202,7 +202,7 @@ Identity 没有功能开关配置。
 
 ## Bootstrap Apps 配置
 
-Identity 启动时通过 `data/bootstrap-apps.json` 文件预置应用注册信息。该文件位于 `data/` 目录下，随整个 `data/` 目录一并由 `start.sh` 挂载到容器 `/app/data`。该机制用于首次部署时预置基础应用（如 Teacher Portal、Admin Portal 的应用凭据），运行时动态管理仍通过 Admin API (`POST /api/admin/apps`) 完成。
+Identity 启动时通过 `data/bootstrap-apps.json` 文件预置应用注册信息。该文件位于 `data/` 目录下，随整个 `data/` 目录一并由 `start.sh` 挂载到容器 `/app/data`。该机制用于首次部署时预置基础应用（各业务 BFF、管理控制台的应用凭据），运行时动态管理仍通过 Admin API (`POST /api/admin/apps`) 完成。
 
 | 配置键 | 默认值 | 说明 |
 |--------|--------|------|
@@ -216,8 +216,8 @@ Identity 启动时通过 `data/bootstrap-apps.json` 文件预置应用注册信�
     {
       "appId": "<32 位十六进制 AppId>",
       "appSecret": "<AppSecret 明文，从密钥库注入>",
-      "appName": "Teacher Portal",
-      "callbackUrl": "http://ruoyu-teacher-api:5004/api/auth/callback"
+      "appName": "<业务应用显示名>",
+      "callbackUrl": "http://<业务 BFF 主机>:5004/api/auth/callback"
     }
   ]
 }

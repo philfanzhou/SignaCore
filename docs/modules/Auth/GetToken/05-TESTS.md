@@ -74,7 +74,7 @@
 ### UT-12 BootstrapAdminLogin_AlwaysGetsAdminRole
 
 - **Given** `AdminBootstrap:Username = "admin"`，密码登录 `username="admin"`
-- **Given** callback 返回空 roles（模拟从 teacher_portal 登录，未注册为 teacher）
+- **Given** callback 返回空 roles（模拟从某业务应用登录，该账号在那边没有任何业务角色）
 - **When** 调用 GetToken
 - **Then** 最终 claims 中包含 `role=admin`（bootstrap admin 绕过 callback 注入）
 

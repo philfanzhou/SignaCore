@@ -101,7 +101,7 @@ public class CallbackUrlValidatorTests
     public void Validate_WithAllowPrivateAddresses_AcceptsPrivateDomain()
     {
         var validator = new CallbackUrlValidator(allowPrivateAddresses: true);
-        var result = validator.Validate("http://teacher-portal:5004/api/auth/callback");
+        var result = validator.Validate("http://business-portal:5004/api/auth/callback");
 
         Assert.True(result.IsValid);
     }
