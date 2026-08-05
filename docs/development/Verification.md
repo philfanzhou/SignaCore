@@ -113,7 +113,7 @@ curl -s -X POST http://localhost:5002/api/auth/token \
 - 第二个 Access Token（refresh 后）仍包含 `role=admin`；
 - 普通账户即使附带 `username=admin`，其 refresh 后的 Access Token 也不包含 `role=admin`。
 
-> 此验证不要求 DocLibrary 配置或发送 AppId/AppSecret。DocLibrary refresh 请求只发送 `grantType` 和 `refreshToken`，由 Identity 在服务端基于已验证账户 ID 重新识别 bootstrap admin。
+> 此验证不要求调用方配置或发送 AppId/AppSecret：refresh 请求只需发送 `grantType` 和 `refreshToken`，由 Identity 在服务端基于已验证账户 ID 重新识别 bootstrap admin。
 
 ## 6. Admin API 验证
 
