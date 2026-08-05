@@ -156,10 +156,14 @@ dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.cspr
   --filter 'FullyQualifiedName~DatabaseContractTests'
 ```
 
-> **已知失败（3 项，待修）**：矩阵此前从未真正跑通过，恢复运行后暴露出三个既有问题——
-> PostgreSQL 用例向 `timestamp with time zone` 写非零偏移被 Npgsql 拒绝（测试构造问题，
-> 产品代码全程用 `DateTimeOffset.UtcNow`，线上不受影响）；MySQL / MariaDB 用例的
-> Unicode 归一化查询返回 null（疑与测试库 collation 未经 `DatabaseProvisioner` 设定有关）。
+> **非 ASCII 字面量一律用转义写法**（如 `\u00C9` 而不是直接写 `É`）。
+> 该矩阵此前从未真正跑通，恢复运行后暴露的第一个失败就是这个坑：
+> `ServerDatabaseContractTests` 里的 `"CAFÉ"` 曾被误按 GBK 解码再存回 UTF-8，
+> 变成了汉字 `"CAF脡"`(U+8121)，测试于是在查询一个从未写入过的值。
+>
+> 另外，向 PostgreSQL 的 `timestamp with time zone` 写 `DateTimeOffset` 时必须是
+> `Offset=0`，Npgsql 会拒绝非零偏移而 MySQL 不会——这是 provider 间的真实行为差异。
+> 产品代码全程使用 `DateTimeOffset.UtcNow`，不依赖该差异，新增写入路径请保持这个约定。
 
 部署机上的 runner 需要打 `identity-prod` 标签，并具备 docker 权限和仓库目录写权限。
 

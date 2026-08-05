@@ -13,7 +13,7 @@ cd backend/Host && dotnet run
 # 构建镜像（多阶段：Vue 前端 → dotnet publish；构建上下文是仓库根）
 bash build.sh
 
-# 部署（停旧容器 → 起新容器 → 跟随日志；末尾 docker logs -f 会阻塞）
+# 部署（停旧容器 → 起新容器，不阻塞；需先 export 凭据环境变量，见 docs/development/Deployment.md）
 bash start.sh
 
 # 单元测试
@@ -31,7 +31,7 @@ dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.cspr
 cd admin_frontend && npm install && npm run dev   # :5173，代理到 :5002
 ```
 
-CI（`.github/workflows/ci.yml`，唯一流水线）：`build-test`（托管 runner，构建镜像 + 单元测试，~90 秒）→ `database-contracts`（托管 runner，四库契约矩阵，~30 秒）/ `deploy`（内网 self-hosted runner，`build.sh` → `start.sh` → smoke）。后两者并行，`deploy` 只 `needs: build-test`。托管 runner 跑 Testcontainers 必须保留 `TESTCONTAINERS_RYUK_DISABLED=true` 与 `--blame-hang`，否则任何卡死都表现为整个 job 静默到超时。契约矩阵当前有 3 项已知失败（矩阵此前从未真正跑通，恢复运行后暴露的既有问题），见 `docs/development/Deployment.md`。
+CI（`.github/workflows/ci.yml`，唯一流水线）：`build-test`（托管 runner，构建镜像 + 单元测试，~90 秒）→ `database-contracts`（托管 runner，四库契约矩阵，~30 秒）/ `deploy`（内网 self-hosted runner，`build.sh` → `start.sh` → smoke）。后两者并行，`deploy` 只 `needs: build-test`。托管 runner 跑 Testcontainers 必须保留 `TESTCONTAINERS_RYUK_DISABLED=true` 与 `--blame-hang`，否则任何卡死都表现为整个 job 静默到超时。测试里的非 ASCII 字面量一律用转义写法（`\u00C9` 而非 `É`）——曾有字面量被误按 GBK 解码再存回 UTF-8，`CAFÉ` 变成汉字 `CAF脡`，让契约矩阵长期失败。
 
 **本仓库是 public repo**：凭据（管理员密码、短信绕过码与白名单、AppSecret）一律不写进脚本或文档，由 CI 密钥库注入；workflow 日志全网可读，smoke 阶段不得回显 token 或响应体。`deploy` job 只在本仓库 main 分支的 push 上触发——public 仓库 + self-hosted runner 意味着 fork PR 能在部署机上执行代码，那三条 `if` 护栏不要动。
 
