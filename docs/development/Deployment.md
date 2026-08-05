@@ -131,16 +131,20 @@ export ADMIN_BOOTSTRAP_PASSWORD=YourSecurePassword
 
 ### CI/CD（GitHub Actions）
 
-`.github/workflows/ci.yml` 是本仓库唯一的流水线（原 Jenkins 流水线已移除），分三个 job：
+`.github/workflows/ci.yml` 是本仓库唯一的流水线（原 Jenkins 流水线已移除），**只做构建与测试，不做部署**：
 
 | job | runner | 触发 | 说明 |
 |---|---|---|---|
 | `build-test` | `ubuntu-latest`（托管） | push + PR，含 fork PR | 构建镜像 + 单元测试，约 90 秒 |
 | `database-contracts` | `ubuntu-latest`（托管） | push + PR | 四库契约矩阵（PG / MySQL / MariaDB / SQLite），约 30 秒 |
-| `deploy` | `[self-hosted, linux, identity-prod]` | 仅本仓库 main 分支的 push | `build.sh` → `start.sh` → smoke |
 
-> **契约矩阵不阻塞部署**：`deploy` 只 `needs: build-test`，与 `database-contracts` 并行。
-> 迁移链验证失败不应该卡死发布通道，两者关注点不同。
+两个 job 都跑在 GitHub 托管 runner 上——public 仓库不限量，本项目不需要自备构建机。
+`database-contracts` 只在 `build-test` 通过后才跑，构建挂了就没必要拉四个数据库镜像。
+
+> **不要往这条流水线里加 self-hosted runner 的 job。** public 仓库 + self-hosted runner 是高危组合：
+> 陌生人 fork 后改一行 workflow 提 PR，就可能在那台机器上执行任意代码。
+> 部署改由人工执行（见下节），代价是多敲几条命令，换来的是内网没有对外的执行入口。
+> 另外 public 仓库的 workflow 日志全网可读，任何新增步骤都不得回显 token、密码或响应体。
 
 托管 runner 上跑 Testcontainers 有两个坑，`ci.yml` 里已处理，改动时不要顺手删掉：
 
@@ -165,18 +169,35 @@ dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.cspr
 > `Offset=0`，Npgsql 会拒绝非零偏移而 MySQL 不会——这是 provider 间的真实行为差异。
 > 产品代码全程使用 `DateTimeOffset.UtcNow`，不依赖该差异，新增写入路径请保持这个约定。
 
-部署机上的 runner 需要打 `identity-prod` 标签，并具备 docker 权限和仓库目录写权限。
+### 发布（人工执行）
 
-> **public 仓库 + self-hosted runner 是高危组合**：陌生人 fork 后改 workflow 提 PR，就可能在部署机上执行任意代码。
-> `deploy` job 的三条 `if` 护栏（仅 push、仅 main、仅本仓库）是唯一屏障，不要为了"方便测试"放宽。
-> 另外 public 仓库的 workflow 日志全网可读，smoke 阶段禁止回显响应体（含 access token）。
+镜像 `quantumzhou.identity:<tag>` 不走 registry，`start.sh` 直接用本机镜像，
+因此**构建和部署必须在同一台机器上**——也就是部署机本身。CI 那次构建只是 PR 期的早失败信号。
 
-仓库 Secrets（Settings → Secrets and variables → Actions）：`ADMIN_BOOTSTRAP_PASSWORD`、
-`SMS_BYPASS_CODE`、`SMS_BYPASS_PHONES`、`CONSUL_TOKEN`。未创建的 secret 展开为空串，
-对两个 SMS 变量而言即"绕过关闭"。
+在部署机上：
 
-`deploy` job 是唯一的自动部署入口。手工部署仍然可以直接在部署机上跑 `bash start.sh`，
-前提是先在 shell 里 export 上表那几个变量。
+```bash
+cd /path/to/QuantumZhou.Identity
+git pull
+
+# 凭据来自密钥库，不写进任何文件；见上表
+export ADMIN_BOOTSTRAP_PASSWORD=...
+export SMS_BYPASS_CODE=...
+export SMS_BYPASS_PHONES=...
+export CONSUL_TOKEN=...
+
+bash build.sh
+bash start.sh
+docker ps --filter 'name=ruoyu-identity'
+```
+
+`start.sh` 在 `docker stop` **之前**展开这四个变量，任何一个没设置都会在停旧容器前退出，
+不会把服务停在半路。变量的必填语义见上表。
+
+发布后按 [Verification](Verification.md) 做冒烟检查（OIDC discovery、JWKS、admin 登录）。
+
+> 这四个变量不再需要配成 GitHub Secrets——流水线里已经没有会用到它们的 job 了。
+> 若此前配过，可以删掉，减少一处凭据留存点。
 
 ---
 
