@@ -21,9 +21,9 @@
 
 | 技术 | 版本 | 用途 |
 |------|------|------|
-| .NET | 8.0 | 运行时 |
-| ASP.NET Core | 8.0 | Web 框架 |
-| EF Core | 8.0 | ORM |
+| .NET | 10.0 LTS | 运行时 |
+| ASP.NET Core | 10.0 | Web 框架 |
+| EF Core | 9.0 | ORM（受 MySQL/MariaDB provider 版本约束） |
 | PostgreSQL | 12+ | 数据库 |
 | BCrypt.Net | - | 密码哈希 |
 | OpenTelemetry | - | 可观测性 |
@@ -91,7 +91,7 @@ Phase 2 移除 gRPC 拦截器后，HTTP 路径的横切关注点由 ASP.NET Core
 | 中间件 | 来源 | 替代的 gRPC 拦截器 | 说明 |
 |--------|------|--------------------|------|
 | `CorrelationIdMiddleware` | 已存在 | `CorrelationIdInterceptor` | 从请求头 `x-correlation-id` 读取或新建 CorrelationId，写入 `HttpContext.Items` 并通过 `ILogger.BeginScope` 注入日志上下文，响应头回写 |
-| `AddRateLimiter` / `UseRateLimiter` | .NET 8 内置 | `RateLimitingInterceptor` | 使用 .NET 8 内置速率限制框架，配置 `RateLimiterOptions` 替代自定义 gRPC 限流拦截器 |
+| `AddRateLimiter` / `UseRateLimiter` | .NET 内置 | `RateLimitingInterceptor` | 使用 ASP.NET Core 内置速率限制框架，配置 `RateLimiterOptions` 替代自定义 gRPC 限流拦截器 |
 | `ExceptionHandlingMiddleware` | 新增 | `ExceptionHandlingInterceptor` | 统一捕获未处理异常，转换为 HTTP 状态码和 JSON 错误响应（详见 [ErrorHandling.md](../development/ErrorHandling.md)） |
 
 ## 详细设计

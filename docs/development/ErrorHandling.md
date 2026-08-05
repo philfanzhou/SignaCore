@@ -61,7 +61,7 @@ HTTP 路径使用 `ExceptionHandlingMiddleware` 统一捕获未处理异常，�
 
 ### 限流事件日志
 
-限流触发拒绝时（HTTP JWKS 端点限流器、.NET 8 内置速率限制），必须输出 Warning 级别日志，包含客户端 IP 与命中限流策略，便于在 Loki 上检索攻击或异常调用模式。日志结构化字段：
+限流触发拒绝时（HTTP JWKS 端点限流器、ASP.NET Core 内置速率限制），必须输出 Warning 级别日志，包含客户端 IP 与命中限流策略，便于在 Loki 上检索攻击或异常调用模式。日志结构化字段：
 
 | 字段 | JWKS 端点 |
 |------|----------|
@@ -85,7 +85,7 @@ UseSwagger / UseSwaggerUI (仅 Development)
   → UseAuthentication()
   → 敏感头脱敏中间件（匿名）                            ← 脱敏 Authorization 等敏感请求头
   → UseAuthorization()
-  → UseRateLimiter()                                    ← 新增，.NET 8 内置限流
+  → UseRateLimiter()                                    ← ASP.NET Core 内置限流
   → MapHealthChecks("/health")
   → JWKS 限流中间件（匿名）                              ← JWKS 端点专属限流
   → MapControllers

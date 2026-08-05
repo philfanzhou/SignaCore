@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-QuantumZhou.Identity 是统一身份与鉴权微服务（.NET 8 + ASP.NET Core），负责集中认证并签发 RS256 JWT；业务微服务只通过 `/.well-known/jwks` 拉公钥本地校验，不引用本仓库任何程序集。仓库文档、注释与提交信息以中文为主。
+QuantumZhou.Identity 是统一身份与鉴权微服务（.NET 10 + ASP.NET Core），负责集中认证并签发 RS256 JWT；业务微服务只通过 `/.well-known/jwks` 拉公钥本地校验，不引用本仓库任何程序集。仓库文档、注释与提交信息以中文为主。
 
 ## 常用命令
 

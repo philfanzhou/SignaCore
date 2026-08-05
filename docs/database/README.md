@@ -47,4 +47,4 @@
 
 ## 数据库提供者
 
-使用 EF Core 8 作为唯一 ORM，支持 PostgreSQL 15+、MySQL 8.0/8.4、MariaDB 10.11/11.4 和 SQLite。PostgreSQL 是默认选择并保留既有迁移历史；MySQL/MariaDB 与 SQLite 使用独立迁移程序集。SQLite 仅支持单实例和本地磁盘文件。
+使用 EF Core 9 作为唯一 ORM，支持 PostgreSQL 15+、MySQL 8.0/8.4、MariaDB 10.11/11.4 和 SQLite。PostgreSQL 是默认选择并保留既有迁移历史；MySQL/MariaDB 与 SQLite 使用独立迁移程序集。SQLite 仅支持单实例和本地磁盘文件。
