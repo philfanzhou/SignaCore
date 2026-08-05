@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -232,7 +233,18 @@ app.MapGet("/.well-known/openid-configuration", (HttpContext httpContext, IConfi
         response_types_supported = new[] { "token" },
         subject_types_supported = new[] { "public" },
         id_token_signing_alg_values_supported = new[] { "RS256" },
-        claims_supported = new[] { "sub", "name", "role", "auth_method", "nickname" }
+        // 这里必须是 token 里**实际**出现的 claim 名字。主体/姓名/角色用的是完整
+        // XML schema URI 而不是 sub / name / role——ClaimsResolver 写的是 ClaimTypes.*，
+        // 出站短名映射没有生效。.NET 下游用 JwtBearer 会自动映射回 ClaimTypes.*，所以无感；
+        // 非 .NET 下游只能按这里列出的名字去读。用常量而不是字面量，免得两边再次漂移。
+        claims_supported = new[]
+        {
+            ClaimTypes.NameIdentifier,
+            ClaimTypes.Name,
+            ClaimTypes.Role,
+            IdentityConstants.ClaimAuthMethod,
+            "nickname"
+        }
     });
 });
 

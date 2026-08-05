@@ -50,11 +50,13 @@ public class AdminController : ControllerBase
             Password = request.Password
         });
 
-        if (!result.IsSuccess || result.Account == null)
+        // result.Account == null 这个额外判断已由 ValidationResult 上的 MemberNotNullWhen 承担：
+        // Success(account, ...) 的 account 是非空参数，成功分支不可能没有账号。
+        if (!result.IsSuccess)
         {
             await auditService.RecordLoginAsync(null, request.Username.Trim(), "admin_login", "login_failure",
                 GetClientIp(), HttpContext.Request.Headers.UserAgent, result.ErrorMessage);
-            return StatusCode(StatusCodes.Status401Unauthorized, new { message = result.ErrorMessage ?? "Login failed." });
+            return StatusCode(StatusCodes.Status401Unauthorized, new { message = result.ErrorMessage });
         }
 
         var username = result.DisplayName ?? request.Username.Trim();
