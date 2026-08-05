@@ -1,4 +1,6 @@
-﻿using DotNet.Testcontainers.Containers;
+﻿using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Configurations;
+using DotNet.Testcontainers.Containers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -132,15 +134,42 @@ public sealed class ServerDatabaseContractTests
                 .WithDatabase("identity")
                 .WithUsername("identity")
                 .WithPassword("identity")
+                .WithWaitStrategy(CreateMySqlWaitStrategy("identity", "identity", "identity"))
                 .Build(),
             "MariaDB" => new MySqlBuilder()
                 .WithImage("mariadb:11.4")
                 .WithDatabase("identity")
                 .WithUsername("identity")
                 .WithPassword("identity")
+                .WithWaitStrategy(CreateMySqlWaitStrategy("identity", "identity", "identity"))
                 .Build(),
             _ => throw new InvalidOperationException($"Unsupported provider: {provider}")
         };
+    }
+
+    /// <summary>
+    /// Testcontainers.MySql 3.8.0 的默认就绪探针执行的是不带凭据的
+    /// <c>mysql &lt;db&gt; --wait --silent --execute="SELECT 1;"</c>，靠模块预先写入容器的
+    /// client 配置来补上用户名密码。该模块的默认镜像是 mysql:8.0，而本测试钉的是
+    /// mysql:8.4 / mariadb:11.4，新版客户端不再读那个路径，探针于是退化成
+    /// "root 无密码"并永远返回 ERROR 1045，容器再健康也等不到就绪
+    /// （CI 上实测：数据库 10 秒可用，探针重试 5 分钟后被 blame-hang 中止）。
+    ///
+    /// 这里显式指定带凭据的探针，不依赖模块内部行为，也就不受镜像版本影响。
+    /// </summary>
+    private static IWaitForContainerOS CreateMySqlWaitStrategy(
+        string username,
+        string password,
+        string database)
+    {
+        return Wait.ForUnixContainer()
+            .UntilCommandIsCompleted(
+                "mysql",
+                $"--user={username}",
+                $"--password={password}",
+                database,
+                "--silent",
+                "--execute=SELECT 1;");
     }
 
     private static string GetConnectionString(IContainer container)
