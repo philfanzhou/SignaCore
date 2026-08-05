@@ -19,10 +19,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  # 境内构建走华为镜像源。
-  NUGET_SOURCE: https://repo.huaweicloud.com/repository/nuget/v3/index.json
-
 jobs:
   build-test:
     name: Build & Test
@@ -31,16 +27,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 项目 TargetFramework 是 net8.0，但日常开发用 SDK 10 构建（见本地环境）。
+      # runner 预装了 SDK 10，这里补一个 8.0 用于运行 net8.0 测试宿主。
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: |
+            8.0.x
+            10.0.x
 
       - name: Build image
         run: bash build.sh
 
       - name: Unit tests
         run: |
-          dotnet restore backend/Tests/unit/QuantumZhou.Identity.Tests.csproj --source "$NUGET_SOURCE"
+          dotnet restore backend/Tests/unit/QuantumZhou.Identity.Tests.csproj
           dotnet test backend/Tests/unit/QuantumZhou.Identity.Tests.csproj \
             --configuration Release \
             --logger 'trx;logfilename=identity-ut.trx' \
@@ -53,7 +53,7 @@ jobs:
         env:
           RUN_IDENTITY_DATABASE_CONTRACTS: 'true'
         run: |
-          dotnet restore backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj --source "$NUGET_SOURCE"
+          dotnet restore backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj
           dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj \
             --configuration Release \
             --filter 'FullyQualifiedName~DatabaseContractTests' \
