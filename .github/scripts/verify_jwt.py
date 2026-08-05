@@ -22,6 +22,13 @@ import time
 # PKCS#1 v1.5 里 SHA-256 的 DigestInfo DER 前缀（RFC 8017 §9.2）
 SHA256_DIGEST_INFO_PREFIX = bytes.fromhex("3031300d060960864801650304020105000420")
 
+# 主体 claim 可能出现的名字，从标准短名到 .NET 的完整 XML schema URI
+SUBJECT_CLAIM_NAMES = (
+    "sub",
+    "nameid",
+    "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier",
+)
+
 
 def b64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
@@ -93,10 +100,13 @@ def main() -> None:
     if expected_audience not in audiences:
         fail(f"aud 不匹配：期望 {expected_audience}，实际 {audience}")
 
-    # 主体 claim：本服务的 ClaimsResolver 用 ClaimTypes.NameIdentifier，
-    # JwtSecurityTokenHandler 出站会把它映射成 nameid 而不是 sub，所以两者都认。
-    if not (payload.get("sub") or payload.get("nameid")):
-        fail(f"payload 里既没有 sub 也没有 nameid，claims={sorted(payload)}")
+    # 主体 claim 的实际名字：本服务签出的 token 用的是完整 XML schema URI
+    # （ClaimsResolver 写 ClaimTypes.NameIdentifier，出站短名映射没有生效），
+    # 不是 sub 也不是 nameid。.NET 下游用 JwtBearer 会自动映射回 ClaimTypes.*，
+    # 所以能正常工作；非 .NET 下游拿到的是长 URI。三种写法都认，避免这里的断言
+    # 反过来把 token 形状钉死在某一种映射配置上。
+    if not any(payload.get(name) for name in SUBJECT_CLAIM_NAMES):
+        fail(f"payload 里找不到主体 claim，claims={sorted(payload)}")
 
     expires_at = payload.get("exp")
     if not isinstance(expires_at, int):
