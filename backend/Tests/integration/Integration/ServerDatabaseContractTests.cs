@@ -230,6 +230,15 @@ public sealed class ServerDatabaseContractTests
         DbContextOptions<IdentityDbContext> options)
     {
         var accountId = Guid.NewGuid();
+
+        // 用东八区表达一个瞬间，再转成 UTC 写入：验证"同一瞬间无论用哪个偏移表达，
+        // 落库后都是同一个 UTC 值且微秒精度不丢"。
+        //
+        // 这里必须显式 ToUniversalTime()，不能直接写非零偏移的值：Npgsql 对
+        // timestamp with time zone 只接受 Offset=0，写非零偏移会抛
+        // ArgumentException（"only offset 0 (UTC) is supported"）。MySQL 侧则会接受，
+        // 也就是说"能不能写非 UTC 偏移"本身是 provider 之间的行为差异。
+        // 产品代码全程使用 DateTimeOffset.UtcNow，不依赖这个差异；此处对齐产品的写入方式。
         var sourceInstant = new DateTimeOffset(
             2026,
             7,
@@ -237,7 +246,7 @@ public sealed class ServerDatabaseContractTests
             12,
             34,
             56,
-            TimeSpan.FromHours(8)).AddTicks(1234560);
+            TimeSpan.FromHours(8)).AddTicks(1234560).ToUniversalTime();
         const string token = "CaseSensitiveRefreshToken";
         const string phone = "13800138000";
         const string otpCode = "123456";
@@ -283,8 +292,15 @@ public sealed class ServerDatabaseContractTests
         {
             var credentialRepository =
                 new PasswordCredentialRepository(queryContext);
+            // 写入的是分解形式 "Café"（e + 组合重音符），查询用预组合的大写形式
+            // "CAFÉ"（É）：验证 IdentityValueNormalizer 的 FormC + ToUpperInvariant
+            // 在各 provider 上行为一致。
+            //
+            // 这里刻意用 \u00C9 转义而不是直接写 É：该字面量曾被误按 GBK 解码再存回 UTF-8，
+            // É(C3 89) 变成了汉字"脡"(U+8121)，于是查询的是一个从未写入过的值，
+            // MySQL / MariaDB 用例因此长期失败。非 ASCII 字面量一律用转义，避免重蹈覆辙。
             var credential =
-                await credentialRepository.GetByUsernameAsync("CAF脡");
+                await credentialRepository.GetByUsernameAsync("CAF\u00C9");
             Assert.NotNull(credential);
 
             var account = await queryContext.Accounts
