@@ -317,7 +317,7 @@ public class TokenControllerTests
         Assert.True(response.Success);
 
         var claims = AssertCapturedClaims();
-        Assert.Contains(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+        Assert.Contains(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "admin");
     }
 
     [Fact]
@@ -330,7 +330,7 @@ public class TokenControllerTests
 
         var callbackMock = new Mock<ICallbackService>();
         callbackMock.Setup(c => c.FetchExternalClaimsAsync(It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(new List<Claim> { new(ClaimTypes.Role, "admin") });
+            .ReturnsAsync(new List<Claim> { new(IdentityConstants.ClaimRole, "admin") });
 
         var controller = CreateController(
             new[] { validatorMock.Object },
@@ -357,7 +357,7 @@ public class TokenControllerTests
         Assert.True(response.Success);
 
         var claims = AssertCapturedClaims();
-        Assert.Single(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+        Assert.Single(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "admin");
     }
 
     [Fact]
@@ -377,7 +377,7 @@ public class TokenControllerTests
         Assert.True(response.Success);
 
         var claims = AssertCapturedClaims();
-        Assert.DoesNotContain(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+        Assert.DoesNotContain(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "admin");
     }
 
     [Fact]
@@ -399,7 +399,7 @@ public class TokenControllerTests
         Assert.True(response.Success);
 
         var claims = AssertCapturedClaims();
-        Assert.DoesNotContain(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+        Assert.DoesNotContain(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "admin");
     }
 
     [Fact]
@@ -421,7 +421,7 @@ public class TokenControllerTests
         Assert.True(response.Success);
 
         var claims = AssertCapturedClaims();
-        Assert.Contains(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+        Assert.Contains(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "admin");
     }
 
     #endregion
@@ -457,8 +457,8 @@ public class TokenControllerTests
         Assert.True(response.Success);
 
         var claims = AssertCapturedClaims();
-        Assert.Contains(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
-        Assert.Single(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+        Assert.Contains(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "admin");
+        Assert.Single(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "admin");
     }
 
     [Fact]
@@ -493,7 +493,7 @@ public class TokenControllerTests
         Assert.True(response.Success);
 
         var claims = AssertCapturedClaims();
-        Assert.DoesNotContain(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+        Assert.DoesNotContain(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "admin");
     }
 
     [Fact]
@@ -528,7 +528,7 @@ public class TokenControllerTests
         Assert.True(response.Success);
 
         var claims = AssertCapturedClaims();
-        Assert.DoesNotContain(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+        Assert.DoesNotContain(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "admin");
     }
 
     [Fact]
@@ -562,7 +562,7 @@ public class TokenControllerTests
         Assert.True(response.Success);
 
         var claims = AssertCapturedClaims();
-        Assert.DoesNotContain(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
+        Assert.DoesNotContain(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "admin");
     }
 
     #endregion

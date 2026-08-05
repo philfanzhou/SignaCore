@@ -126,7 +126,7 @@ Bootstrap Admin Role Injection (after callback, before signing) — async
     │       │   （不读取 refresh 请求体中的 username，防止伪造提权）
     │       └── sms/wechat_code grant: 不触发 bootstrap admin 注入
     │   └── 已视为 bootstrap admin 且 claims 中尚不存在 role=admin
-    │   └── 则注入 new Claim(ClaimTypes.Role, "admin")
+    │   └── 则注入 new Claim(IdentityConstants.ClaimRole, "admin")  // claim 名是标准短名 "role"
     │   └── 该逻辑绕过 callback，保证 bootstrap admin 从任意 portal 登录及刷新都获得 admin 角色
     │   └── 需要 IAccountRepository 依赖（仅在 refresh grant 分支查询）
     │

@@ -190,7 +190,7 @@ public class TokenController : ControllerBase
         var accessToken = _tokenService.GenerateJwtToken(claims, rsaKey, _jwtOptions.TokenExpirationHours);
         var expiresAt = DateTimeOffset.UtcNow.AddHours(_jwtOptions.TokenExpirationHours).ToUnixTimeSeconds();
 
-        var roles = claims.Where(c => c.Type == ClaimTypes.Role).Select(c => c.Value).ToList();
+        var roles = claims.Where(c => c.Type == IdentityConstants.ClaimRole).Select(c => c.Value).ToList();
         var permissions = claims.Where(c => c.Type == IdentityConstants.ClaimPermission).Select(c => c.Value).ToList();
 
         context.Stopwatch.Stop();
@@ -325,7 +325,7 @@ public class TokenController : ControllerBase
         }
 
         if (claims.Any(claim =>
-                claim.Type == ClaimTypes.Role
+                claim.Type == IdentityConstants.ClaimRole
                 && string.Equals(
                     claim.Value,
                     "admin",
@@ -334,7 +334,7 @@ public class TokenController : ControllerBase
             return;
         }
 
-        claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        claims.Add(new Claim(IdentityConstants.ClaimRole, "admin"));
         _logger.LogInformation(
             "Injected bootstrap admin role for account {AccountId}",
             authenticatedAccount.Id);

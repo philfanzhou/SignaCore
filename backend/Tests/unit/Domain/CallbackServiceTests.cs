@@ -32,8 +32,8 @@ public class CallbackServiceTests
         var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
 
         Assert.Equal(4, claims.Count);
-        Assert.Contains(claims, c => c.Type == ClaimTypes.Role && c.Value == "admin");
-        Assert.Contains(claims, c => c.Type == ClaimTypes.Role && c.Value == "user");
+        Assert.Contains(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "admin");
+        Assert.Contains(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "user");
         Assert.Contains(claims, c => c.Type == IdentityConstants.ClaimPermission && c.Value == "read");
         Assert.Contains(claims, c => c.Type == IdentityConstants.ClaimPermission && c.Value == "write");
     }
@@ -114,7 +114,7 @@ public class CallbackServiceTests
         var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
 
         Assert.Equal(50, claims.Count);
-        Assert.All(claims, c => Assert.Equal(ClaimTypes.Role, c.Type));
+        Assert.All(claims, c => Assert.Equal(IdentityConstants.ClaimRole, c.Type));
     }
 
     [Fact]

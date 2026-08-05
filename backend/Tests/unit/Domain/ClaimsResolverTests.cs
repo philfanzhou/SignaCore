@@ -4,6 +4,8 @@ using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Domain;
 using Xunit;
 
+using QuantumZhou.Identity.Database;
+
 namespace QuantumZhou.Identity.Tests.Domain;
 
 public class ClaimsResolverTests
@@ -27,8 +29,8 @@ public class ClaimsResolverTests
         var claims = resolver.ResolveBasicClaims(account, "testuser");
 
         // Assert
-        Assert.Contains(claims, c => c.Type == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier" && c.Value == account.Id.ToString());
-        Assert.Contains(claims, c => c.Type == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name" && c.Value == "testuser");
+        Assert.Contains(claims, c => c.Type == IdentityConstants.ClaimSubject && c.Value == account.Id.ToString());
+        Assert.Contains(claims, c => c.Type == IdentityConstants.ClaimName && c.Value == "testuser");
     }
 
     [Fact]
@@ -48,8 +50,8 @@ public class ClaimsResolverTests
         var claims = resolver.ResolveBasicClaims(account);
 
         // Assert
-        Assert.Contains(claims, c => c.Type == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier" && c.Value == account.Id.ToString());
-        Assert.DoesNotContain(claims, c => c.Type == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name");
+        Assert.Contains(claims, c => c.Type == IdentityConstants.ClaimSubject && c.Value == account.Id.ToString());
+        Assert.DoesNotContain(claims, c => c.Type == IdentityConstants.ClaimName);
     }
 
     [Fact]

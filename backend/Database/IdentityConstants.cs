@@ -33,6 +33,15 @@ public static class IdentityConstants
     public const string ClaimPermission = "Permission";
     public const string ClaimAuthMethod = "auth_method";
 
+    // 签发的 JWT 一律用标准短名，不用 .NET 的 ClaimTypes.* 长 URI。
+    // JwtTokenService 直接构造 JwtPayload，不走 JwtSecurityTokenHandler.CreateToken，
+    // 因此出站短名映射不会发生——claim 写成什么，token 里就是什么。
+    // 长 URI 只有 .NET 下游（且开着 MapInboundClaims）能无感消费，非 .NET 下游会踩坑。
+    public const string ClaimSubject = "sub";
+    public const string ClaimName = "name";
+    public const string ClaimRole = "role";
+    public const string ClaimNickname = "nickname";
+
     public const int MaxUsernameLength = 100;
     public const int MaxPasswordHashLength = 256;
     public const int MaxAppIdLength = 100;
