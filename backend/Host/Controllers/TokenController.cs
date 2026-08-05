@@ -249,7 +249,7 @@ public class TokenController : ControllerBase
     private async Task<ActionResult<TokenResponse>> FailAsync(
         TokenRequestContext context,
         string metricReason,
-        string? responseMessage,
+        string responseMessage,
         string? auditFailureReason,
         string auditUsername = "unknown",
         Guid? accountId = null)
@@ -262,9 +262,10 @@ public class TokenController : ControllerBase
             accountId, auditUsername, context.GrantType, "login_failure",
             context.ClientIp, context.UserAgent, auditFailureReason, context.AppId, context.CorrelationId);
 
-        // 网关校验失败时 ErrorMessage 可能为 null，此处保持既有行为（序列化为 null），
-        // 不擅自兜底成空串——响应体形状是对外契约。
-        return Ok(new TokenResponse { Success = false, Message = responseMessage! });
+        // responseMessage 声明为非空：四个调用点要么传字面量，要么已自带 ?? 兜底，
+        // 网关分支则由 GatewayAuthResult.IsSuccess 上的 MemberNotNullWhen 保证非 null。
+        // 这里不再兜底成空串——响应文案是对外契约，缺了要在调用点显式决定，而不是这里替它决定。
+        return Ok(new TokenResponse { Success = false, Message = responseMessage });
     }
 
     /// <summary>
