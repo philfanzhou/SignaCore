@@ -58,14 +58,14 @@ jobs:
   database-contracts:
     name: Database Contract Matrix
     needs: build-test
-    # 不在 PR 上跑：Testcontainers 要冷拉 postgres / mysql / mariadb 三个镜像，
-    # 托管 runner 每次都是干净环境，代价远高于常驻 agent。PR 只保留构建 + 单测。
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # 已知问题：该 job 目前会在托管 runner 上挂死（测试宿主启动后无任何输出）。
-    # 怀疑是 Testcontainers 的 Ryuk 容器或 Docker Hub 匿名拉取限流，尚未定位。
-    # 超时压到 15 分钟，避免一次挂死浪费半小时。
-    timeout-minutes: 15
+    timeout-minutes: 25
+    env:
+      RUN_IDENTITY_DATABASE_CONTRACTS: 'true'
+      # 托管 runner 是一次性 VM，跑完整机销毁，不需要 Ryuk 回收容器。
+      # 而 Ryuk 会在第一个测试之前拉 testcontainers/ryuk 镜像并等它连上——
+      # 这一步失败时完全没有输出，正是之前挂死 28 分钟的怀疑对象。
+      TESTCONTAINERS_RYUK_DISABLED: 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -75,18 +75,33 @@ jobs:
             8.0.x
             10.0.x
 
+      # 单独一步预拉镜像：dotnet test 会缓冲输出，把拉取放在测试里等于把
+      # Docker Hub 限流（toomanyrequests）藏进一片静默。放在这里则立刻可见，
+      # 同时后续 Testcontainers 直接命中本地镜像。
+      - name: Pre-pull database images
+        run: |
+          for image in postgres:15-alpine mysql:8.4 mariadb:11.4; do
+            echo "::group::docker pull $image"
+            time docker pull "$image"
+            echo "::endgroup::"
+          done
+          docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+
       - name: Database contract matrix
         # Testcontainers 直接用 runner 上的 docker daemon，托管 runner 不在容器里，
         # 因此不需要 TESTCONTAINERS_HOST_OVERRIDE。
-        env:
-          RUN_IDENTITY_DATABASE_CONTRACTS: 'true'
+        # --blame-hang：某个测试 5 分钟无进展就中止并报出是哪个测试卡住，
+        # 避免再次出现"整个 job 静默到超时、日志里什么都没有"。
         run: |
           dotnet restore backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj
           dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj \
             --configuration Release \
             --filter 'FullyQualifiedName~DatabaseContractTests' \
             --logger 'trx;logfilename=identity-database-contracts.trx' \
+            --logger 'console;verbosity=normal' \
             --results-directory reports \
+            --blame-hang \
+            --blame-hang-timeout 5m \
             --no-restore
 
       - name: Upload test results
