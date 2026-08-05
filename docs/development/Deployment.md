@@ -131,24 +131,35 @@ export ADMIN_BOOTSTRAP_PASSWORD=YourSecurePassword
 
 ### CI/CD（GitHub Actions）
 
-`.github/workflows/ci.yml` 是本仓库唯一的流水线（原 Jenkins 流水线已移除），分两个 job：
+`.github/workflows/ci.yml` 是本仓库唯一的流水线（原 Jenkins 流水线已移除），分三个 job：
 
 | job | runner | 触发 | 说明 |
 |---|---|---|---|
 | `build-test` | `ubuntu-latest`（托管） | push + PR，含 fork PR | 构建镜像 + 单元测试，约 90 秒 |
-| `database-contracts` | `ubuntu-latest`（托管） | 仅 main 分支的 push | 三库迁移链契约矩阵，不在 PR 上跑 |
+| `database-contracts` | `ubuntu-latest`（托管） | push + PR | 四库契约矩阵（PG / MySQL / MariaDB / SQLite），约 30 秒 |
 | `deploy` | `[self-hosted, linux, identity-prod]` | 仅本仓库 main 分支的 push | `build.sh` → `start.sh` → smoke |
 
 > **契约矩阵不阻塞部署**：`deploy` 只 `needs: build-test`，与 `database-contracts` 并行。
-> 这是刻意的——该 job 目前在托管 runner 上会挂死（测试宿主启动后无任何输出，怀疑 Testcontainers
-> 的 Ryuk 容器或 Docker Hub 匿名拉取限流），若让部署等它会直接卡死发布通道。
-> **代价是三条迁移链暂时失去自动验证**，改实体后请在本地手工跑一遍：
->
-> ```bash
-> RUN_IDENTITY_DATABASE_CONTRACTS=true \
-> dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj \
->   --filter 'FullyQualifiedName~DatabaseContractTests'
-> ```
+> 迁移链验证失败不应该卡死发布通道，两者关注点不同。
+
+托管 runner 上跑 Testcontainers 有两个坑，`ci.yml` 里已处理，改动时不要顺手删掉：
+
+- `TESTCONTAINERS_RYUK_DISABLED=true`。托管 runner 是一次性 VM，整机销毁，不需要 Ryuk 回收容器；
+  而 Ryuk 在第一个测试之前就要拉镜像并等它连上，失败时**零输出**，表现为整个 job 静默到超时。
+- `--blame-hang --blame-hang-timeout 5m`。`dotnet test` 缓冲输出，没有它的话任何卡死都只能看到一片空白。
+
+本地跑契约矩阵（需要本机 Docker）：
+
+```bash
+RUN_IDENTITY_DATABASE_CONTRACTS=true \
+dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj \
+  --filter 'FullyQualifiedName~DatabaseContractTests'
+```
+
+> **已知失败（3 项，待修）**：矩阵此前从未真正跑通过，恢复运行后暴露出三个既有问题——
+> PostgreSQL 用例向 `timestamp with time zone` 写非零偏移被 Npgsql 拒绝（测试构造问题，
+> 产品代码全程用 `DateTimeOffset.UtcNow`，线上不受影响）；MySQL / MariaDB 用例的
+> Unicode 归一化查询返回 null（疑与测试库 collation 未经 `DatabaseProvisioner` 设定有关）。
 
 部署机上的 runner 需要打 `identity-prod` 标签，并具备 docker 权限和仓库目录写权限。
 
