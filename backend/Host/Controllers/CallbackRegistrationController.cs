@@ -6,6 +6,7 @@ using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Host.Http;
 using QuantumZhou.Identity.Host.Models;
+using QuantumZhou.Identity.Host.Security;
 
 namespace QuantumZhou.Identity.Host.Controllers;
 
@@ -35,14 +36,15 @@ public class CallbackRegistrationController : ControllerBase
     }
 
     [HttpPost("callback/register")]
-    [AllowAnonymous]
+    [Authorize(Policy = GatewayAppAuthenticationDefaults.Policy)]
     public async Task<ActionResult<RegisterCallbackResponse>> RegisterCallback(
         [FromBody] RegisterCallbackRequest request)
     {
-        var appId = HttpContext.GetAppId();
+        var app = HttpContext.GetValidatedApp();
+        var appId = app?.AppId ?? HttpContext.GetAppId();
         var appSecret = HttpContext.GetAppSecret();
 
-        if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(appSecret))
+        if (app is null && (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(appSecret)))
         {
             return Ok(new RegisterCallbackResponse { Success = false, Message = "AppId and AppSecret are required" });
         }
@@ -56,13 +58,13 @@ public class CallbackRegistrationController : ControllerBase
             }
         }
 
-        var app = await _appRegistrationRepository.GetByAppIdAsync(appId);
-        if (app == null)
+        app ??= await _appRegistrationRepository.GetByAppIdAsync(appId!);
+        if (app is null)
         {
             return Ok(new RegisterCallbackResponse { Success = false, Message = "AppId not registered" });
         }
 
-        if (!BCrypt.Net.BCrypt.Verify(appSecret, app.AppSecretHash))
+        if (HttpContext.GetValidatedApp() is null && !BCrypt.Net.BCrypt.Verify(appSecret, app.AppSecretHash))
         {
             _logger.LogWarning("Callback registration failed: AppId={AppId}, Reason=AppSecret mismatch", appId);
             return Ok(new RegisterCallbackResponse { Success = false, Message = "AppSecret mismatch" });

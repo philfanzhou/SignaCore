@@ -15,7 +15,7 @@
 - 密码登录连续失败 5 次后锁定账户 15 分钟
 - 短信验证码有 5 分钟有效期，最多验证 5 次
 - 微信登录不支持自动注册，必须预先绑定
-- 所有请求可通过 AppId/AppSecret 进行网关验证
+- 所有 token 与 sms-code 请求必须通过 AppId/AppSecret 应用认证
 - **Bootstrap Admin 角色**：`AdminBootstrap:Username` 配置的 bootstrap admin 账号是"超级管理员"，无论从哪个 portal 登录都应获得 `role:admin`。注入前检查是否已存在 role=admin，避免重复。角色判断规则：
   - **password grant**：使用已通过密码验证的 `request.Username` 与 `AdminBootstrap:Username` 比较（大小写不敏感、配置非空）。
   - **refresh_token grant**：使用 RefreshTokenValidator 已验证出的 `AccountEntity.Id`，与 `AdminBootstrap:Username` 对应的密码账户 ID 比较；**不**读取 refresh 请求体中的 `username`，避免普通账户伪造 `username=admin` 提权。

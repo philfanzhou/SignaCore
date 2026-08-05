@@ -47,19 +47,15 @@ public class RefreshTokenValidator : IIdentityValidator
             return ValidationResult.Failure("Refresh token has expired");
         }
 
-        // AppId binding is intentionally NOT enforced here. The refresh token itself is
-        // the secret (possession = ownership), and the endpoint already requires a valid
-        // AppId/AppSecret pair for gateway validation. Dropping the cross-app restriction
-        // enables the SSO flow: a refresh token issued by one registered app can be
-        // exchanged by another (using that app's AppId) to mint a token carrying whatever
-        // roles the second app's callback returns.
-        if (!string.IsNullOrEmpty(refreshToken.AppId) && !string.IsNullOrEmpty(request.AppId)
-            && IdentityValueNormalizer.Normalize(refreshToken.AppId) !=
+        if (string.IsNullOrWhiteSpace(refreshToken.AppId)
+            || string.IsNullOrWhiteSpace(request.AppId)
+            || IdentityValueNormalizer.Normalize(refreshToken.AppId) !=
                 IdentityValueNormalizer.Normalize(request.AppId))
         {
-            _logger.LogInformation(
-                "Cross-app refresh token exchange: TokenAppId={TokenAppId}, RequestAppId={RequestAppId}, AccountId={AccountId}",
+            _logger.LogWarning(
+                "Refresh token application binding mismatch: TokenAppId={TokenAppId}, RequestAppId={RequestAppId}, AccountId={AccountId}",
                 refreshToken.AppId, request.AppId, refreshToken.AccountId);
+            return ValidationResult.Failure("Refresh token is not valid for this application");
         }
 
         var account = await _accountRepository.GetByIdAsync(refreshToken.AccountId);

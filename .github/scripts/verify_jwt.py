@@ -25,6 +25,7 @@ SHA256_DIGEST_INFO_PREFIX = bytes.fromhex("3031300d06096086480165030402010500042
 # 签发的 token 一律用标准短名。这里不再接受 nameid 或 .NET 的长 URI：
 # 契约既然定了，就让偏离它的改动在 CI 上直接失败。
 SUBJECT_CLAIM_NAME = "sub"
+CLIENT_ID_CLAIM_NAME = "client_id"
 
 # 回退护栏：claim 名字一旦又变成 ClaimTypes.* 的完整 XML schema URI，立刻报错。
 # 长 URI 只有开着 MapInboundClaims 的 .NET 下游能无感消费，非 .NET 下游会踩坑。
@@ -103,6 +104,9 @@ def main() -> None:
 
     if not payload.get(SUBJECT_CLAIM_NAME):
         fail(f"payload 缺 {SUBJECT_CLAIM_NAME}，claims={sorted(payload)}")
+
+    if not payload.get(CLIENT_ID_CLAIM_NAME):
+        fail(f"payload 缺 {CLIENT_ID_CLAIM_NAME}，claims={sorted(payload)}")
 
     legacy = [name for name in payload if name.startswith(LEGACY_CLAIM_PREFIX)]
     if legacy:

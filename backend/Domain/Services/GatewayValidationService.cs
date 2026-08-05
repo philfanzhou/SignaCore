@@ -18,8 +18,13 @@ public class GatewayValidationService
         _logger = logger;
     }
 
-    public async Task<GatewayAuthResult> ValidateAsync(string appId, string? appSecret)
+    public async Task<GatewayAuthResult> ValidateAsync(string? appId, string? appSecret)
     {
+        if (string.IsNullOrWhiteSpace(appId))
+        {
+            return GatewayAuthResult.Failure("AppId is required");
+        }
+
         if (string.IsNullOrEmpty(appSecret))
         {
             return GatewayAuthResult.Failure("AppSecret is required");

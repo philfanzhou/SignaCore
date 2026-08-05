@@ -85,14 +85,26 @@ jobs:
           # 固定前缀只负责满足这三类字符，熵仍然来自后面的 32 位随机十六进制。
           ADMIN_PASSWORD="Aa1$(openssl rand -hex 16)"
           RSA_MASTER_KEY="$(openssl rand -base64 32)"
+          APP_ID="identity-ci-smoke"
+          APP_SECRET="$(openssl rand -base64 32)"
           echo "::add-mask::$PG_PASSWORD"
           echo "::add-mask::$ADMIN_PASSWORD"
           echo "::add-mask::$RSA_MASTER_KEY"
+          echo "::add-mask::$APP_SECRET"
           {
             echo "PG_PASSWORD=$PG_PASSWORD"
             echo "ADMIN_PASSWORD=$ADMIN_PASSWORD"
             echo "RSA_MASTER_KEY=$RSA_MASTER_KEY"
+            echo "APP_ID=$APP_ID"
+            echo "APP_SECRET=$APP_SECRET"
           } >> "$GITHUB_ENV"
+
+          mkdir -p "$GITHUB_WORKSPACE/qz-smoke-data"
+          jq -n \
+            --arg appId "$APP_ID" \
+            --arg appSecret "$APP_SECRET" \
+            '{apps:[{appId:$appId,appSecret:$appSecret,appName:"Identity CI Smoke",callbackUrl:""}]}' \
+            > "$GITHUB_WORKSPACE/qz-smoke-data/bootstrap-apps.json"
 
           docker network create qz-smoke
           # 故意不预建 quantumzhou_identity 库：DatabaseProvisioner 的建库分支也要被覆盖。
@@ -119,6 +131,7 @@ jobs:
       - name: Start Identity container
         run: |
           docker run -d --name qz-smoke-app --network qz-smoke -p 5002:5002 \
+            -v "$GITHUB_WORKSPACE/qz-smoke-data:/app/data" \
             -e APP_TITLE='Identity CI Smoke' \
             -e Database__Provider=PostgreSQL \
             -e Database__ServerVersion=15 \
@@ -164,6 +177,8 @@ jobs:
           status="$(curl -sS --max-time 10 -o /tmp/token.json -w '%{http_code}' \
             -X POST http://localhost:5002/api/auth/token \
             -H 'Content-Type: application/json' \
+            -H "X-Admin-AppId: ${APP_ID}" \
+            -H "X-Admin-AppSecret: ${APP_SECRET}" \
             -d '{"grantType":"no_such_grant"}')"
           [ "$status" = '200' ] || fail "token 端点返回 $status，契约要求 200"
           grep -q 'unsupported_grant_type' /tmp/token.json \
@@ -211,6 +226,8 @@ jobs:
           status="$(curl -sS --max-time 10 -o /tmp/issued.json -w '%{http_code}' \
             -X POST http://localhost:5002/api/auth/token \
             -H 'Content-Type: application/json' \
+            -H "X-Admin-AppId: ${APP_ID}" \
+            -H "X-Admin-AppSecret: ${APP_SECRET}" \
             -d "{\"grantType\":\"password\",\"username\":\"smoke_admin\",\"password\":\"${ADMIN_PASSWORD}\"}")"
           [ "$status" = '200' ] || { echo "token 端点返回 $status，契约要求 200"; exit 1; }
 

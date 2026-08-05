@@ -104,7 +104,11 @@ public class IdentityDbContext : DbContext
 
         modelBuilder.Entity<RefreshTokenEntity>(entity =>
         {
-            entity.ToTable("refresh_tokens");
+            entity.ToTable(
+                "refresh_tokens",
+                table => table.HasCheckConstraint(
+                    "CK_refresh_tokens_app_id_not_empty",
+                    "app_id <> ''"));
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AccountId).HasColumnName("account_id");
@@ -112,7 +116,7 @@ public class IdentityDbContext : DbContext
             ConfigureInstant(entity.Property(e => e.ExpiresAt).HasColumnName("expires_at"));
             entity.Property(e => e.IsRevoked).HasColumnName("is_revoked");
             ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
-            entity.Property(e => e.AppId).HasColumnName("app_id").HasMaxLength(IdentityConstants.MaxAppIdLength);
+            entity.Property(e => e.AppId).HasColumnName("app_id").HasMaxLength(IdentityConstants.MaxAppIdLength).IsRequired();
             entity.HasIndex(e => e.TokenValue).IsUnique();
         });
 

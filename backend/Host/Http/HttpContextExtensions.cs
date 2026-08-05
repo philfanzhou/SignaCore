@@ -1,3 +1,5 @@
+using QuantumZhou.Identity.Database.Entity;
+
 namespace QuantumZhou.Identity.Host.Http;
 
 /// <summary>
@@ -46,4 +48,7 @@ public static class HttpContextExtensions
     public static string? GetAppSecret(this HttpContext context) =>
         context.Items[IdentityHeaders.AppSecret] as string
         ?? context.Request.Headers[IdentityHeaders.AppSecret].FirstOrDefault();
+
+    public static AppRegistrationEntity? GetValidatedApp(this HttpContext context) =>
+        context.Items[IdentityHeaders.ValidatedApp] as AppRegistrationEntity;
 }

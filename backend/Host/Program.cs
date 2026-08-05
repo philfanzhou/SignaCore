@@ -12,6 +12,7 @@ using QuantumZhou.Identity.Host;
 using QuantumZhou.Identity.Host.Configuration;
 using QuantumZhou.Identity.Host.Controllers;
 using QuantumZhou.Identity.Host.Middleware;
+using QuantumZhou.Identity.Host.Security;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -138,16 +139,17 @@ app.UseCors("AdminWeb");
 app.UseAuthentication();
 
 // ---- Sensitive Header Redaction Middleware ----
-// Strips X-Admin-AppSecret from the request headers after authentication
-// so that downstream logging/middleware cannot accidentally log the secret value.
-// The secret has already been consumed by GatewayController.ValidateGatewayRequestAsync.
+// Moves X-Admin-AppSecret out of the request headers before authorization so
+// downstream logging cannot expose it. GatewayApp authentication reads the
+// value through HttpContextExtensions, which prefers the protected Items copy.
 app.UseMiddleware<SensitiveHeaderRedactionMiddleware>();
 
 app.UseAuthorization();
 app.UseRateLimiter();
 
 app.MapHealthChecks("/health");
-app.MapGet("/consul/status", (ConsulRuntimeState state) => Results.Ok(state.Snapshot()));
+app.MapGet("/consul/status", (ConsulRuntimeState state) => Results.Ok(state.Snapshot()))
+    .RequireAuthorization(GatewayAppAuthenticationDefaults.OpsPolicy);
 app.MapPost("/consul/cache/invalidate", (IConfiguration configuration, ConsulRuntimeState state) =>
 {
     if (!ConsulOptions.IsEnabled(configuration))
@@ -169,7 +171,7 @@ app.MapPost("/consul/cache/invalidate", (IConfiguration configuration, ConsulRun
         invalidated = true,
         cacheDirectory = options.CacheDirectory
     });
-});
+}).RequireAuthorization(GatewayAppAuthenticationDefaults.OpsPolicy);
 
 // ---- JWKS Rate Limiting ----
 var jwksRateLimiter = new System.Threading.RateLimiting.FixedWindowRateLimiter(
@@ -241,7 +243,8 @@ app.MapGet("/.well-known/openid-configuration", (HttpContext httpContext, IConfi
             IdentityConstants.ClaimName,
             IdentityConstants.ClaimRole,
             IdentityConstants.ClaimAuthMethod,
-            IdentityConstants.ClaimNickname
+            IdentityConstants.ClaimNickname,
+            IdentityConstants.ClaimClientId
         }
     });
 });

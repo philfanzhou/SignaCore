@@ -16,7 +16,7 @@ namespace QuantumZhou.Identity.IntegrationTests.Integration;
 /// （见 <see cref="IdentityDatabaseOptionsExtensions"/>），此时 EF Core 禁止在"调用方自己开的事务"
 /// 里执行命令，旋转 refresh token 会在第一条命令上抛
 /// <c>InvalidOperationException: ... does not support user-initiated transactions</c>，
-/// 经 ExceptionHandlingMiddleware 变成 HTTP 409——就是跨应用 SSO 换票失败的现场。
+/// 经 ExceptionHandlingMiddleware 变成 HTTP 409——就是 refresh token 原子换票失败的现场。
 /// <para>
 /// 真实 provider 的矩阵在 <see cref="ServerDatabaseContractTests"/>（需要 Docker/Testcontainers）。
 /// 这里改用 SQLite + 手工注入的重试型 strategy：抛异常的判定在 EF Core 通用的
@@ -102,7 +102,8 @@ public sealed class RefreshTokenRotationDatabaseContractTests
             AccountId = accountId,
             TokenValue = tokenValue,
             CreatedAt = DateTimeOffset.UtcNow,
-            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            AppId = "rotation-contract-app"
         };
     }
 
@@ -158,7 +159,8 @@ public sealed class RefreshTokenRotationDatabaseContractTests
                 AccountId = accountId,
                 TokenValue = tokenValue,
                 CreatedAt = DateTimeOffset.UtcNow,
-                ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
+                ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                AppId = "rotation-contract-app"
             });
             await context.SaveChangesAsync();
             return accountId;

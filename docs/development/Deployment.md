@@ -48,7 +48,7 @@ curl http://localhost:8500/v1/catalog/service/QuantumZhou.Identity
 curl http://localhost:5002/health
 
 # 检查 Consul 连接状态
-curl http://localhost:5002/consul/status
+curl -b admin.cookies http://localhost:5002/consul/status
 ```
 
 ---
@@ -217,7 +217,7 @@ export SMS_BYPASS_PHONES=13800138000,13900139000
 - 白名单外的号码即使提交了正确的绕过码，也会落回正常 OTP 校验并失败。
 - 绕过路径不经过 `DbOtpService`，`MaxAttempts` / `LockoutSeconds` 对它无效——白名单是唯一收口手段，
   名单里只能放测试号码。
-- `/api/auth/token` 是匿名端点且 AppId 头可选，因此白名单里的每个号码等价于一个「知道绕过码即可登录」的账号。
+- `/api/auth/token` 必须先通过 AppId/AppSecret 应用认证；白名单里的号码仍应只放测试账号，因为持有应用凭据和绕过码即可登录。
 
 配置项说明见 [Configuration.md](./Configuration.md)（含 Consul 与环境变量的优先级陷阱）。
 
@@ -290,7 +290,7 @@ EOF
 - SMS/微信 grant 不触发 bootstrap admin 注入，bootstrap account 身份不扩大到这两类 grant
 - `AdminUserIds` 白名单仍保留，用于扩展**非 bootstrap** 的二级管理员账号（需 admin_portal callback 注入）
 
-> **自动刷新会话**：调用方在 Access Token 到期后只提交 Refresh Token（不补传用户名）调用 `POST /api/auth/token`。由于 Identity 在 refresh grant 中基于已验证账户 ID 重新识别 bootstrap admin，管理员会话可以连续刷新而不丢失 `role=admin`，同时普通账户无法通过伪造 `username=admin` 提权。
+> **自动刷新会话**：调用方在 Access Token 到期后提交 Refresh Token，并继续携带签发该令牌的 AppId/AppSecret 调用 `POST /api/auth/token`（无需补传用户名）。Identity 会校验 refresh token 的 AppId 绑定，并基于已验证账户 ID 重新识别 bootstrap admin；跨应用换票会被拒绝。
 
 ### CI 联调验证流程
 
@@ -352,7 +352,7 @@ gunzip -c backup_identity_20260101_020000.sql.gz | docker exec -i ruoyu-postgres
 1. 控制台输出 `[WARN] Consul connection failed, using local cache`
 2. 使用 `data/consul/cache.json`（最后一次成功获取的配置）启动
 3. Consul 恢复后，服务**不会**自动重连，需要重启服务以重新拉取最新配置
-4. 如需不重启刷新，调用 `POST /consul/cache/invalidate` 强制清空缓存并立即重连 Consul
+4. 如需清除降级缓存，使用管理员会话调用 `POST /consul/cache/invalidate`；该操作不会热重载当前配置，下次启动会重新拉取
 
 ### Consul 快照备份
 
@@ -372,10 +372,10 @@ docker exec ruoyu-consul consul snapshot restore /tmp/consul-restore.snap
 
 ### Consul 模式
 
-1. 查看 Consul 连接状态：`curl http://localhost:5002/consul/status`
+1. 查看 Consul 连接状态：`curl -b admin.cookies http://localhost:5002/consul/status`
 2. 检查服务注册：`curl http://localhost:8500/v1/catalog/services`
 3. 检查健康失败原因：`curl http://localhost:8500/v1/health/checks/QuantumZhou.Identity`
-4. 强制重连 Consul：调用 `POST /consul/cache/invalidate` 后重启服务
+4. 清除降级缓存：使用管理员会话调用 `POST /consul/cache/invalidate`，确认 Consul 可用后再重启服务
 
 ### 身份认证失败
 

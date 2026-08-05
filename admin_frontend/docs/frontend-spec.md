@@ -5,7 +5,7 @@
 | 项目 | 技术 |
 |------|------|
 | 框架 | Vue 3 + TypeScript |
-| UI 库 | Element Plus（仅用 ElMessage / ElMessageBox） |
+| UI 库 | Element Plus（仅按需使用 ElMessage / ElMessageBox，不注册完整插件） |
 | HTTP 客户端 | Axios |
 | 构建工具 | Vite |
 | 入口 | `src/main.ts` |
@@ -18,7 +18,7 @@
 admin_frontend/
 ├── src/
 │   ├── App.vue                          # 组装根（会话三分支 + 组件组装 + 生命周期接线）
-│   ├── main.ts                          # 入口文件（按顺序 import 9 个样式文件）
+│   ├── main.ts                          # 入口文件（2 个 EP 按需样式 + 9 个项目样式）
 │   ├── env.d.ts                         # window.__APP_TITLE__ 类型声明
 │   ├── components/                      # 展示组件（零 props，直接从 composable 取状态）
 │   │   ├── AuthView.vue                 # 会话检查页 + 登录页
@@ -54,7 +54,7 @@ admin_frontend/
 │       ├── layout.css                   # app-shell / sidebar / topbar
 │       ├── components.css               # 卡片/按钮/输入/徽章/chip/表格/switch/统计卡/分页/空态/告警
 │       ├── overlays.css                 # drawer / modal
-│       ├── toast.css                    # ElMessage 全局覆写（必须在 element-plus css 之后）
+│       ├── toast.css                    # ElMessage 全局覆写（必须在 EP message 按需样式之后）
 │       ├── utilities.css                # spinner / section-gap
 │       └── responsive.css               # 响应式断点（最后加载）
 ├── public/
@@ -700,7 +700,7 @@ interface AdminUpdateCallbackRequest {
 
 #### R2: style.css 拆分（1622 行 → styles/ 9 文件）
 
-- **拆分方案**：tokens / base / auth / layout / components / overlays / toast / utilities / responsive，main.ts 按级联顺序 import；全部样式无 scoped，顺序与原单文件一致（已用逐字节 diff 验证拼接后与原文件完全一致）。toast.css（`.el-message.is-center` 覆写）保持在 element-plus css 之后，responsive.css 最后。
+- **拆分方案**：tokens / base / auth / layout / components / overlays / toast / utilities / responsive，main.ts 按级联顺序 import；全部样式无 scoped，顺序与原单文件一致（已用逐字节 diff 验证拼接后与原文件完全一致）。toast.css（`.el-message.is-center` 覆写）保持在 Element Plus message 按需样式之后，responsive.css 最后。
 - **状态**：✅ 已完成（2026-07-22）
 
 #### R3: 死代码清理
@@ -709,6 +709,13 @@ interface AdminUpdateCallbackRequest {
 - **CSS 死类**（grep 确认零模板引用后删除）：`.checkbox-wrap`、`.badge.amber`、`.badge.red`、`.trend-up`、`.trend-down`、`.form-group` 半选择器（保留 `.field` 半选择器）。
 - **依赖移除**：`pinia`、`vue-router`、`@element-plus/icons-vue`（已安装但从未在 src 中引用；锁文件已更新）。
 - **状态**：✅ 已完成（2026-07-22，`npm run build` 通过）
+
+#### R4: Element Plus 按需打包
+
+- **根因**：页面只调用 `ElMessage` / `ElMessageBox` 服务，入口却注册完整 Element Plus 插件并加载全量 CSS，导致全部组件进入生产包。
+- **修复**：移除 `app.use(ElementPlus)` 和全量 `element-plus/dist/index.css`，只导入 message 与 message-box 的按需样式；服务代码继续使用具名导入以保持 tree-shaking。
+- **结果**：生产 JS 由 1,045.31 kB 降至 260.32 kB，CSS 由 372.34 kB 降至 69.85 kB，Vite 500 kB chunk 告警消失。
+- **状态**：✅ 已完成（2026-08-05，`npm run build` 通过）
 
 ---
 

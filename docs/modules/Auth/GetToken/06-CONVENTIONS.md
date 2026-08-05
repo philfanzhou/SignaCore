@@ -17,6 +17,8 @@
 
 ## 错误消息格式约定
 
+缺失或无效的 AppId/AppSecret 属于调用方认证失败，统一返回 HTTP 401；通过应用认证后的 grant 业务失败继续返回 HTTP 200 + `success=false`。
+
 | 场景 | 消息文本 |
 |------|----------|
 | 用户名或密码为空 | "Username or password cannot be empty" |

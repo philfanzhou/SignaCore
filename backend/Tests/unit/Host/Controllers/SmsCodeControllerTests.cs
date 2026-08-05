@@ -17,14 +17,24 @@ public class SmsCodeControllerTests
     private readonly Mock<IAppRegistrationRepository> _appRegistrationRepoMock = new();
     private readonly Mock<IAuditService> _auditServiceMock = AuthTestDoubles.AuditService();
 
-    private SmsCodeController CreateController() =>
-        new SmsCodeController(
+    private SmsCodeController CreateController()
+    {
+        var controller = new SmsCodeController(
             _otpServiceMock.Object,
             _smsSenderMock.Object,
-            AuthTestDoubles.GatewayValidator(_appRegistrationRepoMock),
             _auditServiceMock.Object,
             NullLogger<SmsCodeController>.Instance)
             .WithHttpContext();
+        controller.HttpContext.Items[IdentityHeaders.ValidatedApp] = new QuantumZhou.Identity.Database.Entity.AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "test-app",
+            AppName = "Test App",
+            AppSecretHash = "not-used-by-controller",
+            IsActive = true
+        };
+        return controller;
+    }
 
     [Fact]
     public async Task RequestSmsCode_WithEmptyPhone_ReturnsPhoneRequiredError()
@@ -59,24 +69,6 @@ public class SmsCodeControllerTests
             null, "13800138000", "sms", "sms_code_sent",
             It.IsAny<string?>(), It.IsAny<string?>(), null,
             It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task RequestSmsCode_GatewayValidationFails_ReturnsFailure()
-    {
-        var controller = CreateController();
-        controller.HttpContext.Request.Headers[IdentityHeaders.AppId] = "unregistered-app";
-        controller.HttpContext.Request.Headers[IdentityHeaders.AppSecret] = "any-secret";
-
-        var request = new SmsCodeRequest { Phone = "13800138000" };
-
-        var actionResult = await controller.RequestSmsCode(request, CancellationToken.None);
-
-        var ok = AuthTestDoubles.ExtractOk(actionResult);
-        var response = Assert.IsType<SmsCodeResponse>(ok.Value!);
-        Assert.False(response.Success);
-        Assert.Equal("AppId not registered", response.Message);
-        _otpServiceMock.Verify(o => o.GenerateAndSendAsync(It.IsAny<string>(), It.IsAny<ISmsSender>()), Times.Never);
     }
 
     [Fact]

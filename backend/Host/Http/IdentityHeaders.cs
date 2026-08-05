@@ -7,15 +7,18 @@ namespace QuantumZhou.Identity.Host.Http;
 /// </summary>
 public static class IdentityHeaders
 {
-    /// <summary>调用方 AppId。/api/gateway/* 必填；/api/auth/token 可选，带了才做网关校验。</summary>
+    /// <summary>调用方 AppId。所有 gateway-facing 端点必填。</summary>
     public const string AppId = "X-Admin-AppId";
 
     /// <summary>
-    /// 调用方 AppSecret。<see cref="Middleware.SensitiveHeaderRedactionMiddleware"/> 会在认证之后
-    /// 把它从请求头搬到 <c>HttpContext.Items</c>，因此读取一律走
+    /// 调用方 AppSecret。<see cref="Middleware.SensitiveHeaderRedactionMiddleware"/> 会在授权之前
+    /// 把它从请求头搬到 <c>HttpContext.Items</c>，因此认证和业务代码读取一律走
     /// <see cref="HttpContextExtensions.GetAppSecret"/>，不要直接读请求头。
     /// </summary>
     public const string AppSecret = "X-Admin-AppSecret";
+
+    /// <summary>认证处理器缓存已验证应用实体所用的 HttpContext.Items 键。</summary>
+    public const string ValidatedApp = "QuantumZhou.Identity.ValidatedApp";
 
     /// <summary>反向代理透传的客户端 IP 链。</summary>
     public const string ForwardedFor = "X-Forwarded-For";

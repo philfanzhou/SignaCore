@@ -46,6 +46,18 @@ public sealed class SqliteDatabaseContractTests
                     CreatedAt = sourceInstant
                 });
                 await writeContext.SaveChangesAsync();
+
+                writeContext.RefreshTokens.Add(new RefreshTokenEntity
+                {
+                    Id = Guid.NewGuid(),
+                    AccountId = accountId,
+                    TokenValue = Convert.ToBase64String(Guid.NewGuid().ToByteArray()),
+                    CreatedAt = sourceInstant,
+                    ExpiresAt = sourceInstant.AddHours(1),
+                    AppId = string.Empty
+                });
+                await Assert.ThrowsAsync<DbUpdateException>(
+                    () => writeContext.SaveChangesAsync());
             }
 
             await using var readContext = new IdentityDbContext(optionsBuilder.Options);
@@ -110,7 +122,8 @@ public sealed class SqliteDatabaseContractTests
                     AccountId = accountId,
                     TokenValue = refreshToken,
                     CreatedAt = DateTimeOffset.UtcNow,
-                    ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
+                    ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                    AppId = "database-contract-app"
                 });
                 seedContext.Otps.Add(new OtpEntity
                 {
@@ -174,7 +187,8 @@ public sealed class SqliteDatabaseContractTests
             AccountId = accountId,
             TokenValue = Convert.ToBase64String(Guid.NewGuid().ToByteArray()),
             CreatedAt = DateTimeOffset.UtcNow,
-            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            AppId = "database-contract-app"
         });
     }
 

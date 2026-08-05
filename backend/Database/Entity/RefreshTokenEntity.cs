@@ -14,5 +14,5 @@ public class RefreshTokenEntity
 
     public bool IsRevoked { get; set; }
 
-    public string? AppId { get; set; }
+    public string AppId { get; set; } = string.Empty;
 }

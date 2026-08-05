@@ -278,10 +278,10 @@ Consul 集成新增管理端点：
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/consul/status` | GET | Consul 连接状态 / 最后成功时间 / 缓存年龄 |
-| `/consul/cache/invalidate` | POST | 强制清空本地缓存（下次启动重新拉取）|
+| `/consul/status` | GET | 需要 Ops（管理员会话）；Consul 连接状态 / 最后成功时间 / 缓存年龄 |
+| `/consul/cache/invalidate` | POST | 需要 Ops（管理员会话）；强制清空本地缓存（下次启动重新拉取）|
 
-> `/health` 端点**始终映射**。当前阶段仍以数据库健康检查为主，Consul 连接状态通过 `/consul/status` 单独查看。
+> `/health` 端点保持公开。Consul 详细状态和缓存变更属于运维管理面，必须通过管理员会话授权。
 
 ## 10. 健康检查
 

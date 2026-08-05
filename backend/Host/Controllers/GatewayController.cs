@@ -1,8 +1,10 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using QuantumZhou.Identity.Domain.Models;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Host.Http;
 using QuantumZhou.Identity.Host.Models;
+using QuantumZhou.Identity.Host.Security;
 
 namespace QuantumZhou.Identity.Host.Controllers;
 
@@ -16,6 +18,7 @@ namespace QuantumZhou.Identity.Host.Controllers;
 /// </summary>
 [Route("api/gateway")]
 [ApiController]
+[Authorize(Policy = GatewayAppAuthenticationDefaults.Policy)]
 public class GatewayController : ControllerBase
 {
     private readonly ILogger<GatewayController> _logger;
@@ -81,6 +84,11 @@ public class GatewayController : ControllerBase
                 "AppSecret transmission over plain HTTP is insecure. " +
                 "Ensure HTTPS or TLS termination at the reverse proxy in production.",
                 HttpContext.Connection.RemoteIpAddress);
+        }
+
+        if (HttpContext.GetValidatedApp() is not null)
+        {
+            return null;
         }
 
         var appId = HttpContext.GetAppId();

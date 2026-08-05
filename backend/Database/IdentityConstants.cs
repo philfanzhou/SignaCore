@@ -32,6 +32,7 @@ public static class IdentityConstants
 
     public const string ClaimPermission = "Permission";
     public const string ClaimAuthMethod = "auth_method";
+    public const string ClaimClientId = "client_id";
 
     // 签发的 JWT 一律用标准短名，不用 .NET 的 ClaimTypes.* 长 URI。
     // JwtTokenService 直接构造 JwtPayload，不走 JwtSecurityTokenHandler.CreateToken，

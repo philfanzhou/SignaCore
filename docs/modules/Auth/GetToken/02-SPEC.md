@@ -14,13 +14,13 @@
 - [ ] FR-04: 短信验证码登录验证（SmsValidator），支持自动注册
 - [ ] FR-05: 微信 code 登录验证（WechatValidator）
 - [ ] FR-06: 刷新令牌验证（RefreshTokenValidator），AppId 匹配检查
-- [ ] FR-07: 构建基本 Claims（sub, jti, iat, name, nickname, auth_method）
+- [ ] FR-07: 构建基本 Claims（sub, jti, iat, name, nickname, auth_method, client_id）
 - [ ] FR-08: 回调权限注入（如有 CallbackUrl），对回调返回的 Claim 施加数量和长度限制
 - [ ] FR-09: 使用 RSA 密钥签发 JWT
 - [ ] FR-10: 生成刷新令牌并持久化
 - [ ] FR-11: 记录登录审计日志
 - [ ] FR-12: 更新账户登录统计信息
-- [ ] FR-13: 请求短信验证码（RequestSmsCode），支持可选网关验证
+- [ ] FR-13: 请求短信验证码（RequestSmsCode），强制网关应用验证
 - [ ] FR-14: HTTP `POST /api/auth/token` 端点，与 gRPC `GetToken` 行为一致
 - [ ] FR-15: HTTP `POST /api/auth/sms-code` 端点，与 gRPC `RequestSmsCode` 行为一致
 - [ ] FR-16: HTTP `POST /api/auth/revoke` 端点，与 gRPC `RevokeRefreshToken` 行为一致
@@ -30,7 +30,7 @@
 
 ### POST /api/auth/token
 
-**认证**：可选 AppId/AppSecret 请求头（`X-Admin-AppId` / `X-Admin-AppSecret`），与 gRPC 请求体中的 `appId` / `appSecret` 等效。
+**认证**：必须携带 AppId/AppSecret 请求头（`X-Admin-AppId` / `X-Admin-AppSecret`）。缺失或无效凭据返回 HTTP 401，不进入 grant 业务校验。
 
 **请求体**（JSON）：
 
@@ -74,7 +74,7 @@
 
 ### POST /api/auth/sms-code
 
-**请求头**：`X-Admin-AppId` / `X-Admin-AppSecret`（可选，用于网关验证）。
+**请求头**：`X-Admin-AppId` / `X-Admin-AppSecret`（必填）。
 
 **请求体**：`{ "phone": "13800138000" }`
 

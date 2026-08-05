@@ -73,8 +73,8 @@ Identity 服务最初使用 gRPC 作为内部服务间通信协议，HTTP REST �
 
 | 端点 | HTTP 方法 | 原 gRPC 方法（已移除） | 认证方式 | 说明 |
 |------|-----------|----------------------|---------|------|
-| `/api/auth/token` | POST | `GetToken` | AppId/AppSecret 头（可选） | OAuth2 grant_type 模式，支持 password/sms/wechat_code/refresh_token |
-| `/api/auth/sms-code` | POST | `RequestSmsCode` | AppId/AppSecret 头（可选） | 请求短信验证码 |
+| `/api/auth/token` | POST | `GetToken` | AppId/AppSecret 头（必填） | OAuth2 grant_type 模式，支持 password/sms/wechat_code/refresh_token；refresh token 绑定 AppId |
+| `/api/auth/sms-code` | POST | `RequestSmsCode` | AppId/AppSecret 头（必填） | 请求短信验证码 |
 | `/api/auth/revoke` | POST | `RevokeRefreshToken` | 无（需持有 refresh_token） | 吊销刷新令牌 |
 | `/api/auth/callback/register` | POST | `RegisterCallback` | AppId/AppSecret 头 | 注册业务系统权限回调 URL |
 

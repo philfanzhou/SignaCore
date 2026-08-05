@@ -2,81 +2,75 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using QuantumZhou.Identity.Database;
 
 #nullable disable
 
-namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
+namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
 {
     [DbContext(typeof(IdentityDbContext))]
-    partial class IdentityDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260805143354_EnforceRefreshTokenAppBinding")]
+    partial class EnforceRefreshTokenAppBinding
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder
-                .UseCollation("utf8mb4_bin")
-                .HasAnnotation("ProductVersion", "9.0.18")
-                .HasAnnotation("Relational:MaxIdentifierLength", 64);
-
-            MySqlModelBuilderExtensions.HasCharSet(modelBuilder, "utf8mb4");
-            MySqlModelBuilderExtensions.AutoIncrementColumns(modelBuilder);
+            modelBuilder.HasAnnotation("ProductVersion", "9.0.18");
 
             modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AccountEntity", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("id");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("created_at");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("tinyint(1)")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("is_active");
 
-                    b.Property<DateTime?>("LastLoginAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long?>("LastLoginAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("last_login_at");
 
                     b.Property<string>("LastLoginIp")
                         .HasMaxLength(64)
-                        .HasColumnType("varchar(64)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("last_login_ip");
 
                     b.Property<string>("LastLoginMethod")
                         .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("last_login_method");
 
                     b.Property<string>("Nickname")
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("nickname");
 
                     b.Property<string>("NicknameNormalized")
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("nickname_normalized");
 
                     b.Property<string>("Remark")
                         .HasMaxLength(500)
-                        .HasColumnType("varchar(500)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("remark");
 
                     b.Property<string>("RemarkNormalized")
                         .HasMaxLength(500)
-                        .HasColumnType("varchar(500)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("remark_normalized");
 
                     b.Property<int>("TotalLoginCount")
-                        .HasColumnType("int")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("total_login_count");
 
                     b.HasKey("Id");
@@ -88,50 +82,48 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("id");
 
                     b.Property<string>("AppId")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("app_id");
 
                     b.Property<string>("AppIdNormalized")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("app_id_normalized");
 
                     b.Property<string>("AppName")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("varchar(200)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("app_name");
 
                     b.Property<string>("AppSecretHash")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("varchar(256)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("app_secret_hash");
 
-                    b.Property<DateTime?>("CallbackExpiresAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long?>("CallbackExpiresAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("callback_expires_at");
 
                     b.Property<string>("CallbackUrl")
                         .HasMaxLength(500)
-                        .HasColumnType("varchar(500)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("callback_url");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("created_at");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("tinyint(1)")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("is_active");
 
                     b.HasKey("Id");
@@ -146,64 +138,63 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("id");
 
                     b.Property<string>("Action")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("action");
 
                     b.Property<Guid?>("ActorId")
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("actor_id");
 
                     b.Property<string>("ActorName")
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("actor_name");
 
                     b.Property<string>("AfterSnapshot")
                         .HasMaxLength(4096)
-                        .HasColumnType("varchar(4096)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("after_snapshot");
 
                     b.Property<string>("BeforeSnapshot")
                         .HasMaxLength(4096)
-                        .HasColumnType("varchar(4096)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("before_snapshot");
 
                     b.Property<string>("ClientIp")
                         .HasMaxLength(64)
-                        .HasColumnType("varchar(64)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("client_ip");
 
                     b.Property<string>("CorrelationId")
                         .HasMaxLength(64)
-                        .HasColumnType("varchar(64)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("correlation_id");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("created_at");
 
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
-                        .HasColumnType("varchar(1000)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("description");
 
                     b.Property<string>("TargetId")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("varchar(64)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("target_id");
 
                     b.Property<string>("TargetType")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("target_type");
 
                     b.HasKey("Id");
@@ -223,33 +214,31 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("id");
 
                     b.Property<int>("FailedAttempts")
-                        .HasColumnType("int")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("failed_attempts");
 
-                    b.Property<DateTime>("LastAttemptAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("LastAttemptAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("last_attempt_at");
 
-                    b.Property<DateTime?>("LockoutUntil")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long?>("LockoutUntil")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("lockout_until");
 
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("username");
 
                     b.Property<string>("UsernameNormalized")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("username_normalized");
 
                     b.HasKey("Id");
@@ -264,59 +253,58 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("id");
 
                     b.Property<Guid?>("AccountId")
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("account_id");
 
                     b.Property<string>("AppId")
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("app_id");
 
                     b.Property<string>("AuthMethod")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("auth_method");
 
                     b.Property<string>("ClientIp")
                         .HasMaxLength(64)
-                        .HasColumnType("varchar(64)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("client_ip");
 
                     b.Property<string>("CorrelationId")
                         .HasMaxLength(64)
-                        .HasColumnType("varchar(64)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("correlation_id");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("created_at");
 
                     b.Property<string>("EventType")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("varchar(50)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("event_type");
 
                     b.Property<string>("FailureReason")
                         .HasMaxLength(500)
-                        .HasColumnType("varchar(500)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("failure_reason");
 
                     b.Property<string>("UserAgent")
                         .HasMaxLength(512)
-                        .HasColumnType("varchar(512)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("user_agent");
 
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("username");
 
                     b.HasKey("Id");
@@ -334,38 +322,35 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("id");
 
                     b.Property<int>("Attempts")
-                        .HasColumnType("int")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("attempts");
 
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(10)
-                        .HasColumnType("varchar(10)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("code");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("created_at");
 
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("ExpiresAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("expires_at");
 
-                    b.Property<DateTime>("LockoutUntil")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("LockoutUntil")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("lockout_until");
 
                     b.Property<string>("Phone")
                         .IsRequired()
                         .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("phone");
 
                     b.HasKey("Id");
@@ -380,34 +365,33 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AccountId")
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("account_id");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("created_at");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("varchar(256)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("password_hash");
 
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("username");
 
                     b.Property<string>("UsernameNormalized")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("username_normalized");
 
                     b.HasKey("Id");
@@ -424,37 +408,35 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AccountId")
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("account_id");
 
                     b.Property<string>("AppId")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("app_id");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("created_at");
 
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("ExpiresAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("expires_at");
 
                     b.Property<bool>("IsRevoked")
-                        .HasColumnType("tinyint(1)")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("is_revoked");
 
                     b.Property<string>("TokenValue")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("varchar(256)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("token_value");
 
                     b.HasKey("Id");
@@ -472,51 +454,49 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("id");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("created_at");
 
                     b.Property<string>("EncryptedPrivateKeyParams")
                         .IsRequired()
                         .HasMaxLength(4096)
-                        .HasColumnType("varchar(4096)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("encrypted_private_key_params");
 
                     b.Property<string>("EncryptionSalt")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("varchar(256)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("encryption_salt");
 
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasPrecision(6)
-                        .HasColumnType("datetime(6)")
+                    b.Property<long>("ExpiresAt")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("expires_at");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("tinyint(1)")
+                        .HasColumnType("INTEGER")
                         .HasColumnName("is_active");
 
                     b.Property<string>("KeyId")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("key_id");
 
                     b.Property<string>("PublicKeyExponent")
                         .IsRequired()
                         .HasMaxLength(4096)
-                        .HasColumnType("varchar(4096)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("public_key_exponent");
 
                     b.Property<string>("PublicKeyModulus")
                         .IsRequired()
                         .HasMaxLength(2048)
-                        .HasColumnType("varchar(2048)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("public_key_modulus");
 
                     b.HasKey("Id");
@@ -531,29 +511,29 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AccountId")
-                        .HasColumnType("char(36)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("account_id");
 
                     b.Property<string>("ProviderName")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("provider_name");
 
                     b.Property<string>("ProviderNameNormalized")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("provider_name_normalized");
 
                     b.Property<string>("ProviderUserId")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("varchar(256)")
+                        .HasColumnType("TEXT")
                         .HasColumnName("provider_user_id");
 
                     b.HasKey("Id");

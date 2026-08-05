@@ -25,12 +25,12 @@ public class RefreshTokenService : IRefreshTokenService
     {
         if (grantType is IdentityConstants.GrantTypePassword or IdentityConstants.GrantTypeSms or IdentityConstants.GrantTypeWechat)
         {
-            return await GenerateRefreshTokenAsync(account, appId);
+            return await GenerateRefreshTokenAsync(account, RequireAppId(appId));
         }
 
         if (grantType == IdentityConstants.GrantTypeRefreshToken && !string.IsNullOrEmpty(existingRefreshToken))
         {
-            var replacement = CreateRefreshToken(account, appId);
+            var replacement = CreateRefreshToken(account, RequireAppId(appId));
             return await _refreshTokenRepository.TryRotateAsync(existingRefreshToken, replacement)
                 ? replacement.TokenValue
                 : null;
@@ -39,12 +39,17 @@ public class RefreshTokenService : IRefreshTokenService
         return null;
     }
 
+    private static string RequireAppId(string? appId) =>
+        !string.IsNullOrWhiteSpace(appId)
+            ? appId
+            : throw new InvalidOperationException("A validated AppId is required to issue or rotate refresh tokens.");
+
     public async Task<bool> RevokeAsync(string token)
     {
         return await _refreshTokenRepository.TryRevokeAsync(token);
     }
 
-    private async Task<string> GenerateRefreshTokenAsync(AccountEntity account, string? appId)
+    private async Task<string> GenerateRefreshTokenAsync(AccountEntity account, string appId)
     {
         var refreshToken = CreateRefreshToken(account, appId);
         await _refreshTokenRepository.AddAsync(refreshToken);
@@ -52,7 +57,7 @@ public class RefreshTokenService : IRefreshTokenService
         return refreshToken.TokenValue;
     }
 
-    private RefreshTokenEntity CreateRefreshToken(AccountEntity account, string? appId)
+    private RefreshTokenEntity CreateRefreshToken(AccountEntity account, string appId)
     {
         return new RefreshTokenEntity
         {

@@ -92,18 +92,24 @@ echo "<access_token>" | cut -d. -f2 | base64 -d 2>/dev/null | python3 -m json.to
 # 1. bootstrap admin 密码登录
 curl -s -X POST http://localhost:5002/api/auth/token \
   -H "Content-Type: application/json" \
+  -H "X-Admin-AppId: <your-app-id>" \
+  -H "X-Admin-AppSecret: <your-app-secret>" \
   -d '{"grantType":"password","username":"admin","password":"<ADMIN_BOOTSTRAP_PASSWORD>"}'
 # 解码第一个 access_token 的 payload，确认 role 数组包含 "admin"
 
 # 2. 使用返回的 refreshToken 执行 refresh_token grant
 curl -s -X POST http://localhost:5002/api/auth/token \
   -H "Content-Type: application/json" \
+  -H "X-Admin-AppId: <your-app-id>" \
+  -H "X-Admin-AppSecret: <your-app-secret>" \
   -d '{"grantType":"refresh_token","refreshToken":"<refresh_token_from_step_1>"}'
 # 解码第二个 access_token 的 payload，确认 role 数组仍包含 "admin"
 
 # 3. 普通账户伪造提权验证（普通账户的 refreshToken + 恶意 username=admin）
 curl -s -X POST http://localhost:5002/api/auth/token \
   -H "Content-Type: application/json" \
+  -H "X-Admin-AppId: <regular-user-token-app-id>" \
+  -H "X-Admin-AppSecret: <regular-user-token-app-secret>" \
   -d '{"grantType":"refresh_token","refreshToken":"<regular_user_refresh_token>","username":"admin"}'
 # 解码 access_token 的 payload，确认 role 数组不包含 "admin"
 ```
@@ -113,7 +119,7 @@ curl -s -X POST http://localhost:5002/api/auth/token \
 - 第二个 Access Token（refresh 后）仍包含 `role=admin`；
 - 普通账户即使附带 `username=admin`，其 refresh 后的 Access Token 也不包含 `role=admin`。
 
-> 此验证不要求调用方配置或发送 AppId/AppSecret：refresh 请求只需发送 `grantType` 和 `refreshToken`，由 Identity 在服务端基于已验证账户 ID 重新识别 bootstrap admin。
+> 三次请求都必须携带有效 AppId/AppSecret；refresh 请求中的 AppId 必须与 refresh token 的签发应用一致。Identity 仍只根据已验证账户 ID 重新识别 bootstrap admin，不信任请求体里的 `username`。
 
 ## 6. Admin API 验证
 

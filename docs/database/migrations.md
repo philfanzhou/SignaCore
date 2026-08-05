@@ -26,7 +26,7 @@
 
 ### 20260504150448_AddAppIdToRefreshToken
 
-为 `refresh_tokens` 表添加 `app_id` 列（VARCHAR(100)，可为 NULL），用于验证刷新令牌与请求应用的匹配关系。
+`AddAppIdToRefreshToken` 最初为 `refresh_tokens` 添加可空 `app_id`；`EnforceRefreshTokenAppBinding` 会删除缺少 AppId 的旧 refresh token，并把该列改为非空，用于严格验证令牌与请求应用的匹配关系。
 
 ### 20260730134106_AddNormalizedIdentityValues
 

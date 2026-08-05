@@ -43,6 +43,7 @@ public class RefreshTokenValidatorTests
             ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
             IsRevoked = false,
             CreatedAt = DateTimeOffset.UtcNow,
+            AppId = "app-1"
         };
         context.RefreshTokens.Add(refreshToken);
         await context.SaveChangesAsync();
@@ -57,7 +58,8 @@ public class RefreshTokenValidatorTests
         var result = await validator.ValidateAsync(new ValidationRequest
         {
             GrantType = IdentityConstants.GrantTypeRefreshToken,
-            RefreshToken = "valid_refresh_token"
+            RefreshToken = "valid_refresh_token",
+            AppId = "app-1"
         });
 
         Assert.True(result.IsSuccess);
@@ -86,6 +88,7 @@ public class RefreshTokenValidatorTests
             ExpiresAt = DateTimeOffset.UtcNow.AddHours(-1),
             IsRevoked = false,
             CreatedAt = DateTimeOffset.UtcNow,
+            AppId = "app-1"
         };
         context.RefreshTokens.Add(refreshToken);
         await context.SaveChangesAsync();
@@ -205,6 +208,7 @@ public class RefreshTokenValidatorTests
             ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
             IsRevoked = false,
             CreatedAt = DateTimeOffset.UtcNow,
+            AppId = "app-1"
         };
 
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
@@ -217,7 +221,8 @@ public class RefreshTokenValidatorTests
         var result = await validator.ValidateAsync(new ValidationRequest
         {
             GrantType = IdentityConstants.GrantTypeRefreshToken,
-            RefreshToken = "valid_refresh_token"
+            RefreshToken = "valid_refresh_token",
+            AppId = "app-1"
         });
 
         Assert.False(result.IsSuccess);
@@ -225,11 +230,10 @@ public class RefreshTokenValidatorTests
     }
 
     [Fact]
-    public async Task ValidateAsync_WithCrossAppExchange_ReturnsSuccess()
+    public async Task ValidateAsync_WithCrossAppExchange_ReturnsFailure()
     {
-        // SSO scenario: a refresh token issued by one app (bound to that app's AppId) is
-        // exchanged by a second app (using the second app's AppId). The exchange must
-        // succeed so the SSO flow can mint a token for the second app.
+        // A refresh token is an application-bound credential. A second application must
+        // start its own login flow instead of exchanging another app's refresh token.
         var context = CreateInMemoryContext();
         var accountId = Guid.NewGuid();
         var account = new AccountEntity
@@ -267,9 +271,9 @@ public class RefreshTokenValidatorTests
             AppId = "second_app_id"
         });
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal(IdentityConstants.AuthMethodRefreshToken, result.AuthMethod);
-        Assert.Equal(accountId, result.Account!.Id);
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Refresh token is not valid for this application", result.ErrorMessage);
+        accountRepoMock.Verify(r => r.GetByIdAsync(It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]

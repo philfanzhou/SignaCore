@@ -3,9 +3,9 @@ using QuantumZhou.Identity.Host.Http;
 namespace QuantumZhou.Identity.Host.Middleware;
 
 /// <summary>
-/// Strips the X-Admin-AppSecret header from incoming requests after authentication,
+/// Strips the X-Admin-AppSecret header from incoming requests before authorization,
 /// moving the value into HttpContext.Items so downstream logging/middleware cannot
-/// accidentally record the secret. Controllers read the secret from Items first.
+/// record the secret. Gateway authentication and controllers read Items first.
 /// </summary>
 public class SensitiveHeaderRedactionMiddleware
 {

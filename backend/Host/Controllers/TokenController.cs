@@ -12,13 +12,13 @@ using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Host.Http;
 using QuantumZhou.Identity.Host.Models;
+using QuantumZhou.Identity.Host.Security;
 
 namespace QuantumZhou.Identity.Host.Controllers;
 
 /// <summary>
 /// POST /api/auth/token —— 签发 access token。
-/// AppId/AppSecret 通过 X-Admin-AppId / X-Admin-AppSecret 请求头传递，在本端点上是**可选的**：
-/// 带了才做网关校验（只带 refresh_token 换票的调用方依赖这一点）。
+/// AppId/AppSecret 通过 X-Admin-AppId / X-Admin-AppSecret 请求头传递并强制校验。
 /// </summary>
 [Route("api/auth")]
 [ApiController]
@@ -32,7 +32,6 @@ public class TokenController : ControllerBase
     private readonly ValidatorFactory _validatorFactory;
     private readonly ICallbackService? _callbackService;
     private readonly AuthMetrics _authMetrics;
-    private readonly GatewayValidationService _gatewayValidator;
     private readonly IAuditService _auditService;
     private readonly IAccountLoginInfoService _accountLoginInfoService;
     private readonly IAccountRepository _accountRepository;
@@ -48,7 +47,6 @@ public class TokenController : ControllerBase
         ValidatorFactory validatorFactory,
         ICallbackService? callbackService,
         AuthMetrics authMetrics,
-        GatewayValidationService gatewayValidator,
         IAuditService auditService,
         IAccountLoginInfoService accountLoginInfoService,
         IAccountRepository accountRepository,
@@ -63,7 +61,6 @@ public class TokenController : ControllerBase
         _validatorFactory = validatorFactory;
         _callbackService = callbackService;
         _authMetrics = authMetrics;
-        _gatewayValidator = gatewayValidator;
         _auditService = auditService;
         _accountLoginInfoService = accountLoginInfoService;
         _accountRepository = accountRepository;
@@ -77,13 +74,14 @@ public class TokenController : ControllerBase
     /// 见 docs/modules/Auth/GetToken/06-CONVENTIONS.md。
     /// </summary>
     [HttpPost("token")]
-    [AllowAnonymous]
+    [Authorize(Policy = GatewayAppAuthenticationDefaults.Policy)]
     public async Task<ActionResult<TokenResponse>> GetToken(
         [FromBody] TokenRequest request,
         CancellationToken cancellationToken)
     {
-        var appId = HttpContext.GetAppId();
-        var appSecret = HttpContext.GetAppSecret();
+        var app = HttpContext.GetValidatedApp()
+            ?? throw new InvalidOperationException("GatewayApp authentication did not provide a validated application.");
+        var appId = app.AppId;
         var context = new TokenRequestContext(
             request.GrantType,
             HttpContext.GetClientIp(),
@@ -91,23 +89,6 @@ public class TokenController : ControllerBase
             appId,
             HttpContext.GetCorrelationId(),
             Stopwatch.StartNew());
-
-        // 网关校验：只有带了 AppId 头才做
-        AppRegistrationEntity? app = null;
-        if (!string.IsNullOrEmpty(appId))
-        {
-            var gatewayResult = await _gatewayValidator.ValidateAsync(appId, appSecret);
-            if (!gatewayResult.IsSuccess)
-            {
-                _logger.LogWarning("Gateway validation failed: AppId={AppId}, Reason={Reason}", appId, gatewayResult.ErrorMessage);
-                return await FailAsync(
-                    context,
-                    metricReason: "gateway_validation_failed",
-                    responseMessage: gatewayResult.ErrorMessage,
-                    auditFailureReason: gatewayResult.ErrorMessage);
-            }
-            app = gatewayResult.App;
-        }
 
         if (!_validatorFactory.IsSupportedGrantType(request.GrantType))
         {
@@ -166,8 +147,9 @@ public class TokenController : ControllerBase
 
         var claims = _claimsResolver.ResolveBasicClaims(account, displayName);
         claims.Add(new Claim(IdentityConstants.ClaimAuthMethod, authMethod));
+        claims.Add(new Claim(IdentityConstants.ClaimClientId, appId));
 
-        if (app?.CallbackUrl != null && _callbackService != null)
+        if (app.CallbackUrl != null && _callbackService != null)
         {
             try
             {

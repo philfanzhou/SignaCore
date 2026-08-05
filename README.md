@@ -131,7 +131,7 @@ AppId/AppSecret 通过 `X-Admin-AppId` / `X-Admin-AppSecret` 请求头传递。�
 - **自动密钥轮换**：后台服务定期清理过期数据并轮换密钥（默认 30 天）
 - **结构化日志**：所有核心服务均注入 `ILogger`，记录认证、回调、密钥操作等安全事件
 - **登录锁定**：支持登录失败次数限制和账户锁定（可配置）
-- **网关验证**：所有请求必须通过 AppId/AppSecret 验证
+- **网关验证**：所有 token、短信和 gateway 业务请求必须通过 AppId/AppSecret 验证；JWKS、discovery 和 health 保持公开
 - **速率限制**：全局按客户端 IP 限流 100 请求/分钟，JWKS 端点另有独立限流 60 请求/分钟；`/health`、`/metrics`、`/.well-known/jwks` 不进入全局限流。限流参数在代码中硬编码，无配置键
 
 ## 详细设计文档

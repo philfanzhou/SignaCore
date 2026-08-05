@@ -31,4 +31,4 @@
 - 刷新令牌默认有效期 7 天（可通过 `RefreshToken:ExpirationDays` 配置）
 - 使用 refresh_token grant_type 刷新时，旧令牌会被撤销并生成新令牌
 - `CleanupWorker` 定期清理过期和已撤销的令牌
-- `app_id` 字段通过迁移 `AddAppIdToRefreshToken` 添加，记录令牌发行时的应用 ID（用于审计，不参与校验）。refresh_token 换票不限制应用边界：只要请求方提供有效的 AppId/AppSecret 网关凭据，即可换票。这支持跨应用 SSO 场景（如 A 应用签发的 refresh token 可由 B 应用换票）
+- `app_id` 为必填字段，记录并约束令牌的签发应用。refresh_token 换票时，请求方 AppId 必须与该字段匹配；空 AppId 和跨应用换票都会被拒绝

@@ -15,7 +15,7 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "8.0.11");
+            modelBuilder.HasAnnotation("ProductVersion", "9.0.18");
 
             modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AccountEntity", b =>
                 {
@@ -413,6 +413,7 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                         .HasColumnName("account_id");
 
                     b.Property<string>("AppId")
+                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("TEXT")
                         .HasColumnName("app_id");
@@ -440,7 +441,10 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                     b.HasIndex("TokenValue")
                         .IsUnique();
 
-                    b.ToTable("refresh_tokens", (string)null);
+                    b.ToTable("refresh_tokens", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_refresh_tokens_app_id_not_empty", "app_id <> ''");
+                        });
                 });
 
             modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.SecurityKeyEntity", b =>

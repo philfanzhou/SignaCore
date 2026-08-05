@@ -58,7 +58,7 @@ public class RefreshTokenServiceTests
             .ReturnsAsync(true);
 
         var token = await _service.HandleRefreshTokenAsync(
-            IdentityConstants.GrantTypeRefreshToken, "old-token", account, null);
+            IdentityConstants.GrantTypeRefreshToken, "old-token", account, "app-1");
 
         Assert.NotNull(token);
         Assert.NotEqual("old-token", token);
@@ -68,10 +68,21 @@ public class RefreshTokenServiceTests
                 It.Is<RefreshTokenEntity>(replacement =>
                     replacement.AccountId == account.Id &&
                     replacement.TokenValue == token &&
-                    !replacement.IsRevoked)),
+                    !replacement.IsRevoked &&
+                    replacement.AppId == "app-1")),
             Times.Once);
         _repoMock.Verify(r => r.AddAsync(It.IsAny<RefreshTokenEntity>()), Times.Never);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HandleRefreshTokenAsync_IssuingGrantWithoutAppId_Throws()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.HandleRefreshTokenAsync(
+                IdentityConstants.GrantTypePassword, null, CreateAccount(), null));
+
+        _repoMock.Verify(r => r.AddAsync(It.IsAny<RefreshTokenEntity>()), Times.Never);
     }
 
     [Fact]

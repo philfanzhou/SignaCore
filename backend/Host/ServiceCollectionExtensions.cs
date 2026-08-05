@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -13,6 +14,7 @@ using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Services.Sms;
 using QuantumZhou.Identity.Domain.Services.WeChat;
 using QuantumZhou.Identity.Domain.Validators;
+using QuantumZhou.Identity.Host.Security;
 
 namespace QuantumZhou.Identity.Host;
 
@@ -280,7 +282,8 @@ public static class ServiceCollectionExtensions
                 {
                     OnRedirectToLogin = context =>
                     {
-                        if (context.Request.Path.StartsWithSegments("/api/admin"))
+                        if (context.Request.Path.StartsWithSegments("/api/admin")
+                            || context.Request.Path.StartsWithSegments("/consul"))
                         {
                             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                             return Task.CompletedTask;
@@ -291,7 +294,8 @@ public static class ServiceCollectionExtensions
                     },
                     OnRedirectToAccessDenied = context =>
                     {
-                        if (context.Request.Path.StartsWithSegments("/api/admin"))
+                        if (context.Request.Path.StartsWithSegments("/api/admin")
+                            || context.Request.Path.StartsWithSegments("/consul"))
                         {
                             context.Response.StatusCode = StatusCodes.Status403Forbidden;
                             return Task.CompletedTask;
@@ -302,6 +306,9 @@ public static class ServiceCollectionExtensions
                     }
                 };
             })
+            .AddScheme<AuthenticationSchemeOptions, GatewayAppAuthenticationHandler>(
+                GatewayAppAuthenticationDefaults.Scheme,
+                _ => { })
             .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
             {
                 options.TokenValidationParameters = new TokenValidationParameters
@@ -316,8 +323,19 @@ public static class ServiceCollectionExtensions
                 };
             });
         services.AddAuthorizationBuilder()
+            .AddPolicy(GatewayAppAuthenticationDefaults.Policy, policy =>
+            {
+                policy.AddAuthenticationSchemes(GatewayAppAuthenticationDefaults.Scheme);
+                policy.RequireAuthenticatedUser();
+            })
             .AddPolicy("AdminSession", policy =>
             {
+                policy.RequireAuthenticatedUser();
+                policy.RequireClaim("admin_access", "true");
+            })
+            .AddPolicy(GatewayAppAuthenticationDefaults.OpsPolicy, policy =>
+            {
+                policy.AddAuthenticationSchemes(CookieAuthenticationDefaults.AuthenticationScheme);
                 policy.RequireAuthenticatedUser();
                 policy.RequireClaim("admin_access", "true");
             })

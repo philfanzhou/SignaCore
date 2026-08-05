@@ -48,7 +48,7 @@ public class TokenControllerTests
         ICallbackService? callbackService = null)
     {
         var factory = new ValidatorFactory(validators, NullLogger<ValidatorFactory>.Instance);
-        return new TokenController(
+        var controller = new TokenController(
             _keyManagerMock.Object,
             _tokenServiceMock.Object,
             _jwtOptions,
@@ -57,13 +57,21 @@ public class TokenControllerTests
             factory,
             callbackService,
             AuthTestDoubles.AuthMetrics(),
-            AuthTestDoubles.GatewayValidator(_appRegistrationRepoMock),
             _auditServiceMock.Object,
             _accountLoginInfoServiceMock.Object,
             _accountRepositoryMock.Object,
             bootstrapOptionsMock.Object,
             NullLogger<TokenController>.Instance)
             .WithHttpContext();
+        controller.HttpContext.Items[IdentityHeaders.ValidatedApp] = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "test-app",
+            AppName = "Test App",
+            AppSecretHash = "not-used-by-controller",
+            IsActive = true
+        };
+        return controller;
     }
 
     // 由 token service 的 mock 回调写入，供断言 claims 使用。
@@ -170,7 +178,10 @@ public class TokenControllerTests
         Assert.Equal("refresh", response.RefreshToken);
 
         _keyManagerMock.Verify(k => k.GetCurrentKey(), Times.Once);
-        _tokenServiceMock.Verify(t => t.GenerateJwtToken(It.IsAny<List<Claim>>(), It.IsAny<RsaSecurityKey>(), 2), Times.Once);
+        _tokenServiceMock.Verify(t => t.GenerateJwtToken(
+            It.Is<List<Claim>>(claims => claims.Any(c =>
+                c.Type == IdentityConstants.ClaimClientId && c.Value == "test-app")),
+            It.IsAny<RsaSecurityKey>(), 2), Times.Once);
         _refreshTokenServiceMock.Verify(
             s => s.HandleRefreshTokenAsync("sms", It.IsAny<string?>(), It.Is<AccountEntity>(a => a.Id == accountId), It.IsAny<string?>()),
             Times.Once);
@@ -179,28 +190,6 @@ public class TokenControllerTests
     #endregion
 
     #region 失败分支
-
-    [Fact]
-    public async Task GetToken_GatewayValidationFails_ReturnsFailureAndAuditsWithAppId()
-    {
-        var controller = CreateController(Array.Empty<IIdentityValidator>());
-        controller.HttpContext.Request.Headers[IdentityHeaders.AppId] = "unregistered-app";
-        controller.HttpContext.Request.Headers[IdentityHeaders.AppSecret] = "any-secret";
-        // _appRegistrationRepoMock.GetByAppIdAsync 默认返回 null -> "AppId not registered"
-
-        var request = new TokenRequest { GrantType = "password", Username = "alice", Password = "x" };
-
-        var actionResult = await controller.GetToken(request, CancellationToken.None);
-
-        var ok = AuthTestDoubles.ExtractOk(actionResult);
-        var response = Assert.IsType<TokenResponse>(ok.Value!);
-        Assert.False(response.Success);
-        Assert.Equal("AppId not registered", response.Message);
-        _auditServiceMock.Verify(a => a.RecordLoginAsync(
-            null, "unknown", "password", "login_failure",
-            It.IsAny<string?>(), It.IsAny<string?>(), "AppId not registered",
-            "unregistered-app", It.IsAny<string?>()), Times.Once);
-    }
 
     [Fact]
     public async Task GetToken_AuditsCorrelationIdProducedByMiddleware()

@@ -57,7 +57,7 @@ CI（`.github/workflows/ci.yml`，唯一流水线）**只做构建与测试，�
 | 管理控制台 | Cookie `qz_admin_session` + `AdminSession` 授权策略（要求 `admin_access` claim） | `/api/admin/*` |
 | 终端用户 | JwtBearer + `UserProfile` 策略 | `/api/profile/*` |
 
-`/api/auth/token` 失败时返回 **HTTP 200 + `TokenResponse{Success=false, Message=...}`**，不是 4xx；错误文案是契约，见 `docs/modules/Auth/GetToken/06-CONVENTIONS.md`。`/api/auth/token` 上的 AppId 头是可选的：带了就校验，不带则跳过网关校验（只带 refresh_token 换票的调用方依赖这一点）。
+`/api/auth/token` 的业务校验失败返回 **HTTP 200 + `TokenResponse{Success=false, Message=...}`**；缺失或无效的 AppId/AppSecret 在进入 Controller 前由 `GatewayApp` 认证策略拒绝并返回 HTTP 401。所有 token 与 sms-code 请求都必须携带有效的 AppId/AppSecret。refresh token 严格绑定签发应用，不允许空 AppId 或跨应用换票。错误文案是契约，见 `docs/modules/Auth/GetToken/06-CONVENTIONS.md`。
 
 ### 多数据库 Provider
 

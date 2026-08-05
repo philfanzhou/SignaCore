@@ -70,7 +70,7 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     [Fact]
     public async Task TokenEndpoint_WithUnsupportedGrantType_ReturnsHttp200WithFailureBody()
     {
-        using var http = _fixture.CreateHttpClient();
+        using var http = _fixture.CreateGatewayHttpClient();
 
         var response = await http.PostAsJsonAsync("/api/auth/token", new { grantType = "no_such_grant" });
 
@@ -83,7 +83,7 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     [Fact]
     public async Task SmsCodeEndpoint_WithEmptyPhone_ReturnsHttp200WithFailureBody()
     {
-        using var http = _fixture.CreateHttpClient();
+        using var http = _fixture.CreateGatewayHttpClient();
 
         var response = await http.PostAsJsonAsync("/api/auth/sms-code", new { phone = "" });
 
@@ -105,16 +105,54 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 
     [Fact]
-    public async Task CallbackRegisterEndpoint_WithoutCredentials_ReturnsHttp200WithFailureBody()
+    public async Task GatewayFacingEndpoints_WithoutCredentials_ReturnUnauthorized()
     {
         using var http = _fixture.CreateHttpClient();
 
-        var response = await http.PostAsJsonAsync("/api/auth/callback/register",
-            new { callbackUrl = "http://example.com/cb", ttlSeconds = 3600 });
+        var responses = new[]
+        {
+            await http.PostAsJsonAsync("/api/auth/token", new { grantType = "password" }),
+            await http.PostAsJsonAsync("/api/auth/sms-code", new { phone = "13800138000" }),
+            await http.PostAsJsonAsync("/api/auth/callback/register",
+                new { callbackUrl = "http://example.com/cb", ttlSeconds = 3600 }),
+            await http.GetAsync("/api/gateway/users/search")
+        };
+
+        Assert.All(responses, response => Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode));
+    }
+
+    [Fact]
+    public async Task TokenEndpoint_WithInvalidGatewayCredentials_ReturnsUnauthorized()
+    {
+        using var http = _fixture.CreateHttpClient();
+        http.DefaultRequestHeaders.Add("X-Admin-AppId", "unknown-app");
+        http.DefaultRequestHeaders.Add("X-Admin-AppSecret", "wrong-secret");
+
+        var response = await http.PostAsJsonAsync("/api/auth/token", new { grantType = "password" });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ConsulOperationsEndpoints_WithoutAdminSession_ReturnUnauthorized()
+    {
+        using var http = _fixture.CreateHttpClient();
+
+        var statusResponse = await http.GetAsync("/consul/status");
+        var invalidateResponse = await http.PostAsync("/consul/cache/invalidate", content: null);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, statusResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, invalidateResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task ConsulStatusEndpoint_WithAdminSession_ReturnsOk()
+    {
+        using var http = await _fixture.CreateAdminHttpClientAsync();
+
+        var response = await http.GetAsync("/consul/status");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("AppId and AppSecret are required", body);
     }
 
     [Fact]
@@ -159,11 +197,15 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
 
 public class IdentityServerFixture : IAsyncLifetime
 {
+    private const string TestGatewayAppId = "http-contract-app";
+    private const string TestGatewayAppSecret = "http-contract-secret";
+    private const string TestAdminUsername = "http_contract_admin";
+    private const string TestAdminPassword = "HttpContract123";
     private WebApplicationFactory<Program>? _factory;
     private string? _previousMasterKey;
     private string? _databasePath;
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync()
     {
         _previousMasterKey = Environment.GetEnvironmentVariable("RSA_MASTER_KEY");
         Environment.SetEnvironmentVariable("RSA_MASTER_KEY", "test-master-key-for-e2e-testing-only");
@@ -178,8 +220,8 @@ public class IdentityServerFixture : IAsyncLifetime
         _factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
-                builder.UseSetting("AdminBootstrap:Username", "");
-                builder.UseSetting("AdminBootstrap:Password", "");
+                builder.UseSetting("AdminBootstrap:Username", TestAdminUsername);
+                builder.UseSetting("AdminBootstrap:Password", TestAdminPassword);
                 builder.UseSetting("Database:Provider", "SQLite");
                 builder.UseSetting("Database:ServerVersion", "");
                 builder.UseSetting("Database:ConnectionString", connectionString);
@@ -194,12 +236,33 @@ public class IdentityServerFixture : IAsyncLifetime
             });
 
         _factory.CreateClient();
-        return Task.CompletedTask;
+        await SeedGatewayAppAsync(TestGatewayAppId, TestGatewayAppSecret);
     }
 
     public HttpClient CreateHttpClient()
     {
         return _factory!.CreateClient();
+    }
+
+    public HttpClient CreateGatewayHttpClient()
+    {
+        var http = CreateHttpClient();
+        http.DefaultRequestHeaders.Add("X-Admin-AppId", TestGatewayAppId);
+        http.DefaultRequestHeaders.Add("X-Admin-AppSecret", TestGatewayAppSecret);
+        return http;
+    }
+
+    public async Task<HttpClient> CreateAdminHttpClientAsync()
+    {
+        var http = CreateHttpClient();
+        var loginResponse = await http.PostAsJsonAsync("/api/admin/session/login", new
+        {
+            username = TestAdminUsername,
+            password = TestAdminPassword,
+            rememberMe = false
+        });
+        loginResponse.EnsureSuccessStatusCode();
+        return http;
     }
 
     public IServiceProvider Services => _factory!.Services;
