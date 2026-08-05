@@ -43,7 +43,8 @@ public class SmsValidatorTests
         return new AuthMetrics(meterFactory.Object);
     }
 
-    private static SmsOptions CreateSmsOptions(string? bypassCode = null) => new() { BypassCode = bypassCode };
+    private static SmsOptions CreateSmsOptions(string? bypassCode = null, params string[] bypassPhones) =>
+        new() { BypassCode = bypassCode, BypassPhones = bypassPhones };
 
     [Fact]
     public async Task ValidateAsync_WithValidSmsCode_ReturnsSuccess()
@@ -198,6 +199,93 @@ public class SmsValidatorTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Account is disabled", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WithBypassCodeOnAllowListedPhone_SkipsOtpAndReturnsSuccess()
+    {
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true, CreatedAt = DateTimeOffset.UtcNow };
+
+        var accountRepoMock = new Mock<IAccountRepository>();
+        accountRepoMock.Setup(r => r.GetByLoginProviderAsync(IdentityConstants.AuthMethodSms, "13800138000")).ReturnsAsync(account);
+
+        var otpServiceMock = CreateOtpServiceMock(verified: false);
+
+        var validator = new SmsValidator(
+            accountRepoMock.Object,
+            otpServiceMock.Object,
+            CreateUserLoginRepoMock().Object,
+            CreateUnitOfWorkMock().Object,
+            CreateLogger(),
+            CreateAuthMetrics(),
+            CreateSmsOptions("666666", "13800138000"));
+
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeSms,
+            Phone = "13800138000",
+            Code = "666666"
+        });
+
+        Assert.True(result.IsSuccess);
+        otpServiceMock.Verify(o => o.VerifyAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WithBypassCodeOnPhoneOutsideAllowList_FallsBackToOtpAndFails()
+    {
+        var accountRepoMock = new Mock<IAccountRepository>();
+        var otpServiceMock = CreateOtpServiceMock(verified: false);
+
+        var validator = new SmsValidator(
+            accountRepoMock.Object,
+            otpServiceMock.Object,
+            CreateUserLoginRepoMock().Object,
+            CreateUnitOfWorkMock().Object,
+            CreateLogger(),
+            CreateAuthMetrics(),
+            CreateSmsOptions("666666", "13800138000"));
+
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeSms,
+            Phone = "13900139000",
+            Code = "666666"
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Wrong or expired verification code", result.ErrorMessage);
+        otpServiceMock.Verify(o => o.VerifyAsync("13900139000", "666666"), Times.Once);
+        accountRepoMock.Verify(
+            r => r.AddAsync(It.IsAny<AccountEntity>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WithBypassCodeButEmptyAllowList_DisablesBypass()
+    {
+        var accountRepoMock = new Mock<IAccountRepository>();
+        var otpServiceMock = CreateOtpServiceMock(verified: false);
+
+        var validator = new SmsValidator(
+            accountRepoMock.Object,
+            otpServiceMock.Object,
+            CreateUserLoginRepoMock().Object,
+            CreateUnitOfWorkMock().Object,
+            CreateLogger(),
+            CreateAuthMetrics(),
+            CreateSmsOptions("666666"));
+
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeSms,
+            Phone = "13800138000",
+            Code = "666666"
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Wrong or expired verification code", result.ErrorMessage);
+        otpServiceMock.Verify(o => o.VerifyAsync("13800138000", "666666"), Times.Once);
     }
 
     [Fact]

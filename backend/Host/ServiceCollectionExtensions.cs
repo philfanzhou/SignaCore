@@ -108,7 +108,8 @@ public static class ServiceCollectionExtensions
             OtpTtlSeconds = int.Parse(configuration["Sms:OtpTtlSeconds"] ?? "300"),
             MaxAttempts = int.Parse(configuration["Sms:MaxAttempts"] ?? "5"),
             LockoutSeconds = int.Parse(configuration["Sms:LockoutSeconds"] ?? "600"),
-            BypassCode = configuration["Sms:BypassCode"] ?? Environment.GetEnvironmentVariable("SMS_BYPASS_CODE")
+            BypassCode = configuration["Sms:BypassCode"] ?? Environment.GetEnvironmentVariable("SMS_BYPASS_CODE"),
+            BypassPhones = ResolveBypassPhones(configuration)
         });
         services.AddScoped<IOtpService, DbOtpService>();
         // 开发环境使用 LoggingSmsSender，生产环境使用 ThrowingSmsSender 防止验证码泄露
@@ -344,6 +345,26 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton(options);
         return options;
+    }
+
+    /// <summary>
+    /// 解析短信绕过白名单。Consul KV 里写 JSON 数组，环境变量里写逗号分隔字符串，两种都支持。
+    /// 未配置时返回空列表——此时即使配了 BypassCode，<c>SmsValidator</c> 也不会放行任何号码。
+    /// </summary>
+    internal static IReadOnlyList<string> ResolveBypassPhones(IConfiguration configuration)
+    {
+        var section = configuration.GetSection("Sms:BypassPhones");
+
+        var rawValues = section.GetChildren().Any()
+            ? section.Get<string[]>() ?? []
+            : (section.Value ?? Environment.GetEnvironmentVariable("SMS_BYPASS_PHONES") ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        return rawValues
+            .Select(static phone => phone.Trim())
+            .Where(static phone => phone.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
     }
 
     internal static DatabaseOptions BindDatabaseOptions(IConfiguration configuration)

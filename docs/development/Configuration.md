@@ -115,8 +115,29 @@ Identity 没有功能开关配置。
 | Sms:OtpTtlSeconds | 300 | 验证码有效期（秒） |
 | Sms:MaxAttempts | 5 | 最大验证尝试次数 |
 | Sms:LockoutSeconds | 600 | 超过最大尝试后锁定时间（秒） |
-| Sms:BypassCode | （空） | 绕过验证码（仅限开发/预发布，空值=禁用） |
-| SMS_BYPASS_CODE（环境变量） | - | 绕过验证码，优先级高于配置文件 |
+| Sms:BypassCode | （空） | 绕过验证码，空值=禁用 |
+| Sms:BypassPhones | （空） | 允许使用绕过码的手机号白名单，空=绕过整体禁用 |
+| SMS_BYPASS_CODE（环境变量） | - | 绕过验证码，配置文件缺失时回退到该变量 |
+| SMS_BYPASS_PHONES（环境变量） | - | 绕过白名单，逗号分隔，配置文件缺失时回退到该变量 |
+
+> **绕过码必须配合白名单**：`Sms:BypassCode` 单独配置不生效——`BypassPhones` 为空时 `SmsValidator` 不放行任何号码。
+> 白名单在 Consul KV 里写 JSON 数组，在环境变量里写逗号分隔字符串，两种形式都支持：
+>
+> ```jsonc
+> // config/ruoyu/identity.json
+> "Sms": { "BypassPhones": ["13800138000"] }
+> ```
+>
+> ```bash
+> SMS_BYPASS_PHONES=13800138000,13900139000
+> ```
+>
+> 绕过路径**不经过** OTP 校验，因此 `MaxAttempts` / `LockoutSeconds` 对它无效。白名单是唯一的收口手段，
+> 名单里只能放测试号码，绝不能放真实用户号码。命中绕过时会打一条 Warning 日志（手机号已掩码）。
+>
+> **优先级陷阱**：`ProgramConsulExtensions.ApplySnapshotWithExpectedPrecedence` 把环境变量源在 Consul 快照之后重放，
+> 即环境变量覆盖 Consul。若想改用 Consul KV 管理这两项，必须先把 `start.sh` 里对应的 `-e` 行删掉——
+> 否则空环境变量会静默覆盖 Consul 的值，表现为「短信登录失效但日志无提示」。
 
 > **SMS 发送器选择**：开发环境使用 `LoggingSmsSender`（仅记录日志，验证码掩码显示）；生产环境使用 `ThrowingSmsSender`（调用时抛出异常，防止验证码泄露）。生产环境需配置真实 SMS 提供商实现替换 `ThrowingSmsSender`。
 
@@ -193,14 +214,17 @@ Identity 启动时通过 `data/bootstrap-apps.json` 文件预置应用注册信�
 {
   "apps": [
     {
-      "appId": "a6eab9bd87404c0ababc910114d11a62",
-      "appSecret": "cGzoAwXaP+PahtD3qXYVY75IJiPWtfbt/4SIt+WrKoQ=",
+      "appId": "<32 位十六进制 AppId>",
+      "appSecret": "<AppSecret 明文，从密钥库注入>",
       "appName": "Teacher Portal",
       "callbackUrl": "http://ruoyu-teacher-api:5004/api/auth/callback"
     }
   ]
 }
 ```
+
+> 本仓库是 public repo，**不要在文档或脚本里写真实的 AppId / AppSecret**。
+> `bootstrap-apps.json` 由部署脚本从 CI 密钥库生成，不进仓库。
 
 **字段说明**：
 
