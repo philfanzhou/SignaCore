@@ -29,11 +29,11 @@ jobs:
       # build.sh 与下面的冒烟步骤共用同一个 tag，避免默认 tag 变动时两边对不上。
       IMAGE_NAME: quantumzhou.identity:ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # 项目 TargetFramework 是 net8.0，但日常开发用 SDK 10 构建（见本地环境）。
       # runner 预装了 SDK 10，这里补一个 8.0 用于运行 net8.0 测试宿主。
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: |
             8.0.x
@@ -203,6 +203,37 @@ jobs:
 
           echo 'All smoke assertions passed'
 
+      # 签发链路的端到端：password grant 换 token → 用 JWKS 发布的公钥验回签名。
+      # 这正是下游业务微服务做的事——它们不引用本仓库任何程序集，只拉 JWKS 本地验签，
+      # 所以验签一旦对不上，所有下游会同时失效。此前这条链只有单元测试覆盖，
+      # 真容器里一次都没验过。bootstrap admin 在启动时已按 ADMIN_BOOTSTRAP_* 建好账号。
+      - name: Token issuance end-to-end
+        run: |
+          set -euo pipefail
+
+          status="$(curl -sS --max-time 10 -o /tmp/issued.json -w '%{http_code}' \
+            -X POST http://localhost:5002/api/auth/token \
+            -H 'Content-Type: application/json' \
+            -d "{\"grantType\":\"password\",\"username\":\"smoke_admin\",\"password\":\"${ADMIN_PASSWORD}\"}")"
+          [ "$status" = '200' ] || { echo "token 端点返回 $status，契约要求 200"; exit 1; }
+
+          # 响应体里带着 access token，整体回显等于把它写进全网可读的日志。
+          # 这里只把 token 落到文件，失败时只打 message（错误文案本身是对外契约）。
+          python3 - <<'PY'
+          import json, sys
+          body = json.load(open('/tmp/issued.json'))
+          if not body.get('success'):
+              sys.exit(f"password grant 失败: {body.get('message')}")
+          token = body.get('accessToken') or ''
+          if not token:
+              sys.exit('响应里没有 accessToken')
+          open('/tmp/access_token', 'w').write(token)
+          PY
+
+          curl -fsS --max-time 10 http://localhost:5002/.well-known/jwks -o /tmp/jwks.json
+          python3 .github/scripts/verify_jwt.py /tmp/access_token /tmp/jwks.json \
+            'QuantumZhou.Identity' 'QuantumZhou.microservices'
+
       # 冒烟失败时最需要的就是容器日志。没有这一步，"/health 一直不 Healthy"
       # 在日志里只是一行超时，和之前契约矩阵静默挂死是同一类问题。
       - name: Dump container logs
@@ -217,7 +248,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: unit-test-results
           path: reports/
@@ -235,9 +266,9 @@ jobs:
       # 这一步失败时完全没有输出，正是之前挂死 28 分钟的怀疑对象。
       TESTCONTAINERS_RYUK_DISABLED: 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: |
             8.0.x
@@ -274,7 +305,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: database-contract-results
           path: reports/
