@@ -48,6 +48,21 @@ jobs:
             --results-directory reports \
             --no-restore
 
+      # 集成测试程序集里的 HTTP 端点契约测试：WebApplicationFactory 起进程内宿主 +
+      # 文件 SQLite，不碰 Docker，十几秒跑完。它锁的是对外契约——路由不重不漏、
+      # /api/auth/token 失败返回 200+Success=false、JWKS 出 RSA key——所以放在
+      # 单元测试之后一起跑，不必等下游的容器矩阵。
+      # 不设 RUN_IDENTITY_DATABASE_CONTRACTS，容器矩阵仍留在 database-contracts job。
+      - name: HTTP endpoint contract tests
+        run: |
+          dotnet restore backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj
+          dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj \
+            --configuration Release \
+            --filter 'FullyQualifiedName~IdentityHttpEndpointsTests' \
+            --logger 'trx;logfilename=identity-http-endpoints.trx' \
+            --results-directory reports \
+            --no-restore
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
