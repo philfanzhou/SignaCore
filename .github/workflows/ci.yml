@@ -87,6 +87,36 @@ jobs:
           done
           docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'
 
+      # ⚠️ 临时诊断步骤，定位到 MySQL 就绪探针失败原因后删除。
+      # 用与 ServerDatabaseContractTests.CreateContainer 完全相同的环境变量手工起容器，
+      # 把容器日志和探针命令的真实返回打出来——测试里这些都被 dotnet test 吞掉了。
+      - name: Diagnose MySQL readiness probe
+        continue-on-error: true
+        run: |
+          set -x
+          docker run -d --name mysql-probe \
+            -e MYSQL_DATABASE=identity \
+            -e MYSQL_USER=identity \
+            -e MYSQL_PASSWORD=identity \
+            -e MYSQL_ROOT_PASSWORD=identity \
+            mysql:8.4
+
+          for i in $(seq 1 24); do
+            echo "--- attempt $i ($((i*5))s) ---"
+            # Testcontainers 用的探针，一字不差：不带任何凭据
+            docker exec mysql-probe mysql identity --wait --silent --execute="SELECT 1;" \
+              && { echo "PROBE OK at $((i*5))s"; break; }
+            # 带凭据的对照组
+            docker exec mysql-probe mysql -uidentity -pidentity identity --silent --execute="SELECT 1;" \
+              && echo "PROBE OK *with credentials* at $((i*5))s"
+            sleep 5
+          done
+
+          echo "::group::mysql container log"
+          docker logs mysql-probe 2>&1 | tail -40
+          echo "::endgroup::"
+          docker rm -f mysql-probe
+
       - name: Database contract matrix
         # Testcontainers 直接用 runner 上的 docker daemon，托管 runner 不在容器里，
         # 因此不需要 TESTCONTAINERS_HOST_OVERRIDE。
