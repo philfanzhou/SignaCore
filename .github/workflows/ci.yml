@@ -25,6 +25,9 @@ jobs:
     name: Build & Test
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # build.sh 与下面的冒烟步骤共用同一个 tag，避免默认 tag 变动时两边对不上。
+      IMAGE_NAME: quantumzhou.identity:ci
     steps:
       - uses: actions/checkout@v4
 
@@ -62,6 +65,147 @@ jobs:
             --logger 'trx;logfilename=identity-http-endpoints.trx' \
             --results-directory reports \
             --no-restore
+
+      # ---- 以下是镜像冒烟：起真容器 + 真 PostgreSQL，只从 HTTP 端口黑盒断言 ----
+      # 上面的测试全跑在进程内宿主里（WebApplicationFactory + SQLite），覆盖不到运行时层：
+      # Vue 产物有没有真的进镜像的 wwwroot、entrypoint 起不起得来、PostgreSQL 迁移链在
+      # 完整启动序列（建库 → advisory lock → SchemaMigrator → bootstrap admin）下跑不跑得通、
+      # KeyManager 初始化完才接请求这个顺序对不对。镜像已经在 build.sh 那步构建好，
+      # 复用同一个 job 就不必为了冒烟再全量构建一次。
+      - name: Pre-pull PostgreSQL image
+        run: |
+          echo "::group::docker pull postgres:15-alpine"
+          time docker pull postgres:15-alpine
+          echo "::endgroup::"
+
+      - name: Start PostgreSQL
+        run: |
+          # 凭据一律一次性随机生成：本仓库是 public repo，workflow 日志全网可读，
+          # 任何固定值写进来都等同于公开。add-mask 兜住意外回显。
+          PG_PASSWORD="$(openssl rand -hex 16)"
+          ADMIN_PASSWORD="$(openssl rand -hex 16)"
+          RSA_MASTER_KEY="$(openssl rand -base64 32)"
+          echo "::add-mask::$PG_PASSWORD"
+          echo "::add-mask::$ADMIN_PASSWORD"
+          echo "::add-mask::$RSA_MASTER_KEY"
+          {
+            echo "PG_PASSWORD=$PG_PASSWORD"
+            echo "ADMIN_PASSWORD=$ADMIN_PASSWORD"
+            echo "RSA_MASTER_KEY=$RSA_MASTER_KEY"
+          } >> "$GITHUB_ENV"
+
+          docker network create qz-smoke
+          # 故意不预建 quantumzhou_identity 库：DatabaseProvisioner 的建库分支也要被覆盖。
+          docker run -d --name qz-smoke-pg --network qz-smoke \
+            -e POSTGRES_PASSWORD="$PG_PASSWORD" \
+            postgres:15-alpine
+
+          for i in $(seq 1 30); do
+            if docker exec qz-smoke-pg pg_isready -U postgres -q; then
+              echo "PostgreSQL ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "PostgreSQL failed to become ready"
+          docker logs qz-smoke-pg
+          exit 1
+
+      # CONSUL_HTTP_ADDR 指向容器内的 127.0.0.1：立刻 connection refused，
+      # 既走了"Consul 不可达 → 回退本地缓存/appsettings"的降级路径，又不必等 DNS 超时
+      # （默认 host.docker.internal 在 Linux runner 上解析不到，会白等 3s × 3 次重试）。
+      # Discovery 注册关掉：没有 Consul 可注册，注销失败还会在关停时刷噪声。
+      # Loki 同理指向本机，Sink 异步重试，不影响启动。
+      - name: Start Identity container
+        run: |
+          docker run -d --name qz-smoke-app --network qz-smoke -p 5002:5002 \
+            -e APP_TITLE='Identity CI Smoke' \
+            -e Database__Provider=PostgreSQL \
+            -e Database__ServerVersion=15 \
+            -e Database__ConnectionString="Host=qz-smoke-pg;Port=5432;Database=quantumzhou_identity;Username=postgres;Password=${PG_PASSWORD}" \
+            -e ADMIN_BOOTSTRAP_USERNAME=smoke_admin \
+            -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
+            -e RSA_MASTER_KEY="${RSA_MASTER_KEY}" \
+            -e CONSUL_HTTP_ADDR=127.0.0.1:8500 \
+            -e Consul__Discovery__Register=false \
+            -e Consul__Discovery__Deregister=false \
+            -e Loki__Uri=http://127.0.0.1:3100 \
+            "$IMAGE_NAME"
+
+      - name: Wait for /health
+        run: |
+          for i in $(seq 1 90); do
+            if [ "$(curl -fsS --max-time 3 http://localhost:5002/health 2>/dev/null)" = 'Healthy' ]; then
+              echo "Identity healthy after ${i}s"
+              exit 0
+            fi
+            # 容器已经退出就别再空等到超时——启动失败要立刻报出来。
+            if [ -z "$(docker ps -q --filter 'name=^/qz-smoke-app$')" ]; then
+              echo 'Identity container exited before becoming healthy'
+              exit 1
+            fi
+            sleep 1
+          done
+          echo 'Timed out waiting for /health'
+          exit 1
+
+      - name: Smoke assertions
+        run: |
+          set -euo pipefail
+          fail() { echo "SMOKE FAIL: $*"; exit 1; }
+
+          # 1. JWKS：/health 通过意味着 KeyManager 初始化已完成，公钥必须已经能取到
+          jwks="$(curl -fsS --max-time 10 http://localhost:5002/.well-known/jwks)"
+          echo "$jwks" | grep -q '"kty":"RSA"' || fail "JWKS 缺 RSA key: $jwks"
+          echo "$jwks" | grep -q '"alg":"RS256"' || fail "JWKS 缺 RS256: $jwks"
+
+          # 2. token 失败契约：HTTP 200 + 失败体，不是 4xx
+          #    见 docs/modules/Auth/GetToken/06-CONVENTIONS.md
+          status="$(curl -sS --max-time 10 -o /tmp/token.json -w '%{http_code}' \
+            -X POST http://localhost:5002/api/auth/token \
+            -H 'Content-Type: application/json' \
+            -d '{"grantType":"no_such_grant"}')"
+          [ "$status" = '200' ] || fail "token 端点返回 $status，契约要求 200"
+          grep -q 'unsupported_grant_type' /tmp/token.json \
+            || fail "token 响应缺 unsupported_grant_type: $(cat /tmp/token.json)"
+
+          # 3. SPA：Vue 产物真的进了镜像 wwwroot，且 AdminSpaTitleInjector 在运行时
+          #    把 index.html 的 __APP_TITLE__ 换成了 APP_TITLE。这两条只有真容器能验。
+          index="$(curl -fsS --max-time 10 http://localhost:5002/)"
+          echo "$index" | grep -q '<div id="app">' || fail 'SPA 根路径返回的不像 Vue 产物'
+          echo "$index" | grep -q 'Identity CI Smoke' || fail 'APP_TITLE 未注入 index.html'
+          if echo "$index" | grep -q '__APP_TITLE__'; then
+            fail 'index.html 里仍残留 __APP_TITLE__ 占位符'
+          fi
+
+          # 4. /metrics 路由在（空指标时 exporter 可能返回 204，所以只排除 4xx/5xx）
+          metrics_status="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+            http://localhost:5002/metrics)"
+          case "$metrics_status" in
+            2*) ;;
+            *) fail "/metrics 返回 $metrics_status" ;;
+          esac
+
+          # 5. 迁移真的落在 PostgreSQL 上——不是悄悄降级到别的 provider，也不是跳过了
+          applied="$(docker exec -e PGPASSWORD="$PG_PASSWORD" qz-smoke-pg \
+            psql -U postgres -d quantumzhou_identity -tAc \
+            'SELECT count(*) FROM "__EFMigrationsHistory"')"
+          [ "$applied" -gt 0 ] || fail '__EFMigrationsHistory 为空，迁移没有执行'
+          echo "applied migrations: $applied"
+
+          echo 'All smoke assertions passed'
+
+      # 冒烟失败时最需要的就是容器日志。没有这一步，"/health 一直不 Healthy"
+      # 在日志里只是一行超时，和之前契约矩阵静默挂死是同一类问题。
+      - name: Dump container logs
+        if: failure()
+        run: |
+          echo "::group::identity container logs"
+          docker logs qz-smoke-app 2>&1 | tail -300 || true
+          echo "::endgroup::"
+          echo "::group::postgres logs"
+          docker logs qz-smoke-pg 2>&1 | tail -50 || true
+          echo "::endgroup::"
 
       - name: Upload test results
         if: always()
