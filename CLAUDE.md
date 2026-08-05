@@ -97,6 +97,7 @@ CI（`.github/workflows/ci.yml`，唯一流水线）**只做构建与测试，�
 - 日志用结构化占位符，异常传对象（`LogError(ex, ...)`）。手机号、微信 OpenId 必须过 `Domain.SensitiveDataMasker`；Token / AppSecret / 验证码 / 密码一律不记录。数据库字段不受此约束。
 - 限流拒绝要打 Warning，带 ClientIp 与命中的限流策略。
 - 常量放 `Database/IdentityConstants.cs`；grant_type 用 snake_case，AuthMethod 用 PascalCase。
+- **不写具体消费方**：文档、注释、提交信息里描述下游一律按角色（调用方 / 业务系统 / 下游微服务），不出现具体服务名、品牌名、它们的验证器配置或指向其仓库的链接。理由有两条：本仓库是 public repo，写出来等于替别家泄露接入细节；Identity 定位是面向任意系统的通用鉴权服务，点名某一家会让契约读起来像定制品。需要举例时用中性占位（`OrderService` 之类）。部署命名（`config/ruoyu`、`ruoyu-identity`、`ruoyu-net`）不在此列——那是本服务自身的部署身份与真实配置契约。
 
 ## 文档地图
 
