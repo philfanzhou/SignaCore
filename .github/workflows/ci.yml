@@ -47,6 +47,34 @@ jobs:
             --results-directory reports \
             --no-restore
 
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: reports/
+          if-no-files-found: ignore
+
+  database-contracts:
+    name: Database Contract Matrix
+    needs: build-test
+    # 不在 PR 上跑：Testcontainers 要冷拉 postgres / mysql / mariadb 三个镜像，
+    # 托管 runner 每次都是干净环境，代价远高于常驻 agent。PR 只保留构建 + 单测。
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # 已知问题：该 job 目前会在托管 runner 上挂死（测试宿主启动后无任何输出）。
+    # 怀疑是 Testcontainers 的 Ryuk 容器或 Docker Hub 匿名拉取限流，尚未定位。
+    # 超时压到 15 分钟，避免一次挂死浪费半小时。
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
       - name: Database contract matrix
         # Testcontainers 直接用 runner 上的 docker daemon，托管 runner 不在容器里，
         # 因此不需要 TESTCONTAINERS_HOST_OVERRIDE。
@@ -65,7 +93,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: database-contract-results
           path: reports/
           if-no-files-found: ignore
 
