@@ -33,12 +33,6 @@
 业务前端 → 业务后端 (AuthController) → Identity (HTTP POST /api/auth/token)
 ```
 
-### 曾接入服务
-
-| 服务 | 接入方式 | 认证端点路径 |
-|------|---------|-------------|
-| ruoyu.doclibrary | Identity.Client 项目引用 | `/admin/auth/*` |
-
 ## 失败语义总结
 
 ### 出方向：WeChat API 调用失败

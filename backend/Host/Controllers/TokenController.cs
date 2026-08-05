@@ -18,7 +18,7 @@ namespace QuantumZhou.Identity.Host.Controllers;
 /// <summary>
 /// POST /api/auth/token —— 签发 access token。
 /// AppId/AppSecret 通过 X-Admin-AppId / X-Admin-AppSecret 请求头传递，在本端点上是**可选的**：
-/// 带了才做网关校验（DocLibrary 的 refresh 流程依赖这一点）。
+/// 带了才做网关校验（只带 refresh_token 换票的调用方依赖这一点）。
 /// </summary>
 [Route("api/auth")]
 [ApiController]

@@ -57,7 +57,7 @@ CI（`.github/workflows/ci.yml`，唯一流水线）**只做构建与测试，�
 | 管理控制台 | Cookie `qz_admin_session` + `AdminSession` 授权策略（要求 `admin_access` claim） | `/api/admin/*` |
 | 终端用户 | JwtBearer + `UserProfile` 策略 | `/api/profile/*` |
 
-`/api/auth/token` 失败时返回 **HTTP 200 + `TokenResponse{Success=false, Message=...}`**，不是 4xx；错误文案是契约，见 `docs/modules/Auth/GetToken/06-CONVENTIONS.md`。`/api/auth/token` 上的 AppId 头是可选的：带了就校验，不带则跳过网关校验（DocLibrary 的 refresh 流程依赖这一点）。
+`/api/auth/token` 失败时返回 **HTTP 200 + `TokenResponse{Success=false, Message=...}`**，不是 4xx；错误文案是契约，见 `docs/modules/Auth/GetToken/06-CONVENTIONS.md`。`/api/auth/token` 上的 AppId 头是可选的：带了就校验，不带则跳过网关校验（只带 refresh_token 换票的调用方依赖这一点）。
 
 ### 多数据库 Provider
 

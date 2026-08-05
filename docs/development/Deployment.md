@@ -290,7 +290,7 @@ EOF
 - SMS/微信 grant 不触发 bootstrap admin 注入，bootstrap account 身份不扩大到这两类 grant
 - `AdminUserIds` 白名单仍保留，用于扩展**非 bootstrap** 的二级管理员账号（需 admin_portal callback 注入）
 
-> **DocLibrary 自动刷新会话**：DocLibrary 管理后台在 Access Token 到期后只提交 Refresh Token（不补传用户名）调用 `POST /api/auth/token`。由于 Identity 在 refresh grant 中基于已验证账户 ID 重新识别 bootstrap admin，DocLibrary 管理员会话可以连续刷新而不丢失 `role=admin`，同时普通账户无法通过伪造 `username=admin` 提权。
+> **自动刷新会话**：调用方在 Access Token 到期后只提交 Refresh Token（不补传用户名）调用 `POST /api/auth/token`。由于 Identity 在 refresh grant 中基于已验证账户 ID 重新识别 bootstrap admin，管理员会话可以连续刷新而不丢失 `role=admin`，同时普通账户无法通过伪造 `username=admin` 提权。
 
 ### CI 联调验证流程
 
@@ -298,16 +298,14 @@ CI smoke test 依赖以下 Identity 能力（均已在 CI 环境配置）：
 
 1. **JWKS 获取**：`GET /.well-known/jwks`（BFF 启动时自动发现）
 2. **SMS 固定验证码**：`SMS_BYPASS_CODE` + `SMS_BYPASS_PHONES`，均由 CI 的密钥库注入。
-   只有白名单内的测试号码能用绕过码登录——**不再是任意手机号**。Ruoyu.Study 侧的 smoke
+   只有白名单内的测试号码能用绕过码登录——**不再是任意手机号**。调用方侧的 smoke
    如果用了名单外的号码，需要把该号码加进 `SMS_BYPASS_PHONES` 或改用真实 OTP 流程。
 3. **管理员引导账户**：用户名 `admin`，密码由 `ADMIN_BOOTSTRAP_PASSWORD` 注入（DatabaseInitializer 自动种子，
    仅对全新库生效；已存在的 admin 不会被改写，改密要走管理控制台）
 4. **数据目录挂载**：`data/` 目录（含 `master-key/` 由 KeyManager 自动创建、预置 `bootstrap-apps.json` 由 DatabaseInitializer 自动种子）
 5. **Bootstrap Admin 自动注入**：`AdminBootstrap:Username` 配置的账号密码登录时自动获得 `role:admin`（无需额外配置白名单）
 
-跨服务联调方案由
-[Ruoyu.Study CI Smoke Test](https://gitee.com/philfanzhou/Ruoyu.Study/blob/master/tests/integration/docs/ci-smoke-test.md)
-维护。
+跨服务联调方案由调用方各自维护，不在本仓库范围内。
 
 ---
 

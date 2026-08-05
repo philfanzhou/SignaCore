@@ -70,13 +70,13 @@ admin_frontend/
 
 ### 样稿
 - 文件：`prototype/admin-console-redesign.html`
-- 样稿含两个系统（identity / doclib）切换、Overview、Audit 等页面。
+- 样稿含跨系统切换、Overview、Audit 等页面。
 
 ### 范围裁定（基于"业务逻辑零改动"与"数据必须真实"两条铁律）
 
 | 样稿点位 | 处置 | 原因 |
 |---------|------|------|
-| 系统切换器（identity/doclib） | **不实现** | DocLibrary 是独立服务，不属于本前端工程范围 |
+| 跨系统切换器 | **不实现** | 另一侧是独立服务，不属于本前端工程范围 |
 | Identity 概览页（Overview） | **不实现** | 登录趋势/审计 feed/今日登录数无对应 admin API，做静态皮违反"数据必须真实" |
 | Identity 审计日志页 | **不实现** | 后端 `audit_logs` 表存在但无 admin 读取 API |
 | 用户管理 / 应用注册 / 回调管理 / 令牌管理 | **重设计** | 沿用现有 4 个 Tab，按样稿设计语言重包装 |
@@ -150,7 +150,7 @@ admin_frontend/
 
 ### 品牌与标题来源（2026-07-21 去业务化 + 标题参数化修正）
 
-Identity 是面向任意系统提供鉴权能力的通用服务，管理控制台**不得**出现具体业务方品牌（如"若愚学习平台"）。所有标题（浏览器 tab、侧边栏 brand、登录页副标题）**统一来自运行时注入的 `APP_TITLE`**，禁止在前端硬编码，以便同一镜像适配不同项目部署：
+Identity 是面向任意系统提供鉴权能力的通用服务，管理控制台**不得**出现任何具体业务方的品牌名称或标识。所有标题（浏览器 tab、侧边栏 brand、登录页副标题）**统一来自运行时注入的 `APP_TITLE`**，禁止在前端硬编码，以便同一镜像适配不同项目部署：
 
 ```
 start.sh 传参 -e APP_TITLE="${CONTAINER_NAME}"
@@ -667,14 +667,14 @@ interface AdminUpdateCallbackRequest {
 
 ## 修复记录（2026-07-21 品牌去业务化 + 账户类型判据修正）
 
-> 背景：①Identity 定位是面向任意系统的通用鉴权服务，管理控制台残留业务方品牌"若 / 若愚学习平台"；②用户列表/详情的账户类型用 `username` 判空推导，但后端 `AdminUserListItemResponse.Username` 对手机账户回退返回手机号（`username ?? phone`），导致存量手机账户全部误显示为"密码账户"。本轮后端 DTO 新增 `HasPassword` 字段（存在密码凭据 = 密码账户），前端统一改用该字段。
+> 背景：①Identity 定位是面向任意系统的通用鉴权服务，管理控制台残留了某个业务方的品牌文案与标识字符；②用户列表/详情的账户类型用 `username` 判空推导，但后端 `AdminUserListItemResponse.Username` 对手机账户回退返回手机号（`username ?? phone`），导致存量手机账户全部误显示为"密码账户"。本轮后端 DTO 新增 `HasPassword` 字段（存在密码凭据 = 密码账户），前端统一改用该字段。
 
-#### G1: 品牌绑定具体业务（"若 / 若愚学习平台"），且标题未走 APP_TITLE 参数化
+#### G1: 品牌绑定具体业务方，且标题未走 APP_TITLE 参数化
 
-- **问题**：侧边栏 brand（`brand-mark` 汉字"若" + `brand-text`"若愚学习平台"）、登录页/会话检查页 `auth-logo`（汉字"若"）硬编码业务方品牌；Identity 作为通用鉴权服务不应绑定任何具体业务。且既有需求是所有标题来自 `start.sh` 的 `APP_TITLE` 参数（后端 `Program.cs` 已实现运行时注入 `__APP_TITLE__` 占位符 + `window.__APP_TITLE__` 全局变量），但前端从未消费该变量，`index.html` 的 `<title>__APP_TITLE__</title>` 占位符还一度被误改为硬编码文案（会导致后端替换失效）。
+- **问题**：侧边栏 brand（`brand-mark` 标识字符 + `brand-text` 业务方名称）、登录页/会话检查页 `auth-logo` 硬编码了具体业务方的品牌；Identity 作为通用鉴权服务不应绑定任何具体业务。且既有需求是所有标题来自 `start.sh` 的 `APP_TITLE` 参数（后端 `Program.cs` 已实现运行时注入 `__APP_TITLE__` 占位符 + `window.__APP_TITLE__` 全局变量），但前端从未消费该变量，`index.html` 的 `<title>__APP_TITLE__</title>` 占位符还一度被误改为硬编码文案（会导致后端替换失效）。
 - **位置**：`App.vue` 会话检查页/登录页头部、侧边栏 brand；`index.html` title；新增 `src/env.d.ts`
 - **预期**：品牌仅体现部署方通过 `APP_TITLE` 注入的标题，图标为中性的身份卡线性 SVG；浏览器 tab 标题由后端替换占位符生成，页面内标题与 tab 同源。
-- **修复**：`index.html` 恢复 `<title>__APP_TITLE__</title>` 占位符；新增 `env.d.ts` 声明 `window.__APP_TITLE__`；`App.vue` 以 `appTitle = window.__APP_TITLE__ || 'QuantumZhou.Identity'` 读取，brand 主文案与登录页/会话检查页副标题统一改用 `appTitle`；`brand-mark` / `auth-logo` 内汉字"若"替换为身份卡 SVG 图标（沿用图标系统 stroke 1.6 规范）。
+- **修复**：`index.html` 恢复 `<title>__APP_TITLE__</title>` 占位符；新增 `env.d.ts` 声明 `window.__APP_TITLE__`；`App.vue` 以 `appTitle = window.__APP_TITLE__ || 'QuantumZhou.Identity'` 读取，brand 主文案与登录页/会话检查页副标题统一改用 `appTitle`；`brand-mark` / `auth-logo` 内的业务方标识字符替换为身份卡 SVG 图标（沿用图标系统 stroke 1.6 规范）。
 - **状态**：✅ 已修复（2026-07-21，`npm run build` 通过，vue-tsc 零类型错误）
 
 #### G2: 手机账户类型误显示为"密码账户"
