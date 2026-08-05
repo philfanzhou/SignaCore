@@ -2,7 +2,7 @@
 
 ## 服务定位
 
-QuantumZhou.Identity 是统一身份认证与权限管理中心（Identity Provider），基于 .NET 8 构建。负责集中处理用户认证、签发标准化 JWT、管理业务系统注册和动态权限注入。
+QuantumZhou.Identity 是统一身份认证与权限管理中心（Identity Provider），基于 .NET 10 构建。负责集中处理用户认证、签发标准化 JWT、管理业务系统注册和动态权限注入。
 
 ## 上下游调用关系
 

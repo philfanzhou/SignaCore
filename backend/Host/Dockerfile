@@ -10,7 +10,7 @@ COPY admin_frontend/ ./
 RUN npm run build
 
 # ========== Stage 2: Build & Publish Backend ==========
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS backend-build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
@@ -29,7 +29,7 @@ COPY --from=frontend-build /app/dist backend/Host/wwwroot
 RUN dotnet publish "backend/Host/QuantumZhou.Identity.Host.csproj" -c $BUILD_CONFIGURATION -o /app/publish --no-restore /p:UseAppHost=false
 
 # ========== Stage 3: Runtime ==========
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 COPY --from=backend-build /app/publish .
 

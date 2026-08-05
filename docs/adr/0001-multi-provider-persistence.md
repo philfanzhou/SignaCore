@@ -1,11 +1,14 @@
 ---
 status: accepted
 date: 2026-07-30
+amended: 2026-08-05
 ---
 
 # 使用 EF Core Provider Adapter 支持多数据库持久化
 
-QuantumZhou.Identity 当前使用 EF Core 8 和 PostgreSQL，但数据库注册、类型映射、初始化、Migration 与部署配置均直接依赖 PostgreSQL。为允许同一服务在不同部署规模下选择合适的关系数据库，同时控制 ORM 维护成本和性能风险，决定继续以 EF Core 8 作为唯一 ORM，通过 provider adapter 支持 PostgreSQL、MySQL、MariaDB 和 SQLite；不引入第二套 ORM 或数据访问栈。
+作出本决定时，QuantumZhou.Identity 使用 EF Core 8 和 PostgreSQL，但数据库注册、类型映射、初始化、Migration 与部署配置均直接依赖 PostgreSQL。为允许同一服务在不同部署规模下选择合适的关系数据库，同时控制 ORM 维护成本和性能风险，决定继续以 EF Core 作为唯一 ORM，通过 provider adapter 支持 PostgreSQL、MySQL、MariaDB 和 SQLite；不引入第二套 ORM 或数据访问栈。
+
+2026-08-05 随运行时升级到 .NET 10，ORM 升级为 EF Core 9；多 provider、单一 ORM 和独立迁移链等架构决策不变。EF Core 暂不升到 10，是因为 MySQL/MariaDB provider 尚无兼容版本。
 
 ## 决定
 

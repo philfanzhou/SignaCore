@@ -1,10 +1,10 @@
 # QuantumZhou.Identity
 
-统一身份与鉴权微服务（Identity Provider），基于 .NET 8 和 HTTP API 构建，负责集中处理用户认证并签发标准化 JWT。
+统一身份与鉴权微服务（Identity Provider），基于 .NET 10 和 HTTP API 构建，负责集中处理用户认证并签发标准化 JWT。
 
 ## 设计原则
 
-- **原生、无依赖**：完全基于 .NET 8 原生的 `System.IdentityModel.Tokens.Jwt` 和 ASP.NET Core 认证体系，不依赖第三方 Auth 框架
+- **原生、无依赖**：完全基于 .NET 10 的 `System.IdentityModel.Tokens.Jwt` 和 ASP.NET Core 认证体系，不依赖第三方 Auth 框架
 - **高扩展性**：采用策略模式支持多种认证方式，新增登录方式无需修改核心代码
 - **高安全性**：RSA 密钥对动态生成 + AES-GCM 加密存储，AppSecret 防时序攻击，结构化日志记录
 - **可观测性**：内置 OpenTelemetry 指标和追踪，支持 Prometheus 监控
@@ -31,7 +31,7 @@ bash build.sh
 
 ### 环境要求
 
-- .NET 8 SDK
+- .NET 10 SDK
 - PostgreSQL 15+（默认）、MySQL 8.0/8.4、MariaDB 10.11/11.4，或单实例本地文件 SQLite
 - Consul KV `config/ruoyu/identity.json` 中的 `Database:Provider`、`Database:ServerVersion` 和 `Database:ConnectionString`（容器部署）
 - 环境变量 `RSA_MASTER_KEY`（用于 RSA 私钥加密，生产环境必须设置）
