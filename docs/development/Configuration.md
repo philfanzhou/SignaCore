@@ -224,7 +224,7 @@ Identity 启动时通过 `data/bootstrap-apps.json` 文件预置应用注册信�
 ```
 
 > 本仓库是 public repo，**不要在文档或脚本里写真实的 AppId / AppSecret**。
-> `bootstrap-apps.json` 由部署脚本从 CI 密钥库生成，不进仓库。
+> `bootstrap-apps.json` 在部署时由密钥库中的凭据生成，不进仓库。
 
 **字段说明**：
 
