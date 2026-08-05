@@ -83,7 +83,10 @@ jobs:
           # 凭据一律一次性随机生成：本仓库是 public repo，workflow 日志全网可读，
           # 任何固定值写进来都等同于公开。add-mask 兜住意外回显。
           PG_PASSWORD="$(openssl rand -hex 16)"
-          ADMIN_PASSWORD="$(openssl rand -hex 16)"
+          # DefaultPasswordPolicy 要求 ≥8 位且大写/小写/数字齐全，而 openssl rand -hex
+          # 只产小写十六进制——直接用会让 bootstrap admin 抛异常、启动即失败。
+          # 固定前缀只负责满足这三类字符，熵仍然来自后面的 32 位随机十六进制。
+          ADMIN_PASSWORD="Aa1$(openssl rand -hex 16)"
           RSA_MASTER_KEY="$(openssl rand -base64 32)"
           echo "::add-mask::$PG_PASSWORD"
           echo "::add-mask::$ADMIN_PASSWORD"
