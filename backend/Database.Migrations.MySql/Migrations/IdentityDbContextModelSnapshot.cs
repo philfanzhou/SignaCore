@@ -84,6 +84,48 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                     b.ToTable("accounts", (string)null);
                 });
 
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AppLdapAccessEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("app_registration_id");
+
+                    b.Property<int>("ApprovalSource")
+                        .HasColumnType("int")
+                        .HasColumnName("approval_source");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("approved_by");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasPrecision(6)
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("tinyint(1)")
+                        .HasColumnName("is_active");
+
+                    b.Property<Guid>("LdapCredentialId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("ldap_credential_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LdapCredentialId");
+
+                    b.HasIndex("AppRegistrationId", "LdapCredentialId")
+                        .IsUnique();
+
+                    b.ToTable("app_ldap_accesses", (string)null);
+                });
+
             modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AppRegistrationEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -133,6 +175,10 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("is_active");
+
+                    b.Property<int>("LdapLoginMode")
+                        .HasColumnType("int")
+                        .HasColumnName("ldap_login_mode");
 
                     b.HasKey("Id");
 
@@ -217,6 +263,78 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                     b.HasIndex("TargetType", "TargetId", "CreatedAt");
 
                     b.ToTable("audit_logs", (string)null);
+                });
+
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.LdapCredentialEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("account_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasPrecision(6)
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DirectoryKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("directory_key");
+
+                    b.Property<string>("DirectoryKeyNormalized")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("directory_key_normalized");
+
+                    b.Property<Guid>("ObjectGuid")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("object_guid");
+
+                    b.Property<string>("SamAccountName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("sam_account_name");
+
+                    b.Property<string>("SamAccountNameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("sam_account_name_normalized");
+
+                    b.Property<string>("UserPrincipalName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("varchar(256)")
+                        .HasColumnName("user_principal_name");
+
+                    b.Property<string>("UserPrincipalNameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("varchar(256)")
+                        .HasColumnName("user_principal_name_normalized");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("DirectoryKeyNormalized", "ObjectGuid")
+                        .IsUnique();
+
+                    b.HasIndex("DirectoryKeyNormalized", "SamAccountNameNormalized")
+                        .IsUnique();
+
+                    b.HasIndex("DirectoryKeyNormalized", "UserPrincipalNameNormalized")
+                        .IsUnique();
+
+                    b.ToTable("ldap_credentials", (string)null);
                 });
 
             modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.LoginAttemptEntity", b =>
@@ -451,6 +569,10 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                         .HasColumnType("tinyint(1)")
                         .HasColumnName("is_revoked");
 
+                    b.Property<Guid?>("LdapCredentialId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("ldap_credential_id");
+
                     b.Property<string>("TokenValue")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -458,6 +580,8 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                         .HasColumnName("token_value");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("LdapCredentialId");
 
                     b.HasIndex("TokenValue")
                         .IsUnique();
@@ -564,6 +688,30 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                         .IsUnique();
 
                     b.ToTable("user_logins", (string)null);
+                });
+
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AppLdapAccessEntity", b =>
+                {
+                    b.HasOne("QuantumZhou.Identity.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AppRegistrationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("QuantumZhou.Identity.Database.Entity.LdapCredentialEntity", null)
+                        .WithMany()
+                        .HasForeignKey("LdapCredentialId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.LdapCredentialEntity", b =>
+                {
+                    b.HasOne("QuantumZhou.Identity.Database.Entity.AccountEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

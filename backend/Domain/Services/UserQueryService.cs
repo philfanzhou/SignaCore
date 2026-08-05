@@ -33,6 +33,14 @@ public class UserQueryService : IUserQueryService
                      EF.Functions.Like(
                          credential.UsernameNormalized ?? string.Empty,
                          $"%{searchTerm}%")) ||
+                 _dbContext.LdapCredentials.Any(credential =>
+                     credential.AccountId == account.Id &&
+                     (EF.Functions.Like(
+                          credential.UserPrincipalNameNormalized,
+                          $"%{searchTerm}%") ||
+                      EF.Functions.Like(
+                          credential.SamAccountNameNormalized,
+                          $"%{searchTerm}%"))) ||
                  EF.Functions.Like(
                      account.NicknameNormalized ?? string.Empty,
                      $"%{searchTerm}%") ||
@@ -110,16 +118,29 @@ public class UserQueryService : IUserQueryService
                     IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms))
             .ToDictionaryAsync(l => l.AccountId, l => l.ProviderUserId);
 
+        var ldapRows = await _dbContext.LdapCredentials
+            .AsNoTracking()
+            .Where(credential => accountIds.Contains(credential.AccountId))
+            .OrderBy(credential => credential.CreatedAt)
+            .Select(credential => new { credential.AccountId, credential.UserPrincipalName })
+            .ToListAsync();
+        var ldapUsers = ldapRows
+            .GroupBy(item => item.AccountId)
+            .ToDictionary(group => group.Key, group => group.First().UserPrincipalName);
+
         return pagedAccounts.Select(account =>
         {
             var username = credentials.GetValueOrDefault(account.Id);
             var phone = phones.GetValueOrDefault(account.Id);
-            var name = username ?? phone ?? string.Empty;
+            var ldapUser = ldapUsers.GetValueOrDefault(account.Id);
+            var name = username ?? ldapUser ?? phone ?? string.Empty;
             var displayName = !string.IsNullOrWhiteSpace(account.Nickname)
                 ? account.Nickname
                 : (!string.IsNullOrWhiteSpace(username)
                     ? username
-                    : (!string.IsNullOrWhiteSpace(phone) ? phone : account.Id.ToString()[..8]));
+                    : (!string.IsNullOrWhiteSpace(ldapUser)
+                        ? ldapUser
+                        : (!string.IsNullOrWhiteSpace(phone) ? phone : account.Id.ToString()[..8])));
             return new UserListItemResponse(
                 account.Id.ToString(),
                 name,

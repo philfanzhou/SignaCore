@@ -5,6 +5,7 @@
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.10" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
+    <PackageReference Include="System.DirectoryServices.Protocols" Version="10.0.0" />
   </ItemGroup>
 
   <ItemGroup>

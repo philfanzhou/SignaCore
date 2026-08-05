@@ -6,6 +6,7 @@ using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain.Validators;
+using QuantumZhou.Identity.Domain.Services.Ldap;
 using Xunit;
 
 namespace QuantumZhou.Identity.Tests;
@@ -21,6 +22,16 @@ public class RefreshTokenValidatorTests
     }
 
     private static ILogger<RefreshTokenValidator> CreateLogger() => NullLogger<RefreshTokenValidator>.Instance;
+
+    private static RefreshTokenValidator CreateValidator(
+        IRefreshTokenRepository refreshTokenRepository,
+        IAccountRepository accountRepository) =>
+        new(
+            refreshTokenRepository,
+            accountRepository,
+            new Mock<ILdapAccountService>().Object,
+            new Mock<ILdapDirectoryClient>().Object,
+            CreateLogger());
 
     [Fact]
     public async Task ValidateAsync_WithValidRefreshToken_ReturnsSuccess()
@@ -53,7 +64,7 @@ public class RefreshTokenValidatorTests
         var accountRepoMock = new Mock<IAccountRepository>();
         accountRepoMock.Setup(r => r.GetByIdAsync(accountId)).ReturnsAsync(account);
 
-        var validator = new RefreshTokenValidator(refreshTokenRepoMock.Object, accountRepoMock.Object, CreateLogger());
+        var validator = CreateValidator(refreshTokenRepoMock.Object, accountRepoMock.Object);
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -98,7 +109,7 @@ public class RefreshTokenValidatorTests
         var accountRepoMock = new Mock<IAccountRepository>();
         accountRepoMock.Setup(r => r.GetByIdAsync(accountId)).ReturnsAsync(account);
 
-        var validator = new RefreshTokenValidator(refreshTokenRepoMock.Object, accountRepoMock.Object, CreateLogger());
+        var validator = CreateValidator(refreshTokenRepoMock.Object, accountRepoMock.Object);
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -140,7 +151,7 @@ public class RefreshTokenValidatorTests
         var accountRepoMock = new Mock<IAccountRepository>();
         accountRepoMock.Setup(r => r.GetByIdAsync(accountId)).ReturnsAsync(account);
 
-        var validator = new RefreshTokenValidator(refreshTokenRepoMock.Object, accountRepoMock.Object, CreateLogger());
+        var validator = CreateValidator(refreshTokenRepoMock.Object, accountRepoMock.Object);
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -158,7 +169,7 @@ public class RefreshTokenValidatorTests
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
         var accountRepoMock = new Mock<IAccountRepository>();
 
-        var validator = new RefreshTokenValidator(refreshTokenRepoMock.Object, accountRepoMock.Object, CreateLogger());
+        var validator = CreateValidator(refreshTokenRepoMock.Object, accountRepoMock.Object);
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -177,7 +188,7 @@ public class RefreshTokenValidatorTests
         refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync(It.IsAny<string>())).ReturnsAsync((RefreshTokenEntity?)null);
         var accountRepoMock = new Mock<IAccountRepository>();
 
-        var validator = new RefreshTokenValidator(refreshTokenRepoMock.Object, accountRepoMock.Object, CreateLogger());
+        var validator = CreateValidator(refreshTokenRepoMock.Object, accountRepoMock.Object);
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -216,7 +227,7 @@ public class RefreshTokenValidatorTests
         var accountRepoMock = new Mock<IAccountRepository>();
         accountRepoMock.Setup(r => r.GetByIdAsync(accountId)).ReturnsAsync(account);
 
-        var validator = new RefreshTokenValidator(refreshTokenRepoMock.Object, accountRepoMock.Object, CreateLogger());
+        var validator = CreateValidator(refreshTokenRepoMock.Object, accountRepoMock.Object);
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -262,7 +273,7 @@ public class RefreshTokenValidatorTests
         var accountRepoMock = new Mock<IAccountRepository>();
         accountRepoMock.Setup(r => r.GetByIdAsync(accountId)).ReturnsAsync(account);
 
-        var validator = new RefreshTokenValidator(refreshTokenRepoMock.Object, accountRepoMock.Object, CreateLogger());
+        var validator = CreateValidator(refreshTokenRepoMock.Object, accountRepoMock.Object);
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -282,8 +293,70 @@ public class RefreshTokenValidatorTests
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
         var accountRepoMock = new Mock<IAccountRepository>();
 
-        var validator = new RefreshTokenValidator(refreshTokenRepoMock.Object, accountRepoMock.Object, CreateLogger());
+        var validator = CreateValidator(refreshTokenRepoMock.Object, accountRepoMock.Object);
 
         Assert.Equal(IdentityConstants.GrantTypeRefreshToken, validator.GrantType);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_AutoProvisionGrant_DoesNotSurviveSwitchToManualMode()
+    {
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true };
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "app-1",
+            LdapLoginMode = LdapLoginMode.ManualApproval
+        };
+        var credential = new LdapCredentialEntity
+        {
+            Id = Guid.NewGuid(),
+            AccountId = account.Id,
+            DirectoryKey = "corp",
+            ObjectGuid = Guid.NewGuid(),
+            UserPrincipalName = "alice@corp.example.com"
+        };
+        var token = new RefreshTokenEntity
+        {
+            AccountId = account.Id,
+            TokenValue = "ldap-refresh",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            AppId = app.AppId,
+            LdapCredentialId = credential.Id
+        };
+        var tokenRepository = new Mock<IRefreshTokenRepository>();
+        tokenRepository.Setup(repository => repository.GetByTokenValueAsync(token.TokenValue)).ReturnsAsync(token);
+        var accountRepository = new Mock<IAccountRepository>();
+        accountRepository.Setup(repository => repository.GetByIdAsync(account.Id)).ReturnsAsync(account);
+        var ldapAccounts = new Mock<ILdapAccountService>();
+        ldapAccounts.Setup(service => service.GetCredentialAsync(credential.Id)).ReturnsAsync(credential);
+        ldapAccounts.Setup(service => service.GetAccessAsync(app.Id, credential.Id)).ReturnsAsync(
+            new AppLdapAccessEntity
+            {
+                AppRegistrationId = app.Id,
+                LdapCredentialId = credential.Id,
+                ApprovalSource = LdapAccessApprovalSource.AutoProvision,
+                IsActive = true
+            });
+        var directoryClient = new Mock<ILdapDirectoryClient>();
+        var validator = new RefreshTokenValidator(
+            tokenRepository.Object,
+            accountRepository.Object,
+            ldapAccounts.Object,
+            directoryClient.Object,
+            CreateLogger());
+
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = token.TokenValue,
+            AppId = app.AppId,
+            App = app
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("LDAP access has been revoked", result.ErrorMessage);
+        directoryClient.Verify(client => client.IsUserEnabledAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

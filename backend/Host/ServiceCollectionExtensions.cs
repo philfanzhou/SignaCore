@@ -12,6 +12,7 @@ using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Keys;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Services.Sms;
+using QuantumZhou.Identity.Domain.Services.Ldap;
 using QuantumZhou.Identity.Domain.Services.WeChat;
 using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Host.Security;
@@ -93,6 +94,13 @@ public static class ServiceCollectionExtensions
             RefreshTokenExpirationDays = int.Parse(configuration["RefreshToken:ExpirationDays"] ?? "7")
         });
         refreshTokenOptions.Validate();
+
+        // ---- LDAP / Active Directory ----
+        var ldapOptions = configuration.GetSection(LdapOptions.SectionName).Get<LdapOptions>() ?? new LdapOptions();
+        ldapOptions.Validate();
+        services.AddSingleton(ldapOptions);
+        services.AddSingleton<ILdapDirectoryClient, ActiveDirectoryClient>();
+        services.AddScoped<ILdapAccountService, LdapAccountService>();
 
         // ---- Claims Resolver ----
         services.AddScoped<ClaimsResolver>();
@@ -211,6 +219,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IIdentityValidator, SmsValidator>();
         services.AddScoped<IIdentityValidator, WechatValidator>();
         services.AddScoped<IIdentityValidator, RefreshTokenValidator>();
+        services.AddScoped<IIdentityValidator, LdapValidator>();
 
         // ---- Validator Factory (auto-builds dictionary from injected validators) ----
         services.AddScoped<ValidatorFactory>();

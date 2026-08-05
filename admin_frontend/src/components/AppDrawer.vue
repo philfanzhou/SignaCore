@@ -9,10 +9,17 @@ const {
   callbackForm,
   savingCallback,
   resettingSecret,
+  loadingLdapUsers,
+  addingLdapUser,
+  ldapUsers,
+  ldapDirectories,
+  ldapUserForm,
   closeAppDrawer,
   saveCallbackFromDrawer,
   handleResetSecret,
   openDeleteAppModal,
+  addLdapUser,
+  revokeLdapUser,
 } = useApps()
 </script>
 
@@ -62,6 +69,46 @@ const {
               <input v-model="callbackForm.isActive" type="checkbox">
               <span class="track"></span>
             </label>
+          </div>
+        </div>
+        <div class="card section-gap" style="padding: 20px">
+          <div class="card-title" style="margin-bottom: 16px">LDAP 登录</div>
+          <div class="field">
+            <label>当前应用准入模式</label>
+            <select v-model="callbackForm.ldapLoginMode" class="select" style="width: 100%">
+              <option value="Disabled">禁用 LDAP 登录</option>
+              <option value="ManualApproval">仅管理员授权用户</option>
+              <option value="AutoProvision">验证成功自动开户</option>
+            </select>
+            <div class="hint">从自动模式切换为手动模式后，自动开户记录不会被视为管理员授权。</div>
+          </div>
+          <div class="field">
+            <label>为当前应用授权 LDAP 用户</label>
+            <div style="display: grid; grid-template-columns: 130px 1fr auto; gap: 8px">
+              <select v-model="ldapUserForm.directoryKey" class="select">
+                <option v-for="directory in ldapDirectories" :key="directory.key" :value="directory.key">
+                  {{ directory.key }}{{ directory.isDefault ? '（默认）' : '' }}
+                </option>
+              </select>
+              <input v-model="ldapUserForm.username" class="input" placeholder="alice 或 alice@corp.example.com" @keyup.enter="addLdapUser">
+              <button class="btn btn-sm" :disabled="addingLdapUser || !ldapDirectories.length" @click="addLdapUser">授权</button>
+            </div>
+          </div>
+          <div v-if="loadingLdapUsers" class="hint">正在加载授权用户...</div>
+          <div v-else-if="ldapUsers.length === 0" class="hint">当前应用还没有 LDAP 用户授权记录。</div>
+          <div v-else class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>账号</th><th>目录</th><th>来源</th><th>状态</th><th></th></tr></thead>
+              <tbody>
+                <tr v-for="user in ldapUsers" :key="user.credentialId">
+                  <td><div class="td-main">{{ user.username }}</div><div class="mono" style="font-size: 11px; color: var(--text-3)">{{ user.samAccountName }}</div></td>
+                  <td class="mono">{{ user.directoryKey }}</td>
+                  <td>{{ user.approvalSource === 'Admin' ? '管理员' : '自动开户' }}</td>
+                  <td><span class="badge" :class="user.isActive ? 'green' : 'gray'"><span class="dot"></span>{{ user.isActive ? '有效' : '已撤销' }}</span></td>
+                  <td><button v-if="user.isActive" class="btn btn-danger btn-sm" @click="revokeLdapUser(user)">撤销</button></td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
         <div class="danger-zone section-gap">

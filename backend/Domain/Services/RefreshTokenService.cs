@@ -21,16 +21,22 @@ public class RefreshTokenService : IRefreshTokenService
         _refreshTokenOptions = refreshTokenOptions;
     }
 
-    public async Task<string?> HandleRefreshTokenAsync(string grantType, string? existingRefreshToken, AccountEntity account, string? appId)
+    public async Task<string?> HandleRefreshTokenAsync(
+        string grantType,
+        string? existingRefreshToken,
+        AccountEntity account,
+        string? appId,
+        Guid? ldapCredentialId = null)
     {
-        if (grantType is IdentityConstants.GrantTypePassword or IdentityConstants.GrantTypeSms or IdentityConstants.GrantTypeWechat)
+        if (grantType is IdentityConstants.GrantTypePassword or IdentityConstants.GrantTypeSms or
+            IdentityConstants.GrantTypeWechat or IdentityConstants.GrantTypeLdap)
         {
-            return await GenerateRefreshTokenAsync(account, RequireAppId(appId));
+            return await GenerateRefreshTokenAsync(account, RequireAppId(appId), ldapCredentialId);
         }
 
         if (grantType == IdentityConstants.GrantTypeRefreshToken && !string.IsNullOrEmpty(existingRefreshToken))
         {
-            var replacement = CreateRefreshToken(account, RequireAppId(appId));
+            var replacement = CreateRefreshToken(account, RequireAppId(appId), ldapCredentialId);
             return await _refreshTokenRepository.TryRotateAsync(existingRefreshToken, replacement)
                 ? replacement.TokenValue
                 : null;
@@ -49,15 +55,18 @@ public class RefreshTokenService : IRefreshTokenService
         return await _refreshTokenRepository.TryRevokeAsync(token);
     }
 
-    private async Task<string> GenerateRefreshTokenAsync(AccountEntity account, string appId)
+    private async Task<string> GenerateRefreshTokenAsync(
+        AccountEntity account,
+        string appId,
+        Guid? ldapCredentialId)
     {
-        var refreshToken = CreateRefreshToken(account, appId);
+        var refreshToken = CreateRefreshToken(account, appId, ldapCredentialId);
         await _refreshTokenRepository.AddAsync(refreshToken);
         await _unitOfWork.SaveChangesAsync();
         return refreshToken.TokenValue;
     }
 
-    private RefreshTokenEntity CreateRefreshToken(AccountEntity account, string appId)
+    private RefreshTokenEntity CreateRefreshToken(AccountEntity account, string appId, Guid? ldapCredentialId)
     {
         return new RefreshTokenEntity
         {
@@ -67,7 +76,8 @@ public class RefreshTokenService : IRefreshTokenService
             CreatedAt = DateTimeOffset.UtcNow,
             ExpiresAt = DateTimeOffset.UtcNow.AddDays(_refreshTokenOptions.RefreshTokenExpirationDays),
             IsRevoked = false,
-            AppId = appId
+            AppId = appId,
+            LdapCredentialId = ldapCredentialId
         };
     }
 }

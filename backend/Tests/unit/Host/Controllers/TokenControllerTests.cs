@@ -183,7 +183,12 @@ public class TokenControllerTests
                 c.Type == IdentityConstants.ClaimClientId && c.Value == "test-app")),
             It.IsAny<RsaSecurityKey>(), 2), Times.Once);
         _refreshTokenServiceMock.Verify(
-            s => s.HandleRefreshTokenAsync("sms", It.IsAny<string?>(), It.Is<AccountEntity>(a => a.Id == accountId), It.IsAny<string?>()),
+            s => s.HandleRefreshTokenAsync(
+                "sms",
+                It.IsAny<string?>(),
+                It.Is<AccountEntity>(a => a.Id == accountId),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>()),
             Times.Once);
     }
 
@@ -255,7 +260,8 @@ public class TokenControllerTests
                 IdentityConstants.GrantTypeRefreshToken,
                 "consumed-refresh-token",
                 account,
-                It.IsAny<string?>()))
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>()))
             .ReturnsAsync((string?)null);
         var controller = CreateController(new[] { validatorMock.Object });
 

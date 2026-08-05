@@ -109,7 +109,9 @@ public class TokenController : ControllerBase
             Phone = request.Phone,
             Code = request.Code,
             RefreshToken = request.RefreshToken,
-            AppId = appId
+            AppId = appId,
+            App = app,
+            CancellationToken = cancellationToken
         });
 
         if (!validationResult.IsSuccess)
@@ -129,7 +131,7 @@ public class TokenController : ControllerBase
         var authMethod = validationResult.AuthMethod;
         var displayName = ResolveDisplayName(account, validationResult.DisplayName, request.GrantType);
         var newRefreshToken = await _refreshTokenService.HandleRefreshTokenAsync(
-            request.GrantType, request.RefreshToken, account, appId);
+            request.GrantType, request.RefreshToken, account, appId, validationResult.LdapCredentialId);
 
         if (request.GrantType == IdentityConstants.GrantTypeRefreshToken && newRefreshToken == null)
         {

@@ -149,6 +149,35 @@ Identity 没有功能开关配置。
 | WeChat:AppSecret | （空） | 微信开放平台 AppSecret |
 | WeChat:ApiBaseUrl | https://api.weixin.qq.com | 微信 API 基地址 |
 
+### LDAP / Active Directory
+
+LDAP 默认关闭。启用后仅使用 LDAPS，目录服务账号只用于精确查找用户和检查账号状态，不同步目录资料。
+
+```json
+{
+  "Ldap": {
+    "Enabled": true,
+    "DefaultDirectoryKey": "corp",
+    "MaxConcurrentOperations": 20,
+    "Directories": [
+      {
+        "Key": "corp",
+        "Hosts": ["dc01.corp.example.com", "dc02.corp.example.com"],
+        "Port": 636,
+        "BaseDn": "DC=corp,DC=example,DC=com",
+        "BindUsername": "svc_identity@corp.example.com",
+        "BindPassword": "<secret>",
+        "UpnSuffixes": ["corp.example.com"],
+        "NetbiosNames": ["CORP"],
+        "TimeoutSeconds": 5
+      }
+    ]
+  }
+}
+```
+
+生产环境通过密钥配置源或 `Ldap__Directories__0__BindPassword` 注入服务账号密码，不写入仓库。Linux 容器必须信任签发域控 LDAPS 证书的企业 CA；实现不提供跳过证书校验的开关。
+
 ## 速率限制配置
 
 限流在代码中硬编码（`ServiceCollectionExtensions.cs` "Rate Limiting" 段），**无配置键**，调整需改代码：

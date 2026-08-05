@@ -32,6 +32,7 @@ public class RefreshTokenServiceTests
     [InlineData(IdentityConstants.GrantTypePassword)]
     [InlineData(IdentityConstants.GrantTypeSms)]
     [InlineData(IdentityConstants.GrantTypeWechat)]
+    [InlineData(IdentityConstants.GrantTypeLdap)]
     public async Task HandleRefreshTokenAsync_LoginGrants_GeneratesNewToken(string grantType)
     {
         var account = CreateAccount();
@@ -73,6 +74,23 @@ public class RefreshTokenServiceTests
             Times.Once);
         _repoMock.Verify(r => r.AddAsync(It.IsAny<RefreshTokenEntity>()), Times.Never);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HandleRefreshTokenAsync_LdapGrant_BindsTokenToLdapCredential()
+    {
+        var account = CreateAccount();
+        var credentialId = Guid.NewGuid();
+
+        await _service.HandleRefreshTokenAsync(
+            IdentityConstants.GrantTypeLdap,
+            null,
+            account,
+            "app-1",
+            credentialId);
+
+        _repoMock.Verify(repository => repository.AddAsync(
+            It.Is<RefreshTokenEntity>(token => token.LdapCredentialId == credentialId)), Times.Once);
     }
 
     [Fact]

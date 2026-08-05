@@ -47,6 +47,7 @@ const {
               <th>App ID</th>
               <th>回调地址</th>
               <th>回调有效期</th>
+              <th>LDAP</th>
               <th>状态</th>
               <th></th>
             </tr>
@@ -71,6 +72,11 @@ const {
                 <span class="mono" style="font-size: 12px" :style="{ color: app.callbackUrl ? 'var(--text-2)' : 'var(--text-3)' }">{{ app.callbackUrl || '未配置' }}</span>
               </td>
               <td style="font-variant-numeric: tabular-nums">{{ formatTtl(app) }}</td>
+              <td>
+                <span class="badge" :class="app.ldapLoginMode === 'Disabled' ? 'gray' : 'green'">
+                  <span class="dot"></span>{{ app.ldapLoginMode === 'Disabled' ? '禁用' : app.ldapLoginMode === 'ManualApproval' ? '人工准入' : '自动开户' }}
+                </span>
+              </td>
               <td>
                 <span class="badge" :class="app.isActive ? 'green' : 'gray'">
                   <span class="dot"></span>{{ app.isActive ? '已启用' : '已停用' }}

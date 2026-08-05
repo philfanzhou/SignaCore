@@ -24,11 +24,13 @@ public static class IdentityConstants
     public const string GrantTypeSms = "sms";
     public const string GrantTypeWechat = "wechat_code";
     public const string GrantTypeRefreshToken = "refresh_token";
+    public const string GrantTypeLdap = "ldap";
 
     public const string AuthMethodPassword = "Password";
     public const string AuthMethodSms = "Sms";
     public const string AuthMethodWechat = "WeChat";
     public const string AuthMethodRefreshToken = "RefreshToken";
+    public const string AuthMethodLdap = "LDAP";
 
     public const string ClaimPermission = "Permission";
     public const string ClaimAuthMethod = "auth_method";
@@ -53,6 +55,7 @@ public static class IdentityConstants
     public const int MaxKeyNameLength = 100;
     public const int MaxProviderNameLength = 100;
     public const int MaxProviderUserIdLength = 256;
+    public const int MaxDirectoryKeyLength = 64;
     public const int MaxRefreshTokenLength = 256;
     public const int MaxAppNameLength = 200;
     public const int MaxPublicKeyModulusLength = 2048;

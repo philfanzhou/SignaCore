@@ -26,6 +26,23 @@ export interface AdminApp {
   callbackExpiresAt: number | null
   isActive: boolean
   createdAt: number
+  ldapLoginMode: 'Disabled' | 'ManualApproval' | 'AutoProvision'
+}
+
+export interface AdminLdapUser {
+  credentialId: string
+  userId: string
+  username: string
+  samAccountName: string
+  directoryKey: string
+  approvalSource: 'Admin' | 'AutoProvision'
+  isActive: boolean
+  createdAt: number
+}
+
+export interface AdminLdapDirectory {
+  key: string
+  isDefault: boolean
 }
 
 export interface AdminCreateUserRequest {
@@ -130,6 +147,32 @@ class AdminApiClient {
 
   async updateCallback(appId: string, payload: AdminUpdateCallbackRequest) {
     await this.client.put(`/api/admin/apps/${appId}/callback`, payload)
+  }
+
+  async updateLdapPolicy(appId: string, mode: AdminApp['ldapLoginMode']) {
+    await this.client.put(`/api/admin/apps/${appId}/ldap-policy`, { mode })
+  }
+
+  async getLdapDirectories() {
+    const response = await this.client.get<AdminLdapDirectory[]>('/api/admin/ldap/directories')
+    return response.data
+  }
+
+  async getAppLdapUsers(appId: string) {
+    const response = await this.client.get<AdminLdapUser[]>(`/api/admin/apps/${appId}/ldap-users`)
+    return response.data
+  }
+
+  async addAppLdapUser(appId: string, directoryKey: string, username: string) {
+    const response = await this.client.post<AdminLdapUser>(`/api/admin/apps/${appId}/ldap-users`, {
+      directoryKey,
+      username,
+    })
+    return response.data
+  }
+
+  async revokeAppLdapUser(appId: string, credentialId: string) {
+    await this.client.delete(`/api/admin/apps/${appId}/ldap-users/${credentialId}`)
   }
 
   async deleteApp(appId: string) {

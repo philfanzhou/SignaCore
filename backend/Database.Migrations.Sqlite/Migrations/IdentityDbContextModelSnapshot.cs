@@ -75,6 +75,47 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                     b.ToTable("accounts", (string)null);
                 });
 
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AppLdapAccessEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("app_registration_id");
+
+                    b.Property<int>("ApprovalSource")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("approval_source");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("approved_by");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("is_active");
+
+                    b.Property<Guid>("LdapCredentialId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ldap_credential_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LdapCredentialId");
+
+                    b.HasIndex("AppRegistrationId", "LdapCredentialId")
+                        .IsUnique();
+
+                    b.ToTable("app_ldap_accesses", (string)null);
+                });
+
             modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AppRegistrationEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -122,6 +163,10 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER")
                         .HasColumnName("is_active");
+
+                    b.Property<int>("LdapLoginMode")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ldap_login_mode");
 
                     b.HasKey("Id");
 
@@ -205,6 +250,77 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                     b.HasIndex("TargetType", "TargetId", "CreatedAt");
 
                     b.ToTable("audit_logs", (string)null);
+                });
+
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.LdapCredentialEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("account_id");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DirectoryKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("directory_key");
+
+                    b.Property<string>("DirectoryKeyNormalized")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("directory_key_normalized");
+
+                    b.Property<Guid>("ObjectGuid")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("object_guid");
+
+                    b.Property<string>("SamAccountName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("sam_account_name");
+
+                    b.Property<string>("SamAccountNameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("sam_account_name_normalized");
+
+                    b.Property<string>("UserPrincipalName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("user_principal_name");
+
+                    b.Property<string>("UserPrincipalNameNormalized")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("user_principal_name_normalized");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("DirectoryKeyNormalized", "ObjectGuid")
+                        .IsUnique();
+
+                    b.HasIndex("DirectoryKeyNormalized", "SamAccountNameNormalized")
+                        .IsUnique();
+
+                    b.HasIndex("DirectoryKeyNormalized", "UserPrincipalNameNormalized")
+                        .IsUnique();
+
+                    b.ToTable("ldap_credentials", (string)null);
                 });
 
             modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.LoginAttemptEntity", b =>
@@ -430,6 +546,10 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("is_revoked");
 
+                    b.Property<Guid?>("LdapCredentialId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("ldap_credential_id");
+
                     b.Property<string>("TokenValue")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -437,6 +557,8 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                         .HasColumnName("token_value");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("LdapCredentialId");
 
                     b.HasIndex("TokenValue")
                         .IsUnique();
@@ -541,6 +663,30 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                         .IsUnique();
 
                     b.ToTable("user_logins", (string)null);
+                });
+
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AppLdapAccessEntity", b =>
+                {
+                    b.HasOne("QuantumZhou.Identity.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AppRegistrationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("QuantumZhou.Identity.Database.Entity.LdapCredentialEntity", null)
+                        .WithMany()
+                        .HasForeignKey("LdapCredentialId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.LdapCredentialEntity", b =>
+                {
+                    b.HasOne("QuantumZhou.Identity.Database.Entity.AccountEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

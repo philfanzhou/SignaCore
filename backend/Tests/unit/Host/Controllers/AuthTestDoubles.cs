@@ -44,7 +44,12 @@ internal static class AuthTestDoubles
     public static Mock<IRefreshTokenService> RefreshTokenService()
     {
         var mock = new Mock<IRefreshTokenService>();
-        mock.Setup(s => s.HandleRefreshTokenAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<AccountEntity>(), It.IsAny<string?>()))
+        mock.Setup(s => s.HandleRefreshTokenAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<AccountEntity>(),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>()))
             .ReturnsAsync("refresh");
         mock.Setup(s => s.RevokeAsync(It.IsAny<string>())).ReturnsAsync(true);
         return mock;

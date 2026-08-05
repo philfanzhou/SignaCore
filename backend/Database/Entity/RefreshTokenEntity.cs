@@ -15,4 +15,7 @@ public class RefreshTokenEntity
     public bool IsRevoked { get; set; }
 
     public string AppId { get; set; } = string.Empty;
+
+    /// <summary>LDAP identity that authenticated the original session; null otherwise.</summary>
+    public Guid? LdapCredentialId { get; set; }
 }

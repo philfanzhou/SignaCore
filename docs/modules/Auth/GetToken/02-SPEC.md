@@ -14,6 +14,7 @@
 - [ ] FR-04: 短信验证码登录验证（SmsValidator），支持自动注册
 - [ ] FR-05: 微信 code 登录验证（WechatValidator）
 - [ ] FR-06: 刷新令牌验证（RefreshTokenValidator），AppId 匹配检查
+- [ ] FR-06A: LDAP/Active Directory 登录，按 App 独立执行禁用、管理员准入或自动开户策略
 - [ ] FR-07: 构建基本 Claims（sub, jti, iat, name, nickname, auth_method, client_id）
 - [ ] FR-08: 回调权限注入（如有 CallbackUrl），对回调返回的 Claim 施加数量和长度限制
 - [ ] FR-09: 使用 RSA 密钥签发 JWT
@@ -36,9 +37,9 @@
 
 ```json
 {
-  "grantType": "password | sms | wechat_code | refresh_token",
-  "username": "string (grantType=password 时必填)",
-  "password": "string (grantType=password 时必填)",
+  "grantType": "password | sms | wechat_code | ldap | refresh_token",
+  "username": "string (grantType=password 或 ldap 时必填)",
+  "password": "string (grantType=password 或 ldap 时必填)",
   "phone": "string (grantType=sms 时必填)",
   "code": "string (grantType=sms 或 wechat_code 时必填)",
   "refreshToken": "string (grantType=refresh_token 时必填)"
@@ -179,6 +180,15 @@
 - **Given** SMS/微信 grant 对应的账户恰好是 bootstrap account
 - **When** 调用 GetToken(grantType="sms" 或 "wechat_code")
 - **Then** 不触发 bootstrap admin 注入，JWT 角色完全由 callback 决定
+
+### AC-FR-06A: LDAP 登录
+
+- 每个 App 独立配置 `Disabled`、`ManualApproval` 或 `AutoProvision`。
+- `ManualApproval` 下，只有管理员为当前 App 建立的 LDAP 授权才会连接域控验证；未授权用户直接返回统一认证失败。
+- `AutoProvision` 下，LDAP 验证成功后按 `DirectoryKey + objectGUID` 创建或复用全局账户，并建立当前 App 的自动授权。
+- 自动授权不能满足其他 App 的人工准入，也不能在 App 从自动模式切换为人工模式后冒充管理员授权。
+- LDAP 不同步部门、邮箱、职位、组、OU 或其他目录资料；管理员重新授权同一 `objectGUID` 时可显式更新登录名别名。
+- LDAP refresh token 换票时重新检查 App 策略、App 授权及目录账号启用状态。
 
 ### AC-FR-08: 回调权限注入
 

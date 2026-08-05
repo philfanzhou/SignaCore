@@ -4,6 +4,11 @@ namespace QuantumZhou.Identity.Domain.Services;
 
 public interface IRefreshTokenService
 {
-    Task<string?> HandleRefreshTokenAsync(string grantType, string? existingRefreshToken, AccountEntity account, string? appId);
+    Task<string?> HandleRefreshTokenAsync(
+        string grantType,
+        string? existingRefreshToken,
+        AccountEntity account,
+        string? appId,
+        Guid? ldapCredentialId = null);
     Task<bool> RevokeAsync(string token);
 }

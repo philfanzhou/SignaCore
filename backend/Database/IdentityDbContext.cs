@@ -29,6 +29,8 @@ public class IdentityDbContext : DbContext
     public DbSet<LoginAttemptEntity> LoginAttempts => Set<LoginAttemptEntity>();
     public DbSet<LoginHistoryEntity> LoginHistories => Set<LoginHistoryEntity>();
     public DbSet<AuditLogEntity> AuditLogs => Set<AuditLogEntity>();
+    public DbSet<LdapCredentialEntity> LdapCredentials => Set<LdapCredentialEntity>();
+    public DbSet<AppLdapAccessEntity> AppLdapAccesses => Set<AppLdapAccessEntity>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -117,7 +119,9 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.IsRevoked).HasColumnName("is_revoked");
             ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
             entity.Property(e => e.AppId).HasColumnName("app_id").HasMaxLength(IdentityConstants.MaxAppIdLength).IsRequired();
+            entity.Property(e => e.LdapCredentialId).HasColumnName("ldap_credential_id");
             entity.HasIndex(e => e.TokenValue).IsUnique();
+            entity.HasIndex(e => e.LdapCredentialId);
         });
 
         modelBuilder.Entity<AppRegistrationEntity>(entity =>
@@ -133,7 +137,46 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.IsActive).HasColumnName("is_active");
             ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
             ConfigureInstant(entity.Property(e => e.CallbackExpiresAt).HasColumnName("callback_expires_at"));
+            entity.Property(e => e.LdapLoginMode).HasColumnName("ldap_login_mode");
             entity.HasIndex(e => e.AppIdNormalized).IsUnique();
+        });
+
+        modelBuilder.Entity<LdapCredentialEntity>(entity =>
+        {
+            entity.ToTable("ldap_credentials");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.AccountId).HasColumnName("account_id");
+            entity.Property(e => e.DirectoryKey).HasColumnName("directory_key").HasMaxLength(IdentityConstants.MaxDirectoryKeyLength);
+            entity.Property(e => e.DirectoryKeyNormalized).HasColumnName("directory_key_normalized").HasMaxLength(IdentityConstants.MaxDirectoryKeyLength);
+            entity.Property(e => e.ObjectGuid).HasColumnName("object_guid");
+            entity.Property(e => e.UserPrincipalName).HasColumnName("user_principal_name").HasMaxLength(IdentityConstants.MaxProviderUserIdLength);
+            entity.Property(e => e.UserPrincipalNameNormalized).HasColumnName("user_principal_name_normalized").HasMaxLength(IdentityConstants.MaxProviderUserIdLength);
+            entity.Property(e => e.SamAccountName).HasColumnName("sam_account_name").HasMaxLength(IdentityConstants.MaxUsernameLength);
+            entity.Property(e => e.SamAccountNameNormalized).HasColumnName("sam_account_name_normalized").HasMaxLength(IdentityConstants.MaxUsernameLength);
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            entity.HasIndex(e => e.AccountId);
+            entity.HasIndex(e => new { e.DirectoryKeyNormalized, e.ObjectGuid }).IsUnique();
+            entity.HasIndex(e => new { e.DirectoryKeyNormalized, e.UserPrincipalNameNormalized }).IsUnique();
+            entity.HasIndex(e => new { e.DirectoryKeyNormalized, e.SamAccountNameNormalized }).IsUnique();
+            entity.HasOne<AccountEntity>().WithMany().HasForeignKey(e => e.AccountId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AppLdapAccessEntity>(entity =>
+        {
+            entity.ToTable("app_ldap_accesses");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.AppRegistrationId).HasColumnName("app_registration_id");
+            entity.Property(e => e.LdapCredentialId).HasColumnName("ldap_credential_id");
+            entity.Property(e => e.ApprovalSource).HasColumnName("approval_source");
+            entity.Property(e => e.IsActive).HasColumnName("is_active");
+            entity.Property(e => e.ApprovedBy).HasColumnName("approved_by");
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            entity.HasIndex(e => new { e.AppRegistrationId, e.LdapCredentialId }).IsUnique();
+            entity.HasIndex(e => e.LdapCredentialId);
+            entity.HasOne<AppRegistrationEntity>().WithMany().HasForeignKey(e => e.AppRegistrationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<LdapCredentialEntity>().WithMany().HasForeignKey(e => e.LdapCredentialId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<SecurityKeyEntity>(entity =>
@@ -287,6 +330,14 @@ public class IdentityDbContext : DbContext
         {
             entry.Entity.ProviderNameNormalized =
                 IdentityValueNormalizer.Normalize(entry.Entity.ProviderName);
+        }
+
+        foreach (var entry in ChangeTracker.Entries<LdapCredentialEntity>()
+                     .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            entry.Entity.DirectoryKeyNormalized = IdentityValueNormalizer.Normalize(entry.Entity.DirectoryKey);
+            entry.Entity.UserPrincipalNameNormalized = IdentityValueNormalizer.Normalize(entry.Entity.UserPrincipalName);
+            entry.Entity.SamAccountNameNormalized = IdentityValueNormalizer.Normalize(entry.Entity.SamAccountName);
         }
     }
 }

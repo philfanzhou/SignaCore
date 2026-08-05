@@ -12,6 +12,7 @@ using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Models;
 using QuantumZhou.Identity.Domain.Services;
+using QuantumZhou.Identity.Domain.Services.Ldap;
 using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Host.Http;
 using QuantumZhou.Identity.Host.Models;
@@ -352,7 +353,8 @@ public class AdminController : ControllerBase
                 app.CallbackUrl,
                 app.CallbackExpiresAt,
                 app.IsActive,
-                app.CreatedAt
+                app.CreatedAt,
+                app.LdapLoginMode
             })
             .ToList();
 
@@ -362,7 +364,8 @@ public class AdminController : ControllerBase
             app.CallbackUrl ?? string.Empty,
             app.CallbackExpiresAt.HasValue ? app.CallbackExpiresAt.Value.ToUnixTimeSeconds() : null,
             app.IsActive,
-            app.CreatedAt.ToUnixTimeSeconds()))
+            app.CreatedAt.ToUnixTimeSeconds(),
+            app.LdapLoginMode.ToString()))
             .ToList();
 
         return Ok((IReadOnlyList<AdminAppListItemResponse>)items);
@@ -465,6 +468,223 @@ public class AdminController : ControllerBase
             actorId, actorName, $"Admin deleted app: {app.AppName}", GetClientIp());
 
         return Ok(new OperationResponse(true, "App deleted."));
+    }
+
+    [HttpPut("apps/{appId}/ldap-policy")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> UpdateLdapPolicy(
+        string appId,
+        [FromBody] AdminUpdateLdapPolicyRequest request,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IAuditService auditService)
+    {
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        if (app == null)
+        {
+            return NotFound(new ErrorResponse("App not found."));
+        }
+
+        if (!Enum.TryParse<LdapLoginMode>(request.Mode, true, out var mode) ||
+            !Enum.IsDefined(mode))
+        {
+            return BadRequest(new ErrorResponse("Invalid LDAP login mode."));
+        }
+
+        var before = app.LdapLoginMode;
+        app.LdapLoginMode = mode;
+        await unitOfWork.SaveChangesAsync();
+
+        var (actorId, actorName) = GetAdminIdentity();
+        await auditService.RecordActionAsync(
+            "app_ldap_policy_updated",
+            "AppRegistration",
+            appId,
+            actorId,
+            actorName,
+            $"LDAP login mode changed from {before} to {mode}",
+            GetClientIp(),
+            before: new { Mode = before.ToString() },
+            after: new { Mode = mode.ToString() });
+
+        return Ok(new OperationResponse(true, "LDAP login policy updated."));
+    }
+
+    [HttpGet("apps/{appId}/ldap-users")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> GetLdapUsers(
+        string appId,
+        [FromServices] IdentityDbContext dbContext)
+    {
+        var app = await dbContext.AppRegistrations.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId));
+        if (app == null)
+        {
+            return NotFound(new ErrorResponse("App not found."));
+        }
+
+        var users = await dbContext.AppLdapAccesses.AsNoTracking()
+            .Where(access => access.AppRegistrationId == app.Id)
+            .Join(dbContext.LdapCredentials.AsNoTracking(),
+                access => access.LdapCredentialId,
+                credential => credential.Id,
+                (access, credential) => new { access, credential })
+            .OrderByDescending(item => item.access.CreatedAt)
+            .Select(item => new AdminLdapUserResponse(
+                item.credential.Id.ToString(),
+                item.credential.AccountId.ToString(),
+                item.credential.UserPrincipalName,
+                item.credential.SamAccountName,
+                item.credential.DirectoryKey,
+                item.access.ApprovalSource.ToString(),
+                item.access.IsActive,
+                item.access.CreatedAt.ToUnixTimeSeconds()))
+            .ToListAsync();
+
+        return Ok((IReadOnlyList<AdminLdapUserResponse>)users);
+    }
+
+    [HttpGet("ldap/directories")]
+    [Authorize(Policy = "AdminSession")]
+    public IActionResult GetLdapDirectories([FromServices] LdapOptions options)
+    {
+        return Ok(options.Directories.Select(directory => new
+        {
+            directory.Key,
+            IsDefault = string.Equals(
+                directory.Key,
+                options.DefaultDirectoryKey,
+                StringComparison.OrdinalIgnoreCase)
+        }));
+    }
+
+    [HttpPost("apps/{appId}/ldap-users")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> AddLdapUser(
+        string appId,
+        [FromBody] AdminAddLdapUserRequest request,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] ILdapDirectoryClient directoryClient,
+        [FromServices] ILdapAccountService ldapAccountService,
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.DirectoryKey) ||
+            string.IsNullOrWhiteSpace(request.Username))
+        {
+            return BadRequest(new ErrorResponse("Directory key and username are required."));
+        }
+
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        if (app == null)
+        {
+            return NotFound(new ErrorResponse("App not found."));
+        }
+
+        LdapDirectoryIdentity? identity;
+        try
+        {
+            identity = await directoryClient.FindUserAsync(
+                request.DirectoryKey.Trim(),
+                request.Username.Trim(),
+                cancellationToken);
+        }
+        catch (KeyNotFoundException)
+        {
+            return BadRequest(new ErrorResponse("LDAP directory is not configured."));
+        }
+        catch (LdapDirectoryUnavailableException exception)
+        {
+            _logger.LogError(exception, "LDAP directory unavailable while adding an application user");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                new ErrorResponse("Directory service unavailable."));
+        }
+
+        if (identity == null)
+        {
+            return NotFound(new ErrorResponse("LDAP user not found."));
+        }
+        if (!identity.IsEnabled)
+        {
+            return BadRequest(new ErrorResponse("LDAP user is disabled."));
+        }
+
+        var (actorId, actorName) = GetAdminIdentity();
+        var result = await ldapAccountService.ProvisionAsync(
+            identity,
+            app,
+            LdapAccessApprovalSource.Admin,
+            actorId,
+            cancellationToken);
+
+        await auditService.RecordActionAsync(
+            "app_ldap_user_approved",
+            "AppRegistration",
+            appId,
+            actorId,
+            actorName,
+            $"Administrator approved LDAP identity {identity.ObjectGuid} for the application",
+            GetClientIp(),
+            after: new
+            {
+                AccountId = result.Account.Id,
+                CredentialId = result.Credential.Id,
+                identity.DirectoryKey
+            });
+
+        return Ok(new AdminLdapUserResponse(
+            result.Credential.Id.ToString(),
+            result.Account.Id.ToString(),
+            result.Credential.UserPrincipalName,
+            result.Credential.SamAccountName,
+            result.Credential.DirectoryKey,
+            result.Access.ApprovalSource.ToString(),
+            result.Access.IsActive,
+            result.Access.CreatedAt.ToUnixTimeSeconds()));
+    }
+
+    [HttpDelete("apps/{appId}/ldap-users/{credentialId:guid}")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> RevokeLdapUser(
+        string appId,
+        Guid credentialId,
+        [FromServices] IdentityDbContext dbContext,
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
+    {
+        var app = await dbContext.AppRegistrations.FirstOrDefaultAsync(
+            item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId),
+            cancellationToken);
+        if (app == null)
+        {
+            return NotFound(new ErrorResponse("App not found."));
+        }
+
+        var access = await dbContext.AppLdapAccesses.FirstOrDefaultAsync(item =>
+            item.AppRegistrationId == app.Id && item.LdapCredentialId == credentialId,
+            cancellationToken);
+        if (access == null)
+        {
+            return NotFound(new ErrorResponse("LDAP application access not found."));
+        }
+
+        access.IsActive = false;
+        await dbContext.RefreshTokens
+            .Where(token => token.AppId == app.AppId && token.LdapCredentialId == credentialId && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(token => token.IsRevoked, true), cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var (actorId, actorName) = GetAdminIdentity();
+        await auditService.RecordActionAsync(
+            "app_ldap_user_revoked",
+            "AppRegistration",
+            appId,
+            actorId,
+            actorName,
+            $"Administrator revoked LDAP credential {credentialId} from the application",
+            GetClientIp());
+
+        return Ok(new OperationResponse(true, "LDAP application access revoked."));
     }
 
     [HttpPost("apps/{appId}/reset-secret")]

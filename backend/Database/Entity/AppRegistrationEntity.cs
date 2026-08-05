@@ -30,4 +30,7 @@ public class AppRegistrationEntity
 
     /// <summary>When the callback registration expires.</summary>
     public DateTimeOffset? CallbackExpiresAt { get; set; }
+
+    /// <summary>LDAP admission policy for this application. Disabled by default.</summary>
+    public LdapLoginMode LdapLoginMode { get; set; } = LdapLoginMode.Disabled;
 }

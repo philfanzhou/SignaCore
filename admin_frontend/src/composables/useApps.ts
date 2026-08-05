@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { type AdminApp } from '../services/adminApi'
+import { type AdminApp, type AdminLdapDirectory, type AdminLdapUser } from '../services/adminApi'
 import { adminClient } from '../services/apiClient'
 import { normalizeTtlValue } from '../utils/format'
 import { handleApiError } from './useSession'
@@ -11,7 +11,11 @@ const creatingApp = ref(false)
 const savingCallback = ref(false)
 const resettingSecret = ref(false)
 const deletingApp = ref(false)
+const loadingLdapUsers = ref(false)
+const addingLdapUser = ref(false)
 const apps = ref<AdminApp[]>([])
+const ldapUsers = ref<AdminLdapUser[]>([])
+const ldapDirectories = ref<AdminLdapDirectory[]>([])
 const latestCreatedAppSecret = ref('')
 const latestSecretAppId = ref('')
 const showSecretDialog = ref(false)
@@ -38,7 +42,10 @@ const callbackForm = reactive({
   ttlUnit: 'h' as 'h' | 'd',
   neverExpire: false,
   isActive: true,
+  ldapLoginMode: 'Disabled' as AdminApp['ldapLoginMode'],
 })
+
+const ldapUserForm = reactive({ directoryKey: '', username: '' })
 
 const selectedApp = computed(() => apps.value.find((item) => item.appId === callbackForm.appId) ?? null)
 
@@ -191,6 +198,7 @@ function fillCallbackForm(app: AdminApp) {
     }
   }
   callbackForm.isActive = app.isActive
+  callbackForm.ldapLoginMode = app.ldapLoginMode
 }
 
 function onAppSelected() {
@@ -214,12 +222,15 @@ async function handleSaveCallback(): Promise<boolean> {
       : callbackForm.ttlUnit === 'd'
         ? normalizeTtlValue(callbackForm.ttlSeconds) * 86400
         : normalizeTtlValue(callbackForm.ttlSeconds) * 3600
-    await adminClient.updateCallback(callbackForm.appId, {
-      callbackUrl: callbackForm.callbackUrl || undefined,
-      ttlSeconds,
-      isActive: callbackForm.isActive,
-    })
-    ElMessage.success('回调配置保存成功')
+    await Promise.all([
+      adminClient.updateCallback(callbackForm.appId, {
+        callbackUrl: callbackForm.callbackUrl || undefined,
+        ttlSeconds,
+        isActive: callbackForm.isActive,
+      }),
+      adminClient.updateLdapPolicy(callbackForm.appId, callbackForm.ldapLoginMode),
+    ])
+    ElMessage.success('应用配置保存成功')
     await loadApps()
     return true
   } catch (error) {
@@ -281,9 +292,67 @@ function openAppDrawer(app: AdminApp) {
   appDrawerApp.value = app
   fillCallbackForm(app)
   appDrawerVisible.value = true
+  void loadLdapUsers(app.appId)
   requestAnimationFrame(() => requestAnimationFrame(() => {
     appDrawerOpen.value = true
   }))
+}
+
+async function loadLdapUsers(appId: string) {
+  loadingLdapUsers.value = true
+  try {
+    const [users, directories] = await Promise.all([
+      adminClient.getAppLdapUsers(appId),
+      ldapDirectories.value.length ? Promise.resolve(ldapDirectories.value) : adminClient.getLdapDirectories(),
+    ])
+    ldapUsers.value = users
+    ldapDirectories.value = directories
+    if (!ldapUserForm.directoryKey) {
+      ldapUserForm.directoryKey = directories.find(item => item.isDefault)?.key ?? directories[0]?.key ?? ''
+    }
+  } catch (error) {
+    handleApiError('加载 LDAP 授权失败', error)
+  } finally {
+    loadingLdapUsers.value = false
+  }
+}
+
+async function addLdapUser() {
+  const app = appDrawerApp.value
+  if (!app || !ldapUserForm.directoryKey || !ldapUserForm.username.trim()) {
+    ElMessage.warning('请选择目录并输入域账号')
+    return
+  }
+  addingLdapUser.value = true
+  try {
+    await adminClient.addAppLdapUser(app.appId, ldapUserForm.directoryKey, ldapUserForm.username.trim())
+    ldapUserForm.username = ''
+    ElMessage.success('LDAP 用户已授权')
+    await loadLdapUsers(app.appId)
+  } catch (error) {
+    handleApiError('添加 LDAP 用户失败', error)
+  } finally {
+    addingLdapUser.value = false
+  }
+}
+
+async function revokeLdapUser(user: AdminLdapUser) {
+  const app = appDrawerApp.value
+  if (!app) return
+  try {
+    await ElMessageBox.confirm(`确定撤销 ${user.username} 对当前应用的 LDAP 登录权限吗？`, '撤销 LDAP 授权', {
+      confirmButtonText: '撤销', cancelButtonText: '取消', type: 'warning',
+    })
+  } catch {
+    return
+  }
+  try {
+    await adminClient.revokeAppLdapUser(app.appId, user.credentialId)
+    ElMessage.success('LDAP 授权已撤销')
+    await loadLdapUsers(app.appId)
+  } catch (error) {
+    handleApiError('撤销 LDAP 授权失败', error)
+  }
 }
 
 function closeAppDrawer() {
@@ -312,6 +381,11 @@ function resetAppsState() {
   callbackForm.ttlUnit = 'h'
   callbackForm.neverExpire = false
   callbackForm.isActive = true
+  callbackForm.ldapLoginMode = 'Disabled'
+  ldapUsers.value = []
+  ldapDirectories.value = []
+  ldapUserForm.directoryKey = ''
+  ldapUserForm.username = ''
   if (appDrawerTimer) { window.clearTimeout(appDrawerTimer); appDrawerTimer = undefined }
   appDrawerOpen.value = false
   appDrawerVisible.value = false
@@ -337,7 +411,12 @@ export function useApps() {
     savingCallback,
     resettingSecret,
     deletingApp,
+    loadingLdapUsers,
+    addingLdapUser,
     apps,
+    ldapUsers,
+    ldapDirectories,
+    ldapUserForm,
     latestCreatedAppSecret,
     latestSecretAppId,
     showSecretDialog,
@@ -369,6 +448,9 @@ export function useApps() {
     copySecret,
     openAppDrawer,
     closeAppDrawer,
+    loadLdapUsers,
+    addLdapUser,
+    revokeLdapUser,
     openDeleteAppModal,
   }
 }

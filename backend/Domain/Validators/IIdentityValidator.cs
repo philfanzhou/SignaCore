@@ -21,6 +21,8 @@ public class ValidationRequest
 
     public string? RefreshToken { get; set; }
     public string? AppId { get; set; }
+    public AppRegistrationEntity? App { get; set; }
+    public CancellationToken CancellationToken { get; set; }
 }
 
 public class ValidationResult
@@ -53,12 +55,19 @@ public class ValidationResult
     /// <summary>展示名，允许为 null（<see cref="Success"/> 的可选参数）。</summary>
     public string? DisplayName { get; private set; }
 
-    public static ValidationResult Success(AccountEntity account, string authMethod, string? displayName = null) => new()
+    public Guid? LdapCredentialId { get; private set; }
+
+    public static ValidationResult Success(
+        AccountEntity account,
+        string authMethod,
+        string? displayName = null,
+        Guid? ldapCredentialId = null) => new()
     {
         IsSuccess = true,
         Account = account,
         AuthMethod = authMethod,
-        DisplayName = displayName
+        DisplayName = displayName,
+        LdapCredentialId = ldapCredentialId
     };
 
     public static ValidationResult Failure(string message) => new()

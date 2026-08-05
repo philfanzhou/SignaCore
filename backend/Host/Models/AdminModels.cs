@@ -34,7 +34,8 @@ public sealed record AdminAppListItemResponse(
     string CallbackUrl,
     long? CallbackExpiresAt,
     bool IsActive,
-    long CreatedAt);
+    long CreatedAt,
+    string LdapLoginMode);
 
 public sealed record AdminCreateAppRequest(string AppName, string? CallbackUrl, int TtlSeconds);
 
@@ -46,6 +47,20 @@ public sealed record AdminCreateAppResponse(
     long? CallbackExpiresAt);
 
 public sealed record AdminUpdateCallbackRequest(string? CallbackUrl, int TtlSeconds, bool IsActive);
+
+public sealed record AdminUpdateLdapPolicyRequest(string Mode);
+
+public sealed record AdminAddLdapUserRequest(string DirectoryKey, string Username);
+
+public sealed record AdminLdapUserResponse(
+    string CredentialId,
+    string UserId,
+    string Username,
+    string SamAccountName,
+    string DirectoryKey,
+    string ApprovalSource,
+    bool IsActive,
+    long CreatedAt);
 
 public sealed record AdminRevokeRefreshTokenRequest(string RefreshToken);
 
