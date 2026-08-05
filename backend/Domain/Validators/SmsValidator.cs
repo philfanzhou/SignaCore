@@ -46,11 +46,10 @@ public class SmsValidator : IIdentityValidator
 
         var maskedPhone = SensitiveDataMasker.MaskPhone(request.Phone);
 
-        var bypassCode = _smsOptions.BypassCode;
-        var verified = !string.IsNullOrEmpty(bypassCode) && request.Code == bypassCode;
+        var verified = IsBypassAllowed(request.Phone, request.Code);
         if (verified)
         {
-            _logger.LogWarning("SMS bypass code used for Phone={Phone} — this should only be enabled in development/staging", maskedPhone);
+            _logger.LogWarning("SMS bypass code used for Phone={Phone} — allow-listed test number, must never cover real users", maskedPhone);
         }
 
         if (!verified)
@@ -100,5 +99,28 @@ public class SmsValidator : IIdentityValidator
 
         _logger.LogInformation("SMS validated successfully: Phone={Phone}", maskedPhone);
         return ValidationResult.Success(account, IdentityConstants.AuthMethodSms);
+    }
+
+    /// <summary>
+    /// 绕过码只在「已配置绕过码」且「手机号在白名单内」时生效。
+    /// 白名单为空即绕过整体禁用——配了绕过码但没配白名单不等于放行所有号码。
+    /// 不匹配时返回 false，调用方继续走正常 OTP 校验（含失败计数与锁定）。
+    /// </summary>
+    private bool IsBypassAllowed(string phone, string code)
+    {
+        var bypassCode = _smsOptions.BypassCode;
+        if (string.IsNullOrEmpty(bypassCode) || _smsOptions.BypassPhones.Count == 0)
+        {
+            return false;
+        }
+
+        if (!string.Equals(code, bypassCode, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var trimmedPhone = phone.Trim();
+        return _smsOptions.BypassPhones.Any(
+            allowed => string.Equals(allowed, trimmedPhone, StringComparison.Ordinal));
     }
 }

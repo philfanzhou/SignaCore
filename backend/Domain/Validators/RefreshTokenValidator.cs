@@ -50,9 +50,9 @@ public class RefreshTokenValidator : IIdentityValidator
         // AppId binding is intentionally NOT enforced here. The refresh token itself is
         // the secret (possession = ownership), and the endpoint already requires a valid
         // AppId/AppSecret pair for gateway validation. Dropping the cross-app restriction
-        // enables the SSO flow: a refresh token issued by user_portal can be exchanged by
-        // teacher_portal (using teacher_portal's AppId) to mint a token carrying the
-        // teacher role via teacher_portal's callback.
+        // enables the SSO flow: a refresh token issued by one registered app can be
+        // exchanged by another (using that app's AppId) to mint a token carrying whatever
+        // roles the second app's callback returns.
         if (!string.IsNullOrEmpty(refreshToken.AppId) && !string.IsNullOrEmpty(request.AppId)
             && IdentityValueNormalizer.Normalize(refreshToken.AppId) !=
                 IdentityValueNormalizer.Normalize(request.AppId))

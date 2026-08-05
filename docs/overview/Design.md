@@ -52,7 +52,7 @@ Database ← Domain ← Service ← Host
 Identity 服务最初使用 gRPC 作为内部服务间通信协议，HTTP REST 仅用于管理 API、OIDC Discovery、JWKS 和健康检查。经实际运行分析，发现 gRPC 在本场景中带来不必要的客户端复杂度：
 
 - **调用频率极低**：gRPC `GetToken` 仅在登录/SSO/令牌刷新时调用，每次登录 1 次；每次请求的认证校验走 JWT 本地验证（JWKS 缓存 30 分钟），不调用 Identity。gRPC 的性能优势无处发挥。
-- **客户端复杂度高**：调用方需引入 proto 契约依赖、gRPC 通道配置、`RpcException` 处理。User Portal 和 Teacher Portal 的 gRPC 客户端注册代码几乎完全重复。
+- **客户端复杂度高**：调用方需引入 proto 契约依赖、gRPC 通道配置、`RpcException` 处理。各业务 BFF 的 gRPC 客户端注册代码几乎完全重复。
 - **SDK 形同虚设**：Identity Client SDK 只有 DocLibrary 一个消费者，三个 Portal 均未使用。
 - **OIDC 发现文档已声明 HTTP 端点**：`/.well-known/openid-configuration` 声明 `token_endpoint = /api/auth/token`，但该 HTTP 端点实际不存在——说明设计意图是 HTTP，只是未落地。
 

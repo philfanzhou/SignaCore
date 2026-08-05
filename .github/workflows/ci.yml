@@ -1,0 +1,170 @@
+name: CI
+
+# 本仓库是 public repo，且部署目标在内网（self-hosted runner）。
+# 安全模型：
+#   - build-test 跑 GitHub 托管 runner，任何人（含 fork PR）都能触发，拿不到 secrets，跑不到内网；
+#   - deploy 跑 self-hosted runner，只在本仓库 main 分支的 push 上触发，fork PR 永远进不来。
+# 这两条不要合并成一个 job。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # 项目 TargetFramework 是 net8.0，但日常开发用 SDK 10 构建（见本地环境）。
+      # runner 预装了 SDK 10，这里补一个 8.0 用于运行 net8.0 测试宿主。
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Build image
+        run: bash build.sh
+
+      - name: Unit tests
+        run: |
+          dotnet restore backend/Tests/unit/QuantumZhou.Identity.Tests.csproj
+          dotnet test backend/Tests/unit/QuantumZhou.Identity.Tests.csproj \
+            --configuration Release \
+            --logger 'trx;logfilename=identity-ut.trx' \
+            --results-directory reports \
+            --no-restore
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: reports/
+          if-no-files-found: ignore
+
+  database-contracts:
+    name: Database Contract Matrix
+    needs: build-test
+    # 不在 PR 上跑：Testcontainers 要冷拉 postgres / mysql / mariadb 三个镜像，
+    # 托管 runner 每次都是干净环境，代价远高于常驻 agent。PR 只保留构建 + 单测。
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # 已知问题：该 job 目前会在托管 runner 上挂死（测试宿主启动后无任何输出）。
+    # 怀疑是 Testcontainers 的 Ryuk 容器或 Docker Hub 匿名拉取限流，尚未定位。
+    # 超时压到 15 分钟，避免一次挂死浪费半小时。
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Database contract matrix
+        # Testcontainers 直接用 runner 上的 docker daemon，托管 runner 不在容器里，
+        # 因此不需要 TESTCONTAINERS_HOST_OVERRIDE。
+        env:
+          RUN_IDENTITY_DATABASE_CONTRACTS: 'true'
+        run: |
+          dotnet restore backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj
+          dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj \
+            --configuration Release \
+            --filter 'FullyQualifiedName~DatabaseContractTests' \
+            --logger 'trx;logfilename=identity-database-contracts.trx' \
+            --results-directory reports \
+            --no-restore
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-contract-results
+          path: reports/
+          if-no-files-found: ignore
+
+  deploy:
+    name: Deploy & Smoke
+    needs: build-test
+    # 三重护栏，缺一不可：
+    #   1. 只在 push 上跑     —— pull_request 事件（含 fork）直接跳过；
+    #   2. 只在 main 上跑     —— 其他分支的 push 不碰生产；
+    #   3. 只在本仓库跑       —— fork 仓库自己的 main push 触发不到这台机器。
+    if: >-
+      github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && github.repository == 'philfanzhou/QuantumZhou.Identity'
+    runs-on: [self-hosted, linux, identity-prod]
+    environment: production
+    timeout-minutes: 20
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      CONSUL_TOKEN: ${{ secrets.CONSUL_TOKEN }}
+      ADMIN_BOOTSTRAP_PASSWORD: ${{ secrets.ADMIN_BOOTSTRAP_PASSWORD }}
+      # 未配置该 secret 时展开为空串——环境变量仍被设置，start.sh 的 ${VAR?} 通过，
+      # 应用侧视为「绕过关闭」。这是刻意的：关掉绕过不需要改脚本。
+      SMS_BYPASS_CODE: ${{ secrets.SMS_BYPASS_CODE }}
+      SMS_BYPASS_PHONES: ${{ secrets.SMS_BYPASS_PHONES }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image on deploy host
+        # start.sh 用的是本机镜像 quantumzhou.identity:<tag>，不走 registry，
+        # 所以镜像必须在这台机器上构建。托管 runner 那次构建只是 PR 期的早失败信号。
+        run: bash build.sh
+
+      - name: Deploy
+        run: |
+          bash start.sh
+          docker ps --filter 'name=ruoyu-identity' --format '{{.Names}} {{.Status}}'
+
+      - name: Smoke test
+        run: |
+          set +e
+          for i in $(seq 1 30); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 \
+              http://localhost:5002/.well-known/openid-configuration 2>/dev/null || echo 000)
+            if [ "$CODE" = "200" ]; then
+              echo "Identity ready after ${i}s"
+              break
+            fi
+            echo "Attempt $i: HTTP $CODE, retrying..."
+            sleep 1
+          done
+
+          echo "=== OIDC discovery ==="
+          curl -s --max-time 5 http://localhost:5002/.well-known/openid-configuration | head -c 300
+          echo ""
+
+          echo "=== Admin login ==="
+          # 绝不回显响应体：里面含 access token，而本仓库的 workflow 日志是全网可读的。
+          LOGIN=$(curl -s -X POST http://localhost:5002/api/auth/token \
+            -H "Content-Type: application/json" \
+            --data-binary @- <<JSON
+          {"grantType":"password","username":"admin","password":"${ADMIN_BOOTSTRAP_PASSWORD}"}
+          JSON
+          )
+          TOKEN=$(echo "$LOGIN" | python3 -c "import sys,json;print(json.load(sys.stdin).get('accessToken',''))" 2>/dev/null)
+
+          if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 500 ]; then
+            echo "Admin login OK, token length=${#TOKEN}"
+            exit 0
+          fi
+          echo "Admin login FAILED"
+          exit 1

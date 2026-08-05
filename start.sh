@@ -11,9 +11,15 @@ HOST_IP="192.168.100.10"
 CONSUL_HTTP_ADDR="${HOST_IP}:8500"
 CONSUL_TOKEN="${CONSUL_TOKEN:-}"
 
-ADMIN_USERNAME="admin"
-ADMIN_PASSWORD="Qwer1234"
-SMS_BYPASS_CODE="666666"
+# 凭据一律由外部注入（GitHub Actions secrets / 运维 shell 环境）。
+# 本仓库是 public repo，任何写死在这里的值等同于对全网公开。
+# 以下展开在停止旧容器之前执行：缺值时部署直接失败，正在跑的容器不受影响。
+#   :?  = 未设置则报错退出（必填）
+#   ?   = 未设置则报错退出，显式设为空串是合法的（用于关闭短信绕过）
+ADMIN_USERNAME="${ADMIN_BOOTSTRAP_USERNAME:-admin}"
+ADMIN_PASSWORD="${ADMIN_BOOTSTRAP_PASSWORD:?ADMIN_BOOTSTRAP_PASSWORD is required (secret store, never commit it)}"
+SMS_BYPASS_CODE="${SMS_BYPASS_CODE?SMS_BYPASS_CODE is required; set it to an empty string to disable the SMS bypass}"
+SMS_BYPASS_PHONES="${SMS_BYPASS_PHONES?SMS_BYPASS_PHONES is required; comma-separated allow list, empty disables the SMS bypass}"
 
 if [ -n "$(docker ps -q --filter "name=^/${CONTAINER_NAME}$")" ]; then
     docker stop "$CONTAINER_NAME"
@@ -39,5 +45,6 @@ docker run -d \
     -e ADMIN_BOOTSTRAP_USERNAME="${ADMIN_USERNAME}" \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Sms__BypassCode="${SMS_BYPASS_CODE}" \
+    -e Sms__BypassPhones="${SMS_BYPASS_PHONES}" \
     -v "${DATA_DIR}:/app/data" \
     "$IMAGE_NAME"

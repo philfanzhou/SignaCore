@@ -74,7 +74,7 @@
 ### UT-12 BootstrapAdminLogin_AlwaysGetsAdminRole
 
 - **Given** `AdminBootstrap:Username = "admin"`，密码登录 `username="admin"`
-- **Given** callback 返回空 roles（模拟从 teacher_portal 登录，未注册为 teacher）
+- **Given** callback 返回空 roles（模拟从某业务应用登录，该账号在那边没有任何业务角色）
 - **When** 调用 GetToken
 - **Then** 最终 claims 中包含 `role=admin`（bootstrap admin 绕过 callback 注入）
 
@@ -134,4 +134,4 @@
 - 回调权限注入成功/失败的集成测试
 - 网关验证失败时的审计日志记录测试
 - 并发刷新令牌场景测试
-- SmsValidator bypass code "666666" 的行为测试
+- SmsValidator 绕过白名单的集成测试（单元测试已覆盖白名单命中/未命中/白名单为空三种分支）

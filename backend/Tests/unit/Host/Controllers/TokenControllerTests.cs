@@ -297,7 +297,7 @@ public class TokenControllerTests
     public async Task BootstrapAdminLogin_AlwaysGetsAdminRole()
     {
         // bootstrap admin "admin" 走 password 登录；回调不返回任何角色
-        // （模拟从 teacher_portal 登录、而该账号并非教师的场景）。
+        // （模拟从某个业务门户登录、而该账号在那边没有任何业务角色的场景）。
         var account = CreateTestAccount();
         var validatorMock = CreatePasswordValidator(account, "admin");
         var controller = CreateController(new[] { validatorMock.Object });

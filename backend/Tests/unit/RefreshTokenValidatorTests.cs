@@ -227,9 +227,9 @@ public class RefreshTokenValidatorTests
     [Fact]
     public async Task ValidateAsync_WithCrossAppExchange_ReturnsSuccess()
     {
-        // SSO scenario: a refresh token issued by user_portal (bound to user_portal AppId)
-        // is exchanged by teacher_portal (using teacher_portal's AppId). The exchange
-        // must succeed so the SSO flow can mint a token carrying the teacher role.
+        // SSO scenario: a refresh token issued by one app (bound to that app's AppId) is
+        // exchanged by a second app (using the second app's AppId). The exchange must
+        // succeed so the SSO flow can mint a token for the second app.
         var context = CreateInMemoryContext();
         var accountId = Guid.NewGuid();
         var account = new AccountEntity
@@ -264,7 +264,7 @@ public class RefreshTokenValidatorTests
         {
             GrantType = IdentityConstants.GrantTypeRefreshToken,
             RefreshToken = "cross_app_refresh_token",
-            AppId = "teacher_portal_app_id"
+            AppId = "second_app_id"
         });
 
         Assert.True(result.IsSuccess);

@@ -157,7 +157,7 @@ TokenResponse
 7. **回调 Claim 注入防护**：`CallbackService` 对外部回调返回的 Claim 施加数量限制（每种类型最多 50 个）和值长度限制（256 字符），CustomClaims 仅允许白名单类型
 8. **SMS 发送器环境隔离**：开发环境使用 `LoggingSmsSender`（掩码记录），生产环境使用 `ThrowingSmsSender`（抛出异常），防止生产环境验证码泄露
 9. **CORS 生产环境保护**：生产环境未配置 `AdminWeb:AllowedOrigins` 时不启用跨域凭据，开发环境默认允许 localhost
-10. **Bootstrap Admin 注入时机在 callback 之后**：callback 可能返回额外角色（如 teacher），这些角色应保留；bootstrap admin 注入仅补充 role=admin，不覆盖已有角色，且通过 `!claims.Any(...)` 去重
+10. **Bootstrap Admin 注入时机在 callback 之后**：callback 可能返回额外的业务角色，这些角色应保留；bootstrap admin 注入仅补充 role=admin，不覆盖已有角色，且通过 `!claims.Any(...)` 去重
 11. **password / refresh_token 两类 grant 触发**：
     - **password grant** 使用已通过密码验证的 `request.Username` 与 `AdminBootstrap:Username` 比较（大小写不敏感）。
     - **refresh_token grant** 不信任请求体 `username`，改用 `IAccountRepository.GetByPasswordCredentialUsernameAsync(bootstrapUsername)` 取得 bootstrap 账户，再与 RefreshTokenValidator 已验证出的 `AccountEntity.Id` 比较。这保证 bootstrap admin 刷新 Access Token 时仍保留 `role=admin`，同时普通账户无法通过在 refresh 请求体伪造 `username=admin` 提权。

@@ -72,11 +72,22 @@
   },
   {
     "id": "TASK-07",
-    "status": "to_review",
+    "status": "done",
     "depends_on": [],
-    "action": "SmsValidator 中硬编码 bypass code '666666'，需确认是否为测试遗留",
-    "files": ["backend/Domain/Validators/SmsValidator.cs:L44-45"],
-    "acceptance": "确认 bypass code 的用途，生产环境是否需要移除"
+    "action": "绕过码不是遗留，生产依赖它（ThrowingSmsSender 发不出真实短信），但原实现对任意手机号生效且值硬编码在 public repo 的 start.sh 里，等于万能口令。已改为：绕过码必须配合 Sms:BypassPhones 白名单，白名单为空即整体禁用；绕过码与管理员密码从部署脚本移除，改由 CI 密钥库注入",
+    "files": [
+      "backend/Domain/Validators/SmsValidator.cs",
+      "backend/Domain/Services/Sms/SmsOptions.cs",
+      "backend/Host/ServiceCollectionExtensions.cs",
+      "start.sh",
+      "backend/Tests/unit/Domain/SmsValidatorTests.cs"
+    ],
+    "acceptance": [
+      "白名单内号码 + 绕过码 → 成功且不调用 IOtpService.VerifyAsync",
+      "白名单外号码 + 绕过码 → 落回 OTP 校验并失败，不自动注册账号",
+      "配了绕过码但白名单为空 → 绕过禁用",
+      "start.sh 缺少 ADMIN_BOOTSTRAP_PASSWORD / SMS_BYPASS_CODE / SMS_BYPASS_PHONES 时在停止旧容器之前退出"
+    ]
   },
   {
     "id": "TASK-08",

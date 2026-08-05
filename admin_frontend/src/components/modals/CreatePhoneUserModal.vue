@@ -31,7 +31,7 @@ const {
         </div>
         <div class="field">
           <label>备注</label>
-          <input v-model="createPhoneUserForm.remark" class="input" style="width: 100%" placeholder="如 家长账号 · 关联学生xxx">
+          <input v-model="createPhoneUserForm.remark" class="input" style="width: 100%" placeholder="如 备用联系人账号">
         </div>
         <div class="modal-actions">
           <button class="btn btn-ghost" @click="showCreatePhoneUserDialog = false">取消</button>
