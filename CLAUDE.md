@@ -31,7 +31,9 @@ dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.cspr
 cd admin_frontend && npm install && npm run dev   # :5173，代理到 :5002
 ```
 
-CI（`.github/workflows/ci.yml`，唯一流水线）**只做构建与测试，不做部署**：`build-test`（构建镜像 + 单元测试，~90 秒）→ `database-contracts`（四库契约矩阵，~30 秒），两个 job 都跑 GitHub 托管 runner。发布由人工在部署机上执行（`build.sh` → `start.sh` → 冒烟），见 `docs/development/Deployment.md`。托管 runner 跑 Testcontainers 必须保留 `TESTCONTAINERS_RYUK_DISABLED=true` 与 `--blame-hang`，否则任何卡死都表现为整个 job 静默到超时。测试里的非 ASCII 字面量一律用转义写法（`\u00C9` 而非 `É`）——曾有字面量被误按 GBK 解码再存回 UTF-8，`CAFÉ` 变成汉字 `CAF脡`，让契约矩阵长期失败。
+CI（`.github/workflows/ci.yml`，唯一流水线）**只做构建与测试，不做部署**：`build-test`（构建镜像 → 单元测试 → HTTP 端点契约测试 → 真容器冒烟，~2 分钟）→ `database-contracts`（四库契约矩阵，~80 秒），两个 job 都跑 GitHub 托管 runner。发布由人工在部署机上执行（`build.sh` → `start.sh` → 冒烟），见 `docs/development/Deployment.md`。托管 runner 跑 Testcontainers 必须保留 `TESTCONTAINERS_RYUK_DISABLED=true` 与 `--blame-hang`，否则任何卡死都表现为整个 job 静默到超时。
+
+`build-test` 尾部的冒烟起真容器 + 真 PostgreSQL 15，黑盒断言 JWKS、token 失败契约、SPA 标题注入、`/metrics` 与 `__EFMigrationsHistory`，覆盖进程内宿主测试够不到的运行时层（镜像 `wwwroot`、entrypoint、完整启动序列下的迁移链）。它复用同一个 job 里已构建好的镜像——**新开 job 拿不到这个镜像**，只能重跑 `build.sh` 或走 artifact，两者都更慢。冒烟用的凭据一律在 job 内 `openssl rand` 现生成并 `::add-mask::`，不进 secrets；`ADMIN_BOOTSTRAP_PASSWORD` 必须满足 `DefaultPasswordPolicy`（≥8 位 + 大写 + 小写 + 数字），纯 hex 随机串会让容器在 bootstrap admin 处启动失败。测试里的非 ASCII 字面量一律用转义写法（`\u00C9` 而非 `É`）——曾有字面量被误按 GBK 解码再存回 UTF-8，`CAFÉ` 变成汉字 `CAF脡`，让契约矩阵长期失败。
 
 **本仓库是 public repo**：凭据（管理员密码、短信绕过码与白名单、AppSecret）一律不写进脚本或文档，发布时由部署机上的环境变量注入；workflow 日志全网可读，任何步骤都不得回显 token、密码或响应体。**不要往 CI 里加 self-hosted runner 的 job**——public 仓库下 fork PR 能改 workflow，等于给了陌生人在部署机上执行代码的入口；部署留在人工侧就是为了不存在这个入口。
 
