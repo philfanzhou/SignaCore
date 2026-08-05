@@ -173,12 +173,17 @@ jobs:
             || fail "token 响应缺 unsupported_grant_type: $(cat /tmp/token.json)"
 
           # 3. SPA：Vue 产物真的进了镜像 wwwroot，且 AdminSpaTitleInjector 在运行时
-          #    把 index.html 的 __APP_TITLE__ 换成了 APP_TITLE。这两条只有真容器能验。
+          #    做了两件事——换掉 <title> 里的占位符、注入 window.__APP_TITLE__ 供前端读。
+          #    这两条只有真容器能验。注意 window.__APP_TITLE__ 是变量名，本就该出现在
+          #    输出里，所以只能断言 <title> 标签内的占位符已消失，不能全文找占位符。
           index="$(curl -fsS --max-time 10 http://localhost:5002/)"
           echo "$index" | grep -q '<div id="app">' || fail 'SPA 根路径返回的不像 Vue 产物'
-          echo "$index" | grep -q 'Identity CI Smoke' || fail 'APP_TITLE 未注入 index.html'
-          if echo "$index" | grep -q '__APP_TITLE__'; then
-            fail 'index.html 里仍残留 __APP_TITLE__ 占位符'
+          echo "$index" | grep -q '<title>Identity CI Smoke</title>' \
+            || fail 'APP_TITLE 未注入 <title>'
+          echo "$index" | grep -q "window.__APP_TITLE__ = 'Identity CI Smoke'" \
+            || fail '未注入 window.__APP_TITLE__ 脚本'
+          if echo "$index" | grep -q '<title>__APP_TITLE__</title>'; then
+            fail '<title> 里仍残留 __APP_TITLE__ 占位符'
           fi
 
           # 4. /metrics 路由在（空指标时 exporter 可能返回 204，所以只排除 4xx/5xx）
