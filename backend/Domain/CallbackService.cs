@@ -70,7 +70,7 @@ public class CallbackService : ICallbackService
                     .Take(MaxClaimsPerType);
                 foreach (var role in validRoles)
                 {
-                    claims.Add(new Claim(ClaimTypes.Role, role));
+                    claims.Add(new Claim(IdentityConstants.ClaimRole, role));
                 }
                 if (result.Roles.Count > MaxClaimsPerType)
                 {

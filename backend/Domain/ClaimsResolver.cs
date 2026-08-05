@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
+using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
 
 namespace QuantumZhou.Identity.Domain;
@@ -28,19 +29,19 @@ public class ClaimsResolver
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, account.Id.ToString()),
+            new(IdentityConstants.ClaimSubject, account.Id.ToString()),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             new(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
         };
 
         if (!string.IsNullOrEmpty(displayName))
         {
-            claims.Add(new Claim(ClaimTypes.Name, displayName));
+            claims.Add(new Claim(IdentityConstants.ClaimName, displayName));
         }
 
         if (!string.IsNullOrEmpty(account.Nickname))
         {
-            claims.Add(new Claim("nickname", account.Nickname));
+            claims.Add(new Claim(IdentityConstants.ClaimNickname, account.Nickname));
         }
 
         _logger.LogDebug("Resolved {Count} basic claims for account {AccountId}",

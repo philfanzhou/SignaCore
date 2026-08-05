@@ -22,12 +22,13 @@ import time
 # PKCS#1 v1.5 里 SHA-256 的 DigestInfo DER 前缀（RFC 8017 §9.2）
 SHA256_DIGEST_INFO_PREFIX = bytes.fromhex("3031300d060960864801650304020105000420")
 
-# 主体 claim 可能出现的名字，从标准短名到 .NET 的完整 XML schema URI
-SUBJECT_CLAIM_NAMES = (
-    "sub",
-    "nameid",
-    "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier",
-)
+# 签发的 token 一律用标准短名。这里不再接受 nameid 或 .NET 的长 URI：
+# 契约既然定了，就让偏离它的改动在 CI 上直接失败。
+SUBJECT_CLAIM_NAME = "sub"
+
+# 回退护栏：claim 名字一旦又变成 ClaimTypes.* 的完整 XML schema URI，立刻报错。
+# 长 URI 只有开着 MapInboundClaims 的 .NET 下游能无感消费，非 .NET 下游会踩坑。
+LEGACY_CLAIM_PREFIX = "http://schemas."
 
 
 def b64url_decode(value: str) -> bytes:
@@ -100,13 +101,12 @@ def main() -> None:
     if expected_audience not in audiences:
         fail(f"aud 不匹配：期望 {expected_audience}，实际 {audience}")
 
-    # 主体 claim 的实际名字：本服务签出的 token 用的是完整 XML schema URI
-    # （ClaimsResolver 写 ClaimTypes.NameIdentifier，出站短名映射没有生效），
-    # 不是 sub 也不是 nameid。.NET 下游用 JwtBearer 会自动映射回 ClaimTypes.*，
-    # 所以能正常工作；非 .NET 下游拿到的是长 URI。三种写法都认，避免这里的断言
-    # 反过来把 token 形状钉死在某一种映射配置上。
-    if not any(payload.get(name) for name in SUBJECT_CLAIM_NAMES):
-        fail(f"payload 里找不到主体 claim，claims={sorted(payload)}")
+    if not payload.get(SUBJECT_CLAIM_NAME):
+        fail(f"payload 缺 {SUBJECT_CLAIM_NAME}，claims={sorted(payload)}")
+
+    legacy = [name for name in payload if name.startswith(LEGACY_CLAIM_PREFIX)]
+    if legacy:
+        fail(f"token 里出现了 ClaimTypes.* 长 URI，应为标准短名：{sorted(legacy)}")
 
     expires_at = payload.get("exp")
     if not isinstance(expires_at, int):

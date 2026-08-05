@@ -233,17 +233,15 @@ app.MapGet("/.well-known/openid-configuration", (HttpContext httpContext, IConfi
         response_types_supported = new[] { "token" },
         subject_types_supported = new[] { "public" },
         id_token_signing_alg_values_supported = new[] { "RS256" },
-        // 这里必须是 token 里**实际**出现的 claim 名字。主体/姓名/角色用的是完整
-        // XML schema URI 而不是 sub / name / role——ClaimsResolver 写的是 ClaimTypes.*，
-        // 出站短名映射没有生效。.NET 下游用 JwtBearer 会自动映射回 ClaimTypes.*，所以无感；
-        // 非 .NET 下游只能按这里列出的名字去读。用常量而不是字面量，免得两边再次漂移。
+        // 必须与 token 里实际出现的 claim 名字一致。用常量而不是字面量，免得两边漂移——
+        // 这里曾经写着 sub/name/role 而 token 里实际是 ClaimTypes.* 长 URI。
         claims_supported = new[]
         {
-            ClaimTypes.NameIdentifier,
-            ClaimTypes.Name,
-            ClaimTypes.Role,
+            IdentityConstants.ClaimSubject,
+            IdentityConstants.ClaimName,
+            IdentityConstants.ClaimRole,
             IdentityConstants.ClaimAuthMethod,
-            "nickname"
+            IdentityConstants.ClaimNickname
         }
     });
 });

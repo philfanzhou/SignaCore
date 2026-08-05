@@ -234,6 +234,28 @@ jobs:
           python3 .github/scripts/verify_jwt.py /tmp/access_token /tmp/jwks.json \
             'QuantumZhou.Identity' 'QuantumZhou.microservices'
 
+          # 本服务自己也消费这枚 token：/api/profile/* 走 JwtBearer + UserProfile 策略，
+          # ProfileController 读的是 ClaimTypes.NameIdentifier。claim 改成标准短名后，
+          # 这条自消费链路要靠 MapInboundClaims 把 sub 映射回 ClaimTypes.NameIdentifier
+          # 才成立——所以真调一次，别只靠推理。
+          status="$(curl -sS --max-time 10 -o /tmp/profile.json -w '%{http_code}' \
+            -H "Authorization: Bearer $(cat /tmp/access_token)" \
+            http://localhost:5002/api/profile/me)"
+          [ "$status" = '200' ] || {
+            echo "/api/profile/me 返回 $status（期望 200）"; cat /tmp/profile.json; exit 1;
+          }
+
+          python3 - <<'PY'
+          import base64, json, sys
+          def b64u(value):
+              return base64.urlsafe_b64decode(value + '=' * (-len(value) % 4))
+          subject = json.loads(b64u(open('/tmp/access_token').read().split('.')[1]))['sub']
+          user_id = json.load(open('/tmp/profile.json'))['userId']
+          if subject != user_id:
+              sys.exit('/api/profile/me 解析出的账号与 token 的 sub 不一致')
+          print('self-consumption OK: sub 经 MapInboundClaims 正确还原为账号身份')
+          PY
+
       # 冒烟失败时最需要的就是容器日志。没有这一步，"/health 一直不 Healthy"
       # 在日志里只是一行超时，和之前契约矩阵静默挂死是同一类问题。
       - name: Dump container logs
