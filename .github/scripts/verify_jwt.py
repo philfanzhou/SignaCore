@@ -93,8 +93,10 @@ def main() -> None:
     if expected_audience not in audiences:
         fail(f"aud 不匹配：期望 {expected_audience}，实际 {audience}")
 
-    if not payload.get("sub"):
-        fail("payload 缺 sub")
+    # 主体 claim：本服务的 ClaimsResolver 用 ClaimTypes.NameIdentifier，
+    # JwtSecurityTokenHandler 出站会把它映射成 nameid 而不是 sub，所以两者都认。
+    if not (payload.get("sub") or payload.get("nameid")):
+        fail(f"payload 里既没有 sub 也没有 nameid，claims={sorted(payload)}")
 
     expires_at = payload.get("exp")
     if not isinstance(expires_at, int):
@@ -102,9 +104,13 @@ def main() -> None:
     if expires_at <= time.time():
         fail(f"token 已过期：exp={expires_at}, now={int(time.time())}")
 
+    # 只打 claim 名字，不打值——值里可能有手机号等敏感信息，而本仓库是 public repo。
+    # 打出来是为了让 token 的实际形状在日志里有据可查：谁改动了 claim 集合，
+    # 这一行会立刻显出来。
     print(
         f"JWT verified: alg=RS256, kid={kid}, iss={payload['iss']}, "
-        f"aud={expected_audience}, expires_in={expires_at - int(time.time())}s"
+        f"aud={expected_audience}, expires_in={expires_at - int(time.time())}s, "
+        f"claims={sorted(payload)}"
     )
 
 
