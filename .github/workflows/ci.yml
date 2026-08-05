@@ -29,11 +29,11 @@ jobs:
       # build.sh 与下面的冒烟步骤共用同一个 tag，避免默认 tag 变动时两边对不上。
       IMAGE_NAME: quantumzhou.identity:ci
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # 项目 TargetFramework 是 net8.0，但日常开发用 SDK 10 构建（见本地环境）。
       # runner 预装了 SDK 10，这里补一个 8.0 用于运行 net8.0 测试宿主。
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             8.0.x
@@ -248,7 +248,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: unit-test-results
           path: reports/
@@ -266,9 +266,9 @@ jobs:
       # 这一步失败时完全没有输出，正是之前挂死 28 分钟的怀疑对象。
       TESTCONTAINERS_RYUK_DISABLED: 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             8.0.x
@@ -305,7 +305,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: database-contract-results
           path: reports/
