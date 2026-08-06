@@ -1,9 +1,9 @@
-# 功能索引
+# Feature Modules
 
-| 业务域 | 功能点入口 |
-|--------|------------|
-| Admin | [AppManagement](./Admin/AppManagement/01-FEATURE.md), [UserManagement](./Admin/UserManagement/01-FEATURE.md) |
-| Auth | [GetToken](./Auth/GetToken/01-FEATURE.md), [RegisterCallback](./Auth/RegisterCallback/01-FEATURE.md), [RevokeRefreshToken](./Auth/RevokeRefreshToken/01-FEATURE.md) |
-| Gateway | [UserQuery](./Gateway/UserQuery/01-FEATURE.md) |
-| Profile | [NicknameManagement](./Profile/NicknameManagement/01-FEATURE.md) |
-| Security | [AuditLogging](./Security/AuditLogging/01-FEATURE.md), [DataCleanup](./Security/DataCleanup/01-FEATURE.md), [KeyManagement](./Security/KeyManagement/01-FEATURE.md) |
+| Area | Modules |
+| --- | --- |
+| Admin | [Application management](./Admin/AppManagement/01-FEATURE.md), [User management](./Admin/UserManagement/01-FEATURE.md) |
+| Authentication | [Token issuance](./Auth/GetToken/01-FEATURE.md), [Callback registration](./Auth/RegisterCallback/01-FEATURE.md), [Refresh-token revocation](./Auth/RevokeRefreshToken/01-FEATURE.md) |
+| Gateway | [User query](./Gateway/UserQuery/01-FEATURE.md) |
+| Profile | [Nickname management](./Profile/NicknameManagement/01-FEATURE.md) |
+| Security | [Audit logging](./Security/AuditLogging/01-FEATURE.md), [cleanup](./Security/DataCleanup/01-FEATURE.md), [key management](./Security/KeyManagement/01-FEATURE.md) |

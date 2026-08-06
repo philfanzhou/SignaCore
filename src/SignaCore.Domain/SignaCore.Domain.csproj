@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+    <PackageReference Include="BCrypt.Net-Next" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="System.DirectoryServices.Protocols" />
+    <PackageReference Include="AlibabaCloud.SDK.Dysmsapi20170525" />
+    <PackageReference Include="TencentCloudSDK.Sms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SignaCore.Database\SignaCore.Database.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,342 @@
+using System.Diagnostics;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using SignaCore.Database;
+using SignaCore.Database.Entity;
+using SignaCore.Database.Repositories;
+using SignaCore.Domain;
+using SignaCore.Domain.Keys;
+using SignaCore.Domain.Services;
+using SignaCore.Domain.Validators;
+using SignaCore.Host.Http;
+using SignaCore.Host.Models;
+using SignaCore.Host.Security;
+
+namespace SignaCore.Host.Controllers;
+
+/// <summary>
+/// POST /api/auth/token —— 签发 access token。
+/// AppId/AppSecret 通过 X-Admin-AppId / X-Admin-AppSecret 请求头传递并强制校验。
+/// </summary>
+[Route("api/auth")]
+[ApiController]
+public class TokenController : ControllerBase
+{
+    private readonly IKeyManager _keyManager;
+    private readonly ITokenService _tokenService;
+    private readonly JwtOptions _jwtOptions;
+    private readonly IRefreshTokenService _refreshTokenService;
+    private readonly ClaimsResolver _claimsResolver;
+    private readonly ValidatorFactory _validatorFactory;
+    private readonly ICallbackService? _callbackService;
+    private readonly AuthMetrics _authMetrics;
+    private readonly IAuditService _auditService;
+    private readonly IAccountLoginInfoService _accountLoginInfoService;
+    private readonly IAccountRepository _accountRepository;
+    private readonly AdminBootstrapOptions _adminBootstrapOptions;
+    private readonly ILogger<TokenController> _logger;
+
+    public TokenController(
+        IKeyManager keyManager,
+        ITokenService tokenService,
+        JwtOptions jwtOptions,
+        IRefreshTokenService refreshTokenService,
+        ClaimsResolver claimsResolver,
+        ValidatorFactory validatorFactory,
+        ICallbackService? callbackService,
+        AuthMetrics authMetrics,
+        IAuditService auditService,
+        IAccountLoginInfoService accountLoginInfoService,
+        IAccountRepository accountRepository,
+        IOptions<AdminBootstrapOptions> adminBootstrapOptions,
+        ILogger<TokenController> logger)
+    {
+        _keyManager = keyManager;
+        _tokenService = tokenService;
+        _jwtOptions = jwtOptions;
+        _refreshTokenService = refreshTokenService;
+        _claimsResolver = claimsResolver;
+        _validatorFactory = validatorFactory;
+        _callbackService = callbackService;
+        _authMetrics = authMetrics;
+        _auditService = auditService;
+        _accountLoginInfoService = accountLoginInfoService;
+        _accountRepository = accountRepository;
+        _adminBootstrapOptions = adminBootstrapOptions.Value;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// POST /api/auth/token — 统一发 token（OAuth2 grant_type 模式）。
+    /// 失败时返回 HTTP 200 + Success=false，不是 4xx；错误文案是契约，
+    /// 见 docs/modules/Auth/GetToken/06-CONVENTIONS.md。
+    /// </summary>
+    [HttpPost("token")]
+    [Authorize(Policy = GatewayAppAuthenticationDefaults.Policy)]
+    public async Task<ActionResult<TokenResponse>> GetToken(
+        [FromBody] TokenRequest request,
+        CancellationToken cancellationToken)
+    {
+        var app = HttpContext.GetValidatedApp()
+            ?? throw new InvalidOperationException("GatewayApp authentication did not provide a validated application.");
+        var appId = app.AppId;
+        var context = new TokenRequestContext(
+            request.GrantType,
+            HttpContext.GetClientIp(),
+            HttpContext.GetUserAgent(),
+            appId,
+            HttpContext.GetCorrelationId(),
+            Stopwatch.StartNew());
+
+        if (!_validatorFactory.IsSupportedGrantType(request.GrantType))
+        {
+            _logger.LogWarning("Unsupported grant_type: {GrantType}", request.GrantType);
+            return await FailAsync(
+                context,
+                metricReason: "unsupported_grant_type",
+                responseMessage: "unsupported_grant_type",
+                auditFailureReason: $"unsupported_grant_type: {request.GrantType}");
+        }
+
+        var validator = _validatorFactory.GetValidator(request.GrantType);
+        var validationResult = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = request.GrantType,
+            Username = request.Username,
+            Password = request.Password,
+            Phone = request.Phone,
+            Code = request.Code,
+            RefreshToken = request.RefreshToken,
+            AppId = appId,
+            App = app,
+            CancellationToken = cancellationToken
+        });
+
+        if (!validationResult.IsSuccess)
+        {
+            _logger.LogWarning("Authentication failed: GrantType={GrantType}, Reason={Reason}", request.GrantType, validationResult.ErrorMessage);
+            return await FailAsync(
+                context,
+                metricReason: validationResult.ErrorMessage,
+                responseMessage: validationResult.ErrorMessage,
+                auditFailureReason: validationResult.ErrorMessage,
+                auditUsername: request.Username ?? request.Phone ?? request.Code ?? "unknown");
+        }
+
+        // 在成功分支入口一次性捕获：MemberNotNullWhen 给出的非空流状态在跨越
+        // 后面的 await（回调取外部 claims）之后不再保留，捕获成局部变量最省事。
+        var account = validationResult.Account;
+        var authMethod = validationResult.AuthMethod;
+        var displayName = ResolveDisplayName(account, validationResult.DisplayName, request.GrantType);
+        var newRefreshToken = await _refreshTokenService.HandleRefreshTokenAsync(
+            request.GrantType, request.RefreshToken, account, appId,
+            validationResult.LdapCredentialId, validationResult.SmsUserLoginId);
+
+        if (request.GrantType == IdentityConstants.GrantTypeRefreshToken && newRefreshToken == null)
+        {
+            _logger.LogWarning(
+                "Refresh token rotation failed because the token was already consumed: AccountId={AccountId}, AppId={AppId}",
+                account.Id, appId ?? "N/A");
+            return await FailAsync(
+                context,
+                metricReason: "invalid_grant",
+                responseMessage: "invalid_grant",
+                auditFailureReason: "invalid_grant",
+                auditUsername: displayName ?? account.Id.ToString(),
+                accountId: account.Id);
+        }
+
+        var claims = _claimsResolver.ResolveBasicClaims(account, displayName);
+        claims.Add(new Claim(IdentityConstants.ClaimAuthMethod, authMethod));
+        claims.Add(new Claim(IdentityConstants.ClaimClientId, appId));
+
+        if (app.CallbackUrl != null && _callbackService != null)
+        {
+            try
+            {
+                var externalClaims = await _callbackService.FetchExternalClaimsAsync(app.CallbackUrl!, account.Id.ToString());
+                if (externalClaims.Count > 0)
+                {
+                    _logger.LogInformation("Fetched {Count} external claims from callback: AppId={AppId}", externalClaims.Count, appId);
+                    claims.AddRange(externalClaims);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Callback request failed, continuing with basic claims: AppId={AppId}", appId);
+            }
+        }
+
+        await InjectBootstrapAdminRoleAsync(request, account, claims);
+
+        var rsaKey = _keyManager.GetCurrentKey();
+        var accessToken = _tokenService.GenerateJwtToken(claims, rsaKey, _jwtOptions.TokenExpirationHours);
+        var expiresAt = DateTimeOffset.UtcNow.AddHours(_jwtOptions.TokenExpirationHours).ToUnixTimeSeconds();
+
+        var roles = claims.Where(c => c.Type == IdentityConstants.ClaimRole).Select(c => c.Value).ToList();
+        var permissions = claims.Where(c => c.Type == IdentityConstants.ClaimPermission).Select(c => c.Value).ToList();
+
+        context.Stopwatch.Stop();
+        _authMetrics.RecordLoginSuccess(request.GrantType);
+        _authMetrics.RecordLoginDuration(context.Stopwatch.Elapsed.TotalMilliseconds, request.GrantType);
+
+        _logger.LogInformation(
+            "Token issued: AccountId={AccountId}, GrantType={GrantType}, AppId={AppId}",
+            account.Id, request.GrantType, appId ?? "N/A");
+
+        await _auditService.RecordLoginAsync(account.Id, displayName ?? account.Id.ToString(), request.GrantType, "login_success",
+            context.ClientIp, context.UserAgent, null, appId, context.CorrelationId);
+
+        await _accountLoginInfoService.UpdateLoginInfoAsync(account, context.ClientIp, validationResult.AuthMethod ?? request.GrantType);
+
+        return Ok(new TokenResponse
+        {
+            Success = true,
+            Message = "Login successful",
+            AccessToken = accessToken,
+            RefreshToken = newRefreshToken ?? string.Empty,
+            ExpiresIn = _jwtOptions.TokenExpirationHours * 3600,
+            ExpiresAt = expiresAt,
+            UserInfo = new UserInfo
+            {
+                UserId = account.Id.ToString(),
+                Username = displayName ?? string.Empty,
+                AuthMethod = authMethod,
+                Roles = roles,
+                Permissions = permissions
+            }
+        });
+    }
+
+    /// <summary>
+    /// 一次 /api/auth/token 请求里埋点与审计共用的横切数据，入口处算一次往下传。
+    /// </summary>
+    private sealed record TokenRequestContext(
+        string GrantType,
+        string? ClientIp,
+        string? UserAgent,
+        string? AppId,
+        string? CorrelationId,
+        Stopwatch Stopwatch);
+
+    /// <summary>
+    /// /api/auth/token 的统一失败出口：停表 → 记失败指标 → 记耗时 → 写审计 → 返回
+    /// HTTP 200 + Success=false。这五步顺序固定且缺一不可，新增失败分支时只调用本方法，
+    /// 不要再手写一遍（历史上四个分支各抄了一份）。
+    /// <para>
+    /// <paramref name="metricReason"/>、<paramref name="auditFailureReason"/>、
+    /// <paramref name="responseMessage"/> 是三个**可以互不相同**的值，不要合并：
+    /// 例如 unsupported_grant_type 分支的审计原因带具体 grant_type 后缀，而响应文案不带；
+    /// 校验失败分支的审计原因允许为 null，而响应文案有兜底。响应文案是对外契约，
+    /// 见 docs/modules/Auth/GetToken/06-CONVENTIONS.md。
+    /// </para>
+    /// </summary>
+    private async Task<ActionResult<TokenResponse>> FailAsync(
+        TokenRequestContext context,
+        string metricReason,
+        string responseMessage,
+        string? auditFailureReason,
+        string auditUsername = "unknown",
+        Guid? accountId = null)
+    {
+        context.Stopwatch.Stop();
+        _authMetrics.RecordLoginFailure(context.GrantType, metricReason);
+        _authMetrics.RecordLoginDuration(context.Stopwatch.Elapsed.TotalMilliseconds, context.GrantType);
+
+        await _auditService.RecordLoginAsync(
+            accountId, auditUsername, context.GrantType, "login_failure",
+            context.ClientIp, context.UserAgent, auditFailureReason, context.AppId, context.CorrelationId);
+
+        // responseMessage 声明为非空：四个调用点要么传字面量，要么已自带 ?? 兜底，
+        // 网关分支则由 GatewayAuthResult.IsSuccess 上的 MemberNotNullWhen 保证非 null。
+        // 这里不再兜底成空串——响应文案是对外契约，缺了要在调用点显式决定，而不是这里替它决定。
+        return Ok(new TokenResponse { Success = false, Message = responseMessage });
+    }
+
+    /// <summary>
+    /// 当已认证账号就是 <see cref="AdminBootstrapOptions.Username"/> 配置的 bootstrap admin 时，
+    /// 无条件注入 <c>role:admin</c>（已存在则跳过）。这是绕过门户回调机制的"超管"捷径，
+    /// 使 bootstrap admin 无论从哪个门户登录或刷新都能拿到 admin 角色。
+    /// <para>
+    /// 身份一律从已校验的账号推导，绝不信任客户端可控的请求字段：
+    /// <list type="bullet">
+    /// <item><c>password</c>：比对已通过密码校验的 <c>request.Username</c> 与配置的用户名（忽略大小写）。</item>
+    /// <item><c>refresh_token</c>：通过
+    /// <see cref="IAccountRepository.GetByPasswordCredentialUsernameAsync"/> 解析出 bootstrap 账号，
+    /// 与已认证的 <paramref name="authenticatedAccount"/> 比对 Id。请求体里的 username 被刻意忽略，
+    /// 防止普通账号伪造 <c>username=admin</c> 提权。</item>
+    /// <item><c>sms</c> / <c>wechat_code</c>：不触发注入。</item>
+    /// </list>
+    /// </para>
+    /// </summary>
+    private async Task InjectBootstrapAdminRoleAsync(
+        TokenRequest request,
+        AccountEntity authenticatedAccount,
+        List<Claim> claims)
+    {
+        var bootstrapUsername = _adminBootstrapOptions.Username;
+        if (string.IsNullOrWhiteSpace(bootstrapUsername))
+        {
+            return;
+        }
+
+        var isBootstrapAdmin = false;
+
+        if (request.GrantType == IdentityConstants.GrantTypePassword)
+        {
+            isBootstrapAdmin =
+                !string.IsNullOrWhiteSpace(request.Username)
+                && string.Equals(
+                    request.Username.Trim(),
+                    bootstrapUsername.Trim(),
+                    StringComparison.OrdinalIgnoreCase);
+        }
+        else if (request.GrantType == IdentityConstants.GrantTypeRefreshToken)
+        {
+            var bootstrapAccount =
+                await _accountRepository.GetByPasswordCredentialUsernameAsync(
+                    bootstrapUsername.Trim());
+
+            isBootstrapAdmin =
+                bootstrapAccount != null
+                && bootstrapAccount.Id == authenticatedAccount.Id;
+        }
+
+        if (!isBootstrapAdmin)
+        {
+            return;
+        }
+
+        if (claims.Any(claim =>
+                claim.Type == IdentityConstants.ClaimRole
+                && string.Equals(
+                    claim.Value,
+                    "admin",
+                    StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        claims.Add(new Claim(IdentityConstants.ClaimRole, "admin"));
+        _logger.LogInformation(
+            "Injected bootstrap admin role for account {AccountId}",
+            authenticatedAccount.Id);
+    }
+
+    private static string? ResolveDisplayName(AccountEntity account, string? validationResultDisplayName, string grantType)
+    {
+        if (!string.IsNullOrWhiteSpace(account.Nickname))
+            return account.Nickname;
+
+        if (!string.IsNullOrEmpty(validationResultDisplayName))
+            return validationResultDisplayName;
+
+        if (grantType == IdentityConstants.GrantTypeWechat)
+            return $"WeChat_{account.Id.ToString()[..8]}";
+
+        // password/sms 的兜底：用账号 ID 前缀，避免空显示名
+        return $"User_{account.Id.ToString()[..8]}";
+    }
+}

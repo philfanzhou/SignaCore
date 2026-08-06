@@ -1,8 +1,9 @@
-# 用户昵称管理 — 约定与规范 (CONVENTIONS)
+# Nickname Management: Conventions
 
-## 错误消息格式约定
-
-| 场景 | 消息文本 |
-|------|----------|
-| 昵称超长 | "Nickname cannot exceed 100 characters." |
-| 昵称更新成功 | "Nickname updated." |
+- Use the SignaCore root namespace and descriptive domain-oriented type names.
+- Keep routes and JSON field names compatible with the existing API.
+- Use UTC timestamps and Guid identifiers.
+- Pass CancellationToken through every asynchronous boundary.
+- Use structured logging with correlation identifiers; never log credentials or tokens.
+- Return errors through the centralized API error format.
+- Keep database access provider-neutral unless code is located in a provider-specific migration project.

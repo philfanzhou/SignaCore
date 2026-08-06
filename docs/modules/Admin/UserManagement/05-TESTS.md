@@ -1,76 +1,17 @@
-# 用户管理 — 测试计划 (TESTS)
+# User Management: Test Plan
 
-测试工具：xUnit + Moq
-现有测试文件：`backend/Tests/unit/Host/Controllers/AdminControllerTests.cs`（含 GetUsers 的 HasPassword 判据用例 `GetUsers_HasPassword_ReflectsPasswordCredential`）
+## Required coverage
 
-## 单元测试 — Given-When-Then 格式
+Tests should cover creating password and phone users, paging and filtering, editing remarks, validating LDAP inputs, duplicate identities, and deletion.
 
-### UT-01 管理员登录成功
+## Test layers
 
-- **Given** 有效的用户名密码，用户名在白名单中
-- **When** POST /api/admin/session/login
-- **Then** 返回 200，设置 Cookie
+- Unit tests isolate policy and error branches with xUnit and Moq.
+- HTTP integration tests run the host through WebApplicationFactory.
+- Database contract tests verify PostgreSQL, MySQL/MariaDB, and SQLite behavior where provider differences matter.
 
-### UT-02 管理员登录白名单拒绝
+## Given-When-Then baseline
 
-- **Given** 有效的用户名密码，用户名不在白名单中
-- **When** POST /api/admin/session/login
-- **Then** 返回 403
-
-### UT-03 创建密码用户
-
-- **Given** 用户名不重复，密码符合策略
-- **When** POST /api/admin/users
-- **Then** 返回 200，创建 Account + PasswordCredential
-
-### UT-04 创建手机用户
-
-- **Given** 手机号未注册
-- **When** POST /api/admin/users/phone
-- **Then** 返回 200，创建 Account + UserLogin
-
-### UT-05 获取当前会话（有效 Cookie）
-
-- **Given** 用户已登录，Cookie 有效
-- **When** GET /api/admin/session/me
-- **Then** 返回 200，IsAuthenticated=true，包含 AccountId、Username
-
-### UT-06 登出记录审计日志
-
-- **Given** 用户已登录
-- **When** POST /api/admin/session/logout
-- **Then** 签出 Cookie，AuditService 记录 action=admin_logout，返回 200
-
-### UT-07 查询用户列表（用户名过滤）
-
-- **Given** 数据库中存在用户名为 "testuser" 的用户
-- **When** GET /api/admin/users?username=test
-- **Then** 返回 200，结果中包含用户名含 "test" 的用户，每条记录包含 UserId/Username/Phone/IsActive/Remark/Nickname/CreatedAt/DisplayName/HasPassword
-
-### UT-07b 查询用户列表 HasPassword 判据
-
-- **Given** 一个持有密码凭据的账户 + 一个仅有短信登录（user_logins, provider=sms）的账户
-- **When** GET /api/admin/users
-- **Then** 前者 `HasPassword=true`（密码账户），后者 `HasPassword=false`（手机账户，其 Username 回退为手机号但不影响类型判定）
-
-### UT-08 修改备注用户不存在返回 404
-
-- **Given** userId 对应的用户不存在
-- **When** PATCH /api/admin/users/{userId}/remark { remark: "test" }
-- **Then** 返回 404
-
-### UT-09 修改昵称空字符串清除昵称
-
-- **Given** 用户存在且当前昵称为 "旧昵称"
-- **When** PATCH /api/admin/users/{userId}/nickname { nickname: "" }
-- **Then** 返回 200，Nickname 字段被清空
-
-### UT-10 禁用用户记录审计日志（含前后快照）
-
-- **Given** 用户存在且 IsActive=true
-- **When** PATCH /api/admin/users/{userId}/status { isActive: false }
-- **Then** 更新 IsActive=false，AuditService 记录审计日志，包含 before/after 快照（before: IsActive=true, after: IsActive=false）
-
-## 遗漏的测试场景
-
-- 用户登录历史、审计日志查询的边界用例 [待补充]
+- **Given** a valid caller and valid input, **when** the operation runs, **then** it succeeds and persists or returns the expected state.
+- **Given** invalid credentials or input, **when** the operation runs, **then** it fails without leaking sensitive details.
+- **Given** cancellation or an infrastructure failure, **when** execution stops, **then** the failure is observable and no partial unsafe state remains.

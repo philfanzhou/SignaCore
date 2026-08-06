@@ -1,14 +1,12 @@
-# 审计日志记录 — 任务清单 (TASKS)
+# Audit Logging: Implementation Status
 
-```json
-[
-  {
-    "id": "TASK-01",
-    "status": "implemented",
-    "depends_on": [],
-    "action": "AuditService 实现（登录记录 + 操作记录）",
-    "files": ["backend/Domain/Services/AuditService.cs"],
-    "acceptance": "登录和管理操作被正确记录"
-  }
-]
-```
+The feature is implemented. Use this checklist when changing it:
+
+- [ ] Keep the public HTTP contract backward compatible unless a versioned change is approved.
+- [ ] Update domain logic and repository contracts together.
+- [ ] Add or update unit tests for policy branches.
+- [ ] Add integration coverage for database or HTTP contract changes.
+- [ ] Verify logs and errors do not expose secrets or personal data.
+- [ ] Update this module documentation and the relevant overview document.
+
+A rename-only change must not rename existing database tables, JSON properties, routes, or JWT claim names.

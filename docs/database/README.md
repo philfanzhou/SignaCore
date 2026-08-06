@@ -1,50 +1,27 @@
-# 数据库文档
+# Database
 
-> 本目录是 QuantumZhou.Identity 数据库结构的唯一事实源。模块文档只引用，不重复抄整表定义。
+SignaCore uses one EF Core model with provider-specific migrations for PostgreSQL, MySQL/MariaDB, and SQLite.
 
-## 表清单
+## Tables
 
-| 表名 | 说明 | 详细文档 |
-|------|------|----------|
-| accounts | 用户账户主表 | [accounts.md](./tables/accounts.md) |
-| password_credentials | 用户名密码凭证表 | [password_credentials.md](./tables/password_credentials.md) |
-| user_logins | 外部登录绑定表 | [user_logins.md](./tables/user_logins.md) |
-| refresh_tokens | 刷新令牌表 | [refresh_tokens.md](./tables/refresh_tokens.md) |
-| app_registrations | 业务系统注册表 | [app_registrations.md](./tables/app_registrations.md) |
-| security_keys | RSA 密钥对表 | [security_keys.md](./tables/security_keys.md) |
-| otps | 一次性密码记录表 | [otps.md](./tables/otps.md) |
-| login_attempts | 登录尝试跟踪表 | [login_attempts.md](./tables/login_attempts.md) |
-| login_histories | 登录历史记录表 | [login_histories.md](./tables/login_histories.md) |
-| audit_logs | 审计日志表 | [audit_logs.md](./tables/audit_logs.md) |
+| Table | Purpose |
+| --- | --- |
+| [accounts](./tables/accounts.md) | Canonical user account state. |
+| [app_registrations](./tables/app_registrations.md) | Registered client applications and their authentication policies. |
+| [audit_logs](./tables/audit_logs.md) | Administrative and security-relevant change records. |
+| [login_attempts](./tables/login_attempts.md) | Password-login failure counts and lockout state by normalized username. |
+| [login_histories](./tables/login_histories.md) | Successful and failed authentication event history. |
+| [otps](./tables/otps.md) | Application-scoped SMS one-time-password state and rate limiting. |
+| [password_credentials](./tables/password_credentials.md) | Local username/password bindings. |
+| [refresh_tokens](./tables/refresh_tokens.md) | Rotating, revocable refresh credentials bound to an account and application. |
+| [security_keys](./tables/security_keys.md) | RSA signing-key metadata and encrypted private parameters. |
+| [user_logins](./tables/user_logins.md) | External provider identity bindings, including phone and WeChat identities. |
+| `ldap_credentials` | LDAP directory identity bindings |
+| `app_ldap_access` | Per-application LDAP access approvals |
+| `app_sms_access` | Per-application SMS user approvals |
 
-## 实体关系概述
+See [relationships](./relations.md) and [migration operations](./migrations.md).
 
-- `accounts` 是核心实体，被 `password_credentials`、`user_logins`、`refresh_tokens` 引用
-- `app_registrations` 独立存在，`refresh_tokens` 通过 `app_id` 逻辑引用
-- `security_keys` 独立存在，用于 JWT 签名
-- `otps`、`login_attempts` 是临时数据表，有自动清理机制
-- `login_histories`、`audit_logs` 是审计数据表，有保留期限制
+## Naming compatibility
 
-详细关系图见 [relations.md](./relations.md)
-
-## 迁移历史
-
-| 迁移 ID | 说明 | 详细文档 |
-|---------|------|----------|
-| 20260502023354 | InitialCreate - 初始建表 | [migrations.md](./migrations.md) |
-| 20260502033006 | AddLoginHistoryAndAuditLog - 添加登录历史和审计日志表 | [migrations.md](./migrations.md) |
-| 20260502155149 | FixTimestampColumnTypes - 修复时间戳列类型 | [migrations.md](./migrations.md) |
-| 20260504150448 | AddAppIdToRefreshToken - 刷新令牌添加 AppId | [migrations.md](./migrations.md) |
-| 20260730134106 | AddNormalizedIdentityValues - 增加规范化列 | [migrations.md](./migrations.md) |
-| 20260730134156 | EnforceNormalizedIdentityValues - 回填后收紧规范化约束 | [migrations.md](./migrations.md) |
-| 20260730135237 | EnforceSingleOtpPerPhone - OTP 手机号唯一约束 | [migrations.md](./migrations.md) |
-
-详细迁移历史见 [migrations.md](./migrations.md)
-
-## 已移除的表
-
-当前无已移除的表。
-
-## 数据库提供者
-
-使用 EF Core 9 作为唯一 ORM，支持 PostgreSQL 15+、MySQL 8.0/8.4、MariaDB 10.11/11.4 和 SQLite。PostgreSQL 是默认选择并保留既有迁移历史；MySQL/MariaDB 与 SQLite 使用独立迁移程序集。SQLite 仅支持单实例和本地磁盘文件。
+The product rename does not rename existing tables, columns, indexes, or migration identifiers. Only CLR namespaces and migration assembly names changed.

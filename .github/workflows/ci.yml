@@ -1,11 +1,8 @@
 name: CI
 
-# 本仓库是 public repo。这条流水线**只做构建与测试**，全部跑在 GitHub 托管 runner 上：
-# 一次性 VM、拿不到任何 secrets、碰不到内网，因此 fork PR 触发它是安全的。
-#
-# 部署不在这里。生产发布由人工在部署机上执行（见 docs/development/Deployment.md）。
-# 不要在本文件里加 self-hosted runner 的 job：public 仓库 + self-hosted runner 意味着
-# 陌生人改一行 workflow 提 PR 就可能在部署机上执行任意代码。
+# This public-repository workflow only builds and tests on GitHub-hosted runners.
+# Production deployment is intentionally separate. Do not add a self-hosted runner job
+# that would allow pull-request code to execute on deployment infrastructure.
 
 on:
   push:
@@ -26,49 +23,49 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      # build.sh 与下面的冒烟步骤共用同一个 tag，避免默认 tag 变动时两边对不上。
-      IMAGE_NAME: quantumzhou.identity:ci
+      IMAGE_NAME: signacore:ci
     steps:
       - uses: actions/checkout@v7
 
-      # 显式安装项目目标 SDK，避免依赖 runner 预装版本。
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20.19
+          cache: npm
+          cache-dependency-path: src/SignaCore.Admin/package-lock.json
+
+      - name: Admin frontend
+        working-directory: src/SignaCore.Admin
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npm run build
 
       - name: Build image
         run: bash build.sh
 
       - name: Unit tests
         run: |
-          dotnet restore backend/Tests/unit/QuantumZhou.Identity.Tests.csproj
-          dotnet test backend/Tests/unit/QuantumZhou.Identity.Tests.csproj \
+          dotnet restore tests/SignaCore.Tests/SignaCore.Tests.csproj
+          dotnet test tests/SignaCore.Tests/SignaCore.Tests.csproj \
             --configuration Release \
-            --logger 'trx;logfilename=identity-ut.trx' \
+            --logger 'trx;logfilename=signacore-ut.trx' \
             --results-directory reports \
             --no-restore
 
-      # 集成测试程序集里的 HTTP 端点契约测试：WebApplicationFactory 起进程内宿主 +
-      # 文件 SQLite，不碰 Docker，十几秒跑完。它锁的是对外契约——路由不重不漏、
-      # /api/auth/token 失败返回 200+Success=false、JWKS 出 RSA key——所以放在
-      # 单元测试之后一起跑，不必等下游的容器矩阵。
-      # 不设 RUN_IDENTITY_DATABASE_CONTRACTS，容器矩阵仍留在 database-contracts job。
       - name: HTTP endpoint contract tests
         run: |
-          dotnet restore backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj
-          dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj \
+          dotnet restore tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj
+          dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj \
             --configuration Release \
             --filter 'FullyQualifiedName~IdentityHttpEndpointsTests' \
-            --logger 'trx;logfilename=identity-http-endpoints.trx' \
+            --logger 'trx;logfilename=signacore-http-endpoints.trx' \
             --results-directory reports \
             --no-restore
 
-      # ---- 以下是镜像冒烟：起真容器 + 真 PostgreSQL，只从 HTTP 端口黑盒断言 ----
-      # 上面的测试全跑在进程内宿主里（WebApplicationFactory + SQLite），覆盖不到运行时层：
-      # Vue 产物有没有真的进镜像的 wwwroot、entrypoint 起不起得来、PostgreSQL 迁移链在
-      # 完整启动序列（建库 → advisory lock → SchemaMigrator → bootstrap admin）下跑不跑得通、
-      # KeyManager 初始化完才接请求这个顺序对不对。镜像已经在 build.sh 那步构建好，
-      # 复用同一个 job 就不必为了冒烟再全量构建一次。
       - name: Pre-pull PostgreSQL image
         run: |
           echo "::group::docker pull postgres:15-alpine"
@@ -77,15 +74,10 @@ jobs:
 
       - name: Start PostgreSQL
         run: |
-          # 凭据一律一次性随机生成：本仓库是 public repo，workflow 日志全网可读，
-          # 任何固定值写进来都等同于公开。add-mask 兜住意外回显。
           PG_PASSWORD="$(openssl rand -hex 16)"
-          # DefaultPasswordPolicy 要求 ≥8 位且大写/小写/数字齐全，而 openssl rand -hex
-          # 只产小写十六进制——直接用会让 bootstrap admin 抛异常、启动即失败。
-          # 固定前缀只负责满足这三类字符，熵仍然来自后面的 32 位随机十六进制。
           ADMIN_PASSWORD="Aa1$(openssl rand -hex 16)"
           RSA_MASTER_KEY="$(openssl rand -base64 32)"
-          APP_ID="identity-ci-smoke"
+          APP_ID="signacore-ci-smoke"
           APP_SECRET="$(openssl rand -base64 32)"
           echo "::add-mask::$PG_PASSWORD"
           echo "::add-mask::$ADMIN_PASSWORD"
@@ -99,43 +91,41 @@ jobs:
             echo "APP_SECRET=$APP_SECRET"
           } >> "$GITHUB_ENV"
 
-          mkdir -p "$GITHUB_WORKSPACE/qz-smoke-data"
+          mkdir -p "$GITHUB_WORKSPACE/signacore-smoke-data"
           jq -n \
             --arg appId "$APP_ID" \
             --arg appSecret "$APP_SECRET" \
-            '{apps:[{appId:$appId,appSecret:$appSecret,appName:"Identity CI Smoke",callbackUrl:""}]}' \
-            > "$GITHUB_WORKSPACE/qz-smoke-data/bootstrap-apps.json"
+            '{apps:[{appId:$appId,appSecret:$appSecret,appName:"SignaCore CI Smoke",callbackUrl:""}]}' \
+            > "$GITHUB_WORKSPACE/signacore-smoke-data/bootstrap-apps.json"
 
-          docker network create qz-smoke
-          # 故意不预建 quantumzhou_identity 库：DatabaseProvisioner 的建库分支也要被覆盖。
-          docker run -d --name qz-smoke-pg --network qz-smoke \
+          APP_UID="$(docker run --rm --entrypoint id "$IMAGE_NAME" -u)"
+          APP_GID="$(docker run --rm --entrypoint id "$IMAGE_NAME" -g)"
+          sudo chown -R "$APP_UID:$APP_GID" "$GITHUB_WORKSPACE/signacore-smoke-data"
+
+          docker network create signacore-smoke
+          docker run -d --name signacore-smoke-pg --network signacore-smoke \
             -e POSTGRES_PASSWORD="$PG_PASSWORD" \
             postgres:15-alpine
 
           for i in $(seq 1 30); do
-            if docker exec qz-smoke-pg pg_isready -U postgres -q; then
+            if docker exec signacore-smoke-pg pg_isready -U postgres -q; then
               echo "PostgreSQL ready after ${i}s"
               exit 0
             fi
             sleep 1
           done
           echo "PostgreSQL failed to become ready"
-          docker logs qz-smoke-pg
+          docker logs signacore-smoke-pg
           exit 1
 
-      # CONSUL_HTTP_ADDR 指向容器内的 127.0.0.1：立刻 connection refused，
-      # 既走了"Consul 不可达 → 回退本地缓存/appsettings"的降级路径，又不必等 DNS 超时
-      # （默认 host.docker.internal 在 Linux runner 上解析不到，会白等 3s × 3 次重试）。
-      # Discovery 注册关掉：没有 Consul 可注册，注销失败还会在关停时刷噪声。
-      # Loki 同理指向本机，Sink 异步重试，不影响启动。
-      - name: Start Identity container
+      - name: Start SignaCore container
         run: |
-          docker run -d --name qz-smoke-app --network qz-smoke -p 5002:5002 \
-            -v "$GITHUB_WORKSPACE/qz-smoke-data:/app/data" \
-            -e APP_TITLE='Identity CI Smoke' \
+          docker run -d --name signacore-smoke-app --network signacore-smoke -p 5002:5002 \
+            -v "$GITHUB_WORKSPACE/signacore-smoke-data:/app/data" \
+            -e APP_TITLE='SignaCore CI Smoke' \
             -e Database__Provider=PostgreSQL \
             -e Database__ServerVersion=15 \
-            -e Database__ConnectionString="Host=qz-smoke-pg;Port=5432;Database=quantumzhou_identity;Username=postgres;Password=${PG_PASSWORD}" \
+            -e Database__ConnectionString="Host=signacore-smoke-pg;Port=5432;Database=signacore;Username=postgres;Password=${PG_PASSWORD}" \
             -e ADMIN_BOOTSTRAP_USERNAME=smoke_admin \
             -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
             -e RSA_MASTER_KEY="${RSA_MASTER_KEY}" \
@@ -149,12 +139,11 @@ jobs:
         run: |
           for i in $(seq 1 90); do
             if [ "$(curl -fsS --max-time 3 http://localhost:5002/health 2>/dev/null)" = 'Healthy' ]; then
-              echo "Identity healthy after ${i}s"
+              echo "SignaCore healthy after ${i}s"
               exit 0
             fi
-            # 容器已经退出就别再空等到超时——启动失败要立刻报出来。
-            if [ -z "$(docker ps -q --filter 'name=^/qz-smoke-app$')" ]; then
-              echo 'Identity container exited before becoming healthy'
+            if [ -z "$(docker ps -q --filter 'name=^/signacore-smoke-app$')" ]; then
+              echo 'SignaCore container exited before becoming healthy'
               exit 1
             fi
             sleep 1
@@ -167,58 +156,45 @@ jobs:
           set -euo pipefail
           fail() { echo "SMOKE FAIL: $*"; exit 1; }
 
-          # 1. JWKS：/health 通过意味着 KeyManager 初始化已完成，公钥必须已经能取到
           jwks="$(curl -fsS --max-time 10 http://localhost:5002/.well-known/jwks)"
-          echo "$jwks" | grep -q '"kty":"RSA"' || fail "JWKS 缺 RSA key: $jwks"
-          echo "$jwks" | grep -q '"alg":"RS256"' || fail "JWKS 缺 RS256: $jwks"
+          echo "$jwks" | grep -q '"kty":"RSA"' || fail "JWKS has no RSA key: $jwks"
+          echo "$jwks" | grep -q '"alg":"RS256"' || fail "JWKS has no RS256 key: $jwks"
 
-          # 2. token 失败契约：HTTP 200 + 失败体，不是 4xx
-          #    见 docs/modules/Auth/GetToken/06-CONVENTIONS.md
           status="$(curl -sS --max-time 10 -o /tmp/token.json -w '%{http_code}' \
             -X POST http://localhost:5002/api/auth/token \
             -H 'Content-Type: application/json' \
             -H "X-Admin-AppId: ${APP_ID}" \
             -H "X-Admin-AppSecret: ${APP_SECRET}" \
             -d '{"grantType":"no_such_grant"}')"
-          [ "$status" = '200' ] || fail "token 端点返回 $status，契约要求 200"
+          [ "$status" = '200' ] || fail "token endpoint returned $status; contract requires 200"
           grep -q 'unsupported_grant_type' /tmp/token.json \
-            || fail "token 响应缺 unsupported_grant_type: $(cat /tmp/token.json)"
+            || fail "token response lacks unsupported_grant_type: $(cat /tmp/token.json)"
 
-          # 3. SPA：Vue 产物真的进了镜像 wwwroot，且 AdminSpaTitleInjector 在运行时
-          #    做了两件事——换掉 <title> 里的占位符、注入 window.__APP_TITLE__ 供前端读。
-          #    这两条只有真容器能验。注意 window.__APP_TITLE__ 是变量名，本就该出现在
-          #    输出里，所以只能断言 <title> 标签内的占位符已消失，不能全文找占位符。
           index="$(curl -fsS --max-time 10 http://localhost:5002/)"
-          echo "$index" | grep -q '<div id="app">' || fail 'SPA 根路径返回的不像 Vue 产物'
-          echo "$index" | grep -q '<title>Identity CI Smoke</title>' \
-            || fail 'APP_TITLE 未注入 <title>'
-          echo "$index" | grep -q "window.__APP_TITLE__ = 'Identity CI Smoke'" \
-            || fail '未注入 window.__APP_TITLE__ 脚本'
+          echo "$index" | grep -q '<div id="app">' || fail 'SPA root is not the Vue artifact'
+          echo "$index" | grep -q '<title>SignaCore CI Smoke</title>' \
+            || fail 'APP_TITLE was not injected into <title>'
+          echo "$index" | grep -q "window.__APP_TITLE__ = 'SignaCore CI Smoke'" \
+            || fail 'window.__APP_TITLE__ was not injected'
           if echo "$index" | grep -q '<title>__APP_TITLE__</title>'; then
-            fail '<title> 里仍残留 __APP_TITLE__ 占位符'
+            fail '<title> still contains the __APP_TITLE__ placeholder'
           fi
 
-          # 4. /metrics 路由在（空指标时 exporter 可能返回 204，所以只排除 4xx/5xx）
           metrics_status="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
             http://localhost:5002/metrics)"
           case "$metrics_status" in
             2*) ;;
-            *) fail "/metrics 返回 $metrics_status" ;;
+            *) fail "/metrics returned $metrics_status" ;;
           esac
 
-          # 5. 迁移真的落在 PostgreSQL 上——不是悄悄降级到别的 provider，也不是跳过了
-          applied="$(docker exec -e PGPASSWORD="$PG_PASSWORD" qz-smoke-pg \
-            psql -U postgres -d quantumzhou_identity -tAc \
+          applied="$(docker exec -e PGPASSWORD="$PG_PASSWORD" signacore-smoke-pg \
+            psql -U postgres -d signacore -tAc \
             'SELECT count(*) FROM "__EFMigrationsHistory"')"
-          [ "$applied" -gt 0 ] || fail '__EFMigrationsHistory 为空，迁移没有执行'
+          [ "$applied" -gt 0 ] || fail '__EFMigrationsHistory is empty; migrations did not run'
           echo "applied migrations: $applied"
 
           echo 'All smoke assertions passed'
 
-      # 签发链路的端到端：password grant 换 token → 用 JWKS 发布的公钥验回签名。
-      # 这正是下游业务微服务做的事——它们不引用本仓库任何程序集，只拉 JWKS 本地验签，
-      # 所以验签一旦对不上，所有下游会同时失效。此前这条链只有单元测试覆盖，
-      # 真容器里一次都没验过。bootstrap admin 在启动时已按 ADMIN_BOOTSTRAP_* 建好账号。
       - name: Token issuance end-to-end
         run: |
           set -euo pipefail
@@ -229,34 +205,28 @@ jobs:
             -H "X-Admin-AppId: ${APP_ID}" \
             -H "X-Admin-AppSecret: ${APP_SECRET}" \
             -d "{\"grantType\":\"password\",\"username\":\"smoke_admin\",\"password\":\"${ADMIN_PASSWORD}\"}")"
-          [ "$status" = '200' ] || { echo "token 端点返回 $status，契约要求 200"; exit 1; }
+          [ "$status" = '200' ] || { echo "token endpoint returned $status; contract requires 200"; exit 1; }
 
-          # 响应体里带着 access token，整体回显等于把它写进全网可读的日志。
-          # 这里只把 token 落到文件，失败时只打 message（错误文案本身是对外契约）。
           python3 - <<'PY'
           import json, sys
           body = json.load(open('/tmp/issued.json'))
           if not body.get('success'):
-              sys.exit(f"password grant 失败: {body.get('message')}")
+              sys.exit(f"password grant failed: {body.get('message')}")
           token = body.get('accessToken') or ''
           if not token:
-              sys.exit('响应里没有 accessToken')
+              sys.exit('response has no accessToken')
           open('/tmp/access_token', 'w').write(token)
           PY
 
           curl -fsS --max-time 10 http://localhost:5002/.well-known/jwks -o /tmp/jwks.json
           python3 .github/scripts/verify_jwt.py /tmp/access_token /tmp/jwks.json \
-            'QuantumZhou.Identity' 'QuantumZhou.microservices'
+            'SignaCore' 'SignaCore.Services'
 
-          # 本服务自己也消费这枚 token：/api/profile/* 走 JwtBearer + UserProfile 策略，
-          # ProfileController 读的是 ClaimTypes.NameIdentifier。claim 改成标准短名后，
-          # 这条自消费链路要靠 MapInboundClaims 把 sub 映射回 ClaimTypes.NameIdentifier
-          # 才成立——所以真调一次，别只靠推理。
           status="$(curl -sS --max-time 10 -o /tmp/profile.json -w '%{http_code}' \
             -H "Authorization: Bearer $(cat /tmp/access_token)" \
             http://localhost:5002/api/profile/me)"
           [ "$status" = '200' ] || {
-            echo "/api/profile/me 返回 $status（期望 200）"; cat /tmp/profile.json; exit 1;
+            echo "/api/profile/me returned $status (expected 200)"; cat /tmp/profile.json; exit 1;
           }
 
           python3 - <<'PY'
@@ -266,20 +236,18 @@ jobs:
           subject = json.loads(b64u(open('/tmp/access_token').read().split('.')[1]))['sub']
           user_id = json.load(open('/tmp/profile.json'))['userId']
           if subject != user_id:
-              sys.exit('/api/profile/me 解析出的账号与 token 的 sub 不一致')
-          print('self-consumption OK: sub 经 MapInboundClaims 正确还原为账号身份')
+              sys.exit('/api/profile/me user id does not match the token subject')
+          print('self-consumption OK: MapInboundClaims restored sub as the account identity')
           PY
 
-      # 冒烟失败时最需要的就是容器日志。没有这一步，"/health 一直不 Healthy"
-      # 在日志里只是一行超时，和之前契约矩阵静默挂死是同一类问题。
       - name: Dump container logs
         if: failure()
         run: |
-          echo "::group::identity container logs"
-          docker logs qz-smoke-app 2>&1 | tail -300 || true
+          echo "::group::SignaCore container logs"
+          docker logs signacore-smoke-app 2>&1 | tail -300 || true
           echo "::endgroup::"
           echo "::group::postgres logs"
-          docker logs qz-smoke-pg 2>&1 | tail -50 || true
+          docker logs signacore-smoke-pg 2>&1 | tail -50 || true
           echo "::endgroup::"
 
       - name: Upload test results
@@ -296,21 +264,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      RUN_IDENTITY_DATABASE_CONTRACTS: 'true'
-      # 托管 runner 是一次性 VM，跑完整机销毁，不需要 Ryuk 回收容器。
-      # 而 Ryuk 会在第一个测试之前拉 testcontainers/ryuk 镜像并等它连上——
-      # 这一步失败时完全没有输出，正是之前挂死 28 分钟的怀疑对象。
+      RUN_SIGNACORE_DATABASE_CONTRACTS: 'true'
       TESTCONTAINERS_RYUK_DISABLED: 'true'
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
 
-      # 单独一步预拉镜像：dotnet test 会缓冲输出，把拉取放在测试里等于把
-      # Docker Hub 限流（toomanyrequests）藏进一片静默。放在这里则立刻可见，
-      # 同时后续 Testcontainers 直接命中本地镜像。
       - name: Pre-pull database images
         run: |
           for image in postgres:15-alpine mysql:8.4 mariadb:11.4; do
@@ -321,16 +283,12 @@ jobs:
           docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'
 
       - name: Database contract matrix
-        # Testcontainers 直接用 runner 上的 docker daemon，托管 runner 不在容器里，
-        # 因此不需要 TESTCONTAINERS_HOST_OVERRIDE。
-        # --blame-hang：某个测试 5 分钟无进展就中止并报出是哪个测试卡住，
-        # 避免再次出现"整个 job 静默到超时、日志里什么都没有"。
         run: |
-          dotnet restore backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj
-          dotnet test backend/Tests/integration/QuantumZhou.Identity.IntegrationTests.csproj \
+          dotnet restore tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj
+          dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj \
             --configuration Release \
             --filter 'FullyQualifiedName~DatabaseContractTests' \
-            --logger 'trx;logfilename=identity-database-contracts.trx' \
+            --logger 'trx;logfilename=signacore-database-contracts.trx' \
             --logger 'console;verbosity=normal' \
             --results-directory reports \
             --blame-hang \

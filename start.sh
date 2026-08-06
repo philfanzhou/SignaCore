@@ -1,21 +1,20 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 DATA_DIR="${SCRIPT_DIR}/data"
-IMAGE_NAME="quantumzhou.identity:20260502"
-CONTAINER_NAME="ruoyu-identity"
-Port="5002"
-HOST_IP="192.168.100.10"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+IMAGE_NAME="${IMAGE_NAME:-signacore:${IMAGE_TAG}}"
+CONTAINER_NAME="${CONTAINER_NAME:-signacore}"
+PORT="${PORT:-5002}"
+HOST_IP="${HOST_IP:-192.168.100.10}"
 
 CONSUL_HTTP_ADDR="${HOST_IP}:8500"
 CONSUL_TOKEN="${CONSUL_TOKEN:-}"
 
-# 凭据一律由外部注入（GitHub Actions secrets / 运维 shell 环境）。
-# 本仓库是 public repo，任何写死在这里的值等同于对全网公开。
-# 以下展开在停止旧容器之前执行：缺值时部署直接失败，正在跑的容器不受影响。
-#   :?  = 未设置则报错退出（必填）
-#   ?   = 未设置则报错退出，显式设为空串是合法的（用于关闭短信绕过）
+# Inject credentials from a secret store or the operator's environment.
+# Validate them before stopping the existing container so a bad deployment leaves it running.
+# `:?` requires a non-empty value; `?` permits an explicitly empty value.
 ADMIN_USERNAME="${ADMIN_BOOTSTRAP_USERNAME:-admin}"
 ADMIN_PASSWORD="${ADMIN_BOOTSTRAP_PASSWORD:?ADMIN_BOOTSTRAP_PASSWORD is required (secret store, never commit it)}"
 SMS_BYPASS_CODE="${SMS_BYPASS_CODE?SMS_BYPASS_CODE is required; set it to an empty string to disable the SMS bypass}"
@@ -30,19 +29,21 @@ if [ -n "$(docker ps -aq --filter "name=^/${CONTAINER_NAME}$")" ]; then
 fi
 
 mkdir -p "$DATA_DIR"
-chown -R 1000:1000 "$DATA_DIR" 2>/dev/null || true
+CONTAINER_UID="${CONTAINER_UID:-$(docker run --rm --entrypoint id "$IMAGE_NAME" -u)}"
+CONTAINER_GID="${CONTAINER_GID:-$(docker run --rm --entrypoint id "$IMAGE_NAME" -g)}"
+chown -R "$CONTAINER_UID:$CONTAINER_GID" "$DATA_DIR" 2>/dev/null || true
 
 docker run -d \
     --name "$CONTAINER_NAME" \
     --restart unless-stopped \
-    -p "${Port}:5002" \
+    -p "${PORT}:5002" \
     -e TZ=Asia/Shanghai \
     -e APP_TITLE="${CONTAINER_NAME}" \
     -e CONSUL_HTTP_ADDR="${CONSUL_HTTP_ADDR}" \
     -e CONSUL_TOKEN="${CONSUL_TOKEN}" \
     -e Consul__Discovery__PreferIPAddress=true \
     -e Consul__Discovery__IPAddress="${HOST_IP}" \
-    -e Consul__Discovery__Port="${Port}" \
+    -e Consul__Discovery__Port="${PORT}" \
     -e ADMIN_BOOTSTRAP_USERNAME="${ADMIN_USERNAME}" \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Sms__BypassCode="${SMS_BYPASS_CODE}" \

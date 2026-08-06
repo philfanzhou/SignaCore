@@ -1,16 +1,12 @@
-# 应用注册管理 — 任务清单 (TASKS)
+# Application Management: Implementation Status
 
-> 本功能已实现完成，无待办任务。以下为代码评审清单。
+The feature is implemented. Use this checklist when changing it:
 
-```json
-[
-  {
-    "id": "TASK-01",
-    "status": "implemented",
-    "depends_on": [],
-    "action": "应用 CRUD + 回调管理 + 密钥重置 + 令牌吊销 + 审计日志查询",
-    "files": ["backend/Host/Controllers/AdminController.cs"],
-    "acceptance": "管理员可完整管理应用生命周期"
-  }
-]
-```
+- [ ] Keep the public HTTP contract backward compatible unless a versioned change is approved.
+- [ ] Update domain logic and repository contracts together.
+- [ ] Add or update unit tests for policy branches.
+- [ ] Add integration coverage for database or HTTP contract changes.
+- [ ] Verify logs and errors do not expose secrets or personal data.
+- [ ] Update this module documentation and the relevant overview document.
+
+A rename-only change must not rename existing database tables, JSON properties, routes, or JWT claim names.

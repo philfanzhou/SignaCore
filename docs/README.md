@@ -1,14 +1,12 @@
-# QuantumZhou.Identity 文档
+# SignaCore Documentation
 
-QuantumZhou.Identity 是认证与身份服务，负责令牌签发、回调注册、网关校验、用户资料与安全策略。
+All maintained documentation is written in English.
 
-## 入口
-
-| 入口 | 用途 |
-|------|------|
-| [overview/](./overview/README.md) | 服务级总览 |
-| [modules/](./modules/README.md) | 内部业务功能 |
-| [Integration/](./Integration/README.md) | 外部系统交互 |
-| [database/](./database/README.md) | 数据结构与数据主责 |
-| [development/](./development/README.md) | 开发执行支持 |
-| [adr/](./adr/README.md) | 上下文内部架构决策 |
+| Area | Contents |
+| --- | --- |
+| [Overview](./overview/README.md) | Context, requirements, architecture, integrations, and key flows |
+| [Modules](./modules/README.md) | Feature requirements, designs, tests, and conventions |
+| [Database](./database/README.md) | Schema ownership, relationships, and migrations |
+| [Development](./development/README.md) | Setup, configuration, deployment, errors, and verification |
+| [Integrations](./integrations/README.md) | External integration entry point |
+| [ADRs](./adr/README.md) | Architecture decisions |

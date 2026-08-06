@@ -1,107 +1,27 @@
-# 用户管理 — 详细需求规格 (SPEC)
+# User Management: Requirements
 
-## 功能概述和用户故事
+## Overview
 
-作为系统管理员，我希望管理用户账户，以便维护系统中的用户信息。
+Administrators create, inspect, update, and remove local, phone, and LDAP-backed user accounts.
 
-## 功能要求清单
+## Functional requirements
 
-- [ ] FR-01: 管理员登录（POST /api/admin/session/login）
-- [ ] FR-02: 获取当前会话（GET /api/admin/session/me）
-- [ ] FR-03: 管理员登出（POST /api/admin/session/logout）
-- [ ] FR-04: 查询用户列表（GET /api/admin/users）
-- [ ] FR-05: 创建密码用户（POST /api/admin/users）
-- [ ] FR-06: 创建手机用户（POST /api/admin/users/phone）
-- [ ] FR-07: 修改用户备注（PATCH /api/admin/users/{userId}/remark）
-- [ ] FR-08: 修改用户昵称（PATCH /api/admin/users/{userId}/nickname）
-- [ ] FR-09: 修改用户状态（PATCH /api/admin/users/{userId}/status）
-- [ ] FR-10: 查看用户登录历史（GET /api/admin/users/{userId}/login-history）
+1. Validate caller authentication and all required inputs before changing state.
+2. Execute the operation through the domain and repository abstractions.
+3. Return the standard JSON response and an appropriate HTTP status.
+4. Preserve transaction boundaries and cancellation-token propagation.
+5. Record security-relevant activity where the audit policy requires it.
 
-### AC-FR-10: 查看用户登录历史
-- **Given** 用户存在
-- **When** GET /api/admin/users/{userId}/login-history?page=1&pageSize=20
-- **Then** 返回 200，分页结果，每条记录包含 AuthMethod、EventType、ClientIp、UserAgent、FailureReason、AppId、CreatedAt
+## Security requirements
 
-## 详细的验收标准
+Administrative endpoints require an authenticated JWT with the admin role; credentials and secrets must never be returned.
 
-### AC-FR-01: 管理员登录
-- **Given** 有效的用户名和密码，且用户名为 `AdminBootstrap:Username`（唯一管理员）
-- **When** POST /api/admin/session/login
-- **Then** 签发 Cookie，返回 200
+All logs and errors must redact passwords, application secrets, refresh tokens, OTP values, authorization headers, and private key material.
 
-- **Given** 有效的用户名和密码，但用户名 ≠ `AdminBootstrap:Username`
-- **When** POST /api/admin/session/login
-- **Then** 返回 403（bootstrap_admin_required）
+## Data
 
-- **Given** `AdminBootstrap:Username` 为空，任意有效账号尝试登录
-- **When** POST /api/admin/session/login
-- **Then** 返回 403（fail-closed）
+The feature owns or reads accounts, user_logins, password_credentials, and ldap_credentials. Database access remains behind repository interfaces and the unit-of-work/IdentityDbContext boundaries.
 
-### AC-FR-02: 获取当前会话
-- **Given** 用户已登录（Cookie 有效）
-- **When** GET /api/admin/session/me
-- **Then** 返回 200，包含 AccountId、Username、IsAuthenticated=true
+## Compatibility
 
-- **Given** 用户未登录或 Cookie 无效
-- **When** GET /api/admin/session/me
-- **Then** 返回 401（该端点带 `[Authorize(Policy = "AdminSession")]`，由认证中间件拦截，前端 axios 拦截后重置回登录页）
-
-### AC-FR-03: 管理员登出
-- **Given** 用户已登录
-- **When** POST /api/admin/session/logout
-- **Then** 签出 Cookie（清除 qz_admin_session），记录审计日志（action=admin_logout），返回 200
-
-### AC-FR-04: 查询用户列表
-- **Given** 用户已登录为管理员
-- **When** GET /api/admin/users?username=xxx&phone=yyy&page=1&pageSize=20
-- **Then** 返回 200，支持 username 和 phone 模糊搜索，分页（默认 pageSize=20，最大 100），每条记录包含 UserId、Username、Phone、IsActive、Remark、Nickname、CreatedAt、DisplayName、HasPassword
-- **字段语义**：`HasPassword` 表示该账户是否存在密码凭据（password_credentials 中有记录），是"密码账户 / 手机账户"类型展示的唯一判据——`true` = 密码账户，`false` = 手机账户（短信验证码登录）。`Username` 对无密码凭据的账户回退为手机号，**不得**再用 `Username` 是否为空推导账户类型。
-
-### AC-FR-05: 创建密码用户
-- **Given** 用户名和密码不为空，密码符合策略，用户名不重复
-- **When** POST /api/admin/users
-- **Then** 创建 Account + PasswordCredential，返回 200
-
-### AC-FR-06: 创建手机用户
-- **Given** 手机号不为空且未注册
-- **When** POST /api/admin/users/phone
-- **Then** 创建 Account + UserLogin，返回 200
-
-### AC-FR-07: 修改用户备注
-- **Given** 用户存在
-- **When** PATCH /api/admin/users/{userId}/remark { remark: "xxx" }
-- **Then** 更新 Remark 字段，返回 200
-
-- **Given** 用户不存在
-- **When** PATCH /api/admin/users/{userId}/remark
-- **Then** 返回 404
-
-### AC-FR-08: 修改用户昵称
-- **Given** 用户存在
-- **When** PATCH /api/admin/users/{userId}/nickname { nickname: "xxx" }
-- **Then** 更新 Nickname 字段，返回 200；若 nickname 为空字符串则清除昵称
-
-- **Given** 用户不存在
-- **When** PATCH /api/admin/users/{userId}/nickname
-- **Then** 返回 404
-
-### AC-FR-09: 修改用户状态
-- **Given** 用户存在
-- **When** PATCH /api/admin/users/{userId}/status { isActive: false }
-- **Then** 更新 IsActive，记录审计日志
-
-## 非功能需求
-
-| 类别 | 需求 |
-|------|------|
-| 安全 | 所有操作需要 AdminSession 授权 |
-| 安全 | 创建用户密码必须符合密码策略 |
-| 审计 | 创建、启用/禁用操作记录审计日志 |
-| 认证 | 管理员认证使用 Cookie（qz_admin_session），滑动过期 12 小时；勾选 RememberMe 时过期 7 天 |
-| 认证 | Cookie 中需包含 admin_access 声明（claim），用于鉴权中间件校验 |
-| 安全 | Cookie 属性：HttpOnly、SameSite=Lax、SecurePolicy=SameAsRequest |
-| CORS | 管理端 CORS 配置来源于 AdminWeb:AllowedOrigins，仅允许配置的前端域名访问 |
-
-## 测试策略
-
-- [当前无测试覆盖]
+Public HTTP routes, JSON property names, and database table names remain stable across the SignaCore rename. Only product, namespace, assembly, image, and deployment identifiers changed.

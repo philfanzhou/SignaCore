@@ -1,14 +1,9 @@
-# 应用注册管理 — 约定与规范 (CONVENTIONS)
+# Application Management: Conventions
 
-## 命名约定
-
-- API 路由：`/api/admin/apps`、`/api/admin/tokens/revoke`、`/api/admin/audit-logs`
-
-## 错误消息格式约定
-
-| 场景 | 消息文本 |
-|------|----------|
-| 应用名称为空 | "App name cannot be empty." |
-| 应用不存在 | "App not found." |
-| 刷新令牌为空 | "Refresh token cannot be empty." |
-| 刷新令牌不存在 | "Refresh token not found." |
+- Use the SignaCore root namespace and descriptive domain-oriented type names.
+- Keep routes and JSON field names compatible with the existing API.
+- Use UTC timestamps and Guid identifiers.
+- Pass CancellationToken through every asynchronous boundary.
+- Use structured logging with correlation identifiers; never log credentials or tokens.
+- Return errors through the centralized API error format.
+- Keep database access provider-neutral unless code is located in a provider-specific migration project.

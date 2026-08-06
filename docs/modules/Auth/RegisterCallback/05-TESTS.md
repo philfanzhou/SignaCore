@@ -1,36 +1,17 @@
-# 回调注册 — 测试计划 (TESTS)
+# Callback Registration: Test Plan
 
-测试工具：xUnit + Moq
-现有测试文件：当前无 RegisterCallback 专项测试
+## Required coverage
 
-## 单元测试 — Given-When-Then 格式
+Tests should cover valid registration, missing application authentication, malformed URLs, disallowed hosts, and updates to an existing registration.
 
-### UT-01 参数为空
+## Test layers
 
-- **Given** RegisterCallbackRequest 中 AppId 或 AppSecret 为空
-- **When** 调用 RegisterCallback
-- **Then** 返回 success=false, message="AppId and AppSecret are required"
+- Unit tests isolate policy and error branches with xUnit and Moq.
+- HTTP integration tests run the host through WebApplicationFactory.
+- Database contract tests verify PostgreSQL, MySQL/MariaDB, and SQLite behavior where provider differences matter.
 
-### UT-02 AppId 未注册
+## Given-When-Then baseline
 
-- **Given** AppId 在数据库中不存在
-- **When** 调用 RegisterCallback
-- **Then** 返回 success=false, message="AppId not registered"
-
-### UT-03 AppSecret 不匹配
-
-- **Given** AppId 存在但 AppSecret 不匹配
-- **When** 调用 RegisterCallback
-- **Then** 返回 success=false, message="AppSecret mismatch"
-
-### UT-04 注册成功
-
-- **Given** 有效的 AppId + AppSecret + CallbackUrl
-- **When** 调用 RegisterCallback
-- **Then** 更新 CallbackUrl 和 CallbackExpiresAt，返回 success=true
-
-## 遗漏的测试场景
-
-- 当前无 RegisterCallback 的单元测试 [待补充]
-- CallbackUrl 格式验证测试
-- TTL = -1 永不过期场景测试
+- **Given** a valid caller and valid input, **when** the operation runs, **then** it succeeds and persists or returns the expected state.
+- **Given** invalid credentials or input, **when** the operation runs, **then** it fails without leaking sensitive details.
+- **Given** cancellation or an infrastructure failure, **when** execution stops, **then** the failure is observable and no partial unsafe state remains.

@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SignaCore.Database.Migrations.MySql/SignaCore.Database.Migrations.MySql.csproj" />
+    <Project Path="src/SignaCore.Database.Migrations.Sqlite/SignaCore.Database.Migrations.Sqlite.csproj" />
+    <Project Path="src/SignaCore.Database/SignaCore.Database.csproj" />
+    <Project Path="src/SignaCore.Domain/SignaCore.Domain.csproj" />
+    <Project Path="src/SignaCore.Host/SignaCore.Host.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj" />
+    <Project Path="tests/SignaCore.Tests/SignaCore.Tests.csproj" />
+  </Folder>
+</Solution>

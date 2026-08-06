@@ -1,74 +1,27 @@
-# RSA 密钥管理 — 详细需求规格 (SPEC)
+# Signing Key Management: Requirements
 
-## 功能概述和用户故事
+## Overview
 
-本模块负责 RSA 密钥的完整生命周期管理，包括密钥生成、私钥加密存储、公钥暴露、定期轮换及主密钥丢失恢复。作为 JWT 签名的基础设施，密钥管理的安全性直接决定了整个身份认证系统的可信度。
+SignaCore creates, protects, rotates, and publishes RSA signing keys for JWT issuance and JWKS verification.
 
-**用户故事：**
+## Functional requirements
 
-- **US-01**: 作为身份服务，我需要在启动时自动加载或创建 RSA 密钥对，以便能够签发和验证 JWT 令牌。
-- **US-02**: 作为运维人员，我需要私钥以加密形式存储在数据库中，即使数据库泄露也无法直接获取私钥明文。
-- **US-03**: 作为外部应用，我需要通过标准 JWKS 端点获取公钥，以便验证 JWT 签名的合法性。
-- **US-04**: 作为系统管理员，我需要密钥定期自动轮换，以降低密钥泄露带来的安全风险。
-- **US-05**: 作为运维人员，我需要在主密钥丢失时系统能自动恢复，虽然已有 JWT 会失效但服务不会中断。
+1. Validate caller authentication and all required inputs before changing state.
+2. Execute the operation through the domain and repository abstractions.
+3. Return the standard JSON response and an appropriate HTTP status.
+4. Preserve transaction boundaries and cancellation-token propagation.
+5. Record security-relevant activity where the audit policy requires it.
 
-## 功能要求清单
+## Security requirements
 
-- [ ] FR-01: 启动时加载活跃密钥或创建新密钥
-- [ ] FR-02: 私钥使用 AES-256-GCM 加密存储
-- [ ] FR-03: 公钥通过 /.well-known/jwks 暴露
-- [ ] FR-04: 定期检查密钥是否需要轮换
-- [ ] FR-05: 轮换时生成新密钥对，旧密钥标记为非活跃
-- [ ] FR-06: 主密钥丢失时自动恢复
+Private keys are encrypted at rest with an external master key. Public keys alone are exposed through JWKS, and rotation retains verification overlap.
 
-## 详细的验收标准
+All logs and errors must redact passwords, application secrets, refresh tokens, OTP values, authorization headers, and private key material.
 
-### AC-FR-01: 启动加载
-- **Given** 数据库中有活跃密钥
-- **When** 服务启动
-- **Then** 加载密钥并用于 JWT 签名
+## Data
 
-### AC-FR-02: 私钥加密存储
-- **Given** 需要持久化 RSA 私钥
-- **When** 保存私钥到数据库
-- **Then** 使用 AES-256-GCM 算法加密，密钥由 HKDF 从主密钥派生，随机盐值与密文一同存储
+The feature owns or reads security_keys. Database access remains behind repository interfaces and the unit-of-work/IdentityDbContext boundaries.
 
-### AC-FR-03: JWKS 端点
-- **Given** 外部应用需要验证 JWT 签名
-- **When** 请求 `/.well-known/jwks` 端点
-- **Then** 返回 RSA 公钥的 JWK 表示，包含 `kid` 字段用于密钥标识；端点实施速率限制（60 次/分钟）
+## Compatibility
 
-### AC-FR-04: 密钥轮换
-- **Given** 活跃密钥即将过期（超过一半生命周期）
-- **When** CleanupWorker 检查
-- **Then** 生成新密钥对，旧密钥标记为非活跃
-
-### AC-FR-05: 轮换时机
-- **Given** 活跃密钥仍处于有效期内
-- **When** 活跃密钥的剩余生命周期不足总生命周期的一半
-- **Then** 触发密钥轮换流程
-
-### AC-FR-06: 主密钥丢失
-- **Given** 主密钥变更导致私钥解密失败
-- **When** 加载密钥
-- **Then** 自动生成新密钥对，记录 Error 级别日志
-
-## 非功能需求
-
-| 需求项 | 说明 |
-|--------|------|
-| 密钥强度 | RSA 2048-bit 密钥对 |
-| 主密钥来源 | 优先级：环境变量 `RSA_MASTER_KEY` > 文件 > 自动生成 |
-| 密钥轮换周期 | 30 天 |
-| 启动阻塞 | 服务在 `KeyManager.InitializationCompleted` 完成前阻塞，不接受请求 |
-| JWKS 速率限制 | FixedWindowRateLimiter 60 次/分钟，随应用生命周期释放（ApplicationStopping 时 Dispose） |
-| 优雅关闭 | HostOptions.ShutdownTimeout=30s，Kestrel.RequestHeadersTimeout=30s |
-
-## 测试策略
-
-- 单元测试：`backend/Tests/unit/Domain/KeyManagerTests.cs` 与 `backend/Tests/unit/Domain/Keys/`
-  - 密钥生成：验证生成的密钥为 RSA 2048-bit，且私钥已加密存储
-  - 密钥轮换：验证轮换后旧密钥标记为非活跃，新密钥成为活跃密钥
-  - 私钥加密：验证 AES-256-GCM 加密流程，HKDF 密钥派生正确性
-  - 主密钥丢失恢复：验证解密失败时自动生成新密钥对并记录日志
-- 单元测试：`Tests/unit/Host/JwksMapperTests.cs`（JWKS 映射：kty/use/kid/alg 固定值、n/e Base64Url 编码、非 RSA 密钥抛错）
+Public HTTP routes, JSON property names, and database table names remain stable across the SignaCore rename. Only product, namespace, assembly, image, and deployment identifiers changed.

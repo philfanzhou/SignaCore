@@ -1,16 +1,12 @@
-# 回调注册 — 任务清单 (TASKS)
+# Callback Registration: Implementation Status
 
-> 本功能已实现完成，无待办任务。以下为代码评审清单。
+The feature is implemented. Use this checklist when changing it:
 
-```json
-[
-  {
-    "id": "TASK-01",
-    "status": "implemented",
-    "depends_on": [],
-    "action": "RegisterCallback HTTP 端点实现",
-    "files": ["backend/Host/Controllers/AuthController.cs"],
-    "acceptance": "有效请求注册成功；无效请求返回错误"
-  }
-]
-```
+- [ ] Keep the public HTTP contract backward compatible unless a versioned change is approved.
+- [ ] Update domain logic and repository contracts together.
+- [ ] Add or update unit tests for policy branches.
+- [ ] Add integration coverage for database or HTTP contract changes.
+- [ ] Verify logs and errors do not expose secrets or personal data.
+- [ ] Update this module documentation and the relevant overview document.
+
+A rename-only change must not rename existing database tables, JSON properties, routes, or JWT claim names.

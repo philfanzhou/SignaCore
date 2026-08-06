@@ -1,50 +1,27 @@
-# 用户昵称管理 — 详细需求规格 (SPEC)
+# Nickname Management: Requirements
 
-## 功能概述和用户故事
+## Overview
 
-作为已登录的用户，我希望查看和修改自己的昵称，以便在系统中使用自定义的显示名称。
+Authenticated users read and update their own display nickname.
 
-- 用户通过 Profile API 查看和修改自己的昵称
-- 需要 JWT Bearer 认证（UserProfile 策略）
-- 昵称最大长度 100 字符
-- 昵称为空字符串时清除昵称
-- 不支持修改用户名、手机号等身份信息
-- 不支持修改密码
+## Functional requirements
 
-## 功能要求清单
+1. Validate caller authentication and all required inputs before changing state.
+2. Execute the operation through the domain and repository abstractions.
+3. Return the standard JSON response and an appropriate HTTP status.
+4. Preserve transaction boundaries and cancellation-token propagation.
+5. Record security-relevant activity where the audit policy requires it.
 
-- [ ] FR-01: 获取个人资料（GET /api/profile/me）
-- [ ] FR-02: 修改昵称（PATCH /api/profile/nickname）
+## Security requirements
 
-## 详细的验收标准
+The account identifier comes from the validated JWT, never from a caller-supplied account id.
 
-### AC-FR-01
-- **Given** 有效的 JWT Bearer Token
-- **When** GET /api/profile/me
-- **Then** 返回 UserId、Nickname、IsActive、CreatedAt
+All logs and errors must redact passwords, application secrets, refresh tokens, OTP values, authorization headers, and private key material.
 
-### AC-FR-02
-- **Given** 有效的 JWT Bearer Token，昵称不超过 100 字符
-- **When** PATCH /api/profile/nickname
-- **Then** 更新昵称，返回成功
+## Data
 
-### AC-FR-02-补充：清除昵称
-- **Given** 有效的 JWT Bearer Token
-- **When** PATCH /api/profile/nickname，Nickname 为 null 或空白字符串
-- **Then** 将数据库中昵称字段设为 null，返回成功
+The feature owns or reads accounts. Database access remains behind repository interfaces and the unit-of-work/IdentityDbContext boundaries.
 
-### AC-FR-02-补充：昵称超长
-- **Given** 有效的 JWT Bearer Token，昵称超过 100 字符（`IdentityConstants.MaxNicknameLength`）
-- **When** PATCH /api/profile/nickname
-- **Then** 返回 400 BadRequest，提示 "Nickname cannot exceed 100 characters."
+## Compatibility
 
-## 非功能需求
-
-- **NFR-01 安全性**：所有接口必须通过 JWT Bearer 认证，且使用 `UserProfile` 授权策略（`[Authorize(Policy = "UserProfile")]`）
-- **NFR-02 数据约束**：昵称最大长度 100 字符（由 `IdentityConstants.MaxNicknameLength` 定义）
-- **NFR-03 昵称语义**：昵称为 null 表示未设置昵称；空字符串或纯空白字符串等效于清除昵称（设为 null）；非空白昵称会 Trim 后存储
-
-## 测试策略
-
-- 当前无测试覆盖
-- 建议优先补充：认证拦截测试、昵称长度校验测试、昵称清除测试
+Public HTTP routes, JSON property names, and database table names remain stable across the SignaCore rename. Only product, namespace, assembly, image, and deployment identifiers changed.

@@ -1,34 +1,28 @@
-# 审计日志记录 (AuditLogging)
+# Audit Logging
 
-## 核心用户故事
+## Purpose
 
-作为系统安全审计人员，我希望系统自动记录关键操作的审计日志，以便事后追溯和分析安全事件。
+Authentication events and administrative changes are recorded with correlation and request context.
 
-## 功能名称和一句话概括
+## Primary interface
 
-审计日志记录 — 记录登录事件和管理操作的审计日志。
+internal domain service
 
-## 补充约束
+## Acceptance summary
 
-- 审计日志写入失败仅记录日志，不抛异常
-- 登录历史保留 90 天，审计日志保留 365 天
-- 审计日志包含 before/after 快照（JSON 格式）
+- Authorized callers can complete the supported operation.
+- Invalid input is rejected with the repository's standard API error envelope.
+- Sensitive values are not written to logs or returned unintentionally.
+- The behavior is covered by unit or integration tests.
 
-## 关键验收条件摘要
+## Out of scope
 
-1. [ ] 登录成功/失败记录到 login_histories
-2. [ ] 管理操作记录到 audit_logs（含快照）
-3. [ ] 审计日志可通过 Admin API 查询
+This feature does not change unrelated authentication protocols, database ownership, or downstream authorization policy.
 
-## 明确列出"范围外"
+## Related documents
 
-- 不提供审计日志的导出功能
-- 不提供实时告警
-
-## 文档索引
-
-- [详细需求规格](./02-SPEC.md)
-- [设计说明](./03-DESIGN.md)
-- [任务清单](./04-TASKS.md)
-- [测试计划](./05-TESTS.md)
-- [约定与规范](./06-CONVENTIONS.md)
+- [Requirements](./02-SPEC.md)
+- [Design](./03-DESIGN.md)
+- [Tasks](./04-TASKS.md)
+- [Tests](./05-TESTS.md)
+- [Conventions](./06-CONVENTIONS.md)

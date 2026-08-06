@@ -1,36 +1,28 @@
-# RSA 密钥管理 (KeyManagement)
+# Signing Key Management
 
-## 核心用户故事
+## Purpose
 
-作为系统运维人员，我希望系统自动管理 JWT 签名密钥的生成、加密存储和定期轮换，以便保证令牌安全性而无需人工干预。
+SignaCore creates, protects, rotates, and publishes RSA signing keys for JWT issuance and JWKS verification.
 
-## 功能名称和一句话概括
+## Primary interface
 
-RSA 密钥管理 — 自动生成、加密存储和定期轮换 JWT 签名用的 RSA 密钥对。
+GET /.well-known/jwks
 
-## 补充约束
+## Acceptance summary
 
-- 私钥使用 AES-GCM 加密后存储在数据库
-- 主密钥来源优先级：环境变量 RSA_MASTER_KEY > 本地文件 > 自动生成
-- 密钥轮换周期默认 30 天
-- 主密钥丢失时自动生成新密钥对（所有已签发 JWT 失效）
+- Authorized callers can complete the supported operation.
+- Invalid input is rejected with the repository's standard API error envelope.
+- Sensitive values are not written to logs or returned unintentionally.
+- The behavior is covered by unit or integration tests.
 
-## 关键验收条件摘要
+## Out of scope
 
-1. [ ] 启动时加载或创建活跃密钥
-2. [ ] 私钥加密存储，公钥通过 JWKS 端点暴露
-3. [ ] 定期检查并轮换即将过期的密钥
-4. [ ] 主密钥丢失时自动恢复（生成新密钥对）
+This feature does not change unrelated authentication protocols, database ownership, or downstream authorization policy.
 
-## 明确列出"范围外"
+## Related documents
 
-- 不支持手动密钥轮换
-- 不支持密钥撤销（仅通过过期自然淘汰）
-
-## 文档索引
-
-- [详细需求规格](./02-SPEC.md)
-- [设计说明](./03-DESIGN.md)
-- [任务清单](./04-TASKS.md)
-- [测试计划](./05-TESTS.md)
-- [约定与规范](./06-CONVENTIONS.md)
+- [Requirements](./02-SPEC.md)
+- [Design](./03-DESIGN.md)
+- [Tasks](./04-TASKS.md)
+- [Tests](./05-TESTS.md)
+- [Conventions](./06-CONVENTIONS.md)

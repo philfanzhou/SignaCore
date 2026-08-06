@@ -1,51 +1,29 @@
-# 刷新令牌吊销 — 设计说明 (DESIGN)
+# Refresh Token Revocation: Design
 
-## 本功能在项目中的目录与文件结构
+## Components
 
-```
-backend/
-├── Host/Controllers/TokenRevocationController.cs      # POST /api/auth/revoke HTTP 端点
-├── Host/Models/AuthModels.cs               # RevokeRequest / RevokeResponse DTO
-├── Domain/Services/RefreshTokenService.cs  # 吊销逻辑（RevokeAsync）
-└── Database/
-    ├── Entity/RefreshTokenEntity.cs        # 刷新令牌实体
-    └── Repositories/IRefreshTokenRepository.cs
-```
+TokenRevocationController, RefreshTokenService, and RefreshTokenRepository.
 
-## 关键接口签名
+## Request flow
 
-```csharp
-// HTTP 端点（TokenRevocationController）
-[HttpPost("revoke")]
-public async Task<ActionResult<RevokeResponse>> RevokeRefreshToken(
-    [FromBody] RevokeRequest request)
+1. ASP.NET Core middleware assigns or propagates a correlation identifier.
+2. The controller or hosted service validates its security context and input.
+3. Domain services apply policy and coordinate repositories.
+4. EF Core persists changes using the configured provider.
+5. The caller receives a normalized response; failures pass through centralized exception handling.
 
-// 请求/响应 DTO（见 AuthModels.cs）
-public sealed class RevokeRequest { string RefreshToken; }
-public sealed class RevokeResponse { bool Success; }
-```
+## Interface
 
-## 依赖的数据库表
+Primary interface: POST /api/auth/revoke.
 
-- [refresh_tokens](../../../database/tables/refresh_tokens.md) — 查找令牌并标记 IsRevoked
+## Persistence
 
-## 数据流
+Relevant tables: refresh_tokens. PostgreSQL migrations live in Database, while MySQL/MariaDB and SQLite use their provider-specific migration assemblies.
 
-```
-RevokeRefreshToken Request
-    │
-    ▼
-Validate refresh_token not empty
-    │
-    ▼
-RefreshTokenRepository.GetByTokenValueAsync
-    │
-    ▼
-Set IsRevoked = true
-    │
-    ▼
-SaveChangesAsync
-    │
-    ▼
-RevokeResponse { Success = true/false }
-```
+## Design constraints
+
+- Domain code does not depend on the web host.
+- Controllers contain transport concerns, not persistence rules.
+- Secrets are never included in diagnostic payloads.
+- Async calls propagate CancellationToken.
+- Provider-specific behavior must be covered by database contract tests.

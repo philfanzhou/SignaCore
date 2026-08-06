@@ -1,38 +1,27 @@
-# 刷新令牌吊销 — 详细需求规格 (SPEC)
+# Refresh Token Revocation: Requirements
 
-## 功能概述和用户故事
+## Overview
 
-作为已登录的用户或管理员，我希望能够吊销刷新令牌，以便在安全风险或退出时使令牌失效。
+Clients revoke a refresh token so it can no longer be exchanged for new credentials.
 
-## 功能要求清单
+## Functional requirements
 
-- [ ] FR-01: 验证 refresh_token 不为空
-- [ ] FR-02: 查找令牌并标记为已撤销
+1. Validate caller authentication and all required inputs before changing state.
+2. Execute the operation through the domain and repository abstractions.
+3. Return the standard JSON response and an appropriate HTTP status.
+4. Preserve transaction boundaries and cancellation-token propagation.
+5. Record security-relevant activity where the audit policy requires it.
 
-## 详细的验收标准
+## Security requirements
 
-### AC-FR-01: 参数验证
-- **Given** RevokeRequest
-- **When** refresh_token 为空
-- **Then** 返回 success=false
+The response does not reveal whether a token was unknown or already revoked.
 
-### AC-FR-02: 吊销成功
-- **Given** 数据库中存在有效的 refresh_token
-- **When** 调用 RevokeRefreshToken
-- **Then** 令牌 IsRevoked=true，返回 success=true
+All logs and errors must redact passwords, application secrets, refresh tokens, OTP values, authorization headers, and private key material.
 
-### AC-FR-03: 令牌不存在
-- **Given** 数据库中不存在该 refresh_token
-- **When** 调用 RevokeRefreshToken
-- **Then** 返回 success=false
+## Data
 
-## 非功能需求
+The feature owns or reads refresh_tokens. Database access remains behind repository interfaces and the unit-of-work/IdentityDbContext boundaries.
 
-| 类别 | 需求 |
-|------|------|
-| 安全 | 不区分"不存在"和"已吊销"，防止信息泄露 |
+## Compatibility
 
-## 测试策略
-
-- 单元测试覆盖空参数、存在令牌、不存在令牌场景
-- [当前无测试覆盖]
+Public HTTP routes, JSON property names, and database table names remain stable across the SignaCore rename. Only product, namespace, assembly, image, and deployment identifiers changed.

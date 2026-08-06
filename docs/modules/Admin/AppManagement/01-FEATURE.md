@@ -1,37 +1,28 @@
-# 应用注册管理 (AppManagement)
+# Application Management
 
-## 核心用户故事
+## Purpose
 
-作为系统管理员，我希望管理业务系统的注册信息（创建、查询、更新回调、重置密钥、删除），以便控制哪些业务系统可以接入身份认证服务。
+Administrators create, list, inspect, and delete client application registrations.
 
-## 功能名称和一句话概括
+## Primary interface
 
-应用注册管理 — 管理员通过 Admin API 管理业务系统的 AppId/AppSecret 和回调配置。
+POST/GET/DELETE /api/admin/apps
 
-## 补充约束
+## Acceptance summary
 
-- AppSecret 仅在创建和重置时返回一次，不存储明文
-- 删除应用后该应用的所有请求将被拒绝
-- 重置密钥后旧密钥立即失效
-- 应用注册有两种方式：**Bootstrap Apps 文件预置**（首次部署一次性预置基础应用）和 **Admin API 动态注册**（运行时管理）。预置机制由 `DatabaseInitializer` 启动时读取 `data/bootstrap-apps.json` 完成，与 Admin API 互不影响
+- Authorized callers can complete the supported operation.
+- Invalid input is rejected with the repository's standard API error envelope.
+- Sensitive values are not written to logs or returned unintentionally.
+- The behavior is covered by unit or integration tests.
 
-## 关键验收条件摘要
+## Out of scope
 
-1. [ ] 创建应用：生成 AppId + AppSecret，返回明文 AppSecret
-2. [ ] 查询应用列表
-3. [ ] 更新回调配置（URL + TTL + IsActive）
-4. [ ] 删除应用
-5. [ ] 重置 AppSecret，返回新明文密钥
+This feature does not change unrelated authentication protocols, database ownership, or downstream authorization policy.
 
-## 明确列出"范围外"
+## Related documents
 
-- 不处理应用的权限配置（由回调机制动态获取）
-- 不处理应用的使用统计
-
-## 文档索引
-
-- [详细需求规格](./02-SPEC.md)
-- [设计说明](./03-DESIGN.md)
-- [任务清单](./04-TASKS.md)
-- [测试计划](./05-TESTS.md)
-- [约定与规范](./06-CONVENTIONS.md)
+- [Requirements](./02-SPEC.md)
+- [Design](./03-DESIGN.md)
+- [Tasks](./04-TASKS.md)
+- [Tests](./05-TESTS.md)
+- [Conventions](./06-CONVENTIONS.md)

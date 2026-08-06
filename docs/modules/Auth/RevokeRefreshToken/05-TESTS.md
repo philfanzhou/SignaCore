@@ -1,28 +1,17 @@
-# 刷新令牌吊销 — 测试计划 (TESTS)
+# Refresh Token Revocation: Test Plan
 
-测试工具：xUnit + Moq
-现有测试文件：当前无 RevokeRefreshToken 专项测试
+## Required coverage
 
-## 单元测试 — Given-When-Then 格式
+Tests should cover successful revocation, empty input, unknown tokens, already-revoked tokens, and concurrent requests.
 
-### UT-01 空令牌
+## Test layers
 
-- **Given** RevokeRequest 中 refresh_token 为空
-- **When** 调用 RevokeRefreshToken
-- **Then** 返回 success=false
+- Unit tests isolate policy and error branches with xUnit and Moq.
+- HTTP integration tests run the host through WebApplicationFactory.
+- Database contract tests verify PostgreSQL, MySQL/MariaDB, and SQLite behavior where provider differences matter.
 
-### UT-02 吊销成功
+## Given-When-Then baseline
 
-- **Given** 数据库中存在有效的 refresh_token
-- **When** 调用 RevokeRefreshToken
-- **Then** 令牌 IsRevoked=true，返回 success=true
-
-### UT-03 令牌不存在
-
-- **Given** 数据库中不存在该 refresh_token
-- **When** 调用 RevokeRefreshToken
-- **Then** 返回 success=false
-
-## 遗漏的测试场景
-
-- 当前无 RevokeRefreshToken 的单元测试 [待补充]
+- **Given** a valid caller and valid input, **when** the operation runs, **then** it succeeds and persists or returns the expected state.
+- **Given** invalid credentials or input, **when** the operation runs, **then** it fails without leaking sensitive details.
+- **Given** cancellation or an infrastructure failure, **when** execution stops, **then** the failure is observable and no partial unsafe state remains.

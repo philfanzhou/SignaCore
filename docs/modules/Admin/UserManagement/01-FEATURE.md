@@ -1,40 +1,28 @@
-# 用户管理 (UserManagement)
+# User Management
 
-## 核心用户故事
+## Purpose
 
-作为系统管理员，我希望通过 Web 管理界面管理用户账户（创建、查询、修改状态、修改备注和昵称），以便维护系统中的用户信息。
+Administrators create, inspect, update, and remove local, phone, and LDAP-backed user accounts.
 
-## 功能名称和一句话概括
+## Primary interface
 
-用户管理 — 管理员通过 Admin API 对用户账户进行 CRUD 操作。
+/api/admin/users
 
-## 补充约束
+## Acceptance summary
 
-- 所有操作需要 AdminSession 授权（Cookie 认证 + admin_access claim）
-- 创建密码用户时密码必须符合密码策略
-- 创建手机用户时手机号不能重复
-- 禁用用户后该用户无法登录
-- 登录 admin_frontend 的唯一账号 = `AdminBootstrap:Username` 配置的 seed 管理员
+- Authorized callers can complete the supported operation.
+- Invalid input is rejected with the repository's standard API error envelope.
+- Sensitive values are not written to logs or returned unintentionally.
+- The behavior is covered by unit or integration tests.
 
-## 关键验收条件摘要
+## Out of scope
 
-1. [ ] 创建密码用户：设置用户名和密码，密码符合策略
-2. [ ] 创建手机用户：设置手机号，手机号不重复
-3. [ ] 查询用户：按用户名或手机号搜索，分页返回
-4. [ ] 修改用户备注
-5. [ ] 修改用户昵称
-6. [ ] 启用/禁用用户，记录审计日志
+This feature does not change unrelated authentication protocols, database ownership, or downstream authorization policy.
 
-## 明确列出"范围外"
+## Related documents
 
-- 不处理用户删除（仅支持启用/禁用）
-- 不处理密码修改（需通过其他方式重置）
-- 不处理角色和权限分配（由业务系统通过回调管理）
-
-## 文档索引
-
-- [详细需求规格](./02-SPEC.md)
-- [设计说明](./03-DESIGN.md)
-- [任务清单](./04-TASKS.md)
-- [测试计划](./05-TESTS.md)
-- [约定与规范](./06-CONVENTIONS.md)
+- [Requirements](./02-SPEC.md)
+- [Design](./03-DESIGN.md)
+- [Tasks](./04-TASKS.md)
+- [Tests](./05-TESTS.md)
+- [Conventions](./06-CONVENTIONS.md)

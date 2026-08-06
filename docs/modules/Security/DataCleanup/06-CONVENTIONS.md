@@ -1,8 +1,9 @@
-# 过期数据自动清理 — 约定与规范 (CONVENTIONS)
+# Security Data Cleanup: Conventions
 
-## 日志要求
-
-- 清理开始：LogInformation
-- 清理完成：LogInformation
-- 清理失败：LogError
-- 各类清理数量：LogInformation（仅在有数据被清理时）
+- Use the SignaCore root namespace and descriptive domain-oriented type names.
+- Keep routes and JSON field names compatible with the existing API.
+- Use UTC timestamps and Guid identifiers.
+- Pass CancellationToken through every asynchronous boundary.
+- Use structured logging with correlation identifiers; never log credentials or tokens.
+- Return errors through the centralized API error format.
+- Keep database access provider-neutral unless code is located in a provider-specific migration project.

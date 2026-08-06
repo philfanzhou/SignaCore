@@ -1,13 +1,9 @@
-# 网关用户查询 — 约定与规范 (CONVENTIONS)
+# Gateway User Query: Conventions
 
-## 命名约定
-
-- API 路由：`/api/gateway/users/*`
-- 认证头：`X-Admin-AppId`、`X-Admin-AppSecret`
-
-## 错误消息格式约定
-
-| 场景 | 消息文本 |
-|------|----------|
-| 缺少网关凭证 | "Missing gateway credentials." |
-| 网关认证失败 | "Gateway authentication failed." |
+- Use the SignaCore root namespace and descriptive domain-oriented type names.
+- Keep routes and JSON field names compatible with the existing API.
+- Use UTC timestamps and Guid identifiers.
+- Pass CancellationToken through every asynchronous boundary.
+- Use structured logging with correlation identifiers; never log credentials or tokens.
+- Return errors through the centralized API error format.
+- Keep database access provider-neutral unless code is located in a provider-specific migration project.

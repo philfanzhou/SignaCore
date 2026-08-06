@@ -1,31 +1,20 @@
-# password_credentials (用户名密码凭证表)
+# password_credentials
 
-用户名/密码凭证表，支持一个账户绑定多个用户名。
+Local username/password bindings.
 
-## 字段清单
+## Columns
 
-| 字段名 | 类型 | 约束 | 默认值 | 说明 |
-|--------|------|------|--------|------|
-| id | UUID | PK | - | 主键 |
-| account_id | UUID | NOT NULL | - | 关联的账户 ID |
-| username | VARCHAR(100) | NOT NULL | - | 用户名原始显示值 |
-| username_normalized | VARCHAR(100) | NOT NULL, UNIQUE | - | FormC + invariant uppercase 用户名 |
-| password_hash | VARCHAR(256) | NOT NULL | - | BCrypt 密码哈希 |
-| created_at | TIMESTAMPTZ | NOT NULL | - | 凭证创建时间 |
+- id (UUID, primary key)
+- account_id
+- username / username_normalized
+- password_hash
+- created_at
 
-## 索引
+## Relationships and invariants
 
-| 索引名 | 字段 | 类型 | 说明 |
-|--------|------|------|------|
-| IX_password_credentials_username_normalized | username_normalized | UNIQUE | 大小写不敏感用户名唯一索引 |
-| IX_password_credentials_account_id | account_id | NON-UNIQUE | 按账户查询凭证 |
+- account_id references accounts.
+- Normalized usernames are unique and hashes are never returned through APIs.
 
-## 外键关系
+## Ownership
 
-- `account_id` → [accounts](./accounts.md).id
-
-## 特殊说明
-
-- 密码使用 BCrypt 哈希存储，WorkFactor 默认 11（可通过 `PasswordHasher:WorkFactor` 配置）
-- 用户名查询和唯一性使用 `username_normalized`，原始值保留用于显示
-- 密码策略要求：最少 8 字符，包含大写字母、小写字母和数字
+SignaCore owns all writes to this table. Other services must use the HTTP API rather than direct database access.

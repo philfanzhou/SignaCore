@@ -1,5 +1,5 @@
-# 架构决策
+# Architecture Decision Records
 
-| ADR | 状态 | 决定 |
-|-----|------|------|
-| [0001](./0001-multi-provider-persistence.md) | Accepted | 使用 EF Core Provider Adapter 支持 PostgreSQL、MySQL、MariaDB 和 SQLite |
+| ADR | Status | Decision |
+| --- | --- | --- |
+| [0001](./0001-multi-provider-persistence.md) | Accepted | Use EF Core provider adapters for PostgreSQL, MySQL/MariaDB, and SQLite |

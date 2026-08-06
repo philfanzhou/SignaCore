@@ -1,60 +1,29 @@
-# 回调注册 — 设计说明 (DESIGN)
+# Callback Registration: Design
 
-## 本功能在项目中的目录与文件结构
+## Components
 
-```
-backend/
-├── Host/Controllers/CallbackRegistrationController.cs         # POST /api/auth/callback/register HTTP 端点
-├── Host/Models/AuthModels.cs                 # RegisterCallbackRequest / RegisterCallbackResponse DTO
-├── Domain/Services/CallbackUrlValidator.cs   # 回调 URL 格式验证
-└── Database/
-    ├── Entity/AppRegistrationEntity.cs        # 应用注册实体
-    └── Repositories/IAppRegistrationRepository.cs
-```
+CallbackRegistrationController, CallbackUrlValidator, and AppRegistrationRepository.
 
-## 关键接口签名
+## Request flow
 
-```csharp
-// HTTP 端点（CallbackRegistrationController）
-[HttpPost("callback/register")]
-public async Task<ActionResult<RegisterCallbackResponse>> RegisterCallback(
-    [FromBody] RegisterCallbackRequest request)
+1. ASP.NET Core middleware assigns or propagates a correlation identifier.
+2. The controller or hosted service validates its security context and input.
+3. Domain services apply policy and coordinate repositories.
+4. EF Core persists changes using the configured provider.
+5. The caller receives a normalized response; failures pass through centralized exception handling.
 
-// 请求/响应 DTO（见 AuthModels.cs）
-public sealed class RegisterCallbackRequest { string CallbackUrl; int TtlSeconds; }
-public sealed class RegisterCallbackResponse { bool Success; string Message; long ExpiresAt; }
-```
+## Interface
 
-## 依赖的数据库表
+Primary interface: POST /api/auth/callback.
 
-- [app_registrations](../../../database/tables/app_registrations.md) — 更新 CallbackUrl 和 CallbackExpiresAt
+## Persistence
 
-## 数据流
+Relevant tables: app_registrations. PostgreSQL migrations live in Database, while MySQL/MariaDB and SQLite use their provider-specific migration assemblies.
 
-```
-RegisterCallback Request
-    │
-    ▼
-Validate AppId/AppSecret not empty
-    │
-    ▼
-CallbackUrlValidator.Validate(CallbackUrl)（如果 CallbackUrl 非空）
-    │   └── 检查 URL 格式（必须是有效的 HTTP/HTTPS 绝对 URL）
-    │   └── 检查是否解析到私有 IP 地址（仅当显式配置 AllowPrivateAddresses=false 时拒绝）
-    │   └── 检查域名是否在白名单中（如果配置了 AllowedDomains）
-    │
-    ▼
-AppRegistrationRepository.GetByAppIdAsync
-    │
-    ▼
-BCrypt.Verify(AppSecret, AppSecretHash)
-    │
-    ▼
-Update CallbackUrl + CallbackExpiresAt
-    │
-    ▼
-SaveChangesAsync
-    │
-    ▼
-RegisterCallbackResponse
-```
+## Design constraints
+
+- Domain code does not depend on the web host.
+- Controllers contain transport concerns, not persistence rules.
+- Secrets are never included in diagnostic payloads.
+- Async calls propagate CancellationToken.
+- Provider-specific behavior must be covered by database contract tests.

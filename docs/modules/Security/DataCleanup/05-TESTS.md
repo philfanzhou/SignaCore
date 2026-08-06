@@ -1,18 +1,17 @@
-# 过期数据自动清理 — 测试计划 (TESTS)
+# Security Data Cleanup: Test Plan
 
-测试工具：xUnit + Moq
-现有测试文件：test/CleanupWorkerTests.cs
+## Required coverage
 
-## 单元测试
+Tests should cover expired and active records, empty batches, cancellation, database failures, and repeated idempotent runs.
 
-### UT-01 清理执行
+## Test layers
 
-- **Given** 存在过期数据
-- **When** CleanupWorker 执行清理
-- **Then** 过期数据被清理，服务继续运行
+- Unit tests isolate policy and error branches with xUnit and Moq.
+- HTTP integration tests run the host through WebApplicationFactory.
+- Database contract tests verify PostgreSQL, MySQL/MariaDB, and SQLite behavior where provider differences matter.
 
-### UT-02 清理失败不中断
+## Given-When-Then baseline
 
-- **Given** 清理过程中发生异常
-- **When** CleanupWorker 执行
-- **Then** 记录错误日志，等待下次执行
+- **Given** a valid caller and valid input, **when** the operation runs, **then** it succeeds and persists or returns the expected state.
+- **Given** invalid credentials or input, **when** the operation runs, **then** it fails without leaking sensitive details.
+- **Given** cancellation or an infrastructure failure, **when** execution stops, **then** the failure is observable and no partial unsafe state remains.

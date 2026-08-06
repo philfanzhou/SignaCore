@@ -1,33 +1,28 @@
-# 刷新令牌吊销 (RevokeRefreshToken)
+# Refresh Token Revocation
 
-## 核心用户故事
+## Purpose
 
-作为已登录的用户或管理员，我希望能够吊销刷新令牌，以便在发现安全风险或主动退出时使令牌失效。
+Clients revoke a refresh token so it can no longer be exchanged for new credentials.
 
-## 功能名称和一句话概括
+## Primary interface
 
-刷新令牌吊销 — 通过 HTTP 端点吊销指定的刷新令牌。
+POST /api/auth/revoke
 
-## 补充约束
+## Acceptance summary
 
-- 吊销操作不可逆
-- 令牌不存在时返回 success=false（不区分"不存在"和"已吊销"）
+- Authorized callers can complete the supported operation.
+- Invalid input is rejected with the repository's standard API error envelope.
+- Sensitive values are not written to logs or returned unintentionally.
+- The behavior is covered by unit or integration tests.
 
-## 关键验收条件摘要
+## Out of scope
 
-1. [ ] 有效的 refresh_token 吊销成功，返回 success=true
-2. [ ] refresh_token 为空时返回 success=false
-3. [ ] refresh_token 不存在时返回 success=false
+This feature does not change unrelated authentication protocols, database ownership, or downstream authorization policy.
 
-## 明确列出"范围外"
+## Related documents
 
-- 不处理 access_token 的吊销（JWT 无状态，依赖自然过期）
-- 不批量吊销某用户的所有令牌（需逐个吊销）
-
-## 文档索引
-
-- [详细需求规格](./02-SPEC.md)
-- [设计说明](./03-DESIGN.md)
-- [任务清单](./04-TASKS.md)
-- [测试计划](./05-TESTS.md)
-- [约定与规范](./06-CONVENTIONS.md)
+- [Requirements](./02-SPEC.md)
+- [Design](./03-DESIGN.md)
+- [Tasks](./04-TASKS.md)
+- [Tests](./05-TESTS.md)
+- [Conventions](./06-CONVENTIONS.md)

@@ -1,24 +1,17 @@
-# 审计日志记录 — 测试计划 (TESTS)
+# Audit Logging: Test Plan
 
-测试工具：xUnit + Moq
-现有测试文件：test/Domain/Services/AuditServiceTests.cs
+## Required coverage
 
-## 单元测试
+Tests should cover successful and failed sign-ins, administrative mutations, correlation identifiers, redaction, serialization, and persistence failures.
 
-### UT-01 记录登录事件
+## Test layers
 
-- **Given** 登录事件数据
-- **When** 调用 RecordLoginAsync
-- **Then** 写入 login_histories 表
+- Unit tests isolate policy and error branches with xUnit and Moq.
+- HTTP integration tests run the host through WebApplicationFactory.
+- Database contract tests verify PostgreSQL, MySQL/MariaDB, and SQLite behavior where provider differences matter.
 
-### UT-02 记录管理操作
+## Given-When-Then baseline
 
-- **Given** 操作数据含 before/after 快照
-- **When** 调用 RecordActionAsync
-- **Then** 写入 audit_logs 表，快照为 camelCase JSON
-
-### UT-03 写入失败不抛异常
-
-- **Given** 数据库写入失败
-- **When** 调用 RecordLoginAsync
-- **Then** 记录 LogError，不抛异常
+- **Given** a valid caller and valid input, **when** the operation runs, **then** it succeeds and persists or returns the expected state.
+- **Given** invalid credentials or input, **when** the operation runs, **then** it fails without leaking sensitive details.
+- **Given** cancellation or an infrastructure failure, **when** execution stops, **then** the failure is observable and no partial unsafe state remains.

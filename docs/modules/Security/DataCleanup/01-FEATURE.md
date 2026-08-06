@@ -1,38 +1,28 @@
-# 过期数据自动清理 (DataCleanup)
+# Security Data Cleanup
 
-## 核心用户故事
+## Purpose
 
-作为系统运维人员，我希望系统自动清理过期数据（令牌、验证码、登录尝试、历史记录等），以便数据库不会无限增长。
+A background worker removes expired security records according to configured retention windows.
 
-## 功能名称和一句话概括
+## Primary interface
 
-过期数据自动清理 — 后台服务定期清理各类过期数据并检查密钥轮换。
+hosted background service
 
-## 补充约束
+## Acceptance summary
 
-- 清理间隔默认 24 小时
-- 各类数据有独立的保留期策略
-- 清理失败仅记录日志，不影响服务运行
+- Authorized callers can complete the supported operation.
+- Invalid input is rejected with the repository's standard API error envelope.
+- Sensitive values are not written to logs or returned unintentionally.
+- The behavior is covered by unit or integration tests.
 
-## 关键验收条件摘要
+## Out of scope
 
-1. [ ] 清理过期/已撤销的刷新令牌
-2. [ ] 将过期应用注册标记为不活跃
-3. [ ] 清理过期非活跃的密钥记录
-4. [ ] 清理过期的登录尝试记录
-5. [ ] 清理超过保留期的登录历史（90 天）
-6. [ ] 清理超过保留期的审计日志（365 天）
-7. [ ] 检查并执行密钥轮换
+This feature does not change unrelated authentication protocols, database ownership, or downstream authorization policy.
 
-## 明确列出"范围外"
+## Related documents
 
-- 不清理活跃数据
-- 不提供手动清理接口
-
-## 文档索引
-
-- [详细需求规格](./02-SPEC.md)
-- [设计说明](./03-DESIGN.md)
-- [任务清单](./04-TASKS.md)
-- [测试计划](./05-TESTS.md)
-- [约定与规范](./06-CONVENTIONS.md)
+- [Requirements](./02-SPEC.md)
+- [Design](./03-DESIGN.md)
+- [Tasks](./04-TASKS.md)
+- [Tests](./05-TESTS.md)
+- [Conventions](./06-CONVENTIONS.md)

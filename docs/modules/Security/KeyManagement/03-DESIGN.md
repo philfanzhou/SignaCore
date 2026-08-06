@@ -1,99 +1,29 @@
-# RSA 密钥管理 — 设计说明 (DESIGN)
+# Signing Key Management: Design
 
-## 文件结构
+## Components
 
-```
-backend/Domain/Keys/KeyManager.cs               # 密钥生命周期编排（加载/轮换/对外提供）
-backend/Domain/Keys/IMasterKeyProvider.cs       # 主密钥来源抽象
-backend/Domain/Keys/FileMasterKeyProvider.cs    # 环境变量 → 文件 → 生成
-backend/Domain/Keys/IPrivateKeyProtector.cs     # 私钥静态加密抽象
-backend/Domain/Keys/AesGcmPrivateKeyProtector.cs # AES-GCM + HKDF 实现
-backend/Host/Program.cs (JWKS 端点配置)
-```
+KeyManager, IMasterKeyProvider, IPrivateKeyProtector, AesGcmPrivateKeyProtector, and JwksMapper.
 
-三者职责分离：`KeyManager` 不接触任何密钥字节，主密钥从哪来、私钥怎么加解密
-分别由 `IMasterKeyProvider` 与 `IPrivateKeyProtector` 决定。
+## Request flow
 
-## 关键接口签名
+1. ASP.NET Core middleware assigns or propagates a correlation identifier.
+2. The controller or hosted service validates its security context and input.
+3. Domain services apply policy and coordinate repositories.
+4. EF Core persists changes using the configured provider.
+5. The caller receives a normalized response; failures pass through centralized exception handling.
 
-```csharp
-public interface IKeyManager {
-    RsaSecurityKey GetCurrentKey();
-    Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync();
-    Task<bool> NeedsKeyRotationAsync();
-    Task RotateKeyAsync();
-    Task InitializationCompleted { get; }
-}
+## Interface
 
-public interface IMasterKeyProvider {
-    byte[] GetMasterKey();
-}
+Primary interface: GET /.well-known/jwks.
 
-public interface IPrivateKeyProtector {
-    (string EncryptedKey, string Salt) Protect(byte[] pkcs8PrivateKey);
-    byte[] Unprotect(string encryptedKey, string salt);
-}
-```
+## Persistence
 
-> 加密字节格式（`nonce(12) || tag(16) || ciphertext`，salt 分列存储）是**持久化契约**，
-> 由 `AesGcmPrivateKeyProtectorTests` 用独立重写的参考实现双向交叉验证。
+Relevant tables: security_keys. PostgreSQL migrations live in Database, while MySQL/MariaDB and SQLite use their provider-specific migration assemblies.
 
-## 依赖的数据库表
+## Design constraints
 
-- [security_keys](../../../database/tables/security_keys.md)
-
-## 加密流程
-
-### 主密钥派生
-
-```
-Master Key (来源: 环境变量 RSA_MASTER_KEY > 文件 > 自动生成)
-    │
-    ▼ HKDF(SHA256, masterKey, salt="QuantumZhou.Identity.KeyProtection",
-           info="RSA-Private-Key-Encryption")
-32-byte AES Key
-```
-
-### 私钥加密流程
-
-```
-Master Key
-    │
-    ▼ HKDF(SHA256, masterKey, randomSalt, info="RSA-Private-Key-Encrypt")
-32-byte AES Key
-    │
-    ▼ AES-256-GCM(nonce, plaintext=pkcs8PrivateKey)
-nonce(12 bytes) + tag(16 bytes) + ciphertext
-    │
-    ▼ Base64 编码
-EncryptedPrivateKeyParams (存储到数据库)
-```
-
-**详细步骤：**
-
-1. 生成随机 16-byte salt
-2. 使用 HKDF(SHA256, masterKey, randomSalt, info="RSA-Private-Key-Encrypt") 派生 32-byte AES 密钥
-3. 使用 AES-256-GCM 加密 PKCS#8 编码的私钥，生成 12-byte nonce 和 16-byte tag
-4. 拼接 nonce(12) + tag(16) + ciphertext，进行 Base64 编码
-5. 将 Base64 字符串和 randomSalt 一同存储为 `EncryptedPrivateKeyParams`
-
-## 主密钥文件路径
-
-- 容器内路径：`data/master-key/master-key.json`（`AppContext.BaseDirectory` + `data/master-key`，容器内 ContentRoot 为 `/app`）
-- `start.sh` 将宿主机 `data/` 目录挂载到容器 `/app/data`，主密钥文件位于该挂载点下
-- 程序检测 `data/master-key/` 子目录是否存在，**不存在时自动创建**（`Directory.CreateDirectory`），再写入 `master-key.json`；启动脚本不预先创建任何业务子目录
-
-## 关键设计决策
-
-| 决策 | 说明 |
-|------|------|
-| 主密钥文件路径 | `data/master-key/master-key.json`，随 `data/` 目录挂载到容器 `/app/data`；`KeyManager` 在写入前自动创建 `master-key/` 子目录（若不存在） |
-| 启动阻塞 | 服务启动时阻塞等待 `KeyManager.InitializationCompleted`，在密钥初始化完成前不接受任何请求 |
-| 主密钥丢失恢复 | 如果主密钥丢失导致私钥解密失败，旧密钥被标记为非活跃（deactivated），自动生成新的密钥对；所有基于旧密钥签发的 JWT 将失效。该场景视为严重安全事件，必须记录 **Error 级别日志**（不是 Warning），便于在 Loki 仪表盘上立即识别并触发运维介入审计主密钥来源 |
-| JWKS 速率限制 | JWKS 端点配置独立的速率限制器（FixedWindow 策略，60 次/分钟），防止公钥查询被滥用。触发拒绝时输出 Warning 日志，含客户端 IP |
-| JWKS 多密钥返回 | JWKS 端点返回所有未过期密钥（含已停用但未过期的），确保密钥轮换后旧 token 在过期前仍可验证。`IssuerSigningKeyResolver` 同样使用全部有效密钥（`IKeyManager.GetValidationKeys()` 内存快照，避免每请求读库），JWT 库按 `kid` 自动匹配 |
-| 轮换在半衰期触发，不等过期 | `NeedsKeyRotationAsync` 与 `RotateKeyAsync` 共用 `IsInRotationWindow`（剩余寿命 ≤ 总寿命一半）。**二者阈值必须一致**：若检查用"已过期"、执行用"剩余不足一半"，轮换只会发生在密钥过期之后，而 JWKS 只发布未过期密钥，从过期到 CleanupWorker 下次 tick（最长 24h）之间 JWKS 返回空数组，下游全部验签失败，同时本服务仍在用内存里那把过期密钥继续签发、健康检查全绿。回归覆盖见 `KeyRotationTimelineTests` |
-| 当前签名密钥无条件并入校验集 | `GetValidationKeys()` 除快照外**永远**带上 `_currentKey`。`RotateKeyAsync` 是先 `SetCurrentKey` 再刷快照，刷新一旦抛异常，`_currentKey` 已是新密钥而快照停在旧内容上——它非空，所以"空则兜底"救不了，服务会拒掉自己刚签发的每一个 token 直到下次轮换（15 天）或重启，而异常被 `CleanupWorker` 吞成一条日志、健康检查全绿。正常路径下快照本就含当前密钥，走提前返回，无额外分配 |
-| 校验密钥快照只存公钥 | `GetValidationKeys()` 的快照是单例字段、生命周期与进程等长，而验签只需要公钥，私钥没有理由常驻其中——刷新时复制出只含公钥的 `RsaSecurityKey`，随即释放带私钥的那份。复制必须用 `RSA.ImportParameters` 而非 `new RsaSecurityKey(RSAParameters)`：后者 `Rsa` 属性为 null，会让 `JwksMapper.ToJwk` 抛异常。替换快照时**不**释放旧的一份——并发请求可能正持有引用，释放会让验签抛 `ObjectDisposedException`；轮换 15 天才一次，交给 GC |
-| JWKS 数据源仍走私钥解密 | `LoadValidKeysAsync` 刻意不直接读 `public_key_modulus` / `public_key_exponent` 明文列，而是解密私钥。解密成败同时充当"本实例是否仍掌握这把私钥"的准入判据：主密钥变更后旧密钥解不开，此时该私钥可能仍在他人手中，其公钥绝不能继续出现在 JWKS 里，否则等于替对方背书。解不开的密钥记 Warning 后跳过 |
-| 停用走 `DeactivateAllActiveAsync` | 不能只停用 `GetActiveKeyAsync()` 返回的那一条——该方法带 `ExpiresAt > now` 过滤，密钥过期后返回 null，旧行会永远卡在 `is_active=true`，而 `RemoveExpiredInactiveAsync` 只删 `!is_active`，清不掉。停用不单独 SaveChanges，与新密钥插入合并成一次提交，中途不出现零个活跃密钥 |
+- Domain code does not depend on the web host.
+- Controllers contain transport concerns, not persistence rules.
+- Secrets are never included in diagnostic payloads.
+- Async calls propagate CancellationToken.
+- Provider-specific behavior must be covered by database contract tests.

@@ -1,79 +1,27 @@
-# 过期数据自动清理 — 详细需求规格 (SPEC)
+# Security Data Cleanup: Requirements
 
-## 功能概述和用户故事
+## Overview
 
-本模块负责定期清理系统中各类过期数据，包括刷新令牌、应用注册、安全密钥、登录尝试、登录历史和审计日志，并在清理周期中检查密钥轮换需求。自动清理确保数据库不会无限增长，同时满足数据保留合规要求。
+A background worker removes expired security records according to configured retention windows.
 
-**用户故事：**
+## Functional requirements
 
-- **US-01**: 作为运维人员，我需要系统自动清理过期的刷新令牌，避免数据库膨胀。
-- **US-02**: 作为系统管理员，我需要过期的应用注册自动标记为不活跃，防止无效回调。
-- **US-03**: 作为安全人员，我需要过期且非活跃的密钥记录被清理，减少攻击面。
-- **US-04**: 作为运维人员，我需要登录尝试记录仅保留 1 天，减少存储占用。
-- **US-05**: 作为合规人员，我需要登录历史保留 90 天、审计日志保留 365 天，满足审计要求。
-- **US-06**: 作为系统管理员，我需要清理周期中自动检查并执行密钥轮换，确保密钥安全。
+1. Validate caller authentication and all required inputs before changing state.
+2. Execute the operation through the domain and repository abstractions.
+3. Return the standard JSON response and an appropriate HTTP status.
+4. Preserve transaction boundaries and cancellation-token propagation.
+5. Record security-relevant activity where the audit policy requires it.
 
-## 功能要求清单
+## Security requirements
 
-- [ ] FR-01: 清理过期/已撤销刷新令牌
-- [ ] FR-02: 将过期应用注册标记为不活跃
-- [ ] FR-03: 清理过期非活跃密钥记录
-- [ ] FR-04: 清理过期登录尝试记录（>1 天）
-- [ ] FR-05: 清理过期登录历史（>90 天）
-- [ ] FR-06: 清理过期审计日志（>365 天）
-- [ ] FR-07: 检查密钥轮换需求并执行
+Cleanup is bounded, cancellable, and limited to records that satisfy explicit expiry or retention predicates.
 
-## 详细的验收标准
+All logs and errors must redact passwords, application secrets, refresh tokens, OTP values, authorization headers, and private key material.
 
-### AC-FR-01: 清理过期/已撤销刷新令牌
-- **Given** 数据库中存在已过期或已撤销的刷新令牌
-- **When** 清理周期执行
-- **Then** 调用 `RemoveExpiredAndRevokedAsync`，使用 `ExecuteDeleteAsync` 在数据库端直接删除，不加载到内存
+## Data
 
-### AC-FR-02: 标记过期应用注册
-- **Given** 数据库中存在已过期的应用注册
-- **When** 清理周期执行
-- **Then** 调用 `DeactivateExpiredCallbacksAsync`，使用 `ExecuteUpdateAsync` 在数据库端直接更新 IsActive=false，不加载到内存
+The feature owns or reads refresh_tokens, otps, and login_attempts. Database access remains behind repository interfaces and the unit-of-work/IdentityDbContext boundaries.
 
-### AC-FR-03: 清理过期非活跃密钥
-- **Given** 数据库中存在已过期且状态为非活跃的安全密钥
-- **When** 清理周期执行
-- **Then** 调用 `RemoveExpiredInactiveAsync`，使用 `ExecuteDeleteAsync` 在数据库端直接删除，不加载到内存
+## Compatibility
 
-### AC-FR-04: 清理过期登录尝试
-- **Given** 数据库中存在超过 1 天的登录尝试记录
-- **When** 清理周期执行
-- **Then** 调用 `RemoveExpiredAsync`，使用 `ExecuteDeleteAsync` 在数据库端直接删除，不加载到内存
-
-### AC-FR-05: 清理过期登录历史
-- **Given** 数据库中存在超过 90 天的登录历史记录
-- **When** 清理周期执行
-- **Then** 调用 `RemoveOlderThanAsync`，使用 `ExecuteDeleteAsync` 在数据库端直接删除，不加载到内存
-
-### AC-FR-06: 清理过期审计日志
-- **Given** 数据库中存在超过 365 天的审计日志
-- **When** 清理周期执行
-- **Then** 调用 `RemoveOlderThanAsync`，使用 `ExecuteDeleteAsync` 在数据库端直接删除，不加载到内存
-
-### AC-FR-07: 密钥轮换检查
-- **Given** 清理周期执行
-- **When** 调用 `NeedsKeyRotationAsync` 检测到需要轮换
-- **Then** 执行 `RotateKeyAsync` 完成密钥轮换
-
-## 非功能需求
-
-| 需求项 | 说明 |
-|--------|------|
-| 清理间隔 | 24 小时（`IdentityConstants.CleanupIntervalHours`） |
-| 清理失败处理 | 清理失败仅记录错误日志，不抛出异常，继续执行后续清理任务 |
-| 密钥轮换检查 | 密钥轮换检查包含在清理周期中，作为最后一步执行 |
-| 数据库端执行 | 清理操作使用 `ExecuteDeleteAsync`/`ExecuteUpdateAsync`，避免全表加载到内存 |
-
-## 测试策略
-
-- 单元测试：`test/Domain/CleanupWorkerTests.cs`
-  - 验证各清理方法按正确顺序调用
-  - 验证清理失败不影响后续任务执行
-  - 验证密钥轮换检查在清理周期末尾执行
-- 单元测试：`test/Domain/EfCoreRepositoriesTests.cs`（如存在）
-  - 验证 `ExecuteDeleteAsync`/`ExecuteUpdateAsync` 正确执行数据库端操作
+Public HTTP routes, JSON property names, and database table names remain stable across the SignaCore rename. Only product, namespace, assembly, image, and deployment identifiers changed.

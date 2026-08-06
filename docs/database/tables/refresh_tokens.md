@@ -1,34 +1,24 @@
-# refresh_tokens (刷新令牌表)
+# refresh_tokens
 
-刷新令牌表，存储随机字符串（非 JWT），支持撤销和过期清理。
+Rotating, revocable refresh credentials bound to an account and application.
 
-## 字段清单
+## Columns
 
-| 字段名 | 类型 | 约束 | 默认值 | 说明 |
-|--------|------|------|--------|------|
-| id | UUID | PK | - | 主键 |
-| account_id | UUID | NOT NULL | - | 关联的账户 ID |
-| token_value | VARCHAR(256) | NOT NULL, UNIQUE | - | 令牌值（Base64 随机字符串，非 JWT） |
-| expires_at | TIMESTAMPTZ | NOT NULL | - | 令牌过期时间 |
-| created_at | TIMESTAMPTZ | NOT NULL | - | 令牌创建时间 |
-| is_revoked | BOOLEAN | NOT NULL | false | 是否已撤销 |
-| app_id | VARCHAR(100) | NULL | - | 关联的应用 ID |
+- id (UUID, primary key)
+- account_id
+- token_value
+- expires_at / created_at
+- is_revoked
+- app_id
+- ldap_credential_id (nullable)
+- sms_user_login_id (nullable)
 
-## 索引
+## Relationships and invariants
 
-| 索引名 | 字段 | 类型 | 说明 |
-|--------|------|------|------|
-| IX_refresh_tokens_token_value | token_value | UNIQUE | 令牌值唯一索引 |
+- account_id references accounts.
+- app_id logically references app_registrations.app_id.
+- Optional bindings preserve the source LDAP or SMS identity during rotation.
 
-## 外键关系
+## Ownership
 
-- `account_id` → [accounts](./accounts.md).id
-- `app_id` → [app_registrations](./app_registrations.md).app_id（逻辑引用，无外键约束）
-
-## 特殊说明
-
-- 令牌值由 `RandomNumberGenerator.GetBytes(64)` 生成后 Base64 编码
-- 刷新令牌默认有效期 7 天（可通过 `RefreshToken:ExpirationDays` 配置）
-- 使用 refresh_token grant_type 刷新时，旧令牌会被撤销并生成新令牌
-- `CleanupWorker` 定期清理过期和已撤销的令牌
-- `app_id` 为必填字段，记录并约束令牌的签发应用。refresh_token 换票时，请求方 AppId 必须与该字段匹配；空 AppId 和跨应用换票都会被拒绝
+SignaCore owns all writes to this table. Other services must use the HTTP API rather than direct database access.

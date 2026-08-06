@@ -2,11 +2,12 @@
 .gitignore
 .idea
 .vscode
-admin_frontend/node_modules
-admin_frontend/dist
-backend/**/bin
-backend/**/obj
-backend/**/TestResults
+src/SignaCore.Admin/node_modules
+src/SignaCore.Admin/dist
+artifacts
+**/bin
+**/obj
+**/TestResults
 data
 *.user
 *.suo
