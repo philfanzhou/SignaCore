@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Build the administrative frontend.
-FROM node:25-alpine AS frontend-build
+FROM node:24-alpine AS frontend-build
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 ENV npm_config_registry=${NPM_REGISTRY}
 WORKDIR /app

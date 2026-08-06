@@ -59,6 +59,28 @@ public class CleanupWorkerTests
         return scopeFactoryMock;
     }
 
+    private static async Task RunWorkerUntilAsync(
+        CleanupWorker worker,
+        Func<bool> completed)
+    {
+        await worker.StartAsync(CancellationToken.None);
+
+        try
+        {
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+            while (!completed() && DateTimeOffset.UtcNow < deadline)
+            {
+                await Task.Delay(10);
+            }
+
+            Assert.True(completed(), "The cleanup worker did not complete the expected operation within 5 seconds.");
+        }
+        finally
+        {
+            await worker.StopAsync(CancellationToken.None);
+        }
+    }
+
     [Fact]
     public async Task CleanupExpiredDataAsync_RemovesExpiredAndRevokedTokens()
     {
@@ -81,12 +103,9 @@ public class CleanupWorkerTests
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
-        var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
-
-        await worker.StartAsync(cts.Token);
-        await Task.Delay(200);
-        await worker.StopAsync(CancellationToken.None);
+        await RunWorkerUntilAsync(
+            worker,
+            () => refreshTokenRepoMock.Invocations.Count > 0);
 
         refreshTokenRepoMock.Verify(r => r.RemoveExpiredAndRevokedAsync(), Times.AtLeastOnce);
     }
@@ -113,12 +132,9 @@ public class CleanupWorkerTests
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
-        var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
-
-        await worker.StartAsync(cts.Token);
-        await Task.Delay(200);
-        await worker.StopAsync(CancellationToken.None);
+        await RunWorkerUntilAsync(
+            worker,
+            () => appRegRepoMock.Invocations.Count > 0);
 
         appRegRepoMock.Verify(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>()), Times.AtLeastOnce);
     }
@@ -145,12 +161,9 @@ public class CleanupWorkerTests
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
-        var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
-
-        await worker.StartAsync(cts.Token);
-        await Task.Delay(200);
-        await worker.StopAsync(CancellationToken.None);
+        await RunWorkerUntilAsync(
+            worker,
+            () => securityKeyRepoMock.Invocations.Count > 0);
 
         securityKeyRepoMock.Verify(r => r.RemoveExpiredInactiveAsync(), Times.AtLeastOnce);
     }
@@ -177,12 +190,9 @@ public class CleanupWorkerTests
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
-        var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
-
-        await worker.StartAsync(cts.Token);
-        await Task.Delay(200);
-        await worker.StopAsync(CancellationToken.None);
+        await RunWorkerUntilAsync(
+            worker,
+            () => loginAttemptRepoMock.Invocations.Count > 0);
 
         loginAttemptRepoMock.Verify(r => r.RemoveExpiredAsync(It.IsAny<DateTimeOffset>()), Times.AtLeastOnce);
     }
@@ -210,12 +220,10 @@ public class CleanupWorkerTests
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
-        var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
-
-        await worker.StartAsync(cts.Token);
-        await Task.Delay(200);
-        await worker.StopAsync(CancellationToken.None);
+        await RunWorkerUntilAsync(
+            worker,
+            () => keyManagerMock.Invocations.Any(
+                invocation => invocation.Method.Name == nameof(IKeyManager.RotateKeyAsync)));
 
         keyManagerMock.Verify(k => k.NeedsKeyRotationAsync(), Times.AtLeastOnce);
         keyManagerMock.Verify(k => k.RotateKeyAsync(), Times.AtLeastOnce);
@@ -243,12 +251,10 @@ public class CleanupWorkerTests
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
-        var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
-
-        await worker.StartAsync(cts.Token);
-        await Task.Delay(200);
-        await worker.StopAsync(CancellationToken.None);
+        await RunWorkerUntilAsync(
+            worker,
+            () => keyManagerMock.Invocations.Any(
+                invocation => invocation.Method.Name == nameof(IKeyManager.NeedsKeyRotationAsync)));
 
         keyManagerMock.Verify(k => k.NeedsKeyRotationAsync(), Times.AtLeastOnce);
         keyManagerMock.Verify(k => k.RotateKeyAsync(), Times.Never);
@@ -266,14 +272,11 @@ public class CleanupWorkerTests
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
-        var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
-
         var exception = await Record.ExceptionAsync(async () =>
         {
-            await worker.StartAsync(cts.Token);
-            await Task.Delay(200);
-            await worker.StopAsync(CancellationToken.None);
+            await RunWorkerUntilAsync(
+                worker,
+                () => refreshTokenRepoMock.Invocations.Count > 0);
         });
 
         Assert.Null(exception);

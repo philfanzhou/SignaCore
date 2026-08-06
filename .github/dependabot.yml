@@ -9,6 +9,18 @@ updates:
       dotnet-dependencies:
         patterns:
           - "*"
+    # Pomelo is currently an EF Core 9 provider. Keep the provider stack on the
+    # same major until a compatible Pomelo release is adopted deliberately.
+    ignore:
+      - dependency-name: "Microsoft.EntityFrameworkCore*"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "Npgsql.EntityFrameworkCore.PostgreSQL"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: npm
     directory: /src/SignaCore.Admin
@@ -18,11 +30,23 @@ updates:
       frontend-dependencies:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "typescript"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: /src/SignaCore.Host
     schedule:
       interval: weekly
+    # Production builds use an even-numbered Node LTS line.
+    ignore:
+      - dependency-name: "node"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /

@@ -63,8 +63,7 @@ public sealed class ServerDatabaseContractTests
             return;
         }
 
-        var container = new PostgreSqlBuilder()
-            .WithImage("postgres:15-alpine")
+        var container = new PostgreSqlBuilder("postgres:15-alpine")
             .WithDatabase("identity")
             .WithUsername("postgres")
             .WithPassword("postgres")
@@ -124,21 +123,18 @@ public sealed class ServerDatabaseContractTests
     {
         return provider switch
         {
-            "PostgreSQL" => new PostgreSqlBuilder()
-                .WithImage("postgres:15-alpine")
+            "PostgreSQL" => new PostgreSqlBuilder("postgres:15-alpine")
                 .WithDatabase("identity")
                 .WithUsername("postgres")
                 .WithPassword("postgres")
                 .Build(),
-            "MySQL" => new MySqlBuilder()
-                .WithImage("mysql:8.4")
+            "MySQL" => new MySqlBuilder("mysql:8.4")
                 .WithDatabase("identity")
                 .WithUsername("identity")
                 .WithPassword("identity")
                 .WithWaitStrategy(CreateMySqlWaitStrategy())
                 .Build(),
-            "MariaDB" => new MySqlBuilder()
-                .WithImage("mariadb:11.4")
+            "MariaDB" => new MySqlBuilder("mariadb:11.4")
                 .WithDatabase("identity")
                 .WithUsername("identity")
                 .WithPassword("identity")
@@ -149,25 +145,20 @@ public sealed class ServerDatabaseContractTests
     }
 
     /// <summary>
-    /// Testcontainers.MySql 3.8.0 的默认就绪探针要在容器里跑 <c>mysql</c> 客户端，
-    /// 并依赖模块写入 <c>/etc/mysql/my.cnf</c> 的一份 client 配置来补凭据。该模块的默认
-    /// 镜像是 mysql:8.0，而本测试钉的是 mysql:8.4 / mariadb:11.4，这套配合在新镜像上失效：
-    /// CI 实测探针每秒重试、5 分钟不通过，而同一时刻数据库其实 10 秒就可用了。
-    ///
-    /// 改成只等 TCP 3306 就绪——官方镜像初始化阶段的临时服务器是 <c>port: 0</c>（仅 socket），
-    /// 只有真正的服务器才监听 3306，所以这个判据能准确区分两个阶段，且完全不碰 mysql 客户端，
-    /// MySQL 与 MariaDB 通用。端口就绪之后再由 <see cref="WaitUntilConnectableAsync"/>
-    /// 用测试真正要用的连接串做一次应用级确认。
+    /// Wait only for the database server's internal TCP port. This works for
+    /// both MySQL and MariaDB without depending on a client executable inside
+    /// the image. <see cref="WaitUntilConnectableAsync"/> then verifies the
+    /// connection with the same provider and connection string used by the test.
     /// </summary>
     private static IWaitForContainerOS CreateMySqlWaitStrategy()
     {
-        return Wait.ForUnixContainer().UntilPortIsAvailable(3306);
+        return Wait.ForUnixContainer().UntilInternalTcpPortIsAvailable(3306);
     }
 
     /// <summary>
-    /// 用测试真正要用的连接串重试连接，直到成功或超时。
-    /// 容器"端口已监听"与"能用这套凭据连上目标库"之间仍有窗口，这一步把它填掉；
-    /// 失败时抛出的是真实的连接异常，而不是像等待策略那样静默重试到被 blame-hang 掐断。
+    /// Retry the real provider connection until it succeeds or the deadline is
+    /// reached. A listening port can precede database readiness, so this closes
+    /// that gap and preserves the last connection error for diagnostics.
     /// </summary>
     private async Task WaitUntilConnectableAsync(DbContextOptions<IdentityDbContext> options)
     {
