@@ -33,4 +33,10 @@ public class AppRegistrationEntity
 
     /// <summary>LDAP admission policy for this application. Disabled by default.</summary>
     public LdapLoginMode LdapLoginMode { get; set; } = LdapLoginMode.Disabled;
+
+    /// <summary>SMS admission policy for this application. Disabled by default.</summary>
+    public SmsLoginMode SmsLoginMode { get; set; } = SmsLoginMode.Disabled;
+
+    /// <summary>Name of the deployment-managed SMS provider profile.</summary>
+    public string? SmsProfileKey { get; set; }
 }

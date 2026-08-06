@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { type AdminApp, type AdminLdapDirectory, type AdminLdapUser } from '../services/adminApi'
+import { type AdminApp, type AdminLdapDirectory, type AdminLdapUser, type AdminSmsProfile, type AdminSmsUser } from '../services/adminApi'
 import { adminClient } from '../services/apiClient'
 import { normalizeTtlValue } from '../utils/format'
 import { handleApiError } from './useSession'
@@ -13,9 +13,13 @@ const resettingSecret = ref(false)
 const deletingApp = ref(false)
 const loadingLdapUsers = ref(false)
 const addingLdapUser = ref(false)
+const loadingSmsUsers = ref(false)
+const addingSmsUser = ref(false)
 const apps = ref<AdminApp[]>([])
 const ldapUsers = ref<AdminLdapUser[]>([])
 const ldapDirectories = ref<AdminLdapDirectory[]>([])
+const smsUsers = ref<AdminSmsUser[]>([])
+const smsProfiles = ref<AdminSmsProfile[]>([])
 const latestCreatedAppSecret = ref('')
 const latestSecretAppId = ref('')
 const showSecretDialog = ref(false)
@@ -43,9 +47,12 @@ const callbackForm = reactive({
   neverExpire: false,
   isActive: true,
   ldapLoginMode: 'Disabled' as AdminApp['ldapLoginMode'],
+  smsLoginMode: 'Disabled' as AdminApp['smsLoginMode'],
+  smsProfileKey: '' as string,
 })
 
 const ldapUserForm = reactive({ directoryKey: '', username: '' })
+const smsUserForm = reactive({ phone: '' })
 
 const selectedApp = computed(() => apps.value.find((item) => item.appId === callbackForm.appId) ?? null)
 
@@ -199,6 +206,8 @@ function fillCallbackForm(app: AdminApp) {
   }
   callbackForm.isActive = app.isActive
   callbackForm.ldapLoginMode = app.ldapLoginMode
+  callbackForm.smsLoginMode = app.smsLoginMode
+  callbackForm.smsProfileKey = app.smsProfileKey ?? ''
 }
 
 function onAppSelected() {
@@ -229,6 +238,11 @@ async function handleSaveCallback(): Promise<boolean> {
         isActive: callbackForm.isActive,
       }),
       adminClient.updateLdapPolicy(callbackForm.appId, callbackForm.ldapLoginMode),
+      adminClient.updateSmsPolicy(
+        callbackForm.appId,
+        callbackForm.smsLoginMode,
+        callbackForm.smsProfileKey || null,
+      ),
     ])
     ElMessage.success('应用配置保存成功')
     await loadApps()
@@ -292,7 +306,7 @@ function openAppDrawer(app: AdminApp) {
   appDrawerApp.value = app
   fillCallbackForm(app)
   appDrawerVisible.value = true
-  void loadLdapUsers(app.appId)
+  void Promise.all([loadLdapUsers(app.appId), loadSmsUsers(app.appId)])
   requestAnimationFrame(() => requestAnimationFrame(() => {
     appDrawerOpen.value = true
   }))
@@ -355,6 +369,59 @@ async function revokeLdapUser(user: AdminLdapUser) {
   }
 }
 
+async function loadSmsUsers(appId: string) {
+  loadingSmsUsers.value = true
+  try {
+    const [users, profiles] = await Promise.all([
+      adminClient.getAppSmsUsers(appId),
+      smsProfiles.value.length ? Promise.resolve(smsProfiles.value) : adminClient.getSmsProfiles(),
+    ])
+    smsUsers.value = users
+    smsProfiles.value = profiles
+    if (!callbackForm.smsProfileKey && profiles.length === 1) callbackForm.smsProfileKey = profiles[0].key
+  } catch (error) {
+    handleApiError('加载短信登录配置失败', error)
+  } finally {
+    loadingSmsUsers.value = false
+  }
+}
+
+async function addSmsUser() {
+  const app = appDrawerApp.value
+  if (!app || !smsUserForm.phone.trim()) {
+    ElMessage.warning('请输入手机号')
+    return
+  }
+  addingSmsUser.value = true
+  try {
+    await adminClient.addAppSmsUser(app.appId, smsUserForm.phone.trim())
+    smsUserForm.phone = ''
+    ElMessage.success('短信用户已授权')
+    await loadSmsUsers(app.appId)
+  } catch (error) {
+    handleApiError('添加短信用户失败', error)
+  } finally {
+    addingSmsUser.value = false
+  }
+}
+
+async function revokeSmsUser(user: AdminSmsUser) {
+  const app = appDrawerApp.value
+  if (!app) return
+  try {
+    await ElMessageBox.confirm(`确定撤销 ${user.phone} 对当前应用的短信登录权限吗？`, '撤销短信授权', {
+      confirmButtonText: '撤销', cancelButtonText: '取消', type: 'warning',
+    })
+  } catch { return }
+  try {
+    await adminClient.revokeAppSmsUser(app.appId, user.loginId)
+    ElMessage.success('短信授权已撤销')
+    await loadSmsUsers(app.appId)
+  } catch (error) {
+    handleApiError('撤销短信授权失败', error)
+  }
+}
+
 function closeAppDrawer() {
   if (!appDrawerVisible.value) return
   appDrawerOpen.value = false
@@ -382,10 +449,15 @@ function resetAppsState() {
   callbackForm.neverExpire = false
   callbackForm.isActive = true
   callbackForm.ldapLoginMode = 'Disabled'
+  callbackForm.smsLoginMode = 'Disabled'
+  callbackForm.smsProfileKey = ''
   ldapUsers.value = []
   ldapDirectories.value = []
+  smsUsers.value = []
+  smsProfiles.value = []
   ldapUserForm.directoryKey = ''
   ldapUserForm.username = ''
+  smsUserForm.phone = ''
   if (appDrawerTimer) { window.clearTimeout(appDrawerTimer); appDrawerTimer = undefined }
   appDrawerOpen.value = false
   appDrawerVisible.value = false
@@ -413,10 +485,15 @@ export function useApps() {
     deletingApp,
     loadingLdapUsers,
     addingLdapUser,
+    loadingSmsUsers,
+    addingSmsUser,
     apps,
     ldapUsers,
     ldapDirectories,
     ldapUserForm,
+    smsUsers,
+    smsProfiles,
+    smsUserForm,
     latestCreatedAppSecret,
     latestSecretAppId,
     showSecretDialog,
@@ -451,6 +528,9 @@ export function useApps() {
     loadLdapUsers,
     addLdapUser,
     revokeLdapUser,
+    loadSmsUsers,
+    addSmsUser,
+    revokeSmsUser,
     openDeleteAppModal,
   }
 }

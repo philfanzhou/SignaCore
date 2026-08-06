@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Services;
@@ -19,18 +21,18 @@ namespace QuantumZhou.Identity.Host.Controllers;
 public class SmsCodeController : ControllerBase
 {
     private readonly IOtpService _otpService;
-    private readonly ISmsSender _smsSender;
+    private readonly ISmsAdmissionService _admissionService;
     private readonly IAuditService _auditService;
     private readonly ILogger<SmsCodeController> _logger;
 
     public SmsCodeController(
         IOtpService otpService,
-        ISmsSender smsSender,
+        ISmsAdmissionService admissionService,
         IAuditService auditService,
         ILogger<SmsCodeController> logger)
     {
         _otpService = otpService;
-        _smsSender = smsSender;
+        _admissionService = admissionService;
         _auditService = auditService;
         _logger = logger;
     }
@@ -40,6 +42,7 @@ public class SmsCodeController : ControllerBase
     /// </summary>
     [HttpPost("sms-code")]
     [Authorize(Policy = GatewayAppAuthenticationDefaults.Policy)]
+    [EnableRateLimiting("sms-code")]
     public async Task<ActionResult<SmsCodeResponse>> RequestSmsCode(
         [FromBody] SmsCodeRequest request,
         CancellationToken cancellationToken)
@@ -53,11 +56,31 @@ public class SmsCodeController : ControllerBase
             ?? throw new InvalidOperationException("GatewayApp authentication did not provide a validated application.");
         var appId = app.AppId;
 
+        if (app.SmsLoginMode == SmsLoginMode.Disabled)
+            return Ok(new SmsCodeResponse { Success = false, Message = "SMS login is disabled for this application" });
+        if (string.IsNullOrWhiteSpace(app.SmsProfileKey))
+            return Ok(new SmsCodeResponse { Success = false, Message = "SMS provider is not configured for this application" });
+        if (!MainlandChinaPhoneNumber.TryNormalize(request.Phone, out var phone))
+            return Ok(new SmsCodeResponse { Success = false, Message = "Invalid mainland China mobile number" });
+
+        var existingAdmission = await _admissionService.FindAsync(app.Id, phone, cancellationToken);
+        if (existingAdmission is { Account.IsActive: false })
+            return Ok(new SmsCodeResponse { Success = false, Message = "Account is disabled" });
+        if (existingAdmission is { Access.IsActive: false })
+            return Ok(new SmsCodeResponse { Success = false, Message = "SMS access has been revoked" });
+        if (app.SmsLoginMode == SmsLoginMode.ManualApproval)
+        {
+            if (existingAdmission is not { Access.IsActive: true } ||
+                existingAdmission.Access.ApprovalSource != SmsAccessApprovalSource.Admin)
+            {
+                return Ok(new SmsCodeResponse { Success = false, Message = "SMS account is not authorized for this application" });
+            }
+        }
+
         try
         {
-            var phone = request.Phone.Trim();
             var maskedPhone = SensitiveDataMasker.MaskPhone(phone);
-            await _otpService.GenerateAndSendAsync(phone, _smsSender);
+            await _otpService.GenerateAndSendAsync(app.Id, phone, app.SmsProfileKey, cancellationToken);
             _logger.LogInformation("SMS verification code sent: Phone={Phone}", maskedPhone);
 
             await _auditService.RecordLoginAsync(null, phone, IdentityConstants.GrantTypeSms, "sms_code_sent",

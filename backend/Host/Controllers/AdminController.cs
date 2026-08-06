@@ -13,6 +13,7 @@ using QuantumZhou.Identity.Domain;
 using QuantumZhou.Identity.Domain.Models;
 using QuantumZhou.Identity.Domain.Services;
 using QuantumZhou.Identity.Domain.Services.Ldap;
+using QuantumZhou.Identity.Domain.Services.Sms;
 using QuantumZhou.Identity.Domain.Validators;
 using QuantumZhou.Identity.Host.Http;
 using QuantumZhou.Identity.Host.Models;
@@ -216,7 +217,8 @@ public class AdminController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Phone))
             return BadRequest(new ErrorResponse("Phone number is required."));
 
-        var phone = request.Phone.Trim();
+        if (!MainlandChinaPhoneNumber.TryNormalize(request.Phone, out var phone))
+            return BadRequest(new ErrorResponse("A valid mainland China mobile number is required."));
         var existingLogin = await userLoginRepository.GetBySmsPhoneAsync(phone);
         if (existingLogin != null)
             return BadRequest(new ErrorResponse("Phone number already registered."));
@@ -244,11 +246,11 @@ public class AdminController : ControllerBase
         _logger.LogInformation(
             "Phone user created from Admin API: AccountId={AccountId}, Phone={Phone}",
             account.Id,
-            phone);
+            SensitiveDataMasker.MaskPhone(phone));
 
         var (actorId, actorName) = GetAdminIdentity();
         await auditService.RecordActionAsync("account_created", "Account", account.Id.ToString(),
-            actorId, actorName, $"Admin created phone user: {phone}", GetClientIp(),
+            actorId, actorName, "Admin created phone user", GetClientIp(),
             after: new { account.Id, account.IsActive, Phone = phone });
 
         return Ok(new AdminCreateUserResponse(
@@ -354,7 +356,9 @@ public class AdminController : ControllerBase
                 app.CallbackExpiresAt,
                 app.IsActive,
                 app.CreatedAt,
-                app.LdapLoginMode
+                app.LdapLoginMode,
+                app.SmsLoginMode,
+                app.SmsProfileKey
             })
             .ToList();
 
@@ -365,7 +369,9 @@ public class AdminController : ControllerBase
             app.CallbackExpiresAt.HasValue ? app.CallbackExpiresAt.Value.ToUnixTimeSeconds() : null,
             app.IsActive,
             app.CreatedAt.ToUnixTimeSeconds(),
-            app.LdapLoginMode.ToString()))
+            app.LdapLoginMode.ToString(),
+            app.SmsLoginMode.ToString(),
+            app.SmsProfileKey))
             .ToList();
 
         return Ok((IReadOnlyList<AdminAppListItemResponse>)items);
@@ -468,6 +474,127 @@ public class AdminController : ControllerBase
             actorId, actorName, $"Admin deleted app: {app.AppName}", GetClientIp());
 
         return Ok(new OperationResponse(true, "App deleted."));
+    }
+
+    [HttpGet("sms/profiles")]
+    [Authorize(Policy = "AdminSession")]
+    public IActionResult GetSmsProfiles([FromServices] SmsOptions options) =>
+        Ok(options.Profiles.OrderBy(item => item.Key).Select(item => new
+        {
+            Key = item.Key,
+            item.Value.Provider
+        }));
+
+    [HttpPut("apps/{appId}/sms-policy")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> UpdateSmsPolicy(
+        string appId,
+        [FromBody] AdminUpdateSmsPolicyRequest request,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] SmsOptions options,
+        [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IAuditService auditService)
+    {
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+        if (!Enum.TryParse<SmsLoginMode>(request.Mode, true, out var mode) || !Enum.IsDefined(mode))
+            return BadRequest(new ErrorResponse("Invalid SMS login mode."));
+
+        var profileKey = string.IsNullOrWhiteSpace(request.ProfileKey) ? null : request.ProfileKey.Trim();
+        if (mode != SmsLoginMode.Disabled &&
+            (profileKey == null || !options.Profiles.ContainsKey(profileKey)))
+            return BadRequest(new ErrorResponse("A configured SMS provider profile is required."));
+
+        var before = new { Mode = app.SmsLoginMode.ToString(), app.SmsProfileKey };
+        app.SmsLoginMode = mode;
+        app.SmsProfileKey = profileKey;
+        await unitOfWork.SaveChangesAsync();
+
+        var (actorId, actorName) = GetAdminIdentity();
+        await auditService.RecordActionAsync(
+            "app_sms_policy_updated", "AppRegistration", appId, actorId, actorName,
+            $"SMS login mode changed to {mode}", GetClientIp(), before: before,
+            after: new { Mode = mode.ToString(), SmsProfileKey = profileKey });
+        return Ok(new OperationResponse(true, "SMS login policy updated."));
+    }
+
+    [HttpGet("apps/{appId}/sms-users")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> GetSmsUsers(string appId, [FromServices] IdentityDbContext dbContext)
+    {
+        var app = await dbContext.AppRegistrations.AsNoTracking().FirstOrDefaultAsync(
+            item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId));
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+
+        var provider = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms);
+        var users = await dbContext.AppSmsAccesses.AsNoTracking()
+            .Where(access => access.AppRegistrationId == app.Id)
+            .Join(dbContext.UserLogins.AsNoTracking().Where(login => login.ProviderNameNormalized == provider),
+                access => access.UserLoginId, login => login.Id, (access, login) => new { access, login })
+            .OrderByDescending(item => item.access.CreatedAt)
+            .Select(item => new AdminSmsUserResponse(
+                item.login.Id.ToString(), item.login.AccountId.ToString(), item.login.ProviderUserId,
+                item.access.ApprovalSource.ToString(), item.access.IsActive,
+                item.access.CreatedAt.ToUnixTimeSeconds()))
+            .ToListAsync();
+        return Ok((IReadOnlyList<AdminSmsUserResponse>)users);
+    }
+
+    [HttpPost("apps/{appId}/sms-users")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> AddSmsUser(
+        string appId,
+        [FromBody] AdminAddSmsUserRequest request,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] ISmsAdmissionService admissionService,
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
+    {
+        if (!MainlandChinaPhoneNumber.TryNormalize(request.Phone, out var phone))
+            return BadRequest(new ErrorResponse("A valid mainland China mobile number is required."));
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+
+        var (actorId, actorName) = GetAdminIdentity();
+        var admission = await admissionService.ProvisionAsync(
+            app, phone, SmsAccessApprovalSource.Admin, actorId, cancellationToken);
+        await auditService.RecordActionAsync(
+            "app_sms_user_approved", "AppRegistration", appId, actorId, actorName,
+            "Administrator approved an SMS identity for the application", GetClientIp(),
+            after: new { admission.Account.Id, LoginId = admission.Login.Id });
+        return Ok(new AdminSmsUserResponse(
+            admission.Login.Id.ToString(), admission.Account.Id.ToString(), admission.Login.ProviderUserId,
+            admission.Access.ApprovalSource.ToString(), admission.Access.IsActive,
+            admission.Access.CreatedAt.ToUnixTimeSeconds()));
+    }
+
+    [HttpDelete("apps/{appId}/sms-users/{loginId:guid}")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> RevokeSmsUser(
+        string appId,
+        Guid loginId,
+        [FromServices] IdentityDbContext dbContext,
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
+    {
+        var app = await dbContext.AppRegistrations.FirstOrDefaultAsync(
+            item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId), cancellationToken);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+        var access = await dbContext.AppSmsAccesses.FirstOrDefaultAsync(
+            item => item.AppRegistrationId == app.Id && item.UserLoginId == loginId, cancellationToken);
+        if (access == null) return NotFound(new ErrorResponse("SMS application access not found."));
+
+        access.IsActive = false;
+        await dbContext.RefreshTokens
+            .Where(token => token.AppId == app.AppId && token.SmsUserLoginId == loginId && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(token => token.IsRevoked, true), cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        var (actorId, actorName) = GetAdminIdentity();
+        await auditService.RecordActionAsync(
+            "app_sms_user_revoked", "AppRegistration", appId, actorId, actorName,
+            "Administrator revoked an SMS identity for the application", GetClientIp(),
+            after: new { LoginId = loginId, IsActive = false });
+        return Ok(new OperationResponse(true, "SMS application access revoked."));
     }
 
     [HttpPut("apps/{appId}/ldap-policy")]

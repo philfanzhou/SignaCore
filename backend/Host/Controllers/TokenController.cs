@@ -131,7 +131,8 @@ public class TokenController : ControllerBase
         var authMethod = validationResult.AuthMethod;
         var displayName = ResolveDisplayName(account, validationResult.DisplayName, request.GrantType);
         var newRefreshToken = await _refreshTokenService.HandleRefreshTokenAsync(
-            request.GrantType, request.RefreshToken, account, appId, validationResult.LdapCredentialId);
+            request.GrantType, request.RefreshToken, account, appId,
+            validationResult.LdapCredentialId, validationResult.SmsUserLoginId);
 
         if (request.GrantType == IdentityConstants.GrantTypeRefreshToken && newRefreshToken == null)
         {

@@ -3,6 +3,7 @@ using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Domain.Services.Ldap;
+using QuantumZhou.Identity.Domain.Services.Sms;
 
 namespace QuantumZhou.Identity.Domain.Validators;
 
@@ -12,6 +13,7 @@ public class RefreshTokenValidator : IIdentityValidator
     private readonly IAccountRepository _accountRepository;
     private readonly ILdapAccountService _ldapAccountService;
     private readonly ILdapDirectoryClient _ldapDirectoryClient;
+    private readonly ISmsAdmissionService _smsAdmissionService;
     private readonly ILogger<RefreshTokenValidator> _logger;
 
     public RefreshTokenValidator(
@@ -20,11 +22,24 @@ public class RefreshTokenValidator : IIdentityValidator
         ILdapAccountService ldapAccountService,
         ILdapDirectoryClient ldapDirectoryClient,
         ILogger<RefreshTokenValidator> logger)
+        : this(refreshTokenRepository, accountRepository, ldapAccountService, ldapDirectoryClient,
+            new UnavailableSmsAdmissionService(), logger)
+    {
+    }
+
+    public RefreshTokenValidator(
+        IRefreshTokenRepository refreshTokenRepository,
+        IAccountRepository accountRepository,
+        ILdapAccountService ldapAccountService,
+        ILdapDirectoryClient ldapDirectoryClient,
+        ISmsAdmissionService smsAdmissionService,
+        ILogger<RefreshTokenValidator> logger)
     {
         _refreshTokenRepository = refreshTokenRepository;
         _accountRepository = accountRepository;
         _ldapAccountService = ldapAccountService;
         _ldapDirectoryClient = ldapDirectoryClient;
+        _smsAdmissionService = smsAdmissionService;
         _logger = logger;
     }
 
@@ -93,6 +108,22 @@ public class RefreshTokenValidator : IIdentityValidator
                 refreshToken.LdapCredentialId);
         }
 
+        if (refreshToken.SmsUserLoginId.HasValue)
+        {
+            if (request.App == null || request.App.SmsLoginMode == SmsLoginMode.Disabled)
+                return ValidationResult.Failure("SMS login is disabled for this application");
+            var admission = await _smsAdmissionService.FindByLoginIdAsync(
+                request.App.Id, refreshToken.SmsUserLoginId.Value, request.CancellationToken);
+            var admitted = admission is { Access.IsActive: true } &&
+                admission.Account.Id == account.Id &&
+                (request.App.SmsLoginMode == SmsLoginMode.AutoProvision ||
+                 admission.Access.ApprovalSource == SmsAccessApprovalSource.Admin);
+            if (!admitted) return ValidationResult.Failure("SMS access has been revoked");
+            return ValidationResult.Success(
+                account, IdentityConstants.AuthMethodRefreshToken, admission!.Login.ProviderUserId,
+                smsUserLoginId: refreshToken.SmsUserLoginId);
+        }
+
         _logger.LogInformation("Refresh token validated successfully: AccountId={AccountId}, AppId={AppId}", refreshToken.AccountId, request.AppId ?? "N/A");
         return ValidationResult.Success(account, IdentityConstants.AuthMethodRefreshToken);
     }
@@ -138,5 +169,12 @@ public class RefreshTokenValidator : IIdentityValidator
         }
 
         return (true, null, credential);
+    }
+
+    private sealed class UnavailableSmsAdmissionService : ISmsAdmissionService
+    {
+        public Task<SmsAdmission?> FindAsync(Guid appRegistrationId, string phoneE164, CancellationToken cancellationToken = default) => Task.FromResult<SmsAdmission?>(null);
+        public Task<SmsAdmission?> FindByLoginIdAsync(Guid appRegistrationId, Guid userLoginId, CancellationToken cancellationToken = default) => Task.FromResult<SmsAdmission?>(null);
+        public Task<SmsAdmission> ProvisionAsync(AppRegistrationEntity app, string phoneE164, SmsAccessApprovalSource source, Guid? approvedBy, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

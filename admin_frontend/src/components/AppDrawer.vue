@@ -14,12 +14,19 @@ const {
   ldapUsers,
   ldapDirectories,
   ldapUserForm,
+  loadingSmsUsers,
+  addingSmsUser,
+  smsUsers,
+  smsProfiles,
+  smsUserForm,
   closeAppDrawer,
   saveCallbackFromDrawer,
   handleResetSecret,
   openDeleteAppModal,
   addLdapUser,
   revokeLdapUser,
+  addSmsUser,
+  revokeSmsUser,
 } = useApps()
 </script>
 
@@ -106,6 +113,50 @@ const {
                   <td>{{ user.approvalSource === 'Admin' ? '管理员' : '自动开户' }}</td>
                   <td><span class="badge" :class="user.isActive ? 'green' : 'gray'"><span class="dot"></span>{{ user.isActive ? '有效' : '已撤销' }}</span></td>
                   <td><button v-if="user.isActive" class="btn btn-danger btn-sm" @click="revokeLdapUser(user)">撤销</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card section-gap" style="padding: 20px">
+          <div class="card-title" style="margin-bottom: 16px">手机验证码登录</div>
+          <div class="field">
+            <label>当前应用准入模式</label>
+            <select v-model="callbackForm.smsLoginMode" class="select" style="width: 100%">
+              <option value="Disabled">禁用手机验证码登录</option>
+              <option value="ManualApproval">仅管理员授权用户</option>
+              <option value="AutoProvision">验证成功自动开户</option>
+            </select>
+            <div class="hint">切回手工模式后，自动开户记录不会被视为管理员授权。</div>
+          </div>
+          <div class="field">
+            <label>短信供应商配置</label>
+            <select v-model="callbackForm.smsProfileKey" class="select" style="width: 100%">
+              <option value="">请选择部署配置</option>
+              <option v-for="profile in smsProfiles" :key="profile.key" :value="profile.key">
+                {{ profile.key }}（{{ profile.provider }}）
+              </option>
+            </select>
+            <div class="hint">密钥与模板保存在部署配置中，后台只保存配置名称。</div>
+          </div>
+          <div class="field">
+            <label>为当前应用授权手机用户</label>
+            <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px">
+              <input v-model="smsUserForm.phone" class="input" placeholder="13800138000 或 +8613800138000" @keyup.enter="addSmsUser">
+              <button class="btn btn-sm" :disabled="addingSmsUser" @click="addSmsUser">授权</button>
+            </div>
+          </div>
+          <div v-if="loadingSmsUsers" class="hint">正在加载授权用户...</div>
+          <div v-else-if="smsUsers.length === 0" class="hint">当前应用还没有手机用户授权记录。</div>
+          <div v-else class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>手机号</th><th>来源</th><th>状态</th><th></th></tr></thead>
+              <tbody>
+                <tr v-for="user in smsUsers" :key="user.loginId">
+                  <td class="mono">{{ user.phone }}</td>
+                  <td>{{ user.approvalSource === 'Admin' ? '管理员' : '自动开户' }}</td>
+                  <td><span class="badge" :class="user.isActive ? 'green' : 'gray'"><span class="dot"></span>{{ user.isActive ? '有效' : '已撤销' }}</span></td>
+                  <td><button v-if="user.isActive" class="btn btn-danger btn-sm" @click="revokeSmsUser(user)">撤销</button></td>
                 </tr>
               </tbody>
             </table>

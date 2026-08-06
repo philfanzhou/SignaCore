@@ -18,4 +18,7 @@ public class RefreshTokenEntity
 
     /// <summary>LDAP identity that authenticated the original session; null otherwise.</summary>
     public Guid? LdapCredentialId { get; set; }
+
+    /// <summary>SMS login identity that authenticated the original session; null otherwise.</summary>
+    public Guid? SmsUserLoginId { get; set; }
 }

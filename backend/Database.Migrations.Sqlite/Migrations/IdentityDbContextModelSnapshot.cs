@@ -168,12 +168,62 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("ldap_login_mode");
 
+                    b.Property<int>("SmsLoginMode")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("sms_login_mode");
+
+                    b.Property<string>("SmsProfileKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("sms_profile_key");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AppIdNormalized")
                         .IsUnique();
 
                     b.ToTable("app_registrations", (string)null);
+                });
+
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AppSmsAccessEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("app_registration_id");
+
+                    b.Property<int>("ApprovalSource")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("approval_source");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("approved_by");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("is_active");
+
+                    b.Property<Guid>("UserLoginId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("user_login_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserLoginId");
+
+                    b.HasIndex("AppRegistrationId", "UserLoginId")
+                        .IsUnique();
+
+                    b.ToTable("app_sms_accesses", (string)null);
                 });
 
             modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AuditLogEntity", b =>
@@ -438,23 +488,43 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("id");
 
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("app_registration_id");
+
                     b.Property<int>("Attempts")
                         .HasColumnType("INTEGER")
                         .HasColumnName("attempts");
 
-                    b.Property<string>("Code")
+                    b.Property<string>("CodeMac")
                         .IsRequired()
-                        .HasMaxLength(10)
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT")
-                        .HasColumnName("code");
+                        .HasColumnName("code_mac");
 
                     b.Property<long>("CreatedAt")
                         .HasColumnType("INTEGER")
                         .HasColumnName("created_at");
 
+                    b.Property<int>("DaySendCount")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("day_send_count");
+
+                    b.Property<long>("DayWindowStartedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("day_window_started_at");
+
                     b.Property<long>("ExpiresAt")
                         .HasColumnType("INTEGER")
                         .HasColumnName("expires_at");
+
+                    b.Property<int>("HourSendCount")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("hour_send_count");
+
+                    b.Property<long>("HourWindowStartedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("hour_window_started_at");
 
                     b.Property<long>("LockoutUntil")
                         .HasColumnType("INTEGER")
@@ -466,9 +536,39 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("phone");
 
+                    b.Property<string>("ProfileKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("profile_key");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("ProviderMessageId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("provider_message_id");
+
+                    b.Property<long?>("SentAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("sent_at");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("status");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("version");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("Phone")
+                    b.HasIndex("AppRegistrationId", "Phone")
                         .IsUnique();
 
                     b.ToTable("otps", (string)null);
@@ -550,6 +650,10 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("ldap_credential_id");
 
+                    b.Property<Guid?>("SmsUserLoginId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("sms_user_login_id");
+
                     b.Property<string>("TokenValue")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -559,6 +663,8 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("LdapCredentialId");
+
+                    b.HasIndex("SmsUserLoginId");
 
                     b.HasIndex("TokenValue")
                         .IsUnique();
@@ -680,11 +786,35 @@ namespace QuantumZhou.Identity.Database.Migrations.Sqlite.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AppSmsAccessEntity", b =>
+                {
+                    b.HasOne("QuantumZhou.Identity.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AppRegistrationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("QuantumZhou.Identity.Database.Entity.UserLoginEntity", null)
+                        .WithMany()
+                        .HasForeignKey("UserLoginId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.LdapCredentialEntity", b =>
                 {
                     b.HasOne("QuantumZhou.Identity.Database.Entity.AccountEntity", null)
                         .WithMany()
                         .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.OtpEntity", b =>
+                {
+                    b.HasOne("QuantumZhou.Identity.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AppRegistrationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

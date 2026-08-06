@@ -139,7 +139,38 @@ Identity 没有功能开关配置。
 > 即环境变量覆盖 Consul。若想改用 Consul KV 管理这两项，必须先把 `start.sh` 里对应的 `-e` 行删掉——
 > 否则空环境变量会静默覆盖 Consul 的值，表现为「短信登录失效但日志无提示」。
 
-> **SMS 发送器选择**：开发环境使用 `LoggingSmsSender`（仅记录日志，验证码掩码显示）；生产环境使用 `ThrowingSmsSender`（调用时抛出异常，防止验证码泄露）。生产环境需配置真实 SMS 提供商实现替换 `ThrowingSmsSender`。
+> **SMS 发送器选择**：开发环境未配置 Profile 时自动提供 `development / Logging`；生产环境支持 `AlibabaCloud` 与 `TencentCloud`。应用只保存 Profile 名称，访问密钥与模板参数必须由配置中心或环境变量注入。`Sms:OtpHmacKey` 必须是至少 32 字节随机值的 Base64 编码，并在所有实例间保持一致。
+
+```jsonc
+"Sms": {
+  "OtpHmacKey": "<base64-secret>",
+  "MinSendIntervalSeconds": 60,
+  "MaxSendsPerHour": 5,
+  "MaxSendsPerDay": 10,
+  "Profiles": {
+    "aliyun-primary": {
+      "Provider": "AlibabaCloud",
+      "AccessKeyId": "<secret>",
+      "AccessKeySecret": "<secret>",
+      "SignName": "已审核签名",
+      "TemplateId": "SMS_123456789"
+    },
+    "tencent-primary": {
+      "Provider": "TencentCloud",
+      "AccessKeyId": "<secret-id>",
+      "AccessKeySecret": "<secret-key>",
+      "Region": "ap-guangzhou",
+      "SmsSdkAppId": "1400000000",
+      "SignName": "已审核签名",
+      "TemplateId": "123456"
+    }
+  }
+}
+```
+
+后台可为每个 AppId 选择 `Disabled`、`ManualApproval` 或 `AutoProvision`。系统不在发送超时后自动切换供应商，避免原请求实际成功时重复发送不同验证码。
+
+首次升级到应用级短信登录时会清除旧的临时 OTP，并撤销无法追溯原始认证方式的存量 Refresh Token；客户端需要重新登录一次，不保留旧短信会话的兼容窗口。
 
 ## 微信配置
 

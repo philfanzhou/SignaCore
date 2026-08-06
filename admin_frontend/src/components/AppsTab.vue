@@ -48,6 +48,7 @@ const {
               <th>回调地址</th>
               <th>回调有效期</th>
               <th>LDAP</th>
+              <th>短信</th>
               <th>状态</th>
               <th></th>
             </tr>
@@ -75,6 +76,11 @@ const {
               <td>
                 <span class="badge" :class="app.ldapLoginMode === 'Disabled' ? 'gray' : 'green'">
                   <span class="dot"></span>{{ app.ldapLoginMode === 'Disabled' ? '禁用' : app.ldapLoginMode === 'ManualApproval' ? '人工准入' : '自动开户' }}
+                </span>
+              </td>
+              <td>
+                <span class="badge" :class="app.smsLoginMode === 'Disabled' ? 'gray' : 'green'">
+                  <span class="dot"></span>{{ app.smsLoginMode === 'Disabled' ? '禁用' : app.smsLoginMode === 'ManualApproval' ? '人工准入' : '自动开户' }}
                 </span>
               </td>
               <td>

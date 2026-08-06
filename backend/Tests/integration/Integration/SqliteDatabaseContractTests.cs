@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
@@ -9,6 +11,38 @@ namespace QuantumZhou.Identity.IntegrationTests.Integration;
 
 public sealed class SqliteDatabaseContractTests
 {
+    [Fact]
+    public async Task SmsMigration_DropsLegacyEphemeralOtpRowsBeforeAddingAppForeignKey()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"quantumzhou-sms-migration-{Guid.NewGuid():N}.db");
+        var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+        optionsBuilder.UseIdentityDatabase(new DatabaseOptions
+        {
+            Provider = "SQLite",
+            ConnectionString = $"Data Source={databasePath}"
+        });
+
+        try
+        {
+            await using var context = new IdentityDbContext(optionsBuilder.Options);
+            var migrator = context.Database.GetService<IMigrator>();
+            await migrator.MigrateAsync("20260805151934_EnableAppScopedLdapLogin");
+            var now = (DateTimeOffset.UtcNow.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / 10;
+            await context.Database.ExecuteSqlRawAsync(
+                "INSERT INTO otps (id, phone, code, expires_at, attempts, lockout_until, created_at) VALUES ({0}, {1}, {2}, {3}, 0, 0, {3})",
+                Guid.NewGuid(), "13800138000", "123456", now);
+
+            await migrator.MigrateAsync();
+
+            Assert.Empty(await context.Otps.AsNoTracking().ToListAsync());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (File.Exists(databasePath)) File.Delete(databasePath);
+        }
+    }
+
     [Fact]
     public async Task MigrationAndCrud_PreserveUtcInstantAtMicrosecondPrecision()
     {
@@ -95,6 +129,7 @@ public sealed class SqliteDatabaseContractTests
         try
         {
             var accountId = Guid.NewGuid();
+            var appRegistrationId = Guid.NewGuid();
             const string refreshToken = "CaseSensitiveRefreshToken";
             const string phone = "13800138000";
             const string otpCode = "123456";
@@ -102,6 +137,15 @@ public sealed class SqliteDatabaseContractTests
             await using (var seedContext = new IdentityDbContext(optionsBuilder.Options))
             {
                 await seedContext.Database.MigrateAsync();
+                seedContext.AppRegistrations.Add(new AppRegistrationEntity
+                {
+                    Id = appRegistrationId,
+                    AppId = "database-contract-app",
+                    AppSecretHash = "hash",
+                    AppName = "Database Contract",
+                    IsActive = true,
+                    CreatedAt = DateTimeOffset.UtcNow
+                });
                 seedContext.Accounts.Add(new AccountEntity
                 {
                     Id = accountId,
@@ -128,8 +172,14 @@ public sealed class SqliteDatabaseContractTests
                 seedContext.Otps.Add(new OtpEntity
                 {
                     Id = Guid.NewGuid(),
+                    AppRegistrationId = appRegistrationId,
                     Phone = phone,
-                    Code = otpCode,
+                    CodeMac = otpCode,
+                    Status = OtpStatus.Sent,
+                    Provider = "Test",
+                    ProfileKey = "test",
+                    HourWindowStartedAt = DateTimeOffset.UtcNow,
+                    DayWindowStartedAt = DateTimeOffset.UtcNow,
                     CreatedAt = DateTimeOffset.UtcNow,
                     ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5),
                     LockoutUntil = DateTimeOffset.UnixEpoch
@@ -160,8 +210,8 @@ public sealed class SqliteDatabaseContractTests
             }
 
             var consumeResults = await Task.WhenAll(
-                TryConsumeOtpAsync(optionsBuilder.Options, phone, otpCode),
-                TryConsumeOtpAsync(optionsBuilder.Options, phone, otpCode));
+                TryConsumeOtpAsync(optionsBuilder.Options, appRegistrationId, phone, otpCode),
+                TryConsumeOtpAsync(optionsBuilder.Options, appRegistrationId, phone, otpCode));
             Assert.Equal(1, consumeResults.Count(result => result));
         }
         finally
@@ -194,12 +244,14 @@ public sealed class SqliteDatabaseContractTests
 
     private static async Task<bool> TryConsumeOtpAsync(
         DbContextOptions<IdentityDbContext> options,
+        Guid appRegistrationId,
         string phone,
         string code)
     {
         await using var context = new IdentityDbContext(options);
         var repository = new OtpRepository(context);
         return await repository.TryConsumeAsync(
+            appRegistrationId,
             phone,
             code,
             DateTimeOffset.UtcNow,

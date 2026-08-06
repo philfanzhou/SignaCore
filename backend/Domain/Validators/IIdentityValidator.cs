@@ -57,18 +57,22 @@ public class ValidationResult
 
     public Guid? LdapCredentialId { get; private set; }
 
+    public Guid? SmsUserLoginId { get; private set; }
+
     public static ValidationResult Success(
         AccountEntity account,
         string authMethod,
         string? displayName = null,
-        Guid? ldapCredentialId = null) => new()
-    {
-        IsSuccess = true,
-        Account = account,
-        AuthMethod = authMethod,
-        DisplayName = displayName,
-        LdapCredentialId = ldapCredentialId
-    };
+        Guid? ldapCredentialId = null,
+        Guid? smsUserLoginId = null) => new()
+        {
+            IsSuccess = true,
+            Account = account,
+            AuthMethod = authMethod,
+            DisplayName = displayName,
+            LdapCredentialId = ldapCredentialId,
+            SmsUserLoginId = smsUserLoginId
+        };
 
     public static ValidationResult Failure(string message) => new()
     {

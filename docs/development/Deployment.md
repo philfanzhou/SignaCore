@@ -123,6 +123,7 @@ export ADMIN_BOOTSTRAP_PASSWORD=YourSecurePassword
 | `ADMIN_BOOTSTRAP_PASSWORD` | 是（非空） | 部署失败 | 初始管理员密码 |
 | `SMS_BYPASS_CODE` | 是（可为空串） | 部署失败 | 短信绕过码；显式设为空串即关闭绕过 |
 | `SMS_BYPASS_PHONES` | 是（可为空串） | 部署失败 | 绕过白名单，逗号分隔；空串即关闭绕过 |
+| `SMS_OTP_HMAC_KEY` | 是（非空） | 部署失败 | 验证码 HMAC 密钥；至少 32 字节随机值的 Base64 编码，所有实例一致 |
 | `ADMIN_BOOTSTRAP_USERNAME` | 否 | 默认 `admin` | 初始管理员用户名 |
 | `CONSUL_TOKEN` | 否 | 默认空 | Consul ACL token |
 
@@ -184,6 +185,7 @@ git pull
 export ADMIN_BOOTSTRAP_PASSWORD=...
 export SMS_BYPASS_CODE=...
 export SMS_BYPASS_PHONES=...
+export SMS_OTP_HMAC_KEY=... # openssl rand -base64 32；实际值从密钥库注入
 export CONSUL_TOKEN=...
 
 bash build.sh
@@ -203,7 +205,7 @@ docker ps --filter 'name=ruoyu-identity'
 
 ## SMS 绕过验证码
 
-绕过码用于免真实短信网关的联调与 CI smoke（生产环境 `ISmsSender` 是 `ThrowingSmsSender`，发不出真实短信）。
+绕过码用于免真实短信网关的联调与 CI smoke。生产环境使用阿里云或腾讯云 Profile；未给应用选择有效 Profile 时，请求验证码会被拒绝。
 **绕过码必须配合手机号白名单使用**，两者缺一则绕过整体禁用：
 
 ```bash

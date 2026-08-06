@@ -113,24 +113,23 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICallbackService, CallbackService>();
 
         // ---- SMS OTP Services ----
-        var smsOptions = services.RegisterSingleton(new SmsOptions
-        {
-            OtpTtlSeconds = int.Parse(configuration["Sms:OtpTtlSeconds"] ?? "300"),
-            MaxAttempts = int.Parse(configuration["Sms:MaxAttempts"] ?? "5"),
-            LockoutSeconds = int.Parse(configuration["Sms:LockoutSeconds"] ?? "600"),
-            BypassCode = configuration["Sms:BypassCode"] ?? Environment.GetEnvironmentVariable("SMS_BYPASS_CODE"),
-            BypassPhones = ResolveBypassPhones(configuration)
-        });
+        var smsOptions = configuration.GetSection(SmsOptions.SectionName).Get<SmsOptions>() ?? new SmsOptions();
+        smsOptions.BypassCode = configuration["Sms:BypassCode"] ?? Environment.GetEnvironmentVariable("SMS_BYPASS_CODE");
+        smsOptions.BypassPhones = ResolveBypassPhones(configuration);
+        smsOptions.OtpHmacKey = configuration["Sms:OtpHmacKey"] ?? Environment.GetEnvironmentVariable("SMS_OTP_HMAC_KEY");
+        if (environment.IsDevelopment() && string.IsNullOrWhiteSpace(smsOptions.OtpHmacKey))
+            smsOptions.OtpHmacKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        if (environment.IsDevelopment() && smsOptions.Profiles.Count == 0)
+            smsOptions.Profiles["development"] = new SmsProviderProfile { Provider = SmsProviderNames.Logging };
+        smsOptions.Validate(environment.IsDevelopment());
+        services.AddSingleton(smsOptions);
         services.AddScoped<IOtpService, DbOtpService>();
-        // 开发环境使用 LoggingSmsSender，生产环境使用 ThrowingSmsSender 防止验证码泄露
-        if (environment.IsDevelopment())
-        {
-            services.AddSingleton<ISmsSender, LoggingSmsSender>();
-        }
-        else
-        {
-            services.AddSingleton<ISmsSender, ThrowingSmsSender>();
-        }
+        // Logging is development-only; production profiles resolve to a real cloud provider.
+        services.AddSingleton<ISmsSender, AlibabaCloudSmsSender>();
+        services.AddSingleton<ISmsSender, TencentCloudSmsSender>();
+        if (environment.IsDevelopment()) services.AddSingleton<ISmsSender, LoggingSmsSender>();
+        services.AddSingleton<SmsSenderResolver>();
+        services.AddScoped<ISmsAdmissionService, SmsAdmissionService>();
 
         // ---- WeChat API Client ----
         var wechatOptions = services.RegisterSingleton(new WechatOptions
@@ -177,6 +176,20 @@ public static class ServiceCollectionExtensions
         // /health, /metrics, /.well-known/jwks are exempt (have their own limits or are infra).
         services.AddRateLimiter(options =>
         {
+            options.AddPolicy("sms-code", httpContext =>
+            {
+                var appId = httpContext.User.FindFirst(IdentityConstants.ClaimClientId)?.Value ?? "unknown";
+                var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    $"{appId}|{clientIp}",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        AutoReplenishment = true,
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0
+                    });
+            });
             options.AddFixedWindowLimiter("default", opt =>
             {
                 opt.AutoReplenishment = true;

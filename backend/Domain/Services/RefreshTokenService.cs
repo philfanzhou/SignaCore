@@ -26,17 +26,18 @@ public class RefreshTokenService : IRefreshTokenService
         string? existingRefreshToken,
         AccountEntity account,
         string? appId,
-        Guid? ldapCredentialId = null)
+        Guid? ldapCredentialId = null,
+        Guid? smsUserLoginId = null)
     {
         if (grantType is IdentityConstants.GrantTypePassword or IdentityConstants.GrantTypeSms or
             IdentityConstants.GrantTypeWechat or IdentityConstants.GrantTypeLdap)
         {
-            return await GenerateRefreshTokenAsync(account, RequireAppId(appId), ldapCredentialId);
+            return await GenerateRefreshTokenAsync(account, RequireAppId(appId), ldapCredentialId, smsUserLoginId);
         }
 
         if (grantType == IdentityConstants.GrantTypeRefreshToken && !string.IsNullOrEmpty(existingRefreshToken))
         {
-            var replacement = CreateRefreshToken(account, RequireAppId(appId), ldapCredentialId);
+            var replacement = CreateRefreshToken(account, RequireAppId(appId), ldapCredentialId, smsUserLoginId);
             return await _refreshTokenRepository.TryRotateAsync(existingRefreshToken, replacement)
                 ? replacement.TokenValue
                 : null;
@@ -58,15 +59,16 @@ public class RefreshTokenService : IRefreshTokenService
     private async Task<string> GenerateRefreshTokenAsync(
         AccountEntity account,
         string appId,
-        Guid? ldapCredentialId)
+        Guid? ldapCredentialId,
+        Guid? smsUserLoginId)
     {
-        var refreshToken = CreateRefreshToken(account, appId, ldapCredentialId);
+        var refreshToken = CreateRefreshToken(account, appId, ldapCredentialId, smsUserLoginId);
         await _refreshTokenRepository.AddAsync(refreshToken);
         await _unitOfWork.SaveChangesAsync();
         return refreshToken.TokenValue;
     }
 
-    private RefreshTokenEntity CreateRefreshToken(AccountEntity account, string appId, Guid? ldapCredentialId)
+    private RefreshTokenEntity CreateRefreshToken(AccountEntity account, string appId, Guid? ldapCredentialId, Guid? smsUserLoginId)
     {
         return new RefreshTokenEntity
         {
@@ -77,7 +79,8 @@ public class RefreshTokenService : IRefreshTokenService
             ExpiresAt = DateTimeOffset.UtcNow.AddDays(_refreshTokenOptions.RefreshTokenExpirationDays),
             IsRevoked = false,
             AppId = appId,
-            LdapCredentialId = ldapCredentialId
+            LdapCredentialId = ldapCredentialId,
+            SmsUserLoginId = smsUserLoginId
         };
     }
 }

@@ -51,6 +51,7 @@ public class CleanupWorker : BackgroundService
         var loginAttemptRepo = scope.ServiceProvider.GetRequiredService<ILoginAttemptRepository>();
         var loginHistoryRepo = scope.ServiceProvider.GetRequiredService<ILoginHistoryRepository>();
         var auditLogRepo = scope.ServiceProvider.GetRequiredService<IAuditLogRepository>();
+        var otpRepo = scope.ServiceProvider.GetService<IOtpRepository>();
 
         var deletedTokens = await refreshTokenRepo.RemoveExpiredAndRevokedAsync();
         if (deletedTokens > 0)
@@ -68,6 +69,14 @@ public class CleanupWorker : BackgroundService
 
         var lockoutCleanupCutoff = DateTimeOffset.UtcNow.AddDays(-1);
         await loginAttemptRepo.RemoveExpiredAsync(lockoutCleanupCutoff);
+
+        if (otpRepo != null)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var deletedOtps = await otpRepo.RemoveInactiveAsync(now.AddDays(-2), now);
+            if (deletedOtps > 0)
+                _logger.LogInformation("Deleted {Count} inactive SMS OTP challenges", deletedOtps);
+        }
 
         var loginHistoryCutoff = DateTimeOffset.UtcNow.AddDays(-IdentityConstants.LoginHistoryRetentionDays);
         var deletedHistories = await loginHistoryRepo.RemoveOlderThanAsync(loginHistoryCutoff);

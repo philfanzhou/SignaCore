@@ -9,6 +9,7 @@ public interface IRefreshTokenService
         string? existingRefreshToken,
         AccountEntity account,
         string? appId,
-        Guid? ldapCredentialId = null);
+        Guid? ldapCredentialId = null,
+        Guid? smsUserLoginId = null);
     Task<bool> RevokeAsync(string token);
 }

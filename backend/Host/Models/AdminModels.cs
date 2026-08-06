@@ -35,7 +35,9 @@ public sealed record AdminAppListItemResponse(
     long? CallbackExpiresAt,
     bool IsActive,
     long CreatedAt,
-    string LdapLoginMode);
+    string LdapLoginMode,
+    string SmsLoginMode,
+    string? SmsProfileKey);
 
 public sealed record AdminCreateAppRequest(string AppName, string? CallbackUrl, int TtlSeconds);
 
@@ -49,6 +51,18 @@ public sealed record AdminCreateAppResponse(
 public sealed record AdminUpdateCallbackRequest(string? CallbackUrl, int TtlSeconds, bool IsActive);
 
 public sealed record AdminUpdateLdapPolicyRequest(string Mode);
+
+public sealed record AdminUpdateSmsPolicyRequest(string Mode, string? ProfileKey);
+
+public sealed record AdminAddSmsUserRequest(string Phone);
+
+public sealed record AdminSmsUserResponse(
+    string LoginId,
+    string UserId,
+    string Phone,
+    string ApprovalSource,
+    bool IsActive,
+    long CreatedAt);
 
 public sealed record AdminAddLdapUserRequest(string DirectoryKey, string Username);
 

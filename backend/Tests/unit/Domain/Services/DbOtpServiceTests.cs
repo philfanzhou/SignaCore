@@ -9,214 +9,83 @@ namespace QuantumZhou.Identity.Tests.Domain.Services;
 
 public class DbOtpServiceTests
 {
-    private readonly Mock<IOtpRepository> _otpRepoMock;
-    private readonly Mock<IUnitOfWork> _unitOfWorkMock;
-    private readonly Mock<ISmsSender> _smsSenderMock;
-    private readonly SmsOptions _options;
+    private readonly Guid _appId = Guid.NewGuid();
+    private readonly Mock<IOtpRepository> _repository = new();
+    private readonly Mock<IUnitOfWork> _unitOfWork = new();
+    private readonly Mock<ISmsSender> _sender = new();
     private readonly DbOtpService _service;
 
     public DbOtpServiceTests()
     {
-        _otpRepoMock = new Mock<IOtpRepository>();
-        _unitOfWorkMock = new Mock<IUnitOfWork>();
-        _unitOfWorkMock.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
-        _smsSenderMock = new Mock<ISmsSender>();
-        _options = new SmsOptions { OtpTtlSeconds = 300, MaxAttempts = 3, LockoutSeconds = 600 };
-        _service = new DbOtpService(_options, NullLogger<DbOtpService>.Instance, _otpRepoMock.Object, _unitOfWorkMock.Object);
-    }
-
-    private static OtpEntity CreateEntry(string phone, int attempts = 0, DateTimeOffset? expiresAt = null, DateTimeOffset? lockoutUntil = null) => new()
-    {
-        Id = Guid.NewGuid(),
-        Phone = phone,
-        Code = "123456",
-        Attempts = attempts,
-        ExpiresAt = expiresAt ?? DateTimeOffset.UtcNow.AddMinutes(5),
-        LockoutUntil = lockoutUntil ?? DateTimeOffset.MinValue,
-        CreatedAt = DateTimeOffset.UtcNow
-    };
-
-    [Fact]
-    public async Task GenerateAndSendAsync_NoExisting_CreatesAndSendsCode()
-    {
-        _otpRepoMock.Setup(r => r.GetByPhoneAsync("13800138000")).ReturnsAsync((OtpEntity?)null);
-
-        var code = await _service.GenerateAndSendAsync("13800138000", _smsSenderMock.Object);
-
-        Assert.Equal(6, code.Length);
-        _otpRepoMock.Verify(r => r.AddAsync(It.Is<OtpEntity>(o =>
-            o.Phone == "13800138000" && o.Code == code && o.Attempts == 0)), Times.Once);
-        _smsSenderMock.Verify(s => s.SendAsync("13800138000", code), Times.Once);
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        var options = new SmsOptions
+        {
+            OtpHmacKey = Convert.ToBase64String(Enumerable.Range(1, 32).Select(value => (byte)value).ToArray()),
+            MinSendIntervalSeconds = 60,
+            MaxSendsPerHour = 5,
+            MaxSendsPerDay = 10,
+            Profiles = new Dictionary<string, SmsProviderProfile>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["test"] = new() { Provider = "Test" }
+            }
+        };
+        _sender.SetupGet(value => value.Provider).Returns("Test");
+        _sender.Setup(value => value.SendAsync(
+                It.IsAny<SmsProviderProfile>(), It.IsAny<SmsVerificationMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SmsSendResult("Test", "message-1"));
+        _unitOfWork.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+        _service = new DbOtpService(options, NullLogger<DbOtpService>.Instance, _repository.Object,
+            _unitOfWork.Object, new SmsSenderResolver([_sender.Object], options));
     }
 
     [Fact]
-    public async Task GenerateAndSendAsync_ExistingBelowMaxAttempts_ReplacesOldEntry()
+    public async Task Generate_StoresMacAndAppBinding_ThenMarksSent()
     {
-        var existing = CreateEntry("13800138000", attempts: 1);
-        _otpRepoMock.Setup(r => r.GetByPhoneAsync("13800138000")).ReturnsAsync(existing);
+        OtpEntity? stored = null;
+        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000")).ReturnsAsync((OtpEntity?)null);
+        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
+            .Callback<OtpEntity>(value => stored = value).Returns(Task.CompletedTask);
 
-        var code = await _service.GenerateAndSendAsync("13800138000", _smsSenderMock.Object);
+        var code = await _service.GenerateAndSendAsync(_appId, "13800138000", "test");
 
-        _otpRepoMock.Verify(r => r.RemoveByPhoneAsync(existing.Phone), Times.Once);
-        _otpRepoMock.Verify(r => r.AddAsync(It.Is<OtpEntity>(o => o.Code == code)), Times.Once);
+        Assert.NotNull(stored);
+        Assert.Equal(_appId, stored.AppRegistrationId);
+        Assert.Equal(64, stored.CodeMac.Length);
+        Assert.DoesNotContain(code, stored.CodeMac, StringComparison.Ordinal);
+        Assert.Equal(OtpStatus.Sent, stored.Status);
+        Assert.Equal("message-1", stored.ProviderMessageId);
     }
 
     [Fact]
-    public async Task GenerateAndSendAsync_LockedOut_ThrowsInvalidOperation()
+    public async Task Verify_ConsumesOnlyMatchingApplicationChallenge()
     {
-        var existing = CreateEntry("13800138000",
-            attempts: 3,
-            lockoutUntil: DateTimeOffset.UtcNow.AddMinutes(5));
-        _otpRepoMock.Setup(r => r.GetByPhoneAsync("13800138000")).ReturnsAsync(existing);
+        OtpEntity? stored = null;
+        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000"))
+            .ReturnsAsync(() => stored);
+        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
+            .Callback<OtpEntity>(value => stored = value).Returns(Task.CompletedTask);
+        var code = await _service.GenerateAndSendAsync(_appId, "+8613800138000", "test");
+        _repository.Setup(value => value.TryConsumeAsync(
+            _appId, "+8613800138000", stored!.CodeMac, It.IsAny<DateTimeOffset>(), It.IsAny<int>())).ReturnsAsync(true);
 
+        Assert.True(await _service.VerifyAsync(_appId, "13800138000", code));
+        _repository.Verify(value => value.TryConsumeAsync(
+            _appId, "+8613800138000", stored!.CodeMac, It.IsAny<DateTimeOffset>(), It.IsAny<int>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Generate_EnforcesPersistentCooldown()
+    {
+        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000")).ReturnsAsync(new OtpEntity
+        {
+            AppRegistrationId = _appId,
+            Phone = "+8613800138000",
+            CreatedAt = DateTimeOffset.UtcNow,
+            HourWindowStartedAt = DateTimeOffset.UtcNow,
+            DayWindowStartedAt = DateTimeOffset.UtcNow
+        });
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            _service.GenerateAndSendAsync("13800138000", _smsSenderMock.Object));
-
-        _otpRepoMock.Verify(r => r.AddAsync(It.IsAny<OtpEntity>()), Times.Never);
-        _smsSenderMock.Verify(s => s.SendAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task GenerateAndSendAsync_LockoutExpired_RemovesOldAndRegenerates()
-    {
-        var existing = CreateEntry("13800138000",
-            attempts: 3,
-            lockoutUntil: DateTimeOffset.UtcNow.AddMinutes(-1));
-        _otpRepoMock.Setup(r => r.GetByPhoneAsync("13800138000")).ReturnsAsync(existing);
-
-        var code = await _service.GenerateAndSendAsync("13800138000", _smsSenderMock.Object);
-
-        Assert.Equal(6, code.Length);
-        _otpRepoMock.Verify(r => r.RemoveByPhoneAsync(existing.Phone), Times.Once);
-        _otpRepoMock.Verify(r => r.AddAsync(It.Is<OtpEntity>(o => o.Code == code)), Times.Once);
-    }
-
-    [Fact]
-    public async Task VerifyAsync_NoEntry_ReturnsFalse()
-    {
-        _otpRepoMock.Setup(r => r.GetByPhoneAsync(It.IsAny<string>())).ReturnsAsync((OtpEntity?)null);
-
-        var result = await _service.VerifyAsync("13800138000", "123456");
-
-        Assert.False(result);
-    }
-
-    [Fact]
-    public async Task VerifyAsync_Expired_RemovesEntryAndReturnsFalse()
-    {
-        var entry = CreateEntry("13800138000", expiresAt: DateTimeOffset.UtcNow.AddMinutes(-1));
-        _otpRepoMock.Setup(r => r.GetByPhoneAsync("13800138000")).ReturnsAsync(entry);
-
-        var result = await _service.VerifyAsync("13800138000", "123456");
-
-        Assert.False(result);
-        _otpRepoMock.Verify(
-            r => r.RemoveExpiredAsync(
-                entry.Phone,
-                It.IsAny<DateTimeOffset>()),
-            Times.Once);
-    }
-
-    [Fact]
-    public async Task VerifyAsync_WrongCode_IncrementsAttemptsAndReturnsFalse()
-    {
-        var entry = CreateEntry("13800138000", attempts: 0);
-        _otpRepoMock.Setup(r => r.GetByPhoneAsync("13800138000")).ReturnsAsync(entry);
-        _otpRepoMock
-            .Setup(r => r.IncrementFailedAttemptsAsync(
-                entry.Phone,
-                It.IsAny<DateTimeOffset>(),
-                _options.MaxAttempts,
-                It.IsAny<DateTimeOffset>()))
-            .Callback(() => entry.Attempts++)
-            .ReturnsAsync(1);
-
-        var result = await _service.VerifyAsync("13800138000", "000000");
-
-        Assert.False(result);
-        Assert.Equal(1, entry.Attempts);
-        _otpRepoMock.Verify(
-            r => r.TryConsumeAsync(
-                It.IsAny<string>(),
-                It.IsAny<string>(),
-                It.IsAny<DateTimeOffset>(),
-                It.IsAny<int>()),
-            Times.Never);
-    }
-
-    [Fact]
-    public async Task VerifyAsync_ReachingMaxAttempts_LocksAndReturnsFalse()
-    {
-        var entry = CreateEntry("13800138000", attempts: 2);
-        _otpRepoMock.Setup(r => r.GetByPhoneAsync("13800138000")).ReturnsAsync(entry);
-        _otpRepoMock
-            .Setup(r => r.IncrementFailedAttemptsAsync(
-                entry.Phone,
-                It.IsAny<DateTimeOffset>(),
-                _options.MaxAttempts,
-                It.IsAny<DateTimeOffset>()))
-            .Callback<string, DateTimeOffset, int, DateTimeOffset>(
-                (_, _, _, lockoutUntil) =>
-                {
-                    entry.Attempts++;
-                    entry.LockoutUntil = lockoutUntil;
-                })
-            .ReturnsAsync(1);
-
-        var result = await _service.VerifyAsync("13800138000", "000000");
-
-        Assert.False(result);
-        Assert.Equal(3, entry.Attempts);
-        Assert.True(entry.LockoutUntil > DateTimeOffset.UtcNow.AddMinutes(9));
-    }
-
-    [Fact]
-    public async Task VerifyAsync_CorrectCode_RemovesEntryAndReturnsTrue()
-    {
-        var entry = CreateEntry("13800138000", attempts: 1);
-        _otpRepoMock.Setup(r => r.GetByPhoneAsync("13800138000")).ReturnsAsync(entry);
-        _otpRepoMock
-            .Setup(r => r.TryConsumeAsync(
-                entry.Phone,
-                entry.Code,
-                It.IsAny<DateTimeOffset>(),
-                _options.MaxAttempts))
-            .ReturnsAsync(true);
-
-        var result = await _service.VerifyAsync("13800138000", "123456");
-
-        Assert.True(result);
-        _otpRepoMock.Verify(
-            r => r.TryConsumeAsync(
-                entry.Phone,
-                entry.Code,
-                It.IsAny<DateTimeOffset>(),
-                _options.MaxAttempts),
-            Times.Once);
-    }
-
-    [Fact]
-    public async Task InvalidateAsync_ExistingEntry_RemovesIt()
-    {
-        var entry = CreateEntry("13800138000");
-        _otpRepoMock.Setup(r => r.GetByPhoneAsync("13800138000")).ReturnsAsync(entry);
-
-        await _service.InvalidateAsync("13800138000");
-
-        _otpRepoMock.Verify(r => r.RemoveByPhoneAsync(entry.Phone), Times.Once);
-        _unitOfWorkMock.Verify(
-            u => u.SaveChangesAsync(It.IsAny<CancellationToken>()),
-            Times.Never);
-    }
-
-    [Fact]
-    public async Task InvalidateAsync_NoEntry_DoesNothing()
-    {
-        _otpRepoMock.Setup(r => r.GetByPhoneAsync(It.IsAny<string>())).ReturnsAsync((OtpEntity?)null);
-
-        await _service.InvalidateAsync("13800138000");
-
-        _otpRepoMock.Verify(r => r.RemoveByPhoneAsync("13800138000"), Times.Once);
+            _service.GenerateAndSendAsync(_appId, "+8613800138000", "test"));
+        _sender.Verify(value => value.SendAsync(
+            It.IsAny<SmsProviderProfile>(), It.IsAny<SmsVerificationMessage>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

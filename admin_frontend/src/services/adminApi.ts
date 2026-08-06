@@ -27,6 +27,8 @@ export interface AdminApp {
   isActive: boolean
   createdAt: number
   ldapLoginMode: 'Disabled' | 'ManualApproval' | 'AutoProvision'
+  smsLoginMode: 'Disabled' | 'ManualApproval' | 'AutoProvision'
+  smsProfileKey: string | null
 }
 
 export interface AdminLdapUser {
@@ -43,6 +45,20 @@ export interface AdminLdapUser {
 export interface AdminLdapDirectory {
   key: string
   isDefault: boolean
+}
+
+export interface AdminSmsProfile {
+  key: string
+  provider: 'AlibabaCloud' | 'TencentCloud' | 'Logging'
+}
+
+export interface AdminSmsUser {
+  loginId: string
+  userId: string
+  phone: string
+  approvalSource: 'Admin' | 'AutoProvision'
+  isActive: boolean
+  createdAt: number
 }
 
 export interface AdminCreateUserRequest {
@@ -151,6 +167,29 @@ class AdminApiClient {
 
   async updateLdapPolicy(appId: string, mode: AdminApp['ldapLoginMode']) {
     await this.client.put(`/api/admin/apps/${appId}/ldap-policy`, { mode })
+  }
+
+  async updateSmsPolicy(appId: string, mode: AdminApp['smsLoginMode'], profileKey: string | null) {
+    await this.client.put(`/api/admin/apps/${appId}/sms-policy`, { mode, profileKey })
+  }
+
+  async getSmsProfiles() {
+    const response = await this.client.get<AdminSmsProfile[]>('/api/admin/sms/profiles')
+    return response.data
+  }
+
+  async getAppSmsUsers(appId: string) {
+    const response = await this.client.get<AdminSmsUser[]>(`/api/admin/apps/${appId}/sms-users`)
+    return response.data
+  }
+
+  async addAppSmsUser(appId: string, phone: string) {
+    const response = await this.client.post<AdminSmsUser>(`/api/admin/apps/${appId}/sms-users`, { phone })
+    return response.data
+  }
+
+  async revokeAppSmsUser(appId: string, loginId: string) {
+    await this.client.delete(`/api/admin/apps/${appId}/sms-users/${loginId}`)
   }
 
   async getLdapDirectories() {

@@ -226,9 +226,9 @@
 - **When** 调用成功
 - **Then** 通过 OtpService 生成验证码并通过 ISmsSender 发送，返回 success=true
 
-- **Given** 生产环境
+- **Given** 应用已启用短信登录并选择有效的阿里云或腾讯云 Profile
 - **When** 调用 RequestSmsCode
-- **Then** ISmsSender 为 ThrowingSmsSender，未配置真实 SMS 提供商时抛出 InvalidOperationException
+- **Then** 验证码按 AppId 与 E.164 手机号绑定并由对应云厂商发送；未配置 Profile 时拒绝请求
 
 ## 非功能需求
 
@@ -241,7 +241,7 @@
 | 安全 | CustomClaims 仅允许白名单类型：department, class_name, grade, subject, school, organization, title |
 | 安全 | Bootstrap admin refresh 角色保持：refresh_token grant 使用已验证的 `AccountEntity.Id` 与 `AdminBootstrap:Username` 对应账户 ID 比较；**不**读取 refresh 请求体 `username`，普通账户无法通过伪造 `username=admin` 提权 |
 | 安全 | SMS/微信 grant 不触发 bootstrap admin 注入，bootstrap account 身份不扩大到这两类 grant |
-| 安全 | 生产环境使用 ThrowingSmsSender，开发环境使用 LoggingSmsSender（掩码记录） |
+| 安全 | 生产环境只启用阿里云/腾讯云 Profile；开发环境可使用 LoggingSmsSender（掩码记录） |
 | 安全 | 生产环境未配置 AdminWeb:AllowedOrigins 时不启用跨域凭据 |
 | 可靠性 | 回调失败降级为基本 JWT，不阻塞登录 |
 | 可靠性 | 网关验证成功后返回 App 实体，避免二次查询 |
@@ -253,7 +253,7 @@
 - 单元测试覆盖各 Validator 的验证逻辑
 - 单元测试覆盖 CallbackService Claim 数量/长度/类型限制
 - 单元测试覆盖 CallbackUrlValidator 同步/异步验证方法
-- 单元测试覆盖 LoggingSmsSender 掩码记录和 ThrowingSmsSender 抛异常
+- 单元测试覆盖 LoggingSmsSender 掩码记录、应用级 OTP 隔离、HMAC 存储和发送限额
 - 单元测试覆盖 GatewayValidationService 验证成功返回 App 实体
 - 单元测试覆盖 TokenController 全部 4 个 action 的成功与失败分支（网关校验失败、验证器失败含 unknown 回退、OTP 锁定透传、回调注册各分支，见 `TokenControllerTests`）
 - 单元测试覆盖 RefreshTokenService（签发/轮换/吊销）、DbOtpService（锁定/过期/尝试计数）、AccountLoginInfoService、WechatApiClient

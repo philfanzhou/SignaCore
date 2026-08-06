@@ -180,12 +180,63 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                         .HasColumnType("int")
                         .HasColumnName("ldap_login_mode");
 
+                    b.Property<int>("SmsLoginMode")
+                        .HasColumnType("int")
+                        .HasColumnName("sms_login_mode");
+
+                    b.Property<string>("SmsProfileKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("sms_profile_key");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AppIdNormalized")
                         .IsUnique();
 
                     b.ToTable("app_registrations", (string)null);
+                });
+
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AppSmsAccessEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("app_registration_id");
+
+                    b.Property<int>("ApprovalSource")
+                        .HasColumnType("int")
+                        .HasColumnName("approval_source");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("approved_by");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasPrecision(6)
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("tinyint(1)")
+                        .HasColumnName("is_active");
+
+                    b.Property<Guid>("UserLoginId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("user_login_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserLoginId");
+
+                    b.HasIndex("AppRegistrationId", "UserLoginId")
+                        .IsUnique();
+
+                    b.ToTable("app_sms_accesses", (string)null);
                 });
 
             modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AuditLogEntity", b =>
@@ -455,25 +506,47 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("id");
 
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("app_registration_id");
+
                     b.Property<int>("Attempts")
                         .HasColumnType("int")
                         .HasColumnName("attempts");
 
-                    b.Property<string>("Code")
+                    b.Property<string>("CodeMac")
                         .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("varchar(10)")
-                        .HasColumnName("code");
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("code_mac");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasPrecision(6)
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
 
+                    b.Property<int>("DaySendCount")
+                        .HasColumnType("int")
+                        .HasColumnName("day_send_count");
+
+                    b.Property<DateTime>("DayWindowStartedAt")
+                        .HasPrecision(6)
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("day_window_started_at");
+
                     b.Property<DateTime>("ExpiresAt")
                         .HasPrecision(6)
                         .HasColumnType("datetime(6)")
                         .HasColumnName("expires_at");
+
+                    b.Property<int>("HourSendCount")
+                        .HasColumnType("int")
+                        .HasColumnName("hour_send_count");
+
+                    b.Property<DateTime>("HourWindowStartedAt")
+                        .HasPrecision(6)
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("hour_window_started_at");
 
                     b.Property<DateTime>("LockoutUntil")
                         .HasPrecision(6)
@@ -486,9 +559,40 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                         .HasColumnType("varchar(20)")
                         .HasColumnName("phone");
 
+                    b.Property<string>("ProfileKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
+                        .HasColumnName("profile_key");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("varchar(32)")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("ProviderMessageId")
+                        .HasMaxLength(128)
+                        .HasColumnType("varchar(128)")
+                        .HasColumnName("provider_message_id");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasPrecision(6)
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("sent_at");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int")
+                        .HasColumnName("status");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int")
+                        .HasColumnName("version");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("Phone")
+                    b.HasIndex("AppRegistrationId", "Phone")
                         .IsUnique();
 
                     b.ToTable("otps", (string)null);
@@ -573,6 +677,10 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("ldap_credential_id");
 
+                    b.Property<Guid?>("SmsUserLoginId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("sms_user_login_id");
+
                     b.Property<string>("TokenValue")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -582,6 +690,8 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("LdapCredentialId");
+
+                    b.HasIndex("SmsUserLoginId");
 
                     b.HasIndex("TokenValue")
                         .IsUnique();
@@ -705,11 +815,35 @@ namespace QuantumZhou.Identity.Database.Migrations.MySql.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.AppSmsAccessEntity", b =>
+                {
+                    b.HasOne("QuantumZhou.Identity.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AppRegistrationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("QuantumZhou.Identity.Database.Entity.UserLoginEntity", null)
+                        .WithMany()
+                        .HasForeignKey("UserLoginId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.LdapCredentialEntity", b =>
                 {
                     b.HasOne("QuantumZhou.Identity.Database.Entity.AccountEntity", null)
                         .WithMany()
                         .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("QuantumZhou.Identity.Database.Entity.OtpEntity", b =>
+                {
+                    b.HasOne("QuantumZhou.Identity.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AppRegistrationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

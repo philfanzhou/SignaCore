@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Extensions.Logging;
 using QuantumZhou.Identity.Database.Entity;
 using QuantumZhou.Identity.Database.Repositories;
@@ -11,118 +12,152 @@ public class DbOtpService : IOtpService
     private readonly ILogger<DbOtpService> _logger;
     private readonly IOtpRepository _otpRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly SmsSenderResolver _senderResolver;
+    private readonly byte[] _macKey;
 
-    public DbOtpService(SmsOptions options, ILogger<DbOtpService> logger, IOtpRepository otpRepository, IUnitOfWork unitOfWork)
+    public DbOtpService(
+        SmsOptions options,
+        ILogger<DbOtpService> logger,
+        IOtpRepository otpRepository,
+        IUnitOfWork unitOfWork,
+        SmsSenderResolver senderResolver)
     {
         _options = options;
         _logger = logger;
         _otpRepository = otpRepository;
         _unitOfWork = unitOfWork;
+        _senderResolver = senderResolver;
+        _macKey = options.DecodeHmacKey();
     }
 
-    public async Task<string> GenerateAndSendAsync(string phone, ISmsSender smsSender)
+    public async Task<string> GenerateAndSendAsync(
+        Guid appRegistrationId,
+        string phoneE164,
+        string profileKey,
+        CancellationToken cancellationToken = default)
     {
-        var maskedPhone = SensitiveDataMasker.MaskPhone(phone);
+        var phone = MainlandChinaPhoneNumber.Normalize(phoneE164);
+        var now = DateTimeOffset.UtcNow;
+        var existing = await _otpRepository.GetAsync(appRegistrationId, phone);
+        EnforceSendLimits(existing, now);
 
-        var existing = await _otpRepository.GetByPhoneAsync(phone);
-        if (existing != null && existing.Attempts >= _options.MaxAttempts)
+        var (sender, profile) = _senderResolver.Resolve(profileKey);
+        var code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+        var otp = existing ?? new OtpEntity { Id = Guid.NewGuid(), AppRegistrationId = appRegistrationId, Phone = phone };
+        if (existing == null) await _otpRepository.AddAsync(otp);
+
+        UpdateSendWindows(otp, now);
+        otp.CodeMac = ComputeMac(appRegistrationId, phone, code);
+        otp.Status = OtpStatus.PendingDelivery;
+        otp.ExpiresAt = now.AddSeconds(_options.OtpTtlSeconds);
+        otp.Attempts = 0;
+        otp.LockoutUntil = DateTimeOffset.UnixEpoch;
+        otp.Provider = sender.Provider;
+        otp.ProfileKey = profileKey;
+        otp.ProviderMessageId = null;
+        otp.SentAt = null;
+        otp.CreatedAt = now;
+        otp.Version++;
+        try
         {
-            var remaining = existing.LockoutUntil - DateTimeOffset.UtcNow;
-            if (remaining > TimeSpan.Zero)
-            {
-                throw new InvalidOperationException($"Too many attempts. Please try again in {(int)remaining.TotalSeconds} seconds.");
-            }
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            throw new InvalidOperationException("A verification code is already being sent. Please try again later.");
         }
 
-        var code = RandomNumberGenerator.GetInt32(100000, 999999).ToString();
-
-        if (existing != null)
+        try
         {
-            await _otpRepository.RemoveByPhoneAsync(phone);
+            var result = await sender.SendAsync(
+                profile, new SmsVerificationMessage(phone, code, otp.Id.ToString("N")), cancellationToken);
+            otp.Status = OtpStatus.Sent;
+            otp.ProviderMessageId = result.MessageId;
+            otp.SentAt = DateTimeOffset.UtcNow;
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (SmsDeliveryRejectedException exception)
+        {
+            otp.Status = OtpStatus.DeliveryFailed;
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            _logger.LogWarning(
+                "SMS provider rejected delivery: Provider={Provider}, Code={ProviderCode}, Phone={Phone}",
+                sender.Provider, exception.ProviderCode, SensitiveDataMasker.MaskPhone(phone));
+            throw new InvalidOperationException("SMS provider rejected the verification-code request.");
         }
 
-        var otp = new OtpEntity
-        {
-            Id = Guid.NewGuid(),
-            Phone = phone,
-            Code = code,
-            ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(_options.OtpTtlSeconds),
-            Attempts = 0,
-            LockoutUntil = DateTimeOffset.UnixEpoch,
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-        await _otpRepository.AddAsync(otp);
-        await _unitOfWork.SaveChangesAsync();
-
-        await smsSender.SendAsync(phone, code);
-
-        _logger.LogInformation("OTP generated and sent for Phone={Phone}, TTL={Ttl}s", maskedPhone, _options.OtpTtlSeconds);
-
+        _logger.LogInformation(
+            "OTP generated and sent: AppRegistrationId={AppRegistrationId}, Provider={Provider}, Phone={Phone}, TTL={Ttl}s",
+            appRegistrationId, sender.Provider, SensitiveDataMasker.MaskPhone(phone), _options.OtpTtlSeconds);
         return code;
     }
 
-    public async Task<bool> VerifyAsync(string phone, string code)
+    public async Task<bool> VerifyAsync(Guid appRegistrationId, string phoneE164, string code)
     {
-        var maskedPhone = SensitiveDataMasker.MaskPhone(phone);
-
-        var entry = await _otpRepository.GetByPhoneAsync(phone);
-        if (entry == null)
-        {
-            _logger.LogWarning("OTP verification failed: Phone={Phone}, Reason=No OTP found", maskedPhone);
+        var phone = MainlandChinaPhoneNumber.Normalize(phoneE164);
+        var now = DateTimeOffset.UtcNow;
+        var entry = await _otpRepository.GetAsync(appRegistrationId, phone);
+        if (entry == null || entry.Status != OtpStatus.Sent || entry.ExpiresAt < now || entry.LockoutUntil > now)
             return false;
-        }
 
-        if (entry.ExpiresAt < DateTimeOffset.UtcNow)
+        var codeMac = ComputeMac(appRegistrationId, phone, code);
+        if (CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(entry.CodeMac), Convert.FromHexString(codeMac)) &&
+            await _otpRepository.TryConsumeAsync(appRegistrationId, phone, codeMac, now, _options.MaxAttempts))
         {
-            await _otpRepository.RemoveExpiredAsync(phone, DateTimeOffset.UtcNow);
-            _logger.LogWarning("OTP verification failed: Phone={Phone}, Reason=Expired", maskedPhone);
-            return false;
-        }
-
-        var utcNow = DateTimeOffset.UtcNow;
-        if (entry.Code == code &&
-            await _otpRepository.TryConsumeAsync(
-                phone,
-                code,
-                utcNow,
-                _options.MaxAttempts))
-        {
-            _logger.LogInformation("OTP verified successfully: Phone={Phone}", maskedPhone);
+            _logger.LogInformation("OTP verified: AppRegistrationId={AppRegistrationId}, Phone={Phone}", appRegistrationId, SensitiveDataMasker.MaskPhone(phone));
             return true;
         }
 
-        var affectedRows = await _otpRepository.IncrementFailedAttemptsAsync(
-            phone,
-            utcNow,
-            _options.MaxAttempts,
-            utcNow.AddSeconds(_options.LockoutSeconds));
-        if (affectedRows == 0)
-        {
-            _logger.LogWarning(
-                "OTP verification failed: Phone={Phone}, Reason=OTP changed or locked",
-                maskedPhone);
-            return false;
-        }
-
-        var updatedEntry = await _otpRepository.GetByPhoneAsync(phone);
-        if (updatedEntry?.Attempts >= _options.MaxAttempts)
-        {
-            _logger.LogWarning(
-                "OTP verification failed: Phone={Phone}, Reason=Too many attempts, locked for {Lockout}s",
-                maskedPhone,
-                _options.LockoutSeconds);
-            return false;
-        }
-
-        _logger.LogWarning(
-            "OTP verification failed: Phone={Phone}, Attempts={Attempts}",
-            maskedPhone,
-            updatedEntry?.Attempts);
+        await _otpRepository.IncrementFailedAttemptsAsync(
+            appRegistrationId, phone, entry.CodeMac, now, _options.MaxAttempts,
+            now.AddSeconds(_options.LockoutSeconds));
+        _logger.LogWarning("OTP verification failed: AppRegistrationId={AppRegistrationId}, Phone={Phone}", appRegistrationId, SensitiveDataMasker.MaskPhone(phone));
         return false;
     }
 
-    public async Task InvalidateAsync(string phone)
+    public async Task InvalidateAsync(Guid appRegistrationId, string phoneE164)
     {
-        await _otpRepository.RemoveByPhoneAsync(phone);
+        var entry = await _otpRepository.GetAsync(appRegistrationId, MainlandChinaPhoneNumber.Normalize(phoneE164));
+        if (entry == null) return;
+        entry.Status = OtpStatus.Consumed;
+        await _unitOfWork.SaveChangesAsync();
+    }
+
+    private string ComputeMac(Guid appRegistrationId, string phone, string code)
+    {
+        if (_macKey.Length < 32)
+            throw new InvalidOperationException("A stable SMS OTP HMAC key is required.");
+        using var hmac = new HMACSHA256(_macKey);
+        return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes($"{appRegistrationId:N}|{phone}|{code}")));
+    }
+
+    private void EnforceSendLimits(OtpEntity? otp, DateTimeOffset now)
+    {
+        if (otp == null) return;
+        if (otp.LockoutUntil > now) throw new InvalidOperationException("Too many verification attempts. Please try again later.");
+        if (now - otp.CreatedAt < TimeSpan.FromSeconds(_options.MinSendIntervalSeconds))
+            throw new InvalidOperationException("Verification code requested too frequently.");
+        if (now - otp.HourWindowStartedAt < TimeSpan.FromHours(1) && otp.HourSendCount >= _options.MaxSendsPerHour)
+            throw new InvalidOperationException("Hourly verification-code limit exceeded.");
+        if (now - otp.DayWindowStartedAt < TimeSpan.FromDays(1) && otp.DaySendCount >= _options.MaxSendsPerDay)
+            throw new InvalidOperationException("Daily verification-code limit exceeded.");
+    }
+
+    private static void UpdateSendWindows(OtpEntity otp, DateTimeOffset now)
+    {
+        if (otp.HourWindowStartedAt == default || now - otp.HourWindowStartedAt >= TimeSpan.FromHours(1))
+        {
+            otp.HourWindowStartedAt = now;
+            otp.HourSendCount = 1;
+        }
+        else otp.HourSendCount++;
+
+        if (otp.DayWindowStartedAt == default || now - otp.DayWindowStartedAt >= TimeSpan.FromDays(1))
+        {
+            otp.DayWindowStartedAt = now;
+            otp.DaySendCount = 1;
+        }
+        else otp.DaySendCount++;
     }
 }

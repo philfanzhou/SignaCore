@@ -582,7 +582,7 @@ public class AdminControllerTests : IDisposable
     public async Task CreatePhoneUser_WhenPhoneExists_ReturnsBadRequest()
     {
         SetAdminUser();
-        _userLoginRepoMock.Setup(r => r.GetBySmsPhoneAsync("13800001234"))
+        _userLoginRepoMock.Setup(r => r.GetBySmsPhoneAsync("+8613800001234"))
             .ReturnsAsync(new UserLoginEntity());
 
         var result = await _controller.CreatePhoneUser(
@@ -609,7 +609,7 @@ public class AdminControllerTests : IDisposable
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateUserResponse>(ok.Value);
-        Assert.Equal("13800001234", response.Username);
+        Assert.Equal("+8613800001234", response.Username);
         Assert.Equal("Display", response.DisplayName);
         Assert.Equal("remark", response.Remark);
         Assert.Equal("nick", response.Nickname);
@@ -780,12 +780,16 @@ public class AdminControllerTests : IDisposable
     {
         var older = new AppRegistrationEntity
         {
-            Id = Guid.NewGuid(), AppId = "old", AppName = "Old",
+            Id = Guid.NewGuid(),
+            AppId = "old",
+            AppName = "Old",
             CreatedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
         };
         var newer = new AppRegistrationEntity
         {
-            Id = Guid.NewGuid(), AppId = "new", AppName = "New",
+            Id = Guid.NewGuid(),
+            AppId = "new",
+            AppName = "New",
             CreatedAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero)
         };
         _dbContext.AppRegistrations.AddRange(older, newer);
@@ -815,8 +819,11 @@ public class AdminControllerTests : IDisposable
     {
         var app = new AppRegistrationEntity
         {
-            Id = Guid.NewGuid(), AppId = "a", AppName = "A",
-            CallbackUrl = null, CreatedAt = DateTimeOffset.UtcNow
+            Id = Guid.NewGuid(),
+            AppId = "a",
+            AppName = "A",
+            CallbackUrl = null,
+            CreatedAt = DateTimeOffset.UtcNow
         };
         _dbContext.AppRegistrations.Add(app);
         await _dbContext.SaveChangesAsync();
@@ -947,8 +954,11 @@ public class AdminControllerTests : IDisposable
         SetAdminUser();
         var app = new AppRegistrationEntity
         {
-            Id = Guid.NewGuid(), AppId = "a", AppName = "A",
-            CallbackUrl = "https://old", CallbackExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
+            Id = Guid.NewGuid(),
+            AppId = "a",
+            AppName = "A",
+            CallbackUrl = "https://old",
+            CallbackExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
             IsActive = false
         };
         _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
@@ -1053,8 +1063,11 @@ public class AdminControllerTests : IDisposable
         SetAdminUser();
         var app = new AppRegistrationEntity
         {
-            Id = Guid.NewGuid(), AppId = "a", AppName = "MyApp",
-            AppSecretHash = "oldhash", CallbackUrl = "https://cb"
+            Id = Guid.NewGuid(),
+            AppId = "a",
+            AppName = "MyApp",
+            AppSecretHash = "oldhash",
+            CallbackUrl = "https://cb"
         };
         _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
 

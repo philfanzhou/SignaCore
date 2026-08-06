@@ -31,6 +31,7 @@ public class IdentityDbContext : DbContext
     public DbSet<AuditLogEntity> AuditLogs => Set<AuditLogEntity>();
     public DbSet<LdapCredentialEntity> LdapCredentials => Set<LdapCredentialEntity>();
     public DbSet<AppLdapAccessEntity> AppLdapAccesses => Set<AppLdapAccessEntity>();
+    public DbSet<AppSmsAccessEntity> AppSmsAccesses => Set<AppSmsAccessEntity>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -120,8 +121,10 @@ public class IdentityDbContext : DbContext
             ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
             entity.Property(e => e.AppId).HasColumnName("app_id").HasMaxLength(IdentityConstants.MaxAppIdLength).IsRequired();
             entity.Property(e => e.LdapCredentialId).HasColumnName("ldap_credential_id");
+            entity.Property(e => e.SmsUserLoginId).HasColumnName("sms_user_login_id");
             entity.HasIndex(e => e.TokenValue).IsUnique();
             entity.HasIndex(e => e.LdapCredentialId);
+            entity.HasIndex(e => e.SmsUserLoginId);
         });
 
         modelBuilder.Entity<AppRegistrationEntity>(entity =>
@@ -138,6 +141,8 @@ public class IdentityDbContext : DbContext
             ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
             ConfigureInstant(entity.Property(e => e.CallbackExpiresAt).HasColumnName("callback_expires_at"));
             entity.Property(e => e.LdapLoginMode).HasColumnName("ldap_login_mode");
+            entity.Property(e => e.SmsLoginMode).HasColumnName("sms_login_mode");
+            entity.Property(e => e.SmsProfileKey).HasColumnName("sms_profile_key").HasMaxLength(64);
             entity.HasIndex(e => e.AppIdNormalized).IsUnique();
         });
 
@@ -179,6 +184,23 @@ public class IdentityDbContext : DbContext
             entity.HasOne<LdapCredentialEntity>().WithMany().HasForeignKey(e => e.LdapCredentialId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<AppSmsAccessEntity>(entity =>
+        {
+            entity.ToTable("app_sms_accesses");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.AppRegistrationId).HasColumnName("app_registration_id");
+            entity.Property(e => e.UserLoginId).HasColumnName("user_login_id");
+            entity.Property(e => e.ApprovalSource).HasColumnName("approval_source");
+            entity.Property(e => e.IsActive).HasColumnName("is_active");
+            entity.Property(e => e.ApprovedBy).HasColumnName("approved_by");
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            entity.HasIndex(e => new { e.AppRegistrationId, e.UserLoginId }).IsUnique();
+            entity.HasIndex(e => e.UserLoginId);
+            entity.HasOne<AppRegistrationEntity>().WithMany().HasForeignKey(e => e.AppRegistrationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<UserLoginEntity>().WithMany().HasForeignKey(e => e.UserLoginId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<SecurityKeyEntity>(entity =>
         {
             entity.ToTable("security_keys");
@@ -200,13 +222,25 @@ public class IdentityDbContext : DbContext
             entity.ToTable("otps");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.AppRegistrationId).HasColumnName("app_registration_id");
             entity.Property(e => e.Phone).HasColumnName("phone").HasMaxLength(20);
-            entity.Property(e => e.Code).HasColumnName("code").HasMaxLength(10);
+            entity.Property(e => e.CodeMac).HasColumnName("code_mac").HasMaxLength(64);
+            entity.Property(e => e.Status).HasColumnName("status");
             ConfigureInstant(entity.Property(e => e.ExpiresAt).HasColumnName("expires_at"));
             entity.Property(e => e.Attempts).HasColumnName("attempts");
             ConfigureInstant(entity.Property(e => e.LockoutUntil).HasColumnName("lockout_until"));
+            ConfigureInstant(entity.Property(e => e.HourWindowStartedAt).HasColumnName("hour_window_started_at"));
+            entity.Property(e => e.HourSendCount).HasColumnName("hour_send_count");
+            ConfigureInstant(entity.Property(e => e.DayWindowStartedAt).HasColumnName("day_window_started_at"));
+            entity.Property(e => e.DaySendCount).HasColumnName("day_send_count");
+            entity.Property(e => e.Provider).HasColumnName("provider").HasMaxLength(32);
+            entity.Property(e => e.ProfileKey).HasColumnName("profile_key").HasMaxLength(64);
+            entity.Property(e => e.ProviderMessageId).HasColumnName("provider_message_id").HasMaxLength(128);
+            ConfigureInstant(entity.Property(e => e.SentAt).HasColumnName("sent_at"));
             ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
-            entity.HasIndex(e => e.Phone).IsUnique();
+            entity.Property(e => e.Version).HasColumnName("version").IsConcurrencyToken();
+            entity.HasIndex(e => new { e.AppRegistrationId, e.Phone }).IsUnique();
+            entity.HasOne<AppRegistrationEntity>().WithMany().HasForeignKey(e => e.AppRegistrationId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<LoginAttemptEntity>(entity =>

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
+using QuantumZhou.Identity.Domain.Services.Sms;
 
 namespace QuantumZhou.Identity.Host;
 
@@ -25,15 +26,34 @@ internal static class SchemaMigrator
         DatabaseOptions databaseOptions,
         CancellationToken cancellationToken = default)
     {
+        var pendingMigrations = (await dbContext.Database
+                .GetPendingMigrationsAsync(cancellationToken))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var appliedMigrations = (await dbContext.Database
+            .GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        var hasNormalizedLoginSchema = appliedMigrations.Any(
+            id => id.EndsWith("_EnforceNormalizedIdentityValues", StringComparison.Ordinal));
+        if (hasNormalizedLoginSchema &&
+            pendingMigrations.Any(id => id.EndsWith("_EnableAppScopedSmsLogin", StringComparison.Ordinal)))
+        {
+            var smsLogins = await dbContext.UserLogins.AsNoTracking()
+                .Where(login => login.ProviderNameNormalized == "SMS")
+                .ToListAsync(cancellationToken);
+            EnsureUnique(
+                smsLogins,
+                login => MainlandChinaPhoneNumber.TryNormalize(login.ProviderUserId, out var normalized)
+                    ? normalized
+                    : login.ProviderUserId,
+                login => login.ProviderUserId,
+                "SMS phone identity");
+        }
+
         if (databaseOptions.ProviderKind != DatabaseProvider.PostgreSql)
         {
             await dbContext.Database.MigrateAsync(cancellationToken);
             return;
         }
-
-        var pendingMigrations = (await dbContext.Database
-                .GetPendingMigrationsAsync(cancellationToken))
-            .ToHashSet(StringComparer.Ordinal);
 
         if (pendingMigrations.Contains(ExpandMigrationId))
         {

@@ -230,6 +230,7 @@ public sealed class ServerDatabaseContractTests
         DbContextOptions<IdentityDbContext> options)
     {
         var accountId = Guid.NewGuid();
+        var appRegistrationId = Guid.NewGuid();
 
         // 用东八区表达一个瞬间，再转成 UTC 写入：验证"同一瞬间无论用哪个偏移表达，
         // 落库后都是同一个 UTC 值且微秒精度不丢"。
@@ -254,6 +255,15 @@ public sealed class ServerDatabaseContractTests
         await using (var seedContext = new IdentityDbContext(options))
         {
             await seedContext.Database.MigrateAsync();
+            seedContext.AppRegistrations.Add(new AppRegistrationEntity
+            {
+                Id = appRegistrationId,
+                AppId = "database-contract-app",
+                AppSecretHash = "hash",
+                AppName = "Database Contract",
+                IsActive = true,
+                CreatedAt = sourceInstant
+            });
             seedContext.Accounts.Add(new AccountEntity
             {
                 Id = accountId,
@@ -280,8 +290,14 @@ public sealed class ServerDatabaseContractTests
             seedContext.Otps.Add(new OtpEntity
             {
                 Id = Guid.NewGuid(),
+                AppRegistrationId = appRegistrationId,
                 Phone = phone,
-                Code = otpCode,
+                CodeMac = otpCode,
+                Status = OtpStatus.Sent,
+                Provider = "Test",
+                ProfileKey = "test",
+                HourWindowStartedAt = DateTimeOffset.UtcNow,
+                DayWindowStartedAt = DateTimeOffset.UtcNow,
                 CreatedAt = DateTimeOffset.UtcNow,
                 ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5),
                 LockoutUntil = DateTimeOffset.UnixEpoch
@@ -324,8 +340,8 @@ public sealed class ServerDatabaseContractTests
         }
 
         var consumeResults = await Task.WhenAll(
-            TryConsumeOtpAsync(options, phone, otpCode),
-            TryConsumeOtpAsync(options, phone, otpCode));
+            TryConsumeOtpAsync(options, appRegistrationId, phone, otpCode),
+            TryConsumeOtpAsync(options, appRegistrationId, phone, otpCode));
         Assert.Equal(1, consumeResults.Count(result => result));
     }
 
@@ -349,12 +365,14 @@ public sealed class ServerDatabaseContractTests
 
     private static async Task<bool> TryConsumeOtpAsync(
         DbContextOptions<IdentityDbContext> options,
+        Guid appRegistrationId,
         string phone,
         string code)
     {
         await using var context = new IdentityDbContext(options);
         var repository = new OtpRepository(context);
         return await repository.TryConsumeAsync(
+            appRegistrationId,
             phone,
             code,
             DateTimeOffset.UtcNow,

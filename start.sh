@@ -20,6 +20,7 @@ ADMIN_USERNAME="${ADMIN_BOOTSTRAP_USERNAME:-admin}"
 ADMIN_PASSWORD="${ADMIN_BOOTSTRAP_PASSWORD:?ADMIN_BOOTSTRAP_PASSWORD is required (secret store, never commit it)}"
 SMS_BYPASS_CODE="${SMS_BYPASS_CODE?SMS_BYPASS_CODE is required; set it to an empty string to disable the SMS bypass}"
 SMS_BYPASS_PHONES="${SMS_BYPASS_PHONES?SMS_BYPASS_PHONES is required; comma-separated allow list, empty disables the SMS bypass}"
+SMS_OTP_HMAC_KEY="${SMS_OTP_HMAC_KEY:?SMS_OTP_HMAC_KEY is required (base64, at least 32 random bytes)}"
 
 if [ -n "$(docker ps -q --filter "name=^/${CONTAINER_NAME}$")" ]; then
     docker stop "$CONTAINER_NAME"
@@ -46,5 +47,6 @@ docker run -d \
     -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
     -e Sms__BypassCode="${SMS_BYPASS_CODE}" \
     -e Sms__BypassPhones="${SMS_BYPASS_PHONES}" \
+    -e Sms__OtpHmacKey="${SMS_OTP_HMAC_KEY}" \
     -v "${DATA_DIR}:/app/data" \
     "$IMAGE_NAME"

@@ -1,34 +1,27 @@
 using Microsoft.Extensions.Logging;
 using QuantumZhou.Identity.Database;
 using QuantumZhou.Identity.Database.Entity;
-using QuantumZhou.Identity.Database.Repositories;
 using QuantumZhou.Identity.Domain.Services.Sms;
 
 namespace QuantumZhou.Identity.Domain.Validators;
 
 public class SmsValidator : IIdentityValidator
 {
-    private readonly IAccountRepository _accountRepository;
     private readonly IOtpService _otpService;
-    private readonly IUserLoginRepository _userLoginRepository;
-    private readonly IUnitOfWork _unitOfWork;
+    private readonly ISmsAdmissionService _admissionService;
     private readonly ILogger<SmsValidator> _logger;
     private readonly AuthMetrics _authMetrics;
     private readonly SmsOptions _smsOptions;
 
     public SmsValidator(
-        IAccountRepository accountRepository,
         IOtpService otpService,
-        IUserLoginRepository userLoginRepository,
-        IUnitOfWork unitOfWork,
+        ISmsAdmissionService admissionService,
         ILogger<SmsValidator> logger,
         AuthMetrics authMetrics,
         SmsOptions smsOptions)
     {
-        _accountRepository = accountRepository;
         _otpService = otpService;
-        _userLoginRepository = userLoginRepository;
-        _unitOfWork = unitOfWork;
+        _admissionService = admissionService;
         _logger = logger;
         _authMetrics = authMetrics;
         _smsOptions = smsOptions;
@@ -38,89 +31,48 @@ public class SmsValidator : IIdentityValidator
 
     public async Task<ValidationResult> ValidateAsync(ValidationRequest request)
     {
-        if (string.IsNullOrEmpty(request.Phone) || string.IsNullOrEmpty(request.Code))
-        {
-            _logger.LogWarning("SMS validation failed: phone or code is empty");
+        if (request.App == null || request.App.SmsLoginMode == SmsLoginMode.Disabled)
+            return ValidationResult.Failure("SMS login is disabled for this application");
+        if (string.IsNullOrWhiteSpace(request.Phone) || string.IsNullOrWhiteSpace(request.Code))
             return ValidationResult.Failure("Phone or code cannot be empty");
-        }
+        if (!MainlandChinaPhoneNumber.TryNormalize(request.Phone, out var phone))
+            return ValidationResult.Failure("Invalid mainland China mobile number");
 
-        var maskedPhone = SensitiveDataMasker.MaskPhone(request.Phone);
-
-        var verified = IsBypassAllowed(request.Phone, request.Code);
-        if (verified)
+        var admission = await _admissionService.FindAsync(request.App.Id, phone, request.CancellationToken);
+        if (request.App.SmsLoginMode == SmsLoginMode.ManualApproval &&
+            (admission is not { Access.IsActive: true } || admission.Access.ApprovalSource != SmsAccessApprovalSource.Admin))
         {
-            _logger.LogWarning("SMS bypass code used for Phone={Phone} — allow-listed test number, must never cover real users", maskedPhone);
+            return ValidationResult.Failure("SMS account is not authorized for this application");
         }
 
-        if (!verified)
+        var verified = IsBypassAllowed(phone, request.Code) ||
+            await _otpService.VerifyAsync(request.App.Id, phone, request.Code);
+        if (!verified) return ValidationResult.Failure("Wrong or expired verification code");
+
+        if (admission == null || !admission.Access.IsActive)
         {
-            verified = await _otpService.VerifyAsync(request.Phone, request.Code);
+            if (request.App.SmsLoginMode != SmsLoginMode.AutoProvision)
+                return ValidationResult.Failure("SMS account is not authorized for this application");
+            admission = await _admissionService.ProvisionAsync(
+                request.App, phone, SmsAccessApprovalSource.AutoProvision, null, request.CancellationToken);
+            if (!admission.Access.IsActive)
+                return ValidationResult.Failure("SMS access has been revoked");
+            if (admission.AccountCreated) _authMetrics.RecordAccountCreation("auto_register_sms");
         }
 
-        if (!verified)
-        {
-            _logger.LogWarning("SMS validation failed: wrong or expired code, Phone={Phone}", maskedPhone);
-            return ValidationResult.Failure("Wrong or expired verification code");
-        }
-
-        var account = await _accountRepository.GetByLoginProviderAsync(
-            IdentityConstants.AuthMethodSms, request.Phone);
-
-        if (account == null)
-        {
-            account = new AccountEntity
-            {
-                Id = Guid.NewGuid(),
-                IsActive = true,
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-            await _accountRepository.AddAsync(account);
-
-            var userLogin = new UserLoginEntity
-            {
-                Id = Guid.NewGuid(),
-                AccountId = account.Id,
-                ProviderName = IdentityConstants.AuthMethodSms,
-                ProviderUserId = request.Phone
-            };
-            await _userLoginRepository.AddAsync(userLogin);
-
-            await _unitOfWork.SaveChangesAsync();
-
-            _authMetrics.RecordAccountCreation("auto_register_sms");
-            _logger.LogInformation("Auto-registered new SMS user: Phone={Phone}, AccountId={AccountId}", maskedPhone, account.Id);
-        }
-
-        if (!account.IsActive)
-        {
-            _logger.LogWarning("SMS validation failed: account disabled, Phone={Phone}", maskedPhone);
-            return ValidationResult.Failure("Account is disabled");
-        }
-
-        _logger.LogInformation("SMS validated successfully: Phone={Phone}", maskedPhone);
-        return ValidationResult.Success(account, IdentityConstants.AuthMethodSms);
+        if (!admission.Account.IsActive) return ValidationResult.Failure("Account is disabled");
+        _logger.LogInformation(
+            "SMS validated: AppRegistrationId={AppRegistrationId}, Phone={Phone}",
+            request.App.Id, SensitiveDataMasker.MaskPhone(phone));
+        return ValidationResult.Success(
+            admission.Account, IdentityConstants.AuthMethodSms, phone, smsUserLoginId: admission.Login.Id);
     }
 
-    /// <summary>
-    /// 绕过码只在「已配置绕过码」且「手机号在白名单内」时生效。
-    /// 白名单为空即绕过整体禁用——配了绕过码但没配白名单不等于放行所有号码。
-    /// 不匹配时返回 false，调用方继续走正常 OTP 校验（含失败计数与锁定）。
-    /// </summary>
     private bool IsBypassAllowed(string phone, string code)
     {
-        var bypassCode = _smsOptions.BypassCode;
-        if (string.IsNullOrEmpty(bypassCode) || _smsOptions.BypassPhones.Count == 0)
-        {
-            return false;
-        }
-
-        if (!string.Equals(code, bypassCode, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var trimmedPhone = phone.Trim();
-        return _smsOptions.BypassPhones.Any(
-            allowed => string.Equals(allowed, trimmedPhone, StringComparison.Ordinal));
+        if (string.IsNullOrEmpty(_smsOptions.BypassCode) ||
+            !string.Equals(code, _smsOptions.BypassCode, StringComparison.Ordinal)) return false;
+        return _smsOptions.BypassPhones.Any(allowed =>
+            MainlandChinaPhoneNumber.TryNormalize(allowed, out var normalized) && normalized == phone);
     }
 }
