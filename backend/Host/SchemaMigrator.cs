@@ -122,6 +122,8 @@ internal static class SchemaMigrator
         await SeedNormalizedColumnsAsync(dbContext, cancellationToken);
 
         var credentials = await dbContext.PasswordCredentials
+            .AsNoTracking()
+            .Select(item => new { item.Id, item.Username })
             .ToListAsync(cancellationToken);
         EnsureUnique(
             credentials,
@@ -130,6 +132,8 @@ internal static class SchemaMigrator
             "username");
 
         var loginAttempts = await dbContext.LoginAttempts
+            .AsNoTracking()
+            .Select(item => new { item.Id, item.Username })
             .ToListAsync(cancellationToken);
         EnsureUnique(
             loginAttempts,
@@ -138,6 +142,8 @@ internal static class SchemaMigrator
             "login-attempt username");
 
         var appRegistrations = await dbContext.AppRegistrations
+            .AsNoTracking()
+            .Select(item => new { item.Id, item.AppId })
             .ToListAsync(cancellationToken);
         EnsureUnique(
             appRegistrations,
@@ -146,6 +152,8 @@ internal static class SchemaMigrator
             "AppId");
 
         var userLogins = await dbContext.UserLogins
+            .AsNoTracking()
+            .Select(item => new { item.Id, item.ProviderName, item.ProviderUserId })
             .ToListAsync(cancellationToken);
         EnsureUnique(
             userLogins,
@@ -155,38 +163,68 @@ internal static class SchemaMigrator
             item => $"{item.ProviderName}/{item.ProviderUserId}",
             "external provider identity");
 
-        var accounts = await dbContext.Accounts.ToListAsync(cancellationToken);
+        var accounts = await dbContext.Accounts
+            .AsNoTracking()
+            .Select(item => new { item.Id, item.Nickname, item.Remark })
+            .ToListAsync(cancellationToken);
+
+        dbContext.ChangeTracker.Clear();
 
         foreach (var credential in credentials)
         {
-            credential.UsernameNormalized =
-                IdentityValueNormalizer.Normalize(credential.Username);
+            var entity = new PasswordCredentialEntity
+            {
+                Id = credential.Id,
+                Username = credential.Username
+            };
+            dbContext.Attach(entity);
+            dbContext.Entry(entity).Property(item => item.UsernameNormalized).IsModified = true;
         }
 
         foreach (var loginAttempt in loginAttempts)
         {
-            loginAttempt.UsernameNormalized =
-                IdentityValueNormalizer.Normalize(loginAttempt.Username);
+            var entity = new LoginAttemptEntity
+            {
+                Id = loginAttempt.Id,
+                Username = loginAttempt.Username
+            };
+            dbContext.Attach(entity);
+            dbContext.Entry(entity).Property(item => item.UsernameNormalized).IsModified = true;
         }
 
         foreach (var appRegistration in appRegistrations)
         {
-            appRegistration.AppIdNormalized =
-                IdentityValueNormalizer.Normalize(appRegistration.AppId);
+            var entity = new AppRegistrationEntity
+            {
+                Id = appRegistration.Id,
+                AppId = appRegistration.AppId
+            };
+            dbContext.Attach(entity);
+            dbContext.Entry(entity).Property(item => item.AppIdNormalized).IsModified = true;
         }
 
         foreach (var userLogin in userLogins)
         {
-            userLogin.ProviderNameNormalized =
-                IdentityValueNormalizer.Normalize(userLogin.ProviderName);
+            var entity = new UserLoginEntity
+            {
+                Id = userLogin.Id,
+                ProviderName = userLogin.ProviderName
+            };
+            dbContext.Attach(entity);
+            dbContext.Entry(entity).Property(item => item.ProviderNameNormalized).IsModified = true;
         }
 
         foreach (var account in accounts)
         {
-            account.NicknameNormalized =
-                IdentityValueNormalizer.NormalizeNullable(account.Nickname);
-            account.RemarkNormalized =
-                IdentityValueNormalizer.NormalizeNullable(account.Remark);
+            var entity = new AccountEntity
+            {
+                Id = account.Id,
+                Nickname = account.Nickname,
+                Remark = account.Remark
+            };
+            dbContext.Attach(entity);
+            dbContext.Entry(entity).Property(item => item.NicknameNormalized).IsModified = true;
+            dbContext.Entry(entity).Property(item => item.RemarkNormalized).IsModified = true;
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
