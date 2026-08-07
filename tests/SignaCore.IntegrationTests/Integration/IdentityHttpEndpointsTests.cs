@@ -1,11 +1,14 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.Host;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;
@@ -153,6 +156,51 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
             .ToList();
 
         Assert.Single(endpoints);
+    }
+
+    /// <summary>
+    /// 管理台 SPA 分支是终止分支：被它接走的请求到不了 MapControllers()。
+    /// <para>
+    /// 这里遍历**真实注册的每一条路由**，只用前缀名单这道防线去判（不设置 endpoint），
+    /// 断言没有任何一条会被 SPA 吞掉。当初漏加 <c>/oauth2</c> 时这条会直接挂——
+    /// 而按方法逐个写的用例只能覆盖作者当时想到的路径。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void AdminSpaBranch_NeverSwallowsAnyRegisteredRoute()
+    {
+        var routes = _fixture.Services
+            .GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>()
+            .Endpoints
+            .OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText)
+            .Where(template => !string.IsNullOrWhiteSpace(template))
+            .Select(template => "/" + template!.TrimStart('/'))
+            // 路由参数换成占位值，得到一条可用于前缀判断的具体路径。
+            .Select(path => System.Text.RegularExpressions.Regex.Replace(path, @"\{[^}]*\}", "x"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Assert.NotEmpty(routes);
+
+        var swallowed = routes
+            .Where(path => AdminSpaRouting.ShouldServeSpa(ContextFor(path), HostHttpPort))
+            .ToList();
+
+        Assert.True(
+            swallowed.Count == 0,
+            $"These registered routes would be diverted into the admin SPA branch and never reach their "
+            + $"handler: {string.Join(", ", swallowed)}");
+    }
+
+    private const int HostHttpPort = 5002;
+
+    private static DefaultHttpContext ContextFor(string path)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = path;
+        context.Features.Set<IHttpConnectionFeature>(new HttpConnectionFeature { LocalPort = HostHttpPort });
+        return context;
     }
 
     [Fact]
