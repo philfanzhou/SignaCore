@@ -458,6 +458,18 @@ async function revokeWechatUser(user: AdminWechatUser) {
   }
 }
 
+async function restoreWechatUser(user: AdminWechatUser) {
+  const app = appDrawerApp.value
+  if (!app) return
+  try {
+    await adminClient.restoreAppWechatUser(app.appId, user.loginId)
+    ElMessage.success('微信授权已恢复')
+    await loadWechatUsers(app.appId)
+  } catch (error) {
+    handleApiError('恢复微信授权失败', error)
+  }
+}
+
 function closeAppDrawer() {
   if (!appDrawerVisible.value) return
   appDrawerOpen.value = false
@@ -574,6 +586,7 @@ export function useApps() {
     revokeSmsUser,
     loadWechatUsers,
     revokeWechatUser,
+    restoreWechatUser,
     openDeleteAppModal,
   }
 }

@@ -144,6 +144,10 @@ public class ProfileController : ControllerBase
                     Conflict(new ErrorResponse("This WeChat identity is already bound to another account.")),
                 WechatBindOutcome.AccountAlreadyBound =>
                     Conflict(new ErrorResponse("This account is already bound to a different WeChat identity.")),
+                // 撤销是管理员状态，用户重新绑定不能把它清掉。
+                WechatBindOutcome.AccessRevoked =>
+                    StatusCode(StatusCodes.Status403Forbidden,
+                        new ErrorResponse("WeChat access for this application has been revoked by an administrator.")),
                 _ => Unauthorized()
             };
         }

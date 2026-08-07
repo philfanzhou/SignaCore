@@ -350,10 +350,16 @@ public static class ServiceCollectionExtensions
                     ValidateIssuerSigningKey = true,
                     ValidIssuer = jwtOptions.Issuer,
                     ClockSkew = TimeSpan.FromSeconds(30),
-                    // 应用可以按 AudienceMode 逐个切到"每客户端 aud"，此时 aud 是该应用自己的
-                    // AppId，固定的 ValidAudience 会把本服务自己签的 token 拒掉（/api/profile/*
-                    // 就是用这条 scheme 校验的）。放行两种：部署级共享 audience，或与同一张
-                    // token 里 client_id 一致的 aud——后者同属签名覆盖范围，伪造不了。
+                    // 这条 scheme 只服务本服务自己的 /api/profile/*，它是"用户自助"接口，不属于
+                    // 任何单个应用：任何一个已注册应用签出的 token，用户都应该能用来管理自己的资料。
+                    // 所以这里的判定实质是"这张 token 是我们签的"，而不是受众授权——放行部署级共享
+                    // audience，或与同一张 token 里 client_id 一致的 aud（PerApplication 模式下
+                    // 两者相等，等价于接受全部自签 token）。
+                    //
+                    // 注意：这不削弱 AudienceMode 的目标。受众隔离要挡的是**下游服务**拿 A 的 token
+                    // 当 B 的用，而下游用自己的 ValidAudience 校验，不走这里。真正的应用级授权由
+                    // client_id claim 决定（见 ProfileController 里的微信绑定作用域）。
+                    // 详见 docs/overview/StandardsConformance.md。
                     AudienceValidator = (audiences, securityToken, _) =>
                     {
                         var clientId = (securityToken as System.IdentityModel.Tokens.Jwt.JwtSecurityToken)?

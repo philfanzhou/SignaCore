@@ -48,6 +48,10 @@ silently ignored, so a client never receives a token whose authority differs fro
 RFC 7009: form-encoded, client-authenticated, and always HTTP 200 for a syntactically valid request
 whether or not the token existed. Only refresh tokens can be revoked — access tokens are self-contained.
 
+Per RFC 7009 §2.1 a token is revoked only when it was issued to the authenticated client; a request
+naming another client's token succeeds with HTTP 200 and changes nothing, so the response never reveals
+whether the token exists or who owns it.
+
 ## Access-token audience
 
 `aud` is controlled per application by `app_registrations.audience_mode`:
@@ -67,6 +71,13 @@ a time:
 
 Reversing step 2 is safe at any point; tokens already issued keep the audience they were signed with
 until they expire.
+
+**Scope of the isolation.** `PerApplication` constrains *downstream* resource servers, which validate
+with their own configured audience. SignaCore's own `/api/profile/*` endpoints deliberately accept any
+token this service issued, regardless of mode: they are per-user self-service, not owned by one
+application, so a user holding a token from any registered application may manage their own profile.
+Application-scoped decisions on those endpoints — such as which application a WeChat binding admits —
+are made from the `client_id` claim, not from `aud`.
 
 ## What conforms today
 

@@ -1,4 +1,3 @@
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -37,7 +36,11 @@ public class WechatApiClient : IWechatApiClient
             var response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
 
-            var result = await response.Content.ReadFromJsonAsync<WechatSessionResponse>(cancellationToken);
+            // jscode2session 的 Content-Type 是 text/plain，不是 application/json。
+            // ReadFromJsonAsync 会先校验媒体类型并抛 NotSupportedException，所以这里显式
+            // 读字符串再反序列化，不依赖对端把 Content-Type 写对。
+            var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+            var result = JsonSerializer.Deserialize<WechatSessionResponse>(payload, SerializerOptions);
             if (result == null)
             {
                 _logger.LogWarning("WeChat API returned null response");
@@ -59,12 +62,15 @@ public class WechatApiClient : IWechatApiClient
 
             return result.OpenId;
         }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or OperationCanceledException)
         {
+            // 登录失败要能被上层当成"认证失败"处理，不能变成未处理异常打成 500。
             _logger.LogError(ex, "WeChat API request failed");
             return null;
         }
     }
+
+    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
     /// <summary>
     /// Property names are pinned explicitly: WeChat returns <c>openid</c> / <c>errcode</c> /

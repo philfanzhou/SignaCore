@@ -30,6 +30,7 @@ const {
   addSmsUser,
   revokeSmsUser,
   revokeWechatUser,
+  restoreWechatUser,
 } = useApps()
 </script>
 
@@ -176,7 +177,8 @@ const {
             </select>
             <div class="hint">
               OpenId 只有用户授权后才可知，所以没有"管理员预授权"模式：绑定由用户自己在
-              <span class="mono">POST /api/profile/wechat</span> 完成，管理员只做撤销。
+              <span class="mono">POST /api/profile/wechat</span> 完成，管理员做撤销与恢复。
+              撤销后用户重新绑定也不会自动解封，只能从这里恢复。
             </div>
           </div>
           <div v-if="loadingWechatUsers" class="hint">正在加载绑定用户...</div>
@@ -189,7 +191,10 @@ const {
                   <td class="mono">{{ user.openId }}</td>
                   <td>{{ user.approvalSource === 'SelfBind' ? '用户绑定' : '自动开户' }}</td>
                   <td><span class="badge" :class="user.isActive ? 'green' : 'gray'"><span class="dot"></span>{{ user.isActive ? '有效' : '已撤销' }}</span></td>
-                  <td><button v-if="user.isActive" class="btn btn-danger btn-sm" @click="revokeWechatUser(user)">撤销</button></td>
+                  <td>
+                    <button v-if="user.isActive" class="btn btn-danger btn-sm" @click="revokeWechatUser(user)">撤销</button>
+                    <button v-else class="btn btn-sm" @click="restoreWechatUser(user)">恢复</button>
+                  </td>
                 </tr>
               </tbody>
             </table>

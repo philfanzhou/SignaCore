@@ -694,6 +694,37 @@ public class AdminController : ControllerBase
         return Ok((IReadOnlyList<AdminWechatUserResponse>)users);
     }
 
+    /// <summary>
+    /// POST /api/admin/apps/{appId}/wechat-users/{loginId}/restore — 恢复被撤销的微信准入。
+    /// 用户自助重新绑定**不会**清除撤销状态（见 WechatAdmissionService.EnsureAccessAsync），
+    /// 所以恢复只能从这里走。
+    /// </summary>
+    [HttpPost("apps/{appId}/wechat-users/{loginId:guid}/restore")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> RestoreWechatUser(
+        string appId,
+        Guid loginId,
+        [FromServices] IdentityDbContext dbContext,
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
+    {
+        var app = await dbContext.AppRegistrations.FirstOrDefaultAsync(
+            item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId), cancellationToken);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+        var access = await dbContext.AppWechatAccesses.FirstOrDefaultAsync(
+            item => item.AppRegistrationId == app.Id && item.UserLoginId == loginId, cancellationToken);
+        if (access == null) return NotFound(new ErrorResponse("WeChat application access not found."));
+
+        access.IsActive = true;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        var (actorId, actorName) = GetAdminIdentity();
+        await auditService.RecordActionAsync(
+            "app_wechat_user_restored", "AppRegistration", appId, actorId, actorName,
+            "Administrator restored a WeChat identity for the application", GetClientIp(),
+            after: new { LoginId = loginId, IsActive = true });
+        return Ok(new OperationResponse(true, "WeChat application access restored."));
+    }
+
     [HttpDelete("apps/{appId}/wechat-users/{loginId:guid}")]
     [Authorize(Policy = "AdminSession")]
     public async Task<IActionResult> RevokeWechatUser(

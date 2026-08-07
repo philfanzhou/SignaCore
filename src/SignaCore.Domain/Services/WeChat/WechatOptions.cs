@@ -17,9 +17,26 @@ public class WechatOptions
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(AppId) && !string.IsNullOrWhiteSpace(AppSecret);
 
+    /// <summary>
+    /// Validates only when the deployment shows intent to use WeChat, i.e. at least one credential is
+    /// present. WeChat is enabled per application in the database, which is not readable at startup, so
+    /// there is no equivalent of <c>Ldap:Enabled</c> to gate on.
+    /// <para>
+    /// Nothing here may throw for a deployment that does not use WeChat at all. Failing startup on
+    /// <c>WeChat:ApiBaseUrl</c> would take password, SMS, and LDAP login down with it over a setting
+    /// no request would ever read.
+    /// </para>
+    /// </summary>
     public void Validate()
     {
-        if (string.IsNullOrWhiteSpace(AppId) != string.IsNullOrWhiteSpace(AppSecret))
+        var hasAppId = !string.IsNullOrWhiteSpace(AppId);
+        var hasSecret = !string.IsNullOrWhiteSpace(AppSecret);
+        if (!hasAppId && !hasSecret)
+        {
+            return;
+        }
+
+        if (hasAppId != hasSecret)
         {
             throw new InvalidOperationException(
                 "WeChat:AppId and WeChat:AppSecret must both be configured, or both be omitted.");

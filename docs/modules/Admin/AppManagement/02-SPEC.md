@@ -23,6 +23,9 @@ Beyond registration and callbacks, an application carries four policies that adm
 | WeChat admission | `PUT /api/admin/apps/{appId}/wechat-policy` |
 | Access-token audience | `PUT /api/admin/apps/{appId}/audience-mode` |
 
+WeChat admissions are revoked with `DELETE /api/admin/apps/{appId}/wechat-users/{loginId}` and restored
+with `POST .../restore`. A user re-binding cannot clear a revocation, so revoking is not merely advisory.
+
 A WeChat mode other than `Disabled` is rejected when the deployment has no WeChat credentials, and an
 SMS mode other than `Disabled` is rejected without a configured provider profile: a policy that cannot
 be honoured is refused at the point of configuration rather than at the user's first login attempt.

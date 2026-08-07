@@ -16,7 +16,10 @@ public interface IWechatAdmissionService
         string openId,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Binds an OpenId to an already-authenticated account and admits it for the calling application.</summary>
+    /// <summary>
+    /// Binds an OpenId to an already-authenticated account and admits it for the calling application.
+    /// A previously revoked admission is not restored — see <see cref="WechatBindOutcome.AccessRevoked"/>.
+    /// </summary>
     Task<WechatBindResult> BindAsync(
         AppRegistrationEntity app,
         Guid accountId,
@@ -46,7 +49,10 @@ public enum WechatBindOutcome
     AccountAlreadyBound = 2,
 
     /// <summary>The account no longer exists or is disabled.</summary>
-    AccountUnavailable = 3
+    AccountUnavailable = 3,
+
+    /// <summary>An administrator revoked this application's admission; only an administrator restores it.</summary>
+    AccessRevoked = 4
 }
 
 public sealed record WechatBindResult(WechatBindOutcome Outcome, UserLoginEntity? Login = null)
@@ -160,8 +166,11 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
                 _dbContext.UserLogins.Add(login);
             }
 
-            await EnsureAccessAsync(app.Id, login.Id, WechatAccessApprovalSource.SelfBind, cancellationToken);
-            return new WechatBindResult(WechatBindOutcome.Bound, login);
+            var access = await EnsureAccessAsync(
+                app.Id, login.Id, WechatAccessApprovalSource.SelfBind, cancellationToken);
+            return access.IsActive
+                ? new WechatBindResult(WechatBindOutcome.Bound, login)
+                : new WechatBindResult(WechatBindOutcome.AccessRevoked, login);
         }, cancellationToken);
     }
 
@@ -216,36 +225,25 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
         var access = await _dbContext.AppWechatAccesses.FirstOrDefaultAsync(
             item => item.AppRegistrationId == appRegistrationId && item.UserLoginId == userLoginId,
             cancellationToken);
-        if (access == null)
+        if (access != null)
         {
-            access = new AppWechatAccessEntity
-            {
-                Id = Guid.NewGuid(),
-                AppRegistrationId = appRegistrationId,
-                UserLoginId = userLoginId,
-                ApprovalSource = source,
-                IsActive = true,
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-            _dbContext.AppWechatAccesses.Add(access);
-        }
-        else if (access.IsActive)
-        {
+            // A revoked admission is administrator state and is returned as-is. Neither logging in
+            // again nor re-binding may clear it: otherwise the user could undo
+            // DELETE /api/admin/apps/{appId}/wechat-users/{loginId} simply by binding once more,
+            // and revocation would only ever be a suggestion. Restoring is an administrator action.
             return access;
         }
-        else
+
+        access = new AppWechatAccessEntity
         {
-            // A revoked admission is only restored by an explicit user action (self-bind),
-            // never by simply logging in again through auto-provisioning.
-            if (source != WechatAccessApprovalSource.SelfBind)
-            {
-                return access;
-            }
-
-            access.IsActive = true;
-            access.ApprovalSource = source;
-        }
-
+            Id = Guid.NewGuid(),
+            AppRegistrationId = appRegistrationId,
+            UserLoginId = userLoginId,
+            ApprovalSource = source,
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        _dbContext.AppWechatAccesses.Add(access);
         return access;
     }
 

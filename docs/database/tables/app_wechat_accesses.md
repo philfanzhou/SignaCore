@@ -20,7 +20,8 @@ Per-application admission for one WeChat login identity.
 - There is no administrator approval source: an OpenId is only knowable after the user authorizes,
   so admissions are created by the user (`SelfBind`) or by the first login under `AutoProvision`.
   Administrators revoke; they do not pre-grant.
-- A revoked admission is only restored by an explicit rebind, never by logging in again.
+- A revoked admission is administrator state: neither logging in again nor re-binding clears it.
+  Restoring requires POST /api/admin/apps/{appId}/wechat-users/{loginId}/restore.
 
 ## Ownership
 

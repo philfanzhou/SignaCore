@@ -111,6 +111,8 @@ public sealed class OAuthTokenController : ControllerBase
     [Authorize(Policy = OAuthClientAuthenticationDefaults.Policy)]
     public async Task<IActionResult> Revoke()
     {
+        var app = HttpContext.GetValidatedApp()
+            ?? throw new InvalidOperationException("OAuth client authentication did not provide a validated application.");
         var token = Request.Form["token"].ToString();
         if (string.IsNullOrWhiteSpace(token))
         {
@@ -126,7 +128,9 @@ public sealed class OAuthTokenController : ControllerBase
             return Error("unsupported_token_type", $"token_type_hint '{hint}' is not supported.");
         }
 
-        await _refreshTokenService.RevokeAsync(token);
+        // RFC 7009 §2.1: 只撤销签发给该客户端的 token。持有别人的 token 不足以终止别人的会话。
+        // 不匹配时仍然返回 200——响应不能变成"这张 token 是否存在/属于谁"的探针。
+        await _refreshTokenService.RevokeForAppAsync(token, app.AppId);
         return Ok();
     }
 

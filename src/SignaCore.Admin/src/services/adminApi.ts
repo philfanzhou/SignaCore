@@ -223,6 +223,11 @@ class AdminApiClient {
     await this.client.delete(`/api/admin/apps/${appId}/wechat-users/${loginId}`)
   }
 
+  /** 用户自助重新绑定不会清除撤销状态，恢复只能由管理员发起。 */
+  async restoreAppWechatUser(appId: string, loginId: string) {
+    await this.client.post(`/api/admin/apps/${appId}/wechat-users/${loginId}/restore`)
+  }
+
   async getLdapDirectories() {
     const response = await this.client.get<AdminLdapDirectory[]>('/api/admin/ldap/directories')
     return response.data

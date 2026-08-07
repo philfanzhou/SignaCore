@@ -14,8 +14,9 @@ Authenticated users manage the WeChat identity bound to their own account.
 5. Binding an OpenId that already belongs to another account returns HTTP 409.
 6. Binding a second, different OpenId to an already-bound account returns HTTP 409; rebinding requires an
    explicit unbind first.
-7. Re-binding an OpenId whose application admission was revoked reactivates that admission; simply logging
-   in again does not.
+7. Re-binding an OpenId whose application admission was revoked does **not** reactivate it; the bind is
+   refused with HTTP 403. Revocation is administrator state, restored only through
+   `POST /api/admin/apps/{appId}/wechat-users/{loginId}/restore`.
 8. Bind and unbind are recorded in the audit log.
 
 ## Security requirements

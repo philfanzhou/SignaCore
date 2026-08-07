@@ -236,6 +236,40 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(HttpStatusCode.OK, unknown.StatusCode);
     }
 
+    /// <summary>
+    /// RFC 7009 §2.1：只能撤销签发给自己的 token。持有别的客户端的 refresh token 不足以
+    /// 终止对方的会话——响应仍是 200，不泄露 token 归属，但对方的 token 必须还能用。
+    /// </summary>
+    [Fact]
+    public async Task Revoke_DoesNotRevokeATokenIssuedToAnotherClient()
+    {
+        var otherAppId = $"other-{Guid.NewGuid():N}";
+        const string otherSecret = "other-secret";
+        await _fixture.SeedGatewayAppAsync(otherAppId, otherSecret);
+
+        using var victim = CreateClientWithBasicAuth();
+        var issued = await (await victim.PostAsync("/oauth2/token", PasswordGrant()))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        var refreshToken = issued.GetProperty("refresh_token").GetString()!;
+
+        using var attacker = _fixture.CreateHttpClient();
+        attacker.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{otherAppId}:{otherSecret}")));
+        var revoke = await attacker.PostAsync("/oauth2/revoke", new FormUrlEncodedContent(
+            new Dictionary<string, string> { ["token"] = refreshToken }));
+
+        Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
+
+        // 受害者的 token 必须仍然可用。
+        var refresh = await victim.PostAsync("/oauth2/token", new FormUrlEncodedContent(
+            new Dictionary<string, string>
+            {
+                ["grant_type"] = IdentityConstants.GrantTypeRefreshToken,
+                ["refresh_token"] = refreshToken
+            }));
+        Assert.Equal(HttpStatusCode.OK, refresh.StatusCode);
+    }
+
     [Fact]
     public async Task Revoke_WithoutClientCredentials_Returns401()
     {

@@ -59,6 +59,11 @@ public class RefreshTokenService : IRefreshTokenService
         return await _refreshTokenRepository.TryRevokeAsync(token);
     }
 
+    public async Task<bool> RevokeForAppAsync(string token, string appId)
+    {
+        return await _refreshTokenRepository.TryRevokeForAppAsync(token, appId);
+    }
+
     private async Task<string> GenerateRefreshTokenAsync(
         AccountEntity account,
         string appId,

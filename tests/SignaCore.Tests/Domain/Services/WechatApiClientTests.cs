@@ -116,6 +116,52 @@ public class WechatApiClientTests
         Assert.Null(handler.LastRequest);
     }
 
+    /// <summary>
+    /// 回归：jscode2session 的 Content-Type 是 text/plain。之前用 ReadFromJsonAsync 会抛
+    /// NotSupportedException（不是 JsonException），逃出 catch 变成未处理异常 → HTTP 500。
+    /// 所有旧用例都用 application/json 的 helper，恰好绕过了真实形态。
+    /// </summary>
+    [Fact]
+    public async Task CodeToSessionAsync_WithWechatsTextPlainContentType_ReturnsOpenId()
+    {
+        var handler = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """{"openid":"o-abc","session_key":"sk"}""", Encoding.UTF8, "text/plain")
+        });
+        var client = CreateClient(handler);
+
+        var result = await client.CodeToSessionAsync("code-1");
+
+        Assert.Equal("o-abc", result);
+    }
+
+    [Fact]
+    public async Task CodeToSessionAsync_WithTextPlainErrorPayload_ReturnsNull()
+    {
+        var handler = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """{"errcode":40029,"errmsg":"invalid code"}""", Encoding.UTF8, "text/plain")
+        });
+        var client = CreateClient(handler);
+
+        Assert.Null(await client.CodeToSessionAsync("bad-code"));
+    }
+
+    /// <summary>非 JSON 响应体（网关错误页之类）也必须归为登录失败，而不是抛出去。</summary>
+    [Fact]
+    public async Task CodeToSessionAsync_WithNonJsonBody_ReturnsNull()
+    {
+        var handler = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("<html>gateway error</html>", Encoding.UTF8, "text/html")
+        });
+        var client = CreateClient(handler);
+
+        Assert.Null(await client.CodeToSessionAsync("code-1"));
+    }
+
     [Fact]
     public async Task CodeToSessionAsync_HttpError_ReturnsNull()
     {

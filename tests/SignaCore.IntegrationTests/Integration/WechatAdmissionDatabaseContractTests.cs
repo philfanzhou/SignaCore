@@ -119,9 +119,13 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
         Assert.Equal(WechatBindOutcome.AccountUnavailable, result.Outcome);
     }
 
-    /// <summary>撤销后再登录不得自动恢复；只有用户重新绑定才恢复。</summary>
+    /// <summary>
+    /// 撤销是管理员状态：既不能靠再次登录（AutoProvision）恢复，也不能靠用户重新绑定恢复。
+    /// 否则 DELETE /api/admin/apps/{appId}/wechat-users/{loginId} 只是个建议——用户换个方式
+    /// 登录进来重绑一次就自己解封了。恢复只能由管理员发起。
+    /// </summary>
     [Fact]
-    public async Task RevokedAccess_SurvivesAutoProvision_ButIsRestoredByRebinding()
+    public async Task RevokedAccess_IsRestoredByNeitherReloginNorRebinding()
     {
         var app = await SeedAppAsync(WechatLoginMode.AutoProvision);
         Guid accountId;
@@ -146,11 +150,11 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
         await using (var context = CreateContext())
         {
             var result = await new WechatAdmissionService(context).BindAsync(app, accountId, OpenId);
-            Assert.True(result.IsSuccess);
+            Assert.Equal(WechatBindOutcome.AccessRevoked, result.Outcome);
         }
 
         await using var verify = CreateContext();
-        Assert.True((await verify.AppWechatAccesses.AsNoTracking().SingleAsync()).IsActive);
+        Assert.False((await verify.AppWechatAccesses.AsNoTracking().SingleAsync()).IsActive);
     }
 
     [Fact]

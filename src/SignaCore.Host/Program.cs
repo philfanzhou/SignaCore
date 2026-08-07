@@ -264,12 +264,7 @@ app.MapPrometheusScrapingEndpoint();
 
 // ---- Static files & SPA for Admin Web (HTTP port only) ----
 var appTitle = builder.Configuration["APP_TITLE"] ?? "SignaCore";
-app.MapWhen(context =>
-    context.Connection.LocalPort == httpPort &&
-    !context.Request.Path.StartsWithSegments("/api") &&
-    !context.Request.Path.StartsWithSegments("/.well-known") &&
-    !context.Request.Path.StartsWithSegments("/health") &&
-    !context.Request.Path.StartsWithSegments("/metrics"),
+app.MapWhen(context => AdminSpaRouting.ShouldServeSpa(context, httpPort),
     adminApp =>
     {
         adminApp.UseDefaultFiles();

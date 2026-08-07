@@ -19,7 +19,7 @@ unbinding when nothing is bound, and a disabled application policy.
   bound and admitted for the calling application.
 - **Given** an OpenId already bound elsewhere, **when** binding runs, **then** it fails with HTTP 409 and
   the existing binding is untouched.
-- **Given** a revoked admission, **when** the user logs in again, **then** access stays revoked; **when**
-  the user rebinds, **then** access is restored.
+- **Given** a revoked admission, **when** the user logs in again or rebinds, **then** access stays
+  revoked; only an administrator restore reactivates it.
 - **Given** cancellation or an infrastructure failure, **when** execution stops, **then** the failure is
   observable and no partial unsafe state remains.
