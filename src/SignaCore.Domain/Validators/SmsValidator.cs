@@ -32,11 +32,13 @@ public class SmsValidator : IIdentityValidator
     public async Task<ValidationResult> ValidateAsync(ValidationRequest request)
     {
         if (request.App == null || request.App.SmsLoginMode == SmsLoginMode.Disabled)
-            return ValidationResult.Failure("SMS login is disabled for this application");
+            return ValidationResult.Failure(
+                "SMS login is disabled for this application", OAuthErrorCodes.UnauthorizedClient);
         if (string.IsNullOrWhiteSpace(request.Phone) || string.IsNullOrWhiteSpace(request.Code))
-            return ValidationResult.Failure("Phone or code cannot be empty");
+            return ValidationResult.Failure("Phone or code cannot be empty", OAuthErrorCodes.InvalidRequest);
         if (!MainlandChinaPhoneNumber.TryNormalize(request.Phone, out var phone))
-            return ValidationResult.Failure("Invalid mainland China mobile number");
+            return ValidationResult.Failure(
+                "Invalid mainland China mobile number", OAuthErrorCodes.InvalidRequest);
 
         var admission = await _admissionService.FindAsync(request.App.Id, phone, request.CancellationToken);
         if (request.App.SmsLoginMode == SmsLoginMode.ManualApproval &&

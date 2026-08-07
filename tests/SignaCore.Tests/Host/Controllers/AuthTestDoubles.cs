@@ -36,7 +36,7 @@ internal static class AuthTestDoubles
     public static Mock<ITokenService> TokenService()
     {
         var mock = new Mock<ITokenService>();
-        mock.Setup(t => t.GenerateJwtToken(It.IsAny<List<Claim>>(), It.IsAny<RsaSecurityKey>(), It.IsAny<int>()))
+        mock.Setup(t => t.GenerateJwtToken(It.IsAny<List<Claim>>(), It.IsAny<RsaSecurityKey>(), It.IsAny<int>(), It.IsAny<string?>()))
             .Returns("token");
         return mock;
     }

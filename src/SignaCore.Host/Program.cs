@@ -97,6 +97,22 @@ app.Logger.LogInformation(
     StartupDiagnosticsFormatter.SummarizeValue(effectiveDatabaseServerVersion),
     StartupDiagnosticsFormatter.SummarizeValue(effectiveLokiUri));
 
+// ---- Discovery conformance diagnostics ----
+// OIDC/OAuth metadata requires the issuer to be an https URL, and every conforming client compares
+// the `iss` claim against the URL it fetched discovery from. The default deployment identifier
+// ("SignaCore") is kept for backward compatibility with existing downstream validators, so this is a
+// warning rather than a hard failure — see docs/overview/StandardsConformance.md.
+PublicOrigin.Validate(builder.Configuration);
+var configuredIssuer = app.Services.GetRequiredService<JwtOptions>().Issuer;
+if (!Uri.TryCreate(configuredIssuer, UriKind.Absolute, out var issuerUri) ||
+    issuerUri.Scheme != Uri.UriSchemeHttps)
+{
+    app.Logger.LogWarning(
+        "Jwt:Issuer is {Issuer}, which is not an absolute https URL. OAuth/OIDC clients that validate "
+        + "the issuer against the discovery URL will reject tokens issued by this service.",
+        configuredIssuer);
+}
+
 // ---- HTTPS Warning for Gateway API ----
 // Gateway API transmits AppSecret via request headers; warn if not running behind HTTPS/TLS.
 // Note: Kestrel configured via ConfigureKestrel may not populate app.Urls; this is a best-effort check.
@@ -219,35 +235,19 @@ app.Use(async (context, next) =>
     }
 });
 
-// ---- OIDC Discovery ----
-app.MapGet("/.well-known/openid-configuration", (HttpContext httpContext, IConfiguration configuration) =>
-{
-    var httpPort = configuration.GetValue("Endpoints:Http", 5002);
-    var host = httpContext.Request.Host.Host;
-    var scheme = httpContext.Request.Scheme;
-    var baseUrl = $"{scheme}://{host}:{httpPort}";
+// ---- Discovery metadata ----
+// 同一份文档挂两个标准路径：OIDC Discovery 的 openid-configuration 与
+// RFC 8414 的 oauth-authorization-server。issuer 必须与 token 里的 iss 完全相同，
+// 所以取 JwtOptions.Issuer，而不是再写一遍字面量。
+IResult BuildDiscoveryDocument(HttpContext httpContext, IConfiguration configuration) =>
+    Results.Ok(DiscoveryDocument.Create(
+            app.Services.GetRequiredService<JwtOptions>().Issuer,
+            PublicOrigin.Resolve(httpContext.Request, configuration),
+            httpContext.RequestServices.GetRequiredService<ValidatorFactory>().GetSupportedGrantTypes())
+        .ToMetadata());
 
-    return Results.Ok(new
-    {
-        issuer = "SignaCore",
-        jwks_uri = $"{baseUrl}/.well-known/jwks",
-        token_endpoint = $"{baseUrl}/api/auth/token",
-        response_types_supported = new[] { "token" },
-        subject_types_supported = new[] { "public" },
-        id_token_signing_alg_values_supported = new[] { "RS256" },
-        // 必须与 token 里实际出现的 claim 名字一致。用常量而不是字面量，免得两边漂移——
-        // 这里曾经写着 sub/name/role 而 token 里实际是 ClaimTypes.* 长 URI。
-        claims_supported = new[]
-        {
-            IdentityConstants.ClaimSubject,
-            IdentityConstants.ClaimName,
-            IdentityConstants.ClaimRole,
-            IdentityConstants.ClaimAuthMethod,
-            IdentityConstants.ClaimNickname,
-            IdentityConstants.ClaimClientId
-        }
-    });
-});
+app.MapGet("/.well-known/openid-configuration", BuildDiscoveryDocument);
+app.MapGet("/.well-known/oauth-authorization-server", BuildDiscoveryDocument);
 
 // ---- JWKS Discovery ----
 app.MapGet("/.well-known/jwks", async (IKeyManager keyManager) =>

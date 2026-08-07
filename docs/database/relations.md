@@ -4,6 +4,7 @@
 accounts
   +-- password_credentials
   +-- user_logins --< app_sms_access >-- app_registrations
+  |             --< app_wechat_accesses >-- app_registrations
   +-- ldap_credentials --< app_ldap_access >-- app_registrations
   +-- refresh_tokens (also bound to app_id and optional login source)
   +-- login_histories

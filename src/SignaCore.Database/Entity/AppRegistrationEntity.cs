@@ -39,4 +39,13 @@ public class AppRegistrationEntity
 
     /// <summary>Name of the deployment-managed SMS provider profile.</summary>
     public string? SmsProfileKey { get; set; }
+
+    /// <summary>WeChat admission policy for this application. Disabled by default.</summary>
+    public WechatLoginMode WechatLoginMode { get; set; } = WechatLoginMode.Disabled;
+
+    /// <summary>
+    /// Audience placed in access tokens issued to this application. Defaults to
+    /// <see cref="AudienceMode.Shared"/> so existing downstream validators keep working.
+    /// </summary>
+    public AudienceMode AudienceMode { get; set; } = AudienceMode.Shared;
 }

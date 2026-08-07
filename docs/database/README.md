@@ -19,6 +19,7 @@ SignaCore uses one EF Core model with provider-specific migrations for PostgreSQ
 | `ldap_credentials` | LDAP directory identity bindings |
 | `app_ldap_access` | Per-application LDAP access approvals |
 | `app_sms_access` | Per-application SMS user approvals |
+| [app_wechat_accesses](./tables/app_wechat_accesses.md) | Per-application WeChat identity admissions |
 
 See [relationships](./relations.md) and [migration operations](./migrations.md).
 

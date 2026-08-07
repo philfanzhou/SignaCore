@@ -19,6 +19,8 @@ const {
   smsUsers,
   smsProfiles,
   smsUserForm,
+  loadingWechatUsers,
+  wechatUsers,
   closeAppDrawer,
   saveCallbackFromDrawer,
   handleResetSecret,
@@ -27,6 +29,7 @@ const {
   revokeLdapUser,
   addSmsUser,
   revokeSmsUser,
+  revokeWechatUser,
 } = useApps()
 </script>
 
@@ -160,6 +163,51 @@ const {
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+        <div class="card section-gap" style="padding: 20px">
+          <div class="card-title" style="margin-bottom: 16px">微信登录</div>
+          <div class="field">
+            <label>当前应用准入模式</label>
+            <select v-model="callbackForm.wechatLoginMode" class="select" style="width: 100%">
+              <option value="Disabled">禁用微信登录</option>
+              <option value="BindRequired">仅已绑定微信的账号</option>
+              <option value="AutoProvision">首次授权自动开户</option>
+            </select>
+            <div class="hint">
+              OpenId 只有用户授权后才可知，所以没有"管理员预授权"模式：绑定由用户自己在
+              <span class="mono">POST /api/profile/wechat</span> 完成，管理员只做撤销。
+            </div>
+          </div>
+          <div v-if="loadingWechatUsers" class="hint">正在加载绑定用户...</div>
+          <div v-else-if="wechatUsers.length === 0" class="hint">当前应用还没有微信绑定记录。</div>
+          <div v-else class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>OpenId</th><th>来源</th><th>状态</th><th></th></tr></thead>
+              <tbody>
+                <tr v-for="user in wechatUsers" :key="user.loginId">
+                  <td class="mono">{{ user.openId }}</td>
+                  <td>{{ user.approvalSource === 'SelfBind' ? '用户绑定' : '自动开户' }}</td>
+                  <td><span class="badge" :class="user.isActive ? 'green' : 'gray'"><span class="dot"></span>{{ user.isActive ? '有效' : '已撤销' }}</span></td>
+                  <td><button v-if="user.isActive" class="btn btn-danger btn-sm" @click="revokeWechatUser(user)">撤销</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card section-gap" style="padding: 20px">
+          <div class="card-title" style="margin-bottom: 16px">Access token 受众（aud）</div>
+          <div class="field">
+            <label>受众模式</label>
+            <select v-model="callbackForm.audienceMode" class="select" style="width: 100%">
+              <option value="Shared">共享受众（所有应用同一个 aud）</option>
+              <option value="PerApplication">按应用隔离（aud = 本应用 AppId）</option>
+            </select>
+            <div class="hint">
+              当前生效：<span class="mono">{{ appDrawerApp.audience }}</span>。
+              共享模式下，签给本应用的 access token 在其他应用同样校验通过——受众不构成边界。
+              切到按应用隔离前，必须先让下游同时接受两个 aud，否则在用的 token 会被下游拒掉。
+            </div>
           </div>
         </div>
         <div class="danger-zone section-gap">

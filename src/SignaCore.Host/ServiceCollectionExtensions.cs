@@ -16,6 +16,7 @@ using SignaCore.Domain.Services.Ldap;
 using SignaCore.Domain.Services.WeChat;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Security;
+using SignaCore.Host.Services;
 
 namespace SignaCore.Host;
 
@@ -138,11 +139,13 @@ public static class ServiceCollectionExtensions
             AppSecret = configuration["WeChat:AppSecret"] ?? string.Empty,
             ApiBaseUrl = configuration["WeChat:ApiBaseUrl"] ?? "https://api.weixin.qq.com"
         });
+        wechatOptions.Validate();
         services.AddHttpClient<IWechatApiClient, WechatApiClient>(client =>
         {
             client.BaseAddress = new Uri(wechatOptions.ApiBaseUrl);
             client.Timeout = TimeSpan.FromSeconds(10);
         });
+        services.AddScoped<IWechatAdmissionService, WechatAdmissionService>();
 
         // ---- Repository Layer ----
         services.AddScoped<IAccountRepository, AccountRepository>();
@@ -236,6 +239,9 @@ public static class ServiceCollectionExtensions
 
         // ---- Validator Factory (auto-builds dictionary from injected validators) ----
         services.AddScoped<ValidatorFactory>();
+
+        // ---- Token issuance pipeline shared by /api/auth/token and /oauth2/token ----
+        services.AddScoped<TokenIssuanceService>();
 
         // ---- Background Cleanup Service ----
         services.AddHostedService<CleanupWorker>();
@@ -331,6 +337,9 @@ public static class ServiceCollectionExtensions
             .AddScheme<AuthenticationSchemeOptions, GatewayAppAuthenticationHandler>(
                 GatewayAppAuthenticationDefaults.Scheme,
                 _ => { })
+            .AddScheme<AuthenticationSchemeOptions, OAuthClientAuthenticationHandler>(
+                OAuthClientAuthenticationDefaults.Scheme,
+                _ => { })
             .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
             {
                 options.TokenValidationParameters = new TokenValidationParameters
@@ -340,14 +349,30 @@ public static class ServiceCollectionExtensions
                     ValidateLifetime = true,
                     ValidateIssuerSigningKey = true,
                     ValidIssuer = jwtOptions.Issuer,
-                    ValidAudience = jwtOptions.Audience,
-                    ClockSkew = TimeSpan.FromSeconds(30)
+                    ClockSkew = TimeSpan.FromSeconds(30),
+                    // 应用可以按 AudienceMode 逐个切到"每客户端 aud"，此时 aud 是该应用自己的
+                    // AppId，固定的 ValidAudience 会把本服务自己签的 token 拒掉（/api/profile/*
+                    // 就是用这条 scheme 校验的）。放行两种：部署级共享 audience，或与同一张
+                    // token 里 client_id 一致的 aud——后者同属签名覆盖范围，伪造不了。
+                    AudienceValidator = (audiences, securityToken, _) =>
+                    {
+                        var clientId = (securityToken as System.IdentityModel.Tokens.Jwt.JwtSecurityToken)?
+                            .Claims.FirstOrDefault(claim => claim.Type == IdentityConstants.ClaimClientId)?.Value;
+                        return audiences.Any(audience =>
+                            string.Equals(audience, jwtOptions.Audience, StringComparison.Ordinal)
+                            || (clientId != null && string.Equals(audience, clientId, StringComparison.Ordinal)));
+                    }
                 };
             });
         services.AddAuthorizationBuilder()
             .AddPolicy(GatewayAppAuthenticationDefaults.Policy, policy =>
             {
                 policy.AddAuthenticationSchemes(GatewayAppAuthenticationDefaults.Scheme);
+                policy.RequireAuthenticatedUser();
+            })
+            .AddPolicy(OAuthClientAuthenticationDefaults.Policy, policy =>
+            {
+                policy.AddAuthenticationSchemes(OAuthClientAuthenticationDefaults.Scheme);
                 policy.RequireAuthenticatedUser();
             })
             .AddPolicy("AdminSession", policy =>

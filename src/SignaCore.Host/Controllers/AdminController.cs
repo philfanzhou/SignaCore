@@ -14,6 +14,7 @@ using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Services.Ldap;
 using SignaCore.Domain.Services.Sms;
+using SignaCore.Domain.Services.WeChat;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Http;
 using SignaCore.Host.Models;
@@ -340,7 +341,9 @@ public class AdminController : ControllerBase
 
     [HttpGet("apps")]
     [Authorize(Policy = "AdminSession")]
-    public async Task<IActionResult> GetApps([FromServices] IdentityDbContext dbContext)
+    public async Task<IActionResult> GetApps(
+        [FromServices] IdentityDbContext dbContext,
+        [FromServices] JwtOptions jwtOptions)
     {
         var allApps = await dbContext.AppRegistrations
             .AsNoTracking()
@@ -358,7 +361,11 @@ public class AdminController : ControllerBase
                 app.CreatedAt,
                 app.LdapLoginMode,
                 app.SmsLoginMode,
-                app.SmsProfileKey
+                app.SmsProfileKey,
+                app.WechatLoginMode,
+                app.AudienceMode,
+                // 直接把生效的 aud 值算出来给管理台，省得前端复制一份解析规则。
+                Audience = JwtTokenService.ResolveAudience(app, jwtOptions)
             })
             .ToList();
 
@@ -371,7 +378,10 @@ public class AdminController : ControllerBase
             app.CreatedAt.ToUnixTimeSeconds(),
             app.LdapLoginMode.ToString(),
             app.SmsLoginMode.ToString(),
-            app.SmsProfileKey))
+            app.SmsProfileKey,
+            app.WechatLoginMode.ToString(),
+            app.AudienceMode.ToString(),
+            app.Audience))
             .ToList();
 
         return Ok((IReadOnlyList<AdminAppListItemResponse>)items);
@@ -595,6 +605,122 @@ public class AdminController : ControllerBase
             "Administrator revoked an SMS identity for the application", GetClientIp(),
             after: new { LoginId = loginId, IsActive = false });
         return Ok(new OperationResponse(true, "SMS application access revoked."));
+    }
+
+    [HttpPut("apps/{appId}/wechat-policy")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> UpdateWechatPolicy(
+        string appId,
+        [FromBody] AdminUpdateWechatPolicyRequest request,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] WechatOptions wechatOptions,
+        [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IAuditService auditService)
+    {
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+        if (!Enum.TryParse<WechatLoginMode>(request.Mode, true, out var mode) || !Enum.IsDefined(mode))
+            return BadRequest(new ErrorResponse("Invalid WeChat login mode."));
+        if (mode != WechatLoginMode.Disabled && !wechatOptions.IsConfigured)
+            return BadRequest(new ErrorResponse("WeChat credentials are not configured for this deployment."));
+
+        var before = new { Mode = app.WechatLoginMode.ToString() };
+        app.WechatLoginMode = mode;
+        await unitOfWork.SaveChangesAsync();
+
+        var (actorId, actorName) = GetAdminIdentity();
+        await auditService.RecordActionAsync(
+            "app_wechat_policy_updated", "AppRegistration", appId, actorId, actorName,
+            $"WeChat login mode changed to {mode}", GetClientIp(), before: before,
+            after: new { Mode = mode.ToString() });
+        return Ok(new OperationResponse(true, "WeChat login policy updated."));
+    }
+
+    /// <summary>
+    /// PUT /api/admin/apps/{appId}/audience-mode — 切换该应用 access token 的 aud。
+    /// 切到 PerApplication 前，下游必须已经能同时接受共享 audience 与本应用 AppId，
+    /// 否则正在使用的 token 会在下游校验失败。见 docs/overview/StandardsConformance.md。
+    /// </summary>
+    [HttpPut("apps/{appId}/audience-mode")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> UpdateAudienceMode(
+        string appId,
+        [FromBody] AdminUpdateAudienceModeRequest request,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] JwtOptions jwtOptions,
+        [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IAuditService auditService)
+    {
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+        if (!Enum.TryParse<AudienceMode>(request.Mode, true, out var mode) || !Enum.IsDefined(mode))
+            return BadRequest(new ErrorResponse("Invalid audience mode."));
+
+        var before = new { Mode = app.AudienceMode.ToString(), Audience = JwtTokenService.ResolveAudience(app, jwtOptions) };
+        app.AudienceMode = mode;
+        await unitOfWork.SaveChangesAsync();
+        var audience = JwtTokenService.ResolveAudience(app, jwtOptions);
+
+        var (actorId, actorName) = GetAdminIdentity();
+        await auditService.RecordActionAsync(
+            "app_audience_mode_updated", "AppRegistration", appId, actorId, actorName,
+            $"Access-token audience mode changed to {mode}", GetClientIp(), before: before,
+            after: new { Mode = mode.ToString(), Audience = audience });
+        return Ok(new OperationResponse(true, $"Access tokens for this application now carry aud={audience}."));
+    }
+
+    [HttpGet("apps/{appId}/wechat-users")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> GetWechatUsers(string appId, [FromServices] IdentityDbContext dbContext)
+    {
+        var app = await dbContext.AppRegistrations.AsNoTracking().FirstOrDefaultAsync(
+            item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId));
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+
+        var provider = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodWechat);
+        var rows = await dbContext.AppWechatAccesses.AsNoTracking()
+            .Where(access => access.AppRegistrationId == app.Id)
+            .Join(dbContext.UserLogins.AsNoTracking().Where(login => login.ProviderNameNormalized == provider),
+                access => access.UserLoginId, login => login.Id, (access, login) => new { access, login })
+            .OrderByDescending(item => item.access.CreatedAt)
+            .ToListAsync();
+
+        // 掩码在内存里做：SensitiveDataMasker 不能翻译成 SQL。
+        var users = rows.Select(item => new AdminWechatUserResponse(
+            item.login.Id.ToString(), item.login.AccountId.ToString(),
+            SensitiveDataMasker.MaskOpenId(item.login.ProviderUserId),
+            item.access.ApprovalSource.ToString(), item.access.IsActive,
+            item.access.CreatedAt.ToUnixTimeSeconds())).ToList();
+        return Ok((IReadOnlyList<AdminWechatUserResponse>)users);
+    }
+
+    [HttpDelete("apps/{appId}/wechat-users/{loginId:guid}")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> RevokeWechatUser(
+        string appId,
+        Guid loginId,
+        [FromServices] IdentityDbContext dbContext,
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
+    {
+        var app = await dbContext.AppRegistrations.FirstOrDefaultAsync(
+            item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId), cancellationToken);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+        var access = await dbContext.AppWechatAccesses.FirstOrDefaultAsync(
+            item => item.AppRegistrationId == app.Id && item.UserLoginId == loginId, cancellationToken);
+        if (access == null) return NotFound(new ErrorResponse("WeChat application access not found."));
+
+        access.IsActive = false;
+        await dbContext.RefreshTokens
+            .Where(token => token.AppId == app.AppId && token.WechatUserLoginId == loginId && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(token => token.IsRevoked, true), cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        var (actorId, actorName) = GetAdminIdentity();
+        await auditService.RecordActionAsync(
+            "app_wechat_user_revoked", "AppRegistration", appId, actorId, actorName,
+            "Administrator revoked a WeChat identity for the application", GetClientIp(),
+            after: new { LoginId = loginId, IsActive = false });
+        return Ok(new OperationResponse(true, "WeChat application access revoked."));
     }
 
     [HttpPut("apps/{appId}/ldap-policy")]

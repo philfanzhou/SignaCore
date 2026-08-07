@@ -12,12 +12,14 @@ Rotating, revocable refresh credentials bound to an account and application.
 - app_id
 - ldap_credential_id (nullable)
 - sms_user_login_id (nullable)
+- wechat_user_login_id (nullable)
 
 ## Relationships and invariants
 
 - account_id references accounts.
 - app_id logically references app_registrations.app_id.
-- Optional bindings preserve the source LDAP or SMS identity during rotation.
+- Optional bindings preserve the source LDAP, SMS, or WeChat identity during rotation, so a
+  revoked application admission also stops the refresh grant.
 
 ## Ownership
 

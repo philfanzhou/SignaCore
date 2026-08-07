@@ -10,6 +10,7 @@ public interface IRefreshTokenService
         AccountEntity account,
         string? appId,
         Guid? ldapCredentialId = null,
-        Guid? smsUserLoginId = null);
+        Guid? smsUserLoginId = null,
+        Guid? wechatUserLoginId = null);
     Task<bool> RevokeAsync(string token);
 }
