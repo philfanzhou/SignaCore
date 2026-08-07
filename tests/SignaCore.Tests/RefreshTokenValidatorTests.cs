@@ -7,6 +7,8 @@ using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Validators;
 using SignaCore.Domain.Services.Ldap;
+using SignaCore.Domain.Services.Sms;
+using SignaCore.Domain.Services.WeChat;
 using Xunit;
 
 namespace SignaCore.Tests;
@@ -25,12 +27,15 @@ public class RefreshTokenValidatorTests
 
     private static RefreshTokenValidator CreateValidator(
         IRefreshTokenRepository refreshTokenRepository,
-        IAccountRepository accountRepository) =>
+        IAccountRepository accountRepository,
+        IWechatAdmissionService? wechatAdmissionService = null) =>
         new(
             refreshTokenRepository,
             accountRepository,
             new Mock<ILdapAccountService>().Object,
             new Mock<ILdapDirectoryClient>().Object,
+            new Mock<ISmsAdmissionService>().Object,
+            wechatAdmissionService ?? new Mock<IWechatAdmissionService>().Object,
             CreateLogger());
 
     [Fact]
@@ -287,6 +292,104 @@ public class RefreshTokenValidatorTests
         accountRepoMock.Verify(r => r.GetByIdAsync(It.IsAny<Guid>()), Times.Never);
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task ValidateAsync_WechatBoundToken_FollowsCurrentApplicationAdmission(
+        bool accessIsActive,
+        bool expectedSuccess)
+    {
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true };
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "app-1",
+            WechatLoginMode = WechatLoginMode.BindRequired
+        };
+        var login = new UserLoginEntity
+        {
+            Id = Guid.NewGuid(),
+            AccountId = account.Id,
+            ProviderName = IdentityConstants.AuthMethodWechat,
+            ProviderUserId = "open-id"
+        };
+        var token = new RefreshTokenEntity
+        {
+            AccountId = account.Id,
+            TokenValue = "wechat-refresh",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            AppId = app.AppId,
+            WechatUserLoginId = login.Id
+        };
+        var tokenRepository = new Mock<IRefreshTokenRepository>();
+        tokenRepository.Setup(repository => repository.GetByTokenValueAsync(token.TokenValue)).ReturnsAsync(token);
+        var accountRepository = new Mock<IAccountRepository>();
+        accountRepository.Setup(repository => repository.GetByIdAsync(account.Id)).ReturnsAsync(account);
+        var wechatAdmission = new Mock<IWechatAdmissionService>();
+        wechatAdmission.Setup(service => service.FindByLoginIdAsync(app.Id, login.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WechatAdmission(
+                account,
+                login,
+                new AppWechatAccessEntity { AppRegistrationId = app.Id, UserLoginId = login.Id, IsActive = accessIsActive }));
+
+        var validator = CreateValidator(tokenRepository.Object, accountRepository.Object, wechatAdmission.Object);
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = token.TokenValue,
+            AppId = app.AppId,
+            App = app
+        });
+
+        Assert.Equal(expectedSuccess, result.IsSuccess);
+        if (expectedSuccess)
+        {
+            Assert.Equal(login.Id, result.WechatUserLoginId);
+        }
+        else
+        {
+            Assert.Equal("WeChat access has been revoked", result.ErrorMessage);
+        }
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WechatBoundToken_IsRejectedWhenApplicationDisablesWechat()
+    {
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true };
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "app-1",
+            WechatLoginMode = WechatLoginMode.Disabled
+        };
+        var token = new RefreshTokenEntity
+        {
+            AccountId = account.Id,
+            TokenValue = "wechat-refresh",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            AppId = app.AppId,
+            WechatUserLoginId = Guid.NewGuid()
+        };
+        var tokenRepository = new Mock<IRefreshTokenRepository>();
+        tokenRepository.Setup(repository => repository.GetByTokenValueAsync(token.TokenValue)).ReturnsAsync(token);
+        var accountRepository = new Mock<IAccountRepository>();
+        accountRepository.Setup(repository => repository.GetByIdAsync(account.Id)).ReturnsAsync(account);
+        var wechatAdmission = new Mock<IWechatAdmissionService>();
+
+        var validator = CreateValidator(tokenRepository.Object, accountRepository.Object, wechatAdmission.Object);
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = token.TokenValue,
+            AppId = app.AppId,
+            App = app
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("WeChat login is disabled for this application", result.ErrorMessage);
+        wechatAdmission.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public void GrantType_ReturnsRefreshToken()
     {
@@ -344,6 +447,8 @@ public class RefreshTokenValidatorTests
             accountRepository.Object,
             ldapAccounts.Object,
             directoryClient.Object,
+            new Mock<ISmsAdmissionService>().Object,
+            new Mock<IWechatAdmissionService>().Object,
             CreateLogger());
 
         var result = await validator.ValidateAsync(new ValidationRequest

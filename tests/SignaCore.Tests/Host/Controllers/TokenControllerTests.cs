@@ -14,6 +14,7 @@ using SignaCore.Host;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Http;
 using SignaCore.Host.Models;
+using SignaCore.Host.Services;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Controllers;
@@ -45,25 +46,13 @@ public class TokenControllerTests
     private TokenController CreateController(
         IIdentityValidator[] validators,
         Mock<IOptions<AdminBootstrapOptions>> bootstrapOptionsMock,
-        ICallbackService? callbackService = null)
+        ICallbackService? callbackService = null,
+        AppRegistrationEntity? app = null)
     {
-        var factory = new ValidatorFactory(validators, NullLogger<ValidatorFactory>.Instance);
         var controller = new TokenController(
-            _keyManagerMock.Object,
-            _tokenServiceMock.Object,
-            _jwtOptions,
-            _refreshTokenServiceMock.Object,
-            _claimsResolver,
-            factory,
-            callbackService,
-            AuthTestDoubles.AuthMetrics(),
-            _auditServiceMock.Object,
-            _accountLoginInfoServiceMock.Object,
-            _accountRepositoryMock.Object,
-            bootstrapOptionsMock.Object,
-            NullLogger<TokenController>.Instance)
+                CreateIssuanceService(validators, bootstrapOptionsMock, callbackService))
             .WithHttpContext();
-        controller.HttpContext.Items[IdentityHeaders.ValidatedApp] = new AppRegistrationEntity
+        controller.HttpContext.Items[IdentityHeaders.ValidatedApp] = app ?? new AppRegistrationEntity
         {
             Id = Guid.NewGuid(),
             AppId = "test-app",
@@ -74,14 +63,38 @@ public class TokenControllerTests
         return controller;
     }
 
+    /// <summary>
+    /// 发 token 的流程本体在 <see cref="TokenIssuanceService"/>，controller 只做传输映射。
+    /// 这些用例继续从 controller 打进去：断言的是"经过完整流程后对外看到什么"。
+    /// </summary>
+    private TokenIssuanceService CreateIssuanceService(
+        IIdentityValidator[] validators,
+        Mock<IOptions<AdminBootstrapOptions>> bootstrapOptionsMock,
+        ICallbackService? callbackService = null) =>
+        new(
+            _keyManagerMock.Object,
+            _tokenServiceMock.Object,
+            _jwtOptions,
+            _refreshTokenServiceMock.Object,
+            _claimsResolver,
+            new ValidatorFactory(validators, NullLogger<ValidatorFactory>.Instance),
+            callbackService,
+            AuthTestDoubles.AuthMetrics(),
+            _auditServiceMock.Object,
+            _accountLoginInfoServiceMock.Object,
+            _accountRepositoryMock.Object,
+            bootstrapOptionsMock.Object,
+            NullLogger<TokenIssuanceService>.Instance);
+
     // 由 token service 的 mock 回调写入，供断言 claims 使用。
     private List<Claim>? _capturedClaims;
 
     private void BeginCaptureGeneratedClaims()
     {
         _capturedClaims = null;
-        _tokenServiceMock.Setup(t => t.GenerateJwtToken(It.IsAny<List<Claim>>(), It.IsAny<RsaSecurityKey>(), It.IsAny<int>()))
-            .Callback((List<Claim> claims, RsaSecurityKey _, int __) => _capturedClaims = claims)
+        _tokenServiceMock.Setup(t => t.GenerateJwtToken(
+                It.IsAny<List<Claim>>(), It.IsAny<RsaSecurityKey>(), It.IsAny<int>(), It.IsAny<string?>()))
+            .Callback((List<Claim> claims, RsaSecurityKey _, int __, string? ___) => _capturedClaims = claims)
             .Returns("token");
     }
 
@@ -181,7 +194,7 @@ public class TokenControllerTests
         _tokenServiceMock.Verify(t => t.GenerateJwtToken(
             It.Is<List<Claim>>(claims => claims.Any(c =>
                 c.Type == IdentityConstants.ClaimClientId && c.Value == "test-app")),
-            It.IsAny<RsaSecurityKey>(), 2), Times.Once);
+            It.IsAny<RsaSecurityKey>(), 2, It.IsAny<string?>()), Times.Once);
         _refreshTokenServiceMock.Verify(
             s => s.HandleRefreshTokenAsync(
                 "sms",
@@ -280,7 +293,8 @@ public class TokenControllerTests
             service => service.GenerateJwtToken(
                 It.IsAny<List<Claim>>(),
                 It.IsAny<RsaSecurityKey>(),
-                It.IsAny<int>()),
+                It.IsAny<int>(),
+                It.IsAny<string?>()),
             Times.Never);
     }
 

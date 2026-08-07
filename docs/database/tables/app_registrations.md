@@ -12,11 +12,14 @@ Registered client applications and their authentication policies.
 - is_active / created_at
 - ldap_login_mode
 - sms_login_mode / sms_profile_key
+- wechat_login_mode
+- audience_mode
 
 ## Relationships and invariants
 
-- Referenced by application-scoped LDAP/SMS access and OTP records.
+- Referenced by application-scoped LDAP/SMS/WeChat access and OTP records.
 - Refresh tokens store app_id as a logical binding.
+- audience_mode selects the aud claim of access tokens: the shared Jwt:Audience, or this app_id.
 
 ## Ownership
 

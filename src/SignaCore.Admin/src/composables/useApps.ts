@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { type AdminApp, type AdminLdapDirectory, type AdminLdapUser, type AdminSmsProfile, type AdminSmsUser } from '../services/adminApi'
+import { type AdminApp, type AdminLdapDirectory, type AdminLdapUser, type AdminSmsProfile, type AdminSmsUser, type AdminWechatUser } from '../services/adminApi'
 import { adminClient } from '../services/apiClient'
 import { normalizeTtlValue } from '../utils/format'
 import { handleApiError } from './useSession'
@@ -20,6 +20,8 @@ const ldapUsers = ref<AdminLdapUser[]>([])
 const ldapDirectories = ref<AdminLdapDirectory[]>([])
 const smsUsers = ref<AdminSmsUser[]>([])
 const smsProfiles = ref<AdminSmsProfile[]>([])
+const loadingWechatUsers = ref(false)
+const wechatUsers = ref<AdminWechatUser[]>([])
 const latestCreatedAppSecret = ref('')
 const latestSecretAppId = ref('')
 const showSecretDialog = ref(false)
@@ -49,6 +51,8 @@ const callbackForm = reactive({
   ldapLoginMode: 'Disabled' as AdminApp['ldapLoginMode'],
   smsLoginMode: 'Disabled' as AdminApp['smsLoginMode'],
   smsProfileKey: '' as string,
+  wechatLoginMode: 'Disabled' as AdminApp['wechatLoginMode'],
+  audienceMode: 'Shared' as AdminApp['audienceMode'],
 })
 
 const ldapUserForm = reactive({ directoryKey: '', username: '' })
@@ -208,6 +212,8 @@ function fillCallbackForm(app: AdminApp) {
   callbackForm.ldapLoginMode = app.ldapLoginMode
   callbackForm.smsLoginMode = app.smsLoginMode
   callbackForm.smsProfileKey = app.smsProfileKey ?? ''
+  callbackForm.wechatLoginMode = app.wechatLoginMode
+  callbackForm.audienceMode = app.audienceMode
 }
 
 function onAppSelected() {
@@ -243,6 +249,8 @@ async function handleSaveCallback(): Promise<boolean> {
         callbackForm.smsLoginMode,
         callbackForm.smsProfileKey || null,
       ),
+      adminClient.updateWechatPolicy(callbackForm.appId, callbackForm.wechatLoginMode),
+      adminClient.updateAudienceMode(callbackForm.appId, callbackForm.audienceMode),
     ])
     ElMessage.success('应用配置保存成功')
     await loadApps()
@@ -306,7 +314,7 @@ function openAppDrawer(app: AdminApp) {
   appDrawerApp.value = app
   fillCallbackForm(app)
   appDrawerVisible.value = true
-  void Promise.all([loadLdapUsers(app.appId), loadSmsUsers(app.appId)])
+  void Promise.all([loadLdapUsers(app.appId), loadSmsUsers(app.appId), loadWechatUsers(app.appId)])
   requestAnimationFrame(() => requestAnimationFrame(() => {
     appDrawerOpen.value = true
   }))
@@ -422,6 +430,46 @@ async function revokeSmsUser(user: AdminSmsUser) {
   }
 }
 
+async function loadWechatUsers(appId: string) {
+  loadingWechatUsers.value = true
+  try {
+    wechatUsers.value = await adminClient.getAppWechatUsers(appId)
+  } catch (error) {
+    handleApiError('加载微信登录配置失败', error)
+  } finally {
+    loadingWechatUsers.value = false
+  }
+}
+
+async function revokeWechatUser(user: AdminWechatUser) {
+  const app = appDrawerApp.value
+  if (!app) return
+  try {
+    await ElMessageBox.confirm(`确定撤销 ${user.openId} 对当前应用的微信登录权限吗？`, '撤销微信授权', {
+      confirmButtonText: '撤销', cancelButtonText: '取消', type: 'warning',
+    })
+  } catch { return }
+  try {
+    await adminClient.revokeAppWechatUser(app.appId, user.loginId)
+    ElMessage.success('微信授权已撤销')
+    await loadWechatUsers(app.appId)
+  } catch (error) {
+    handleApiError('撤销微信授权失败', error)
+  }
+}
+
+async function restoreWechatUser(user: AdminWechatUser) {
+  const app = appDrawerApp.value
+  if (!app) return
+  try {
+    await adminClient.restoreAppWechatUser(app.appId, user.loginId)
+    ElMessage.success('微信授权已恢复')
+    await loadWechatUsers(app.appId)
+  } catch (error) {
+    handleApiError('恢复微信授权失败', error)
+  }
+}
+
 function closeAppDrawer() {
   if (!appDrawerVisible.value) return
   appDrawerOpen.value = false
@@ -451,10 +499,13 @@ function resetAppsState() {
   callbackForm.ldapLoginMode = 'Disabled'
   callbackForm.smsLoginMode = 'Disabled'
   callbackForm.smsProfileKey = ''
+  callbackForm.wechatLoginMode = 'Disabled'
+  callbackForm.audienceMode = 'Shared'
   ldapUsers.value = []
   ldapDirectories.value = []
   smsUsers.value = []
   smsProfiles.value = []
+  wechatUsers.value = []
   ldapUserForm.directoryKey = ''
   ldapUserForm.username = ''
   smsUserForm.phone = ''
@@ -487,6 +538,7 @@ export function useApps() {
     addingLdapUser,
     loadingSmsUsers,
     addingSmsUser,
+    loadingWechatUsers,
     apps,
     ldapUsers,
     ldapDirectories,
@@ -494,6 +546,7 @@ export function useApps() {
     smsUsers,
     smsProfiles,
     smsUserForm,
+    wechatUsers,
     latestCreatedAppSecret,
     latestSecretAppId,
     showSecretDialog,
@@ -531,6 +584,9 @@ export function useApps() {
     loadSmsUsers,
     addSmsUser,
     revokeSmsUser,
+    loadWechatUsers,
+    revokeWechatUser,
+    restoreWechatUser,
     openDeleteAppModal,
   }
 }

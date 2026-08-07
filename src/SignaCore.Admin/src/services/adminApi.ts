@@ -29,6 +29,10 @@ export interface AdminApp {
   ldapLoginMode: 'Disabled' | 'ManualApproval' | 'AutoProvision'
   smsLoginMode: 'Disabled' | 'ManualApproval' | 'AutoProvision'
   smsProfileKey: string | null
+  wechatLoginMode: 'Disabled' | 'BindRequired' | 'AutoProvision'
+  audienceMode: 'Shared' | 'PerApplication'
+  /** 当前生效的 aud 值，由后端按 audienceMode 算好 */
+  audience: string
 }
 
 export interface AdminLdapUser {
@@ -57,6 +61,16 @@ export interface AdminSmsUser {
   userId: string
   phone: string
   approvalSource: 'Admin' | 'AutoProvision'
+  isActive: boolean
+  createdAt: number
+}
+
+/** openId 是掩码值：后端从不返回原始 OpenId。 */
+export interface AdminWechatUser {
+  loginId: string
+  userId: string
+  openId: string
+  approvalSource: 'SelfBind' | 'AutoProvision'
   isActive: boolean
   createdAt: number
 }
@@ -190,6 +204,28 @@ class AdminApiClient {
 
   async revokeAppSmsUser(appId: string, loginId: string) {
     await this.client.delete(`/api/admin/apps/${appId}/sms-users/${loginId}`)
+  }
+
+  async updateWechatPolicy(appId: string, mode: AdminApp['wechatLoginMode']) {
+    await this.client.put(`/api/admin/apps/${appId}/wechat-policy`, { mode })
+  }
+
+  async updateAudienceMode(appId: string, mode: AdminApp['audienceMode']) {
+    await this.client.put(`/api/admin/apps/${appId}/audience-mode`, { mode })
+  }
+
+  async getAppWechatUsers(appId: string) {
+    const response = await this.client.get<AdminWechatUser[]>(`/api/admin/apps/${appId}/wechat-users`)
+    return response.data
+  }
+
+  async revokeAppWechatUser(appId: string, loginId: string) {
+    await this.client.delete(`/api/admin/apps/${appId}/wechat-users/${loginId}`)
+  }
+
+  /** 用户自助重新绑定不会清除撤销状态，恢复只能由管理员发起。 */
+  async restoreAppWechatUser(appId: string, loginId: string) {
+    await this.client.post(`/api/admin/apps/${appId}/wechat-users/${loginId}/restore`)
   }
 
   async getLdapDirectories() {

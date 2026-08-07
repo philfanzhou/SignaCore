@@ -9,3 +9,8 @@ public sealed record ProfileResponse(
     long CreatedAt);
 
 public sealed record UpdateProfileNicknameRequest(string? Nickname);
+
+public sealed record BindWechatRequest(string? Code);
+
+/// <summary>WeChat binding status. <paramref name="OpenId"/> is masked; the raw value never leaves the service.</summary>
+public sealed record WechatBindingResponse(bool Bound, string? OpenId);

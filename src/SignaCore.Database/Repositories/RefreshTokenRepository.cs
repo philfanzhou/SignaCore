@@ -35,6 +35,22 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     }
 
     /// <summary>
+    /// 比较用精确相等而不是规范化：两侧都源自同一列 app_registrations.app_id——
+    /// 签发时写的是 <c>app.AppId</c>，撤销方的身份也是网关认证解析出的同一个 <c>app.AppId</c>。
+    /// 而且 <c>IdentityValueNormalizer.Normalize</c> 翻译不成 SQL，塞进这里会让整条查询落到客户端。
+    /// </summary>
+    public async Task<bool> TryRevokeForAppAsync(string tokenValue, string appId)
+    {
+        var affectedRows = await _dbContext.RefreshTokens
+            .Where(token => token.TokenValue == tokenValue
+                && !token.IsRevoked
+                && token.AppId == appId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.IsRevoked, true));
+        return affectedRows == 1;
+    }
+
+    /// <summary>
     /// 一次性旋转 refresh token：撤销旧 token + 插入 replacement，两步同一事务，原子成败。
     /// <para>
     /// 显式事务**必须**整体跑在 <c>CreateExecutionStrategy()</c> 里。PostgreSQL / MySQL / MariaDB

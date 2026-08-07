@@ -5,6 +5,9 @@ SignaCore is a .NET 10 identity and authentication service. It centralizes accou
 ## Capabilities
 
 - Password, SMS, WeChat, LDAP, and refresh-token grants
+- Per-application admission policies for SMS, LDAP, and WeChat, with self-service WeChat binding
+- RFC 6749 token endpoint and RFC 7009 revocation at /oauth2/*, alongside the legacy /api/auth/* contract
+- Per-application access-token audience isolation
 - RS256 signing-key generation, encrypted private-key storage, rotation, and JWKS publication
 - Application registration, callback claim enrichment, and gateway authentication
 - User/profile administration, audit trails, login history, lockout, and cleanup jobs
@@ -46,7 +49,7 @@ Provide a PostgreSQL connection string and development secrets through user secr
 dotnet run --project src/SignaCore.Host/SignaCore.Host.csproj
 ```
 
-The API listens on the URLs in `src/SignaCore.Host/Properties/launchSettings.json`. Useful endpoints include `/health`, `/.well-known/openid-configuration`, `/.well-known/jwks`, `/metrics`, `/api/auth/token`, and `/admin`.
+The API listens on the URLs in `src/SignaCore.Host/Properties/launchSettings.json`. Useful endpoints include `/health`, `/.well-known/openid-configuration`, `/.well-known/jwks`, `/metrics`, `/oauth2/token`, `/api/auth/token`, and `/admin`.
 
 ## Container
 

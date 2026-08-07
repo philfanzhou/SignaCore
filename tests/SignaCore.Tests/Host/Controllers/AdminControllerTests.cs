@@ -44,6 +44,13 @@ public class AdminControllerTests : IDisposable
     private const string AdminName = "admin";
     private const string AdminScheme = "Cookies";
 
+    private static readonly JwtOptions TestJwtOptions = new()
+    {
+        Issuer = "TestIssuer",
+        Audience = "TestAudience",
+        TokenExpirationHours = 2
+    };
+
     public AdminControllerTests()
     {
         var options = new DbContextOptionsBuilder<IdentityDbContext>()
@@ -795,7 +802,7 @@ public class AdminControllerTests : IDisposable
         _dbContext.AppRegistrations.AddRange(older, newer);
         await _dbContext.SaveChangesAsync();
 
-        var result = await _controller.GetApps(_dbContext);
+        var result = await _controller.GetApps(_dbContext, TestJwtOptions);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var list = Assert.IsAssignableFrom<IReadOnlyList<AdminAppListItemResponse>>(ok.Value);
@@ -807,7 +814,7 @@ public class AdminControllerTests : IDisposable
     [Fact]
     public async Task GetApps_WhenNoApps_ReturnsEmptyList()
     {
-        var result = await _controller.GetApps(_dbContext);
+        var result = await _controller.GetApps(_dbContext, TestJwtOptions);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var list = Assert.IsAssignableFrom<IReadOnlyList<AdminAppListItemResponse>>(ok.Value);
@@ -828,7 +835,7 @@ public class AdminControllerTests : IDisposable
         _dbContext.AppRegistrations.Add(app);
         await _dbContext.SaveChangesAsync();
 
-        var result = await _controller.GetApps(_dbContext);
+        var result = await _controller.GetApps(_dbContext, TestJwtOptions);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var list = Assert.IsAssignableFrom<IReadOnlyList<AdminAppListItemResponse>>(ok.Value);

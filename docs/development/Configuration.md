@@ -11,10 +11,23 @@ Configuration precedence is command line, environment variables, Consul KV, Cons
 | `Database:Provider` | `PostgreSQL` | PostgreSQL, MySQL, MariaDB, or SQLite |
 | `Database:ServerVersion` | `15` | Required for MySQL/MariaDB compatibility selection |
 | `Database:ConnectionString` | development only | Required production connection |
-| `Jwt:Issuer` | `SignaCore` | Must match downstream validation |
+| `Endpoints:PublicBaseUrl` | request origin | External origin used to build discovery URLs behind a proxy |
+| `Jwt:Issuer` | `SignaCore` | Must match downstream validation; see [conformance](../overview/StandardsConformance.md) |
 | `Jwt:Audience` | `SignaCore.Services` | Must match downstream validation |
 | `Jwt:TokenExpirationHours` | `2` | Access-token lifetime |
 | `RefreshToken:ExpirationDays` | `7` | Refresh-token lifetime |
+
+## WeChat
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `WeChat:AppId` | empty | Required before any application may leave `wechat_login_mode = Disabled` |
+| `WeChat:AppSecret` | empty | Must be set together with `WeChat:AppId` |
+| `WeChat:ApiBaseUrl` | `https://api.weixin.qq.com` | Must be https, except for a loopback stub |
+
+Startup fails when only one of `WeChat:AppId` / `WeChat:AppSecret` is present. When both are absent,
+WeChat login stays unavailable and the admin API refuses to enable a WeChat mode, instead of issuing
+requests to WeChat with an empty appid.
 
 ## Secret settings
 

@@ -37,7 +37,10 @@ public sealed record AdminAppListItemResponse(
     long CreatedAt,
     string LdapLoginMode,
     string SmsLoginMode,
-    string? SmsProfileKey);
+    string? SmsProfileKey,
+    string WechatLoginMode,
+    string AudienceMode,
+    string Audience);
 
 public sealed record AdminCreateAppRequest(string AppName, string? CallbackUrl, int TtlSeconds);
 
@@ -60,6 +63,19 @@ public sealed record AdminSmsUserResponse(
     string LoginId,
     string UserId,
     string Phone,
+    string ApprovalSource,
+    bool IsActive,
+    long CreatedAt);
+
+public sealed record AdminUpdateWechatPolicyRequest(string Mode);
+
+public sealed record AdminUpdateAudienceModeRequest(string Mode);
+
+/// <summary><paramref name="OpenId"/> is masked: the raw OpenId is never returned by the admin API.</summary>
+public sealed record AdminWechatUserResponse(
+    string LoginId,
+    string UserId,
+    string OpenId,
     string ApprovalSource,
     bool IsActive,
     long CreatedAt);

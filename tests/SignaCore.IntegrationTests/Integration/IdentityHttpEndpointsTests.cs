@@ -1,10 +1,14 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.Host;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;
@@ -40,6 +44,88 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
+    /// 发现文档挂在 OIDC 与 RFC 8414 两个标准路径上，且两处返回同一份内容。
+    /// </summary>
+    [Theory]
+    [InlineData("/.well-known/openid-configuration")]
+    [InlineData("/.well-known/oauth-authorization-server")]
+    public async Task DiscoveryEndpoints_DescribeTheEndpointsThatActuallyExist(string path)
+    {
+        using var http = _fixture.CreateHttpClient();
+
+        var response = await http.GetAsync(path);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var document = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var origin = $"{http.BaseAddress!.Scheme}://{http.BaseAddress.Authority}";
+
+        Assert.Equal($"{origin}/.well-known/jwks", document.GetProperty("jwks_uri").GetString());
+        Assert.Equal($"{origin}/oauth2/token", document.GetProperty("token_endpoint").GetString());
+        Assert.Equal($"{origin}/oauth2/revoke", document.GetProperty("revocation_endpoint").GetString());
+        Assert.Empty(document.GetProperty("response_types_supported").EnumerateArray());
+
+        var grantTypes = document.GetProperty("grant_types_supported")
+            .EnumerateArray().Select(item => item.GetString()!).ToList();
+        Assert.Contains(IdentityConstants.GrantTypePassword, grantTypes);
+        Assert.Contains(IdentityConstants.GrantTypeRefreshToken, grantTypes);
+
+        // 广播的每个 grant 名字都必须被 token 端点真正认识：任何一个换回
+        // unsupported_grant_type，说明发现文档和端点已经对不上了。
+        using var oauth = CreateOAuthClient();
+        foreach (var grantType in grantTypes)
+        {
+            var probe = await oauth.PostAsync("/oauth2/token", new FormUrlEncodedContent(
+                new Dictionary<string, string> { ["grant_type"] = grantType }));
+            var error = (await probe.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("error").GetString();
+            Assert.NotEqual("unsupported_grant_type", error);
+        }
+    }
+
+    private HttpClient CreateOAuthClient()
+    {
+        var http = _fixture.CreateHttpClient();
+        var credentials = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+            $"{IdentityServerFixture.GatewayAppId}:{IdentityServerFixture.GatewayAppSecret}"));
+        http.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
+        return http;
+    }
+
+    /// <summary>
+    /// 发现文档的 issuer 必须与真实签发 token 的 iss 完全一致，否则任何按标准校验
+    /// issuer 的客户端都会拒掉本服务签发的 token。
+    /// </summary>
+    [Fact]
+    public async Task DiscoveryIssuer_MatchesTheIssuerClaimOfAnIssuedToken()
+    {
+        using var http = _fixture.CreateHttpClient();
+        var document = await http.GetFromJsonAsync<JsonElement>("/.well-known/openid-configuration");
+        var advertisedIssuer = document.GetProperty("issuer").GetString();
+
+        using var gateway = _fixture.CreateGatewayHttpClient();
+        var response = await gateway.PostAsJsonAsync("/api/auth/token", new
+        {
+            grantType = IdentityConstants.GrantTypePassword,
+            username = IdentityServerFixture.AdminUsername,
+            password = IdentityServerFixture.AdminPassword
+        });
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(body.GetProperty("success").GetBoolean(), body.ToString());
+
+        var accessToken = body.GetProperty("accessToken").GetString()!;
+        var payload = JsonSerializer.Deserialize<JsonElement>(DecodeSegment(accessToken.Split('.')[1]));
+
+        Assert.Equal(advertisedIssuer, payload.GetProperty("iss").GetString());
+    }
+
+    private static byte[] DecodeSegment(string segment)
+    {
+        var padded = segment.Replace('-', '+').Replace('_', '/');
+        return Convert.FromBase64String(padded.PadRight(padded.Length + (4 - padded.Length % 4) % 4, '='));
+    }
+
+    /// <summary>
     /// 锁定对外 HTTP 路由清单。/api/auth 下四个端点原本在同一个 AuthController 上，
     /// 后来按职责拆成四个 controller——路由必须一个不多、一个不少、也不能重复注册
     /// （重复注册在 ASP.NET Core 里要到实际请求时才会抛 AmbiguousMatchException）。
@@ -51,6 +137,11 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     [InlineData("POST", "api/auth/callback/register")]
     [InlineData("GET", "api/gateway/users/search")]
     [InlineData("POST", "api/gateway/users/batch")]
+    [InlineData("POST", "oauth2/token")]
+    [InlineData("POST", "oauth2/revoke")]
+    [InlineData("GET", "api/profile/wechat")]
+    [InlineData("POST", "api/profile/wechat")]
+    [InlineData("DELETE", "api/profile/wechat")]
     public void PublicRoutes_AreRegisteredExactlyOnce(string httpMethod, string routeTemplate)
     {
         var endpoints = _fixture.Services
@@ -65,6 +156,51 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
             .ToList();
 
         Assert.Single(endpoints);
+    }
+
+    /// <summary>
+    /// 管理台 SPA 分支是终止分支：被它接走的请求到不了 MapControllers()。
+    /// <para>
+    /// 这里遍历**真实注册的每一条路由**，只用前缀名单这道防线去判（不设置 endpoint），
+    /// 断言没有任何一条会被 SPA 吞掉。当初漏加 <c>/oauth2</c> 时这条会直接挂——
+    /// 而按方法逐个写的用例只能覆盖作者当时想到的路径。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void AdminSpaBranch_NeverSwallowsAnyRegisteredRoute()
+    {
+        var routes = _fixture.Services
+            .GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>()
+            .Endpoints
+            .OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText)
+            .Where(template => !string.IsNullOrWhiteSpace(template))
+            .Select(template => "/" + template!.TrimStart('/'))
+            // 路由参数换成占位值，得到一条可用于前缀判断的具体路径。
+            .Select(path => System.Text.RegularExpressions.Regex.Replace(path, @"\{[^}]*\}", "x"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Assert.NotEmpty(routes);
+
+        var swallowed = routes
+            .Where(path => AdminSpaRouting.ShouldServeSpa(ContextFor(path), HostHttpPort))
+            .ToList();
+
+        Assert.True(
+            swallowed.Count == 0,
+            $"These registered routes would be diverted into the admin SPA branch and never reach their "
+            + $"handler: {string.Join(", ", swallowed)}");
+    }
+
+    private const int HostHttpPort = 5002;
+
+    private static DefaultHttpContext ContextFor(string path)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = path;
+        context.Features.Set<IHttpConnectionFeature>(new HttpConnectionFeature { LocalPort = HostHttpPort });
+        return context;
     }
 
     [Fact]
@@ -197,10 +333,10 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
 
 public class IdentityServerFixture : IAsyncLifetime
 {
-    private const string TestGatewayAppId = "http-contract-app";
-    private const string TestGatewayAppSecret = "http-contract-secret";
-    private const string TestAdminUsername = "http_contract_admin";
-    private const string TestAdminPassword = "HttpContract123";
+    public const string GatewayAppId = "http-contract-app";
+    public const string GatewayAppSecret = "http-contract-secret";
+    public const string AdminUsername = "http_contract_admin";
+    public const string AdminPassword = "HttpContract123";
     private WebApplicationFactory<Program>? _factory;
     private string? _previousMasterKey;
     private string? _databasePath;
@@ -220,8 +356,8 @@ public class IdentityServerFixture : IAsyncLifetime
         _factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
-                builder.UseSetting("AdminBootstrap:Username", TestAdminUsername);
-                builder.UseSetting("AdminBootstrap:Password", TestAdminPassword);
+                builder.UseSetting("AdminBootstrap:Username", AdminUsername);
+                builder.UseSetting("AdminBootstrap:Password", AdminPassword);
                 builder.UseSetting("Database:Provider", "SQLite");
                 builder.UseSetting("Database:ServerVersion", "");
                 builder.UseSetting("Database:ConnectionString", connectionString);
@@ -236,7 +372,7 @@ public class IdentityServerFixture : IAsyncLifetime
             });
 
         _factory.CreateClient();
-        await SeedGatewayAppAsync(TestGatewayAppId, TestGatewayAppSecret);
+        await SeedGatewayAppAsync(GatewayAppId, GatewayAppSecret);
     }
 
     public HttpClient CreateHttpClient()
@@ -247,8 +383,8 @@ public class IdentityServerFixture : IAsyncLifetime
     public HttpClient CreateGatewayHttpClient()
     {
         var http = CreateHttpClient();
-        http.DefaultRequestHeaders.Add("X-Admin-AppId", TestGatewayAppId);
-        http.DefaultRequestHeaders.Add("X-Admin-AppSecret", TestGatewayAppSecret);
+        http.DefaultRequestHeaders.Add("X-Admin-AppId", GatewayAppId);
+        http.DefaultRequestHeaders.Add("X-Admin-AppSecret", GatewayAppSecret);
         return http;
     }
 
@@ -257,8 +393,8 @@ public class IdentityServerFixture : IAsyncLifetime
         var http = CreateHttpClient();
         var loginResponse = await http.PostAsJsonAsync("/api/admin/session/login", new
         {
-            username = TestAdminUsername,
-            password = TestAdminPassword,
+            username = AdminUsername,
+            password = AdminPassword,
             rememberMe = false
         });
         loginResponse.EnsureSuccessStatusCode();
@@ -267,7 +403,10 @@ public class IdentityServerFixture : IAsyncLifetime
 
     public IServiceProvider Services => _factory!.Services;
 
-    public async Task SeedGatewayAppAsync(string appId, string appSecret)
+    public async Task SeedGatewayAppAsync(
+        string appId,
+        string appSecret,
+        AudienceMode audienceMode = AudienceMode.Shared)
     {
         using var scope = _factory!.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
@@ -279,11 +418,15 @@ public class IdentityServerFixture : IAsyncLifetime
             AppSecretHash = BCrypt.Net.BCrypt.HashPassword(appSecret),
             AppName = "Gateway Test App",
             IsActive = true,
-            CreatedAt = DateTimeOffset.UtcNow
+            CreatedAt = DateTimeOffset.UtcNow,
+            AudienceMode = audienceMode
         });
 
         await dbContext.SaveChangesAsync();
     }
+
+    public string SharedAudience =>
+        _factory!.Services.GetRequiredService<JwtOptions>().Audience;
 
     public async Task SeedGatewayUserAsync(Guid accountId, string username, string phone, string? remark)
     {

@@ -38,7 +38,7 @@ public class PasswordValidator : IIdentityValidator
         if (string.IsNullOrEmpty(request.Username) || string.IsNullOrEmpty(request.Password))
         {
             _logger.LogWarning("Password validation failed: username or password is empty");
-            return ValidationResult.Failure("Username or password cannot be empty");
+            return ValidationResult.Failure("Username or password cannot be empty", OAuthErrorCodes.InvalidRequest);
         }
 
         var loginAttempt = await _loginAttemptRepository.GetByUsernameAsync(request.Username);

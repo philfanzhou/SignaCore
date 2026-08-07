@@ -32,6 +32,7 @@ public class IdentityDbContext : DbContext
     public DbSet<LdapCredentialEntity> LdapCredentials => Set<LdapCredentialEntity>();
     public DbSet<AppLdapAccessEntity> AppLdapAccesses => Set<AppLdapAccessEntity>();
     public DbSet<AppSmsAccessEntity> AppSmsAccesses => Set<AppSmsAccessEntity>();
+    public DbSet<AppWechatAccessEntity> AppWechatAccesses => Set<AppWechatAccessEntity>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -122,9 +123,11 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.AppId).HasColumnName("app_id").HasMaxLength(IdentityConstants.MaxAppIdLength).IsRequired();
             entity.Property(e => e.LdapCredentialId).HasColumnName("ldap_credential_id");
             entity.Property(e => e.SmsUserLoginId).HasColumnName("sms_user_login_id");
+            entity.Property(e => e.WechatUserLoginId).HasColumnName("wechat_user_login_id");
             entity.HasIndex(e => e.TokenValue).IsUnique();
             entity.HasIndex(e => e.LdapCredentialId);
             entity.HasIndex(e => e.SmsUserLoginId);
+            entity.HasIndex(e => e.WechatUserLoginId);
         });
 
         modelBuilder.Entity<AppRegistrationEntity>(entity =>
@@ -143,6 +146,8 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.LdapLoginMode).HasColumnName("ldap_login_mode");
             entity.Property(e => e.SmsLoginMode).HasColumnName("sms_login_mode");
             entity.Property(e => e.SmsProfileKey).HasColumnName("sms_profile_key").HasMaxLength(64);
+            entity.Property(e => e.WechatLoginMode).HasColumnName("wechat_login_mode");
+            entity.Property(e => e.AudienceMode).HasColumnName("audience_mode");
             entity.HasIndex(e => e.AppIdNormalized).IsUnique();
         });
 
@@ -194,6 +199,22 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.ApprovalSource).HasColumnName("approval_source");
             entity.Property(e => e.IsActive).HasColumnName("is_active");
             entity.Property(e => e.ApprovedBy).HasColumnName("approved_by");
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            entity.HasIndex(e => new { e.AppRegistrationId, e.UserLoginId }).IsUnique();
+            entity.HasIndex(e => e.UserLoginId);
+            entity.HasOne<AppRegistrationEntity>().WithMany().HasForeignKey(e => e.AppRegistrationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<UserLoginEntity>().WithMany().HasForeignKey(e => e.UserLoginId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AppWechatAccessEntity>(entity =>
+        {
+            entity.ToTable("app_wechat_accesses");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.AppRegistrationId).HasColumnName("app_registration_id");
+            entity.Property(e => e.UserLoginId).HasColumnName("user_login_id");
+            entity.Property(e => e.ApprovalSource).HasColumnName("approval_source");
+            entity.Property(e => e.IsActive).HasColumnName("is_active");
             ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
             entity.HasIndex(e => new { e.AppRegistrationId, e.UserLoginId }).IsUnique();
             entity.HasIndex(e => e.UserLoginId);

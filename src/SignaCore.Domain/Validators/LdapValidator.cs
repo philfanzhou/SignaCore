@@ -45,12 +45,14 @@ public sealed class LdapValidator : IIdentityValidator
         if (!_options.Enabled || request.App == null ||
             request.App.LdapLoginMode == LdapLoginMode.Disabled)
         {
-            return ValidationResult.Failure("LDAP login is disabled for this application");
+            return ValidationResult.Failure(
+                "LDAP login is disabled for this application", OAuthErrorCodes.UnauthorizedClient);
         }
 
         if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrEmpty(request.Password))
         {
-            return ValidationResult.Failure("Username or password cannot be empty");
+            return ValidationResult.Failure(
+                "Username or password cannot be empty", OAuthErrorCodes.InvalidRequest);
         }
 
         LdapDirectoryOptions directory;
@@ -72,7 +74,8 @@ public sealed class LdapValidator : IIdentityValidator
         catch (LdapDirectoryUnavailableException exception)
         {
             _logger.LogError(exception, "LDAP directory unavailable: DirectoryKey={DirectoryKey}", directory.Key);
-            return ValidationResult.Failure("Directory service unavailable");
+            return ValidationResult.Failure(
+                "Directory service unavailable", OAuthErrorCodes.TemporarilyUnavailable);
         }
     }
 

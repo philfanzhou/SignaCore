@@ -4,6 +4,7 @@ using SignaCore.Database.Repositories;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Services.Ldap;
 using SignaCore.Domain.Services.Sms;
+using SignaCore.Domain.Services.WeChat;
 
 namespace SignaCore.Domain.Validators;
 
@@ -14,6 +15,7 @@ public class RefreshTokenValidator : IIdentityValidator
     private readonly ILdapAccountService _ldapAccountService;
     private readonly ILdapDirectoryClient _ldapDirectoryClient;
     private readonly ISmsAdmissionService _smsAdmissionService;
+    private readonly IWechatAdmissionService _wechatAdmissionService;
     private readonly ILogger<RefreshTokenValidator> _logger;
 
     public RefreshTokenValidator(
@@ -21,18 +23,8 @@ public class RefreshTokenValidator : IIdentityValidator
         IAccountRepository accountRepository,
         ILdapAccountService ldapAccountService,
         ILdapDirectoryClient ldapDirectoryClient,
-        ILogger<RefreshTokenValidator> logger)
-        : this(refreshTokenRepository, accountRepository, ldapAccountService, ldapDirectoryClient,
-            new UnavailableSmsAdmissionService(), logger)
-    {
-    }
-
-    public RefreshTokenValidator(
-        IRefreshTokenRepository refreshTokenRepository,
-        IAccountRepository accountRepository,
-        ILdapAccountService ldapAccountService,
-        ILdapDirectoryClient ldapDirectoryClient,
         ISmsAdmissionService smsAdmissionService,
+        IWechatAdmissionService wechatAdmissionService,
         ILogger<RefreshTokenValidator> logger)
     {
         _refreshTokenRepository = refreshTokenRepository;
@@ -40,6 +32,7 @@ public class RefreshTokenValidator : IIdentityValidator
         _ldapAccountService = ldapAccountService;
         _ldapDirectoryClient = ldapDirectoryClient;
         _smsAdmissionService = smsAdmissionService;
+        _wechatAdmissionService = wechatAdmissionService;
         _logger = logger;
     }
 
@@ -50,7 +43,7 @@ public class RefreshTokenValidator : IIdentityValidator
         if (string.IsNullOrEmpty(request.RefreshToken))
         {
             _logger.LogWarning("Refresh token validation failed: token is empty");
-            return ValidationResult.Failure("Refresh token cannot be empty");
+            return ValidationResult.Failure("Refresh token cannot be empty", OAuthErrorCodes.InvalidRequest);
         }
 
         var refreshToken = await _refreshTokenRepository.GetByTokenValueAsync(request.RefreshToken);
@@ -98,7 +91,7 @@ public class RefreshTokenValidator : IIdentityValidator
                 refreshToken.LdapCredentialId.Value);
             if (!ldapResult.IsSuccess)
             {
-                return ValidationResult.Failure(ldapResult.ErrorMessage!);
+                return ValidationResult.Failure(ldapResult.ErrorMessage!, ldapResult.ErrorCode);
             }
 
             return ValidationResult.Success(
@@ -111,7 +104,8 @@ public class RefreshTokenValidator : IIdentityValidator
         if (refreshToken.SmsUserLoginId.HasValue)
         {
             if (request.App == null || request.App.SmsLoginMode == SmsLoginMode.Disabled)
-                return ValidationResult.Failure("SMS login is disabled for this application");
+                return ValidationResult.Failure(
+                    "SMS login is disabled for this application", OAuthErrorCodes.UnauthorizedClient);
             var admission = await _smsAdmissionService.FindByLoginIdAsync(
                 request.App.Id, refreshToken.SmsUserLoginId.Value, request.CancellationToken);
             var admitted = admission is { Access.IsActive: true } &&
@@ -124,23 +118,52 @@ public class RefreshTokenValidator : IIdentityValidator
                 smsUserLoginId: refreshToken.SmsUserLoginId);
         }
 
+        if (refreshToken.WechatUserLoginId.HasValue)
+        {
+            if (request.App == null || request.App.WechatLoginMode == WechatLoginMode.Disabled)
+                return ValidationResult.Failure(
+                    "WeChat login is disabled for this application", OAuthErrorCodes.UnauthorizedClient);
+            var admission = await _wechatAdmissionService.FindByLoginIdAsync(
+                request.App.Id, refreshToken.WechatUserLoginId.Value, request.CancellationToken);
+            var admitted = admission is { Access.IsActive: true } && admission.Account.Id == account.Id;
+            if (!admitted) return ValidationResult.Failure("WeChat access has been revoked");
+            return ValidationResult.Success(
+                account, IdentityConstants.AuthMethodRefreshToken,
+                wechatUserLoginId: refreshToken.WechatUserLoginId);
+        }
+
         _logger.LogInformation("Refresh token validated successfully: AccountId={AccountId}, AppId={AppId}", refreshToken.AccountId, request.AppId ?? "N/A");
         return ValidationResult.Success(account, IdentityConstants.AuthMethodRefreshToken);
     }
 
-    private async Task<(bool IsSuccess, string? ErrorMessage, LdapCredentialEntity? Credential)> ValidateLdapAdmissionAsync(
+    /// <summary>刷新时 LDAP 分支的判定结果，带 OAuth 错误码。</summary>
+    private readonly record struct LdapAdmission(
+        bool IsSuccess,
+        string? ErrorMessage,
+        string ErrorCode,
+        LdapCredentialEntity? Credential)
+    {
+        public static LdapAdmission Rejected(string message, string? errorCode = null) =>
+            new(false, message, errorCode ?? OAuthErrorCodes.InvalidGrant, null);
+
+        public static LdapAdmission Admitted(LdapCredentialEntity credential) =>
+            new(true, null, OAuthErrorCodes.InvalidGrant, credential);
+    }
+
+    private async Task<LdapAdmission> ValidateLdapAdmissionAsync(
         ValidationRequest request,
         Guid credentialId)
     {
         if (request.App == null || request.App.LdapLoginMode == LdapLoginMode.Disabled)
         {
-            return (false, "LDAP login is disabled for this application", null);
+            return LdapAdmission.Rejected(
+                "LDAP login is disabled for this application", OAuthErrorCodes.UnauthorizedClient);
         }
 
         var credential = await _ldapAccountService.GetCredentialAsync(credentialId);
         if (credential == null)
         {
-            return (false, "LDAP access has been revoked", null);
+            return LdapAdmission.Rejected("LDAP access has been revoked");
         }
 
         var access = await _ldapAccountService.GetAccessAsync(request.App.Id, credentialId);
@@ -149,7 +172,7 @@ public class RefreshTokenValidator : IIdentityValidator
              access.ApprovalSource == LdapAccessApprovalSource.Admin);
         if (!admitted)
         {
-            return (false, "LDAP access has been revoked", null);
+            return LdapAdmission.Rejected("LDAP access has been revoked");
         }
 
         try
@@ -159,22 +182,15 @@ public class RefreshTokenValidator : IIdentityValidator
                     credential.ObjectGuid,
                     request.CancellationToken))
             {
-                return (false, "LDAP account is disabled", null);
+                return LdapAdmission.Rejected("LDAP account is disabled");
             }
         }
         catch (LdapDirectoryUnavailableException exception)
         {
             _logger.LogError(exception, "LDAP directory unavailable during refresh validation");
-            return (false, "Directory service unavailable", null);
+            return LdapAdmission.Rejected("Directory service unavailable", OAuthErrorCodes.TemporarilyUnavailable);
         }
 
-        return (true, null, credential);
-    }
-
-    private sealed class UnavailableSmsAdmissionService : ISmsAdmissionService
-    {
-        public Task<SmsAdmission?> FindAsync(Guid appRegistrationId, string phoneE164, CancellationToken cancellationToken = default) => Task.FromResult<SmsAdmission?>(null);
-        public Task<SmsAdmission?> FindByLoginIdAsync(Guid appRegistrationId, Guid userLoginId, CancellationToken cancellationToken = default) => Task.FromResult<SmsAdmission?>(null);
-        public Task<SmsAdmission> ProvisionAsync(AppRegistrationEntity app, string phoneE164, SmsAccessApprovalSource source, Guid? approvedBy, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        return LdapAdmission.Admitted(credential);
     }
 }

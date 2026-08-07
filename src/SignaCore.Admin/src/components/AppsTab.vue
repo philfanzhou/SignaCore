@@ -49,6 +49,7 @@ const {
               <th>回调有效期</th>
               <th>LDAP</th>
               <th>短信</th>
+              <th>微信</th>
               <th>状态</th>
               <th></th>
             </tr>
@@ -81,6 +82,11 @@ const {
               <td>
                 <span class="badge" :class="app.smsLoginMode === 'Disabled' ? 'gray' : 'green'">
                   <span class="dot"></span>{{ app.smsLoginMode === 'Disabled' ? '禁用' : app.smsLoginMode === 'ManualApproval' ? '人工准入' : '自动开户' }}
+                </span>
+              </td>
+              <td>
+                <span class="badge" :class="app.wechatLoginMode === 'Disabled' ? 'gray' : 'green'">
+                  <span class="dot"></span>{{ app.wechatLoginMode === 'Disabled' ? '禁用' : app.wechatLoginMode === 'BindRequired' ? '需绑定' : '自动开户' }}
                 </span>
               </td>
               <td>

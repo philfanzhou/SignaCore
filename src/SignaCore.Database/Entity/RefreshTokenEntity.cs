@@ -21,4 +21,7 @@ public class RefreshTokenEntity
 
     /// <summary>SMS login identity that authenticated the original session; null otherwise.</summary>
     public Guid? SmsUserLoginId { get; set; }
+
+    /// <summary>WeChat login identity that authenticated the original session; null otherwise.</summary>
+    public Guid? WechatUserLoginId { get; set; }
 }

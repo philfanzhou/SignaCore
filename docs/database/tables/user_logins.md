@@ -12,7 +12,9 @@ External provider identity bindings, including phone and WeChat identities.
 ## Relationships and invariants
 
 - account_id references accounts.
-- Provider name plus provider user id identifies an external login.
+- Provider name plus provider user id identifies an external login and is unique.
+- SMS rows store an E.164 phone number; WeChat rows store an OpenId.
+- An account holds at most one WeChat binding; rebinding requires an explicit unbind.
 
 ## Ownership
 

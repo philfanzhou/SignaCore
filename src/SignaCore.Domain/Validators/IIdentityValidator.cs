@@ -59,24 +59,37 @@ public class ValidationResult
 
     public Guid? SmsUserLoginId { get; private set; }
 
+    public Guid? WechatUserLoginId { get; private set; }
+
+    /// <summary>
+    /// OAuth 2.0 错误码（RFC 6749 §5.2）。<c>/api/auth/token</c> 不用它——那条路的对外契约是
+    /// HTTP 200 + 文案；<c>/oauth2/token</c> 用它决定 <c>error</c> 字段。默认
+    /// <see cref="OAuthErrorCodes.InvalidGrant"/>：凭据类失败是绝大多数，只有"参数缺失"和
+    /// "该应用未开通此登录方式"需要在调用点显式给别的码。
+    /// </summary>
+    public string ErrorCode { get; private set; } = OAuthErrorCodes.InvalidGrant;
+
     public static ValidationResult Success(
         AccountEntity account,
         string authMethod,
         string? displayName = null,
         Guid? ldapCredentialId = null,
-        Guid? smsUserLoginId = null) => new()
+        Guid? smsUserLoginId = null,
+        Guid? wechatUserLoginId = null) => new()
         {
             IsSuccess = true,
             Account = account,
             AuthMethod = authMethod,
             DisplayName = displayName,
             LdapCredentialId = ldapCredentialId,
-            SmsUserLoginId = smsUserLoginId
+            SmsUserLoginId = smsUserLoginId,
+            WechatUserLoginId = wechatUserLoginId
         };
 
-    public static ValidationResult Failure(string message) => new()
+    public static ValidationResult Failure(string message, string? errorCode = null) => new()
     {
         IsSuccess = false,
-        ErrorMessage = message
+        ErrorMessage = message,
+        ErrorCode = errorCode ?? OAuthErrorCodes.InvalidGrant
     };
 }
