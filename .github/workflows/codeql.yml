@@ -9,7 +9,7 @@ on:
     - cron: '23 3 * * 1'
 
 concurrency:
-  group: codeql-${{ github.ref }}-${{ matrix.language }}
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
