@@ -1,3 +1,4 @@
+using System.Net;
 using System.Threading.Tasks;
 using SignaCore.Domain;
 using Xunit;
@@ -40,6 +41,26 @@ public class CallbackUrlValidatorTests
 
         Assert.False(result.IsValid);
         Assert.Contains("HTTP or HTTPS", result.ErrorMessage);
+    }
+
+    [Fact]
+    public void Validate_WhenHttpsIsRequired_RejectsHttp()
+    {
+        var validator = new CallbackUrlValidator(requireHttps: true);
+
+        var result = validator.Validate("http://example.com/callback");
+
+        Assert.False(result.IsValid);
+        Assert.Contains("HTTPS", result.ErrorMessage);
+    }
+
+    [Fact]
+    public void Validate_WithUserInformation_RejectsUrl()
+    {
+        var result = _validator.Validate("https://user:secret@example.com/callback");
+
+        Assert.False(result.IsValid);
+        Assert.Contains("user information", result.ErrorMessage);
     }
 
     [Fact]
@@ -191,5 +212,70 @@ public class CallbackUrlValidatorTests
         var validator = new CallbackUrlValidator(allowPrivateAddresses: true);
         var result = await validator.ValidateAsync("http://192.168.1.1/callback");
         Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WhenHttpsIsRequired_RejectsHttp()
+    {
+        var validator = new CallbackUrlValidator(requireHttps: true);
+
+        var result = await validator.ValidateAsync("http://example.com/callback");
+
+        Assert.False(result.IsValid);
+        Assert.Contains("HTTPS", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WithUserInformation_RejectsUrl()
+    {
+        var result = await _validator.ValidateAsync(
+            "https://user:secret@example.com/callback");
+
+        Assert.False(result.IsValid);
+        Assert.Contains("user information", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WhenPublicAddressIsRequired_RejectsUnresolvableHost()
+    {
+        var validator = new CallbackUrlValidator(allowPrivateAddresses: false);
+
+        var result = await validator.ValidateAsync("https://callback.invalid/claims");
+
+        Assert.False(result.IsValid);
+        Assert.Contains("could not be resolved", result.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData("127.0.0.1")]
+    [InlineData("169.254.169.254")]
+    [InlineData("100.64.0.1")]
+    [InlineData("10.0.0.1")]
+    [InlineData("172.31.255.255")]
+    [InlineData("192.168.1.1")]
+    [InlineData("192.0.2.1")]
+    [InlineData("198.18.0.1")]
+    [InlineData("198.51.100.1")]
+    [InlineData("203.0.113.1")]
+    [InlineData("224.0.0.1")]
+    [InlineData("::1")]
+    [InlineData("::ffff:127.0.0.1")]
+    [InlineData("fc00::1")]
+    [InlineData("ff02::1")]
+    [InlineData("2001:db8::1")]
+    public void IsNonPublicAddress_RejectsLocalReservedAndMetadataRanges(string value)
+    {
+        Assert.True(CallbackUrlValidator.IsNonPublicAddress(IPAddress.Parse(value)));
+    }
+
+    [Theory]
+    [InlineData("8.8.8.8")]
+    [InlineData("100.128.0.1")]
+    [InlineData("172.32.0.1")]
+    [InlineData("192.1.1.1")]
+    [InlineData("2606:4700:4700::1111")]
+    public void IsNonPublicAddress_AcceptsPublicAddresses(string value)
+    {
+        Assert.False(CallbackUrlValidator.IsNonPublicAddress(IPAddress.Parse(value)));
     }
 }

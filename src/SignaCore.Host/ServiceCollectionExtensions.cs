@@ -1,6 +1,7 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -11,8 +12,8 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
-using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.Ldap;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.WeChat;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Security;
@@ -52,6 +53,15 @@ public static class ServiceCollectionExtensions
 
         // ---- Database ----
         var databaseOptions = BindDatabaseOptions(configuration);
+        if (!environment.IsDevelopment() &&
+            string.Equals(
+                databaseOptions.ConnectionString,
+                "Host=localhost;Port=5432;Database=signacore;Username=postgres",
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The development database connection string cannot be used in production.");
+        }
         services.AddSingleton(databaseOptions);
 
         services.AddDbContext<IdentityDbContext>(options =>
@@ -59,12 +69,19 @@ public static class ServiceCollectionExtensions
             options.UseIdentityDatabase(databaseOptions);
         });
 
-        // ---- HttpClient for Callback ----
-        services.AddHttpClient("Callback");
-
         // ---- RSA Key Manager ----
         // 主密钥来源与私钥加解密是两个独立关注点，KeyManager 只负责密钥生命周期编排。
-        services.AddSingleton<IMasterKeyProvider, FileMasterKeyProvider>();
+        services.AddSingleton<IMasterKeyProvider>(provider =>
+        {
+            if (!environment.IsDevelopment() &&
+                string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RSA_MASTER_KEY")))
+            {
+                throw new InvalidOperationException(
+                    "RSA_MASTER_KEY is required outside the Development environment.");
+            }
+
+            return ActivatorUtilities.CreateInstance<FileMasterKeyProvider>(provider);
+        });
         services.AddSingleton<IPrivateKeyProtector, AesGcmPrivateKeyProtector>();
         services.AddSingleton<IKeyManager, KeyManager>();
 
@@ -76,6 +93,26 @@ public static class ServiceCollectionExtensions
             TokenExpirationHours = int.Parse(configuration["Jwt:TokenExpirationHours"] ?? "2")
         });
         jwtOptions.Validate();
+        var allowNonHttpsIssuer = configuration.GetValue("Security:AllowNonHttpsIssuer", false);
+        if (!environment.IsDevelopment() && !allowNonHttpsIssuer &&
+            (!Uri.TryCreate(jwtOptions.Issuer, UriKind.Absolute, out var issuerUri) ||
+             issuerUri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new InvalidOperationException(
+                "Jwt:Issuer must be an absolute HTTPS URL outside the Development environment. " +
+                "Set Security:AllowNonHttpsIssuer=true only for a deliberate legacy migration.");
+        }
+        var publicBaseUrl = configuration[PublicOrigin.ConfigurationKey];
+        if (!environment.IsDevelopment() && !allowNonHttpsIssuer &&
+            !string.IsNullOrWhiteSpace(publicBaseUrl) &&
+            !string.Equals(
+                jwtOptions.Issuer.TrimEnd('/'),
+                publicBaseUrl.Trim().TrimEnd('/'),
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Jwt:Issuer must match {PublicOrigin.ConfigurationKey} outside the Development environment.");
+        }
 
         // ---- Token Service ----
         services.AddSingleton<ITokenService, JwtTokenService>();
@@ -108,9 +145,23 @@ public static class ServiceCollectionExtensions
 
         // ---- Callback Service ----
         var callbackAllowedDomains = configuration.GetSection("Callback:AllowedDomains").Get<string[]>() ?? [];
-        // 默认允许私有地址：微服务回调走内网是常态。公网部署可显式设为 false 拒绝解析到内网的回调 URL。
-        var callbackAllowPrivateAddresses = configuration.GetValue("Callback:AllowPrivateAddresses", true);
-        services.AddSingleton(new CallbackUrlValidator(callbackAllowedDomains, callbackAllowPrivateAddresses));
+        var callbackAllowPrivateAddresses = configuration.GetValue(
+            "Callback:AllowPrivateAddresses",
+            environment.IsDevelopment());
+        var callbackRequireHttps = configuration.GetValue(
+            "Callback:RequireHttps",
+            !environment.IsDevelopment());
+        services.AddSingleton(new CallbackUrlValidator(
+            callbackAllowedDomains,
+            callbackAllowPrivateAddresses,
+            callbackRequireHttps));
+        services.AddHttpClient("Callback", client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(IdentityConstants.CallbackTimeoutSeconds);
+                client.MaxResponseContentBufferSize = 64 * 1024;
+            })
+            .ConfigurePrimaryHttpMessageHandler(() =>
+                CallbackHttpMessageHandler.Create(callbackAllowPrivateAddresses));
         services.AddScoped<ICallbackService, CallbackService>();
 
         // ---- SMS OTP Services ----
@@ -297,13 +348,39 @@ public static class ServiceCollectionExtensions
             });
         });
 
+        // Forwarded headers are honored only from explicitly trusted proxies (plus the framework's
+        // loopback defaults). This keeps scheme/client-IP handling correct without trusting spoofed
+        // X-Forwarded-* headers from arbitrary clients.
+        services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor |
+                                       ForwardedHeaders.XForwardedProto;
+            options.ForwardLimit = 1;
+            options.RequireHeaderSymmetry = true;
+
+            foreach (var value in configuration
+                         .GetSection("ReverseProxy:KnownProxies")
+                         .Get<string[]>() ?? [])
+            {
+                if (!System.Net.IPAddress.TryParse(value, out var address))
+                {
+                    throw new InvalidOperationException(
+                        $"ReverseProxy:KnownProxies contains an invalid IP address: '{value}'.");
+                }
+
+                options.KnownProxies.Add(address);
+            }
+        });
+
         services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
             .AddCookie(options =>
             {
                 options.Cookie.Name = "qz_admin_session";
                 options.Cookie.HttpOnly = true;
                 options.Cookie.SameSite = SameSiteMode.Lax;
-                options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+                options.Cookie.SecurePolicy = environment.IsDevelopment()
+                    ? CookieSecurePolicy.SameAsRequest
+                    : CookieSecurePolicy.Always;
                 options.SlidingExpiration = true;
                 options.ExpireTimeSpan = TimeSpan.FromHours(12);
                 options.Events = new CookieAuthenticationEvents

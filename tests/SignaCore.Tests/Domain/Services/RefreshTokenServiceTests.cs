@@ -41,9 +41,10 @@ public class RefreshTokenServiceTests
 
         Assert.NotNull(token);
         Assert.False(string.IsNullOrEmpty(token));
+        Assert.False(RefreshTokenDigest.IsDigest(token));
         _repoMock.Verify(r => r.AddAsync(It.Is<RefreshTokenEntity>(t =>
             t.AccountId == account.Id &&
-            t.TokenValue == token &&
+            t.TokenValue == RefreshTokenDigest.Compute(token) &&
             !t.IsRevoked &&
             t.AppId == "app-1" &&
             t.ExpiresAt > DateTimeOffset.UtcNow.AddDays(6))), Times.Once);
@@ -68,7 +69,7 @@ public class RefreshTokenServiceTests
                 "old-token",
                 It.Is<RefreshTokenEntity>(replacement =>
                     replacement.AccountId == account.Id &&
-                    replacement.TokenValue == token &&
+                    replacement.TokenValue == RefreshTokenDigest.Compute(token) &&
                     !replacement.IsRevoked &&
                     replacement.AppId == "app-1")),
             Times.Once);

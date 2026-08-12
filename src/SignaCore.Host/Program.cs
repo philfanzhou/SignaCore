@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Serilog;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain;
@@ -13,9 +14,15 @@ using SignaCore.Host.Configuration;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Middleware;
 using SignaCore.Host.Security;
-using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+
+if (!builder.Environment.IsDevelopment() &&
+    string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RSA_MASTER_KEY")))
+{
+    throw new InvalidOperationException(
+        "RSA_MASTER_KEY is required outside the Development environment.");
+}
 
 // ---- Consul Configuration Source ----
 // Identity 固定接入 Consul，按 config/signacore 单层共享路径加载 Consul KV，失败时回退本地缓存。
@@ -99,10 +106,13 @@ app.Logger.LogInformation(
 
 // ---- Discovery conformance diagnostics ----
 // OIDC/OAuth metadata requires the issuer to be an https URL, and every conforming client compares
-// the `iss` claim against the URL it fetched discovery from. The default deployment identifier
-// ("SignaCore") is kept for backward compatibility with existing downstream validators, so this is a
-// warning rather than a hard failure — see docs/overview/StandardsConformance.md.
-PublicOrigin.Validate(builder.Configuration);
+// the `iss` claim against the URL it fetched discovery from. Development keeps the short issuer for
+// convenience. Production requires HTTPS unless the explicit legacy compatibility switch is enabled,
+// so this warning primarily identifies development or a temporary migration deployment.
+PublicOrigin.Validate(
+    builder.Configuration,
+    requireHttps: !app.Environment.IsDevelopment(),
+    requireConfiguredOrigin: !app.Environment.IsDevelopment());
 var configuredIssuer = app.Services.GetRequiredService<JwtOptions>().Issuer;
 if (!Uri.TryCreate(configuredIssuer, UriKind.Absolute, out var issuerUri) ||
     issuerUri.Scheme != Uri.UriSchemeHttps)
@@ -149,6 +159,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Identity Service API v1"));
 }
+app.UseForwardedHeaders();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseCors("AdminWeb");

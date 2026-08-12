@@ -89,9 +89,13 @@ public sealed class RefreshTokenRotationDatabaseContractTests
         var tokens = await context.RefreshTokens.AsNoTracking().ToListAsync();
 
         Assert.Equal(2, tokens.Count);
-        Assert.True(Assert.Single(tokens, token => token.TokenValue == TokenValue).IsRevoked);
+        Assert.True(Assert.Single(
+            tokens,
+            token => token.TokenValue == RefreshTokenDigest.Compute(TokenValue)).IsRevoked);
         Assert.False(
-            Assert.Single(tokens, token => token.TokenValue == ReplacementTokenValue).IsRevoked);
+            Assert.Single(
+                tokens,
+                token => token.TokenValue == RefreshTokenDigest.Compute(ReplacementTokenValue)).IsRevoked);
     }
 
     private static RefreshTokenEntity CreateReplacement(Guid accountId, string tokenValue)
@@ -157,7 +161,7 @@ public sealed class RefreshTokenRotationDatabaseContractTests
             {
                 Id = Guid.NewGuid(),
                 AccountId = accountId,
-                TokenValue = tokenValue,
+                TokenValue = RefreshTokenDigest.Compute(tokenValue),
                 CreatedAt = DateTimeOffset.UtcNow,
                 ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
                 AppId = "rotation-contract-app"

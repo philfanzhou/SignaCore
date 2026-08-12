@@ -6,6 +6,10 @@ public class RefreshTokenEntity
 
     public Guid AccountId { get; set; }
 
+    /// <summary>
+    /// Versioned one-way digest of the bearer token. The raw token is returned to the client once
+    /// and must never be persisted.
+    /// </summary>
     public string TokenValue { get; set; } = string.Empty;
 
     public DateTimeOffset ExpiresAt { get; set; }

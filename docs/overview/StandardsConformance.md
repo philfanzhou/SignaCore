@@ -94,6 +94,7 @@ are made from the `client_id` claim, not from `aud`.
 | Revocation (RFC 7009) | Conforms at `/oauth2/revoke` |
 | Discovery (RFC 8414) | Served at `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`; advertises only endpoints and grants that exist |
 | Refresh-token rotation | Single-use rotation with atomic consumption |
+| Refresh-token storage | Versioned one-way SHA-256 digest; raw bearer tokens are returned once and never persisted |
 | Audience isolation | Available per application; `Shared` by default |
 
 ## What does not conform
@@ -106,14 +107,14 @@ are made from the `client_id` claim, not from `aud`.
 | No `scope` | RFC 6749 §3.3 | There is no way to request or restrict a subset of authority |
 | The `password` grant is the primary flow | OAuth 2.1 draft, BCP 240 | The resource-owner password grant is deprecated in current guidance; it remains here because clients depend on it |
 | No refresh-token reuse detection | OAuth 2.0 Security BCP §4.14 | Replaying a consumed refresh token fails, but descendants of the replayed token are not revoked |
-| `Jwt:Issuer` defaults to `SignaCore`, not an https URL | RFC 8414 §2 | Any client that validates `iss` against the discovery URL rejects these tokens. The service logs a warning at startup |
+| Development `Jwt:Issuer` defaults to `SignaCore` | RFC 8414 §2 | Development remains convenient; production startup requires an absolute HTTPS issuer unless an explicit temporary legacy override is enabled |
 | Legacy `/api/auth/*` routes | RFC 6749 | Kept deliberately; not standards-shaped and not advertised in discovery |
 
 ## Deployment guidance
 
-- Set `Endpoints:PublicBaseUrl` to the externally reachable origin when the service runs behind a
-  TLS-terminating proxy. Discovery URLs are otherwise derived from the incoming request, and forwarded
-  headers are deliberately not trusted.
+- Production startup requires `Endpoints:PublicBaseUrl` to be the externally reachable HTTPS origin,
+  preventing discovery metadata from depending on an untrusted request `Host`. Development can still
+  derive discovery URLs from the incoming request.
 - Set `Jwt:Issuer` to the same absolute https URL that clients use to fetch discovery. Changing the
   issuer invalidates the issuer check in every downstream validator configured with the old value, so
   treat it as a coordinated migration, not a config tweak.

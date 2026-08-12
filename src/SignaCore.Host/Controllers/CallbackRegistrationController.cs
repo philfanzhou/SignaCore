@@ -38,7 +38,8 @@ public class CallbackRegistrationController : ControllerBase
     [HttpPost("callback/register")]
     [Authorize(Policy = GatewayAppAuthenticationDefaults.Policy)]
     public async Task<ActionResult<RegisterCallbackResponse>> RegisterCallback(
-        [FromBody] RegisterCallbackRequest request)
+        [FromBody] RegisterCallbackRequest request,
+        CancellationToken cancellationToken = default)
     {
         var app = HttpContext.GetValidatedApp();
         var appId = app?.AppId ?? HttpContext.GetAppId();
@@ -51,7 +52,9 @@ public class CallbackRegistrationController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(request.CallbackUrl))
         {
-            var urlValidation = _callbackUrlValidator.Validate(request.CallbackUrl);
+            var urlValidation = await _callbackUrlValidator.ValidateAsync(
+                request.CallbackUrl,
+                cancellationToken);
             if (!urlValidation.IsValid)
             {
                 return Ok(new RegisterCallbackResponse { Success = false, Message = $"Invalid callback URL: {urlValidation.ErrorMessage}" });
@@ -74,7 +77,7 @@ public class CallbackRegistrationController : ControllerBase
         app.CallbackExpiresAt = request.TtlSeconds == IdentityConstants.CallbackTtlNeverExpire
             ? null
             : DateTimeOffset.UtcNow.AddSeconds(request.TtlSeconds > 0 ? request.TtlSeconds : IdentityConstants.DefaultCallbackTtlSeconds);
-        await _unitOfWork.SaveChangesAsync();
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new RegisterCallbackResponse
         {

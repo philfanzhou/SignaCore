@@ -264,6 +264,76 @@ public class TokenControllerTests
     }
 
     [Fact]
+    public async Task GetToken_ValidatorFails_NeverWritesCodeAsAuditUsername()
+    {
+        const string sensitiveCode = "one-time-secret-code";
+        var controller = CreateController(new[]
+        {
+            CreateFailingValidator(IdentityConstants.GrantTypeWechat, "invalid code").Object
+        });
+
+        var actionResult = await controller.GetToken(new TokenRequest
+        {
+            GrantType = IdentityConstants.GrantTypeWechat,
+            Code = sensitiveCode
+        }, CancellationToken.None);
+
+        var ok = AuthTestDoubles.ExtractOk(actionResult);
+        Assert.False(Assert.IsType<TokenResponse>(ok.Value!).Success);
+        _auditServiceMock.Verify(a => a.RecordLoginAsync(
+            null, "unknown", IdentityConstants.GrantTypeWechat, "login_failure",
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
+        _auditServiceMock.Verify(a => a.RecordLoginAsync(
+            It.IsAny<Guid?>(), sensitiveCode, It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetToken_WhenCallbackObservesRequestCancellation_PropagatesCancellation()
+    {
+        var account = CreateTestAccount();
+        var callback = new Mock<ICallbackService>();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        callback.Setup(service => service.FetchExternalClaimsAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                cancellation.Token))
+            .ThrowsAsync(new OperationCanceledException(cancellation.Token));
+        var controller = CreateController(
+            new[] { CreatePasswordValidator(account, "user").Object },
+            _adminBootstrapOptionsMock,
+            callback.Object,
+            new AppRegistrationEntity
+            {
+                Id = Guid.NewGuid(),
+                AppId = "test-app",
+                AppName = "Test App",
+                AppSecretHash = "not-used",
+                CallbackUrl = "https://callback.example.com/claims",
+                IsActive = true
+            });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            controller.GetToken(
+                new TokenRequest
+                {
+                    GrantType = IdentityConstants.GrantTypePassword,
+                    Username = "user",
+                    Password = "password"
+                },
+                cancellation.Token));
+
+        _tokenServiceMock.Verify(service => service.GenerateJwtToken(
+            It.IsAny<List<Claim>>(),
+            It.IsAny<RsaSecurityKey>(),
+            It.IsAny<int>(),
+            It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
     public async Task RefreshTokenRotation_WhenTokenWasAlreadyConsumed_DoesNotIssueAccessToken()
     {
         var account = CreateTestAccount();
@@ -338,7 +408,10 @@ public class TokenControllerTests
         var validatorMock = CreatePasswordValidator(account, "admin");
 
         var callbackMock = new Mock<ICallbackService>();
-        callbackMock.Setup(c => c.FetchExternalClaimsAsync(It.IsAny<string>(), It.IsAny<string>()))
+        callbackMock.Setup(c => c.FetchExternalClaimsAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<Claim> { new(IdentityConstants.ClaimRole, "admin") });
 
         var controller = CreateController(

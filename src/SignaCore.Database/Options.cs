@@ -12,11 +12,11 @@ public class JwtOptions
         {
             throw new InvalidOperationException("TokenExpirationHours must be a positive number");
         }
-        if (string.IsNullOrEmpty(Issuer))
+        if (string.IsNullOrWhiteSpace(Issuer))
         {
             throw new InvalidOperationException("Jwt Issuer cannot be empty");
         }
-        if (string.IsNullOrEmpty(Audience))
+        if (string.IsNullOrWhiteSpace(Audience))
         {
             throw new InvalidOperationException("Jwt Audience cannot be empty");
         }

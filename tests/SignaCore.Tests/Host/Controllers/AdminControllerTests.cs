@@ -11,6 +11,7 @@ using Moq;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
+using SignaCore.Domain;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
@@ -43,6 +44,7 @@ public class AdminControllerTests : IDisposable
     private static readonly Guid AdminId = Guid.NewGuid();
     private const string AdminName = "admin";
     private const string AdminScheme = "Cookies";
+    private static readonly CallbackUrlValidator CallbackValidator = new();
 
     private static readonly JwtOptions TestJwtOptions = new()
     {
@@ -853,7 +855,7 @@ public class AdminControllerTests : IDisposable
         SetAdminUser();
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("", null, 0),
-            _appRegRepoMock.Object, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
 
         Assert.IsType<BadRequestObjectResult>(result);
     }
@@ -866,7 +868,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://cb.example.com", 3600),
-            _appRegRepoMock.Object, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateAppResponse>(ok.Value);
@@ -880,6 +882,32 @@ public class AdminControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateApp_WithInvalidCallback_DoesNotPersistApp()
+    {
+        SetAdminUser();
+
+        var result = await _controller.CreateApp(
+            new AdminCreateAppRequest(
+                "MyApp",
+                "https://user:secret@cb.example.com/claims",
+                3600),
+            _appRegRepoMock.Object,
+            CallbackValidator,
+            _unitOfWorkMock.Object);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Contains(
+            "Invalid callback URL",
+            Assert.IsType<ErrorResponse>(badRequest.Value).Message);
+        _appRegRepoMock.Verify(
+            repository => repository.AddAsync(It.IsAny<AppRegistrationEntity>()),
+            Times.Never);
+        _unitOfWorkMock.Verify(
+            unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task CreateApp_WithNeverExpireTtl_SetsNullExpiry()
     {
         SetAdminUser();
@@ -889,7 +917,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://cb.example.com", IdentityConstants.CallbackTtlNeverExpire),
-            _appRegRepoMock.Object, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateAppResponse>(ok.Value);
@@ -910,7 +938,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "", 0),
-            _appRegRepoMock.Object, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateAppResponse>(ok.Value);
@@ -933,7 +961,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://cb.example.com", -10),
-            _appRegRepoMock.Object, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
 
         Assert.IsType<OkObjectResult>(result);
     }
@@ -950,7 +978,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("missing",
             new AdminUpdateCallbackRequest("https://cb", 3600, true),
-            _appRegRepoMock.Object, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
 
         Assert.IsType<NotFoundObjectResult>(result);
     }
@@ -972,7 +1000,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("", 0, true),
-            _appRegRepoMock.Object, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
@@ -991,12 +1019,41 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://new", 7200, false),
-            _appRegRepoMock.Object, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Equal("https://new", app.CallbackUrl);
         Assert.NotNull(app.CallbackExpiresAt);
         Assert.False(app.IsActive);
+    }
+
+    [Fact]
+    public async Task UpdateCallback_WithInvalidCallback_DoesNotMutateApp()
+    {
+        SetAdminUser();
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "a",
+            AppName = "A",
+            CallbackUrl = "https://old.example.com/claims",
+            IsActive = true
+        };
+        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+
+        var result = await _controller.UpdateCallback(
+            "a",
+            new AdminUpdateCallbackRequest("ftp://cb.example.com/claims", 7200, false),
+            _appRegRepoMock.Object,
+            CallbackValidator,
+            _unitOfWorkMock.Object);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("https://old.example.com/claims", app.CallbackUrl);
+        Assert.True(app.IsActive);
+        _unitOfWorkMock.Verify(
+            unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -1008,7 +1065,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://cb", IdentityConstants.CallbackTtlNeverExpire, true),
-            _appRegRepoMock.Object, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Null(app.CallbackExpiresAt);

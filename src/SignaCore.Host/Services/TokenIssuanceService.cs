@@ -113,7 +113,8 @@ public sealed class TokenIssuanceService
                 metricReason: validationResult.ErrorMessage,
                 responseMessage: validationResult.ErrorMessage,
                 auditFailureReason: validationResult.ErrorMessage,
-                auditUsername: request.Username ?? request.Phone ?? request.Code ?? "unknown");
+                // OTPs and provider authorization codes are credentials, never audit identities.
+                auditUsername: request.Username ?? request.Phone ?? "unknown");
         }
 
         // 在成功分支入口一次性捕获：MemberNotNullWhen 给出的非空流状态在跨越
@@ -151,13 +152,17 @@ public sealed class TokenIssuanceService
             try
             {
                 var externalClaims = await _callbackService.FetchExternalClaimsAsync(
-                    request.App.CallbackUrl!, account.Id.ToString());
+                    request.App.CallbackUrl!, account.Id.ToString(), cancellationToken);
                 if (externalClaims.Count > 0)
                 {
                     _logger.LogInformation(
                         "Fetched {Count} external claims from callback: AppId={AppId}", externalClaims.Count, appId);
                     claims.AddRange(externalClaims);
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {

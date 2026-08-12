@@ -29,7 +29,13 @@ curl --fail http://localhost:5002/.well-known/jwks
 curl --fail http://localhost:5002/metrics
 ```
 
-Issue a token with a test application, confirm `iss=SignaCore` and `aud=SignaCore.Services`, verify its RS256 signature from JWKS, exercise refresh rotation, and confirm migration history in the selected database.
+Issue a token with a test application, confirm `iss` matches the configured HTTPS issuer and
+`aud=SignaCore.Services` (or the application's per-application audience), verify its RS256 signature
+from JWKS, exercise refresh rotation, and confirm migration history in the selected database.
+
+CI runs the full integration project, verifies refresh rotation/replay rejection and digest-only
+storage against the containerized PostgreSQL smoke deployment, blocks high/critical fixed container
+vulnerabilities, uploads an SPDX JSON SBOM, and runs CodeQL for C# and JavaScript/TypeScript.
 
 ## Rename audit
 

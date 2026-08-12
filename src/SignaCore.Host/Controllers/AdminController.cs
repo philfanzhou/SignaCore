@@ -392,11 +392,28 @@ public class AdminController : ControllerBase
     public async Task<IActionResult> CreateApp(
         [FromBody] AdminCreateAppRequest request,
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
-        [FromServices] IUnitOfWork unitOfWork)
+        [FromServices] CallbackUrlValidator callbackUrlValidator,
+        [FromServices] IUnitOfWork unitOfWork,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.AppName))
         {
             return BadRequest(new ErrorResponse("App name cannot be empty."));
+        }
+
+        var callbackUrl = string.IsNullOrWhiteSpace(request.CallbackUrl)
+            ? null
+            : request.CallbackUrl.Trim();
+        if (callbackUrl != null)
+        {
+            var validation = await callbackUrlValidator.ValidateAsync(
+                callbackUrl,
+                cancellationToken);
+            if (!validation.IsValid)
+            {
+                return BadRequest(new ErrorResponse(
+                    $"Invalid callback URL: {validation.ErrorMessage}"));
+            }
         }
 
         var newAppId = Guid.NewGuid().ToString("N");
@@ -408,8 +425,8 @@ public class AdminController : ControllerBase
             AppId = newAppId,
             AppSecretHash = BCrypt.Net.BCrypt.HashPassword(newAppSecret),
             AppName = request.AppName.Trim(),
-            CallbackUrl = string.IsNullOrWhiteSpace(request.CallbackUrl) ? null : request.CallbackUrl.Trim(),
-            CallbackExpiresAt = string.IsNullOrWhiteSpace(request.CallbackUrl)
+            CallbackUrl = callbackUrl,
+            CallbackExpiresAt = callbackUrl == null
                 ? null
                 : (request.TtlSeconds == IdentityConstants.CallbackTtlNeverExpire
                     ? null
@@ -419,7 +436,7 @@ public class AdminController : ControllerBase
         };
 
         await appRegistrationRepository.AddAsync(app);
-        await unitOfWork.SaveChangesAsync();
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new AdminCreateAppResponse(
             app.AppId,
@@ -435,7 +452,9 @@ public class AdminController : ControllerBase
         string appId,
         [FromBody] AdminUpdateCallbackRequest request,
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
-        [FromServices] IUnitOfWork unitOfWork)
+        [FromServices] CallbackUrlValidator callbackUrlValidator,
+        [FromServices] IUnitOfWork unitOfWork,
+        CancellationToken cancellationToken = default)
     {
         var app = await appRegistrationRepository.GetByAppIdAsync(appId);
         if (app == null)
@@ -450,14 +469,24 @@ public class AdminController : ControllerBase
         }
         else
         {
-            app.CallbackUrl = request.CallbackUrl.Trim();
+            var callbackUrl = request.CallbackUrl.Trim();
+            var validation = await callbackUrlValidator.ValidateAsync(
+                callbackUrl,
+                cancellationToken);
+            if (!validation.IsValid)
+            {
+                return BadRequest(new ErrorResponse(
+                    $"Invalid callback URL: {validation.ErrorMessage}"));
+            }
+
+            app.CallbackUrl = callbackUrl;
             app.CallbackExpiresAt = request.TtlSeconds == IdentityConstants.CallbackTtlNeverExpire
                 ? null
                 : DateTimeOffset.UtcNow.AddSeconds(request.TtlSeconds > 0 ? request.TtlSeconds : IdentityConstants.DefaultCallbackTtlSeconds);
         }
 
         app.IsActive = request.IsActive;
-        await unitOfWork.SaveChangesAsync();
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new OperationResponse(true, "Callback configuration updated."));
     }

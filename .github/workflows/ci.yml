@@ -25,13 +25,13 @@ jobs:
     env:
       IMAGE_NAME: signacore:ci
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 20.19
           cache: npm
@@ -47,6 +47,28 @@ jobs:
       - name: Build image
         run: bash build.sh
 
+      # Pin the action commit because scanner distribution channels are part of the threat model.
+      - name: Scan image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}
+          version: v0.73.0
+          format: table
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Generate image SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}
+          version: v0.73.0
+          skip-setup-trivy: true
+          format: spdx-json
+          output: signacore-image.spdx.json
+          scanners: vuln
+
       - name: Unit tests
         run: |
           dotnet restore tests/SignaCore.Tests/SignaCore.Tests.csproj
@@ -56,13 +78,12 @@ jobs:
             --results-directory reports \
             --no-restore
 
-      - name: HTTP endpoint contract tests
+      - name: Integration and HTTP contract tests
         run: |
           dotnet restore tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj
           dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj \
             --configuration Release \
-            --filter 'FullyQualifiedName~IdentityHttpEndpointsTests' \
-            --logger 'trx;logfilename=signacore-http-endpoints.trx' \
+            --logger 'trx;logfilename=signacore-integration.trx' \
             --results-directory reports \
             --no-restore
 
@@ -129,6 +150,8 @@ jobs:
             -e ADMIN_BOOTSTRAP_USERNAME=smoke_admin \
             -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
             -e RSA_MASTER_KEY="${RSA_MASTER_KEY}" \
+            -e Jwt__Issuer=https://signacore.test \
+            -e Endpoints__PublicBaseUrl=https://signacore.test \
             -e CONSUL_HTTP_ADDR=127.0.0.1:8500 \
             -e Consul__Discovery__Register=false \
             -e Consul__Discovery__Deregister=false \
@@ -215,12 +238,16 @@ jobs:
           token = body.get('accessToken') or ''
           if not token:
               sys.exit('response has no accessToken')
+          refresh_token = body.get('refreshToken') or ''
+          if not refresh_token:
+              sys.exit('response has no refreshToken')
           open('/tmp/access_token', 'w').write(token)
+          open('/tmp/refresh_token', 'w').write(refresh_token)
           PY
 
           curl -fsS --max-time 10 http://localhost:5002/.well-known/jwks -o /tmp/jwks.json
           python3 .github/scripts/verify_jwt.py /tmp/access_token /tmp/jwks.json \
-            'SignaCore' 'SignaCore.Services'
+            'https://signacore.test' 'SignaCore.Services'
 
           status="$(curl -sS --max-time 10 -o /tmp/profile.json -w '%{http_code}' \
             -H "Authorization: Bearer $(cat /tmp/access_token)" \
@@ -240,6 +267,48 @@ jobs:
           print('self-consumption OK: MapInboundClaims restored sub as the account identity')
           PY
 
+          status="$(curl -sS --max-time 10 -o /tmp/refreshed.json -w '%{http_code}' \
+            -X POST http://localhost:5002/api/auth/token \
+            -H 'Content-Type: application/json' \
+            -H "X-Admin-AppId: ${APP_ID}" \
+            -H "X-Admin-AppSecret: ${APP_SECRET}" \
+            -d "$(jq -n --rawfile token /tmp/refresh_token \
+              '{grantType:"refresh_token",refreshToken:$token}')")"
+          [ "$status" = '200' ] || { echo "refresh endpoint returned $status"; exit 1; }
+
+          python3 - <<'PY'
+          import json, sys
+          original = open('/tmp/refresh_token').read()
+          body = json.load(open('/tmp/refreshed.json'))
+          if not body.get('success'):
+              sys.exit(f"refresh rotation failed: {body.get('message')}")
+          replacement = body.get('refreshToken') or ''
+          if not replacement or replacement == original:
+              sys.exit('refresh rotation did not issue a distinct replacement')
+          PY
+
+          status="$(curl -sS --max-time 10 -o /tmp/replayed.json -w '%{http_code}' \
+            -X POST http://localhost:5002/api/auth/token \
+            -H 'Content-Type: application/json' \
+            -H "X-Admin-AppId: ${APP_ID}" \
+            -H "X-Admin-AppSecret: ${APP_SECRET}" \
+            -d "$(jq -n --rawfile token /tmp/refresh_token \
+              '{grantType:"refresh_token",refreshToken:$token}')")"
+          [ "$status" = '200' ] || { echo "refresh replay returned $status"; exit 1; }
+          jq -e '.success == false' /tmp/replayed.json >/dev/null \
+            || { echo 'consumed refresh token replay was accepted'; exit 1; }
+
+          unprotected="$(docker exec -e PGPASSWORD="$PG_PASSWORD" signacore-smoke-pg \
+            psql -U postgres -d signacore -tAc \
+            "SELECT count(*) FROM refresh_tokens WHERE token_value NOT LIKE 'sha256:%'")"
+          [ "$unprotected" = '0' ] \
+            || { echo "database contains $unprotected unprotected refresh tokens"; exit 1; }
+          protected="$(docker exec -e PGPASSWORD="$PG_PASSWORD" signacore-smoke-pg \
+            psql -U postgres -d signacore -tAc \
+            "SELECT count(*) FROM refresh_tokens WHERE token_value LIKE 'sha256:%' AND length(token_value) = 71")"
+          [ "$protected" -ge 2 ] \
+            || { echo "expected rotated refresh-token digests, found $protected"; exit 1; }
+
       - name: Dump container logs
         if: failure()
         run: |
@@ -252,10 +321,18 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: unit-test-results
           path: reports/
+          if-no-files-found: ignore
+
+      - name: Upload image SBOM
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: signacore-image-sbom
+          path: signacore-image.spdx.json
           if-no-files-found: ignore
 
   database-contracts:
@@ -267,9 +344,9 @@ jobs:
       RUN_SIGNACORE_DATABASE_CONTRACTS: 'true'
       TESTCONTAINERS_RYUK_DISABLED: 'true'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
 
@@ -297,7 +374,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: database-contract-results
           path: reports/

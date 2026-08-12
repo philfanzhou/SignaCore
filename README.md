@@ -56,13 +56,20 @@ The API listens on the URLs in `src/SignaCore.Host/Properties/launchSettings.jso
 ```bash
 IMAGE_TAG=latest ./build.sh
 ADMIN_BOOTSTRAP_PASSWORD='replace-me' \
+RSA_MASTER_KEY='long-random-secret-from-secret-manager' \
+JWT_ISSUER='https://identity.example.com' \
+PUBLIC_BASE_URL='https://identity.example.com' \
+DATABASE_CONNECTION_STRING='Host=db;Database=signacore;Username=signacore;Password=replace-me' \
 SMS_BYPASS_CODE='' \
 SMS_BYPASS_PHONES='' \
 SMS_OTP_HMAC_KEY='base64-encoded-key' \
 ./start.sh
 ```
 
-The default image is `signacore:latest` and the default container name is `signacore`. Secrets must come from the deployment environment or a secret manager; never commit them.
+The default image is `signacore:latest` and the default container name is `signacore`. The launcher
+resolves the tag to an immutable image ID, waits for `/health`, and restores the previous container if
+the new instance fails. Secrets must come from the deployment environment or a secret manager; never
+commit them.
 
 ## Configuration
 

@@ -20,7 +20,7 @@ public static class PublicOrigin
         var configured = configuration[ConfigurationKey];
         if (!string.IsNullOrWhiteSpace(configured))
         {
-            return configured.TrimEnd('/');
+            return configured.Trim().TrimEnd('/');
         }
 
         // Request.Host already carries the port when it is not the scheme default, and PathBase
@@ -32,19 +32,39 @@ public static class PublicOrigin
     /// Validates the configured value at startup so a typo surfaces on boot rather than in a
     /// downstream client's discovery cache.
     /// </summary>
-    public static void Validate(IConfiguration configuration)
+    public static void Validate(
+        IConfiguration configuration,
+        bool requireHttps = false,
+        bool requireConfiguredOrigin = false)
     {
         var configured = configuration[ConfigurationKey];
         if (string.IsNullOrWhiteSpace(configured))
         {
+            if (requireConfiguredOrigin)
+            {
+                throw new InvalidOperationException(
+                    $"{ConfigurationKey} is required outside the Development environment.");
+            }
+
             return;
         }
 
         if (!Uri.TryCreate(configured, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp) ||
+            string.IsNullOrWhiteSpace(uri.Host) ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment))
         {
             throw new InvalidOperationException(
-                $"{ConfigurationKey} must be an absolute http or https URL.");
+                $"{ConfigurationKey} must be an absolute http or https base URL without " +
+                "user information, query, or fragment.");
+        }
+
+        if (requireHttps && uri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new InvalidOperationException(
+                $"{ConfigurationKey} must use HTTPS outside the Development environment.");
         }
     }
 }

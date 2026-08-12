@@ -7,7 +7,10 @@ namespace SignaCore.Domain;
 
 public interface ICallbackService
 {
-    Task<List<Claim>> FetchExternalClaimsAsync(string callbackUrl, string userId);
+    Task<List<Claim>> FetchExternalClaimsAsync(
+        string callbackUrl,
+        string userId,
+        CancellationToken cancellationToken = default);
 }
 
 public class CallbackService : ICallbackService
@@ -32,12 +35,18 @@ public class CallbackService : ICallbackService
         _urlValidator = urlValidator;
     }
 
-    public async Task<List<Claim>> FetchExternalClaimsAsync(string callbackUrl, string userId)
+    public async Task<List<Claim>> FetchExternalClaimsAsync(
+        string callbackUrl,
+        string userId,
+        CancellationToken cancellationToken = default)
     {
-        var urlValidation = await _urlValidator.ValidateAsync(callbackUrl);
+        var urlValidation = await _urlValidator.ValidateAsync(callbackUrl, cancellationToken);
         if (!urlValidation.IsValid)
         {
-            _logger.LogWarning("Callback URL validation failed: {Url}, Reason={Reason}", callbackUrl, urlValidation.ErrorMessage);
+            _logger.LogWarning(
+                "Callback URL validation failed: {Url}, Reason={Reason}",
+                DescribeForLog(callbackUrl),
+                urlValidation.ErrorMessage);
             return new List<Claim>();
         }
 
@@ -47,15 +56,22 @@ public class CallbackService : ICallbackService
             client.Timeout = TimeSpan.FromSeconds(TimeoutSeconds);
 
             var requestBody = new { user_id = userId };
-            var response = await client.PostAsJsonAsync(callbackUrl, requestBody);
+            using var response = await client.PostAsJsonAsync(
+                callbackUrl,
+                requestBody,
+                cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Callback request failed: {Url}, StatusCode: {StatusCode}", callbackUrl, response.StatusCode);
+                _logger.LogWarning(
+                    "Callback request failed: {Url}, StatusCode: {StatusCode}",
+                    DescribeForLog(callbackUrl),
+                    response.StatusCode);
                 return new List<Claim>();
             }
 
-            var result = await response.Content.ReadFromJsonAsync<CallbackResponse>();
+            var result = await response.Content.ReadFromJsonAsync<CallbackResponse>(
+                cancellationToken);
             if (result == null)
             {
                 return new List<Claim>();
@@ -113,19 +129,36 @@ public class CallbackService : ICallbackService
                 }
             }
 
-            _logger.LogInformation("Successfully retrieved {Count} extended claims from {Url}", claims.Count, callbackUrl);
+            _logger.LogInformation(
+                "Successfully retrieved {Count} extended claims from {Url}",
+                claims.Count,
+                DescribeForLog(callbackUrl));
             return claims;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (TaskCanceledException)
         {
-            _logger.LogWarning("Callback request timed out: {Url}", callbackUrl);
+            _logger.LogWarning("Callback request timed out: {Url}", DescribeForLog(callbackUrl));
             return new List<Claim>();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Callback request exception: {Url}", callbackUrl);
+            _logger.LogError(ex, "Callback request exception: {Url}", DescribeForLog(callbackUrl));
             return new List<Claim>();
         }
+    }
+
+    internal static string DescribeForLog(string callbackUrl)
+    {
+        if (!Uri.TryCreate(callbackUrl, UriKind.Absolute, out var uri))
+        {
+            return "<invalid>";
+        }
+
+        return $"{uri.Scheme}://{uri.Authority}";
     }
 }
 

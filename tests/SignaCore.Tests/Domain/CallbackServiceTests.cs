@@ -168,6 +168,37 @@ public class CallbackServiceTests
         Assert.Contains(claims, c => c.Value == "admin");
         Assert.Contains(claims, c => c.Value == "user");
     }
+
+    [Fact]
+    public async Task FetchExternalClaimsAsync_WhenCallerCancels_PropagatesCancellation()
+    {
+        var handler = new MockHttpMessageHandler("{}", HttpStatusCode.OK);
+        using var httpClient = new HttpClient(handler);
+        var service = new CallbackService(
+            new TestHttpClientFactory(httpClient),
+            CreateLogger(),
+            _validator);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            service.FetchExternalClaimsAsync(
+                "https://example.com/callback",
+                "user123",
+                cancellation.Token));
+    }
+
+    [Theory]
+    [InlineData(
+        "https://callback.example.com/secret/token?access_token=sensitive#fragment",
+        "https://callback.example.com")]
+    [InlineData("not-a-url", "<invalid>")]
+    public void DescribeForLog_DoesNotExposePathQueryOrFragment(
+        string callbackUrl,
+        string expected)
+    {
+        Assert.Equal(expected, CallbackService.DescribeForLog(callbackUrl));
+    }
 }
 
 public class MockHttpMessageHandler : HttpMessageHandler

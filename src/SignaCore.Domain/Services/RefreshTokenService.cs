@@ -39,10 +39,10 @@ public class RefreshTokenService : IRefreshTokenService
 
         if (grantType == IdentityConstants.GrantTypeRefreshToken && !string.IsNullOrEmpty(existingRefreshToken))
         {
-            var replacement = CreateRefreshToken(
+            var (rawToken, replacement) = CreateRefreshToken(
                 account, RequireAppId(appId), ldapCredentialId, smsUserLoginId, wechatUserLoginId);
             return await _refreshTokenRepository.TryRotateAsync(existingRefreshToken, replacement)
-                ? replacement.TokenValue
+                ? rawToken
                 : null;
         }
 
@@ -71,24 +71,26 @@ public class RefreshTokenService : IRefreshTokenService
         Guid? smsUserLoginId,
         Guid? wechatUserLoginId)
     {
-        var refreshToken = CreateRefreshToken(account, appId, ldapCredentialId, smsUserLoginId, wechatUserLoginId);
+        var (rawToken, refreshToken) = CreateRefreshToken(
+            account, appId, ldapCredentialId, smsUserLoginId, wechatUserLoginId);
         await _refreshTokenRepository.AddAsync(refreshToken);
         await _unitOfWork.SaveChangesAsync();
-        return refreshToken.TokenValue;
+        return rawToken;
     }
 
-    private RefreshTokenEntity CreateRefreshToken(
+    private (string RawToken, RefreshTokenEntity Entity) CreateRefreshToken(
         AccountEntity account,
         string appId,
         Guid? ldapCredentialId,
         Guid? smsUserLoginId,
         Guid? wechatUserLoginId)
     {
-        return new RefreshTokenEntity
+        var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+        return (rawToken, new RefreshTokenEntity
         {
             Id = Guid.NewGuid(),
             AccountId = account.Id,
-            TokenValue = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
+            TokenValue = RefreshTokenDigest.Compute(rawToken),
             CreatedAt = DateTimeOffset.UtcNow,
             ExpiresAt = DateTimeOffset.UtcNow.AddDays(_refreshTokenOptions.RefreshTokenExpirationDays),
             IsRevoked = false,
@@ -96,6 +98,6 @@ public class RefreshTokenService : IRefreshTokenService
             LdapCredentialId = ldapCredentialId,
             SmsUserLoginId = smsUserLoginId,
             WechatUserLoginId = wechatUserLoginId
-        };
+        });
     }
 }

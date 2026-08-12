@@ -34,6 +34,7 @@ internal static class DatabaseInitializer
                 await DatabaseProvisioner.AcquireMigrationLockAsync(databaseOptions);
 
             await MigrateAsync(db, databaseOptions, logger);
+            await ProtectLegacyRefreshTokensAsync(db, logger);
             await EnsureBootstrapAdminAsync(scope.ServiceProvider, db, logger);
             await SeedBootstrapAppsAsync(configuration, db, logger);
         }
@@ -41,6 +42,44 @@ internal static class DatabaseInitializer
         {
             logger.LogError(exception, "Database initialization failed");
             throw;
+        }
+    }
+
+    internal static async Task ProtectLegacyRefreshTokensAsync(
+        IdentityDbContext db,
+        ILogger logger)
+    {
+        const int batchSize = 500;
+        var protectedCount = 0;
+        while (true)
+        {
+            var legacyTokens = await db.RefreshTokens
+                .Where(token =>
+                    !token.TokenValue.StartsWith(RefreshTokenDigest.Prefix) ||
+                    token.TokenValue.Length != RefreshTokenDigest.EncodedLength)
+                .OrderBy(token => token.Id)
+                .Take(batchSize)
+                .ToListAsync();
+            if (legacyTokens.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var token in legacyTokens)
+            {
+                token.TokenValue = RefreshTokenDigest.Compute(token.TokenValue);
+            }
+
+            await db.SaveChangesAsync();
+            protectedCount += legacyTokens.Count;
+            db.ChangeTracker.Clear();
+        }
+
+        if (protectedCount > 0)
+        {
+            logger.LogInformation(
+                "Protected {Count} legacy refresh tokens with one-way digests.",
+                protectedCount);
         }
     }
 

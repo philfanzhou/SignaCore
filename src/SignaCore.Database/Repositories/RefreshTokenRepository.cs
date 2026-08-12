@@ -15,20 +15,23 @@ public class RefreshTokenRepository : IRefreshTokenRepository
 
     public async Task<RefreshTokenEntity?> GetByTokenValueAsync(string tokenValue)
     {
+        var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
         return await _dbContext.RefreshTokens
-            .FirstOrDefaultAsync(r => r.TokenValue == tokenValue);
+            .FirstOrDefaultAsync(r => r.TokenValue == tokenDigest);
     }
 
     public Task AddAsync(RefreshTokenEntity refreshToken)
     {
+        refreshToken.TokenValue = RefreshTokenDigest.EnsureDigest(refreshToken.TokenValue);
         _dbContext.RefreshTokens.Add(refreshToken);
         return Task.CompletedTask;
     }
 
     public async Task<bool> TryRevokeAsync(string tokenValue)
     {
+        var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
         var affectedRows = await _dbContext.RefreshTokens
-            .Where(token => token.TokenValue == tokenValue && !token.IsRevoked)
+            .Where(token => token.TokenValue == tokenDigest && !token.IsRevoked)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(token => token.IsRevoked, true));
         return affectedRows == 1;
@@ -41,8 +44,9 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     /// </summary>
     public async Task<bool> TryRevokeForAppAsync(string tokenValue, string appId)
     {
+        var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
         var affectedRows = await _dbContext.RefreshTokens
-            .Where(token => token.TokenValue == tokenValue
+            .Where(token => token.TokenValue == tokenDigest
                 && !token.IsRevoked
                 && token.AppId == appId)
             .ExecuteUpdateAsync(setters => setters
@@ -66,6 +70,8 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     /// </summary>
     public async Task<bool> TryRotateAsync(string tokenValue, RefreshTokenEntity replacement)
     {
+        var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
+        replacement.TokenValue = RefreshTokenDigest.EnsureDigest(replacement.TokenValue);
         var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
         return await executionStrategy.ExecuteAsync(async () =>
         {
@@ -74,7 +80,7 @@ public class RefreshTokenRepository : IRefreshTokenRepository
             // 并发语义靠这条条件更新 + 事务持锁：两个请求同时旋转同一个 token 时，
             // 后到的那个会阻塞在行锁上，等前一个提交后重新求值 is_revoked，命中 0 行返回 false。
             var affectedRows = await _dbContext.RefreshTokens
-                .Where(token => token.TokenValue == tokenValue && !token.IsRevoked)
+                .Where(token => token.TokenValue == tokenDigest && !token.IsRevoked)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(token => token.IsRevoked, true));
 

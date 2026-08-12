@@ -116,6 +116,18 @@ public class DiscoveryDocumentTests
         Assert.Equal("https://id.example.com", origin);
     }
 
+    [Fact]
+    public void Resolve_TrimsConfiguredPublicBaseUrlWhitespace()
+    {
+        var request = new DefaultHttpContext().Request;
+
+        var origin = PublicOrigin.Resolve(
+            request,
+            Configuration((PublicOrigin.ConfigurationKey, "  https://id.example.com/  ")));
+
+        Assert.Equal("https://id.example.com", origin);
+    }
+
     /// <summary>转发头不被隐式信任：伪造 X-Forwarded-Host 不能把客户端引到别处的 JWKS。</summary>
     [Fact]
     public void Resolve_IgnoresForwardedHeadersThatWereNotProcessedByTheHost()
@@ -131,7 +143,10 @@ public class DiscoveryDocumentTests
     [Theory]
     [InlineData("not-a-url")]
     [InlineData("ftp://id.example.com")]
-    public void Validate_RejectsANonHttpPublicBaseUrl(string value)
+    [InlineData("https://user:secret@id.example.com")]
+    [InlineData("https://id.example.com?tenant=one")]
+    [InlineData("https://id.example.com#metadata")]
+    public void Validate_RejectsInvalidPublicBaseUrl(string value)
     {
         var exception = Assert.Throws<InvalidOperationException>(
             () => PublicOrigin.Validate(Configuration((PublicOrigin.ConfigurationKey, value))));
@@ -143,6 +158,39 @@ public class DiscoveryDocumentTests
     public void Validate_AcceptsAnAbsentPublicBaseUrl()
     {
         PublicOrigin.Validate(Configuration());
+    }
+
+    [Fact]
+    public void Validate_InProduction_RequiresConfiguredPublicBaseUrl()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            PublicOrigin.Validate(
+                Configuration(),
+                requireHttps: true,
+                requireConfiguredOrigin: true));
+
+        Assert.Contains("is required", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_InProduction_RequiresHttpsPublicBaseUrl()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            PublicOrigin.Validate(
+                Configuration((PublicOrigin.ConfigurationKey, "http://id.example.com")),
+                requireHttps: true,
+                requireConfiguredOrigin: true));
+
+        Assert.Contains("must use HTTPS", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_InProduction_AcceptsCanonicalHttpsPublicBaseUrl()
+    {
+        PublicOrigin.Validate(
+            Configuration((PublicOrigin.ConfigurationKey, "https://id.example.com/identity")),
+            requireHttps: true,
+            requireConfiguredOrigin: true);
     }
 
     private static IConfiguration Configuration(params (string Key, string Value)[] values) =>
