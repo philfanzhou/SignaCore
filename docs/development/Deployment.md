@@ -8,6 +8,32 @@ IMAGE_TAG=latest ./build.sh
 
 This produces `signacore:latest` from `src/SignaCore.Host/Dockerfile`. The image builds the Vue admin application, restores and publishes `SignaCore.Host`, runs as the non-root `app` user, exposes port 5002, and starts `SignaCore.Host.dll`.
 
+## Releasing
+
+Releases are driven entirely by pushing a tag. Nothing is published by hand.
+
+```bash
+git tag -a 0.1.4 -m "SignaCore 0.1.4"
+git push origin 0.1.4
+```
+
+The tag must be numeric `MAJOR.MINOR.PATCH`; CI rejects anything else. Pushing it runs the full
+pipeline — build, unit tests, integration and HTTP contract tests, the image vulnerability scan, the
+containerised first-run and smoke assertions, and the database contract matrix — and only if all of
+it passes does the release happen, in two steps:
+
+1. **Publish GHCR Image** builds and pushes `ghcr.io/philfanzhou/signacore`, tagged with the exact
+   version, the `MAJOR.MINOR` line, and `latest`, with provenance and an SBOM attached.
+2. **Publish GitHub Release** creates the release for the tag, quoting the digest that was actually
+   published and appending GitHub's generated changelog.
+
+Because the release job runs last, a release only ever exists for a tag whose tests passed and whose
+image is pullable. A tag whose pipeline fails publishes neither; fix the cause, then tag a new
+version rather than moving the failed tag.
+
+Re-running the workflow for a tag that already has a release leaves that release untouched, so notes
+edited afterwards are never overwritten.
+
 ## Prepare persistent bootstrap storage
 
 The launcher no longer carries application secrets. Everything except the database connection and the

@@ -488,6 +488,8 @@ jobs:
       packages: write
     env:
       REGISTRY_IMAGE: ghcr.io/philfanzhou/signacore
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -541,4 +543,58 @@ jobs:
             echo
             echo "- Image: \`${REGISTRY_IMAGE}:${GITHUB_REF_NAME}\`"
             echo "- Digest: \`${{ steps.push.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Runs last so a release only ever exists for a tag whose tests passed and whose image is
+  # actually pullable, and so the notes can quote the digest that was really published.
+  publish-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [publish-container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      REGISTRY_IMAGE: ghcr.io/philfanzhou/signacore
+      IMAGE_DIGEST: ${{ needs.publish-container.outputs.digest }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Publish the release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Re-running the workflow for a tag must not rewrite notes someone has since edited by
+          # hand, so an existing release is left exactly as it is.
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists; leaving it untouched."
+            echo "Release \`${GITHUB_REF_NAME}\` already existed and was left untouched." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          minor="${GITHUB_REF_NAME%.*}"
+
+          # printf keeps the Markdown backticks literal; a heredoc would need them escaped.
+          {
+            printf '## Container image\n\n'
+            printf '```\n%s:%s\n```\n\n' "${REGISTRY_IMAGE}" "${GITHUB_REF_NAME}"
+            printf 'Digest: `%s`\n\n' "${IMAGE_DIGEST}"
+            printf 'Also tagged `%s` and `latest`.\n' "${minor}"
+          } > release-notes.md
+
+          # --generate-notes appends GitHub's commit and pull-request changelog underneath.
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "SignaCore ${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            --generate-notes \
+            --verify-tag \
+            --latest
+
+          {
+            echo "### Published release"
+            echo
+            echo "- <${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}>"
           } >> "$GITHUB_STEP_SUMMARY"
