@@ -111,6 +111,33 @@ internal sealed class InstallationSetupService
             return new SetupResult(SetupOutcome.InvalidRequest, string.Join(" ", snapshotErrors));
         }
 
+        // The explicit transaction has to run inside CreateExecutionStrategy(): PostgreSQL, MySQL and
+        // MariaDB enable EnableRetryOnFailure(), and a retrying strategy refuses to execute commands
+        // inside a caller-opened transaction — the first command throws
+        // "does not support user-initiated transactions" and setup fails. SQLite has no retry
+        // configured, so its strategy runs the lambda exactly once and behaves as before.
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+            await CompleteInTransactionAsync(
+                request, clientIp, publicBaseUrl, username, values, cancellationToken));
+    }
+
+    /// <summary>
+    /// The transactional half of <see cref="CompleteAsync"/>, written so a retrying execution
+    /// strategy can replay it whole: every entity it tracks is created inside, and the change
+    /// tracker is reset up front so a rolled-back attempt cannot leak pending inserts into the next
+    /// one.
+    /// </summary>
+    private async Task<SetupResult> CompleteInTransactionAsync(
+        SetupRequest request,
+        string? clientIp,
+        string publicBaseUrl,
+        string username,
+        Dictionary<string, string> values,
+        CancellationToken cancellationToken)
+    {
+        _db.ChangeTracker.Clear();
+
         await using var transaction = await _db.Database.BeginTransactionAsync(
             IsolationLevel.Serializable,
             cancellationToken);

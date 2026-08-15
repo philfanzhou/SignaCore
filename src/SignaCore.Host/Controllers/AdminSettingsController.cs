@@ -116,71 +116,33 @@ public sealed class AdminSettingsController : ControllerBase
                 $"These keys are not database-backed settings: {string.Join(", ", unknown)}."));
         }
 
-        await using var transaction = await _db.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
-            cancellationToken);
+        // The explicit transaction has to run inside CreateExecutionStrategy(): PostgreSQL, MySQL and
+        // MariaDB enable EnableRetryOnFailure(), and a retrying strategy refuses to execute commands
+        // inside a caller-opened transaction. The lambda is replayed as a unit, so it re-reads the
+        // snapshot on every attempt and starts from a cleared change tracker.
+        var strategy = _db.Database.CreateExecutionStrategy();
+        var outcome = await strategy.ExecuteAsync(ApplyAsync);
 
-        var state = await InstallationStateLock.LoadLockedAsync(_db, _databaseOptions, cancellationToken);
-        if (state is null)
+        if (outcome.Error is not null)
         {
-            return Conflict(new ErrorResponse("Installation state is missing."));
+            return outcome.IsConflict
+                ? Conflict(new ErrorResponse(outcome.Error))
+                : BadRequest(new ErrorResponse(outcome.Error));
         }
 
-        var current = await _settingsStore.LoadAsync(_db, state.ConfigurationVersion, cancellationToken);
-
-        // Merge onto the full current snapshot: a settings change is still validated as one snapshot,
-        // so a value that only becomes invalid in combination with an untouched one is rejected here
-        // rather than at the next startup.
-        var proposed = SystemSettingsCatalog.BuildDefaults();
-        foreach (var (key, value) in current.Values)
-        {
-            proposed[key] = value;
-        }
-
-        var changedKeys = new List<string>();
-        foreach (var (key, value) in request.Values)
-        {
-            var normalized = value ?? string.Empty;
-            if (proposed.TryGetValue(key, out var existing) &&
-                string.Equals(existing, normalized, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            proposed[key] = normalized;
-            changedKeys.Add(key);
-        }
-
-        if (changedKeys.Count == 0)
+        if (outcome.ChangedKeys.Count == 0)
         {
             return Ok(new UpdateSettingsResponse
             {
-                ConfigurationVersion = state.ConfigurationVersion,
+                ConfigurationVersion = outcome.ConfigurationVersion,
                 ChangedKeys = [],
                 RestartRequired = false,
                 Message = "No settings changed."
             });
         }
 
-        var errors = SettingsSnapshotValidator.Validate(proposed);
-        if (errors.Count > 0)
-        {
-            return BadRequest(new ErrorResponse(string.Join(" ", errors)));
-        }
-
-        var configurationVersion = state.ConfigurationVersion + 1;
-        await _settingsStore.WriteAsync(
-            _db,
-            proposed.Where(pair => changedKeys.Contains(pair.Key, StringComparer.OrdinalIgnoreCase))
-                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase),
-            configurationVersion,
-            User.Identity?.Name,
-            cancellationToken);
-
-        state.ConfigurationVersion = configurationVersion;
-        _db.InstallationStates.Update(state);
-        await _db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        var configurationVersion = outcome.ConfigurationVersion;
+        var changedKeys = outcome.ChangedKeys;
 
         var actorId = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : (Guid?)null;
         // Keys only. Recording old or new values here would put secrets into the audit trail.
@@ -209,5 +171,92 @@ public sealed class AdminSettingsController : ControllerBase
                 "Settings saved. Restart every SignaCore instance to activate them; with multiple " +
                 "instances, use a rolling restart."
         });
+
+        async Task<SettingsUpdateOutcome> ApplyAsync()
+        {
+            _db.ChangeTracker.Clear();
+
+            await using var transaction = await _db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
+            var state = await InstallationStateLock.LoadLockedAsync(_db, _databaseOptions, cancellationToken);
+            if (state is null)
+            {
+                return SettingsUpdateOutcome.Failed("Installation state is missing.", isConflict: true);
+            }
+
+            var current = await _settingsStore.LoadAsync(_db, state.ConfigurationVersion, cancellationToken);
+
+            // Merge onto the full current snapshot: a settings change is still validated as one
+            // snapshot, so a value that only becomes invalid in combination with an untouched one is
+            // rejected here rather than at the next startup.
+            var proposed = SystemSettingsCatalog.BuildDefaults();
+            foreach (var (key, value) in current.Values)
+            {
+                proposed[key] = value;
+            }
+
+            var pendingKeys = new List<string>();
+            foreach (var (key, value) in request.Values)
+            {
+                var normalized = value ?? string.Empty;
+                if (proposed.TryGetValue(key, out var existing) &&
+                    string.Equals(existing, normalized, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                proposed[key] = normalized;
+                pendingKeys.Add(key);
+            }
+
+            if (pendingKeys.Count == 0)
+            {
+                return SettingsUpdateOutcome.Unchanged(state.ConfigurationVersion);
+            }
+
+            var errors = SettingsSnapshotValidator.Validate(proposed);
+            if (errors.Count > 0)
+            {
+                return SettingsUpdateOutcome.Failed(string.Join(" ", errors), isConflict: false);
+            }
+
+            var nextVersion = state.ConfigurationVersion + 1;
+            await _settingsStore.WriteAsync(
+                _db,
+                proposed.Where(pair => pendingKeys.Contains(pair.Key, StringComparer.OrdinalIgnoreCase))
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase),
+                nextVersion,
+                User.Identity?.Name,
+                cancellationToken);
+
+            state.ConfigurationVersion = nextVersion;
+            _db.InstallationStates.Update(state);
+            await _db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            return SettingsUpdateOutcome.Applied(nextVersion, pendingKeys);
+        }
+    }
+
+    /// <summary>
+    /// What the retriable transaction decided, kept separate from the HTTP result so the audit entry
+    /// and the response are written once after it commits rather than on every replayed attempt.
+    /// </summary>
+    private sealed record SettingsUpdateOutcome(
+        string? Error,
+        bool IsConflict,
+        int ConfigurationVersion,
+        List<string> ChangedKeys)
+    {
+        public static SettingsUpdateOutcome Failed(string error, bool isConflict) =>
+            new(error, isConflict, 0, []);
+
+        public static SettingsUpdateOutcome Unchanged(int configurationVersion) =>
+            new(null, false, configurationVersion, []);
+
+        public static SettingsUpdateOutcome Applied(int configurationVersion, List<string> changedKeys) =>
+            new(null, false, configurationVersion, changedKeys);
     }
 }

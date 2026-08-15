@@ -75,41 +75,55 @@ internal static class LegacyConfigurationImporter
 
         SettingsSnapshotValidator.ThrowIfInvalid(values);
 
-        await using var transaction = await db.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
-            cancellationToken);
-
         const int configurationVersion = 1;
-        await settingsStore.WriteAsync(db, values, configurationVersion, "legacy-import", cancellationToken);
 
-        var now = DateTimeOffset.UtcNow;
-        var state = new InstallationStateEntity
+        // The explicit transaction has to run inside CreateExecutionStrategy(): PostgreSQL, MySQL and
+        // MariaDB enable EnableRetryOnFailure(), and a retrying strategy refuses to execute commands
+        // inside a caller-opened transaction. Everything the lambda tracks is built inside it, and it
+        // starts from a cleared change tracker, so a retried attempt cannot insert the state row or
+        // the audit entry twice.
+        var strategy = db.Database.CreateExecutionStrategy();
+        var state = await strategy.ExecuteAsync(async () =>
         {
-            Id = InstallationStateEntity.SingletonId,
-            Status = InstallationStatus.Completed,
-            InstallationId = Guid.NewGuid(),
-            SetupCodeHash = null,
-            SetupCodeExpiresAt = null,
-            CompletedAt = now,
-            ConfigurationVersion = configurationVersion
-        };
-        db.InstallationStates.Add(state);
+            db.ChangeTracker.Clear();
 
-        db.AuditLogs.Add(new AuditLogEntity
-        {
-            Id = Guid.NewGuid(),
-            Action = "installation.legacy_import.completed",
-            TargetType = "Installation",
-            TargetId = state.InstallationId.ToString(),
-            ActorName = "legacy-import",
-            Description =
-                $"Imported {imported.Count} legacy settings into system_settings. " +
-                $"ConfigurationVersion={configurationVersion}.",
-            CreatedAt = now
+            await using var transaction = await db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
+            await settingsStore.WriteAsync(db, values, configurationVersion, "legacy-import", cancellationToken);
+
+            var now = DateTimeOffset.UtcNow;
+            var installationState = new InstallationStateEntity
+            {
+                Id = InstallationStateEntity.SingletonId,
+                Status = InstallationStatus.Completed,
+                InstallationId = Guid.NewGuid(),
+                SetupCodeHash = null,
+                SetupCodeExpiresAt = null,
+                CompletedAt = now,
+                ConfigurationVersion = configurationVersion
+            };
+            db.InstallationStates.Add(installationState);
+
+            db.AuditLogs.Add(new AuditLogEntity
+            {
+                Id = Guid.NewGuid(),
+                Action = "installation.legacy_import.completed",
+                TargetType = "Installation",
+                TargetId = installationState.InstallationId.ToString(),
+                ActorName = "legacy-import",
+                Description =
+                    $"Imported {imported.Count} legacy settings into system_settings. " +
+                    $"ConfigurationVersion={configurationVersion}.",
+                CreatedAt = now
+            });
+
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return installationState;
         });
 
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
         db.ChangeTracker.Clear();
 
         logger.LogInformation(
