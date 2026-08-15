@@ -82,7 +82,8 @@ internal static class SetupModeHost
             };
         });
 
-        services.AddControllers();
+        services.AddControllers(options =>
+            options.Conventions.Add(new SetupModeControllerConvention()));
     }
 
     public static void ConfigurePipeline(WebApplication app, int httpPort)

@@ -111,6 +111,26 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// The verbs the endpoints actually declare, which is what a real client sends. A GET reaches
+    /// the gate only because it matches no action; a POST resolves the endpoint and would drag its
+    /// <c>[Authorize]</c> metadata into a Setup Mode that registers no policies.
+    /// </summary>
+    [Theory]
+    [InlineData("/api/auth/token")]
+    [InlineData("/oauth2/token")]
+    [InlineData("/api/admin/session/login")]
+    public async Task NormalApis_WhilePending_ReturnInstallationRequiredForTheirOwnVerb(string path)
+    {
+        using var http = await StartSetupModeHostAsync();
+
+        var response = await http.PostAsJsonAsync(path, new { grantType = "password" });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("installation_required", body.GetProperty("error").GetString());
+    }
+
+    /// <summary>
     /// Liveness has to be true so a launcher can wait for the setup page; readiness has to be false
     /// so a load balancer never routes authentication traffic here.
     /// </summary>
