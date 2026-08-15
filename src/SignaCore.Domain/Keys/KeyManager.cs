@@ -31,10 +31,7 @@ internal enum KeyGenerationReason
     Initial,
 
     /// <summary>到期轮换。</summary>
-    Rotation,
-
-    /// <summary>主密钥丢失导致存量密文无法解密，强制重建。</summary>
-    MasterKeyLost
+    Rotation
 }
 
 /// <summary>
@@ -313,20 +310,14 @@ public class KeyManager : IKeyManager
         catch (CryptographicException ex)
         {
             _logger.LogError(ex,
-                "Failed to decrypt RSA key from database. Master key may have been lost. Re-encrypting with new key pair. " +
-                "All previously issued JWTs are now invalid; operations team must audit master key provenance.");
+                "Failed to decrypt the stored RSA signing key. Startup is failing closed; no key " +
+                "was deactivated, generated, or replaced.");
 
-            // 与 RotateKeyAsync 用同一套停用方式，维持"库里有且只有一条 IsActive"的不变量：
-            // 单条 keyEntity.IsActive = false 既漏掉历史僵尸行，其独立的 SaveChanges 也会在
-            // 后续生成失败时留下"零个活跃密钥"的中间态。
-            await keyRepo.DeactivateAllActiveAsync();
-            var newKey = await GenerateAndSaveKeyAsync(keyRepo, unitOfWork, KeyGenerationReason.MasterKeyLost);
-            SetCurrentKey(newKey);
-
-            _logger.LogWarning("RSA key re-encrypted after master key loss. All clients must re-authenticate.");
-
-            var freshEntity = await keyRepo.GetActiveKeyAsync();
-            return LoadKeyFromEntity(freshEntity!);
+            throw new CryptographicException(
+                "The stored RSA signing key could not be decrypted with the configured master key. " +
+                "Restore the bootstrap file that belongs to this database. Replacing the key " +
+                "without rewrapping protected data is not supported.",
+                ex);
         }
     }
 

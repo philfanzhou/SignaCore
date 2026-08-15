@@ -2,7 +2,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using SignaCore.Database;
 using SignaCore.Domain;
+using SignaCore.Domain.Keys;
 using SignaCore.Host;
 using Xunit;
 
@@ -59,10 +61,6 @@ public class CallbackUrlValidatorRegistrationTests
     {
         var values = new Dictionary<string, string?>
         {
-            ["Database:Provider"] = "PostgreSQL",
-            ["Database:ServerVersion"] = "15",
-            ["Database:ConnectionString"] =
-                "Host=localhost;Database=identity;Username=postgres;Password=test",
             ["Jwt:Issuer"] = "https://identity.example.test"
         };
 
@@ -85,7 +83,14 @@ public class CallbackUrlValidatorRegistrationTests
         services.AddLogging();
         services.AddIdentityInfrastructure(
             configuration,
-            new StubHostEnvironment { EnvironmentName = environmentName });
+            new StubHostEnvironment { EnvironmentName = environmentName },
+            new DatabaseOptions
+            {
+                Provider = "PostgreSQL",
+                ServerVersion = "15",
+                ConnectionString = "Host=localhost;Database=identity;Username=postgres;Password=test"
+            },
+            new BootstrapMasterKeyProvider("callback-validator-registration-tests-root-secret"));
 
         return services.BuildServiceProvider().GetRequiredService<CallbackUrlValidator>();
     }

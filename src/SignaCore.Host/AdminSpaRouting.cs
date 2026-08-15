@@ -23,7 +23,7 @@ namespace SignaCore.Host;
 public static class AdminSpaRouting
 {
     private static readonly string[] NonSpaPrefixes =
-        ["/api", "/oauth2", "/consul", "/.well-known", "/health", "/metrics"];
+        ["/api", "/oauth2", "/.well-known", "/health", "/metrics"];
 
     public static bool ShouldServeSpa(HttpContext context, int httpPort)
     {

@@ -37,7 +37,7 @@ public class AdminController : ControllerBase
     public async Task<IActionResult> Login(
         [FromBody] AdminLoginRequest request,
         [FromServices] ValidatorFactory validatorFactory,
-        [FromServices] IOptions<AdminBootstrapOptions> bootstrapOptions,
+        [FromServices] AdminIdentityOptions adminIdentity,
         [FromServices] IAuditService auditService)
     {
         if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
@@ -63,7 +63,7 @@ public class AdminController : ControllerBase
         }
 
         var username = result.DisplayName ?? request.Username.Trim();
-        var configuredAdmin = bootstrapOptions.Value.Username?.Trim();
+        var configuredAdmin = adminIdentity.Username.Trim();
         if (string.IsNullOrWhiteSpace(configuredAdmin)
             || !string.Equals(username, configuredAdmin, StringComparison.OrdinalIgnoreCase))
         {

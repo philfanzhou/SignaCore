@@ -25,10 +25,23 @@ The host composes `SignaCore.Domain`, `SignaCore.Database`, and the provider-spe
 - Add unit coverage for policy changes and integration/contract coverage for HTTP or provider behavior.
 - Update English documentation whenever behavior or configuration changes.
 
+## Configuration
+
+Global application configuration lives in the business database (`system_settings`) and is managed
+through first-run setup and the authenticated administration pages. Only the database
+provider/version/connection and the inline external root key live outside it, in the writable,
+protected bootstrap file at `<application-base>/config/signacore.bootstrap.json`. The file is
+created or replaced atomically by protected UI workflows. A new database-backed setting is added
+to the catalog in `SignaCore.Host/Configuration/SystemSettingsCatalog.cs`, with a safe product
+default and an explicit secret flag; it is not added to `appsettings.json`. Consul KV is not a
+configuration source.
+
 ## Persistence
 
 PostgreSQL migrations are in `SignaCore.Database`; MySQL/MariaDB migrations are in `SignaCore.Database.Migrations.MySql`; SQLite migrations are in `SignaCore.Database.Migrations.Sqlite`. A schema change must account for all three migration histories.
 
 ## Deployment identifiers
 
-The canonical product is `SignaCore`; the local image and container are `signacore`; the Consul prefix is `config/signacore`; the default JWT issuer is `SignaCore`; and the default audience is `SignaCore.Services`.
+The canonical product is `SignaCore`; the local image and container are `signacore`; the Consul
+service name for optional discovery is `SignaCore`; the JWT issuer is the canonical public base URL
+collected by first-run setup; and the default audience is `SignaCore.Services`.

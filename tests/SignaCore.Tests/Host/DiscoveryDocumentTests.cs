@@ -140,58 +140,10 @@ public class DiscoveryDocumentTests
         Assert.Equal("http://id.example.com", PublicOrigin.Resolve(context.Request, Configuration()));
     }
 
-    [Theory]
-    [InlineData("not-a-url")]
-    [InlineData("ftp://id.example.com")]
-    [InlineData("https://user:secret@id.example.com")]
-    [InlineData("https://id.example.com?tenant=one")]
-    [InlineData("https://id.example.com#metadata")]
-    public void Validate_RejectsInvalidPublicBaseUrl(string value)
-    {
-        var exception = Assert.Throws<InvalidOperationException>(
-            () => PublicOrigin.Validate(Configuration((PublicOrigin.ConfigurationKey, value))));
-
-        Assert.Contains(PublicOrigin.ConfigurationKey, exception.Message);
-    }
-
-    [Fact]
-    public void Validate_AcceptsAnAbsentPublicBaseUrl()
-    {
-        PublicOrigin.Validate(Configuration());
-    }
-
-    [Fact]
-    public void Validate_InProduction_RequiresConfiguredPublicBaseUrl()
-    {
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            PublicOrigin.Validate(
-                Configuration(),
-                requireHttps: true,
-                requireConfiguredOrigin: true));
-
-        Assert.Contains("is required", exception.Message);
-    }
-
-    [Fact]
-    public void Validate_InProduction_RequiresHttpsPublicBaseUrl()
-    {
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            PublicOrigin.Validate(
-                Configuration((PublicOrigin.ConfigurationKey, "http://id.example.com")),
-                requireHttps: true,
-                requireConfiguredOrigin: true));
-
-        Assert.Contains("must use HTTPS", exception.Message);
-    }
-
-    [Fact]
-    public void Validate_InProduction_AcceptsCanonicalHttpsPublicBaseUrl()
-    {
-        PublicOrigin.Validate(
-            Configuration((PublicOrigin.ConfigurationKey, "https://id.example.com/identity")),
-            requireHttps: true,
-            requireConfiguredOrigin: true);
-    }
+    // The rules that used to live in PublicOrigin.Validate — absolute URL, no user information,
+    // query, or fragment, HTTPS outside Development — are now enforced by
+    // SettingsSnapshotValidator over the whole snapshot, and are covered by its own tests. Keeping a
+    // second entry point for the same rules would let the two drift apart.
 
     private static IConfiguration Configuration(params (string Key, string Value)[] values) =>
         new ConfigurationBuilder()

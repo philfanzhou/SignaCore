@@ -18,6 +18,19 @@ public static class IdentityConstants
     public const string MasterKeyHkdfInfo = "RSA-Private-Key-Encryption";
     public const string PrivateKeyHkdfInfo = "RSA-Private-Key-Encrypt";
 
+    /// <summary>
+    /// HKDF info for the configuration-protection key. It is deliberately distinct from
+    /// <see cref="PrivateKeyHkdfInfo"/> so the same root secret protects signing keys and settings
+    /// with separate derived keys. Changing this value orphans every stored secret setting.
+    /// </summary>
+    public const string ConfigurationProtectionHkdfInfo = "Configuration-Setting-Encryption";
+
+    /// <summary>
+    /// Schema version bound as authenticated associated data into every protected setting. Bump it
+    /// only together with a deliberate re-encryption migration.
+    /// </summary>
+    public const int ConfigurationProtectionSchemaVersion = 1;
+
     public const int CleanupIntervalHours = 24;
 
     public const string GrantTypePassword = "password";
@@ -61,6 +74,9 @@ public static class IdentityConstants
     public const int MaxPublicKeyModulusLength = 2048;
     public const int MaxEncryptedKeyLength = 4096;
     public const int MaxEncryptionSaltLength = 256;
+    public const int MaxSettingKeyLength = 200;
+    public const int MaxSettingValueTypeLength = 32;
+    public const int MaxSetupCodeHashLength = 128;
 
     public const int DefaultCallbackTtlSeconds = 3600;
 

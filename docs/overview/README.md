@@ -9,4 +9,4 @@
 - [Data ownership](./DataOwnership.md)
 - [OAuth 2.0 / OpenID Connect conformance](./StandardsConformance.md)
 
-Operational configuration and Consul behavior are documented in [Development](../development/README.md).
+Database-backed configuration, first-run setup, and Consul behavior are documented in [Development](../development/README.md).

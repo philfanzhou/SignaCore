@@ -1,25 +1,43 @@
 # Consul Integration
 
-SignaCore uses Consul for KV configuration and service discovery. The default prefix is `config/signacore`. Configuration can be supplied as JSON values under that prefix; reserved `__comment` fields are ignored.
+Consul is optional and is used for service registration and discovery only.
 
-## Startup sequence
+Consul KV is **not** a configuration authority. Global application configuration lives in the business
+database (`system_settings`); the database connection and the external root key live in the read-only
+bootstrap file. The former KV loader, its precedence rules, and the local plaintext configuration
+cache have been removed, along with the `/consul/status` and `/consul/cache/invalidate` endpoints.
 
-1. Bind Consul connection options from appsettings and environment variables.
-2. Load and flatten KV documents under the configured prefix.
-3. Save a successful snapshot to the local cache.
-4. On Consul failure, load the cache; if that also fails, continue with appsettings.
-5. Register the service through Steeltoe when discovery is enabled.
+## Enabling discovery
 
-## Diagnostics
+Discovery is disabled by default. Its settings are themselves read from `system_settings` after the
+database bootstrap phase, so they are configured like any other setting rather than through
+environment variables:
 
-- `GET /consul/status` returns the active source, loaded prefixes, key count, cache path, and a sanitized last error.
-- `POST /consul/cache/invalidate` clears the local cache when Consul mode is enabled.
-- Startup logs mask the ACL token.
+| Key | Default |
+| --- | --- |
+| `Consul:Host` | `host.docker.internal` |
+| `Consul:Port` | `8500` |
+| `Consul:Token` | empty (stored encrypted) |
+| `Consul:Discovery:Enabled` | `false` |
+| `Consul:Discovery:Register` | `false` |
+| `Consul:Discovery:Deregister` | `false` |
+| `Consul:Discovery:ServiceName` | `SignaCore` |
+| `Consul:Discovery:HealthCheckPath` | `/health/ready` |
+| `Consul:Discovery:PreferIPAddress` | `false` |
+| `Consul:Discovery:IPAddress` | empty |
+| `Consul:Discovery:Port` | `0` |
 
-## Deployment keys
+Registration happens through Steeltoe when `Consul:Discovery:Enabled` is true.
 
-Use `CONSUL_HTTP_ADDR=host:port` and `CONSUL_TOKEN` for the loader. Discovery options live under `Consul:Discovery`, including `Enabled`, `ServiceName`, `HealthCheckPath`, `Register`, `Deregister`, address, and port.
+## Health checks
 
-## Rename migration
+Point the Consul check at `/health/ready`, not `/health/live`. An instance awaiting first-run setup is
+live but deliberately not ready, and must not receive authentication traffic.
 
-Copy or recreate the required KV documents below `config/signacore` and register the new service name `SignaCore`. Keep the former service registration only for the duration of a controlled traffic migration.
+## Migrating away from KV configuration
+
+A deployment that previously stored configuration under `config/signacore` does not need to copy it
+anywhere: the one-time legacy import reads the effective configuration of the running deployment and
+stores it in the database. Supply the former KV values through appsettings or environment variables
+for that single start if they are not otherwise present, then delete the KV documents — leaving them
+in place has no effect and only invites confusion.

@@ -19,7 +19,7 @@ No SignaCore assembly or private client SDK is required. The former client SDK i
 | WeChat API | Exchange an authorization code for an external identity |
 | LDAP/Active Directory | Validate and bind enterprise identities |
 | Callback endpoint | Add application-owned claims after authentication |
-| Consul | KV configuration and service discovery |
+| Consul | Optional service registration and discovery; not a configuration source |
 | Loki / OTLP / Prometheus | Logs, traces, and metrics |
 
 Callbacks must pass the configured allowed-domain policy and should use HTTPS.

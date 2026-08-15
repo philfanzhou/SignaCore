@@ -33,10 +33,12 @@ public class AdminSpaRoutingTests
     [InlineData("/api/profile/wechat")]
     [InlineData("/oauth2/token")]
     [InlineData("/oauth2/revoke")]
-    [InlineData("/consul/status")]
+    [InlineData("/api/setup/status")]
     [InlineData("/.well-known/openid-configuration")]
     [InlineData("/.well-known/jwks")]
     [InlineData("/health")]
+    [InlineData("/health/live")]
+    [InlineData("/health/ready")]
     [InlineData("/metrics")]
     public void ShouldServeSpa_NeverSwallowsServiceRoutes(string path)
     {

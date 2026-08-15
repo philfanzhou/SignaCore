@@ -8,65 +8,124 @@ IMAGE_TAG=latest ./build.sh
 
 This produces `signacore:latest` from `src/SignaCore.Host/Dockerfile`. The image builds the Vue admin application, restores and publishes `SignaCore.Host`, runs as the non-root `app` user, exposes port 5002, and starts `SignaCore.Host.dll`.
 
-## Run
+## Prepare persistent bootstrap storage
 
-`start.sh` defaults to image `signacore:latest` and container `signacore`. Set required secrets in the shell or secret manager before invoking it:
+The launcher no longer carries application secrets. Everything except the database connection and the
+external root key lives in the business database and is managed through first-run setup and the
+administration pages.
+
+Create a persistent directory next to `start.sh` and make it writable only by the container runtime
+identity:
 
 ```bash
-export ADMIN_BOOTSTRAP_PASSWORD='replace-me'
-export RSA_MASTER_KEY='long-random-secret-from-secret-manager'
-export JWT_ISSUER='https://identity.example.com'
-export PUBLIC_BASE_URL='https://identity.example.com'
-export DATABASE_CONNECTION_STRING='Host=db;Database=signacore;Username=signacore;Password=replace-me'
-export SMS_BYPASS_CODE=''
-export SMS_BYPASS_PHONES=''
-export SMS_OTP_HMAC_KEY='base64-encoded-key'
-export CONSUL_TOKEN='token-if-required'
+mkdir -p ./config
+chmod 700 ./config
+```
+
+On the first start, leave the directory empty. SignaCore stays live, prints a one-time bootstrap code
+to standard output, and serves `/bootstrap`. The protected form tests the database and creates this
+exact file atomically, generating the master key for a new installation:
+
+```json
+{
+  "Database": {
+    "Provider": "PostgreSQL",
+    "ServerVersion": "15",
+    "ConnectionString": "Host=db;Database=signacore;Username=signacore;Password=replace-me"
+  },
+  "MasterKey": "generated-cryptographically-random-root-key"
+}
+```
+
+For migration or recovery, select existing installation and submit the existing key as a write-only
+value. There is no separate master-key file. Losing the resulting bootstrap file means protected RSA
+private keys and secret settings become undecryptable; back it up with the database.
+
+See [Configuration](./Configuration.md#bootstrap-file) for the full schema.
+
+## Run
+
+`start.sh` defaults to image `signacore:latest` and container `signacore`:
+
+```bash
 ./start.sh
 ```
 
-The script mounts `./data` at `/app/data`, where bootstrap applications, signing-key material, and the
-Consul cache may be stored. It resolves the requested tag to its image ID before changing containers,
-waits for `/health`, and restores the previous container automatically when startup, health
-verification, or the deployment script itself fails or is interrupted. `curl` is required on the deployment host. Back up the data directory according to
-the deployment's key-management policy.
+The script mounts `./config` read-write at `/app/config` and `./data` at `/app/data`, where bootstrap
+applications and other mutable runtime data may be stored. It resolves the requested tag to its image
+ID before changing containers, waits for `/health/live`, then waits for `/health/ready`, and restores
+the previous container automatically when startup, health verification, or the deployment script
+itself fails or is interrupted. `curl` is required on the deployment host.
+
+With no bootstrap file, readiness stays false until an operator completes `/bootstrap`; an empty
+database then enters `/setup` and remains not ready until first-run setup completes. The launcher
+recognizes both states and keeps the container running instead of rolling back. See
+[First-run setup](./FirstRunSetup.md).
 
 The launcher gives the old container 35 seconds to shut down cleanly. A rollback restores the prior
 container image and configuration, but it does not reverse database migrations; keep migrations
 backward-compatible and take a verified database backup before deployment.
 
-The launcher also maps these optional operator variables to ASP.NET Core settings:
+The launcher owns only deployment concerns, overridable through the environment:
 
-| Operator variable | Application setting |
-| --- | --- |
-| `DATABASE_PROVIDER`, `DATABASE_SERVER_VERSION`, `DATABASE_CONNECTION_STRING` | `Database:*` |
-| `JWT_ISSUER`, `JWT_AUDIENCE` | `Jwt:*` |
-| `ALLOW_NON_HTTPS_ISSUER` | temporary `Security:AllowNonHttpsIssuer` compatibility switch |
-| `PUBLIC_BASE_URL` | required production `Endpoints:PublicBaseUrl` canonical HTTPS URL (unless supplied by Consul) |
-| `ADMIN_WEB_ORIGIN` | first `AdminWeb:AllowedOrigins` entry |
-| `CALLBACK_ALLOWED_DOMAIN` | first `Callback:AllowedDomains` entry |
-| `CALLBACK_ALLOW_PRIVATE_ADDRESSES`, `CALLBACK_REQUIRE_HTTPS` | callback security policy |
-| `REVERSE_PROXY_IP` | first trusted reverse proxy address |
-| `OTLP_ENDPOINT`, `LOKI_URI` | observability exporters |
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `IMAGE_NAME`, `IMAGE_TAG` | `signacore:latest` | Image to deploy |
+| `CONTAINER_NAME` | `signacore` | Container name |
+| `PORT` | `5002` | Host port |
+| `CONFIG_DIR` | `./config` | Writable persistent bootstrap mount |
+| `DATA_DIR` | `./data` | Mutable data mount |
+| `TZ` | `Asia/Shanghai` | Container timezone |
+| `APP_TITLE` | container name | Admin console and document title |
+
+## Health endpoints
+
+| Endpoint | Meaning | Used by |
+| --- | --- | --- |
+| `/health/live` | The process is running; once configured, database liveness is also checked | Launchers deploying a new instance, so bootstrap/setup pages can be reached |
+| `/health/ready` | Installation is completed, the configuration snapshot is valid, database initialization is complete, and signing keys are ready | Load balancers and orchestrators |
+| `/health` | Compatibility alias for readiness | Existing checks |
+
+A pending-setup instance is live but not ready, so it never receives authentication traffic.
 
 ## Production checklist
 
 - Terminate TLS at the service or a trusted reverse proxy.
-- Set `REVERSE_PROXY_IP` when TLS terminates at a non-loopback proxy so forwarded scheme and client IP
-  are accepted only from that proxy.
+- Prepare the writable persistent bootstrap directory, complete protected bootstrap configuration,
+  restrict the resulting file to mode `0600`, and back it up.
+- Set `ReverseProxy:KnownProxies` when TLS terminates at a non-loopback proxy so forwarded scheme and
+  client IP are accepted only from that proxy.
 - Use a production database and verify the selected provider's migrations.
-- Supply all secrets externally and restrict file permissions.
-- Set the JWT issuer/audience expected by downstream services.
+- Complete first-run setup and record the administrator credentials in your secret manager.
+- Set the JWT audience expected by downstream services; the issuer follows the public base URL.
 - Publish `/.well-known/openid-configuration` and JWKS through the public base URL.
-- Configure Consul health checks for `/health`.
+- Point orchestrator and Consul health checks at `/health/ready`.
 - Scrape `/metrics` and connect logs/traces to the chosen observability backend.
+- Remove legacy application-setting environment variables from the launcher; startup logs any that
+  remain.
 - Run the verification steps after deployment.
 
-## Upgrade from the former name
+## Backup and recovery
 
-1. Build and distribute the `signacore` image.
-2. Copy Consul KV to `config/signacore` and update discovery consumers to `SignaCore`.
-3. Reuse the existing database by retaining its connection string, or migrate data explicitly before using the new default database name.
-4. Coordinate the JWT issuer/audience cutover; old tokens remain valid only when validators accept their original values.
-5. Replace old container names, dashboards, log labels, alerts, and deployment commands.
-6. Remove the old instance after health, authentication, JWKS, and database migration checks pass.
+Two artifacts must be backed up together, because they are only useful as a set:
+
+1. the business database, which now holds global configuration alongside identity data;
+2. the bootstrap file, which names the database and contains the external root key.
+
+Restoring the database without the matching root key leaves stored signing keys and secret settings
+undecryptable. Startup fails closed in that case, naming the affected setting keys — it does not
+silently rotate or replace signing keys.
+
+## Upgrading a pre-bootstrap deployment
+
+1. Build and distribute the new image.
+2. Create the bootstrap file using the currently deployed connection string and the value the
+   deployment previously supplied as `RSA_MASTER_KEY`. The key derivation is unchanged, so stored
+   signing keys remain decryptable.
+3. Leave the existing legacy environment variables in place for one start. Migrations add
+   `system_settings` and `installation_state`, and because business data already exists SignaCore runs
+   the protected legacy import instead of exposing `/setup`.
+4. Confirm startup reported a completed import, then remove the legacy variables from the launcher and
+   redeploy. Anything still supplied is logged as an ignored legacy override.
+5. Change settings from then on through the administration pages, followed by a coordinated rolling
+   restart.

@@ -16,6 +16,8 @@ using SignaCore.Domain.Services.Ldap;
 using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.WeChat;
 using SignaCore.Domain.Validators;
+using SignaCore.Host.Configuration;
+using SignaCore.Host.HealthChecks;
 using SignaCore.Host.Security;
 using SignaCore.Host.Services;
 
@@ -23,10 +25,25 @@ namespace SignaCore.Host;
 
 public static class ServiceCollectionExtensions
 {
-    public static (JwtOptions JwtOptions, string DbProvider) AddIdentityInfrastructure(
+    /// <summary>
+    /// Composes the normal application phase. It runs only after the installation state has been
+    /// determined and a valid configuration snapshot has been loaded, so every option bound here is
+    /// backed by the database rather than by deployment-provided application settings.
+    /// </summary>
+    /// <param name="databaseOptions">
+    /// From the protected bootstrap file. The connection cannot be read from the database it is
+    /// needed to open, so it is the one piece of application configuration that stays outside.
+    /// </param>
+    /// <param name="masterKeyProvider">
+    /// Built in the bootstrap phase from the external root secret, and shared with it so migrations,
+    /// settings decryption, and RSA key protection all derive from the same root.
+    /// </param>
+    internal static (JwtOptions JwtOptions, string DbProvider) AddIdentityInfrastructure(
         this IServiceCollection services,
         IConfiguration configuration,
-        IHostEnvironment environment)
+        IHostEnvironment environment,
+        DatabaseOptions databaseOptions,
+        IMasterKeyProvider masterKeyProvider)
     {
         // ---- OpenTelemetry & Metrics ----
         services.AddOpenTelemetry()
@@ -52,16 +69,6 @@ public static class ServiceCollectionExtensions
             });
 
         // ---- Database ----
-        var databaseOptions = BindDatabaseOptions(configuration);
-        if (!environment.IsDevelopment() &&
-            string.Equals(
-                databaseOptions.ConnectionString,
-                "Host=localhost;Port=5432;Database=signacore;Username=postgres",
-                StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                "The development database connection string cannot be used in production.");
-        }
         services.AddSingleton(databaseOptions);
 
         services.AddDbContext<IdentityDbContext>(options =>
@@ -71,18 +78,9 @@ public static class ServiceCollectionExtensions
 
         // ---- RSA Key Manager ----
         // 主密钥来源与私钥加解密是两个独立关注点，KeyManager 只负责密钥生命周期编排。
-        services.AddSingleton<IMasterKeyProvider>(provider =>
-        {
-            if (!environment.IsDevelopment() &&
-                string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RSA_MASTER_KEY")))
-            {
-                throw new InvalidOperationException(
-                    "RSA_MASTER_KEY is required outside the Development environment.");
-            }
-
-            return ActivatorUtilities.CreateInstance<FileMasterKeyProvider>(provider);
-        });
+        services.AddSingleton(masterKeyProvider);
         services.AddSingleton<IPrivateKeyProtector, AesGcmPrivateKeyProtector>();
+        services.AddSingleton<IConfigurationProtector, AesGcmConfigurationProtector>();
         services.AddSingleton<IKeyManager, KeyManager>();
 
         // ---- JWT Options ----
@@ -118,13 +116,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITokenService, JwtTokenService>();
 
         // ---- Password Hasher ----
-        services.RegisterSingleton(new PasswordHasherOptions
-        {
-            WorkFactor = configuration.GetValue(
-                "PasswordHasher:WorkFactor",
-                IdentityConstants.BCryptWorkFactor)
-        });
-        services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
+        services.RegisterPasswordHashingDefaults(configuration);
 
         // ---- Refresh Token Options ----
         var refreshTokenOptions = services.RegisterSingleton(new RefreshTokenOptions
@@ -222,9 +214,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddScoped<IAccountLoginInfoService, AccountLoginInfoService>();
 
-        // ---- Password Policy ----
-        services.AddSingleton<IPasswordPolicy, DefaultPasswordPolicy>();
-
         // ---- Rate Limiting (ASP.NET Core built-in) ----
         // Per-IP fixed window limiter: 100 requests per 60 seconds per client IP.
         // /health, /metrics, /.well-known/jwks are exempt (have their own limits or are infra).
@@ -244,6 +233,29 @@ public static class ServiceCollectionExtensions
                         QueueLimit = 0
                     });
             });
+            // The setup and bootstrap endpoints are mapped by every host, so the policies their
+            // actions reference have to exist here too even though a configured, completed
+            // installation only ever answers 409 from them.
+            options.AddPolicy(Controllers.SetupController.RateLimitPolicy, context =>
+                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        AutoReplenishment = true,
+                        PermitLimit = 5,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0
+                    }));
+            options.AddPolicy(Controllers.BootstrapController.RateLimitPolicy, context =>
+                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        AutoReplenishment = true,
+                        PermitLimit = 5,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0
+                    }));
             options.AddFixedWindowLimiter("default", opt =>
             {
                 opt.AutoReplenishment = true;
@@ -256,7 +268,9 @@ public static class ServiceCollectionExtensions
             {
                 var path = httpContext.Request.Path.Value ?? string.Empty;
                 // Exempt infrastructure endpoints from global rate limiting
-                if (path == "/health" || path == "/metrics" || path == "/.well-known/jwks")
+                if (path == HealthEndpoints.Legacy || path == HealthEndpoints.Live ||
+                    path == HealthEndpoints.Ready || path == "/metrics" ||
+                    path == "/.well-known/jwks")
                 {
                     return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter(
                         System.Net.IPAddress.Loopback);
@@ -298,17 +312,22 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<CleanupWorker>();
 
         // ---- Health Checks ----
+        // Liveness answers "is this process able to reach its database"; readiness additionally
+        // requires that signing keys are loaded, so a starting instance never receives traffic it
+        // cannot serve.
         services.AddHealthChecks()
-            .AddDbContextCheck<IdentityDbContext>("database");
+            .AddDbContextCheck<IdentityDbContext>(
+                "database",
+                tags: [HealthCheckTags.Live, HealthCheckTags.Ready])
+            .AddCheck<SigningKeysHealthCheck>(
+                "signing-keys",
+                tags: [HealthCheckTags.Ready]);
 
-        var adminWebOrigins = configuration.GetSection("AdminWeb:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
-        services.Configure<AdminBootstrapOptions>(configuration.GetSection(AdminBootstrapOptions.SectionName));
-        services.PostConfigure<AdminBootstrapOptions>(options =>
+        var adminWebOrigins = configuration.GetSection(SystemSettingKeys.AdminWebAllowedOrigins)
+            .Get<string[]>() ?? Array.Empty<string>();
+        services.AddSingleton(new AdminIdentityOptions
         {
-            var envUsername = Environment.GetEnvironmentVariable("ADMIN_BOOTSTRAP_USERNAME");
-            if (!string.IsNullOrWhiteSpace(envUsername)) options.Username = envUsername;
-            var envPassword = Environment.GetEnvironmentVariable("ADMIN_BOOTSTRAP_PASSWORD");
-            if (!string.IsNullOrWhiteSpace(envPassword)) options.Password = envPassword;
+            Username = configuration[SystemSettingKeys.AdminUsername]?.Trim() ?? string.Empty
         });
         services.AddCors(options =>
         {
@@ -387,8 +406,7 @@ public static class ServiceCollectionExtensions
                 {
                     OnRedirectToLogin = context =>
                     {
-                        if (context.Request.Path.StartsWithSegments("/api/admin")
-                            || context.Request.Path.StartsWithSegments("/consul"))
+                        if (context.Request.Path.StartsWithSegments("/api/admin"))
                         {
                             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                             return Task.CompletedTask;
@@ -399,8 +417,7 @@ public static class ServiceCollectionExtensions
                     },
                     OnRedirectToAccessDenied = context =>
                     {
-                        if (context.Request.Path.StartsWithSegments("/api/admin")
-                            || context.Request.Path.StartsWithSegments("/consul"))
+                        if (context.Request.Path.StartsWithSegments("/api/admin"))
                         {
                             context.Response.StatusCode = StatusCodes.Status403Forbidden;
                             return Task.CompletedTask;
@@ -496,6 +513,25 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Password hashing and policy. Setup Mode needs both to create the initial administrator, so
+    /// they are registered separately from the rest of the application phase.
+    /// </summary>
+    internal static IServiceCollection RegisterPasswordHashingDefaults(
+        this IServiceCollection services,
+        IConfiguration? configuration = null)
+    {
+        services.AddSingleton(new PasswordHasherOptions
+        {
+            WorkFactor = configuration?.GetValue(
+                SystemSettingKeys.PasswordHasherWorkFactor,
+                IdentityConstants.BCryptWorkFactor) ?? IdentityConstants.BCryptWorkFactor
+        });
+        services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
+        services.AddSingleton<IPasswordPolicy, DefaultPasswordPolicy>();
+        return services;
+    }
+
+    /// <summary>
     /// 解析短信绕过白名单。Consul KV 里写 JSON 数组，环境变量里写逗号分隔字符串，两种都支持。
     /// 未配置时返回空列表——此时即使配了 BypassCode，<c>SmsValidator</c> 也不会放行任何号码。
     /// </summary>
@@ -515,36 +551,4 @@ public static class ServiceCollectionExtensions
             .ToArray();
     }
 
-    internal static DatabaseOptions BindDatabaseOptions(IConfiguration configuration)
-    {
-        var legacyKeys = new[]
-        {
-            "Database:Name",
-            "ConnectionStrings:Default",
-            "ConnectionStrings:PostgreSQL"
-        };
-
-        var configuredLegacyKeys = legacyKeys
-            .Where(key => configuration[key] is not null)
-            .ToList();
-
-        if (configuration.GetSection("PostgreSql").GetChildren().Any())
-        {
-            configuredLegacyKeys.Add("PostgreSql:*");
-        }
-
-        if (configuredLegacyKeys.Count > 0)
-        {
-            throw new InvalidOperationException(
-                $"Legacy database configuration is not supported: {string.Join(", ", configuredLegacyKeys)}.");
-        }
-
-        var options = configuration
-            .GetRequiredSection(DatabaseOptions.SectionName)
-            .Get<DatabaseOptions>()
-            ?? throw new InvalidOperationException("Database configuration is required.");
-
-        options.Validate();
-        return options;
-    }
 }

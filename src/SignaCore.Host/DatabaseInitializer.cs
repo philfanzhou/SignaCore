@@ -1,15 +1,22 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
-using SignaCore.Domain.Services;
-using SignaCore.Domain.Validators;
 
 namespace SignaCore.Host;
 
 /// <summary>
-/// 启动时的数据库初始化入口：建库 → 持迁移锁 → 跑迁移 → 预置管理员 → 预置应用注册。
-/// 任何一步失败都会向上抛出，由 <c>Program</c> 直接终止启动（不降级、不跳过）。
+/// Application-phase database work.
+/// <para>
+/// Provisioning, migrations, and installation-state resolution now belong to the bootstrap phase
+/// (<c>Startup/BootstrapPhase</c>), which runs before any application configuration exists. What is
+/// left here is data seeding that depends on the composed application: the optional
+/// bootstrap-apps.json pre-seed.
+/// </para>
+/// <para>
+/// The initial administrator is no longer created from <c>ADMIN_BOOTSTRAP_*</c>. First-run setup
+/// creates it behind the one-time setup code, so a deployment no longer has to hand the launcher an
+/// administrator password.
+/// </para>
 /// </summary>
 internal static class DatabaseInitializer
 {
@@ -25,17 +32,9 @@ internal static class DatabaseInitializer
 
         using var scope = serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-        var databaseOptions = scope.ServiceProvider.GetRequiredService<DatabaseOptions>();
 
         try
         {
-            await DatabaseProvisioner.EnsureDatabaseExistsAsync(databaseOptions);
-            await using var migrationLock =
-                await DatabaseProvisioner.AcquireMigrationLockAsync(databaseOptions);
-
-            await MigrateAsync(db, databaseOptions, logger);
-            await ProtectLegacyRefreshTokensAsync(db, logger);
-            await EnsureBootstrapAdminAsync(scope.ServiceProvider, db, logger);
             await SeedBootstrapAppsAsync(configuration, db, logger);
         }
         catch (Exception exception)
@@ -81,87 +80,6 @@ internal static class DatabaseInitializer
                 "Protected {Count} legacy refresh tokens with one-way digests.",
                 protectedCount);
         }
-    }
-
-    private static async Task MigrateAsync(
-        IdentityDbContext db,
-        DatabaseOptions databaseOptions,
-        ILogger logger)
-    {
-        var pendingMigrations = (await db.Database.GetPendingMigrationsAsync()).ToList();
-        if (pendingMigrations.Count > 0)
-        {
-            logger.LogInformation(
-                "Applying {Count} pending migrations...",
-                pendingMigrations.Count);
-        }
-
-        await SchemaMigrator.MigrateAsync(db, databaseOptions);
-    }
-
-    /// <summary>
-    /// 按 <c>AdminBootstrap:*</c> 预置初始管理员。用户名规范化后比对，已存在则跳过（幂等）。
-    /// 用户名和密码必须同时配置或同时留空，只配一个视为配置错误。
-    /// </summary>
-    private static async Task EnsureBootstrapAdminAsync(
-        IServiceProvider scopedServices,
-        IdentityDbContext db,
-        ILogger logger)
-    {
-        var options = scopedServices.GetRequiredService<IOptions<AdminBootstrapOptions>>().Value;
-        var username = options.Username.Trim();
-        var password = options.Password;
-
-        if (string.IsNullOrWhiteSpace(username) && string.IsNullOrWhiteSpace(password))
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
-        {
-            throw new InvalidOperationException(
-                "AdminBootstrap.Username and AdminBootstrap.Password must both be configured.");
-        }
-
-        var passwordPolicy = scopedServices.GetRequiredService<IPasswordPolicy>();
-        if (!passwordPolicy.Validate(password, out var passwordError))
-        {
-            throw new InvalidOperationException(
-                $"Admin bootstrap password is invalid: {passwordError}");
-        }
-
-        var normalizedUsername = IdentityValueNormalizer.Normalize(username);
-        var alreadyExists = await db.PasswordCredentials
-            .AsNoTracking()
-            .AnyAsync(item => item.UsernameNormalized == normalizedUsername);
-        if (alreadyExists)
-        {
-            logger.LogInformation(
-                "Bootstrap admin account already exists: Username={Username}",
-                username);
-            return;
-        }
-
-        var passwordHasher = scopedServices.GetRequiredService<IPasswordHasher>();
-        var account = new AccountEntity
-        {
-            Id = Guid.NewGuid(),
-            IsActive = true,
-            CreatedAt = DateTimeOffset.UtcNow,
-            Remark = "Bootstrap admin account"
-        };
-        db.Accounts.Add(account);
-        db.PasswordCredentials.Add(new PasswordCredentialEntity
-        {
-            Id = Guid.NewGuid(),
-            AccountId = account.Id,
-            Username = username,
-            PasswordHash = passwordHasher.HashPassword(password),
-            CreatedAt = DateTimeOffset.UtcNow
-        });
-        await db.SaveChangesAsync();
-
-        logger.LogInformation("Bootstrap admin account created: Username={Username}", username);
     }
 
     /// <summary>

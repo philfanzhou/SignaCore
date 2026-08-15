@@ -12,7 +12,8 @@ SignaCore is a .NET 10 identity and authentication service. It centralizes accou
 - Application registration, callback claim enrichment, and gateway authentication
 - User/profile administration, audit trails, login history, lockout, and cleanup jobs
 - PostgreSQL, MySQL/MariaDB, and SQLite through EF Core provider-specific migrations
-- Consul KV configuration and service discovery with local-cache fallback
+- Database-backed global configuration with web-based first-run setup
+- Optional Consul service discovery
 - OpenTelemetry, Prometheus, Serilog, and optional Loki export
 
 ## Repository layout
@@ -43,51 +44,63 @@ npm --prefix src/SignaCore.Admin run build
 
 ## Run locally
 
-Provide a PostgreSQL connection string and development secrets through user secrets or environment variables, then run:
+Point `appsettings.Development.json` at a local PostgreSQL instance (or override
+`Database__ConnectionString`), then run:
 
 ```bash
 dotnet run --project src/SignaCore.Host/SignaCore.Host.csproj
 ```
 
-The API listens on the URLs in `src/SignaCore.Host/Properties/launchSettings.json`. Useful endpoints include `/health`, `/.well-known/openid-configuration`, `/.well-known/jwks`, `/metrics`, `/oauth2/token`, `/api/auth/token`, and `/admin`.
+The first run against an empty database enters Setup Mode. Open `/setup`, enter the one-time setup
+code printed to the console, and supply the public base URL and administrator credentials. See
+[first-run setup](docs/development/FirstRunSetup.md).
+
+The API listens on the URLs in `src/SignaCore.Host/Properties/launchSettings.json`. Useful endpoints include `/health/live`, `/health/ready`, `/.well-known/openid-configuration`, `/.well-known/jwks`, `/metrics`, `/oauth2/token`, `/api/auth/token`, and `/admin`.
 
 ## Container
 
 ```bash
 IMAGE_TAG=latest ./build.sh
-ADMIN_BOOTSTRAP_PASSWORD='replace-me' \
-RSA_MASTER_KEY='long-random-secret-from-secret-manager' \
-JWT_ISSUER='https://identity.example.com' \
-PUBLIC_BASE_URL='https://identity.example.com' \
-DATABASE_CONNECTION_STRING='Host=db;Database=signacore;Username=signacore;Password=replace-me' \
-SMS_BYPASS_CODE='' \
-SMS_BYPASS_PHONES='' \
-SMS_OTP_HMAC_KEY='base64-encoded-key' \
+
+mkdir -p config
+chmod 700 config
+
 ./start.sh
 ```
 
-The default image is `signacore:latest` and the default container name is `signacore`. The launcher
-resolves the tag to an immutable image ID, waits for `/health`, and restores the previous container if
-the new instance fails. Secrets must come from the deployment environment or a secret manager; never
-commit them.
+On first start, open `/bootstrap` and enter the one-time code printed by `docker logs signacore`.
+The protected UI tests the database, generates the root key for a new install, and atomically creates
+`config/signacore.bootstrap.json`. The directory is mounted read-write so later authenticated edits
+can replace the file. Everything else is configured through first-run setup and administration
+pages. A brand-new installation stays live but not ready during both configuration phases, and the
+launcher reports that instead of rolling back.
 
 ## Configuration
 
-ASP.NET Core configuration precedence applies. SignaCore additionally loads Consul KV under `config/signacore`, with local cache and appsettings fallback. Important defaults are:
+Global application configuration lives in the business database, in `system_settings`. Every instance
+reads the same active configuration, changes are transactional and audited, and there is no
+per-instance drift.
+
+Only what is required to open and decrypt that database stays outside it, in one writable bootstrap
+file at `/app/config/signacore.bootstrap.json`: the database provider, server version, and connection
+string, plus the inline external root key. The whole file is a mode-`0600` secret on persistent
+storage and must be backed up with the database.
+
+Important defaults, all stored in the database and editable after installation:
 
 | Setting | Default |
 | --- | --- |
-| `Jwt:Issuer` | `SignaCore` |
+| `Endpoints:PublicBaseUrl` | collected by first-run setup |
+| `Jwt:Issuer` | the normalized public base URL |
 | `Jwt:Audience` | `SignaCore.Services` |
-| `Database:Provider` | `PostgreSQL` |
-| `Database:ConnectionString` | local development value only |
-| `Consul:ServiceName` | `SignaCore` |
-| `Consul:KvPrefix` | `config/signacore` |
-| `APP_TITLE` | `SignaCore` |
+| `Consul:Discovery:Enabled` | `false` |
+| `APP_TITLE` (launcher) | `SignaCore` |
+
+See [configuration](docs/development/Configuration.md) for the full catalog.
 
 ## Rename migration
 
-The rename changes .NET namespaces and assembly names from the former product name to `SignaCore.*`. It also changes the default image/container, database name, Consul service/prefix, JWT issuer/audience, telemetry source, and UI package name. Existing deployments should override old JWT values during a rolling migration if previously issued tokens must remain valid, copy Consul KV to the new prefix, and point the new connection string at the existing database if data must be retained. Database table names and HTTP contracts were not renamed.
+The rename changes .NET namespaces and assembly names from the former product name to `SignaCore.*`. It also changes the default image/container, database name, Consul service/prefix, JWT issuer/audience, telemetry source, and UI package name. Existing deployments should override old JWT values during a rolling migration if previously issued tokens must remain valid, point the bootstrap connection string at the existing database if data must be retained, and reuse the previous `RSA_MASTER_KEY` value as the bootstrap root key so stored signing keys remain decryptable. Database table names and HTTP contracts were not renamed.
 
 ## Documentation
 

@@ -23,6 +23,23 @@ Server database contract tests use environment-supplied connection strings. CI r
 After starting the container, verify:
 
 ```bash
+curl --fail http://localhost:5002/health/live
+curl --fail http://localhost:5002/api/bootstrap/status
+```
+
+With an empty configuration directory, the service reports `"status":"required"`, serves
+`/bootstrap`, keeps readiness false, and returns `503 bootstrap_configuration_required` from normal
+APIs. Confirm a wrong/expired code and invalid database target do not create the file. Complete the
+protected bootstrap form and verify the resulting JSON has only `Database` and inline `MasterKey`,
+with mode `0600`.
+
+After restart, a new empty database reports `"status":"pending"` from `/api/setup/status`, serves
+`/setup`, and returns
+`503 installation_required` from every other API. Complete setup with the one-time code from the
+container log, wait for the container to restart, then verify the normal surface:
+
+```bash
+curl --fail http://localhost:5002/health/ready
 curl --fail http://localhost:5002/health
 curl --fail http://localhost:5002/.well-known/openid-configuration
 curl --fail http://localhost:5002/.well-known/jwks
@@ -44,3 +61,9 @@ rg -i 'former-product-token' . --hidden -g '!**/.git/**' -g '!**/bin/**' -g '!**
 ```
 
 Also inspect artifact names, container metadata, log labels, dashboards, Consul registrations, and downstream issuer/audience configuration.
+
+## Configuration audit
+
+Startup logs any deployment-provided value for a database-backed setting, and any `Database` section
+outside the bootstrap file, as an ignored legacy override. A clean deployment produces neither
+warning.

@@ -1,38 +1,140 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using SignaCore.Database;
-using SignaCore.Database.Entity;
-using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host;
+using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Configuration;
-using SignaCore.Host.Controllers;
+using SignaCore.Host.HealthChecks;
+using SignaCore.Host.Installation;
 using SignaCore.Host.Middleware;
 using SignaCore.Host.Security;
+using SignaCore.Host.Startup;
 
 var builder = WebApplication.CreateBuilder(args);
 
-if (!builder.Environment.IsDevelopment() &&
-    string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RSA_MASTER_KEY")))
+using var bootstrapLoggerFactory = LoggerFactory.Create(logging =>
 {
-    throw new InvalidOperationException(
-        "RSA_MASTER_KEY is required outside the Development environment.");
+    logging.AddSimpleConsole(options => options.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff ");
+});
+
+// ---- Operator command: reissue the one-time setup code ----
+// Allowed only while the installation is Pending, requires access to the bootstrap secret, uses the
+// database lock, and prints the new code once. It can never reset a Completed installation.
+if (args.Contains("--rotate-setup-code", StringComparer.Ordinal))
+{
+    return await BootstrapPhase.RotateSetupCodeAsync(builder.Configuration, builder.Environment);
 }
 
-// ---- Consul Configuration Source ----
-// Identity 固定接入 Consul，按 config/signacore 单层共享路径加载 Consul KV，失败时回退本地缓存。
-builder.Configuration.AddConsulIfEnabled(builder.Configuration);
+// The listening port is a deployment concern owned by the launcher, not database-backed
+// configuration, so it keeps coming from appsettings/environment. It is resolved before the
+// bootstrap phase because Bootstrap Configuration Mode needs it too.
+var httpPort = builder.Configuration.GetValue<int?>("Endpoints:Http") ?? 5002;
+
+void ConfigureKestrel(WebApplicationBuilder target)
+{
+    target.WebHost.ConfigureKestrel(options =>
+    {
+        options.ListenAnyIP(httpPort, listenOptions =>
+        {
+            listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1;
+        });
+        options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
+    });
+    target.Services.Configure<Microsoft.Extensions.Hosting.HostOptions>(options =>
+    {
+        options.ShutdownTimeout = TimeSpan.FromSeconds(30);
+    });
+}
+
+// ---- Bootstrap file ----
+// A missing bootstrap file is not a failure: the operator has not configured this deployment yet.
+// A malformed one is, because ignoring a bootstrap someone did write is indistinguishable from
+// silently pointing the service at the wrong database.
+BootstrapConfiguration? bootstrap;
+try
+{
+    bootstrap = BootstrapLoader.TryLoad(builder.Configuration, builder.Environment);
+}
+catch (Exception exception)
+{
+    Console.Error.WriteLine("SignaCore failed to start.");
+    Console.Error.WriteLine(exception.Message);
+    throw;
+}
+
+// ---- Bootstrap Configuration Mode ----
+// No database is known, so nothing that needs one is composed. The process stays live, reports
+// readiness as false, and serves exactly one workflow: create the bootstrap file.
+if (bootstrap is null)
+{
+    var codeAuthority = BootstrapCodeAuthority.Create(out var bootstrapCode);
+    StartupBanner.WriteBootstrapCode(
+        bootstrapCode,
+        BootstrapLoader.ResolveFilePath(builder.Configuration),
+        codeAuthority.ExpiresAt);
+    StartupBanner.WriteBootstrapModeNotice();
+
+    builder.Host.UseAgentSerilog("SignaCore");
+    ConfigureKestrel(builder);
+    BootstrapModeHost.ConfigureServices(builder, codeAuthority);
+
+    var bootstrapApp = builder.Build();
+    BootstrapModeHost.ConfigurePipeline(bootstrapApp, httpPort);
+
+    bootstrapApp.Lifetime.ApplicationStopping.Register(() =>
+    {
+        if (bootstrapApp.Services.GetRequiredService<BootstrapCodeAuthority>().IsConsumed)
+        {
+            StartupBanner.WriteRestartInstruction();
+        }
+    });
+
+    await bootstrapApp.RunAsync();
+    return 0;
+}
+
+// ---- Bootstrap phase ----
+// Open the business database named by the bootstrap file, migrate it, and decide whether this
+// process runs Setup Mode or the normal host. Nothing application-level is composed yet: production
+// configuration validation must not run before the installation state is known.
+BootstrapPhaseResult bootstrapResult;
+try
+{
+    bootstrapResult = await BootstrapPhase.RunAsync(
+        bootstrap,
+        builder.Configuration,
+        builder.Environment,
+        bootstrapLoggerFactory);
+}
+catch (Exception exception)
+{
+    // Startup diagnostics never carry the connection string or the root key; the loader and the
+    // snapshot validator both produce messages that are safe to print here.
+    Console.Error.WriteLine("SignaCore failed to start.");
+    Console.Error.WriteLine(exception.Message);
+    throw;
+}
+
+// ---- Legacy override diagnostics ----
+// The database is authoritative now. Values still supplied by appsettings, environment variables, or
+// the launcher are inert; report them so operators can remove them.
+var legacyOverrides = LegacyConfigurationGuard.FindManagedOverrides(builder.Configuration);
+var hasLegacyDatabaseSection = LegacyConfigurationGuard.HasDatabaseSectionOverride(builder.Configuration);
+
+// ---- Activate the configuration snapshot ----
+// Layered last so the database wins over every deployment-provided source.
+if (bootstrapResult.Snapshot is not null)
+{
+    builder.Configuration.AddInMemoryCollection(bootstrapResult.Snapshot.ConfigurationEntries);
+}
 
 // ---- Serilog (Console + Grafana Loki) ----
-// Loki 地址统一来自配置键 Loki:Uri（优先由 Consul KV 提供），覆盖 appsettings.json 中的 fallback。
-// Loki Sink 在 uri 为 null 时会抛 ArgumentNullException，配置文件中提供 fallback uri 确保服务能启动。
-// Loki 不可达时 Sink 异步重试，不影响服务运行。
-var lokiUri = builder.Configuration["Loki:Uri"];
+// The Loki sink throws on a null uri, so the address is only patched in when the snapshot supplies
+// one. Loki being unreachable is not fatal: the sink retries asynchronously.
+var lokiUri = builder.Configuration[SystemSettingKeys.LokiUri];
 if (!string.IsNullOrWhiteSpace(lokiUri))
 {
     builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -46,73 +148,94 @@ builder.Host.UseAgentSerilog("SignaCore");
 // 未处理异常会让进程立刻退出，而 Loki Sink 是批量异步投递的，缓冲区里的日志
 // （包括致命异常本身）会整批丢失，只能进容器 stdout。正常关停时 host 释放
 // logger 会刷盘，这里补上崩溃退出这条路径，让启动失败的原因也能进 Loki。
-// UseAgentSerilog 使用默认的 preserveStaticLogger: false，Log.Logger 即宿主实际使用的 logger。
-AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
 {
-    if (args.ExceptionObject is Exception exception)
+    if (eventArgs.ExceptionObject is Exception unhandled)
     {
-        Log.Fatal(exception, "Application terminated unexpectedly");
+        Log.Fatal(unhandled, "Application terminated unexpectedly");
     }
 
     Log.CloseAndFlush();
 };
 
-var httpPort = builder.Configuration.GetValue<int?>("Endpoints:Http") ?? 5002;
+ConfigureKestrel(builder);
 
-builder.WebHost.ConfigureKestrel(options =>
+// ---- Setup Mode ----
+if (bootstrapResult.Phase != InstallationPhase.Completed)
 {
-    options.ListenAnyIP(httpPort, listenOptions =>
+    if (bootstrapResult.PlaintextSetupCode is not null)
     {
-        listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1;
-    });
-    options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
-});
-builder.Services.Configure<Microsoft.Extensions.Hosting.HostOptions>(options =>
-{
-    options.ShutdownTimeout = TimeSpan.FromSeconds(30);
-});
+        StartupBanner.WriteSetupCode(
+            bootstrapResult.PlaintextSetupCode,
+            DateTimeOffset.UtcNow.Add(SetupCode.DefaultLifetime));
+    }
 
-// ---- Consul Service Discovery ----
-// 通过 Steeltoe.Discovery.Consul 注册服务实例。
-// 健康检查路径：/health（由 Steeltoe 自动配置），间隔 10s，超时 10s。
+    StartupBanner.WriteSetupModeNotice();
+
+    SetupModeHost.ConfigureServices(builder, bootstrapResult);
+    var setupApp = builder.Build();
+    SetupModeHost.ConfigurePipeline(setupApp, httpPort);
+
+    setupApp.Lifetime.ApplicationStopping.Register(() =>
+    {
+        if (setupApp.Services.GetRequiredService<InstallationRuntimeState>().SetupCompleted)
+        {
+            StartupBanner.WriteRestartInstruction();
+        }
+    });
+
+    await setupApp.RunAsync();
+    return 0;
+}
+
+// ---- Consul Service Discovery (optional) ----
 builder.Services.AddConsulDiscoveryIfEnabled(builder.Configuration);
 
 // ---- Infrastructure (DI, Auth, CORS, 限流, OpenTelemetry) ----
-var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(builder.Configuration, builder.Environment);
+var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(
+    builder.Configuration,
+    builder.Environment,
+    bootstrapResult.Bootstrap.Database,
+    bootstrapResult.MasterKeyProvider);
+
+builder.Services.AddSingleton(bootstrapResult.RuntimeState);
+builder.Services.AddSingleton(bootstrapResult.SettingsStore);
+
+// The authenticated bootstrap editor needs the root secret verbatim so a database change can keep
+// the current key without asking the operator to retype it. It is registered as the internal
+// bootstrap record rather than as a bare string so nothing else can resolve it by accident.
+builder.Services.AddSingleton(bootstrapResult.Bootstrap);
+builder.Services.AddSingleton<BootstrapConfigurationService>();
 
 var app = builder.Build();
-var consulRuntimeState = app.Services.GetRequiredService<ConsulRuntimeState>();
-var consulOptions = ConsulOptions.Bind(app.Configuration);
-
-var effectiveDatabaseProvider = app.Configuration["Database:Provider"];
-var effectiveDatabaseServerVersion = app.Configuration["Database:ServerVersion"];
-var effectiveLokiUri = app.Configuration["Loki:Uri"];
 
 app.Logger.LogInformation("Service endpoints configured: HTTP={HttpPort}", httpPort);
-app.Logger.LogInformation("Database: {Provider}", dbProvider);
 app.Logger.LogInformation(
-    "Consul startup diagnostics: Address={Address}, Token={Token}, Source={Source}, KeyCount={KeyCount}, Prefixes={Prefixes}, LastError={LastError}",
-    $"{consulOptions.Host}:{consulOptions.Port}",
-    StartupDiagnosticsFormatter.MaskSecret(consulOptions.Token),
-    consulRuntimeState.Source,
-    consulRuntimeState.KeyCount,
-    StartupDiagnosticsFormatter.SummarizePrefixes(consulRuntimeState.LoadedPrefixes),
-    StartupDiagnosticsFormatter.SummarizeError(consulRuntimeState.LastError));
+    "Database: {Provider} at {Endpoint}",
+    dbProvider,
+    bootstrapResult.Bootstrap.DatabaseEndpointForDiagnostics);
 app.Logger.LogInformation(
-    "Effective configuration diagnostics: DatabaseProvider={DatabaseProvider}, DatabaseServerVersion={DatabaseServerVersion}, LokiUri={LokiUri}",
-    StartupDiagnosticsFormatter.SummarizeValue(effectiveDatabaseProvider),
-    StartupDiagnosticsFormatter.SummarizeValue(effectiveDatabaseServerVersion),
-    StartupDiagnosticsFormatter.SummarizeValue(effectiveLokiUri));
+    "Installation: Id={InstallationId}, ConfigurationVersion={ConfigurationVersion}",
+    bootstrapResult.RuntimeState.InstallationId,
+    bootstrapResult.RuntimeState.ConfigurationVersion);
+
+if (hasLegacyDatabaseSection)
+{
+    app.Logger.LogWarning(
+        "A 'Database' section is present in appsettings or the environment. The bootstrap " +
+        "file is the only source for the database connection; the section is ignored. Remove it.");
+}
+
+if (legacyOverrides.Count > 0)
+{
+    app.Logger.LogWarning(
+        "Legacy application-setting overrides are present and ignored; the database is authoritative " +
+        "for these keys. Remove them from the launcher: {Keys}",
+        string.Join(", ", legacyOverrides));
+}
 
 // ---- Discovery conformance diagnostics ----
-// OIDC/OAuth metadata requires the issuer to be an https URL, and every conforming client compares
-// the `iss` claim against the URL it fetched discovery from. Development keeps the short issuer for
-// convenience. Production requires HTTPS unless the explicit legacy compatibility switch is enabled,
-// so this warning primarily identifies development or a temporary migration deployment.
-PublicOrigin.Validate(
-    builder.Configuration,
-    requireHttps: !app.Environment.IsDevelopment(),
-    requireConfiguredOrigin: !app.Environment.IsDevelopment());
+// The snapshot validator accepts a non-HTTPS issuer only after an explicit operator opt-in.
 var configuredIssuer = app.Services.GetRequiredService<JwtOptions>().Issuer;
 if (!Uri.TryCreate(configuredIssuer, UriKind.Absolute, out var issuerUri) ||
     issuerUri.Scheme != Uri.UriSchemeHttps)
@@ -134,9 +257,9 @@ if (!hasHttpsEndpoint)
         "In production, enable HTTPS or ensure TLS termination at the reverse proxy.");
 }
 
-// ---- Database Initialization (must happen before KeyManager) ----
-// Auto migration is always enabled. DatabaseInitializer handles migrations,
-// schema reconciliation, admin bootstrap, and optional bootstrap-apps.json pre-seeding.
+// ---- Application-phase data seeding ----
+// Schema migration and installation state were settled in the bootstrap phase; what is left is the
+// optional bootstrap-apps.json pre-seed.
 await DatabaseInitializer.InitializeAsync(app.Services, builder.Configuration);
 
 // ---- Wait for KeyManager initialization before accepting requests ----
@@ -174,31 +297,36 @@ app.UseMiddleware<SensitiveHeaderRedactionMiddleware>();
 app.UseAuthorization();
 app.UseRateLimiter();
 
-app.MapHealthChecks("/health");
-app.MapGet("/consul/status", (ConsulRuntimeState state) => Results.Ok(state.Snapshot()))
-    .RequireAuthorization(GatewayAppAuthenticationDefaults.OpsPolicy);
-app.MapPost("/consul/cache/invalidate", (IConfiguration configuration, ConsulRuntimeState state) =>
+// ---- Health ----
+app.MapHealthChecks(HealthEndpoints.Live, new()
 {
-    if (!ConsulOptions.IsEnabled(configuration))
+    Predicate = registration => registration.Tags.Contains(HealthCheckTags.Live)
+});
+app.MapHealthChecks(HealthEndpoints.Ready, new()
+{
+    Predicate = registration => registration.Tags.Contains(HealthCheckTags.Ready)
+});
+// Compatibility alias: existing launchers and Consul checks poll /health for readiness.
+app.MapHealthChecks(HealthEndpoints.Legacy, new()
+{
+    Predicate = registration => registration.Tags.Contains(HealthCheckTags.Ready)
+});
+
+// A completed installation must never re-enter setup. Browser navigation goes to the console; the
+// API surface is handled by SetupClosedController. This is middleware rather than a mapped endpoint
+// because the setup-mode host serves the same path from the SPA branch, and the branch's guard list
+// has to stay identical between the two hosts.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments(SetupModeGateMiddleware.SetupPath) ||
+        context.Request.Path.StartsWithSegments(BootstrapModeGateMiddleware.BootstrapPath))
     {
-        return Results.Ok(new
-        {
-            invalidated = false,
-            reason = "Consul mode is off"
-        });
+        context.Response.Redirect("/admin");
+        return;
     }
 
-    var options = ConsulOptions.Bind(configuration);
-    using var cacheService = new ConsulCacheService(options.CacheDirectory);
-    cacheService.Invalidate();
-    state.MarkCacheInvalidated();
-
-    return Results.Ok(new
-    {
-        invalidated = true,
-        cacheDirectory = options.CacheDirectory
-    });
-}).RequireAuthorization(GatewayAppAuthenticationDefaults.OpsPolicy);
+    await next(context);
+});
 
 // ---- JWKS Rate Limiting ----
 var jwksRateLimiter = new System.Threading.RateLimiting.FixedWindowRateLimiter(
@@ -261,10 +389,10 @@ app.MapGet("/.well-known/openid-configuration", BuildDiscoveryDocument);
 app.MapGet("/.well-known/oauth-authorization-server", BuildDiscoveryDocument);
 
 // ---- JWKS Discovery ----
-app.MapGet("/.well-known/jwks", async (IKeyManager keyManager) =>
+app.MapGet("/.well-known/jwks", async (IKeyManager keys) =>
 {
-    var keys = await keyManager.GetValidKeysAsync();
-    var jwks = keys.Select(JwksMapper.ToJwk);
+    var validKeys = await keys.GetValidKeysAsync();
+    var jwks = validKeys.Select(JwksMapper.ToJwk);
     return Results.Ok(new { keys = jwks });
 });
 
@@ -274,45 +402,9 @@ app.MapControllers();
 app.MapPrometheusScrapingEndpoint();
 
 // ---- Static files & SPA for Admin Web (HTTP port only) ----
-var appTitle = builder.Configuration["APP_TITLE"] ?? "SignaCore";
-app.MapWhen(context => AdminSpaRouting.ShouldServeSpa(context, httpPort),
-    adminApp =>
-    {
-        adminApp.UseDefaultFiles();
+AdminSpaBranch.Map(app, httpPort);
 
-        // Inject app title from APP_TITLE env var into index.html at runtime
-        adminApp.Use(async (context, next) =>
-        {
-            if (context.Request.Path == "/index.html")
-            {
-                var wwwroot = app.Environment.WebRootPath;
-                var filePath = Path.Combine(wwwroot, "index.html");
-                if (File.Exists(filePath))
-                {
-                    var content = await File.ReadAllTextAsync(filePath);
-                    content = AdminSpaTitleInjector.Inject(content, appTitle);
-                    context.Response.ContentType = "text/html; charset=utf-8";
-                    await context.Response.WriteAsync(content);
-                    return;
-                }
-            }
-            await next();
-        });
-
-        adminApp.UseStaticFiles();
-
-        // SPA fallback for Vue Router history mode
-        adminApp.MapWhen(_ => true, spaApp =>
-        {
-            spaApp.Use(async (context, next) =>
-            {
-                context.Request.Path = "/index.html";
-                await next();
-            });
-            spaApp.UseStaticFiles();
-        });
-    });
-
-app.Run();
+await app.RunAsync();
+return 0;
 
 public partial class Program { }

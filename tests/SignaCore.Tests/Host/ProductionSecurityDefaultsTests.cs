@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Host;
 using SignaCore.Tests.Domain.Keys;
@@ -145,51 +146,14 @@ public class ProductionSecurityDefaultsTests
         Assert.NotNull(provider);
     }
 
-    [Fact]
-    public void ProductionStartup_RejectsDevelopmentDatabaseFallback()
-    {
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            BuildServices(
-                Environments.Production,
-                new Dictionary<string, string?>
-                {
-                    ["Database:ConnectionString"] =
-                        "Host=localhost;Port=5432;Database=signacore;Username=postgres"
-                }));
-
-        Assert.Contains("development database", exception.Message);
-    }
-
-    [Fact]
-    public void ProductionMasterKeyProvider_RejectsMissingEnvironmentSecretWhenResolved()
-    {
-        var previous = Environment.GetEnvironmentVariable("RSA_MASTER_KEY");
-        try
-        {
-            Environment.SetEnvironmentVariable("RSA_MASTER_KEY", null);
-            using var provider = BuildServices(Environments.Production);
-
-            var exception = Assert.Throws<InvalidOperationException>(() =>
-                provider.GetRequiredService<IMasterKeyProvider>());
-
-            Assert.Contains("RSA_MASTER_KEY is required", exception.Message);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("RSA_MASTER_KEY", previous);
-        }
-    }
-
     private static ServiceProvider BuildServices(
         string environmentName,
         IDictionary<string, string?>? overrides = null)
     {
+        // Database connection and root secret now come from the bootstrap file rather than from
+        // application configuration, so they are passed directly instead of through IConfiguration.
         var values = new Dictionary<string, string?>
         {
-            ["Database:Provider"] = "PostgreSQL",
-            ["Database:ServerVersion"] = "15",
-            ["Database:ConnectionString"] =
-                "Host=localhost;Database=identity;Username=postgres;Password=test",
             ["Jwt:Issuer"] = "https://identity.example.test"
         };
         foreach (var pair in overrides ?? new Dictionary<string, string?>())
@@ -204,7 +168,14 @@ public class ProductionSecurityDefaultsTests
         services.AddLogging();
         services.AddIdentityInfrastructure(
             configuration,
-            new StubHostEnvironment { EnvironmentName = environmentName });
+            new StubHostEnvironment { EnvironmentName = environmentName },
+            new DatabaseOptions
+            {
+                Provider = "PostgreSQL",
+                ServerVersion = "15",
+                ConnectionString = "Host=localhost;Database=identity;Username=postgres;Password=test"
+            },
+            new BootstrapMasterKeyProvider("production-security-defaults-tests-root-secret"));
         return services.BuildServiceProvider();
     }
 

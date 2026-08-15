@@ -33,6 +33,8 @@ public class IdentityDbContext : DbContext
     public DbSet<AppLdapAccessEntity> AppLdapAccesses => Set<AppLdapAccessEntity>();
     public DbSet<AppSmsAccessEntity> AppSmsAccesses => Set<AppSmsAccessEntity>();
     public DbSet<AppWechatAccessEntity> AppWechatAccesses => Set<AppWechatAccessEntity>();
+    public DbSet<SystemSettingEntity> SystemSettings => Set<SystemSettingEntity>();
+    public DbSet<InstallationStateEntity> InstallationStates => Set<InstallationStateEntity>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -317,6 +319,38 @@ public class IdentityDbContext : DbContext
             entity.HasIndex(e => new { e.ActorId, e.CreatedAt });
             entity.HasIndex(e => new { e.Action, e.CreatedAt });
             entity.HasIndex(e => e.CreatedAt);
+        });
+
+        modelBuilder.Entity<SystemSettingEntity>(entity =>
+        {
+            entity.ToTable("system_settings");
+            entity.HasKey(e => e.Key);
+            entity.Property(e => e.Key).HasColumnName("key").HasMaxLength(IdentityConstants.MaxSettingKeyLength);
+            // No length limit: structured settings such as Ldap:Directories serialize to JSON that
+            // easily exceeds any varchar bound the three providers agree on.
+            entity.Property(e => e.Value).HasColumnName("value").IsRequired();
+            entity.Property(e => e.ValueType).HasColumnName("value_type").HasMaxLength(IdentityConstants.MaxSettingValueTypeLength);
+            entity.Property(e => e.IsSecret).HasColumnName("is_secret");
+            entity.Property(e => e.Version).HasColumnName("version");
+            ConfigureInstant(entity.Property(e => e.UpdatedAt).HasColumnName("updated_at"));
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by").HasMaxLength(IdentityConstants.MaxUsernameLength);
+        });
+
+        modelBuilder.Entity<InstallationStateEntity>(entity =>
+        {
+            entity.ToTable(
+                "installation_state",
+                table => table.HasCheckConstraint(
+                    "CK_installation_state_singleton",
+                    "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(e => e.Status).HasColumnName("status");
+            entity.Property(e => e.InstallationId).HasColumnName("installation_id");
+            entity.Property(e => e.SetupCodeHash).HasColumnName("setup_code_hash").HasMaxLength(IdentityConstants.MaxSetupCodeHashLength);
+            ConfigureInstant(entity.Property(e => e.SetupCodeExpiresAt).HasColumnName("setup_code_expires_at"));
+            ConfigureInstant(entity.Property(e => e.CompletedAt).HasColumnName("completed_at"));
+            entity.Property(e => e.ConfigurationVersion).HasColumnName("configuration_version");
         });
     }
 

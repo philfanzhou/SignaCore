@@ -33,7 +33,7 @@ public sealed class TokenIssuanceService
     private readonly IAuditService _auditService;
     private readonly IAccountLoginInfoService _accountLoginInfoService;
     private readonly IAccountRepository _accountRepository;
-    private readonly AdminBootstrapOptions _adminBootstrapOptions;
+    private readonly AdminIdentityOptions _adminIdentityOptions;
     private readonly ILogger<TokenIssuanceService> _logger;
 
     public TokenIssuanceService(
@@ -48,7 +48,7 @@ public sealed class TokenIssuanceService
         IAuditService auditService,
         IAccountLoginInfoService accountLoginInfoService,
         IAccountRepository accountRepository,
-        IOptions<AdminBootstrapOptions> adminBootstrapOptions,
+        AdminIdentityOptions adminIdentityOptions,
         ILogger<TokenIssuanceService> logger)
     {
         _keyManager = keyManager;
@@ -62,7 +62,7 @@ public sealed class TokenIssuanceService
         _auditService = auditService;
         _accountLoginInfoService = accountLoginInfoService;
         _accountRepository = accountRepository;
-        _adminBootstrapOptions = adminBootstrapOptions.Value;
+        _adminIdentityOptions = adminIdentityOptions;
         _logger = logger;
     }
 
@@ -241,7 +241,7 @@ public sealed class TokenIssuanceService
     }
 
     /// <summary>
-    /// 当已认证账号就是 <see cref="AdminBootstrapOptions.Username"/> 配置的 bootstrap admin 时，
+    /// 当已认证账号就是 <see cref="AdminIdentityOptions.Username"/> 配置的 bootstrap admin 时，
     /// 无条件注入 <c>role:admin</c>（已存在则跳过）。这是绕过门户回调机制的"超管"捷径，
     /// 使 bootstrap admin 无论从哪个门户登录或刷新都能拿到 admin 角色。
     /// <para>
@@ -261,7 +261,7 @@ public sealed class TokenIssuanceService
         AccountEntity authenticatedAccount,
         List<Claim> claims)
     {
-        var bootstrapUsername = _adminBootstrapOptions.Username;
+        var bootstrapUsername = _adminIdentityOptions.Username;
         if (string.IsNullOrWhiteSpace(bootstrapUsername))
         {
             return;

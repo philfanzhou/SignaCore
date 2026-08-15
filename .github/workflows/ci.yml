@@ -142,38 +142,134 @@ jobs:
 
       - name: Start SignaCore container
         run: |
+          # The launcher carries no application secrets any more: the protected bootstrap file holds
+          # the database connection and the external root key, and everything else is established by
+          # first-run setup.
+          mkdir -p "$GITHUB_WORKSPACE/signacore-smoke-config"
+          jq -n \
+            --arg connectionString "Host=signacore-smoke-pg;Port=5432;Database=signacore;Username=postgres;Password=${PG_PASSWORD}" \
+            --arg masterKey "$RSA_MASTER_KEY" \
+            '{Database:{Provider:"PostgreSQL",ServerVersion:"15",ConnectionString:$connectionString},MasterKey:$masterKey}' \
+            > "$GITHUB_WORKSPACE/signacore-smoke-config/signacore.bootstrap.json"
+
+          APP_UID="$(docker run --rm --entrypoint id "$IMAGE_NAME" -u)"
+          APP_GID="$(docker run --rm --entrypoint id "$IMAGE_NAME" -g)"
+          sudo chown -R "$APP_UID:$APP_GID" "$GITHUB_WORKSPACE/signacore-smoke-config"
+          sudo chmod 700 "$GITHUB_WORKSPACE/signacore-smoke-config"
+          sudo chmod 600 "$GITHUB_WORKSPACE/signacore-smoke-config/signacore.bootstrap.json"
+
+          # unless-stopped is what turns "setup completed" into "restarted into the normal host":
+          # the setup-mode host stops itself once the setup transaction has committed.
           docker run -d --name signacore-smoke-app --network signacore-smoke -p 5002:5002 \
+            --restart unless-stopped \
+            -v "$GITHUB_WORKSPACE/signacore-smoke-config:/app/config" \
             -v "$GITHUB_WORKSPACE/signacore-smoke-data:/app/data" \
             -e APP_TITLE='SignaCore CI Smoke' \
-            -e Database__Provider=PostgreSQL \
-            -e Database__ServerVersion=15 \
-            -e Database__ConnectionString="Host=signacore-smoke-pg;Port=5432;Database=signacore;Username=postgres;Password=${PG_PASSWORD}" \
-            -e ADMIN_BOOTSTRAP_USERNAME=smoke_admin \
-            -e ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_PASSWORD}" \
-            -e RSA_MASTER_KEY="${RSA_MASTER_KEY}" \
-            -e Jwt__Issuer=https://signacore.test \
-            -e Endpoints__PublicBaseUrl=https://signacore.test \
-            -e CONSUL_HTTP_ADDR=127.0.0.1:8500 \
-            -e Consul__Discovery__Register=false \
-            -e Consul__Discovery__Deregister=false \
-            -e Loki__Uri=http://127.0.0.1:3100 \
             "$IMAGE_NAME"
 
-      - name: Wait for /health
+      - name: Wait for liveness
         run: |
+          # A brand-new installation is deliberately live but not ready, so the launcher waits for
+          # liveness first; waiting for readiness would make the setup page unreachable forever.
           for i in $(seq 1 90); do
-            if [ "$(curl -fsS --max-time 3 http://localhost:5002/health 2>/dev/null)" = 'Healthy' ]; then
-              echo "SignaCore healthy after ${i}s"
+            if curl -fsS --max-time 3 http://localhost:5002/health/live >/dev/null 2>&1; then
+              echo "SignaCore live after ${i}s"
               exit 0
             fi
             if [ -z "$(docker ps -q --filter 'name=^/signacore-smoke-app$')" ]; then
-              echo 'SignaCore container exited before becoming healthy'
+              echo 'SignaCore container exited before becoming live'
+              docker logs signacore-smoke-app
               exit 1
             fi
             sleep 1
           done
-          echo 'Timed out waiting for /health'
+          echo 'Timed out waiting for /health/live'
+          docker logs signacore-smoke-app
           exit 1
+
+      - name: Setup Mode assertions
+        run: |
+          set -euo pipefail
+          fail() { echo "SMOKE FAIL: $*"; exit 1; }
+
+          curl -fsS --max-time 10 http://localhost:5002/api/setup/status | grep -q '"status":"pending"' \
+            || fail 'a new database did not enter Setup Mode'
+
+          ready_status="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+            http://localhost:5002/health/ready)"
+          [ "$ready_status" = '503' ] || fail "/health/ready returned $ready_status while pending"
+
+          token_status="$(curl -sS --max-time 10 -o /tmp/pending.json -w '%{http_code}' \
+            -X POST http://localhost:5002/api/auth/token \
+            -H 'Content-Type: application/json' -d '{"grantType":"password"}')"
+          [ "$token_status" = '503' ] || fail "token endpoint returned $token_status while pending"
+          grep -q 'installation_required' /tmp/pending.json \
+            || fail "pending token response lacks installation_required: $(cat /tmp/pending.json)"
+
+          redirect="$(curl -sS --max-time 10 -o /dev/null -w '%{redirect_url}' \
+            -H 'Accept: text/html' http://localhost:5002/admin)"
+          case "$redirect" in
+            */setup) ;;
+            *) fail "/admin redirected to '$redirect' instead of /setup" ;;
+          esac
+
+          echo 'Setup Mode assertions passed'
+
+      - name: Complete first-run setup
+        run: |
+          set -euo pipefail
+
+          # The plaintext setup code is printed exactly once, to stdout, and is never stored.
+          SETUP_CODE="$(docker logs signacore-smoke-app 2>&1 \
+            | grep -Eo '[A-Z0-9]{5}(-[A-Z0-9]{5}){5}' | head -1)"
+          [ -n "$SETUP_CODE" ] || { echo 'no setup code found in the container log'; exit 1; }
+          echo "::add-mask::$SETUP_CODE"
+
+          # A wrong code must be refused without changing anything.
+          bad_status="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+            -X POST http://localhost:5002/api/setup/complete \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg password "$ADMIN_PASSWORD" \
+              '{publicBaseUrl:"https://signacore.test",username:"smoke_admin",password:$password,confirmPassword:$password,setupCode:"AAAAA-BBBBB-CCCCC-DDDDD"}')")"
+          [ "$bad_status" = '403' ] || { echo "wrong setup code returned $bad_status"; exit 1; }
+
+          status="$(curl -sS --max-time 10 -o /tmp/setup.json -w '%{http_code}' \
+            -X POST http://localhost:5002/api/setup/complete \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg password "$ADMIN_PASSWORD" --arg code "$SETUP_CODE" \
+              '{publicBaseUrl:"https://signacore.test",username:"smoke_admin",password:$password,confirmPassword:$password,setupCode:$code}')")"
+          [ "$status" = '200' ] || { echo "setup returned $status: $(cat /tmp/setup.json)"; exit 1; }
+
+      - name: Wait for readiness after the restart
+        run: |
+          # The host stops itself after the response completes; Docker's restart policy brings it
+          # back as the normal host.
+          for i in $(seq 1 120); do
+            if [ "$(curl -fsS --max-time 3 http://localhost:5002/health/ready 2>/dev/null)" = 'Healthy' ]; then
+              echo "SignaCore ready after ${i}s"
+              # /health remains a compatibility alias for readiness.
+              [ "$(curl -fsS --max-time 3 http://localhost:5002/health)" = 'Healthy' ] \
+                || { echo '/health is not an alias for readiness'; exit 1; }
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'Timed out waiting for /health/ready after setup'
+          docker logs --tail 200 signacore-smoke-app
+          exit 1
+
+      - name: Setup cannot be replayed
+        run: |
+          set -euo pipefail
+
+          curl -fsS --max-time 10 http://localhost:5002/api/setup/status | grep -q '"status":"completed"' \
+            || { echo 'setup status did not become completed'; exit 1; }
+
+          status="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+            -X POST http://localhost:5002/api/setup/complete \
+            -H 'Content-Type: application/json' \
+            -d '{"publicBaseUrl":"https://attacker.test","username":"attacker","password":"Attacker1234","confirmPassword":"Attacker1234","setupCode":"AAAAA-BBBBB-CCCCC-DDDDD"}')"
+          [ "$status" = '409' ] || { echo "completed installation accepted setup: $status"; exit 1; }
 
       - name: Smoke assertions
         run: |

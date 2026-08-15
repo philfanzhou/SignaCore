@@ -37,20 +37,20 @@ public class TokenControllerTests
         TokenExpirationHours = 2
     };
 
-    // Bootstrap admin 配置默认用户名 admin；个别测试通过 AuthTestDoubles.BootstrapOptions(...) 覆盖。
-    private readonly Mock<IOptions<AdminBootstrapOptions>> _adminBootstrapOptionsMock = AuthTestDoubles.BootstrapOptions();
+    // 管理员用户名默认 admin；个别测试通过 AuthTestDoubles.AdminIdentity(...) 覆盖。
+    private readonly AdminIdentityOptions _adminIdentityOptions = AuthTestDoubles.AdminIdentity();
 
     private TokenController CreateController(IIdentityValidator[] validators) =>
-        CreateController(validators, _adminBootstrapOptionsMock);
+        CreateController(validators, _adminIdentityOptions);
 
     private TokenController CreateController(
         IIdentityValidator[] validators,
-        Mock<IOptions<AdminBootstrapOptions>> bootstrapOptionsMock,
+        AdminIdentityOptions adminIdentityOptions,
         ICallbackService? callbackService = null,
         AppRegistrationEntity? app = null)
     {
         var controller = new TokenController(
-                CreateIssuanceService(validators, bootstrapOptionsMock, callbackService))
+                CreateIssuanceService(validators, adminIdentityOptions, callbackService))
             .WithHttpContext();
         controller.HttpContext.Items[IdentityHeaders.ValidatedApp] = app ?? new AppRegistrationEntity
         {
@@ -69,7 +69,7 @@ public class TokenControllerTests
     /// </summary>
     private TokenIssuanceService CreateIssuanceService(
         IIdentityValidator[] validators,
-        Mock<IOptions<AdminBootstrapOptions>> bootstrapOptionsMock,
+        AdminIdentityOptions adminIdentityOptions,
         ICallbackService? callbackService = null) =>
         new(
             _keyManagerMock.Object,
@@ -83,7 +83,7 @@ public class TokenControllerTests
             _auditServiceMock.Object,
             _accountLoginInfoServiceMock.Object,
             _accountRepositoryMock.Object,
-            bootstrapOptionsMock.Object,
+            adminIdentityOptions,
             NullLogger<TokenIssuanceService>.Instance);
 
     // 由 token service 的 mock 回调写入，供断言 claims 使用。
@@ -304,7 +304,7 @@ public class TokenControllerTests
             .ThrowsAsync(new OperationCanceledException(cancellation.Token));
         var controller = CreateController(
             new[] { CreatePasswordValidator(account, "user").Object },
-            _adminBootstrapOptionsMock,
+            _adminIdentityOptions,
             callback.Object,
             new AppRegistrationEntity
             {
@@ -416,7 +416,7 @@ public class TokenControllerTests
 
         var controller = CreateController(
             new[] { validatorMock.Object },
-            AuthTestDoubles.BootstrapOptions(o => o.Username = "admin"),
+            AuthTestDoubles.AdminIdentity("admin"),
             callbackMock.Object);
 
         // 提供一个带回调 URL 的 app，让回调分支真正执行。
@@ -470,7 +470,7 @@ public class TokenControllerTests
         var validatorMock = CreatePasswordValidator(account, "admin");
         var controller = CreateController(
             new[] { validatorMock.Object },
-            AuthTestDoubles.BootstrapOptions(o => o.Username = ""));
+            AuthTestDoubles.AdminIdentity(string.Empty));
 
         var request = new TokenRequest { GrantType = "password", Username = "admin", Password = "Qwer1234" };
         BeginCaptureGeneratedClaims();
@@ -492,7 +492,7 @@ public class TokenControllerTests
         var validatorMock = CreatePasswordValidator(account, "ADMIN");
         var controller = CreateController(
             new[] { validatorMock.Object },
-            AuthTestDoubles.BootstrapOptions(o => o.Username = "admin"));
+            AuthTestDoubles.AdminIdentity("admin"));
 
         var request = new TokenRequest { GrantType = "password", Username = "ADMIN", Password = "Qwer1234" };
         BeginCaptureGeneratedClaims();

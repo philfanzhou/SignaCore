@@ -5,10 +5,12 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Host;
+using SignaCore.Host.Startup;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;
@@ -269,26 +271,163 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    /// <summary>
+    /// A completed installation must never permit reinitialization: the setup API stays routable so
+    /// clients get a clear answer, but it can only ever report "already completed".
+    /// </summary>
     [Fact]
-    public async Task ConsulOperationsEndpoints_WithoutAdminSession_ReturnUnauthorized()
+    public async Task SetupEndpoints_AfterInstallation_RefuseReinitialization()
     {
         using var http = _fixture.CreateHttpClient();
 
-        var statusResponse = await http.GetAsync("/consul/status");
-        var invalidateResponse = await http.PostAsync("/consul/cache/invalidate", content: null);
+        var status = await http.GetAsync("/api/setup/status");
+        Assert.Equal(HttpStatusCode.OK, status.StatusCode);
+        Assert.Equal(
+            "completed",
+            (await status.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("status").GetString());
 
-        Assert.Equal(HttpStatusCode.Unauthorized, statusResponse.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, invalidateResponse.StatusCode);
+        var complete = await http.PostAsJsonAsync("/api/setup/complete", new
+        {
+            publicBaseUrl = "https://attacker.example",
+            username = "attacker",
+            password = "Attacker123",
+            confirmPassword = "Attacker123",
+            setupCode = "does-not-matter"
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, complete.StatusCode);
+    }
+
+    /// <summary>
+    /// Settings are readable only with an admin session, and secret values never leave the service.
+    /// </summary>
+    [Fact]
+    public async Task SettingsApi_RequiresAnAdminSessionAndNeverReturnsSecretValues()
+    {
+        using var anonymous = _fixture.CreateHttpClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/admin/settings")).StatusCode);
+
+        using var admin = await _fixture.CreateAdminHttpClientAsync();
+        var response = await admin.GetAsync("/api/admin/settings");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var items = body.GetProperty("items").EnumerateArray().ToList();
+        Assert.NotEmpty(items);
+        Assert.All(
+            items.Where(item => item.GetProperty("isSecret").GetBoolean()),
+            item => Assert.Equal(JsonValueKind.Null, item.GetProperty("value").ValueKind));
+
+        // Non-secret values are returned so the console can render the current configuration.
+        Assert.Contains(
+            items,
+            item => item.GetProperty("key").GetString() == "Jwt:Audience"
+                && item.GetProperty("value").GetString() == _fixture.SharedAudience);
+    }
+
+    /// <summary>
+    /// A settings change is validated as a whole snapshot, so a value that only becomes invalid in
+    /// combination with an untouched one is refused rather than committed.
+    /// </summary>
+    [Fact]
+    public async Task SettingsApi_RejectsAChangeThatWouldInvalidateTheSnapshot()
+    {
+        using var admin = await _fixture.CreateAdminHttpClientAsync();
+
+        var response = await admin.PutAsJsonAsync("/api/admin/settings", new
+        {
+            values = new Dictionary<string, string>
+            {
+                // The issuer must keep matching the public base URL.
+                ["Jwt:Issuer"] = "https://somewhere.else.test"
+            }
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
-    public async Task ConsulStatusEndpoint_WithAdminSession_ReturnsOk()
+    public async Task SettingsApi_RejectsKeysThatAreNotDatabaseBacked()
     {
-        using var http = await _fixture.CreateAdminHttpClientAsync();
+        using var admin = await _fixture.CreateAdminHttpClientAsync();
 
-        var response = await http.GetAsync("/consul/status");
+        var response = await admin.PutAsJsonAsync("/api/admin/settings", new
+        {
+            values = new Dictionary<string, string> { ["Endpoints:Http"] = "9999" }
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    /// <summary>
+    /// A valid change increments the configuration version, encrypts secrets at rest, and records
+    /// which keys changed without recording their values.
+    /// </summary>
+    [Fact]
+    public async Task SettingsApi_AppliesAValidChangeTransactionally()
+    {
+        using var admin = await _fixture.CreateAdminHttpClientAsync();
+        var before = (await (await admin.GetAsync("/api/admin/settings")).Content
+            .ReadFromJsonAsync<JsonElement>()).GetProperty("configurationVersion").GetInt32();
+
+        var response = await admin.PutAsJsonAsync("/api/admin/settings", new
+        {
+            values = new Dictionary<string, string>
+            {
+                ["Sms:MaxSendsPerHour"] = "7",
+                ["WeChat:AppSecret"] = "a-new-wechat-secret"
+            }
+        });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(before + 1, body.GetProperty("configurationVersion").GetInt32());
+        Assert.True(body.GetProperty("restartRequired").GetBoolean());
+
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+
+        var secret = await db.SystemSettings.AsNoTracking()
+            .SingleAsync(setting => setting.Key == "WeChat:AppSecret");
+        Assert.True(secret.IsSecret);
+        Assert.DoesNotContain("a-new-wechat-secret", secret.Value, StringComparison.Ordinal);
+
+        var audit = await db.AuditLogs.AsNoTracking()
+            .Where(entry => entry.Action == "settings_updated")
+            .OrderByDescending(entry => entry.CreatedAt)
+            .FirstAsync();
+        Assert.Contains("WeChat:AppSecret", audit.Description ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain("a-new-wechat-secret", audit.Description ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    /// <summary>Browser navigation to /setup goes to the console once installation is complete.</summary>
+    [Fact]
+    public async Task SetupPage_AfterInstallation_RedirectsToAdminConsole()
+    {
+        using var http = _fixture.CreateNonRedirectingHttpClient();
+
+        var response = await http.GetAsync("/setup");
+
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        Assert.Equal("/admin", response.Headers.Location?.ToString());
+    }
+
+    /// <summary>
+    /// Liveness and readiness are distinct endpoints, and /health remains an alias for readiness so
+    /// existing launchers and Consul checks keep working.
+    /// </summary>
+    [Theory]
+    [InlineData("/health")]
+    [InlineData("/health/live")]
+    [InlineData("/health/ready")]
+    public async Task HealthEndpoints_OnCompletedInstallation_ReportHealthy(string path)
+    {
+        using var http = _fixture.CreateHttpClient();
+
+        var response = await http.GetAsync(path);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("Healthy", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -337,14 +476,17 @@ public class IdentityServerFixture : IAsyncLifetime
     public const string GatewayAppSecret = "http-contract-secret";
     public const string AdminUsername = "http_contract_admin";
     public const string AdminPassword = "HttpContract123";
+    public const string RootSecret = "test-master-key-for-e2e-testing-only";
+
     private WebApplicationFactory<Program>? _factory;
-    private string? _previousMasterKey;
     private string? _databasePath;
+    private string? _bootstrapDirectory;
 
     public async Task InitializeAsync()
     {
-        _previousMasterKey = Environment.GetEnvironmentVariable("RSA_MASTER_KEY");
-        Environment.SetEnvironmentVariable("RSA_MASTER_KEY", "test-master-key-for-e2e-testing-only");
+        _bootstrapDirectory = Path.Combine(
+            Path.GetTempPath(),
+            $"signacore-bootstrap-{Guid.NewGuid():N}");
         _databasePath = Path.Combine(
             Path.GetTempPath(),
             $"signacore-http-{Guid.NewGuid():N}.db");
@@ -353,23 +495,27 @@ public class IdentityServerFixture : IAsyncLifetime
             DataSource = _databasePath
         }.ConnectionString;
 
+        // The host no longer takes its database connection, root secret, or administrator from
+        // application configuration. Install the database first — through the same migration,
+        // settings-seeding, and administrator-creation components production uses — and then point
+        // the host at the resulting bootstrap file.
+        var bootstrapFilePath = await InstallationTestSupport.PrepareCompletedInstallationAsync(
+            _bootstrapDirectory,
+            new DatabaseOptions
+            {
+                Provider = "SQLite",
+                ConnectionString = connectionString
+            },
+            RootSecret,
+            AdminUsername,
+            AdminPassword);
+
+        // Consul discovery defaults to disabled in the settings catalog, so the test host never
+        // tries to register with a Consul that is not running. Registration failures used to surface
+        // during host shutdown and poison the whole test class.
         _factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
-            {
-                builder.UseSetting("AdminBootstrap:Username", AdminUsername);
-                builder.UseSetting("AdminBootstrap:Password", AdminPassword);
-                builder.UseSetting("Database:Provider", "SQLite");
-                builder.UseSetting("Database:ServerVersion", "");
-                builder.UseSetting("Database:ConnectionString", connectionString);
-
-                // 测试宿主不向 Consul 注册服务实例。本机没有 Consul，注册与注销都会失败，
-                // 而注销发生在 host 关停期间——异常会从 _factory.Dispose() 冒出去，
-                // 被 xUnit 记为 "Test Class Cleanup Failure"，把本类所有测试染成失败
-                // （即使断言全部通过）。这曾是一个偶发的假失败。
-                builder.UseSetting("Consul:Discovery:Enabled", "false");
-                builder.UseSetting("Consul:Discovery:Register", "false");
-                builder.UseSetting("Consul:Discovery:Deregister", "false");
-            });
+                builder.UseSetting("Bootstrap:FilePath", bootstrapFilePath));
 
         _factory.CreateClient();
         await SeedGatewayAppAsync(GatewayAppId, GatewayAppSecret);
@@ -378,6 +524,15 @@ public class IdentityServerFixture : IAsyncLifetime
     public HttpClient CreateHttpClient()
     {
         return _factory!.CreateClient();
+    }
+
+    /// <summary>For asserting on a redirect itself rather than on what it points at.</summary>
+    public HttpClient CreateNonRedirectingHttpClient()
+    {
+        return _factory!.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
     }
 
     public HttpClient CreateGatewayHttpClient()
@@ -469,7 +624,10 @@ public class IdentityServerFixture : IAsyncLifetime
         {
             File.Delete(_databasePath);
         }
-        Environment.SetEnvironmentVariable("RSA_MASTER_KEY", _previousMasterKey);
+        if (_bootstrapDirectory != null && Directory.Exists(_bootstrapDirectory))
+        {
+            Directory.Delete(_bootstrapDirectory, recursive: true);
+        }
         return Task.CompletedTask;
     }
 }

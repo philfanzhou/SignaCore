@@ -9,7 +9,7 @@ Canonical identifiers:
 - Namespace and assemblies: `SignaCore.*`
 - Solution: `SignaCore.slnx`
 - Image and container: `signacore`
-- Consul service/prefix: `SignaCore` / `config/signacore`
+- Consul service name (optional discovery, disabled by default): `SignaCore`
 - JWT issuer/audience: `SignaCore` / `SignaCore.Services`
 
 Public API routes and database table names remain stable across the repository rename.

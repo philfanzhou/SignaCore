@@ -347,6 +347,45 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                     b.ToTable("audit_logs", (string)null);
                 });
 
+            modelBuilder.Entity("SignaCore.Database.Entity.InstallationStateEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("id");
+
+                    b.Property<long?>("CompletedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("completed_at");
+
+                    b.Property<int>("ConfigurationVersion")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("configuration_version");
+
+                    b.Property<Guid>("InstallationId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("installation_id");
+
+                    b.Property<long?>("SetupCodeExpiresAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("setup_code_expires_at");
+
+                    b.Property<string>("SetupCodeHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("setup_code_hash");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("installation_state", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_installation_state_singleton", "id = 1");
+                        });
+                });
+
             modelBuilder.Entity("SignaCore.Database.Entity.LdapCredentialEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -781,6 +820,46 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                         .IsUnique();
 
                     b.ToTable("security_keys", (string)null);
+                });
+
+            modelBuilder.Entity("SignaCore.Database.Entity.SystemSettingEntity", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("key");
+
+                    b.Property<bool>("IsSecret")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("is_secret");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("updated_by");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("value");
+
+                    b.Property<string>("ValueType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("value_type");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("version");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("system_settings", (string)null);
                 });
 
             modelBuilder.Entity("SignaCore.Database.Entity.UserLoginEntity", b =>

@@ -92,15 +92,9 @@ internal static class AuthTestDoubles
     public static GatewayValidationService GatewayValidator(Mock<IAppRegistrationRepository> appRegRepoMock) =>
         new(appRegRepoMock.Object, NullLogger<GatewayValidationService>.Instance);
 
-    /// <summary>Bootstrap admin 配置，默认用户名 admin；个别测试可通过 configure 覆盖。</summary>
-    public static Mock<IOptions<AdminBootstrapOptions>> BootstrapOptions(Action<AdminBootstrapOptions>? configure = null)
-    {
-        var options = new AdminBootstrapOptions { Username = "admin" };
-        configure?.Invoke(options);
-        var mock = new Mock<IOptions<AdminBootstrapOptions>>();
-        mock.Setup(o => o.Value).Returns(options);
-        return mock;
-    }
+    /// <summary>管理员身份配置，默认用户名 admin；个别测试可通过 username 覆盖。</summary>
+    public static AdminIdentityOptions AdminIdentity(string username = "admin") =>
+        new() { Username = username };
 
     /// <summary>给 controller 装一个带固定远端 IP 的 HttpContext。</summary>
     public static T WithHttpContext<T>(this T controller) where T : ControllerBase

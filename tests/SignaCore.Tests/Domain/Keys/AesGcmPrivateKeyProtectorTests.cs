@@ -140,8 +140,8 @@ public class AesGcmPrivateKeyProtectorTests
     [Fact]
     public void Unprotect_WithDifferentMasterKey_ThrowsCryptographicException()
     {
-        // 主密钥丢失/被换掉时必须抛 CryptographicException——
-        // KeyManager 正是靠捕获它来触发"主密钥丢失，强制重建密钥对"的分支。
+        // 主密钥丢失/被换掉时必须抛 CryptographicException；KeyManager 据此让启动
+        // fail closed，绝不能静默停用或重建已有签名密钥。
         var (encrypted, salt) = CreateProtector(0x2A).Protect(SamplePkcs8());
 
         Assert.ThrowsAny<CryptographicException>(

@@ -15,7 +15,18 @@ dotnet build SignaCore.slnx
 dotnet run --project src/SignaCore.Host/SignaCore.Host.csproj
 ```
 
-Override nested settings with double underscores, for example `Database__ConnectionString` and `Jwt__Issuer`. Store secrets in environment variables or .NET user secrets.
+The database connection comes from the writable protected bootstrap file. In Development only, when
+`config/signacore.bootstrap.json` is absent, the `Database` section of `appsettings.Development.json`
+is used instead, so a clone-and-run setup works without preparing a secret file. Override it with
+`Database__ConnectionString` if your local database differs.
+
+Everything else — public base URL, issuer, SMS, WeChat, LDAP — lives in the database. The first run
+against an empty database enters Setup Mode: open `http://localhost:5002/setup` and enter the
+one-time setup code printed to the console. See [First-run setup](./FirstRunSetup.md).
+
+To exercise the production bootstrap path locally, create
+`src/SignaCore.Host/bin/Debug/net10.0/config/signacore.bootstrap.json`, or point `Bootstrap__FilePath`
+at a file elsewhere.
 
 ## Admin frontend
 

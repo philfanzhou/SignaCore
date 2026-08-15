@@ -2,27 +2,24 @@
 set -euo pipefail
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-DATA_DIR="${SCRIPT_DIR}/data"
+DATA_DIR="${DATA_DIR:-${SCRIPT_DIR}/data}"
+CONFIG_DIR="${CONFIG_DIR:-${SCRIPT_DIR}/config}"
+BOOTSTRAP_FILE="${CONFIG_DIR}/signacore.bootstrap.json"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 IMAGE_NAME="${IMAGE_NAME:-signacore:${IMAGE_TAG}}"
 CONTAINER_NAME="${CONTAINER_NAME:-signacore}"
 PORT="${PORT:-5002}"
-HOST_IP="${HOST_IP:-192.168.100.10}"
 
-CONSUL_HTTP_ADDR="${CONSUL_HTTP_ADDR:-${HOST_IP}:8500}"
-CONSUL_TOKEN="${CONSUL_TOKEN:-}"
-
-# Inject credentials from a secret store or the operator's environment.
-# Validate them before stopping the existing container so a bad deployment leaves it running.
-# `:?` requires a non-empty value; `?` permits an explicitly empty value.
-ADMIN_USERNAME="${ADMIN_BOOTSTRAP_USERNAME:-admin}"
-ADMIN_PASSWORD="${ADMIN_BOOTSTRAP_PASSWORD:?ADMIN_BOOTSTRAP_PASSWORD is required (secret store, never commit it)}"
-SMS_BYPASS_CODE="${SMS_BYPASS_CODE?SMS_BYPASS_CODE is required; set it to an empty string to disable the SMS bypass}"
-SMS_BYPASS_PHONES="${SMS_BYPASS_PHONES?SMS_BYPASS_PHONES is required; comma-separated allow list, empty disables the SMS bypass}"
-SMS_OTP_HMAC_KEY="${SMS_OTP_HMAC_KEY:?SMS_OTP_HMAC_KEY is required (base64, at least 32 random bytes)}"
-RSA_MASTER_KEY="${RSA_MASTER_KEY:?RSA_MASTER_KEY is required (secret store, never commit it)}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${PORT}/health}"
-HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-60}"
+# The launcher owns deployment concerns only: image, container name, host port, mounts, restart
+# policy, and timezone. Application configuration lives in the business database and is managed
+# through first-run setup and the administration pages. The database connection and the external
+# root key live in the writable bootstrap file below.
+LIVE_URL="${LIVE_URL:-http://127.0.0.1:${PORT}/health/live}"
+READY_URL="${READY_URL:-http://127.0.0.1:${PORT}/health/ready}"
+BOOTSTRAP_STATUS_URL="${BOOTSTRAP_STATUS_URL:-http://127.0.0.1:${PORT}/api/bootstrap/status}"
+SETUP_STATUS_URL="${SETUP_STATUS_URL:-http://127.0.0.1:${PORT}/api/setup/status}"
+LIVE_ATTEMPTS="${LIVE_ATTEMPTS:-60}"
+READY_ATTEMPTS="${READY_ATTEMPTS:-60}"
 HEALTH_INTERVAL_SECONDS="${HEALTH_INTERVAL_SECONDS:-2}"
 STOP_TIMEOUT_SECONDS="${STOP_TIMEOUT_SECONDS:-35}"
 
@@ -36,11 +33,16 @@ if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
     exit 1
 fi
 
-mkdir -p "$DATA_DIR"
+mkdir -p "$DATA_DIR" "$CONFIG_DIR"
 IMAGE_ID="$(docker image inspect "$IMAGE_NAME" --format '{{.Id}}')"
 CONTAINER_UID="${CONTAINER_UID:-$(docker run --rm --entrypoint id "$IMAGE_ID" -u)}"
 CONTAINER_GID="${CONTAINER_GID:-$(docker run --rm --entrypoint id "$IMAGE_ID" -g)}"
 chown -R "$CONTAINER_UID:$CONTAINER_GID" "$DATA_DIR" 2>/dev/null || true
+# The bootstrap backend creates and atomically replaces the file, so the runtime identity needs
+# exclusive read/write access to this persistent directory.
+chown -R "$CONTAINER_UID:$CONTAINER_GID" "$CONFIG_DIR" 2>/dev/null || true
+chmod 700 "$CONFIG_DIR" 2>/dev/null || true
+chmod 600 "$CONFIG_DIR"/* 2>/dev/null || true
 
 ROLLBACK_NAME="${CONTAINER_NAME}-rollback-$(date +%s)-$$"
 PREVIOUS_CONTAINER_ID="$(docker ps -aq --filter "name=^/${CONTAINER_NAME}$")"
@@ -81,73 +83,95 @@ fi
 DEPLOYMENT_IN_PROGRESS=true
 
 DOCKER_ENV_ARGS=(
-    -e "TZ=Asia/Shanghai"
-    -e "APP_TITLE=${CONTAINER_NAME}"
-    -e "CONSUL_HTTP_ADDR=${CONSUL_HTTP_ADDR}"
-    -e "CONSUL_TOKEN=${CONSUL_TOKEN}"
-    -e "Consul__Discovery__PreferIPAddress=true"
-    -e "Consul__Discovery__IPAddress=${HOST_IP}"
-    -e "Consul__Discovery__Port=${PORT}"
-    -e "ADMIN_BOOTSTRAP_USERNAME=${ADMIN_USERNAME}"
-    -e "ADMIN_BOOTSTRAP_PASSWORD=${ADMIN_PASSWORD}"
-    -e "RSA_MASTER_KEY=${RSA_MASTER_KEY}"
-    -e "Sms__BypassCode=${SMS_BYPASS_CODE}"
-    -e "Sms__BypassPhones=${SMS_BYPASS_PHONES}"
-    -e "Sms__OtpHmacKey=${SMS_OTP_HMAC_KEY}"
+    -e "TZ=${TZ:-Asia/Shanghai}"
+    -e "APP_TITLE=${APP_TITLE:-${CONTAINER_NAME}}"
 )
 
-append_optional_env() {
-    local source_name="$1"
-    local target_name="$2"
-    if [ -n "${!source_name:-}" ]; then
-        DOCKER_ENV_ARGS+=(-e "${target_name}=${!source_name}")
-    fi
-}
-
-append_optional_env DATABASE_PROVIDER Database__Provider
-append_optional_env DATABASE_SERVER_VERSION Database__ServerVersion
-append_optional_env DATABASE_CONNECTION_STRING Database__ConnectionString
-append_optional_env JWT_ISSUER Jwt__Issuer
-append_optional_env JWT_AUDIENCE Jwt__Audience
-append_optional_env ALLOW_NON_HTTPS_ISSUER Security__AllowNonHttpsIssuer
-append_optional_env PUBLIC_BASE_URL Endpoints__PublicBaseUrl
-append_optional_env ADMIN_WEB_ORIGIN AdminWeb__AllowedOrigins__0
-append_optional_env CALLBACK_ALLOWED_DOMAIN Callback__AllowedDomains__0
-append_optional_env CALLBACK_ALLOW_PRIVATE_ADDRESSES Callback__AllowPrivateAddresses
-append_optional_env CALLBACK_REQUIRE_HTTPS Callback__RequireHttps
-append_optional_env REVERSE_PROXY_IP ReverseProxy__KnownProxies__0
-append_optional_env OTLP_ENDPOINT OpenTelemetry__OtlpEndpoint
-append_optional_env LOKI_URI Loki__Uri
-
+# `unless-stopped` is what turns "setup completed" into "process restarted into the normal host":
+# the setup-mode host stops itself once the setup transaction has committed.
 if ! docker run -d \
     --name "$CONTAINER_NAME" \
     --restart unless-stopped \
     -p "${PORT}:5002" \
     "${DOCKER_ENV_ARGS[@]}" \
+    -v "${CONFIG_DIR}:/app/config" \
     -v "${DATA_DIR}:/app/data" \
     "$IMAGE_ID"; then
     restore_previous
     exit 1
 fi
 
-for ((attempt = 1; attempt <= HEALTH_ATTEMPTS; attempt++)); do
-    if [ "$(curl -fsS --max-time 3 "$HEALTH_URL" 2>/dev/null || true)" = "Healthy" ]; then
-        if [ -n "$PREVIOUS_CONTAINER_ID" ]; then
-            docker rm "$ROLLBACK_NAME" >/dev/null ||
-                echo "Warning: healthy deployment retained rollback container $ROLLBACK_NAME" >&2
-        fi
-        DEPLOYMENT_IN_PROGRESS=false
-        echo "Deployment healthy: $CONTAINER_NAME ($IMAGE_ID)"
-        exit 0
-    fi
+container_is_running() {
+    [ -n "$(docker ps -q --filter "name=^/${CONTAINER_NAME}$")" ]
+}
 
-    if [ -z "$(docker ps -q --filter "name=^/${CONTAINER_NAME}$")" ]; then
+# Liveness first: a brand-new instance is deliberately not ready, and waiting for readiness would
+# make it impossible to ever reach the setup page.
+LIVE=false
+for ((attempt = 1; attempt <= LIVE_ATTEMPTS; attempt++)); do
+    if curl -fsS --max-time 3 "$LIVE_URL" >/dev/null 2>&1; then
+        LIVE=true
+        break
+    fi
+    if ! container_is_running; then
         break
     fi
     sleep "$HEALTH_INTERVAL_SECONDS"
 done
 
-echo "New container failed health verification at $HEALTH_URL" >&2
+if [ "$LIVE" != true ]; then
+    echo "New container failed liveness verification at $LIVE_URL" >&2
+    docker logs --tail 200 "$CONTAINER_NAME" >&2 || true
+    restore_previous
+    exit 1
+fi
+
+for ((attempt = 1; attempt <= READY_ATTEMPTS; attempt++)); do
+    if curl -fsS --max-time 3 "$READY_URL" >/dev/null 2>&1; then
+        if [ -n "$PREVIOUS_CONTAINER_ID" ]; then
+            docker rm "$ROLLBACK_NAME" >/dev/null ||
+                echo "Warning: healthy deployment retained rollback container $ROLLBACK_NAME" >&2
+        fi
+        DEPLOYMENT_IN_PROGRESS=false
+        echo "Deployment ready: $CONTAINER_NAME ($IMAGE_ID)"
+        exit 0
+    fi
+
+    # With no file the process stays live in protected Bootstrap Configuration Mode. This is a
+    # successful deployment awaiting an operator, not a readiness failure.
+    if curl -fsS --max-time 3 "$BOOTSTRAP_STATUS_URL" 2>/dev/null | grep -Eq '"status":"(required|restarting)"'; then
+        if [ -n "$PREVIOUS_CONTAINER_ID" ]; then
+            docker rm "$ROLLBACK_NAME" >/dev/null ||
+                echo "Warning: retained rollback container $ROLLBACK_NAME" >&2
+        fi
+        DEPLOYMENT_IN_PROGRESS=false
+        echo "Deployment is awaiting bootstrap configuration: $CONTAINER_NAME ($IMAGE_ID)"
+        echo "Open http://<host>:${PORT}/bootstrap and enter the one-time code printed in the container log:"
+        echo "  docker logs $CONTAINER_NAME"
+        exit 0
+    fi
+
+    # A live-but-not-ready instance whose setup endpoint reports "pending" is a brand-new
+    # installation waiting for an operator, not a failed deployment.
+    if curl -fsS --max-time 3 "$SETUP_STATUS_URL" 2>/dev/null | grep -q '"status":"pending"'; then
+        if [ -n "$PREVIOUS_CONTAINER_ID" ]; then
+            docker rm "$ROLLBACK_NAME" >/dev/null ||
+                echo "Warning: retained rollback container $ROLLBACK_NAME" >&2
+        fi
+        DEPLOYMENT_IN_PROGRESS=false
+        echo "Deployment is awaiting first-run setup: $CONTAINER_NAME ($IMAGE_ID)"
+        echo "Open http://<host>:${PORT}/setup and enter the one-time setup code printed in the container log:"
+        echo "  docker logs $CONTAINER_NAME"
+        exit 0
+    fi
+
+    if ! container_is_running; then
+        break
+    fi
+    sleep "$HEALTH_INTERVAL_SECONDS"
+done
+
+echo "New container failed readiness verification at $READY_URL" >&2
 docker logs --tail 200 "$CONTAINER_NAME" >&2 || true
 restore_previous
 exit 1

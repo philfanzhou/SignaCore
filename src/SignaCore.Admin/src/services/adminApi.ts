@@ -268,6 +268,111 @@ class AdminApiClient {
   async revokeRefreshToken(refreshToken: string) {
     await this.client.post('/api/admin/tokens/revoke', { refreshToken })
   }
+
+  async getSettings() {
+    const response = await this.client.get<AdminSettingsList>('/api/admin/settings')
+    return response.data
+  }
+
+  /** Only the supplied keys change; omitting a secret leaves it untouched. */
+  async updateSettings(values: Record<string, string>) {
+    const response = await this.client.put<AdminSettingsUpdateResult>(
+      '/api/admin/settings',
+      { values },
+    )
+    return response.data
+  }
+
+  async getBootstrapSettings() {
+    const response = await this.client.get<BootstrapSettings>('/api/admin/bootstrap')
+    return response.data
+  }
+
+  async testBootstrapSettings(payload: UpdateBootstrapPayload) {
+    const response = await this.client.post<BootstrapInspection>('/api/admin/bootstrap/test', payload)
+    return response.data
+  }
+
+  async updateBootstrapSettings(payload: UpdateBootstrapPayload) {
+    const response = await this.client.put<{ status: string; message: string }>(
+      '/api/admin/bootstrap',
+      payload,
+    )
+    return response.data
+  }
+}
+
+export interface BootstrapProvider {
+  provider: string
+  serverVersions: string[]
+  defaultPort: number | null
+  singleInstanceOnly: boolean
+}
+
+export interface BootstrapSettings {
+  provider: string
+  serverVersion: string | null
+  endpoint: string
+  filePath: string
+  masterKeyConfigured: boolean
+  editable: boolean
+  singleInstanceOnly: boolean
+  scopeNotice: string
+  supportedProviders: BootstrapProvider[]
+}
+
+export interface BootstrapDatabasePayload {
+  provider: string
+  serverVersion: string | null
+  host?: string
+  port?: number | null
+  database?: string
+  username?: string
+  password?: string
+  filePath?: string
+  connectionString?: string
+}
+
+export interface UpdateBootstrapPayload {
+  database: BootstrapDatabasePayload
+  masterKey: string | null
+  confirm: boolean
+}
+
+export interface BootstrapInspection {
+  target: string
+  endpoint: string
+  canConnect: boolean
+  hasProtectedData: boolean
+  masterKey: string
+  installationId: string | null
+  message: string
+}
+
+export interface AdminSetting {
+  key: string
+  valueType: 'String' | 'Number' | 'Boolean' | 'Json'
+  isSecret: boolean
+  /** null for secrets: secret values never leave the service. */
+  value: string | null
+  hasValue: boolean
+  restartRequired: boolean
+  updatedAt: number | null
+  updatedBy: string | null
+}
+
+export interface AdminSettingsList {
+  configurationVersion: number
+  runningConfigurationVersion: number
+  restartPending: boolean
+  items: AdminSetting[]
+}
+
+export interface AdminSettingsUpdateResult {
+  configurationVersion: number
+  changedKeys: string[]
+  restartRequired: boolean
+  message: string
 }
 
 export function createAdminApiClient() {

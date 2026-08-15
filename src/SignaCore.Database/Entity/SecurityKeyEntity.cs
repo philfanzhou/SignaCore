@@ -2,7 +2,7 @@ namespace SignaCore.Database.Entity;
 
 /// <summary>
 /// RSA key pair for signing JWTs.
-/// Private key is encrypted with master key (RSA_MASTER_KEY) before storage.
+/// Private key is encrypted with the key derived from the bootstrap master key before storage.
 /// Public key is exposed via /.well-known/jwks for downstream services to verify JWTs.
 /// </summary>
 public class SecurityKeyEntity

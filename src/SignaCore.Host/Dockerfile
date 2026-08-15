@@ -36,7 +36,12 @@ LABEL org.opencontainers.image.title="SignaCore" \
       org.opencontainers.image.description="Identity and authentication service" \
       org.opencontainers.image.source="https://github.com/philfanzhou/SignaCore"
 COPY --from=backend-build --chown=app:app /app/publish .
-RUN mkdir -p /app/data && chown -R app:app /app/data
+# /app/config is the writable persistent bootstrap directory:
+#   /app/config/signacore.bootstrap.json
+# The service creates or atomically replaces the file after protected setup. It holds only the
+# database connection and the external root key. /app/data remains available for mutable runtime
+# data but is not a configuration authority.
+RUN mkdir -p /app/data /app/config && chown -R app:app /app/data /app/config
 
 EXPOSE 5002
 

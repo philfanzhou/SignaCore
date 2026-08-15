@@ -40,7 +40,7 @@ public sealed class KeyRotationTimelineTests : IDisposable
         _dbContext = new IdentityDbContext(options);
 
         var protector = new AesGcmPrivateKeyProtector(
-            new FileMasterKeyProvider(NullLogger<FileMasterKeyProvider>.Instance));
+            new BootstrapMasterKeyProvider("timeline_test_master_key_32bytes_min!!"));
 
         _keyManager = new KeyManager(
             CreateRealRepositoryScopeFactory(_dbContext),
