@@ -136,12 +136,15 @@ const {
           <div class="field">
             <label>短信供应商配置</label>
             <select v-model="callbackForm.smsProfileKey" class="select" style="width: 100%">
-              <option value="">请选择部署配置</option>
+              <option value="">不配置供应商（仅测试白名单可登录）</option>
               <option v-for="profile in smsProfiles" :key="profile.key" :value="profile.key">
                 {{ profile.key }}（{{ profile.provider }}）
               </option>
             </select>
-            <div class="hint">密钥与模板保存在部署配置中，后台只保存配置名称。</div>
+            <div class="hint">
+              密钥与模板保存在部署配置中，后台只保存配置名称。留空表示不下发验证码，只有
+              <span class="mono">Sms:BypassPhones</span> 白名单内的号码能用固定测试码登录。
+            </div>
           </div>
           <div class="field">
             <label>为当前应用授权手机用户</label>

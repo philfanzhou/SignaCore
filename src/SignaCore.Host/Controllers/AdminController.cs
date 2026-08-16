@@ -539,10 +539,12 @@ public class AdminController : ControllerBase
         if (!Enum.TryParse<SmsLoginMode>(request.Mode, true, out var mode) || !Enum.IsDefined(mode))
             return BadRequest(new ErrorResponse("Invalid SMS login mode."));
 
+        // A provider profile is only needed to *send* codes. A deployment may enable SMS login without
+        // one and admit the phones on the bypass allow-list, so only an unknown key is rejected here;
+        // POST /api/auth/sms-code reports the missing provider when a code is actually requested.
         var profileKey = string.IsNullOrWhiteSpace(request.ProfileKey) ? null : request.ProfileKey.Trim();
-        if (mode != SmsLoginMode.Disabled &&
-            (profileKey == null || !options.Profiles.ContainsKey(profileKey)))
-            return BadRequest(new ErrorResponse("A configured SMS provider profile is required."));
+        if (profileKey != null && !options.Profiles.ContainsKey(profileKey))
+            return BadRequest(new ErrorResponse("Unknown SMS provider profile."));
 
         var before = new { Mode = app.SmsLoginMode.ToString(), app.SmsProfileKey };
         app.SmsLoginMode = mode;

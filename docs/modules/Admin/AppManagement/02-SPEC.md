@@ -26,9 +26,13 @@ Beyond registration and callbacks, an application carries four policies that adm
 WeChat admissions are revoked with `DELETE /api/admin/apps/{appId}/wechat-users/{loginId}` and restored
 with `POST .../restore`. A user re-binding cannot clear a revocation, so revoking is not merely advisory.
 
-A WeChat mode other than `Disabled` is rejected when the deployment has no WeChat credentials, and an
-SMS mode other than `Disabled` is rejected without a configured provider profile: a policy that cannot
-be honoured is refused at the point of configuration rather than at the user's first login attempt.
+A WeChat mode other than `Disabled` is rejected when the deployment has no WeChat credentials: a policy
+that cannot be honoured is refused at the point of configuration rather than at the user's first login
+attempt. The SMS provider profile is optional, because it governs only code delivery: an application
+may leave it unset and admit the phones on the `Sms:BypassPhones` allow-list with the fixed
+`Sms:BypassCode`, which is how a test deployment runs without provider credentials. A profile key that
+is not present in `Sms:Profiles` is still rejected, so a typo cannot silently disable delivery, and
+`POST /api/auth/sms-code` reports the missing provider when a code is requested without one.
 
 Changing the audience mode alters the `aud` claim of every subsequently issued access token for that
 application; the coordinated rollout is described in

@@ -124,7 +124,12 @@ for a deliberately isolated internal deployment.
 | `Sms:OtpHmacKey` | empty | yes | Base64, at least 32 bytes, required once any profile exists |
 | `Sms:BypassCode` | empty | yes | Disabled when empty |
 | `Sms:BypassPhones` | `[]` | | Empty disables the bypass even when a code is configured |
-| `Sms:Profiles` | `{}` | yes | Per-profile provider credentials |
+| `Sms:Profiles` | `{}` | yes | Per-profile provider credentials; optional when only the bypass allow-list is used |
+
+A profile is required only to deliver codes. A deployment that enables SMS login purely for testing can
+leave `Sms:Profiles` (and therefore `Sms:OtpHmacKey`) empty, set `Sms:BypassCode` plus `Sms:BypassPhones`,
+and leave the per-application SMS provider profile unset; the listed phones then log in with the fixed
+code, while `POST /api/auth/sms-code` answers that no provider is configured.
 
 ### WeChat
 

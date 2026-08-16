@@ -14,6 +14,7 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using SignaCore.Host.Controllers;
@@ -1104,6 +1105,71 @@ public class AdminControllerTests : IDisposable
             "app_deleted", "AppRegistration", "a",
             AdminId, AdminName, "Admin deleted app: MyApp", It.IsAny<string?>(),
             It.IsAny<string?>(), null, null), Times.Once);
+    }
+
+    #endregion
+
+    #region UpdateSmsPolicy
+
+    private static SmsOptions CreateSmsOptions(params string[] profileKeys)
+    {
+        var options = new SmsOptions();
+        foreach (var key in profileKeys)
+        {
+            options.Profiles[key] = new SmsProviderProfile { Provider = SmsProviderNames.AlibabaCloud };
+        }
+
+        return options;
+    }
+
+    [Fact]
+    public async Task UpdateSmsPolicy_WithoutProfile_EnablesModeForBypassOnlyDeployment()
+    {
+        SetAdminUser();
+        var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "a", AppName = "MyApp" };
+        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+
+        var result = await _controller.UpdateSmsPolicy(
+            "a", new AdminUpdateSmsPolicyRequest("AutoProvision", null),
+            _appRegRepoMock.Object, CreateSmsOptions(), _unitOfWorkMock.Object, _auditServiceMock.Object);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
+        Assert.Equal(SmsLoginMode.AutoProvision, app.SmsLoginMode);
+        Assert.Null(app.SmsProfileKey);
+    }
+
+    [Fact]
+    public async Task UpdateSmsPolicy_WithUnknownProfile_ReturnsBadRequest()
+    {
+        SetAdminUser();
+        var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "a", AppName = "MyApp" };
+        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+
+        var result = await _controller.UpdateSmsPolicy(
+            "a", new AdminUpdateSmsPolicyRequest("AutoProvision", "typo"),
+            _appRegRepoMock.Object, CreateSmsOptions("primary"), _unitOfWorkMock.Object, _auditServiceMock.Object);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal(SmsLoginMode.Disabled, app.SmsLoginMode);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateSmsPolicy_WithConfiguredProfile_StoresProfileKey()
+    {
+        SetAdminUser();
+        var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "a", AppName = "MyApp" };
+        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+
+        var result = await _controller.UpdateSmsPolicy(
+            "a", new AdminUpdateSmsPolicyRequest("ManualApproval", " primary "),
+            _appRegRepoMock.Object, CreateSmsOptions("primary"), _unitOfWorkMock.Object, _auditServiceMock.Object);
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(SmsLoginMode.ManualApproval, app.SmsLoginMode);
+        Assert.Equal("primary", app.SmsProfileKey);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     #endregion
