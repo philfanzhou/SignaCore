@@ -28,15 +28,29 @@ public class RefreshTokenValidatorTests
     private static RefreshTokenValidator CreateValidator(
         IRefreshTokenRepository refreshTokenRepository,
         IAccountRepository accountRepository,
-        IWechatAdmissionService? wechatAdmissionService = null) =>
+        IWechatAdmissionService? wechatAdmissionService = null,
+        IAppExchangeTrustRepository? exchangeTrustRepository = null,
+        ISmsAdmissionService? smsAdmissionService = null) =>
         new(
             refreshTokenRepository,
             accountRepository,
+            // Default: no application trusts any other, which is the shape of a deployment that
+            // never configures an exchange.
+            exchangeTrustRepository ?? new Mock<IAppExchangeTrustRepository>().Object,
             new Mock<ILdapAccountService>().Object,
             new Mock<ILdapDirectoryClient>().Object,
-            new Mock<ISmsAdmissionService>().Object,
+            smsAdmissionService ?? new Mock<ISmsAdmissionService>().Object,
             wechatAdmissionService ?? new Mock<IWechatAdmissionService>().Object,
             CreateLogger());
+
+    private static IAppExchangeTrustRepository TrustFrom(Guid appRegistrationId, string sourceAppId)
+    {
+        var repository = new Mock<IAppExchangeTrustRepository>();
+        repository
+            .Setup(item => item.IsTrustedSourceAsync(appRegistrationId, sourceAppId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        return repository.Object;
+    }
 
     [Fact]
     public async Task ValidateAsync_WithValidRefreshToken_ReturnsSuccess()
@@ -248,48 +262,203 @@ public class RefreshTokenValidatorTests
     [Fact]
     public async Task ValidateAsync_WithCrossAppExchange_ReturnsFailure()
     {
-        // A refresh token is an application-bound credential. A second application must
-        // start its own login flow instead of exchanging another app's refresh token.
-        var context = CreateInMemoryContext();
-        var accountId = Guid.NewGuid();
-        var account = new AccountEntity
-        {
-            Id = accountId,
-            IsActive = true,
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-        context.Accounts.Add(account);
+        // A refresh token is an application-bound credential. Without an administered exchange
+        // trust, a second application must start its own login flow instead of presenting it.
+        var (account, token, tokenRepository, accountRepository) =
+            CreateCrossApplicationFixture("cross_app_refresh_token", "source_app_id");
+        var targetApp = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "target_app_id" };
 
-        var refreshToken = new RefreshTokenEntity
-        {
-            Id = Guid.NewGuid(),
-            AccountId = accountId,
-            TokenValue = "cross_app_refresh_token",
-            ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
-            IsRevoked = false,
-            CreatedAt = DateTimeOffset.UtcNow,
-            AppId = "user_portal_app_id"
-        };
-        context.RefreshTokens.Add(refreshToken);
-        await context.SaveChangesAsync();
-
-        var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
-        refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync("cross_app_refresh_token")).ReturnsAsync(refreshToken);
-        var accountRepoMock = new Mock<IAccountRepository>();
-        accountRepoMock.Setup(r => r.GetByIdAsync(accountId)).ReturnsAsync(account);
-
-        var validator = CreateValidator(refreshTokenRepoMock.Object, accountRepoMock.Object);
+        var validator = CreateValidator(tokenRepository.Object, accountRepository.Object);
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
             GrantType = IdentityConstants.GrantTypeRefreshToken,
-            RefreshToken = "cross_app_refresh_token",
-            AppId = "second_app_id"
+            RefreshToken = token.TokenValue,
+            AppId = targetApp.AppId,
+            App = targetApp
         });
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Refresh token is not valid for this application", result.ErrorMessage);
-        accountRepoMock.Verify(r => r.GetByIdAsync(It.IsAny<Guid>()), Times.Never);
+        Assert.False(result.IsCrossApplicationExchange);
+        accountRepository.Verify(item => item.GetByIdAsync(It.IsAny<Guid>()), Times.Never);
+        Assert.NotNull(account);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_CrossApplicationRefresh_IsAdmittedByAnExchangeTrust()
+    {
+        var (account, token, tokenRepository, accountRepository) =
+            CreateCrossApplicationFixture("trusted_refresh_token", "source_app_id");
+        var targetApp = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "target_app_id" };
+
+        var validator = CreateValidator(
+            tokenRepository.Object,
+            accountRepository.Object,
+            exchangeTrustRepository: TrustFrom(targetApp.Id, token.AppId));
+
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = token.TokenValue,
+            AppId = targetApp.AppId,
+            App = targetApp
+        });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(account.Id, result.Account.Id);
+        // The issuance path reads these two to mint instead of rotate.
+        Assert.True(result.IsCrossApplicationExchange);
+        Assert.Equal("source_app_id", result.SourceAppId);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_CrossApplicationRefresh_DoesNotComposeAcrossTwoTrusts()
+    {
+        // A → B and B → C must not add up to A → C. A token minted by an exchange carries the
+        // application it came from, and that is what disqualifies it from a second exchange.
+        var (_, token, tokenRepository, accountRepository) =
+            CreateCrossApplicationFixture("second_hop_refresh_token", "middle_app_id");
+        token.SourceAppId = "first_app_id";
+        var targetApp = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "third_app_id" };
+
+        var validator = CreateValidator(
+            tokenRepository.Object,
+            accountRepository.Object,
+            exchangeTrustRepository: TrustFrom(targetApp.Id, token.AppId));
+
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = token.TokenValue,
+            AppId = targetApp.AppId,
+            App = targetApp
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Refresh token is not valid for this application", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_CrossApplicationRefresh_DerivesSmsAdmissionAsExchangeGranted()
+    {
+        var (account, token, tokenRepository, accountRepository) =
+            CreateCrossApplicationFixture("sms_exchange_refresh_token", "source_app_id");
+        var loginId = Guid.NewGuid();
+        token.SmsUserLoginId = loginId;
+        var targetApp = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "target_app_id",
+            SmsLoginMode = SmsLoginMode.AutoProvision
+        };
+
+        var login = new UserLoginEntity { Id = loginId, AccountId = account.Id, ProviderUserId = "+8613800138000" };
+        var smsAdmission = new Mock<ISmsAdmissionService>();
+        smsAdmission
+            .Setup(item => item.FindByLoginIdAsync(targetApp.Id, loginId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SmsAdmission?)null);
+        smsAdmission
+            .Setup(item => item.GrantByLoginIdAsync(
+                targetApp, loginId, SmsAccessApprovalSource.ExchangeGranted, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SmsAdmission(
+                account,
+                login,
+                new AppSmsAccessEntity
+                {
+                    AppRegistrationId = targetApp.Id,
+                    UserLoginId = loginId,
+                    ApprovalSource = SmsAccessApprovalSource.ExchangeGranted,
+                    IsActive = true
+                }));
+
+        var validator = CreateValidator(
+            tokenRepository.Object,
+            accountRepository.Object,
+            exchangeTrustRepository: TrustFrom(targetApp.Id, token.AppId),
+            smsAdmissionService: smsAdmission.Object);
+
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = token.TokenValue,
+            AppId = targetApp.AppId,
+            App = targetApp
+        });
+
+        Assert.True(result.IsSuccess);
+        Assert.True(result.IsCrossApplicationExchange);
+        // Recorded as derived, not as a verified SMS login: no OTP was checked for this application.
+        smsAdmission.Verify(item => item.GrantByLoginIdAsync(
+            targetApp, loginId, SmsAccessApprovalSource.ExchangeGranted, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_CrossApplicationRefresh_DoesNotDeriveAdmissionUnderManualApproval()
+    {
+        var (account, token, tokenRepository, accountRepository) =
+            CreateCrossApplicationFixture("manual_exchange_refresh_token", "source_app_id");
+        var loginId = Guid.NewGuid();
+        token.SmsUserLoginId = loginId;
+        var targetApp = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "target_app_id",
+            SmsLoginMode = SmsLoginMode.ManualApproval
+        };
+
+        var smsAdmission = new Mock<ISmsAdmissionService>();
+        smsAdmission
+            .Setup(item => item.FindByLoginIdAsync(targetApp.Id, loginId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SmsAdmission?)null);
+
+        var validator = CreateValidator(
+            tokenRepository.Object,
+            accountRepository.Object,
+            exchangeTrustRepository: TrustFrom(targetApp.Id, token.AppId),
+            smsAdmissionService: smsAdmission.Object);
+
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = token.TokenValue,
+            AppId = targetApp.AppId,
+            App = targetApp
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("SMS access has been revoked", result.ErrorMessage);
+        smsAdmission.Verify(item => item.GrantByLoginIdAsync(
+            It.IsAny<AppRegistrationEntity>(), It.IsAny<Guid>(), It.IsAny<SmsAccessApprovalSource>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        Assert.NotNull(account);
+    }
+
+    private static (AccountEntity Account, RefreshTokenEntity Token,
+        Mock<IRefreshTokenRepository> TokenRepository, Mock<IAccountRepository> AccountRepository)
+        CreateCrossApplicationFixture(string tokenValue, string sourceAppId)
+    {
+        var account = new AccountEntity
+        {
+            Id = Guid.NewGuid(),
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        var token = new RefreshTokenEntity
+        {
+            Id = Guid.NewGuid(),
+            AccountId = account.Id,
+            TokenValue = tokenValue,
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
+            IsRevoked = false,
+            CreatedAt = DateTimeOffset.UtcNow,
+            AppId = sourceAppId
+        };
+        var tokenRepository = new Mock<IRefreshTokenRepository>();
+        tokenRepository.Setup(item => item.GetByTokenValueAsync(tokenValue)).ReturnsAsync(token);
+        var accountRepository = new Mock<IAccountRepository>();
+        accountRepository.Setup(item => item.GetByIdAsync(account.Id)).ReturnsAsync(account);
+        return (account, token, tokenRepository, accountRepository);
     }
 
     [Theory]
@@ -445,6 +614,7 @@ public class RefreshTokenValidatorTests
         var validator = new RefreshTokenValidator(
             tokenRepository.Object,
             accountRepository.Object,
+            new Mock<IAppExchangeTrustRepository>().Object,
             ldapAccounts.Object,
             directoryClient.Object,
             new Mock<ISmsAdmissionService>().Object,

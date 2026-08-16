@@ -71,6 +71,18 @@ public sealed record AdminUpdateWechatPolicyRequest(string Mode);
 
 public sealed record AdminUpdateAudienceModeRequest(string Mode);
 
+public sealed record AdminAddExchangeTrustRequest(string SourceAppId);
+
+/// <summary>
+/// One directed exchange trust: this application accepts refresh tokens issued to
+/// <paramref name="SourceAppId"/>.
+/// </summary>
+public sealed record AdminExchangeTrustResponse(
+    string SourceAppId,
+    string SourceAppName,
+    bool SourceIsActive,
+    long CreatedAt);
+
 /// <summary><paramref name="OpenId"/> is masked: the raw OpenId is never returned by the admin API.</summary>
 public sealed record AdminWechatUserResponse(
     string LoginId,

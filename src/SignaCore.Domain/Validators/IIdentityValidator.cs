@@ -69,6 +69,17 @@ public class ValidationResult
     /// </summary>
     public string ErrorCode { get; private set; } = OAuthErrorCodes.InvalidGrant;
 
+    /// <summary>
+    /// 该次 refresh 是跨应用换票：presented token 属于 <see cref="SourceAppId"/>，由信任边放行。
+    /// 签发路径据此改为"只签发不轮换"——presented token 是别的应用的会话凭据，在这里吊销它
+    /// 等于顺手结束了那边的登录。见 docs/adr/0003-cross-application-refresh-grant.md。
+    /// </summary>
+    [MemberNotNullWhen(true, nameof(SourceAppId))]
+    public bool IsCrossApplicationExchange { get; private set; }
+
+    /// <summary>被换的 refresh token 所属的 AppId；非跨应用换票时为 null。</summary>
+    public string? SourceAppId { get; private set; }
+
     public static ValidationResult Success(
         AccountEntity account,
         string authMethod,
@@ -92,4 +103,16 @@ public class ValidationResult
         ErrorMessage = message,
         ErrorCode = errorCode ?? OAuthErrorCodes.InvalidGrant
     };
+
+    /// <summary>
+    /// 把一次成功的 refresh 校验标记为跨应用换票。只在 <see cref="RefreshTokenValidator"/> 里紧跟
+    /// <see cref="Success"/> 调用——写成实例方法而不是再往 Success 上加两个可选参数，是因为这条信息
+    /// 只有一个 grant type 用得上，塞进公共工厂签名会让其余四个调用点都要跳过它。
+    /// </summary>
+    public ValidationResult AsCrossApplicationExchange(string sourceAppId)
+    {
+        IsCrossApplicationExchange = true;
+        SourceAppId = sourceAppId;
+        return this;
+    }
 }

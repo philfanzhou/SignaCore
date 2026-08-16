@@ -41,7 +41,7 @@ export interface AdminLdapUser {
   username: string
   samAccountName: string
   directoryKey: string
-  approvalSource: 'Admin' | 'AutoProvision'
+  approvalSource: 'Admin' | 'AutoProvision' | 'ExchangeGranted'
   isActive: boolean
   createdAt: number
 }
@@ -60,7 +60,7 @@ export interface AdminSmsUser {
   loginId: string
   userId: string
   phone: string
-  approvalSource: 'Admin' | 'AutoProvision'
+  approvalSource: 'Admin' | 'AutoProvision' | 'ExchangeGranted'
   isActive: boolean
   createdAt: number
 }
@@ -70,8 +70,16 @@ export interface AdminWechatUser {
   loginId: string
   userId: string
   openId: string
-  approvalSource: 'SelfBind' | 'AutoProvision'
+  approvalSource: 'SelfBind' | 'AutoProvision' | 'ExchangeGranted'
   isActive: boolean
+  createdAt: number
+}
+
+/** 一条有向信任边：本应用接受 sourceAppId 签发的 refresh token，反向不成立。 */
+export interface AdminExchangeTrust {
+  sourceAppId: string
+  sourceAppName: string
+  sourceIsActive: boolean
   createdAt: number
 }
 
@@ -212,6 +220,21 @@ class AdminApiClient {
 
   async updateAudienceMode(appId: string, mode: AdminApp['audienceMode']) {
     await this.client.put(`/api/admin/apps/${appId}/audience-mode`, { mode })
+  }
+
+  async getExchangeTrusts(appId: string) {
+    const response = await this.client.get<AdminExchangeTrust[]>(`/api/admin/apps/${appId}/exchange-trusts`)
+    return response.data
+  }
+
+  async addExchangeTrust(appId: string, sourceAppId: string) {
+    const response = await this.client.post<AdminExchangeTrust>(
+      `/api/admin/apps/${appId}/exchange-trusts`, { sourceAppId })
+    return response.data
+  }
+
+  async removeExchangeTrust(appId: string, sourceAppId: string) {
+    await this.client.delete(`/api/admin/apps/${appId}/exchange-trusts/${sourceAppId}`)
   }
 
   async getAppWechatUsers(appId: string) {

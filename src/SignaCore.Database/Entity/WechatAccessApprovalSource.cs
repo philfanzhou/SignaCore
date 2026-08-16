@@ -6,5 +6,11 @@ public enum WechatAccessApprovalSource
     SelfBind = 0,
 
     /// <summary>The first WeChat login provisioned the account under <see cref="WechatLoginMode.AutoProvision"/>.</summary>
-    AutoProvision = 1
+    AutoProvision = 1,
+
+    /// <summary>
+    /// A cross-application refresh grant derived this admission from one the account already held at
+    /// another application. No WeChat authorization was performed for this application.
+    /// </summary>
+    ExchangeGranted = 2
 }

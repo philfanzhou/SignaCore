@@ -700,6 +700,98 @@ public class AdminController : ControllerBase
         return Ok(new OperationResponse(true, $"Access tokens for this application now carry aud={audience}."));
     }
 
+    /// <summary>
+    /// GET /api/admin/apps/{appId}/exchange-trusts — 本应用愿意接受哪些应用签发的 refresh token。
+    /// 边是有向的：这里列出的是来源，反向不成立。见 docs/adr/0003-cross-application-refresh-grant.md。
+    /// </summary>
+    [HttpGet("apps/{appId}/exchange-trusts")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> GetExchangeTrusts(
+        string appId,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] IAppExchangeTrustRepository exchangeTrustRepository,
+        CancellationToken cancellationToken)
+    {
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+
+        var trusts = await exchangeTrustRepository.ListSourcesAsync(app.Id, cancellationToken);
+        var items = trusts
+            .Select(trust => new AdminExchangeTrustResponse(
+                trust.SourceAppId, trust.SourceAppName, trust.SourceIsActive,
+                trust.CreatedAt.ToUnixTimeSeconds()))
+            .ToList();
+        return Ok((IReadOnlyList<AdminExchangeTrustResponse>)items);
+    }
+
+    /// <summary>
+    /// POST /api/admin/apps/{appId}/exchange-trusts — 允许本应用接受来源应用签发的 refresh token。
+    /// 加这条边等于：任何持有来源应用 refresh token 的人都能为同一账号换到本应用的会话。本应用比来源
+    /// 应用权限更高时，差异必须由本应用的回调和授权规则守住，不能指望这条边不存在。
+    /// </summary>
+    [HttpPost("apps/{appId}/exchange-trusts")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> AddExchangeTrust(
+        string appId,
+        [FromBody] AdminAddExchangeTrustRequest request,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] IAppExchangeTrustRepository exchangeTrustRepository,
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.SourceAppId))
+            return BadRequest(new ErrorResponse("A source AppId is required."));
+
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+
+        var sourceApp = await appRegistrationRepository.GetByAppIdAsync(request.SourceAppId.Trim());
+        if (sourceApp == null) return NotFound(new ErrorResponse("Source app not found."));
+        if (sourceApp.Id == app.Id)
+            return BadRequest(new ErrorResponse("An application cannot trust itself."));
+
+        var (actorId, actorName) = GetAdminIdentity();
+        var trust = await exchangeTrustRepository.AddAsync(app, sourceApp, actorId, cancellationToken);
+        await auditService.RecordActionAsync(
+            "app_exchange_trust_added", "AppRegistration", appId, actorId, actorName,
+            $"Application now accepts refresh tokens issued to {sourceApp.AppId}", GetClientIp(),
+            after: new { SourceAppId = sourceApp.AppId });
+        return Ok(new AdminExchangeTrustResponse(
+            trust.SourceAppId, trust.SourceAppName, trust.SourceIsActive,
+            trust.CreatedAt.ToUnixTimeSeconds()));
+    }
+
+    /// <summary>
+    /// DELETE /api/admin/apps/{appId}/exchange-trusts/{sourceAppId} — 撤销信任边。
+    /// 已经换出去的会话不会因此结束：它们绑定在本应用和本应用的准入记录上，要终止得按应用撤销。
+    /// </summary>
+    [HttpDelete("apps/{appId}/exchange-trusts/{sourceAppId}")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> RemoveExchangeTrust(
+        string appId,
+        string sourceAppId,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] IAppExchangeTrustRepository exchangeTrustRepository,
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
+    {
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+
+        var sourceApp = await appRegistrationRepository.GetByAppIdAsync(sourceAppId);
+        if (sourceApp == null) return NotFound(new ErrorResponse("Source app not found."));
+
+        if (!await exchangeTrustRepository.RemoveAsync(app.Id, sourceApp.Id, cancellationToken))
+            return NotFound(new ErrorResponse("Exchange trust not found."));
+
+        var (actorId, actorName) = GetAdminIdentity();
+        await auditService.RecordActionAsync(
+            "app_exchange_trust_removed", "AppRegistration", appId, actorId, actorName,
+            $"Application no longer accepts refresh tokens issued to {sourceApp.AppId}", GetClientIp(),
+            before: new { SourceAppId = sourceApp.AppId });
+        return Ok(new OperationResponse(true, "Exchange trust removed."));
+    }
+
     [HttpGet("apps/{appId}/wechat-users")]
     [Authorize(Policy = "AdminSession")]
     public async Task<IActionResult> GetWechatUsers(string appId, [FromServices] IdentityDbContext dbContext)

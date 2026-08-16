@@ -18,7 +18,7 @@ namespace SignaCore.Database.Migrations.MySql.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .UseCollation("utf8mb4_bin")
-                .HasAnnotation("ProductVersion", "9.0.18")
+                .HasAnnotation("ProductVersion", "9.0.19")
                 .HasAnnotation("Relational:MaxIdentifierLength", 64);
 
             MySqlModelBuilderExtensions.HasCharSet(modelBuilder, "utf8mb4");
@@ -82,6 +82,43 @@ namespace SignaCore.Database.Migrations.MySql.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("accounts", (string)null);
+                });
+
+            modelBuilder.Entity("SignaCore.Database.Entity.AppExchangeTrustEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("app_registration_id");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("approved_by");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasPrecision(6)
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("SourceAppRegistrationId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("source_app_registration_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceAppRegistrationId");
+
+                    b.HasIndex("AppRegistrationId", "SourceAppRegistrationId")
+                        .IsUnique();
+
+                    b.ToTable("app_exchange_trusts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_app_exchange_trusts_no_self_trust", "app_registration_id <> source_app_registration_id");
+                        });
                 });
 
             modelBuilder.Entity("SignaCore.Database.Entity.AppLdapAccessEntity", b =>
@@ -768,6 +805,11 @@ namespace SignaCore.Database.Migrations.MySql.Migrations
                         .HasColumnType("char(36)")
                         .HasColumnName("sms_user_login_id");
 
+                    b.Property<string>("SourceAppId")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("source_app_id");
+
                     b.Property<string>("TokenValue")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -932,6 +974,21 @@ namespace SignaCore.Database.Migrations.MySql.Migrations
                         .IsUnique();
 
                     b.ToTable("user_logins", (string)null);
+                });
+
+            modelBuilder.Entity("SignaCore.Database.Entity.AppExchangeTrustEntity", b =>
+                {
+                    b.HasOne("SignaCore.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AppRegistrationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SignaCore.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SourceAppRegistrationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("SignaCore.Database.Entity.AppLdapAccessEntity", b =>

@@ -15,7 +15,7 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "9.0.18");
+            modelBuilder.HasAnnotation("ProductVersion", "9.0.19");
 
             modelBuilder.Entity("SignaCore.Database.Entity.AccountEntity", b =>
                 {
@@ -73,6 +73,42 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("accounts", (string)null);
+                });
+
+            modelBuilder.Entity("SignaCore.Database.Entity.AppExchangeTrustEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("app_registration_id");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("approved_by");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("SourceAppRegistrationId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("source_app_registration_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceAppRegistrationId");
+
+                    b.HasIndex("AppRegistrationId", "SourceAppRegistrationId")
+                        .IsUnique();
+
+                    b.ToTable("app_exchange_trusts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_app_exchange_trusts_no_self_trust", "app_registration_id <> source_app_registration_id");
+                        });
                 });
 
             modelBuilder.Entity("SignaCore.Database.Entity.AppLdapAccessEntity", b =>
@@ -738,6 +774,11 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("sms_user_login_id");
 
+                    b.Property<string>("SourceAppId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("source_app_id");
+
                     b.Property<string>("TokenValue")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -899,6 +940,21 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                         .IsUnique();
 
                     b.ToTable("user_logins", (string)null);
+                });
+
+            modelBuilder.Entity("SignaCore.Database.Entity.AppExchangeTrustEntity", b =>
+                {
+                    b.HasOne("SignaCore.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AppRegistrationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SignaCore.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SourceAppRegistrationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("SignaCore.Database.Entity.AppLdapAccessEntity", b =>

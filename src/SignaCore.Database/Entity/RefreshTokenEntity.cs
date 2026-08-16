@@ -28,4 +28,11 @@ public class RefreshTokenEntity
 
     /// <summary>WeChat login identity that authenticated the original session; null otherwise.</summary>
     public Guid? WechatUserLoginId { get; set; }
+
+    /// <summary>
+    /// AppId this token was exchanged from; null when the token was issued by authentication. A token
+    /// with a value here may not be exchanged again, which is what keeps exchange trust from composing
+    /// across hops. See docs/adr/0003-cross-application-refresh-grant.md.
+    /// </summary>
+    public string? SourceAppId { get; set; }
 }

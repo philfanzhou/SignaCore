@@ -12,6 +12,7 @@ accounts
 app_registrations
   +-- otps
   +-- callback and login-policy settings
+  +-- app_exchange_trusts >-- app_registrations (directed: target accepts source's refresh tokens)
 
 security_keys, login_attempts, and audit_logs are security-owned supporting tables
 ```

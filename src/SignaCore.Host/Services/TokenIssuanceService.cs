@@ -125,7 +125,7 @@ public sealed class TokenIssuanceService
         var newRefreshToken = await _refreshTokenService.HandleRefreshTokenAsync(
             request.GrantType, request.RefreshToken, account, appId,
             validationResult.LdapCredentialId, validationResult.SmsUserLoginId,
-            validationResult.WechatUserLoginId);
+            validationResult.WechatUserLoginId, validationResult.SourceAppId);
 
         if (request.GrantType == IdentityConstants.GrantTypeRefreshToken && newRefreshToken == null)
         {

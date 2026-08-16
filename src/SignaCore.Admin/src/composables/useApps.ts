@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { type AdminApp, type AdminLdapDirectory, type AdminLdapUser, type AdminSmsProfile, type AdminSmsUser, type AdminWechatUser } from '../services/adminApi'
+import { type AdminApp, type AdminExchangeTrust, type AdminLdapDirectory, type AdminLdapUser, type AdminSmsProfile, type AdminSmsUser, type AdminWechatUser } from '../services/adminApi'
 import { adminClient } from '../services/apiClient'
 import { normalizeTtlValue } from '../utils/format'
 import { handleApiError } from './useSession'
@@ -22,6 +22,9 @@ const smsUsers = ref<AdminSmsUser[]>([])
 const smsProfiles = ref<AdminSmsProfile[]>([])
 const loadingWechatUsers = ref(false)
 const wechatUsers = ref<AdminWechatUser[]>([])
+const loadingExchangeTrusts = ref(false)
+const addingExchangeTrust = ref(false)
+const exchangeTrusts = ref<AdminExchangeTrust[]>([])
 const latestCreatedAppSecret = ref('')
 const latestSecretAppId = ref('')
 const showSecretDialog = ref(false)
@@ -57,6 +60,7 @@ const callbackForm = reactive({
 
 const ldapUserForm = reactive({ directoryKey: '', username: '' })
 const smsUserForm = reactive({ phone: '' })
+const exchangeTrustForm = reactive({ sourceAppId: '' })
 
 const selectedApp = computed(() => apps.value.find((item) => item.appId === callbackForm.appId) ?? null)
 
@@ -314,7 +318,10 @@ function openAppDrawer(app: AdminApp) {
   appDrawerApp.value = app
   fillCallbackForm(app)
   appDrawerVisible.value = true
-  void Promise.all([loadLdapUsers(app.appId), loadSmsUsers(app.appId), loadWechatUsers(app.appId)])
+  void Promise.all([
+    loadLdapUsers(app.appId), loadSmsUsers(app.appId), loadWechatUsers(app.appId),
+    loadExchangeTrusts(app.appId),
+  ])
   requestAnimationFrame(() => requestAnimationFrame(() => {
     appDrawerOpen.value = true
   }))
@@ -441,6 +448,66 @@ async function loadWechatUsers(appId: string) {
   }
 }
 
+async function loadExchangeTrusts(appId: string) {
+  loadingExchangeTrusts.value = true
+  try {
+    exchangeTrusts.value = await adminClient.getExchangeTrusts(appId)
+  } catch (error) {
+    handleApiError('加载换票信任配置失败', error)
+  } finally {
+    loadingExchangeTrusts.value = false
+  }
+}
+
+async function addExchangeTrust() {
+  const app = appDrawerApp.value
+  const sourceAppId = exchangeTrustForm.sourceAppId.trim()
+  if (!app || !sourceAppId) {
+    ElMessage.warning('请选择来源应用')
+    return
+  }
+  try {
+    // 加边等于把来源应用的会话直接接过来，权限差异只能由本应用自己守住——所以在这里说清楚。
+    await ElMessageBox.confirm(
+      `加上这条信任后，任何持有「${sourceAppId}」refresh token 的人都能为同一账号换到当前应用的会话，` +
+      '不需要在当前应用重新登录。当前应用如果权限更高，差异必须由回调和授权规则守住。',
+      '添加换票信任',
+      { confirmButtonText: '确认添加', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch { return }
+  addingExchangeTrust.value = true
+  try {
+    await adminClient.addExchangeTrust(app.appId, sourceAppId)
+    exchangeTrustForm.sourceAppId = ''
+    ElMessage.success('换票信任已添加')
+    await loadExchangeTrusts(app.appId)
+  } catch (error) {
+    handleApiError('添加换票信任失败', error)
+  } finally {
+    addingExchangeTrust.value = false
+  }
+}
+
+async function removeExchangeTrust(trust: AdminExchangeTrust) {
+  const app = appDrawerApp.value
+  if (!app) return
+  try {
+    await ElMessageBox.confirm(
+      `撤销后当前应用不再接受「${trust.sourceAppId}」签发的 refresh token。` +
+      '已经换出去的会话不会因此结束——它们绑定在当前应用上，要终止得按应用撤销准入或停用账号。',
+      '撤销换票信任',
+      { confirmButtonText: '撤销', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch { return }
+  try {
+    await adminClient.removeExchangeTrust(app.appId, trust.sourceAppId)
+    ElMessage.success('换票信任已撤销')
+    await loadExchangeTrusts(app.appId)
+  } catch (error) {
+    handleApiError('撤销换票信任失败', error)
+  }
+}
+
 async function revokeWechatUser(user: AdminWechatUser) {
   const app = appDrawerApp.value
   if (!app) return
@@ -509,6 +576,8 @@ function resetAppsState() {
   ldapUserForm.directoryKey = ''
   ldapUserForm.username = ''
   smsUserForm.phone = ''
+  exchangeTrusts.value = []
+  exchangeTrustForm.sourceAppId = ''
   if (appDrawerTimer) { window.clearTimeout(appDrawerTimer); appDrawerTimer = undefined }
   appDrawerOpen.value = false
   appDrawerVisible.value = false
@@ -539,6 +608,8 @@ export function useApps() {
     loadingSmsUsers,
     addingSmsUser,
     loadingWechatUsers,
+    loadingExchangeTrusts,
+    addingExchangeTrust,
     apps,
     ldapUsers,
     ldapDirectories,
@@ -547,6 +618,8 @@ export function useApps() {
     smsProfiles,
     smsUserForm,
     wechatUsers,
+    exchangeTrusts,
+    exchangeTrustForm,
     latestCreatedAppSecret,
     latestSecretAppId,
     showSecretDialog,
@@ -585,6 +658,9 @@ export function useApps() {
     addSmsUser,
     revokeSmsUser,
     loadWechatUsers,
+    loadExchangeTrusts,
+    addExchangeTrust,
+    removeExchangeTrust,
     revokeWechatUser,
     restoreWechatUser,
     openDeleteAppModal,

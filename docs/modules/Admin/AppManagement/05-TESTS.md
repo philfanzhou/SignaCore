@@ -2,7 +2,7 @@
 
 ## Required coverage
 
-Tests should cover creating an application, listing registrations, returning the secret once, rejecting duplicate identifiers, and deleting an application.
+Tests should cover creating an application, listing registrations, returning the secret once, rejecting duplicate identifiers, deleting an application, and adding, listing, and removing exchange trusts including the rejection of self-trust.
 
 ## Test layers
 

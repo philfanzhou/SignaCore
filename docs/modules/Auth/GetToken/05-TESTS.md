@@ -4,6 +4,8 @@
 
 Tests should cover each grant type, invalid application credentials, lockout, app binding, refresh rotation, callback claim enrichment, and bootstrap-admin role preservation.
 
+Cross-application refresh grants additionally require: rejection without a trust edge, admission with one, the source token surviving the exchange, non-composition across two hops, direction, and admission derived as `ExchangeGranted` only under an auto-provisioning admission mode.
+
 ## Test layers
 
 - Unit tests isolate policy and error branches with xUnit and Moq.

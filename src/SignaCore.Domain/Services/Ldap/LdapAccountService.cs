@@ -10,6 +10,18 @@ public interface ILdapAccountService
     Task<LdapCredentialEntity?> GetCredentialAsync(Guid credentialId);
     Task<LdapCredentialEntity?> GetCredentialByObjectGuidAsync(string directoryKey, Guid objectGuid);
     Task<AppLdapAccessEntity?> GetAccessAsync(Guid appRegistrationId, Guid credentialId);
+
+    /// <summary>
+    /// Admits an existing LDAP credential for <paramref name="appRegistrationId"/> without a directory
+    /// bind, for an admission derived from one the account already holds elsewhere. Returns null when
+    /// the credential does not exist. An existing admission row is returned unchanged, including a
+    /// revoked one — restoring a revoked admission is an administrator action.
+    /// </summary>
+    Task<AppLdapAccessEntity?> GrantAccessAsync(
+        Guid appRegistrationId,
+        Guid credentialId,
+        LdapAccessApprovalSource source,
+        CancellationToken cancellationToken = default);
     Task<LdapProvisioningResult> ProvisionAsync(
         LdapDirectoryIdentity identity,
         AppRegistrationEntity app,
@@ -59,6 +71,48 @@ public sealed class LdapAccountService : ILdapAccountService
         _dbContext.AppLdapAccesses.FirstOrDefaultAsync(access =>
             access.AppRegistrationId == appRegistrationId &&
             access.LdapCredentialId == credentialId);
+
+    public async Task<AppLdapAccessEntity?> GrantAccessAsync(
+        Guid appRegistrationId,
+        Guid credentialId,
+        LdapAccessApprovalSource source,
+        CancellationToken cancellationToken = default)
+    {
+        var credentialExists = await _dbContext.LdapCredentials
+            .AnyAsync(credential => credential.Id == credentialId, cancellationToken);
+        if (!credentialExists) return null;
+
+        var access = await GetAccessAsync(appRegistrationId, credentialId);
+        if (access != null) return access;
+
+        access = new AppLdapAccessEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = appRegistrationId,
+            LdapCredentialId = credentialId,
+            ApprovalSource = source,
+            IsActive = true,
+            ApprovedBy = null,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        _dbContext.AppLdapAccesses.Add(access);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Two exchanges for the same credential raced. The unique index decided; re-read the
+            // winner rather than failing a request that got the outcome it asked for.
+            _dbContext.ChangeTracker.Clear();
+            access = await _dbContext.AppLdapAccesses.AsNoTracking().FirstOrDefaultAsync(
+                row => row.AppRegistrationId == appRegistrationId && row.LdapCredentialId == credentialId,
+                cancellationToken);
+            if (access == null) throw;
+        }
+
+        return access;
+    }
 
     public async Task<LdapProvisioningResult> ProvisionAsync(
         LdapDirectoryIdentity identity,

@@ -78,6 +78,28 @@ public class RefreshTokenServiceTests
     }
 
     [Fact]
+    public async Task HandleRefreshTokenAsync_CrossApplicationExchange_MintsWithoutRevokingTheSourceToken()
+    {
+        // Rotation would revoke the presented token, and the presented token is the source
+        // application's session credential — the user would be signed out there instead.
+        var account = CreateAccount();
+
+        var token = await _service.HandleRefreshTokenAsync(
+            IdentityConstants.GrantTypeRefreshToken, "source-token", account, "target-app",
+            exchangedFromAppId: "source-app");
+
+        Assert.NotNull(token);
+        _repoMock.Verify(r => r.TryRotateAsync(It.IsAny<string>(), It.IsAny<RefreshTokenEntity>()), Times.Never);
+        _repoMock.Verify(r => r.AddAsync(It.Is<RefreshTokenEntity>(minted =>
+            minted.AccountId == account.Id &&
+            minted.AppId == "target-app" &&
+            // Marks the token as already exchanged, so it cannot be exchanged a second time.
+            minted.SourceAppId == "source-app" &&
+            !minted.IsRevoked)), Times.Once);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task HandleRefreshTokenAsync_LdapGrant_BindsTokenToLdapCredential()
     {
         var account = CreateAccount();

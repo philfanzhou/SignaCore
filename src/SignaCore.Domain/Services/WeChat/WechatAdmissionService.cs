@@ -26,6 +26,18 @@ public interface IWechatAdmissionService
         string openId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Admits an existing WeChat login for <paramref name="app"/> without a WeChat authorization, for
+    /// an admission derived from one the account already holds elsewhere. Returns null when the login
+    /// is not a WeChat login of an existing account. An existing admission row is returned unchanged,
+    /// including a revoked one — restoring a revoked admission is an administrator action.
+    /// </summary>
+    Task<WechatAdmission?> GrantByLoginIdAsync(
+        AppRegistrationEntity app,
+        Guid userLoginId,
+        WechatAccessApprovalSource source,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Removes the account's WeChat binding and every application admission that depends on it.</summary>
     Task<bool> UnbindAsync(Guid accountId, CancellationToken cancellationToken = default);
 
@@ -93,6 +105,53 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
                 value => value.login.Id, access => access.UserLoginId, (value, access) => new { value.login, value.account, access })
             .FirstOrDefaultAsync(cancellationToken);
         return item == null ? null : new WechatAdmission(item.account, item.login, item.access);
+    }
+
+    public async Task<WechatAdmission?> GrantByLoginIdAsync(
+        AppRegistrationEntity app,
+        Guid userLoginId,
+        WechatAccessApprovalSource source,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodWechat);
+        var item = await _dbContext.UserLogins
+            .Where(login => login.Id == userLoginId && login.ProviderNameNormalized == provider)
+            .Join(_dbContext.Accounts, login => login.AccountId, account => account.Id,
+                (login, account) => new { login, account })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (item == null) return null;
+
+        var access = await _dbContext.AppWechatAccesses.FirstOrDefaultAsync(
+            row => row.AppRegistrationId == app.Id && row.UserLoginId == userLoginId, cancellationToken);
+        if (access == null)
+        {
+            access = new AppWechatAccessEntity
+            {
+                Id = Guid.NewGuid(),
+                AppRegistrationId = app.Id,
+                UserLoginId = userLoginId,
+                ApprovalSource = source,
+                IsActive = true,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            _dbContext.AppWechatAccesses.Add(access);
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                // Two exchanges for the same identity raced. The unique index decided; re-read the
+                // winner rather than failing a request that got the outcome it asked for.
+                _dbContext.ChangeTracker.Clear();
+                access = await _dbContext.AppWechatAccesses.AsNoTracking().FirstOrDefaultAsync(
+                    row => row.AppRegistrationId == app.Id && row.UserLoginId == userLoginId,
+                    cancellationToken);
+                if (access == null) throw;
+            }
+        }
+
+        return new WechatAdmission(item.account, item.login, access);
     }
 
     public Task<WechatAdmission> ProvisionAsync(

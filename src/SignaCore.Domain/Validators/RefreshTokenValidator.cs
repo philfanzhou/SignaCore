@@ -12,6 +12,7 @@ public class RefreshTokenValidator : IIdentityValidator
 {
     private readonly IRefreshTokenRepository _refreshTokenRepository;
     private readonly IAccountRepository _accountRepository;
+    private readonly IAppExchangeTrustRepository _exchangeTrustRepository;
     private readonly ILdapAccountService _ldapAccountService;
     private readonly ILdapDirectoryClient _ldapDirectoryClient;
     private readonly ISmsAdmissionService _smsAdmissionService;
@@ -21,6 +22,7 @@ public class RefreshTokenValidator : IIdentityValidator
     public RefreshTokenValidator(
         IRefreshTokenRepository refreshTokenRepository,
         IAccountRepository accountRepository,
+        IAppExchangeTrustRepository exchangeTrustRepository,
         ILdapAccountService ldapAccountService,
         ILdapDirectoryClient ldapDirectoryClient,
         ISmsAdmissionService smsAdmissionService,
@@ -29,6 +31,7 @@ public class RefreshTokenValidator : IIdentityValidator
     {
         _refreshTokenRepository = refreshTokenRepository;
         _accountRepository = accountRepository;
+        _exchangeTrustRepository = exchangeTrustRepository;
         _ldapAccountService = ldapAccountService;
         _ldapDirectoryClient = ldapDirectoryClient;
         _smsAdmissionService = smsAdmissionService;
@@ -66,15 +69,10 @@ public class RefreshTokenValidator : IIdentityValidator
             return ValidationResult.Failure("Refresh token has expired");
         }
 
-        if (string.IsNullOrWhiteSpace(refreshToken.AppId)
-            || string.IsNullOrWhiteSpace(request.AppId)
-            || IdentityValueNormalizer.Normalize(refreshToken.AppId) !=
-                IdentityValueNormalizer.Normalize(request.AppId))
+        var exchange = await ResolveExchangeAsync(request, refreshToken);
+        if (exchange.Rejection != null)
         {
-            _logger.LogWarning(
-                "Refresh token application binding mismatch: TokenAppId={TokenAppId}, RequestAppId={RequestAppId}, AccountId={AccountId}",
-                refreshToken.AppId, request.AppId, refreshToken.AccountId);
-            return ValidationResult.Failure("Refresh token is not valid for this application");
+            return exchange.Rejection;
         }
 
         var account = await _accountRepository.GetByIdAsync(refreshToken.AccountId);
@@ -84,21 +82,27 @@ public class RefreshTokenValidator : IIdentityValidator
             return ValidationResult.Failure("Account is disabled");
         }
 
+        // 成功结果统一过这里：跨应用换票要把来源 AppId 带给签发路径，它据此改成只签发不轮换。
+        ValidationResult Issue(ValidationResult result) => exchange.IsCrossApplication
+            ? result.AsCrossApplicationExchange(refreshToken.AppId)
+            : result;
+
         if (refreshToken.LdapCredentialId.HasValue)
         {
             var ldapResult = await ValidateLdapAdmissionAsync(
                 request,
-                refreshToken.LdapCredentialId.Value);
+                refreshToken.LdapCredentialId.Value,
+                exchange.IsCrossApplication);
             if (!ldapResult.IsSuccess)
             {
                 return ValidationResult.Failure(ldapResult.ErrorMessage!, ldapResult.ErrorCode);
             }
 
-            return ValidationResult.Success(
+            return Issue(ValidationResult.Success(
                 account,
                 IdentityConstants.AuthMethodRefreshToken,
                 ldapResult.Credential!.UserPrincipalName,
-                refreshToken.LdapCredentialId);
+                refreshToken.LdapCredentialId));
         }
 
         if (refreshToken.SmsUserLoginId.HasValue)
@@ -106,16 +110,28 @@ public class RefreshTokenValidator : IIdentityValidator
             if (request.App == null || request.App.SmsLoginMode == SmsLoginMode.Disabled)
                 return ValidationResult.Failure(
                     "SMS login is disabled for this application", OAuthErrorCodes.UnauthorizedClient);
+            var loginId = refreshToken.SmsUserLoginId.Value;
             var admission = await _smsAdmissionService.FindByLoginIdAsync(
-                request.App.Id, refreshToken.SmsUserLoginId.Value, request.CancellationToken);
+                request.App.Id, loginId, request.CancellationToken);
+
+            if (admission == null && exchange.IsCrossApplication &&
+                request.App.SmsLoginMode == SmsLoginMode.AutoProvision)
+            {
+                // 来源应用已经验过这个手机号，目标应用又是自动准入，所以把准入派生过来——但记成
+                // ExchangeGranted，不是 AutoProvision：这里没有验过任何验证码。ManualApproval 故意
+                // 不走这条路，落到下面按"必须已有管理员批准的行"判定。
+                admission = await _smsAdmissionService.GrantByLoginIdAsync(
+                    request.App, loginId, SmsAccessApprovalSource.ExchangeGranted, request.CancellationToken);
+            }
+
             var admitted = admission is { Access.IsActive: true } &&
                 admission.Account.Id == account.Id &&
                 (request.App.SmsLoginMode == SmsLoginMode.AutoProvision ||
                  admission.Access.ApprovalSource == SmsAccessApprovalSource.Admin);
             if (!admitted) return ValidationResult.Failure("SMS access has been revoked");
-            return ValidationResult.Success(
+            return Issue(ValidationResult.Success(
                 account, IdentityConstants.AuthMethodRefreshToken, admission!.Login.ProviderUserId,
-                smsUserLoginId: refreshToken.SmsUserLoginId);
+                smsUserLoginId: loginId));
         }
 
         if (refreshToken.WechatUserLoginId.HasValue)
@@ -123,17 +139,87 @@ public class RefreshTokenValidator : IIdentityValidator
             if (request.App == null || request.App.WechatLoginMode == WechatLoginMode.Disabled)
                 return ValidationResult.Failure(
                     "WeChat login is disabled for this application", OAuthErrorCodes.UnauthorizedClient);
+            var loginId = refreshToken.WechatUserLoginId.Value;
             var admission = await _wechatAdmissionService.FindByLoginIdAsync(
-                request.App.Id, refreshToken.WechatUserLoginId.Value, request.CancellationToken);
+                request.App.Id, loginId, request.CancellationToken);
+
+            if (admission == null && exchange.IsCrossApplication &&
+                request.App.WechatLoginMode == WechatLoginMode.AutoProvision)
+            {
+                admission = await _wechatAdmissionService.GrantByLoginIdAsync(
+                    request.App, loginId, WechatAccessApprovalSource.ExchangeGranted, request.CancellationToken);
+            }
+
             var admitted = admission is { Access.IsActive: true } && admission.Account.Id == account.Id;
             if (!admitted) return ValidationResult.Failure("WeChat access has been revoked");
-            return ValidationResult.Success(
+            return Issue(ValidationResult.Success(
                 account, IdentityConstants.AuthMethodRefreshToken,
-                wechatUserLoginId: refreshToken.WechatUserLoginId);
+                wechatUserLoginId: loginId));
         }
 
         _logger.LogInformation("Refresh token validated successfully: AccountId={AccountId}, AppId={AppId}", refreshToken.AccountId, request.AppId ?? "N/A");
-        return ValidationResult.Success(account, IdentityConstants.AuthMethodRefreshToken);
+        return Issue(ValidationResult.Success(account, IdentityConstants.AuthMethodRefreshToken));
+    }
+
+    /// <summary>换票判定：同应用刷新、被信任边放行的跨应用换票，或拒绝。</summary>
+    private readonly record struct ExchangeDecision(bool IsCrossApplication, ValidationResult? Rejection)
+    {
+        public static readonly ExchangeDecision SameApplication = new(false, null);
+        public static readonly ExchangeDecision CrossApplication = new(true, null);
+        public static ExchangeDecision Reject(ValidationResult rejection) => new(false, rejection);
+    }
+
+    /// <summary>
+    /// presented token 属于别的应用时，判断有没有信任边放行。见
+    /// docs/adr/0003-cross-application-refresh-grant.md。
+    /// </summary>
+    private async Task<ExchangeDecision> ResolveExchangeAsync(
+        ValidationRequest request,
+        RefreshTokenEntity refreshToken)
+    {
+        if (!string.IsNullOrWhiteSpace(refreshToken.AppId)
+            && !string.IsNullOrWhiteSpace(request.AppId)
+            && IdentityValueNormalizer.Normalize(refreshToken.AppId) ==
+                IdentityValueNormalizer.Normalize(request.AppId))
+        {
+            return ExchangeDecision.SameApplication;
+        }
+
+        // 三种拒绝共用同一句对外文案：哪个应用信任哪个应用不是调用方可以试探出来的信息。
+        // 区分留在日志里。
+        var rejection = ValidationResult.Failure("Refresh token is not valid for this application");
+
+        if (string.IsNullOrWhiteSpace(refreshToken.AppId)
+            || string.IsNullOrWhiteSpace(request.AppId)
+            || request.App == null)
+        {
+            _logger.LogWarning(
+                "Refresh token application binding mismatch: TokenAppId={TokenAppId}, RequestAppId={RequestAppId}, AccountId={AccountId}",
+                refreshToken.AppId, request.AppId, refreshToken.AccountId);
+            return ExchangeDecision.Reject(rejection);
+        }
+
+        if (!string.IsNullOrWhiteSpace(refreshToken.SourceAppId))
+        {
+            _logger.LogWarning(
+                "Cross-application refresh rejected: the presented token was itself minted by an exchange, TokenAppId={TokenAppId}, TokenSourceAppId={TokenSourceAppId}, RequestAppId={RequestAppId}, AccountId={AccountId}",
+                refreshToken.AppId, refreshToken.SourceAppId, request.AppId, refreshToken.AccountId);
+            return ExchangeDecision.Reject(rejection);
+        }
+
+        if (!await _exchangeTrustRepository.IsTrustedSourceAsync(
+                request.App.Id, refreshToken.AppId, request.CancellationToken))
+        {
+            _logger.LogWarning(
+                "Cross-application refresh rejected: no exchange trust admits the source application, TokenAppId={TokenAppId}, RequestAppId={RequestAppId}, AccountId={AccountId}",
+                refreshToken.AppId, request.AppId, refreshToken.AccountId);
+            return ExchangeDecision.Reject(rejection);
+        }
+
+        _logger.LogInformation(
+            "Cross-application refresh admitted by exchange trust: SourceAppId={SourceAppId}, AppId={AppId}, AccountId={AccountId}",
+            refreshToken.AppId, request.AppId, refreshToken.AccountId);
+        return ExchangeDecision.CrossApplication;
     }
 
     /// <summary>刷新时 LDAP 分支的判定结果，带 OAuth 错误码。</summary>
@@ -152,7 +238,8 @@ public class RefreshTokenValidator : IIdentityValidator
 
     private async Task<LdapAdmission> ValidateLdapAdmissionAsync(
         ValidationRequest request,
-        Guid credentialId)
+        Guid credentialId,
+        bool isCrossApplicationExchange)
     {
         if (request.App == null || request.App.LdapLoginMode == LdapLoginMode.Disabled)
         {
@@ -167,6 +254,13 @@ public class RefreshTokenValidator : IIdentityValidator
         }
 
         var access = await _ldapAccountService.GetAccessAsync(request.App.Id, credentialId);
+        if (access == null && isCrossApplicationExchange &&
+            request.App.LdapLoginMode == LdapLoginMode.AutoProvision)
+        {
+            access = await _ldapAccountService.GrantAccessAsync(
+                request.App.Id, credentialId, LdapAccessApprovalSource.ExchangeGranted, request.CancellationToken);
+        }
+
         var admitted = access is { IsActive: true } &&
             (request.App.LdapLoginMode == LdapLoginMode.AutoProvision ||
              access.ApprovalSource == LdapAccessApprovalSource.Admin);

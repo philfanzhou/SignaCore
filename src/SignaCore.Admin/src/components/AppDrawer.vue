@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useApps } from '../composables/useApps'
 import { I } from '../utils/icons'
 
 const {
+  apps,
   appDrawerVisible,
   appDrawerOpen,
   appDrawerApp,
@@ -21,6 +23,10 @@ const {
   smsUserForm,
   loadingWechatUsers,
   wechatUsers,
+  loadingExchangeTrusts,
+  addingExchangeTrust,
+  exchangeTrusts,
+  exchangeTrustForm,
   closeAppDrawer,
   saveCallbackFromDrawer,
   handleResetSecret,
@@ -31,7 +37,28 @@ const {
   revokeSmsUser,
   revokeWechatUser,
   restoreWechatUser,
+  addExchangeTrust,
+  removeExchangeTrust,
 } = useApps()
+
+/** 准入来源的展示名。ExchangeGranted 必须和自动开户区分开——那条记录背后没有任何验证过程。 */
+const approvalSourceLabels: Record<string, string> = {
+  Admin: '管理员',
+  AutoProvision: '自动开户',
+  SelfBind: '用户绑定',
+  ExchangeGranted: '跨应用换票',
+}
+
+function approvalSourceLabel(source: string) {
+  return approvalSourceLabels[source] ?? source
+}
+
+/** 可选的来源应用：除自己以外的全部应用，已经加过的边不再重复列出。 */
+const availableTrustSources = computed(() => {
+  const current = appDrawerApp.value?.appId
+  const existing = new Set(exchangeTrusts.value.map((trust) => trust.sourceAppId))
+  return apps.value.filter((app) => app.appId !== current && !existing.has(app.appId))
+})
 </script>
 
 <template>
@@ -114,7 +141,7 @@ const {
                 <tr v-for="user in ldapUsers" :key="user.credentialId">
                   <td><div class="td-main">{{ user.username }}</div><div class="mono" style="font-size: 11px; color: var(--text-3)">{{ user.samAccountName }}</div></td>
                   <td class="mono">{{ user.directoryKey }}</td>
-                  <td>{{ user.approvalSource === 'Admin' ? '管理员' : '自动开户' }}</td>
+                  <td>{{ approvalSourceLabel(user.approvalSource) }}</td>
                   <td><span class="badge" :class="user.isActive ? 'green' : 'gray'"><span class="dot"></span>{{ user.isActive ? '有效' : '已撤销' }}</span></td>
                   <td><button v-if="user.isActive" class="btn btn-danger btn-sm" @click="revokeLdapUser(user)">撤销</button></td>
                 </tr>
@@ -161,7 +188,7 @@ const {
               <tbody>
                 <tr v-for="user in smsUsers" :key="user.loginId">
                   <td class="mono">{{ user.phone }}</td>
-                  <td>{{ user.approvalSource === 'Admin' ? '管理员' : '自动开户' }}</td>
+                  <td>{{ approvalSourceLabel(user.approvalSource) }}</td>
                   <td><span class="badge" :class="user.isActive ? 'green' : 'gray'"><span class="dot"></span>{{ user.isActive ? '有效' : '已撤销' }}</span></td>
                   <td><button v-if="user.isActive" class="btn btn-danger btn-sm" @click="revokeSmsUser(user)">撤销</button></td>
                 </tr>
@@ -192,12 +219,47 @@ const {
               <tbody>
                 <tr v-for="user in wechatUsers" :key="user.loginId">
                   <td class="mono">{{ user.openId }}</td>
-                  <td>{{ user.approvalSource === 'SelfBind' ? '用户绑定' : '自动开户' }}</td>
+                  <td>{{ approvalSourceLabel(user.approvalSource) }}</td>
                   <td><span class="badge" :class="user.isActive ? 'green' : 'gray'"><span class="dot"></span>{{ user.isActive ? '有效' : '已撤销' }}</span></td>
                   <td>
                     <button v-if="user.isActive" class="btn btn-danger btn-sm" @click="revokeWechatUser(user)">撤销</button>
                     <button v-else class="btn btn-sm" @click="restoreWechatUser(user)">恢复</button>
                   </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card section-gap" style="padding: 20px">
+          <div class="card-title" style="margin-bottom: 16px">跨应用换票信任</div>
+          <div class="field">
+            <label>接受哪些应用签发的 refresh token</label>
+            <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px">
+              <select v-model="exchangeTrustForm.sourceAppId" class="select">
+                <option value="">选择来源应用</option>
+                <option v-for="app in availableTrustSources" :key="app.appId" :value="app.appId">
+                  {{ app.appName }}（{{ app.appId }}）{{ app.isActive ? '' : '（已停用）' }}
+                </option>
+              </select>
+              <button class="btn btn-sm" :disabled="addingExchangeTrust || !exchangeTrustForm.sourceAppId" @click="addExchangeTrust">添加</button>
+            </div>
+            <div class="hint">
+              信任是有向的：这里配的是「当前应用接受谁的票」，反过来不成立。持有来源应用 refresh token
+              的人可以直接换到当前应用的会话，不需要重新登录——当前应用权限更高时，差异必须由回调和
+              授权规则守住。换票只签发新票，不会吊销来源应用手上那张；换出来的票不能再换第二次，
+              所以信任不会沿着两条边传递。
+            </div>
+          </div>
+          <div v-if="loadingExchangeTrusts" class="hint">正在加载换票信任...</div>
+          <div v-else-if="exchangeTrusts.length === 0" class="hint">当前应用不接受任何其他应用签发的 refresh token。</div>
+          <div v-else class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>来源应用</th><th>状态</th><th></th></tr></thead>
+              <tbody>
+                <tr v-for="trust in exchangeTrusts" :key="trust.sourceAppId">
+                  <td><div class="td-main">{{ trust.sourceAppName }}</div><div class="mono" style="font-size: 11px; color: var(--text-3)">{{ trust.sourceAppId }}</div></td>
+                  <td><span class="badge" :class="trust.sourceIsActive ? 'green' : 'gray'"><span class="dot"></span>{{ trust.sourceIsActive ? '有效' : '来源已停用' }}</span></td>
+                  <td><button class="btn btn-danger btn-sm" @click="removeExchangeTrust(trust)">撤销</button></td>
                 </tr>
               </tbody>
             </table>

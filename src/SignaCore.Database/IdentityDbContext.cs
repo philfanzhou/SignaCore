@@ -33,6 +33,7 @@ public class IdentityDbContext : DbContext
     public DbSet<AppLdapAccessEntity> AppLdapAccesses => Set<AppLdapAccessEntity>();
     public DbSet<AppSmsAccessEntity> AppSmsAccesses => Set<AppSmsAccessEntity>();
     public DbSet<AppWechatAccessEntity> AppWechatAccesses => Set<AppWechatAccessEntity>();
+    public DbSet<AppExchangeTrustEntity> AppExchangeTrusts => Set<AppExchangeTrustEntity>();
     public DbSet<SystemSettingEntity> SystemSettings => Set<SystemSettingEntity>();
     public DbSet<InstallationStateEntity> InstallationStates => Set<InstallationStateEntity>();
 
@@ -126,6 +127,7 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.LdapCredentialId).HasColumnName("ldap_credential_id");
             entity.Property(e => e.SmsUserLoginId).HasColumnName("sms_user_login_id");
             entity.Property(e => e.WechatUserLoginId).HasColumnName("wechat_user_login_id");
+            entity.Property(e => e.SourceAppId).HasColumnName("source_app_id").HasMaxLength(IdentityConstants.MaxAppIdLength);
             entity.HasIndex(e => e.TokenValue).IsUnique();
             entity.HasIndex(e => e.LdapCredentialId);
             entity.HasIndex(e => e.SmsUserLoginId);
@@ -222,6 +224,29 @@ public class IdentityDbContext : DbContext
             entity.HasIndex(e => e.UserLoginId);
             entity.HasOne<AppRegistrationEntity>().WithMany().HasForeignKey(e => e.AppRegistrationId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<UserLoginEntity>().WithMany().HasForeignKey(e => e.UserLoginId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AppExchangeTrustEntity>(entity =>
+        {
+            entity.ToTable(
+                "app_exchange_trusts",
+                // An application trusting itself is not an edge, it is the ordinary binding check.
+                // Rejecting it in the schema keeps the validator from having to reason about it.
+                table => table.HasCheckConstraint(
+                    "CK_app_exchange_trusts_no_self_trust",
+                    "app_registration_id <> source_app_registration_id"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.AppRegistrationId).HasColumnName("app_registration_id");
+            entity.Property(e => e.SourceAppRegistrationId).HasColumnName("source_app_registration_id");
+            entity.Property(e => e.ApprovedBy).HasColumnName("approved_by");
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            entity.HasIndex(e => new { e.AppRegistrationId, e.SourceAppRegistrationId }).IsUnique();
+            entity.HasIndex(e => e.SourceAppRegistrationId);
+            // An edge has no meaning without either endpoint, so deleting an application removes the
+            // edges pointing at it from both directions.
+            entity.HasOne<AppRegistrationEntity>().WithMany().HasForeignKey(e => e.AppRegistrationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AppRegistrationEntity>().WithMany().HasForeignKey(e => e.SourceAppRegistrationId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<SecurityKeyEntity>(entity =>

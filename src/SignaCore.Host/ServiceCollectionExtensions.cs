@@ -196,6 +196,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserLoginRepository, UserLoginRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IAppRegistrationRepository, AppRegistrationRepository>();
+        services.AddScoped<IAppExchangeTrustRepository, AppExchangeTrustRepository>();
         services.AddScoped<ISecurityKeyRepository, SecurityKeyRepository>();
         services.AddScoped<IOtpRepository, OtpRepository>();
         services.AddScoped<ILoginAttemptRepository, LoginAttemptRepository>();

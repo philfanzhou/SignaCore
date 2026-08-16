@@ -10,7 +10,7 @@
 
 ## History
 
-The migration series creates the identity schema, adds login/audit records, normalizes identity values, enforces one OTP state per scope, binds refresh tokens to applications, enables application-scoped LDAP/SMS access, adds OTP optimistic concurrency, enables application-scoped WeChat access, adds the per-application access-token audience mode, and adds `system_settings` and `installation_state` so the business database becomes the configuration authority.
+The migration series creates the identity schema, adds login/audit records, normalizes identity values, enforces one OTP state per scope, binds refresh tokens to applications, enables application-scoped LDAP/SMS access, adds OTP optimistic concurrency, enables application-scoped WeChat access, adds the per-application access-token audience mode, adds `system_settings` and `installation_state` so the business database becomes the configuration authority, and adds `app_exchange_trusts` plus `refresh_tokens.source_app_id` for cross-application refresh grants.
 
 ## Creating a migration
 

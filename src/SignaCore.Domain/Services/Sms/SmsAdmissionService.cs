@@ -14,6 +14,18 @@ public interface ISmsAdmissionService
         SmsAccessApprovalSource source,
         Guid? approvedBy,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Admits an existing SMS login for <paramref name="app"/> without verifying an OTP, for an
+    /// admission derived from one the account already holds elsewhere. Returns null when the login
+    /// is not an SMS login of an existing account. An existing admission row is returned unchanged,
+    /// including a revoked one — restoring a revoked admission is an administrator action.
+    /// </summary>
+    Task<SmsAdmission?> GrantByLoginIdAsync(
+        AppRegistrationEntity app,
+        Guid userLoginId,
+        SmsAccessApprovalSource source,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record SmsAdmission(
@@ -133,5 +145,53 @@ public sealed class SmsAdmissionService : ISmsAdmissionService
         }
 
         throw new InvalidOperationException("SMS account provisioning failed after a concurrent update.");
+    }
+
+    public async Task<SmsAdmission?> GrantByLoginIdAsync(
+        AppRegistrationEntity app,
+        Guid userLoginId,
+        SmsAccessApprovalSource source,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms);
+        var item = await _dbContext.UserLogins
+            .Where(login => login.Id == userLoginId && login.ProviderNameNormalized == provider)
+            .Join(_dbContext.Accounts, login => login.AccountId, account => account.Id,
+                (login, account) => new { login, account })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (item == null) return null;
+
+        var access = await _dbContext.AppSmsAccesses.FirstOrDefaultAsync(
+            row => row.AppRegistrationId == app.Id && row.UserLoginId == userLoginId, cancellationToken);
+        if (access == null)
+        {
+            access = new AppSmsAccessEntity
+            {
+                Id = Guid.NewGuid(),
+                AppRegistrationId = app.Id,
+                UserLoginId = userLoginId,
+                ApprovalSource = source,
+                IsActive = true,
+                ApprovedBy = null,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+            _dbContext.AppSmsAccesses.Add(access);
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                // Two exchanges for the same identity raced. The unique index decided; re-read the
+                // winner rather than failing a request that got the outcome it asked for.
+                _dbContext.ChangeTracker.Clear();
+                access = await _dbContext.AppSmsAccesses.AsNoTracking().FirstOrDefaultAsync(
+                    row => row.AppRegistrationId == app.Id && row.UserLoginId == userLoginId,
+                    cancellationToken);
+                if (access == null) throw;
+            }
+        }
+
+        return new SmsAdmission(item.account, item.login, access);
     }
 }

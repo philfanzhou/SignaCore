@@ -28,7 +28,8 @@ public class RefreshTokenService : IRefreshTokenService
         string? appId,
         Guid? ldapCredentialId = null,
         Guid? smsUserLoginId = null,
-        Guid? wechatUserLoginId = null)
+        Guid? wechatUserLoginId = null,
+        string? exchangedFromAppId = null)
     {
         if (grantType is IdentityConstants.GrantTypePassword or IdentityConstants.GrantTypeSms or
             IdentityConstants.GrantTypeWechat or IdentityConstants.GrantTypeLdap)
@@ -39,6 +40,16 @@ public class RefreshTokenService : IRefreshTokenService
 
         if (grantType == IdentityConstants.GrantTypeRefreshToken && !string.IsNullOrEmpty(existingRefreshToken))
         {
+            // 跨应用换票只签发不轮换：presented token 是来源应用的会话凭据，轮换会把它吊销，
+            // 于是目标应用开一个会话的副作用是结束了来源应用那个——而且要等到来源那边的
+            // access token 过期才看得出来。
+            if (!string.IsNullOrWhiteSpace(exchangedFromAppId))
+            {
+                return await GenerateRefreshTokenAsync(
+                    account, RequireAppId(appId), ldapCredentialId, smsUserLoginId, wechatUserLoginId,
+                    exchangedFromAppId);
+            }
+
             var (rawToken, replacement) = CreateRefreshToken(
                 account, RequireAppId(appId), ldapCredentialId, smsUserLoginId, wechatUserLoginId);
             return await _refreshTokenRepository.TryRotateAsync(existingRefreshToken, replacement)
@@ -69,10 +80,11 @@ public class RefreshTokenService : IRefreshTokenService
         string appId,
         Guid? ldapCredentialId,
         Guid? smsUserLoginId,
-        Guid? wechatUserLoginId)
+        Guid? wechatUserLoginId,
+        string? sourceAppId = null)
     {
         var (rawToken, refreshToken) = CreateRefreshToken(
-            account, appId, ldapCredentialId, smsUserLoginId, wechatUserLoginId);
+            account, appId, ldapCredentialId, smsUserLoginId, wechatUserLoginId, sourceAppId);
         await _refreshTokenRepository.AddAsync(refreshToken);
         await _unitOfWork.SaveChangesAsync();
         return rawToken;
@@ -83,7 +95,8 @@ public class RefreshTokenService : IRefreshTokenService
         string appId,
         Guid? ldapCredentialId,
         Guid? smsUserLoginId,
-        Guid? wechatUserLoginId)
+        Guid? wechatUserLoginId,
+        string? sourceAppId = null)
     {
         var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
         return (rawToken, new RefreshTokenEntity
@@ -97,7 +110,8 @@ public class RefreshTokenService : IRefreshTokenService
             AppId = appId,
             LdapCredentialId = ldapCredentialId,
             SmsUserLoginId = smsUserLoginId,
-            WechatUserLoginId = wechatUserLoginId
+            WechatUserLoginId = wechatUserLoginId,
+            SourceAppId = sourceAppId
         });
     }
 }
