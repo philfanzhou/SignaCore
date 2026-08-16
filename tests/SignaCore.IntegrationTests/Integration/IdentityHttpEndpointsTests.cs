@@ -34,15 +34,38 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         Assert.Equal("Healthy", content);
     }
 
-    [Fact]
-    public async Task JwksEndpoint_ReturnsValidJwks()
+    /// <summary>
+    /// Both JWKS routes answer. The <c>.json</c> alias is not decoration: it is the path operators,
+    /// probes and hand-configured validators try first, and a 404 there is read as "this service
+    /// publishes no signing keys".
+    /// </summary>
+    [Theory]
+    [InlineData(WellKnownEndpoints.Jwks)]
+    [InlineData(WellKnownEndpoints.JwksJson)]
+    public async Task JwksEndpoint_ReturnsValidJwks(string path)
     {
         using var http = _fixture.CreateHttpClient();
-        var response = await http.GetAsync("/.well-known/jwks");
+        var response = await http.GetAsync(path);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var content = await response.Content.ReadAsStringAsync();
         Assert.Contains("RSA", content);
         Assert.Contains("keys", content);
+    }
+
+    /// <summary>
+    /// The alias must stay an alias. If the two routes ever drifted onto different handlers, a
+    /// consumer that picked the wrong one could validate against a stale or partial key set — the
+    /// exact failure JWKS exists to prevent.
+    /// </summary>
+    [Fact]
+    public async Task JwksAlias_ServesTheSameDocumentAsTheCanonicalRoute()
+    {
+        using var http = _fixture.CreateHttpClient();
+
+        var canonical = await http.GetStringAsync(WellKnownEndpoints.Jwks);
+        var alias = await http.GetStringAsync(WellKnownEndpoints.JwksJson);
+
+        Assert.Equal(canonical, alias);
     }
 
     /// <summary>

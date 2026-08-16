@@ -216,7 +216,7 @@ public static class ServiceCollectionExtensions
 
         // ---- Rate Limiting (ASP.NET Core built-in) ----
         // Per-IP fixed window limiter: 100 requests per 60 seconds per client IP.
-        // /health, /metrics, /.well-known/jwks are exempt (have their own limits or are infra).
+        // /health, /metrics and both JWKS routes are exempt (have their own limits or are infra).
         services.AddRateLimiter(options =>
         {
             options.AddPolicy("sms-code", httpContext =>
@@ -270,7 +270,7 @@ public static class ServiceCollectionExtensions
                 // Exempt infrastructure endpoints from global rate limiting
                 if (path == HealthEndpoints.Legacy || path == HealthEndpoints.Live ||
                     path == HealthEndpoints.Ready || path == "/metrics" ||
-                    path == "/.well-known/jwks")
+                    WellKnownEndpoints.IsJwks(path))
                 {
                     return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter(
                         System.Net.IPAddress.Loopback);

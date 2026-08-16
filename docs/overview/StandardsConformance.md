@@ -84,7 +84,7 @@ are made from the `client_id` claim, not from `aud`.
 | Area | Status |
 | --- | --- |
 | Signing algorithm | RS256 with key rotation |
-| JWKS publication (RFC 7517) | Conforms; all unexpired keys are served during rotation |
+| JWKS publication (RFC 7517) | Conforms; all unexpired keys are served during rotation. Served at `/.well-known/jwks` (what discovery advertises) and at the de-facto `/.well-known/jwks.json`, which returns the identical document |
 | Access-token claims | `iss`, `aud`, `sub`, `exp`, `nbf`, `iat`, `jti`, `client_id` with standard names |
 | Access-token type (RFC 9068) | `typ: at+jwt` |
 | Token endpoint (RFC 6749 §3.2) | Conforms at `/oauth2/token` |

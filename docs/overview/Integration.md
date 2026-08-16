@@ -9,6 +9,10 @@ Downstream services should use OpenID discovery and JWKS directly:
 3. validate the RS256 signature, issuer, audience, lifetime, and required claims locally.
 4. Refresh cached keys when an unknown `kid` is encountered.
 
+`jwks_uri` resolves to `/.well-known/jwks`. A validator that has to be pointed at a literal URL can
+use `/.well-known/jwks.json` instead — it is an alias for the same document — but reading the URL
+from discovery is what survives a future route change.
+
 No SignaCore assembly or private client SDK is required. The former client SDK is not maintained.
 
 ## External providers

@@ -55,7 +55,7 @@ The first run against an empty database enters Setup Mode. Open `/setup`, enter 
 code printed to the console, and supply the public base URL and administrator credentials. See
 [first-run setup](docs/development/FirstRunSetup.md).
 
-The API listens on the URLs in `src/SignaCore.Host/Properties/launchSettings.json`. Useful endpoints include `/health/live`, `/health/ready`, `/.well-known/openid-configuration`, `/.well-known/jwks`, `/metrics`, `/oauth2/token`, `/api/auth/token`, and `/admin`.
+The API listens on the URLs in `src/SignaCore.Host/Properties/launchSettings.json`. Useful endpoints include `/health/live`, `/health/ready`, `/.well-known/openid-configuration`, `/.well-known/jwks` (also reachable as `/.well-known/jwks.json`), `/metrics`, `/oauth2/token`, `/api/auth/token`, and `/admin`.
 
 ## Container
 

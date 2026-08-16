@@ -43,6 +43,7 @@ curl --fail http://localhost:5002/health/ready
 curl --fail http://localhost:5002/health
 curl --fail http://localhost:5002/.well-known/openid-configuration
 curl --fail http://localhost:5002/.well-known/jwks
+curl --fail http://localhost:5002/.well-known/jwks.json
 curl --fail http://localhost:5002/metrics
 ```
 

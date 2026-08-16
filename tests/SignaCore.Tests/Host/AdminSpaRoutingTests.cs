@@ -36,6 +36,7 @@ public class AdminSpaRoutingTests
     [InlineData("/api/setup/status")]
     [InlineData("/.well-known/openid-configuration")]
     [InlineData("/.well-known/jwks")]
+    [InlineData("/.well-known/jwks.json")]
     [InlineData("/health")]
     [InlineData("/health/live")]
     [InlineData("/health/ready")]

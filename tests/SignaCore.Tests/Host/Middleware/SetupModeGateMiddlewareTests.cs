@@ -17,6 +17,7 @@ public class SetupModeGateMiddlewareTests
     [InlineData("/oauth2/token")]
     [InlineData("/.well-known/openid-configuration")]
     [InlineData("/.well-known/jwks")]
+    [InlineData("/.well-known/jwks.json")]
     public async Task ApiRequests_ReceiveStructuredInstallationRequired(string path)
     {
         var context = Context(path, acceptsHtml: true);

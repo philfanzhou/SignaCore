@@ -98,6 +98,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     [InlineData("/oauth2/token")]
     [InlineData("/.well-known/openid-configuration")]
     [InlineData("/.well-known/jwks")]
+    [InlineData("/.well-known/jwks.json")]
     [InlineData("/api/admin/session/login")]
     public async Task NormalApis_WhilePending_ReturnInstallationRequired(string path)
     {

@@ -6,7 +6,8 @@ SignaCore creates, protects, rotates, and publishes RSA signing keys for JWT iss
 
 ## Primary interface
 
-GET /.well-known/jwks
+GET /.well-known/jwks — also served at /.well-known/jwks.json, which returns the identical document.
+Discovery advertises the first form only.
 
 ## Acceptance summary
 

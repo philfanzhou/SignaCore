@@ -280,6 +280,12 @@ jobs:
           echo "$jwks" | grep -q '"kty":"RSA"' || fail "JWKS has no RSA key: $jwks"
           echo "$jwks" | grep -q '"alg":"RS256"' || fail "JWKS has no RS256 key: $jwks"
 
+          # The .json alias is what operators and hand-configured validators reach for; a 404 there
+          # reads as "no keys published". It must serve the same document as the canonical route.
+          jwks_alias="$(curl -fsS --max-time 10 http://localhost:5002/.well-known/jwks.json)" \
+            || fail "/.well-known/jwks.json did not answer"
+          [ "$jwks_alias" = "$jwks" ] || fail "JWKS alias diverged from /.well-known/jwks"
+
           status="$(curl -sS --max-time 10 -o /tmp/token.json -w '%{http_code}' \
             -X POST http://localhost:5002/api/auth/token \
             -H 'Content-Type: application/json' \

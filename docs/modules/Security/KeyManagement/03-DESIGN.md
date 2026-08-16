@@ -14,7 +14,12 @@ KeyManager, IMasterKeyProvider, IPrivateKeyProtector, AesGcmPrivateKeyProtector,
 
 ## Interface
 
-Primary interface: GET /.well-known/jwks.
+Primary interface: GET /.well-known/jwks, with /.well-known/jwks.json bound to the same handler.
+RFC 7517 defines no path for the key set — a conforming client reads `jwks_uri` from discovery — but
+the key set is fetched by hand at least as often, and every operator, probe and copied validator
+snippet reaches for the `.json` form first. A 404 there is indistinguishable from "this service
+publishes no keys", so both paths answer. The routes are declared in `WellKnownEndpoints`, and the
+rate limiters treat them identically; the alias must never diverge into a second contract.
 
 ## Persistence
 
