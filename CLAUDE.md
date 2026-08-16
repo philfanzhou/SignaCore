@@ -22,6 +22,7 @@ The host composes `SignaCore.Domain`, `SignaCore.Database`, and the provider-spe
 - Keep public routes, JSON fields, claims, and existing database table names stable unless an intentional migration is designed.
 - Propagate cancellation tokens and use UTC timestamps.
 - Never commit or log credentials, application secrets, OTP values, refresh tokens, authorization headers, private signing keys, or master keys.
+- Never name a specific consumer. Documentation, comments, and commit messages describe downstream systems by role — the calling application, the business system, a staff-facing application — never by product name, brand, repository link, or their validator configuration. This repository is public, so naming one leaks another party's integration details; and SignaCore is a general-purpose identity service, so naming one consumer makes the contract read like a bespoke one. Use a neutral placeholder when an example is needed (`OrderService`). This does not cover SignaCore's own deployment identifiers, which are real configuration contract.
 - Add unit coverage for policy changes and integration/contract coverage for HTTP or provider behavior.
 - Update English documentation whenever behavior or configuration changes.
 
