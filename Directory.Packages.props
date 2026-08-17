@@ -18,12 +18,12 @@
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="9.0.19" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageVersion Include="Moq" Version="4.20.72" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
-    <!-- 1.15.3 contains fixes for GHSA-4625-4j76-fww9 and GHSA-mr8r-92fq-pj8p. -->
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
-    <PackageVersion Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.15.2-beta.1" />
+    <!-- The Prometheus exporter only ships on the beta channel; keep it on the same 1.17.0 line as the rest of OpenTelemetry. -->
+    <PackageVersion Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.17.0-beta.1" />
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.17.0" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.17.0" />
@@ -35,18 +35,16 @@
     <PackageVersion Include="Serilog.Settings.Configuration" Version="10.0.1" />
     <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageVersion Include="Serilog.Sinks.Grafana.Loki" Version="9.0.2" />
-    <!-- Testcontainers 4.13.0 still resolves SSH.NET 2025.1.0; 2026.0.0 fixes GHSA-q939-rpr3-3284. -->
-    <PackageVersion Include="SSH.NET" Version="2026.0.0" />
-    <!-- Pin the first 2.1.x release that fixes GHSA-2m69-gcr7-jv3q. -->
+    <!-- Overrides the 2.1.12 that EF Core Sqlite resolves transitively. -->
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <PackageVersion Include="Steeltoe.Discovery.Consul" Version="4.2.0" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <PackageVersion Include="System.DirectoryServices.Protocols" Version="10.0.11" />
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.22.0" />
     <PackageVersion Include="TencentCloudSDK.Sms" Version="3.0.1435" />
-    <PackageVersion Include="Testcontainers.MySql" Version="4.13.0" />
-    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.13.0" />
+    <PackageVersion Include="Testcontainers.MySql" Version="4.14.0" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.14.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
-    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
   </ItemGroup>
 </Project>

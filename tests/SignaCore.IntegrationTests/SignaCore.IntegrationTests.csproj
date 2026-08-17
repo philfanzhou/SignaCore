@@ -18,7 +18,6 @@
     </PackageReference>
     <PackageReference Include="Moq" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
-    <PackageReference Include="SSH.NET" PrivateAssets="all" />
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="Testcontainers.MySql" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
