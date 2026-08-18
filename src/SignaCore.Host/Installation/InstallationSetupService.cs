@@ -111,8 +111,8 @@ internal sealed class InstallationSetupService
             return new SetupResult(SetupOutcome.InvalidRequest, string.Join(" ", snapshotErrors));
         }
 
-        // The explicit transaction has to run inside CreateExecutionStrategy(): PostgreSQL, MySQL and
-        // MariaDB enable EnableRetryOnFailure(), and a retrying strategy refuses to execute commands
+        // The explicit transaction has to run inside CreateExecutionStrategy(): PostgreSQL enables
+        // EnableRetryOnFailure(), and a retrying strategy refuses to execute commands
         // inside a caller-opened transaction — the first command throws
         // "does not support user-initiated transactions" and setup fails. SQLite has no retry
         // configured, so its strategy runs the lambda exactly once and behaves as before.

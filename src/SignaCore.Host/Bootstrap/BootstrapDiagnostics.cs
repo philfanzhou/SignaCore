@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using MySqlConnector;
 using Npgsql;
 using SignaCore.Database;
 
@@ -22,12 +21,6 @@ internal static class BootstrapDiagnostics
                 {
                     var builder = new NpgsqlConnectionStringBuilder(options.ConnectionString);
                     return $"{builder.Host}:{builder.Port}/{builder.Database}";
-                }
-                case DatabaseProvider.MySql:
-                case DatabaseProvider.MariaDb:
-                {
-                    var builder = new MySqlConnectionStringBuilder(options.ConnectionString);
-                    return $"{builder.Server}:{builder.Port}/{builder.Database}";
                 }
                 case DatabaseProvider.Sqlite:
                 {

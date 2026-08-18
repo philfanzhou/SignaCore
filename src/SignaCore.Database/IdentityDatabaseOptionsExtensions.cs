@@ -22,24 +22,6 @@ public static class IdentityDatabaseOptionsExtensions
                         maxRetryDelay: TimeSpan.FromSeconds(4),
                         errorCodesToAdd: null);
                 }),
-            DatabaseProvider.MySql => optionsBuilder.UseMySql(
-                databaseOptions.ConnectionString,
-                new MySqlServerVersion(databaseOptions.GetServerVersion()),
-                providerOptions =>
-                {
-                    providerOptions.MigrationsAssembly(
-                        "SignaCore.Database.Migrations.MySql");
-                    providerOptions.EnableRetryOnFailure();
-                }),
-            DatabaseProvider.MariaDb => optionsBuilder.UseMySql(
-                databaseOptions.ConnectionString,
-                new MariaDbServerVersion(databaseOptions.GetServerVersion()),
-                providerOptions =>
-                {
-                    providerOptions.MigrationsAssembly(
-                        "SignaCore.Database.Migrations.MySql");
-                    providerOptions.EnableRetryOnFailure();
-                }),
             DatabaseProvider.Sqlite => optionsBuilder.UseSqlite(
                 databaseOptions.ConnectionString,
                 providerOptions => providerOptions.MigrationsAssembly(

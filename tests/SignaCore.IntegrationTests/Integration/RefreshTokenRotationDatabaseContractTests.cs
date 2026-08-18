@@ -12,7 +12,7 @@ namespace SignaCore.IntegrationTests.Integration;
 
 /// <summary>
 /// 守住 <see cref="RefreshTokenRepository.TryRotateAsync"/> 在**重试型 execution strategy**
-/// 下的行为。生产上 PostgreSQL / MySQL / MariaDB 都开了 <c>EnableRetryOnFailure()</c>
+/// 下的行为。生产上 PostgreSQL 开了 <c>EnableRetryOnFailure()</c>
 /// （见 <see cref="IdentityDatabaseOptionsExtensions"/>），此时 EF Core 禁止在"调用方自己开的事务"
 /// 里执行命令，旋转 refresh token 会在第一条命令上抛
 /// <c>InvalidOperationException: ... does not support user-initiated transactions</c>，
@@ -131,7 +131,7 @@ public sealed class RefreshTokenRotationDatabaseContractTests
                     providerOptions.MigrationsAssembly(
                         "SignaCore.Database.Migrations.Sqlite");
                     // SQLite 没有 EnableRetryOnFailure，这里手工装一个会重试的 strategy，
-                    // 等价于 PostgreSQL/MySQL 生产配置下的 RetriesOnFailure == true。
+                    // 等价于 PostgreSQL 生产配置下的 RetriesOnFailure == true。
                     providerOptions.ExecutionStrategy(
                         dependencies => new TestRetryingExecutionStrategy(dependencies));
                 });

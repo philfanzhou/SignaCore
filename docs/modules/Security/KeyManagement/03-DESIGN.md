@@ -23,7 +23,7 @@ rate limiters treat them identically; the alias must never diverge into a second
 
 ## Persistence
 
-Relevant tables: security_keys. PostgreSQL migrations live in Database, while MySQL/MariaDB and SQLite use their provider-specific migration assemblies.
+Relevant tables: security_keys. PostgreSQL migrations live in Database, while SQLite uses its provider-specific migration assembly.
 
 ## Design constraints
 

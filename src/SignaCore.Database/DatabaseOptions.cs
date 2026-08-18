@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using MySqlConnector;
 using Npgsql;
 
 namespace SignaCore.Database;
@@ -15,11 +14,9 @@ public sealed class DatabaseOptions
     public DatabaseProvider ProviderKind => Provider switch
     {
         "PostgreSQL" => DatabaseProvider.PostgreSql,
-        "MySQL" => DatabaseProvider.MySql,
-        "MariaDB" => DatabaseProvider.MariaDb,
         "SQLite" => DatabaseProvider.Sqlite,
         _ => throw new InvalidOperationException(
-            "Database.Provider must be one of: PostgreSQL, MySQL, MariaDB, SQLite.")
+            "Database.Provider must be one of: PostgreSQL, SQLite.")
     };
 
     public Version GetServerVersion()
@@ -77,20 +74,6 @@ public sealed class DatabaseOptions
                 }
                 ValidatePostgreSqlConnectionString();
                 break;
-            case DatabaseProvider.MySql:
-                if (version.Major != 8 || version.Minor is not (0 or 4))
-                {
-                    throw new InvalidOperationException("Supported MySQL versions are 8.0 and 8.4.");
-                }
-                ValidateMySqlConnectionString();
-                break;
-            case DatabaseProvider.MariaDb:
-                if ((version.Major, version.Minor) is not ((10, 11) or (11, 4)))
-                {
-                    throw new InvalidOperationException("Supported MariaDB versions are 10.11 and 11.4.");
-                }
-                ValidateMySqlConnectionString();
-                break;
             default:
                 throw new InvalidOperationException("Unsupported database provider.");
         }
@@ -115,24 +98,6 @@ public sealed class DatabaseOptions
         }
     }
 
-    private void ValidateMySqlConnectionString()
-    {
-        try
-        {
-            var builder = new MySqlConnectionStringBuilder(ConnectionString);
-            if (string.IsNullOrWhiteSpace(builder.Server) || string.IsNullOrWhiteSpace(builder.Database))
-            {
-                throw new InvalidOperationException(
-                    "MySQL-compatible connection string must specify Server and Database.");
-            }
-        }
-        catch (ArgumentException exception)
-        {
-            throw new InvalidOperationException(
-                "Database.ConnectionString is not a valid MySQL-compatible connection string.",
-                exception);
-        }
-    }
 
     private void ValidateSqliteConnectionString()
     {

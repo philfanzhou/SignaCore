@@ -1,15 +1,15 @@
 # ADR 0001: Multi-provider Persistence
 
-- Status: Accepted
+- Status: Accepted, amended by [ADR 0004](./0004-drop-mysql-support.md)
 - Date: 2026-07-30
 
 ## Context
 
-SignaCore must support PostgreSQL, MySQL/MariaDB, and SQLite without maintaining separate domain or repository implementations. Provider differences affect connection parsing, database creation, server-version selection, migrations, SQL types, locking, and some schema operations.
+SignaCore must support several relational databases without maintaining separate domain or repository implementations. At the time of this decision the set was PostgreSQL, MySQL/MariaDB, and SQLite; ADR 0004 later withdrew MySQL/MariaDB. Provider differences affect connection parsing, database creation, server-version selection, migrations, SQL types, locking, and some schema operations.
 
 ## Decision
 
-Use EF Core as the only ORM and data-access stack. Keep the model and repositories in `SignaCore.Database`; keep PostgreSQL migrations there; use `SignaCore.Database.Migrations.MySql` and `SignaCore.Database.Migrations.Sqlite` for provider-specific migrations. Select the provider from `Database:Provider` and validate its required settings at startup.
+Use EF Core as the only ORM and data-access stack. Keep the model and repositories in `SignaCore.Database`; keep PostgreSQL migrations there; use a dedicated migration assembly per additional provider, such as `SignaCore.Database.Migrations.Sqlite`. Select the provider from `Database:Provider` and validate its required settings at startup.
 
 ## Consequences
 

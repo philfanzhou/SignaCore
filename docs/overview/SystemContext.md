@@ -6,7 +6,7 @@ SignaCore is the central identity provider for a service ecosystem. Users authen
 Users and administrators
           |
           v
-      SignaCore <------> PostgreSQL / MySQL / SQLite
+      SignaCore <------> PostgreSQL / SQLite
        |   |
        |   +---------> SMS, WeChat, LDAP, callback services
        |

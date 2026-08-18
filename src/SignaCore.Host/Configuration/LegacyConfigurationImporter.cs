@@ -77,8 +77,8 @@ internal static class LegacyConfigurationImporter
 
         const int configurationVersion = 1;
 
-        // The explicit transaction has to run inside CreateExecutionStrategy(): PostgreSQL, MySQL and
-        // MariaDB enable EnableRetryOnFailure(), and a retrying strategy refuses to execute commands
+        // The explicit transaction has to run inside CreateExecutionStrategy(): PostgreSQL enables
+        // EnableRetryOnFailure(), and a retrying strategy refuses to execute commands
         // inside a caller-opened transaction. Everything the lambda tracks is built inside it, and it
         // starts from a cleared change tracker, so a retried attempt cannot insert the state row or
         // the audit entry twice.

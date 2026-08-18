@@ -18,7 +18,7 @@ Primary interface: /api/admin/users.
 
 ## Persistence
 
-Relevant tables: accounts, user_logins, password_credentials, and ldap_credentials. PostgreSQL migrations live in Database, while MySQL/MariaDB and SQLite use their provider-specific migration assemblies.
+Relevant tables: accounts, user_logins, password_credentials, and ldap_credentials. PostgreSQL migrations live in Database, while SQLite uses its provider-specific migration assembly.
 
 ## Design constraints
 

@@ -9,7 +9,6 @@ SignaCore uses a conventional repository layout so that source, tests, documenta
 |-- src/
 |   |-- SignaCore.Admin/     Vue administrative console
 |   |-- SignaCore.Database/  EF Core model, repositories, PostgreSQL migrations
-|   |-- SignaCore.Database.Migrations.MySql/
 |   |-- SignaCore.Database.Migrations.Sqlite/
 |   |-- SignaCore.Domain/    Authentication and identity behavior
 |   `-- SignaCore.Host/      ASP.NET Core composition root and container file

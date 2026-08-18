@@ -18,7 +18,7 @@ Primary interface: internal domain service.
 
 ## Persistence
 
-Relevant tables: login_histories and audit_logs. PostgreSQL migrations live in Database, while MySQL/MariaDB and SQLite use their provider-specific migration assemblies.
+Relevant tables: login_histories and audit_logs. PostgreSQL migrations live in Database, while SQLite uses its provider-specific migration assembly.
 
 ## Design constraints
 

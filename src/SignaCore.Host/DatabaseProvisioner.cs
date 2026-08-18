@@ -1,6 +1,5 @@
 using System.Data.Common;
 using Microsoft.Data.Sqlite;
-using MySqlConnector;
 using Npgsql;
 using SignaCore.Database;
 
@@ -9,7 +8,6 @@ namespace SignaCore.Host;
 internal static class DatabaseProvisioner
 {
     private const long PostgreSqlMigrationLockId = 5860957687944148308;
-    private const string MySqlMigrationLockName = "SignaCore.Migrations";
 
     public static async Task EnsureDatabaseExistsAsync(
         DatabaseOptions options,
@@ -19,12 +17,6 @@ internal static class DatabaseProvisioner
         {
             case DatabaseProvider.PostgreSql:
                 await EnsurePostgreSqlDatabaseExistsAsync(
-                    options.ConnectionString,
-                    cancellationToken);
-                break;
-            case DatabaseProvider.MySql:
-            case DatabaseProvider.MariaDb:
-                await EnsureMySqlDatabaseExistsAsync(
                     options.ConnectionString,
                     cancellationToken);
                 break;
@@ -59,34 +51,6 @@ internal static class DatabaseProvisioner
                         parameter.ParameterName = "@lock_id";
                         parameter.Value = PostgreSqlMigrationLockId;
                         command.Parameters.Add(parameter);
-                    });
-            }
-            case DatabaseProvider.MySql:
-            case DatabaseProvider.MariaDb:
-            {
-                var connection = new MySqlConnection(options.ConnectionString);
-                await connection.OpenAsync(cancellationToken);
-                await using var command = connection.CreateCommand();
-                command.CommandText = "SELECT GET_LOCK(@lock_name, 60)";
-                command.Parameters.AddWithValue("@lock_name", MySqlMigrationLockName);
-                var acquired = Convert.ToInt32(
-                    await command.ExecuteScalarAsync(cancellationToken)) == 1;
-                if (!acquired)
-                {
-                    await connection.DisposeAsync();
-                    throw new InvalidOperationException(
-                        "Timed out while acquiring the database migration lock.");
-                }
-
-                return new DatabaseMigrationLock(
-                    connection,
-                    "SELECT RELEASE_LOCK(@lock_name)",
-                    releaseCommand =>
-                    {
-                        var parameter = releaseCommand.CreateParameter();
-                        parameter.ParameterName = "@lock_name";
-                        parameter.Value = MySqlMigrationLockName;
-                        releaseCommand.Parameters.Add(parameter);
                     });
             }
             case DatabaseProvider.Sqlite:
@@ -133,29 +97,6 @@ internal static class DatabaseProvisioner
         {
             // Another instance completed database creation after the existence check.
         }
-    }
-
-    private static async Task EnsureMySqlDatabaseExistsAsync(
-        string connectionString,
-        CancellationToken cancellationToken)
-    {
-        var target = new MySqlConnectionStringBuilder(connectionString);
-        var databaseName = target.Database;
-        var maintenance = new MySqlConnectionStringBuilder(connectionString)
-        {
-            Database = string.Empty,
-            Pooling = false
-        };
-
-        await using var connection = new MySqlConnection(maintenance.ConnectionString);
-        await connection.OpenAsync(cancellationToken);
-
-        var escapedDatabaseName = databaseName.Replace("`", "``", StringComparison.Ordinal);
-        await using var command = connection.CreateCommand();
-        command.CommandText =
-            $"CREATE DATABASE IF NOT EXISTS `{escapedDatabaseName}` " +
-            "CHARACTER SET utf8mb4 COLLATE utf8mb4_bin";
-        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static void EnsureSqliteDirectoryExists(string connectionString)
