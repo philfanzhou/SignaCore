@@ -76,7 +76,7 @@ public class RefreshTokenValidatorTests
             AppId = "app-1"
         };
         context.RefreshTokens.Add(refreshToken);
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
         refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync("valid_refresh_token")).ReturnsAsync(refreshToken);
@@ -121,7 +121,7 @@ public class RefreshTokenValidatorTests
             AppId = "app-1"
         };
         context.RefreshTokens.Add(refreshToken);
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
         refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync("expired_refresh_token")).ReturnsAsync(refreshToken);
@@ -163,7 +163,7 @@ public class RefreshTokenValidatorTests
             CreatedAt = DateTimeOffset.UtcNow,
         };
         context.RefreshTokens.Add(refreshToken);
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
         refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync("revoked_refresh_token")).ReturnsAsync(refreshToken);

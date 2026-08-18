@@ -31,11 +31,11 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
     {
         using var http = CreateClientWithBasicAuth();
 
-        var response = await http.PostAsync("/oauth2/token", PasswordGrant());
+        var response = await http.PostAsync("/oauth2/token", PasswordGrant(), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("Bearer", body.GetProperty("token_type").GetString());
         Assert.True(body.GetProperty("expires_in").GetInt64() > 0);
         Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("access_token").GetString()));
@@ -54,7 +54,7 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
             ["password"] = IdentityServerFixture.AdminPassword,
             ["client_id"] = IdentityServerFixture.GatewayAppId,
             ["client_secret"] = IdentityServerFixture.GatewayAppSecret
-        }));
+        }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -65,8 +65,8 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
     {
         using var http = CreateClientWithBasicAuth();
 
-        var response = await http.PostAsync("/oauth2/token", PasswordGrant());
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var response = await http.PostAsync("/oauth2/token", PasswordGrant(), TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var token = new JwtSecurityTokenHandler().ReadJwtToken(body.GetProperty("access_token").GetString());
 
         Assert.Equal(JwtTokenService.AccessTokenType, token.Header.Typ);
@@ -80,11 +80,11 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
     {
         using var http = _fixture.CreateHttpClient();
 
-        var response = await http.PostAsync("/oauth2/token", PasswordGrant());
+        var response = await http.PostAsync("/oauth2/token", PasswordGrant(), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Contains(response.Headers.WwwAuthenticate, header => header.Scheme == "Basic");
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("invalid_client", body.GetProperty("error").GetString());
     }
 
@@ -93,7 +93,7 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
     {
         using var http = CreateClientWithBasicAuth(secret: "wrong-secret");
 
-        var response = await http.PostAsync("/oauth2/token", PasswordGrant());
+        var response = await http.PostAsync("/oauth2/token", PasswordGrant(), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -109,10 +109,10 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
             ["grant_type"] = IdentityConstants.GrantTypePassword,
             ["username"] = IdentityServerFixture.AdminUsername,
             ["password"] = "definitely-not-the-password"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("invalid_grant", body.GetProperty("error").GetString());
         Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("error_description").GetString()));
     }
@@ -125,10 +125,10 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         var response = await http.PostAsync("/oauth2/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["username"] = IdentityServerFixture.AdminUsername
-        }));
+        }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("invalid_request", body.GetProperty("error").GetString());
     }
 
@@ -144,10 +144,10 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         var response = await http.PostAsync("/oauth2/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["grant_type"] = grantType
-        }));
+        }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("unsupported_grant_type", body.GetProperty("error").GetString());
     }
 
@@ -162,10 +162,10 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
             ["grant_type"] = OAuthGrantTypes.Sms,
             ["phone"] = "13800138000",
             ["code"] = "123456"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("unauthorized_client", body.GetProperty("error").GetString());
     }
 
@@ -180,10 +180,10 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
             ["username"] = IdentityServerFixture.AdminUsername,
             ["password"] = IdentityServerFixture.AdminPassword,
             ["scope"] = "openid profile"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("invalid_scope", body.GetProperty("error").GetString());
     }
 
@@ -191,18 +191,18 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
     public async Task RefreshTokenGrant_RotatesTheRefreshToken()
     {
         using var http = CreateClientWithBasicAuth();
-        var first = await (await http.PostAsync("/oauth2/token", PasswordGrant()))
-            .Content.ReadFromJsonAsync<JsonElement>();
+        var first = await (await http.PostAsync("/oauth2/token", PasswordGrant(), TestContext.Current.CancellationToken))
+            .Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var refreshToken = first.GetProperty("refresh_token").GetString()!;
 
         var response = await http.PostAsync("/oauth2/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["grant_type"] = IdentityConstants.GrantTypeRefreshToken,
             ["refresh_token"] = refreshToken
-        }));
+        }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotEqual(refreshToken, body.GetProperty("refresh_token").GetString());
 
         // 旧 token 已被消费，重放必须失败。
@@ -210,7 +210,7 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         {
             ["grant_type"] = IdentityConstants.GrantTypeRefreshToken,
             ["refresh_token"] = refreshToken
-        }));
+        }), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, replay.StatusCode);
     }
 
@@ -219,18 +219,18 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
     public async Task Revoke_ReturnsOkForBothKnownAndUnknownTokens()
     {
         using var http = CreateClientWithBasicAuth();
-        var issued = await (await http.PostAsync("/oauth2/token", PasswordGrant()))
-            .Content.ReadFromJsonAsync<JsonElement>();
+        var issued = await (await http.PostAsync("/oauth2/token", PasswordGrant(), TestContext.Current.CancellationToken))
+            .Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
 
         var known = await http.PostAsync("/oauth2/revoke", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["token"] = issued.GetProperty("refresh_token").GetString()!,
             ["token_type_hint"] = "refresh_token"
-        }));
+        }), TestContext.Current.CancellationToken);
         var unknown = await http.PostAsync("/oauth2/revoke", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["token"] = "this-token-never-existed"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, known.StatusCode);
         Assert.Equal(HttpStatusCode.OK, unknown.StatusCode);
@@ -248,15 +248,15 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         await _fixture.SeedGatewayAppAsync(otherAppId, otherSecret);
 
         using var victim = CreateClientWithBasicAuth();
-        var issued = await (await victim.PostAsync("/oauth2/token", PasswordGrant()))
-            .Content.ReadFromJsonAsync<JsonElement>();
+        var issued = await (await victim.PostAsync("/oauth2/token", PasswordGrant(), TestContext.Current.CancellationToken))
+            .Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var refreshToken = issued.GetProperty("refresh_token").GetString()!;
 
         using var attacker = _fixture.CreateHttpClient();
         attacker.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{otherAppId}:{otherSecret}")));
         var revoke = await attacker.PostAsync("/oauth2/revoke", new FormUrlEncodedContent(
-            new Dictionary<string, string> { ["token"] = refreshToken }));
+            new Dictionary<string, string> { ["token"] = refreshToken }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
 
@@ -266,7 +266,7 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
             {
                 ["grant_type"] = IdentityConstants.GrantTypeRefreshToken,
                 ["refresh_token"] = refreshToken
-            }));
+            }), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, refresh.StatusCode);
     }
 
@@ -278,7 +278,7 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         var response = await http.PostAsync("/oauth2/revoke", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["token"] = "irrelevant"
-        }));
+        }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -288,20 +288,20 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
     public async Task Revoke_InvalidatesTheRefreshToken()
     {
         using var http = CreateClientWithBasicAuth();
-        var issued = await (await http.PostAsync("/oauth2/token", PasswordGrant()))
-            .Content.ReadFromJsonAsync<JsonElement>();
+        var issued = await (await http.PostAsync("/oauth2/token", PasswordGrant(), TestContext.Current.CancellationToken))
+            .Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var refreshToken = issued.GetProperty("refresh_token").GetString()!;
 
         await http.PostAsync("/oauth2/revoke", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["token"] = refreshToken
-        }));
+        }), TestContext.Current.CancellationToken);
 
         var response = await http.PostAsync("/oauth2/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["grant_type"] = IdentityConstants.GrantTypeRefreshToken,
             ["refresh_token"] = refreshToken
-        }));
+        }), TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }

@@ -29,7 +29,7 @@ public class CallbackServiceTests
         var factory = new TestHttpClientFactory(httpClient);
         var service = new CallbackService(factory, CreateLogger(), _validator);
 
-        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123", TestContext.Current.CancellationToken);
 
         Assert.Equal(4, claims.Count);
         Assert.Contains(claims, c => c.Type == IdentityConstants.ClaimRole && c.Value == "admin");
@@ -46,7 +46,7 @@ public class CallbackServiceTests
         var factory = new TestHttpClientFactory(httpClient);
         var service = new CallbackService(factory, CreateLogger(), _validator);
 
-        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123", TestContext.Current.CancellationToken);
 
         Assert.Empty(claims);
     }
@@ -59,7 +59,7 @@ public class CallbackServiceTests
         var factory = new TestHttpClientFactory(httpClient);
         var service = new CallbackService(factory, CreateLogger(), _validator);
 
-        var claims = await service.FetchExternalClaimsAsync("invalid-url", "user123");
+        var claims = await service.FetchExternalClaimsAsync("invalid-url", "user123", TestContext.Current.CancellationToken);
 
         Assert.Empty(claims);
     }
@@ -75,7 +75,7 @@ public class CallbackServiceTests
         var factory = new TestHttpClientFactory(httpClient);
         var service = new CallbackService(factory, CreateLogger(), _validator);
 
-        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123", TestContext.Current.CancellationToken);
 
         Assert.Equal(2, claims.Count);
         Assert.Contains(claims, c => c.Type == "department" && c.Value == "Engineering");
@@ -93,7 +93,7 @@ public class CallbackServiceTests
         var factory = new TestHttpClientFactory(httpClient);
         var service = new CallbackService(factory, CreateLogger(), _validator);
 
-        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123", TestContext.Current.CancellationToken);
 
         Assert.Single(claims);
         Assert.Contains(claims, c => c.Type == "department" && c.Value == "Engineering");
@@ -111,7 +111,7 @@ public class CallbackServiceTests
         var factory = new TestHttpClientFactory(httpClient);
         var service = new CallbackService(factory, CreateLogger(), _validator);
 
-        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123", TestContext.Current.CancellationToken);
 
         Assert.Equal(50, claims.Count);
         Assert.All(claims, c => Assert.Equal(IdentityConstants.ClaimRole, c.Type));
@@ -128,7 +128,7 @@ public class CallbackServiceTests
         var factory = new TestHttpClientFactory(httpClient);
         var service = new CallbackService(factory, CreateLogger(), _validator);
 
-        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123", TestContext.Current.CancellationToken);
 
         Assert.Equal(50, claims.Count);
         Assert.All(claims, c => Assert.Equal(IdentityConstants.ClaimPermission, c.Type));
@@ -146,7 +146,7 @@ public class CallbackServiceTests
         var factory = new TestHttpClientFactory(httpClient);
         var service = new CallbackService(factory, CreateLogger(), _validator);
 
-        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123", TestContext.Current.CancellationToken);
 
         Assert.Empty(claims);
     }
@@ -162,7 +162,7 @@ public class CallbackServiceTests
         var factory = new TestHttpClientFactory(httpClient);
         var service = new CallbackService(factory, CreateLogger(), _validator);
 
-        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123");
+        var claims = await service.FetchExternalClaimsAsync("https://example.com/callback", "user123", TestContext.Current.CancellationToken);
 
         Assert.Equal(2, claims.Count);
         Assert.Contains(claims, c => c.Value == "admin");

@@ -30,7 +30,7 @@ public sealed class SqliteDatabaseContractTests
         try
         {
             await using var context = new IdentityDbContext(optionsBuilder.Options);
-            await context.Database.MigrateAsync();
+            await context.Database.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
             var accountId = Guid.NewGuid();
             context.Accounts.Add(new AccountEntity
             {
@@ -47,7 +47,7 @@ public sealed class SqliteDatabaseContractTests
                 CreatedAt = DateTimeOffset.UtcNow,
                 ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
             });
-            await context.SaveChangesAsync();
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
             await DatabaseInitializer.ProtectLegacyRefreshTokensAsync(
                 context,
@@ -57,7 +57,7 @@ public sealed class SqliteDatabaseContractTests
                 RefreshTokenDigest.Compute(legacyToken),
                 await context.RefreshTokens.AsNoTracking()
                     .Select(token => token.TokenValue)
-                    .SingleAsync());
+                    .SingleAsync(cancellationToken: TestContext.Current.CancellationToken));
         }
         finally
         {
@@ -84,15 +84,15 @@ public sealed class SqliteDatabaseContractTests
         {
             await using var context = new IdentityDbContext(optionsBuilder.Options);
             var migrator = context.Database.GetService<IMigrator>();
-            await migrator.MigrateAsync("20260805151934_EnableAppScopedLdapLogin");
+            await migrator.MigrateAsync("20260805151934_EnableAppScopedLdapLogin", TestContext.Current.CancellationToken);
             var now = (DateTimeOffset.UtcNow.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / 10;
             await context.Database.ExecuteSqlRawAsync(
                 "INSERT INTO otps (id, phone, code, expires_at, attempts, lockout_until, created_at) VALUES ({0}, {1}, {2}, {3}, 0, 0, {3})",
                 Guid.NewGuid(), "13800138000", "123456", now);
 
-            await migrator.MigrateAsync();
+            await migrator.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-            Assert.Empty(await context.Otps.AsNoTracking().ToListAsync());
+            Assert.Empty(await context.Otps.AsNoTracking().ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
         }
         finally
         {
@@ -130,14 +130,14 @@ public sealed class SqliteDatabaseContractTests
 
             await using (var writeContext = new IdentityDbContext(optionsBuilder.Options))
             {
-                await writeContext.Database.MigrateAsync();
+                await writeContext.Database.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
                 writeContext.Accounts.Add(new AccountEntity
                 {
                     Id = accountId,
                     IsActive = true,
                     CreatedAt = sourceInstant
                 });
-                await writeContext.SaveChangesAsync();
+                await writeContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
                 writeContext.RefreshTokens.Add(new RefreshTokenEntity
                 {
@@ -149,13 +149,13 @@ public sealed class SqliteDatabaseContractTests
                     AppId = string.Empty
                 });
                 await Assert.ThrowsAsync<DbUpdateException>(
-                    () => writeContext.SaveChangesAsync());
+                    () => writeContext.SaveChangesAsync(TestContext.Current.CancellationToken));
             }
 
             await using var readContext = new IdentityDbContext(optionsBuilder.Options);
             var account = await readContext.Accounts
                 .AsNoTracking()
-                .SingleAsync(item => item.Id == accountId);
+                .SingleAsync(item => item.Id == accountId, cancellationToken: TestContext.Current.CancellationToken);
 
             Assert.Equal(TimeSpan.Zero, account.CreatedAt.Offset);
             Assert.Equal(sourceInstant.UtcTicks / 10, account.CreatedAt.UtcTicks / 10);
@@ -194,7 +194,7 @@ public sealed class SqliteDatabaseContractTests
 
             await using (var seedContext = new IdentityDbContext(optionsBuilder.Options))
             {
-                await seedContext.Database.MigrateAsync();
+                await seedContext.Database.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
                 seedContext.AppRegistrations.Add(new AppRegistrationEntity
                 {
                     Id = appRegistrationId,
@@ -242,7 +242,7 @@ public sealed class SqliteDatabaseContractTests
                     ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5),
                     LockoutUntil = DateTimeOffset.UnixEpoch
                 });
-                await seedContext.SaveChangesAsync();
+                await seedContext.SaveChangesAsync(TestContext.Current.CancellationToken);
             }
 
             await using (var queryContext = new IdentityDbContext(optionsBuilder.Options))
@@ -264,7 +264,7 @@ public sealed class SqliteDatabaseContractTests
             {
                 Assert.Single(await assertionContext.RefreshTokens
                     .Where(token => !token.IsRevoked)
-                    .ToListAsync());
+                    .ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
             }
 
             var consumeResults = await Task.WhenAll(

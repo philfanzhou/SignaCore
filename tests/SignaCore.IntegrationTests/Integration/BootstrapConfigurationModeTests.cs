@@ -43,17 +43,18 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
     {
         using var http = StartHost();
 
-        Assert.Equal(HttpStatusCode.OK, (await http.GetAsync("/health/live")).StatusCode);
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await http.GetAsync("/health/ready")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await http.GetAsync("/health/live", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await http.GetAsync("/health/ready", TestContext.Current.CancellationToken)).StatusCode);
 
-        var blocked = await http.GetAsync("/.well-known/openid-configuration");
+        var blocked = await http.GetAsync("/.well-known/openid-configuration", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, blocked.StatusCode);
         Assert.Equal(
             "bootstrap_configuration_required",
-            (await blocked.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+            (await blocked.Content.ReadFromJsonAsync<JsonElement>(
+                cancellationToken: TestContext.Current.CancellationToken)).GetProperty("error").GetString());
 
         http.DefaultRequestHeaders.Accept.ParseAdd("text/html");
-        var navigation = await http.GetAsync("/admin");
+        var navigation = await http.GetAsync("/admin", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Found, navigation.StatusCode);
         Assert.Equal("/bootstrap", navigation.Headers.Location?.ToString());
     }
@@ -73,7 +74,7 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
             database,
             installMode = "new",
             bootstrapCode = "wrong-code"
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, wrongCode.StatusCode);
         Assert.False(File.Exists(_bootstrapPath));
 
@@ -82,7 +83,7 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
             database = new { provider = "SQLite", filePath = ":memory:" },
             installMode = "new",
             bootstrapCode = _bootstrapCode
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, invalidDatabase.StatusCode);
         Assert.False(File.Exists(_bootstrapPath));
 
@@ -92,7 +93,7 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
             installMode = "new",
             masterKey = "an-operator-selected-key-is-not-allowed",
             bootstrapCode = _bootstrapCode
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, operatorSelectedKey.StatusCode);
         Assert.False(File.Exists(_bootstrapPath));
     }
@@ -111,12 +112,12 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
             },
             installMode = "new",
             bootstrapCode = _bootstrapCode
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(File.Exists(_bootstrapPath));
 
-        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(_bootstrapPath));
+        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(_bootstrapPath, TestContext.Current.CancellationToken));
         Assert.Equal(2, document.RootElement.EnumerateObject().Count());
         Assert.True(document.RootElement.TryGetProperty("Database", out var database));
         Assert.Equal(3, database.EnumerateObject().Count());

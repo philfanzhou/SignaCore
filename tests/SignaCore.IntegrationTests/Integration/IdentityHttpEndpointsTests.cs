@@ -28,9 +28,9 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     public async Task HealthCheckEndpoint_ReturnsHealthy()
     {
         using var http = _fixture.CreateHttpClient();
-        var response = await http.GetAsync("/health");
+        var response = await http.GetAsync("/health", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Equal("Healthy", content);
     }
 
@@ -45,9 +45,9 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     public async Task JwksEndpoint_ReturnsValidJwks(string path)
     {
         using var http = _fixture.CreateHttpClient();
-        var response = await http.GetAsync(path);
+        var response = await http.GetAsync(path, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync();
+        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("RSA", content);
         Assert.Contains("keys", content);
     }
@@ -62,8 +62,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     {
         using var http = _fixture.CreateHttpClient();
 
-        var canonical = await http.GetStringAsync(WellKnownEndpoints.Jwks);
-        var alias = await http.GetStringAsync(WellKnownEndpoints.JwksJson);
+        var canonical = await http.GetStringAsync(WellKnownEndpoints.Jwks, TestContext.Current.CancellationToken);
+        var alias = await http.GetStringAsync(WellKnownEndpoints.JwksJson, TestContext.Current.CancellationToken);
 
         Assert.Equal(canonical, alias);
     }
@@ -78,10 +78,10 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     {
         using var http = _fixture.CreateHttpClient();
 
-        var response = await http.GetAsync(path);
+        var response = await http.GetAsync(path, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var document = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var document = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var origin = $"{http.BaseAddress!.Scheme}://{http.BaseAddress.Authority}";
 
         Assert.Equal($"{origin}/.well-known/jwks", document.GetProperty("jwks_uri").GetString());
@@ -100,8 +100,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         foreach (var grantType in grantTypes)
         {
             var probe = await oauth.PostAsync("/oauth2/token", new FormUrlEncodedContent(
-                new Dictionary<string, string> { ["grant_type"] = grantType }));
-            var error = (await probe.Content.ReadFromJsonAsync<JsonElement>())
+                new Dictionary<string, string> { ["grant_type"] = grantType }), TestContext.Current.CancellationToken);
+            var error = (await probe.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken))
                 .GetProperty("error").GetString();
             Assert.NotEqual("unsupported_grant_type", error);
         }
@@ -125,7 +125,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     public async Task DiscoveryIssuer_MatchesTheIssuerClaimOfAnIssuedToken()
     {
         using var http = _fixture.CreateHttpClient();
-        var document = await http.GetFromJsonAsync<JsonElement>("/.well-known/openid-configuration");
+        var document = await http.GetFromJsonAsync<JsonElement>("/.well-known/openid-configuration",
+            cancellationToken: TestContext.Current.CancellationToken);
         var advertisedIssuer = document.GetProperty("issuer").GetString();
 
         using var gateway = _fixture.CreateGatewayHttpClient();
@@ -134,8 +135,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
             grantType = IdentityConstants.GrantTypePassword,
             username = IdentityServerFixture.AdminUsername,
             password = IdentityServerFixture.AdminPassword
-        });
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        }, cancellationToken: TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(body.GetProperty("success").GetBoolean(), body.ToString());
 
         var accessToken = body.GetProperty("accessToken").GetString()!;
@@ -233,11 +234,12 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     {
         using var http = _fixture.CreateGatewayHttpClient();
 
-        var response = await http.PostAsJsonAsync("/api/auth/token", new { grantType = "no_such_grant" });
+        var response = await http.PostAsJsonAsync("/api/auth/token", new { grantType = "no_such_grant" },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         // 失败也返回 200 + Success=false 是对外契约，见 docs/modules/Auth/GetToken/06-CONVENTIONS.md
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("unsupported_grant_type", body);
     }
 
@@ -246,10 +248,10 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     {
         using var http = _fixture.CreateGatewayHttpClient();
 
-        var response = await http.PostAsJsonAsync("/api/auth/sms-code", new { phone = "" });
+        var response = await http.PostAsJsonAsync("/api/auth/sms-code", new { phone = "" }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("Phone number is required", body);
     }
 
@@ -258,10 +260,11 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     {
         using var http = _fixture.CreateHttpClient();
 
-        var response = await http.PostAsJsonAsync("/api/auth/revoke", new { refreshToken = "" });
+        var response = await http.PostAsJsonAsync("/api/auth/revoke", new { refreshToken = "" },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("false", body, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -272,11 +275,11 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
 
         var responses = new[]
         {
-            await http.PostAsJsonAsync("/api/auth/token", new { grantType = "password" }),
-            await http.PostAsJsonAsync("/api/auth/sms-code", new { phone = "13800138000" }),
-            await http.PostAsJsonAsync("/api/auth/callback/register",
-                new { callbackUrl = "http://example.com/cb", ttlSeconds = 3600 }),
-            await http.GetAsync("/api/gateway/users/search")
+            await http.PostAsJsonAsync("/api/auth/token", new { grantType = "password" }, cancellationToken: TestContext.Current.CancellationToken),
+            await http.PostAsJsonAsync("/api/auth/sms-code", new { phone = "13800138000" }, cancellationToken: TestContext.Current.CancellationToken),
+            await http.PostAsJsonAsync("/api/auth/callback/register", new { callbackUrl = "http://example.com/cb", ttlSeconds = 3600 },
+                cancellationToken: TestContext.Current.CancellationToken),
+            await http.GetAsync("/api/gateway/users/search", TestContext.Current.CancellationToken)
         };
 
         Assert.All(responses, response => Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode));
@@ -289,7 +292,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         http.DefaultRequestHeaders.Add("X-Admin-AppId", "unknown-app");
         http.DefaultRequestHeaders.Add("X-Admin-AppSecret", "wrong-secret");
 
-        var response = await http.PostAsJsonAsync("/api/auth/token", new { grantType = "password" });
+        var response = await http.PostAsJsonAsync("/api/auth/token", new { grantType = "password" },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -303,11 +307,12 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     {
         using var http = _fixture.CreateHttpClient();
 
-        var status = await http.GetAsync("/api/setup/status");
+        var status = await http.GetAsync("/api/setup/status", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, status.StatusCode);
         Assert.Equal(
             "completed",
-            (await status.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("status").GetString());
+            (await status.Content.ReadFromJsonAsync<JsonElement>(
+                cancellationToken: TestContext.Current.CancellationToken)).GetProperty("status").GetString());
 
         var complete = await http.PostAsJsonAsync("/api/setup/complete", new
         {
@@ -316,7 +321,7 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
             password = "Attacker123",
             confirmPassword = "Attacker123",
             setupCode = "does-not-matter"
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Conflict, complete.StatusCode);
     }
@@ -328,13 +333,14 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     public async Task SettingsApi_RequiresAnAdminSessionAndNeverReturnsSecretValues()
     {
         using var anonymous = _fixture.CreateHttpClient();
-        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/admin/settings")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/admin/settings",
+            TestContext.Current.CancellationToken)).StatusCode);
 
         using var admin = await _fixture.CreateAdminHttpClientAsync();
-        var response = await admin.GetAsync("/api/admin/settings");
+        var response = await admin.GetAsync("/api/admin/settings", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var items = body.GetProperty("items").EnumerateArray().ToList();
         Assert.NotEmpty(items);
         Assert.All(
@@ -364,7 +370,7 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
                 // The issuer must keep matching the public base URL.
                 ["Jwt:Issuer"] = "https://somewhere.else.test"
             }
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -377,7 +383,7 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         var response = await admin.PutAsJsonAsync("/api/admin/settings", new
         {
             values = new Dictionary<string, string> { ["Endpoints:Http"] = "9999" }
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -390,8 +396,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     public async Task SettingsApi_AppliesAValidChangeTransactionally()
     {
         using var admin = await _fixture.CreateAdminHttpClientAsync();
-        var before = (await (await admin.GetAsync("/api/admin/settings")).Content
-            .ReadFromJsonAsync<JsonElement>()).GetProperty("configurationVersion").GetInt32();
+        var before = (await (await admin.GetAsync("/api/admin/settings", TestContext.Current.CancellationToken)).Content
+            .ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken)).GetProperty("configurationVersion").GetInt32();
 
         var response = await admin.PutAsJsonAsync("/api/admin/settings", new
         {
@@ -400,10 +406,10 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
                 ["Sms:MaxSendsPerHour"] = "7",
                 ["WeChat:AppSecret"] = "a-new-wechat-secret"
             }
-        });
+        }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(before + 1, body.GetProperty("configurationVersion").GetInt32());
         Assert.True(body.GetProperty("restartRequired").GetBoolean());
 
@@ -411,14 +417,14 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
 
         var secret = await db.SystemSettings.AsNoTracking()
-            .SingleAsync(setting => setting.Key == "WeChat:AppSecret");
+            .SingleAsync(setting => setting.Key == "WeChat:AppSecret", cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(secret.IsSecret);
         Assert.DoesNotContain("a-new-wechat-secret", secret.Value, StringComparison.Ordinal);
 
         var audit = await db.AuditLogs.AsNoTracking()
             .Where(entry => entry.Action == "settings_updated")
             .OrderByDescending(entry => entry.CreatedAt)
-            .FirstAsync();
+            .FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Contains("WeChat:AppSecret", audit.Description ?? string.Empty, StringComparison.Ordinal);
         Assert.DoesNotContain("a-new-wechat-secret", audit.Description ?? string.Empty, StringComparison.Ordinal);
     }
@@ -429,7 +435,7 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     {
         using var http = _fixture.CreateNonRedirectingHttpClient();
 
-        var response = await http.GetAsync("/setup");
+        var response = await http.GetAsync("/setup", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         Assert.Equal("/admin", response.Headers.Location?.ToString());
@@ -447,10 +453,10 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     {
         using var http = _fixture.CreateHttpClient();
 
-        var response = await http.GetAsync(path);
+        var response = await http.GetAsync(path, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("Healthy", await response.Content.ReadAsStringAsync());
+        Assert.Equal("Healthy", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -469,10 +475,12 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         http.DefaultRequestHeaders.Add("X-Admin-AppId", appId);
         http.DefaultRequestHeaders.Add("X-Admin-AppSecret", appSecret);
 
-        var searchResponse = await http.GetAsync($"/api/gateway/users/search?username={username}&page=1&pageSize=20");
+        var searchResponse = await http.GetAsync($"/api/gateway/users/search?username={username}&page=1&pageSize=20",
+            TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, searchResponse.StatusCode);
 
-        var searchPayload = await searchResponse.Content.ReadFromJsonAsync<TestPagedResponse<TestUserItem>>();
+        var searchPayload = await searchResponse.Content.ReadFromJsonAsync<TestPagedResponse<TestUserItem>>(
+            cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(searchPayload);
         var searchedUser = Assert.Single(searchPayload!.Items);
         Assert.Equal(accountId.ToString(), searchedUser.UserId);
@@ -480,10 +488,12 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(phone, searchedUser.Phone);
         Assert.Equal(username, searchedUser.DisplayName);
 
-        var batchResponse = await http.PostAsJsonAsync("/api/gateway/users/batch", new[] { accountId.ToString() });
+        var batchResponse = await http.PostAsJsonAsync("/api/gateway/users/batch", new[] { accountId.ToString() },
+            cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, batchResponse.StatusCode);
 
-        var batchPayload = await batchResponse.Content.ReadFromJsonAsync<List<TestUserItem>>();
+        var batchPayload = await batchResponse.Content.ReadFromJsonAsync<List<TestUserItem>>(
+            cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(batchPayload);
         var batchUser = Assert.Single(batchPayload!);
         Assert.Equal(searchedUser.UserId, batchUser.UserId);

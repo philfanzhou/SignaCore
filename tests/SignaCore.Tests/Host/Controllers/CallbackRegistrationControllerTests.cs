@@ -58,7 +58,7 @@ public class CallbackRegistrationControllerTests
             TtlSeconds = 3600
         };
 
-        var actionResult = await controller.RegisterCallback(request);
+        var actionResult = await controller.RegisterCallback(request, TestContext.Current.CancellationToken);
 
         var ok = AuthTestDoubles.ExtractOk(actionResult);
         var response = Assert.IsType<RegisterCallbackResponse>(ok.Value!);
@@ -73,7 +73,7 @@ public class CallbackRegistrationControllerTests
 
         var request = new RegisterCallbackRequest { CallbackUrl = "not a url", TtlSeconds = 3600 };
 
-        var actionResult = await controller.RegisterCallback(request);
+        var actionResult = await controller.RegisterCallback(request, TestContext.Current.CancellationToken);
 
         var ok = AuthTestDoubles.ExtractOk(actionResult);
         var response = Assert.IsType<RegisterCallbackResponse>(ok.Value!);
@@ -88,7 +88,7 @@ public class CallbackRegistrationControllerTests
 
         var request = new RegisterCallbackRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = 3600 };
 
-        var actionResult = await controller.RegisterCallback(request);
+        var actionResult = await controller.RegisterCallback(request, TestContext.Current.CancellationToken);
 
         var ok = AuthTestDoubles.ExtractOk(actionResult);
         var response = Assert.IsType<RegisterCallbackResponse>(ok.Value!);
@@ -104,7 +104,7 @@ public class CallbackRegistrationControllerTests
 
         var request = new RegisterCallbackRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = 3600 };
 
-        var actionResult = await controller.RegisterCallback(request);
+        var actionResult = await controller.RegisterCallback(request, TestContext.Current.CancellationToken);
 
         var ok = AuthTestDoubles.ExtractOk(actionResult);
         var response = Assert.IsType<RegisterCallbackResponse>(ok.Value!);
@@ -120,7 +120,7 @@ public class CallbackRegistrationControllerTests
 
         var request = new RegisterCallbackRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = 0 };
 
-        var actionResult = await controller.RegisterCallback(request);
+        var actionResult = await controller.RegisterCallback(request, TestContext.Current.CancellationToken);
 
         var ok = AuthTestDoubles.ExtractOk(actionResult);
         var response = Assert.IsType<RegisterCallbackResponse>(ok.Value!);
@@ -137,7 +137,7 @@ public class CallbackRegistrationControllerTests
 
         var request = new RegisterCallbackRequest { CallbackUrl = "http://example.com/cb", TtlSeconds = IdentityConstants.CallbackTtlNeverExpire };
 
-        var actionResult = await controller.RegisterCallback(request);
+        var actionResult = await controller.RegisterCallback(request, TestContext.Current.CancellationToken);
 
         var ok = AuthTestDoubles.ExtractOk(actionResult);
         var response = Assert.IsType<RegisterCallbackResponse>(ok.Value!);

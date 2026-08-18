@@ -176,7 +176,7 @@ public sealed class KeyRotationTimelineTests : IDisposable
 
             var activeKeys = await _dbContext.SecurityKeys
                 .Where(k => k.IsActive)
-                .ToListAsync();
+                .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
 
             Assert.Single(activeKeys);
             Assert.Equal(_keyManager.GetCurrentKey().KeyId, activeKeys[0].KeyId);
@@ -200,7 +200,7 @@ public sealed class KeyRotationTimelineTests : IDisposable
 
         var staleRows = await _dbContext.SecurityKeys
             .Where(k => k.IsActive && k.ExpiresAt < DateTimeOffset.UtcNow)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Empty(staleRows);
     }

@@ -44,7 +44,7 @@ public class WechatApiClientTests
         var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, """{"openid":"o-abc","session_key":"sk"}"""));
         var client = CreateClient(handler);
 
-        var result = await client.CodeToSessionAsync("code-1");
+        var result = await client.CodeToSessionAsync("code-1", TestContext.Current.CancellationToken);
 
         Assert.Equal("o-abc", result);
         var query = handler.LastRequest!.RequestUri!.Query;
@@ -64,7 +64,7 @@ public class WechatApiClientTests
         var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, """{"errcode":40029,"errmsg":"invalid code"}"""));
         var client = CreateClient(handler);
 
-        var result = await client.CodeToSessionAsync("bad-code");
+        var result = await client.CodeToSessionAsync("bad-code", TestContext.Current.CancellationToken);
 
         Assert.Null(result);
     }
@@ -75,7 +75,7 @@ public class WechatApiClientTests
         var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, """{"errcode":"40029","errmsg":"invalid code"}"""));
         var client = CreateClient(handler);
 
-        var result = await client.CodeToSessionAsync("bad-code");
+        var result = await client.CodeToSessionAsync("bad-code", TestContext.Current.CancellationToken);
 
         Assert.Null(result);
     }
@@ -87,7 +87,7 @@ public class WechatApiClientTests
         var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, """{"errcode":0,"openid":"o-abc","session_key":"sk"}"""));
         var client = CreateClient(handler);
 
-        var result = await client.CodeToSessionAsync("code-1");
+        var result = await client.CodeToSessionAsync("code-1", TestContext.Current.CancellationToken);
 
         Assert.Equal("o-abc", result);
     }
@@ -98,7 +98,7 @@ public class WechatApiClientTests
         var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, """{"session_key":"sk"}"""));
         var client = CreateClient(handler);
 
-        var result = await client.CodeToSessionAsync("code-1");
+        var result = await client.CodeToSessionAsync("code-1", TestContext.Current.CancellationToken);
 
         Assert.Null(result);
     }
@@ -110,7 +110,7 @@ public class WechatApiClientTests
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://api.weixin.qq.com") };
         var client = new WechatApiClient(httpClient, new WechatOptions(), NullLogger<WechatApiClient>.Instance);
 
-        var result = await client.CodeToSessionAsync("code-1");
+        var result = await client.CodeToSessionAsync("code-1", TestContext.Current.CancellationToken);
 
         Assert.Null(result);
         Assert.Null(handler.LastRequest);
@@ -131,7 +131,7 @@ public class WechatApiClientTests
         });
         var client = CreateClient(handler);
 
-        var result = await client.CodeToSessionAsync("code-1");
+        var result = await client.CodeToSessionAsync("code-1", TestContext.Current.CancellationToken);
 
         Assert.Equal("o-abc", result);
     }
@@ -146,7 +146,7 @@ public class WechatApiClientTests
         });
         var client = CreateClient(handler);
 
-        Assert.Null(await client.CodeToSessionAsync("bad-code"));
+        Assert.Null(await client.CodeToSessionAsync("bad-code", TestContext.Current.CancellationToken));
     }
 
     /// <summary>非 JSON 响应体（网关错误页之类）也必须归为登录失败，而不是抛出去。</summary>
@@ -159,7 +159,7 @@ public class WechatApiClientTests
         });
         var client = CreateClient(handler);
 
-        Assert.Null(await client.CodeToSessionAsync("code-1"));
+        Assert.Null(await client.CodeToSessionAsync("code-1", TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -168,7 +168,7 @@ public class WechatApiClientTests
         var handler = new FakeHandler(_ => Json(HttpStatusCode.InternalServerError, "{}"));
         var client = CreateClient(handler);
 
-        var result = await client.CodeToSessionAsync("code-1");
+        var result = await client.CodeToSessionAsync("code-1", TestContext.Current.CancellationToken);
 
         Assert.Null(result);
     }
@@ -179,7 +179,7 @@ public class WechatApiClientTests
         var handler = new FakeHandler(_ => throw new HttpRequestException("network down"));
         var client = CreateClient(handler);
 
-        var result = await client.CodeToSessionAsync("code-1");
+        var result = await client.CodeToSessionAsync("code-1", TestContext.Current.CancellationToken);
 
         Assert.Null(result);
     }
@@ -190,7 +190,7 @@ public class WechatApiClientTests
         var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, "null"));
         var client = CreateClient(handler);
 
-        var result = await client.CodeToSessionAsync("code-1");
+        var result = await client.CodeToSessionAsync("code-1", TestContext.Current.CancellationToken);
 
         Assert.Null(result);
     }

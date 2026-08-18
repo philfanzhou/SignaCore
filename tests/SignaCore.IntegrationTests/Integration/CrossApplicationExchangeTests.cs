@@ -111,7 +111,8 @@ public class CrossApplicationExchangeTests : IClassFixture<IdentityServerFixture
         using (var admin = await _fixture.CreateAdminHttpClientAsync())
         {
             var removed = await admin.DeleteAsync(
-                $"/api/admin/apps/{target.AppId}/exchange-trusts/{source.AppId}");
+                $"/api/admin/apps/{target.AppId}/exchange-trusts/{source.AppId}",
+                TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
         }
 
@@ -126,7 +127,9 @@ public class CrossApplicationExchangeTests : IClassFixture<IdentityServerFixture
 
         using var admin = await _fixture.CreateAdminHttpClientAsync();
         var response = await admin.PostAsJsonAsync(
-            $"/api/admin/apps/{app.AppId}/exchange-trusts", new { sourceAppId = app.AppId });
+            $"/api/admin/apps/{app.AppId}/exchange-trusts",
+            new { sourceAppId = app.AppId },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }

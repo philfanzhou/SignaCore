@@ -58,10 +58,10 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     {
         using var http = await StartSetupModeHostAsync();
 
-        var response = await http.GetAsync("/api/setup/status");
+        var response = await http.GetAsync("/api/setup/status", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("pending", body.GetProperty("status").GetString());
     }
 
@@ -71,7 +71,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         using var _ = await StartSetupModeHostAsync();
 
         await using var db = OpenDatabase();
-        var state = await db.InstallationStates.SingleAsync();
+        var state = await db.InstallationStates.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(InstallationStatus.Pending, state.Status);
         Assert.False(string.IsNullOrWhiteSpace(state.SetupCodeHash));
@@ -87,7 +87,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         using var http = await StartSetupModeHostAsync(allowRedirects: false);
         http.DefaultRequestHeaders.Add("Accept", "text/html");
 
-        var response = await http.GetAsync(path);
+        var response = await http.GetAsync(path, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         Assert.Equal("/setup", response.Headers.Location?.ToString());
@@ -104,10 +104,10 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     {
         using var http = await StartSetupModeHostAsync();
 
-        var response = await http.GetAsync(path);
+        var response = await http.GetAsync(path, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("installation_required", body.GetProperty("error").GetString());
     }
 
@@ -124,10 +124,10 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     {
         using var http = await StartSetupModeHostAsync();
 
-        var response = await http.PostAsJsonAsync(path, new { grantType = "password" });
+        var response = await http.PostAsJsonAsync(path, new { grantType = "password" }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("installation_required", body.GetProperty("error").GetString());
     }
 
@@ -140,9 +140,9 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     {
         using var http = await StartSetupModeHostAsync();
 
-        Assert.Equal(HttpStatusCode.OK, (await http.GetAsync("/health/live")).StatusCode);
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await http.GetAsync("/health/ready")).StatusCode);
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await http.GetAsync("/health")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await http.GetAsync("/health/live", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await http.GetAsync("/health/ready", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await http.GetAsync("/health", TestContext.Current.CancellationToken)).StatusCode);
     }
 
     [Fact]
@@ -155,9 +155,10 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
 
         await using var db = OpenDatabase();
-        Assert.Equal(InstallationStatus.Pending, (await db.InstallationStates.SingleAsync()).Status);
-        Assert.False(await db.Accounts.AnyAsync());
-        Assert.False(await db.SystemSettings.AnyAsync());
+        Assert.Equal(InstallationStatus.Pending, (await db.InstallationStates.SingleAsync(
+            cancellationToken: TestContext.Current.CancellationToken)).Status);
+        Assert.False(await db.Accounts.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.False(await db.SystemSettings.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -182,7 +183,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         await using var db = OpenDatabase();
-        Assert.False(await db.Accounts.AnyAsync());
+        Assert.False(await db.Accounts.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -211,7 +212,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         await using var db = OpenDatabase();
-        var settings = await db.SystemSettings.ToDictionaryAsync(setting => setting.Key);
+        var settings = await db.SystemSettings.ToDictionaryAsync(setting => setting.Key, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("true", settings[SystemSettingKeys.SecurityAllowNonHttpsIssuer].Value);
     }
 
@@ -228,7 +229,8 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(
             "urn:example:services",
             (await db.SystemSettings.SingleAsync(
-                setting => setting.Key == SystemSettingKeys.JwtAudience)).Value);
+                setting => setting.Key == SystemSettingKeys.JwtAudience,
+                cancellationToken: TestContext.Current.CancellationToken)).Value);
     }
 
     [Fact]
@@ -242,7 +244,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         await using var db = OpenDatabase();
-        var state = await db.InstallationStates.SingleAsync();
+        var state = await db.InstallationStates.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(InstallationStatus.Completed, state.Status);
         Assert.Equal(1, state.ConfigurationVersion);
         Assert.NotNull(state.CompletedAt);
@@ -250,16 +252,16 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Null(state.SetupCodeHash);
         Assert.Null(state.SetupCodeExpiresAt);
 
-        var credential = await db.PasswordCredentials.SingleAsync();
+        var credential = await db.PasswordCredentials.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(AdminUsername, credential.Username);
         Assert.True(BCrypt.Net.BCrypt.Verify(AdminPassword, credential.PasswordHash));
 
-        var settings = await db.SystemSettings.ToDictionaryAsync(setting => setting.Key);
+        var settings = await db.SystemSettings.ToDictionaryAsync(setting => setting.Key, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(PublicBaseUrl, settings[SystemSettingKeys.PublicBaseUrl].Value);
         Assert.Equal(PublicBaseUrl, settings[SystemSettingKeys.JwtIssuer].Value);
         Assert.Equal(AdminUsername, settings[SystemSettingKeys.AdminUsername].Value);
 
-        var audit = await db.AuditLogs.SingleAsync();
+        var audit = await db.AuditLogs.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("installation.setup.completed", audit.Action);
     }
 
@@ -277,15 +279,16 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
 
         Assert.DoesNotContain(
             AdminPassword,
-            (await db.PasswordCredentials.SingleAsync()).PasswordHash,
+            (await db.PasswordCredentials.SingleAsync(cancellationToken: TestContext.Current.CancellationToken)).PasswordHash,
             StringComparison.Ordinal);
 
-        var audit = await db.AuditLogs.SingleAsync();
+        var audit = await db.AuditLogs.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.DoesNotContain(AdminPassword, audit.Description ?? string.Empty, StringComparison.Ordinal);
         Assert.Null(audit.BeforeSnapshot);
         Assert.Null(audit.AfterSnapshot);
 
-        var secrets = await db.SystemSettings.Where(setting => setting.IsSecret).ToListAsync();
+        var secrets = await db.SystemSettings.Where(setting => setting.IsSecret).ToListAsync(
+            cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotEmpty(secrets);
         var protector = new AesGcmConfigurationProtector(new BootstrapMasterKeyProvider(RootSecret));
         foreach (var secret in secrets)
@@ -316,8 +319,8 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
 
         await using var db = OpenDatabase();
-        Assert.Equal(1, await db.PasswordCredentials.CountAsync());
-        Assert.Equal(1, (await db.InstallationStates.SingleAsync()).ConfigurationVersion);
+        Assert.Equal(1, await db.PasswordCredentials.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, (await db.InstallationStates.SingleAsync(cancellationToken: TestContext.Current.CancellationToken)).ConfigurationVersion);
     }
 
     /// <summary>
@@ -348,8 +351,8 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(1, outcomes.Count(status => status == HttpStatusCode.OK));
 
         await using var db = OpenDatabase();
-        Assert.Equal(1, await db.PasswordCredentials.CountAsync());
-        Assert.Equal(1, await db.Accounts.CountAsync());
+        Assert.Equal(1, await db.PasswordCredentials.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, await db.Accounts.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
     /// <summary>
@@ -369,19 +372,19 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             [SystemSettingKeys.LegacyAdminBootstrapUsername] = "legacy_admin"
         });
 
-        var status = await http.GetAsync("/api/setup/status");
-        Assert.Equal("completed", (await status.Content.ReadFromJsonAsync<JsonElement>())
+        var status = await http.GetAsync("/api/setup/status", TestContext.Current.CancellationToken);
+        Assert.Equal("completed", (await status.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken))
             .GetProperty("status").GetString());
 
         await using var db = OpenDatabase();
-        var state = await db.InstallationStates.SingleAsync();
+        var state = await db.InstallationStates.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(InstallationStatus.Completed, state.Status);
         Assert.Null(state.SetupCodeHash);
 
         // Import creates no administrator: the deployment already has its own accounts.
-        Assert.Equal(1, await db.PasswordCredentials.CountAsync());
-        Assert.Equal("legacy_admin", (await db.SystemSettings.SingleAsync(
-            setting => setting.Key == SystemSettingKeys.AdminUsername)).Value);
+        Assert.Equal(1, await db.PasswordCredentials.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal("legacy_admin", (await db.SystemSettings.SingleAsync(setting => setting.Key == SystemSettingKeys.AdminUsername,
+            cancellationToken: TestContext.Current.CancellationToken)).Value);
     }
 
     /// <summary>
@@ -403,19 +406,20 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         {
             await db.SystemSettings
                 .Where(setting => setting.Key == SystemSettingKeys.JwtAudience)
-                .ExecuteDeleteAsync();
+                .ExecuteDeleteAsync(cancellationToken: TestContext.Current.CancellationToken);
         }
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
             using var http = await StartHostAsync();
-            await http.GetAsync("/health/live");
+            await http.GetAsync("/health/live", TestContext.Current.CancellationToken);
         });
 
         Assert.Contains(SystemSettingKeys.JwtAudience, Flatten(exception), StringComparison.Ordinal);
 
         await using var verifyDb = OpenDatabase();
-        Assert.Equal(InstallationStatus.Completed, (await verifyDb.InstallationStates.SingleAsync()).Status);
+        Assert.Equal(InstallationStatus.Completed, (await verifyDb.InstallationStates.SingleAsync(
+            cancellationToken: TestContext.Current.CancellationToken)).Status);
     }
 
     /// <summary>
@@ -436,7 +440,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         // One normal start so the installation actually owns signing keys.
         using (var normalHost = await StartHostAsync())
         {
-            Assert.Equal(HttpStatusCode.OK, (await normalHost.GetAsync("/health/ready")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await normalHost.GetAsync("/health/ready", TestContext.Current.CancellationToken)).StatusCode);
         }
 
         _factory?.Dispose();
@@ -449,7 +453,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
                 .OrderBy(key => key.KeyId)
                 .Select(key => new ValueTuple<string, string, string>(
                     key.KeyId, key.EncryptedPrivateKeyParams, key.EncryptionSalt))
-                .ToListAsync();
+                .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         }
 
         Assert.NotEmpty(before);
@@ -457,7 +461,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         var exception = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
             using var http = await StartHostAsync(rootSecret: "a-completely-different-root-secret");
-            await http.GetAsync("/health/live");
+            await http.GetAsync("/health/live", TestContext.Current.CancellationToken);
         });
 
         // The failure names the settings it could not decrypt, and never the secret itself.
@@ -469,7 +473,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             .OrderBy(key => key.KeyId)
             .Select(key => new ValueTuple<string, string, string>(
                 key.KeyId, key.EncryptedPrivateKeyParams, key.EncryptionSalt))
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(before, after);
     }

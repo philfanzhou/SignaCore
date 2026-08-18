@@ -27,7 +27,7 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
         WechatAdmission first;
         await using (var context = CreateContext())
         {
-            first = await new WechatAdmissionService(context).ProvisionAsync(app, OpenId);
+            first = await new WechatAdmissionService(context).ProvisionAsync(app, OpenId, TestContext.Current.CancellationToken);
         }
 
         Assert.True(first.AccountCreated);
@@ -36,15 +36,15 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
         WechatAdmission second;
         await using (var context = CreateContext())
         {
-            second = await new WechatAdmissionService(context).ProvisionAsync(app, OpenId);
+            second = await new WechatAdmissionService(context).ProvisionAsync(app, OpenId, TestContext.Current.CancellationToken);
         }
 
         Assert.False(second.AccountCreated);
         Assert.Equal(first.Account.Id, second.Account.Id);
 
         await using var verify = CreateContext();
-        Assert.Single(await verify.UserLogins.AsNoTracking().ToListAsync());
-        Assert.Single(await verify.AppWechatAccesses.AsNoTracking().ToListAsync());
+        Assert.Single(await verify.UserLogins.AsNoTracking().ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Single(await verify.AppWechatAccesses.AsNoTracking().ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -55,12 +55,12 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
 
         await using (var context = CreateContext())
         {
-            var result = await new WechatAdmissionService(context).BindAsync(app, accountId, OpenId);
+            var result = await new WechatAdmissionService(context).BindAsync(app, accountId, OpenId, TestContext.Current.CancellationToken);
             Assert.True(result.IsSuccess);
         }
 
         await using var verify = CreateContext();
-        var admission = await new WechatAdmissionService(verify).FindAsync(app.Id, OpenId);
+        var admission = await new WechatAdmissionService(verify).FindAsync(app.Id, OpenId, TestContext.Current.CancellationToken);
         Assert.NotNull(admission);
         Assert.Equal(accountId, admission!.Account.Id);
         Assert.Equal(WechatAccessApprovalSource.SelfBind, admission.Access.ApprovalSource);
@@ -75,17 +75,17 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
 
         await using (var context = CreateContext())
         {
-            await new WechatAdmissionService(context).BindAsync(app, firstAccount, OpenId);
+            await new WechatAdmissionService(context).BindAsync(app, firstAccount, OpenId, TestContext.Current.CancellationToken);
         }
 
         await using (var context = CreateContext())
         {
-            var result = await new WechatAdmissionService(context).BindAsync(app, secondAccount, OpenId);
+            var result = await new WechatAdmissionService(context).BindAsync(app, secondAccount, OpenId, TestContext.Current.CancellationToken);
             Assert.Equal(WechatBindOutcome.OpenIdAlreadyBound, result.Outcome);
         }
 
         await using var verify = CreateContext();
-        var login = Assert.Single(await verify.UserLogins.AsNoTracking().ToListAsync());
+        var login = Assert.Single(await verify.UserLogins.AsNoTracking().ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(firstAccount, login.AccountId);
     }
 
@@ -97,12 +97,13 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
 
         await using (var context = CreateContext())
         {
-            await new WechatAdmissionService(context).BindAsync(app, accountId, OpenId);
+            await new WechatAdmissionService(context).BindAsync(app, accountId, OpenId, TestContext.Current.CancellationToken);
         }
 
         await using (var context = CreateContext())
         {
-            var result = await new WechatAdmissionService(context).BindAsync(app, accountId, "o-another-openid");
+            var result = await new WechatAdmissionService(context).BindAsync(app, accountId, "o-another-openid",
+                TestContext.Current.CancellationToken);
             Assert.Equal(WechatBindOutcome.AccountAlreadyBound, result.Outcome);
         }
     }
@@ -114,7 +115,7 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
         var accountId = await SeedAccountAsync(isActive: false);
 
         await using var context = CreateContext();
-        var result = await new WechatAdmissionService(context).BindAsync(app, accountId, OpenId);
+        var result = await new WechatAdmissionService(context).BindAsync(app, accountId, OpenId, TestContext.Current.CancellationToken);
 
         Assert.Equal(WechatBindOutcome.AccountUnavailable, result.Outcome);
     }
@@ -131,30 +132,30 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
         Guid accountId;
         await using (var context = CreateContext())
         {
-            accountId = (await new WechatAdmissionService(context).ProvisionAsync(app, OpenId)).Account.Id;
+            accountId = (await new WechatAdmissionService(context).ProvisionAsync(app, OpenId, TestContext.Current.CancellationToken)).Account.Id;
         }
 
         await using (var context = CreateContext())
         {
-            var access = await context.AppWechatAccesses.SingleAsync();
+            var access = await context.AppWechatAccesses.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
             access.IsActive = false;
-            await context.SaveChangesAsync();
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         await using (var context = CreateContext())
         {
-            var admission = await new WechatAdmissionService(context).ProvisionAsync(app, OpenId);
+            var admission = await new WechatAdmissionService(context).ProvisionAsync(app, OpenId, TestContext.Current.CancellationToken);
             Assert.False(admission.Access.IsActive);
         }
 
         await using (var context = CreateContext())
         {
-            var result = await new WechatAdmissionService(context).BindAsync(app, accountId, OpenId);
+            var result = await new WechatAdmissionService(context).BindAsync(app, accountId, OpenId, TestContext.Current.CancellationToken);
             Assert.Equal(WechatBindOutcome.AccessRevoked, result.Outcome);
         }
 
         await using var verify = CreateContext();
-        Assert.False((await verify.AppWechatAccesses.AsNoTracking().SingleAsync()).IsActive);
+        Assert.False((await verify.AppWechatAccesses.AsNoTracking().SingleAsync(cancellationToken: TestContext.Current.CancellationToken)).IsActive);
     }
 
     [Fact]
@@ -164,18 +165,19 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
         Guid accountId;
         await using (var context = CreateContext())
         {
-            accountId = (await new WechatAdmissionService(context).ProvisionAsync(app, OpenId)).Account.Id;
+            accountId = (await new WechatAdmissionService(context).ProvisionAsync(app, OpenId, TestContext.Current.CancellationToken)).Account.Id;
         }
 
         await using (var context = CreateContext())
         {
-            Assert.True(await new WechatAdmissionService(context).UnbindAsync(accountId));
+            Assert.True(await new WechatAdmissionService(context).UnbindAsync(accountId, TestContext.Current.CancellationToken));
         }
 
         await using var verify = CreateContext();
-        Assert.Empty(await verify.UserLogins.AsNoTracking().ToListAsync());
-        Assert.Empty(await verify.AppWechatAccesses.AsNoTracking().ToListAsync());
-        Assert.NotNull(await verify.Accounts.AsNoTracking().SingleOrDefaultAsync(item => item.Id == accountId));
+        Assert.Empty(await verify.UserLogins.AsNoTracking().ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(await verify.AppWechatAccesses.AsNoTracking().ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.NotNull(await verify.Accounts.AsNoTracking().SingleOrDefaultAsync(item => item.Id == accountId,
+            cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -185,7 +187,7 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
         var accountId = await SeedAccountAsync();
 
         await using var context = CreateContext();
-        Assert.False(await new WechatAdmissionService(context).UnbindAsync(accountId));
+        Assert.False(await new WechatAdmissionService(context).UnbindAsync(accountId, TestContext.Current.CancellationToken));
     }
 
     private IdentityDbContext CreateContext()

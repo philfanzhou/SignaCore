@@ -41,7 +41,7 @@ public sealed class ServerDatabaseContractTests
         var container = CreateContainer(provider);
         await using (container)
         {
-            await container.StartAsync();
+            await container.StartAsync(TestContext.Current.CancellationToken);
             var databaseOptions = CreateDatabaseOptions(
                 provider,
                 GetConnectionString(container));
@@ -71,7 +71,7 @@ public sealed class ServerDatabaseContractTests
 
         await using (container)
         {
-            await container.StartAsync();
+            await container.StartAsync(TestContext.Current.CancellationToken);
             var databaseOptions = CreateDatabaseOptions(
                 "PostgreSQL",
                 container.GetConnectionString());
@@ -81,7 +81,8 @@ public sealed class ServerDatabaseContractTests
             await using var context = new IdentityDbContext(optionsBuilder.Options);
             var migrator = context.GetService<IMigrator>();
             await migrator.MigrateAsync(
-                "20260504150448_AddAppIdToRefreshToken");
+                "20260504150448_AddAppIdToRefreshToken",
+                TestContext.Current.CancellationToken);
 
             var accountId = Guid.NewGuid();
             var credentialId = Guid.NewGuid();
@@ -93,19 +94,20 @@ public sealed class ServerDatabaseContractTests
                     (id, account_id, username, password_hash, created_at)
                 VALUES
                     ({credentialId}, {accountId}, {"LegacyUser"}, {"hash"}, {DateTimeOffset.UtcNow});
-                """);
+                """, cancellationToken: TestContext.Current.CancellationToken);
 
             await SchemaMigrator.MigrateAsync(
                 context,
-                databaseOptions);
+                databaseOptions,
+                TestContext.Current.CancellationToken);
 
             var credential = await context.PasswordCredentials
                 .AsNoTracking()
-                .SingleAsync(item => item.Id == credentialId);
+                .SingleAsync(item => item.Id == credentialId, cancellationToken: TestContext.Current.CancellationToken);
             Assert.Equal("LEGACYUSER", credential.UsernameNormalized);
 
             var appliedMigrations = (await context.Database
-                    .GetAppliedMigrationsAsync())
+                    .GetAppliedMigrationsAsync(cancellationToken: TestContext.Current.CancellationToken))
                 .ToHashSet(StringComparer.Ordinal);
             Assert.Contains(
                 "20260502023354_InitialCreate",
