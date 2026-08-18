@@ -98,7 +98,6 @@ public sealed class DatabaseOptions
         }
     }
 
-
     private void ValidateSqliteConnectionString()
     {
         try
