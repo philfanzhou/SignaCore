@@ -505,7 +505,7 @@ public class IdentityServerFixture : IAsyncLifetime
     private string? _databasePath;
     private string? _bootstrapDirectory;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _bootstrapDirectory = Path.Combine(
             Path.GetTempPath(),
@@ -639,7 +639,7 @@ public class IdentityServerFixture : IAsyncLifetime
         await dbContext.SaveChangesAsync();
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _factory?.Dispose();
         SqliteConnection.ClearAllPools();
@@ -651,7 +651,7 @@ public class IdentityServerFixture : IAsyncLifetime
         {
             Directory.Delete(_bootstrapDirectory, recursive: true);
         }
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }
 

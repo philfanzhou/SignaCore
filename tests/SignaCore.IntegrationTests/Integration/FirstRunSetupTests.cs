@@ -32,16 +32,16 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     private string _connectionString = string.Empty;
     private WebApplicationFactory<Program>? _factory;
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         _workingDirectory = Path.Combine(Path.GetTempPath(), $"signacore-setup-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workingDirectory);
         _databasePath = Path.Combine(_workingDirectory, "signacore.db");
         _connectionString = new SqliteConnectionStringBuilder { DataSource = _databasePath }.ConnectionString;
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _factory?.Dispose();
         SqliteConnection.ClearAllPools();
@@ -50,7 +50,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             Directory.Delete(_workingDirectory, recursive: true);
         }
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     [Fact]

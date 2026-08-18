@@ -12,7 +12,6 @@ using SignaCore.Host;
 using Testcontainers.MySql;
 using Testcontainers.PostgreSql;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SignaCore.IntegrationTests.Integration;
 

@@ -19,15 +19,15 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
     private string _bootstrapCode = string.Empty;
     private WebApplicationFactory<Program>? _factory;
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         _directory = Path.Combine(Path.GetTempPath(), $"signacore-bootstrap-mode-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_directory);
         _bootstrapPath = Path.Combine(_directory, BootstrapLoader.FileName);
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public Task DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _factory?.Dispose();
         if (Directory.Exists(_directory))
@@ -35,7 +35,7 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
             Directory.Delete(_directory, recursive: true);
         }
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     [Fact]

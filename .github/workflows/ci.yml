@@ -75,7 +75,8 @@ jobs:
           dotnet restore tests/SignaCore.Tests/SignaCore.Tests.csproj
           dotnet test tests/SignaCore.Tests/SignaCore.Tests.csproj \
             --configuration Release \
-            --logger 'trx;logfilename=signacore-ut.trx' \
+            --report-xunit-trx \
+            --report-xunit-trx-filename signacore-ut.trx \
             --results-directory reports \
             --no-restore
 
@@ -84,7 +85,8 @@ jobs:
           dotnet restore tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj
           dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj \
             --configuration Release \
-            --logger 'trx;logfilename=signacore-integration.trx' \
+            --report-xunit-trx \
+            --report-xunit-trx-filename signacore-integration.trx \
             --results-directory reports \
             --no-restore
 
@@ -468,11 +470,12 @@ jobs:
           dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj \
             --configuration Release \
             --filter 'FullyQualifiedName~DatabaseContractTests' \
-            --logger 'trx;logfilename=signacore-database-contracts.trx' \
-            --logger 'console;verbosity=normal' \
+            --report-xunit-trx \
+            --report-xunit-trx-filename signacore-database-contracts.trx \
+            --output Detailed \
             --results-directory reports \
-            --blame-hang \
-            --blame-hang-timeout 5m \
+            --hangdump \
+            --hangdump-timeout 5m \
             --no-restore
 
       - name: Upload test results

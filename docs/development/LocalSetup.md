@@ -44,3 +44,9 @@ The Vite development server proxies API requests to the configured backend. Prod
 dotnet test tests/SignaCore.Tests/SignaCore.Tests.csproj
 dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj
 ```
+
+The suites run on xUnit.net v3, which is hosted by Microsoft.Testing.Platform rather than
+VSTest. `global.json` selects that runner through its `test.runner` entry, so `dotnet test`
+picks it up automatically; no per-invocation flag is needed. Reporting and diagnostic
+switches differ from VSTest: use `--report-xunit-trx` instead of `--logger trx`, and
+`--hangdump` instead of `--blame-hang`.
