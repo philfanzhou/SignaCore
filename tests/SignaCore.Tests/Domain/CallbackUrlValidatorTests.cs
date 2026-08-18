@@ -169,14 +169,14 @@ public class CallbackUrlValidatorTests
     [Fact]
     public async Task ValidateAsync_WithValidHttpsUrl_ReturnsValid()
     {
-        var result = await _validator.ValidateAsync("https://example.com/callback");
+        var result = await _validator.ValidateAsync("https://example.com/callback", TestContext.Current.CancellationToken);
         Assert.True(result.IsValid);
     }
 
     [Fact]
     public async Task ValidateAsync_WithInvalidUrl_ReturnsInvalid()
     {
-        var result = await _validator.ValidateAsync("not-a-url");
+        var result = await _validator.ValidateAsync("not-a-url", TestContext.Current.CancellationToken);
         Assert.False(result.IsValid);
         Assert.Contains("not a valid absolute URL", result.ErrorMessage);
     }
@@ -184,7 +184,7 @@ public class CallbackUrlValidatorTests
     [Fact]
     public async Task ValidateAsync_WithFtpScheme_ReturnsInvalid()
     {
-        var result = await _validator.ValidateAsync("ftp://example.com/callback");
+        var result = await _validator.ValidateAsync("ftp://example.com/callback", TestContext.Current.CancellationToken);
         Assert.False(result.IsValid);
         Assert.Contains("HTTP or HTTPS", result.ErrorMessage);
     }
@@ -193,7 +193,7 @@ public class CallbackUrlValidatorTests
     public async Task ValidateAsync_WithAllowedDomain_ReturnsValid()
     {
         var validator = new CallbackUrlValidator(new[] { "trusted.example.com" });
-        var result = await validator.ValidateAsync("https://trusted.example.com/callback");
+        var result = await validator.ValidateAsync("https://trusted.example.com/callback", TestContext.Current.CancellationToken);
         Assert.True(result.IsValid);
     }
 
@@ -201,7 +201,7 @@ public class CallbackUrlValidatorTests
     public async Task ValidateAsync_WithDisallowedDomain_ReturnsInvalid()
     {
         var validator = new CallbackUrlValidator(new[] { "trusted.example.com" });
-        var result = await validator.ValidateAsync("https://untrusted.example.com/callback");
+        var result = await validator.ValidateAsync("https://untrusted.example.com/callback", TestContext.Current.CancellationToken);
         Assert.False(result.IsValid);
         Assert.Contains("not in the allowed domains list", result.ErrorMessage);
     }
@@ -210,7 +210,7 @@ public class CallbackUrlValidatorTests
     public async Task ValidateAsync_WithAllowPrivateAddresses_AcceptsIpAddress()
     {
         var validator = new CallbackUrlValidator(allowPrivateAddresses: true);
-        var result = await validator.ValidateAsync("http://192.168.1.1/callback");
+        var result = await validator.ValidateAsync("http://192.168.1.1/callback", TestContext.Current.CancellationToken);
         Assert.True(result.IsValid);
     }
 
@@ -219,7 +219,7 @@ public class CallbackUrlValidatorTests
     {
         var validator = new CallbackUrlValidator(requireHttps: true);
 
-        var result = await validator.ValidateAsync("http://example.com/callback");
+        var result = await validator.ValidateAsync("http://example.com/callback", TestContext.Current.CancellationToken);
 
         Assert.False(result.IsValid);
         Assert.Contains("HTTPS", result.ErrorMessage);
@@ -229,7 +229,8 @@ public class CallbackUrlValidatorTests
     public async Task ValidateAsync_WithUserInformation_RejectsUrl()
     {
         var result = await _validator.ValidateAsync(
-            "https://user:secret@example.com/callback");
+            "https://user:secret@example.com/callback",
+            TestContext.Current.CancellationToken);
 
         Assert.False(result.IsValid);
         Assert.Contains("user information", result.ErrorMessage);
@@ -240,7 +241,7 @@ public class CallbackUrlValidatorTests
     {
         var validator = new CallbackUrlValidator(allowPrivateAddresses: false);
 
-        var result = await validator.ValidateAsync("https://callback.invalid/claims");
+        var result = await validator.ValidateAsync("https://callback.invalid/claims", TestContext.Current.CancellationToken);
 
         Assert.False(result.IsValid);
         Assert.Contains("could not be resolved", result.ErrorMessage);

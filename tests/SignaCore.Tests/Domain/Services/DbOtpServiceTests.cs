@@ -45,7 +45,7 @@ public class DbOtpServiceTests
         _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
             .Callback<OtpEntity>(value => stored = value).Returns(Task.CompletedTask);
 
-        var code = await _service.GenerateAndSendAsync(_appId, "13800138000", "test");
+        var code = await _service.GenerateAndSendAsync(_appId, "13800138000", "test", TestContext.Current.CancellationToken);
 
         Assert.NotNull(stored);
         Assert.Equal(_appId, stored.AppRegistrationId);
@@ -63,7 +63,7 @@ public class DbOtpServiceTests
             .ReturnsAsync(() => stored);
         _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
             .Callback<OtpEntity>(value => stored = value).Returns(Task.CompletedTask);
-        var code = await _service.GenerateAndSendAsync(_appId, "+8613800138000", "test");
+        var code = await _service.GenerateAndSendAsync(_appId, "+8613800138000", "test", TestContext.Current.CancellationToken);
         _repository.Setup(value => value.TryConsumeAsync(
             _appId, "+8613800138000", stored!.CodeMac, It.IsAny<DateTimeOffset>(), It.IsAny<int>())).ReturnsAsync(true);
 
@@ -84,7 +84,7 @@ public class DbOtpServiceTests
             DayWindowStartedAt = DateTimeOffset.UtcNow
         });
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            _service.GenerateAndSendAsync(_appId, "+8613800138000", "test"));
+            _service.GenerateAndSendAsync(_appId, "+8613800138000", "test", TestContext.Current.CancellationToken));
         _sender.Verify(value => value.SendAsync(
             It.IsAny<SmsProviderProfile>(), It.IsAny<SmsVerificationMessage>(), It.IsAny<CancellationToken>()), Times.Never);
     }

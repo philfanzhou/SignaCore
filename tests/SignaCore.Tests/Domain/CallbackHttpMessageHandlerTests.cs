@@ -28,7 +28,7 @@ public class CallbackHttpMessageHandlerTests
             CallbackHttpMessageHandler.Create(allowPrivateAddresses: false));
 
         var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
-            client.GetAsync("http://127.0.0.1:1/callback"));
+            client.GetAsync("http://127.0.0.1:1/callback", TestContext.Current.CancellationToken));
 
         Assert.Contains("no permitted public address", exception.Message);
     }
@@ -40,7 +40,7 @@ public class CallbackHttpMessageHandlerTests
             CallbackHttpMessageHandler.Create(allowPrivateAddresses: true));
 
         var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
-            client.GetAsync("http://127.0.0.1:1/callback"));
+            client.GetAsync("http://127.0.0.1:1/callback", TestContext.Current.CancellationToken));
 
         Assert.Contains("no reachable address", exception.Message);
     }

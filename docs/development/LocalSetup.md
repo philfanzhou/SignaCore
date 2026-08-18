@@ -50,3 +50,8 @@ VSTest. `global.json` selects that runner through its `test.runner` entry, so `d
 picks it up automatically; no per-invocation flag is needed. Reporting and diagnostic
 switches differ from VSTest: use `--report-xunit-trx` instead of `--logger trx`, and
 `--hangdump` instead of `--blame-hang`.
+
+Test code passes `TestContext.Current.CancellationToken` to every call that accepts a
+cancellation token, so a cancelled run stops promptly instead of waiting on in-flight work.
+The xUnit1051 analyzer enforces this and the build treats it as a warning, so new tests
+should follow the same pattern.

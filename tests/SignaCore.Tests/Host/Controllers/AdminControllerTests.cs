@@ -310,7 +310,7 @@ public class AdminControllerTests : IDisposable
         var acc2 = new AccountEntity { Id = Guid.NewGuid(), Nickname = "Bob", IsActive = true, CreatedAt = DateTimeOffset.UtcNow };
         _dbContext.Accounts.AddRange(acc1, acc2);
         _dbContext.PasswordCredentials.Add(new PasswordCredentialEntity { Id = Guid.NewGuid(), AccountId = acc1.Id, Username = "alice", PasswordHash = "h", CreatedAt = DateTimeOffset.UtcNow });
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await _controller.GetUsers(null, null, null, null, new UserQueryService(_dbContext));
 
@@ -328,7 +328,7 @@ public class AdminControllerTests : IDisposable
         _dbContext.Accounts.AddRange(passwordAccount, phoneAccount);
         _dbContext.PasswordCredentials.Add(new PasswordCredentialEntity { Id = Guid.NewGuid(), AccountId = passwordAccount.Id, Username = "alice", PasswordHash = "h", CreatedAt = DateTimeOffset.UtcNow });
         _dbContext.UserLogins.Add(new UserLoginEntity { Id = Guid.NewGuid(), AccountId = phoneAccount.Id, ProviderName = IdentityConstants.AuthMethodSms, ProviderUserId = "13800001234" });
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await _controller.GetUsers(null, null, null, null, new UserQueryService(_dbContext));
 
@@ -350,7 +350,7 @@ public class AdminControllerTests : IDisposable
         var acc2 = new AccountEntity { Id = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
         _dbContext.Accounts.AddRange(acc1, acc2);
         _dbContext.PasswordCredentials.Add(new PasswordCredentialEntity { Id = Guid.NewGuid(), AccountId = acc1.Id, Username = "alice", PasswordHash = "h", CreatedAt = DateTimeOffset.UtcNow });
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await _controller.GetUsers("alice", null, null, null, new UserQueryService(_dbContext));
 
@@ -366,7 +366,7 @@ public class AdminControllerTests : IDisposable
         var acc1 = new AccountEntity { Id = Guid.NewGuid(), Remark = "VIP customer", CreatedAt = DateTimeOffset.UtcNow };
         var acc2 = new AccountEntity { Id = Guid.NewGuid(), Remark = "regular", CreatedAt = DateTimeOffset.UtcNow };
         _dbContext.Accounts.AddRange(acc1, acc2);
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await _controller.GetUsers("VIP", null, null, null, new UserQueryService(_dbContext));
 
@@ -381,7 +381,7 @@ public class AdminControllerTests : IDisposable
         var acc1 = new AccountEntity { Id = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
         _dbContext.Accounts.Add(acc1);
         _dbContext.UserLogins.Add(new UserLoginEntity { Id = Guid.NewGuid(), AccountId = acc1.Id, ProviderName = IdentityConstants.AuthMethodSms, ProviderUserId = "13800001234" });
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await _controller.GetUsers(null, "1380000", null, null, new UserQueryService(_dbContext));
 
@@ -398,7 +398,7 @@ public class AdminControllerTests : IDisposable
         {
             _dbContext.Accounts.Add(new AccountEntity { Id = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow.AddSeconds(i) });
         }
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await _controller.GetUsers(null, null, 2, 2, new UserQueryService(_dbContext));
 
@@ -413,7 +413,7 @@ public class AdminControllerTests : IDisposable
     public async Task GetUsers_WithInvalidPage_DefaultsToOne()
     {
         _dbContext.Accounts.Add(new AccountEntity { Id = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow });
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await _controller.GetUsers(null, null, 0, 10, new UserQueryService(_dbContext));
 
@@ -426,7 +426,7 @@ public class AdminControllerTests : IDisposable
     public async Task GetUsers_PageSizeCappedAt100()
     {
         _dbContext.Accounts.Add(new AccountEntity { Id = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow });
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await _controller.GetUsers(null, null, 1, 500, new UserQueryService(_dbContext));
 
@@ -440,7 +440,7 @@ public class AdminControllerTests : IDisposable
     {
         var acc = new AccountEntity { Id = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow };
         _dbContext.Accounts.Add(acc);
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await _controller.GetUsers(null, null, null, null, new UserQueryService(_dbContext));
 
@@ -803,7 +803,7 @@ public class AdminControllerTests : IDisposable
             CreatedAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero)
         };
         _dbContext.AppRegistrations.AddRange(older, newer);
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await _controller.GetApps(_dbContext, TestJwtOptions);
 
@@ -836,7 +836,7 @@ public class AdminControllerTests : IDisposable
             CreatedAt = DateTimeOffset.UtcNow
         };
         _dbContext.AppRegistrations.Add(app);
-        await _dbContext.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await _controller.GetApps(_dbContext, TestJwtOptions);
 
@@ -856,7 +856,7 @@ public class AdminControllerTests : IDisposable
         SetAdminUser();
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("", null, 0),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
     }
@@ -869,7 +869,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://cb.example.com", 3600),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateAppResponse>(ok.Value);
@@ -894,7 +894,8 @@ public class AdminControllerTests : IDisposable
                 3600),
             _appRegRepoMock.Object,
             CallbackValidator,
-            _unitOfWorkMock.Object);
+            _unitOfWorkMock.Object,
+            TestContext.Current.CancellationToken);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Contains(
@@ -918,7 +919,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://cb.example.com", IdentityConstants.CallbackTtlNeverExpire),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateAppResponse>(ok.Value);
@@ -939,7 +940,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "", 0),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateAppResponse>(ok.Value);
@@ -962,7 +963,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://cb.example.com", -10),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
     }
@@ -979,7 +980,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("missing",
             new AdminUpdateCallbackRequest("https://cb", 3600, true),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
 
         Assert.IsType<NotFoundObjectResult>(result);
     }
@@ -1001,7 +1002,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("", 0, true),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
@@ -1020,7 +1021,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://new", 7200, false),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Equal("https://new", app.CallbackUrl);
@@ -1047,7 +1048,8 @@ public class AdminControllerTests : IDisposable
             new AdminUpdateCallbackRequest("ftp://cb.example.com/claims", 7200, false),
             _appRegRepoMock.Object,
             CallbackValidator,
-            _unitOfWorkMock.Object);
+            _unitOfWorkMock.Object,
+            TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal("https://old.example.com/claims", app.CallbackUrl);
@@ -1066,7 +1068,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://cb", IdentityConstants.CallbackTtlNeverExpire, true),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Null(app.CallbackExpiresAt);

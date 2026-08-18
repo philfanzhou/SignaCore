@@ -26,7 +26,7 @@ public class LegacyRefreshTokenProtectionTests
             CreateToken(accountId, legacyToken),
             CreateToken(accountId, "sha256:not-a-real-digest"),
             CreateToken(accountId, RefreshTokenDigest.Compute(currentToken)));
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await DatabaseInitializer.ProtectLegacyRefreshTokensAsync(
             context,
@@ -35,7 +35,7 @@ public class LegacyRefreshTokenProtectionTests
         var stored = await context.RefreshTokens
             .AsNoTracking()
             .Select(token => token.TokenValue)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Contains(RefreshTokenDigest.Compute(legacyToken), stored);
         Assert.Contains(RefreshTokenDigest.Compute(currentToken), stored);
         Assert.Contains(RefreshTokenDigest.Compute("sha256:not-a-real-digest"), stored);
@@ -55,7 +55,7 @@ public class LegacyRefreshTokenProtectionTests
         });
         context.RefreshTokens.AddRange(Enumerable.Range(0, 501)
             .Select(index => CreateToken(accountId, $"legacy-token-{index}")));
-        await context.SaveChangesAsync();
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await DatabaseInitializer.ProtectLegacyRefreshTokensAsync(
             context,
@@ -64,7 +64,7 @@ public class LegacyRefreshTokenProtectionTests
         var stored = await context.RefreshTokens
             .AsNoTracking()
             .Select(token => token.TokenValue)
-            .ToListAsync();
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(501, stored.Count);
         Assert.All(stored, value => Assert.True(RefreshTokenDigest.IsDigest(value)));
     }
