@@ -39,7 +39,7 @@ configuration source.
 
 ## Persistence
 
-PostgreSQL migrations are in `SignaCore.Database`; MySQL/MariaDB migrations are in `SignaCore.Database.Migrations.MySql`; SQLite migrations are in `SignaCore.Database.Migrations.Sqlite`. A schema change must account for all three migration histories.
+PostgreSQL migrations are in `SignaCore.Database`; SQLite migrations are in `SignaCore.Database.Migrations.Sqlite`. A schema change must account for both migration histories.
 
 ## Deployment identifiers
 

@@ -18,7 +18,6 @@ WORKDIR /workspace
 # Copy dependency manifests first to preserve the restore cache.
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY src/SignaCore.Database/SignaCore.Database.csproj src/SignaCore.Database/
-COPY src/SignaCore.Database.Migrations.MySql/SignaCore.Database.Migrations.MySql.csproj src/SignaCore.Database.Migrations.MySql/
 COPY src/SignaCore.Database.Migrations.Sqlite/SignaCore.Database.Migrations.Sqlite.csproj src/SignaCore.Database.Migrations.Sqlite/
 COPY src/SignaCore.Domain/SignaCore.Domain.csproj src/SignaCore.Domain/
 COPY src/SignaCore.Host/SignaCore.Host.csproj src/SignaCore.Host/

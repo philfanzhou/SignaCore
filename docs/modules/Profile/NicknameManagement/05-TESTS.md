@@ -8,7 +8,7 @@ Tests should cover reading a profile, updating a nickname, empty and overlong va
 
 - Unit tests isolate policy and error branches with xUnit and Moq.
 - HTTP integration tests run the host through WebApplicationFactory.
-- Database contract tests verify PostgreSQL, MySQL/MariaDB, and SQLite behavior where provider differences matter.
+- Database contract tests verify PostgreSQL and SQLite behavior where provider differences matter.
 
 ## Given-When-Then baseline
 

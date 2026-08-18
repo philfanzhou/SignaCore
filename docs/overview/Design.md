@@ -11,7 +11,7 @@ SignaCore.Host -----> SignaCore.Domain -----> SignaCore.Database
 - `SignaCore.Host` owns HTTP, middleware, configuration, discovery, observability, and SPA hosting.
 - `SignaCore.Domain` owns authentication, claims, tokens, keys, SMS, LDAP, callbacks, and audit policy.
 - `SignaCore.Database` owns EF Core entities, repositories, the unit of work, and PostgreSQL migrations.
-- Provider-specific assemblies own MySQL/MariaDB and SQLite migrations.
+- A provider-specific assembly owns SQLite migrations.
 
 The host is the composition root and references its real dependencies explicitly. The repository does not keep an empty pass-through application assembly.
 

@@ -2,7 +2,6 @@ using System.Data.Common;
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using MySqlConnector;
 using Npgsql;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
@@ -65,7 +64,6 @@ internal sealed record BootstrapTargetInspection(
 internal static class BootstrapTargetInspector
 {
     private const string PostgreSqlInvalidCatalogName = "3D000";
-    private const int MySqlUnknownDatabase = 1049;
 
     public static async Task<BootstrapTargetInspection> InspectAsync(
         DatabaseOptions database,
@@ -150,22 +148,6 @@ internal static class BootstrapTargetInspector
                     return new Reachability(true, false, null);
                 }
 
-                case DatabaseProvider.MySql:
-                case DatabaseProvider.MariaDb:
-                {
-                    await using var connection = new MySqlConnection(database.ConnectionString);
-                    try
-                    {
-                        await connection.OpenAsync(cancellationToken);
-                    }
-                    catch (MySqlException exception) when (exception.Number == MySqlUnknownDatabase)
-                    {
-                        return await ProbeServerOnlyAsync(database, cancellationToken);
-                    }
-
-                    return new Reachability(true, false, null);
-                }
-
                 case DatabaseProvider.Sqlite:
                 {
                     var dataSource = new SqliteConnectionStringBuilder(database.ConnectionString).DataSource;
@@ -214,34 +196,22 @@ internal static class BootstrapTargetInspector
         DatabaseOptions database,
         CancellationToken cancellationToken)
     {
+        if (database.ProviderKind != DatabaseProvider.PostgreSql)
+        {
+            // A file-backed provider has no server to probe separately.
+            return new Reachability(false, false, null);
+        }
+
         try
         {
-            switch (database.ProviderKind)
+            var maintenance = new NpgsqlConnectionStringBuilder(database.ConnectionString)
             {
-                case DatabaseProvider.PostgreSql:
-                {
-                    var maintenance = new NpgsqlConnectionStringBuilder(database.ConnectionString)
-                    {
-                        Database = "postgres",
-                        Pooling = false
-                    };
-                    await using var connection = new NpgsqlConnection(maintenance.ConnectionString);
-                    await connection.OpenAsync(cancellationToken);
-                    return new Reachability(false, true, null);
-                }
-
-                default:
-                {
-                    var maintenance = new MySqlConnectionStringBuilder(database.ConnectionString)
-                    {
-                        Database = string.Empty,
-                        Pooling = false
-                    };
-                    await using var connection = new MySqlConnection(maintenance.ConnectionString);
-                    await connection.OpenAsync(cancellationToken);
-                    return new Reachability(false, true, null);
-                }
-            }
+                Database = "postgres",
+                Pooling = false
+            };
+            await using var connection = new NpgsqlConnection(maintenance.ConnectionString);
+            await connection.OpenAsync(cancellationToken);
+            return new Reachability(false, true, null);
         }
         catch (Exception exception) when (exception is DbException or InvalidOperationException
                                               or TimeoutException)

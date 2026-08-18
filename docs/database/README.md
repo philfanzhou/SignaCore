@@ -1,6 +1,6 @@
 # Database
 
-SignaCore uses one EF Core model with provider-specific migrations for PostgreSQL, MySQL/MariaDB, and SQLite.
+SignaCore uses one EF Core model with provider-specific migrations for PostgreSQL and SQLite.
 
 ## Tables
 

@@ -19,18 +19,6 @@ internal static class BootstrapProviderCatalog
         },
         new()
         {
-            Provider = "MySQL",
-            ServerVersions = ["8.0", "8.4"],
-            DefaultPort = 3306
-        },
-        new()
-        {
-            Provider = "MariaDB",
-            ServerVersions = ["10.11", "11.4"],
-            DefaultPort = 3306
-        },
-        new()
-        {
             Provider = "SQLite",
             ServerVersions = [],
             DefaultPort = null,

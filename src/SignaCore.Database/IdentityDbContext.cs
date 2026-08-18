@@ -7,10 +7,6 @@ namespace SignaCore.Database;
 
 public class IdentityDbContext : DbContext
 {
-    private static readonly ValueConverter<DateTimeOffset, DateTime> UtcDateTimeConverter = new(
-        value => value.UtcDateTime,
-        value => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc)));
-
     private static readonly ValueConverter<DateTimeOffset, long> UnixMicrosecondsConverter = new(
         value => (value.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / 10,
         value => DateTimeOffset.UnixEpoch.AddTicks(value * 10));
@@ -54,16 +50,6 @@ public class IdentityDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-
-        if (string.Equals(
-            Database.ProviderName,
-            "Pomelo.EntityFrameworkCore.MySql",
-            StringComparison.Ordinal))
-        {
-            modelBuilder
-                .HasCharSet("utf8mb4")
-                .UseCollation("utf8mb4_bin");
-        }
 
         modelBuilder.Entity<AccountEntity>(entity =>
         {
@@ -389,18 +375,6 @@ public class IdentityDbContext : DbContext
             StringComparison.Ordinal))
         {
             property.HasConversion(UnixMicrosecondsConverter);
-            return;
-        }
-
-        if (string.Equals(
-            providerName,
-            "Pomelo.EntityFrameworkCore.MySql",
-            StringComparison.Ordinal))
-        {
-            property
-                .HasConversion(UtcDateTimeConverter)
-                .HasColumnType("datetime(6)")
-                .HasPrecision(6);
             return;
         }
 

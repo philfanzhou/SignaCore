@@ -18,5 +18,5 @@
 - Authentication and authorization must fail closed.
 - Secrets and personal data must be redacted from logs and errors.
 - HTTP and database behavior must be covered by automated tests.
-- The service must operate with PostgreSQL, MySQL/MariaDB, or SQLite.
+- The service must operate with PostgreSQL or SQLite.
 - Health, metrics, traces, and structured logs must support production diagnostics.

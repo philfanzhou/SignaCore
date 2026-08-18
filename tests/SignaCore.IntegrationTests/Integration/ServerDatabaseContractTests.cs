@@ -1,5 +1,3 @@
-using DotNet.Testcontainers.Builders;
-using DotNet.Testcontainers.Configurations;
 using DotNet.Testcontainers.Containers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -9,7 +7,6 @@ using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Host;
-using Testcontainers.MySql;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -26,8 +23,6 @@ public sealed class ServerDatabaseContractTests
 
     [Theory]
     [InlineData("PostgreSQL")]
-    [InlineData("MySQL")]
-    [InlineData("MariaDB")]
     public async Task ProviderContract_MigrationCrudNormalizationAndConcurrency(
         string provider)
     {
@@ -130,31 +125,8 @@ public sealed class ServerDatabaseContractTests
                 .WithUsername("postgres")
                 .WithPassword("postgres")
                 .Build(),
-            "MySQL" => new MySqlBuilder("mysql:8.4")
-                .WithDatabase("identity")
-                .WithUsername("identity")
-                .WithPassword("identity")
-                .WithWaitStrategy(CreateMySqlWaitStrategy())
-                .Build(),
-            "MariaDB" => new MySqlBuilder("mariadb:11.4")
-                .WithDatabase("identity")
-                .WithUsername("identity")
-                .WithPassword("identity")
-                .WithWaitStrategy(CreateMySqlWaitStrategy())
-                .Build(),
             _ => throw new InvalidOperationException($"Unsupported provider: {provider}")
         };
-    }
-
-    /// <summary>
-    /// Wait only for the database server's internal TCP port. This works for
-    /// both MySQL and MariaDB without depending on a client executable inside
-    /// the image. <see cref="WaitUntilConnectableAsync"/> then verifies the
-    /// connection with the same provider and connection string used by the test.
-    /// </summary>
-    private static IWaitForContainerOS CreateMySqlWaitStrategy()
-    {
-        return Wait.ForUnixContainer().UntilInternalTcpPortIsAvailable(3306);
     }
 
     /// <summary>
@@ -195,7 +167,6 @@ public sealed class ServerDatabaseContractTests
         return container switch
         {
             PostgreSqlContainer postgreSql => postgreSql.GetConnectionString(),
-            MySqlContainer mySql => mySql.GetConnectionString(),
             _ => throw new InvalidOperationException("Unsupported test container.")
         };
     }
@@ -210,8 +181,6 @@ public sealed class ServerDatabaseContractTests
             ServerVersion = provider switch
             {
                 "PostgreSQL" => "15",
-                "MySQL" => "8.4",
-                "MariaDB" => "11.4",
                 _ => throw new InvalidOperationException(
                     $"Unsupported provider: {provider}")
             },
@@ -230,9 +199,8 @@ public sealed class ServerDatabaseContractTests
         //
         // 这里必须显式 ToUniversalTime()，不能直接写非零偏移的值：Npgsql 对
         // timestamp with time zone 只接受 Offset=0，写非零偏移会抛
-        // ArgumentException（"only offset 0 (UTC) is supported"）。MySQL 侧则会接受，
-        // 也就是说"能不能写非 UTC 偏移"本身是 provider 之间的行为差异。
-        // 产品代码全程使用 DateTimeOffset.UtcNow，不依赖这个差异；此处对齐产品的写入方式。
+        // ArgumentException（"only offset 0 (UTC) is supported"）。
+        // 产品代码全程使用 DateTimeOffset.UtcNow，此处对齐产品的写入方式。
         var sourceInstant = new DateTimeOffset(
             2026,
             7,
@@ -327,7 +295,7 @@ public sealed class ServerDatabaseContractTests
             //
             // 这里刻意用 \u00C9 转义而不是直接写 É：该字面量曾被误按 GBK 解码再存回 UTF-8，
             // É(C3 89) 变成了汉字"脡"(U+8121)，于是查询的是一个从未写入过的值，
-            // MySQL / MariaDB 用例因此长期失败。非 ASCII 字面量一律用转义，避免重蹈覆辙。
+            // 用例因此长期失败。非 ASCII 字面量一律用转义，避免重蹈覆辙。
             var credential =
                 await credentialRepository.GetByUsernameAsync("CAF\u00C9");
             Assert.NotNull(credential);

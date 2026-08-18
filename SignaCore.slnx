@@ -1,6 +1,5 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/SignaCore.Database.Migrations.MySql/SignaCore.Database.Migrations.MySql.csproj" />
     <Project Path="src/SignaCore.Database.Migrations.Sqlite/SignaCore.Database.Migrations.Sqlite.csproj" />
     <Project Path="src/SignaCore.Database/SignaCore.Database.csproj" />
     <Project Path="src/SignaCore.Domain/SignaCore.Domain.csproj" />

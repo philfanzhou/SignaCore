@@ -116,8 +116,8 @@ public sealed class AdminSettingsController : ControllerBase
                 $"These keys are not database-backed settings: {string.Join(", ", unknown)}."));
         }
 
-        // The explicit transaction has to run inside CreateExecutionStrategy(): PostgreSQL, MySQL and
-        // MariaDB enable EnableRetryOnFailure(), and a retrying strategy refuses to execute commands
+        // The explicit transaction has to run inside CreateExecutionStrategy(): PostgreSQL enables
+        // EnableRetryOnFailure(), and a retrying strategy refuses to execute commands
         // inside a caller-opened transaction. The lambda is replayed as a unit, so it re-reads the
         // snapshot on every attempt and starts from a cleared change tracker.
         var strategy = _db.Database.CreateExecutionStrategy();

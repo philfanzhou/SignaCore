@@ -8,7 +8,7 @@ Tests should cover expired and active records, empty batches, cancellation, data
 
 - Unit tests isolate policy and error branches with xUnit and Moq.
 - HTTP integration tests run the host through WebApplicationFactory.
-- Database contract tests verify PostgreSQL, MySQL/MariaDB, and SQLite behavior where provider differences matter.
+- Database contract tests verify PostgreSQL and SQLite behavior where provider differences matter.
 
 ## Given-When-Then baseline
 

@@ -18,7 +18,7 @@ Primary interface: POST /api/auth/revoke.
 
 ## Persistence
 
-Relevant tables: refresh_tokens. PostgreSQL migrations live in Database, while MySQL/MariaDB and SQLite use their provider-specific migration assemblies.
+Relevant tables: refresh_tokens. PostgreSQL migrations live in Database, while SQLite uses its provider-specific migration assembly.
 
 ## Design constraints
 

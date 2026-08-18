@@ -24,7 +24,7 @@ Docker is required for the complete database contract matrix and image smoke che
 
 ## Database changes
 
-Schema changes must include reviewed migrations for PostgreSQL, MySQL/MariaDB, and SQLite. Keep existing migration identifiers intact and verify each provider's contract tests.
+Schema changes must include reviewed migrations for PostgreSQL and SQLite. Keep existing migration identifiers intact and verify each provider's contract tests.
 
 ## Security
 

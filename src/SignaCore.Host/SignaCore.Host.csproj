@@ -31,7 +31,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SignaCore.Database\SignaCore.Database.csproj" />
-    <ProjectReference Include="..\SignaCore.Database.Migrations.MySql\SignaCore.Database.Migrations.MySql.csproj" />
     <ProjectReference Include="..\SignaCore.Database.Migrations.Sqlite\SignaCore.Database.Migrations.Sqlite.csproj" />
     <ProjectReference Include="..\SignaCore.Domain\SignaCore.Domain.csproj" />
   </ItemGroup>

@@ -57,8 +57,8 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     /// <summary>
     /// 一次性旋转 refresh token：撤销旧 token + 插入 replacement，两步同一事务，原子成败。
     /// <para>
-    /// 显式事务**必须**整体跑在 <c>CreateExecutionStrategy()</c> 里。PostgreSQL / MySQL / MariaDB
-    /// 都开了 <c>EnableRetryOnFailure()</c>（见 <see cref="IdentityDatabaseOptionsExtensions"/>），
+    /// 显式事务**必须**整体跑在 <c>CreateExecutionStrategy()</c> 里。PostgreSQL
+    /// 开了 <c>EnableRetryOnFailure()</c>（见 <see cref="IdentityDatabaseOptionsExtensions"/>），
     /// 重试策略拒绝在"调用方自己开的事务"里执行命令：直接 <c>BeginTransactionAsync</c> 会让第一条命令抛
     /// <c>InvalidOperationException: ... does not support user-initiated transactions</c>，
     /// 经 ExceptionHandlingMiddleware 变成 HTTP 409，刷新流程整个挂掉。SQLite 没开重试，

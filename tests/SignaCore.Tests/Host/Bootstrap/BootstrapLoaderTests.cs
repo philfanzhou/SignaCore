@@ -110,6 +110,10 @@ public sealed class BootstrapLoaderTests : IDisposable
     [Theory]
     // Unknown provider.
     [InlineData("""{ "Database": { "Provider": "postgres", "ServerVersion": "15", "ConnectionString": "Host=db;Database=x;Username=u" }, "MasterKey": "k" }""", "Database.Provider")]
+    // MySQL and MariaDB were withdrawn by ADR 0004. A bootstrap file left over from a
+    // MySQL-era deployment must fail at startup rather than be read as something else.
+    [InlineData("""{ "Database": { "Provider": "MySQL", "ServerVersion": "8.4", "ConnectionString": "Server=db;Database=x;User ID=u" }, "MasterKey": "k" }""", "Database.Provider")]
+    [InlineData("""{ "Database": { "Provider": "MariaDB", "ServerVersion": "11.4", "ConnectionString": "Server=db;Database=x;User ID=u" }, "MasterKey": "k" }""", "Database.Provider")]
     // PostgreSQL below the supported major version.
     [InlineData("""{ "Database": { "Provider": "PostgreSQL", "ServerVersion": "13", "ConnectionString": "Host=db;Database=x;Username=u" }, "MasterKey": "k" }""", "PostgreSQL 15")]
     // Server version supplied for SQLite, which does not have one.

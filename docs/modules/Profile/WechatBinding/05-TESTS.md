@@ -11,7 +11,7 @@ unbinding when nothing is bound, and a disabled application policy.
 - Unit tests isolate policy and error branches with xUnit and Moq.
 - HTTP integration tests run the host through WebApplicationFactory.
 - Database contract tests verify the unique index, the transaction, and the cascade on real SQLite
-  (`WechatAdmissionDatabaseContractTests`); PostgreSQL and MySQL/MariaDB share the same model.
+  (`WechatAdmissionDatabaseContractTests`); PostgreSQL shares the same model.
 
 ## Given-When-Then baseline
 

@@ -5,7 +5,6 @@
 | Provider | Migration project |
 | --- | --- |
 | PostgreSQL | `src/SignaCore.Database/SignaCore.Database.csproj` |
-| MySQL / MariaDB | `src/SignaCore.Database.Migrations.MySql/SignaCore.Database.Migrations.MySql.csproj` |
 | SQLite | `src/SignaCore.Database.Migrations.Sqlite/SignaCore.Database.Migrations.Sqlite.csproj` |
 
 ## History
@@ -25,9 +24,6 @@ packages in `Directory.Packages.props`:
 dotnet ef migrations add <Name> \
   --project src/SignaCore.Database/SignaCore.Database.csproj \
   --msbuildprojectextensionspath artifacts/obj/SignaCore.Database
-dotnet ef migrations add <Name> \
-  --project src/SignaCore.Database.Migrations.MySql/SignaCore.Database.Migrations.MySql.csproj \
-  --msbuildprojectextensionspath artifacts/obj/SignaCore.Database.Migrations.MySql
 dotnet ef migrations add <Name> \
   --project src/SignaCore.Database.Migrations.Sqlite/SignaCore.Database.Migrations.Sqlite.csproj \
   --msbuildprojectextensionspath artifacts/obj/SignaCore.Database.Migrations.Sqlite

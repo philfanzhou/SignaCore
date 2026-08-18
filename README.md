@@ -11,7 +11,7 @@ SignaCore is a .NET 10 identity and authentication service. It centralizes accou
 - RS256 signing-key generation, encrypted private-key storage, rotation, and JWKS publication
 - Application registration, callback claim enrichment, and gateway authentication
 - User/profile administration, audit trails, login history, lockout, and cleanup jobs
-- PostgreSQL, MySQL/MariaDB, and SQLite through EF Core provider-specific migrations
+- PostgreSQL and SQLite through EF Core provider-specific migrations
 - Database-backed global configuration with web-based first-run setup
 - Optional Consul service discovery
 - OpenTelemetry, Prometheus, Serilog, and optional Loki export
@@ -21,7 +21,7 @@ SignaCore is a .NET 10 identity and authentication service. It centralizes accou
 | Path | Purpose |
 | --- | --- |
 | `src/SignaCore.Database` | EF Core model, repositories, and PostgreSQL migrations |
-| `src/SignaCore.Database.Migrations.*` | MySQL/MariaDB and SQLite migration assemblies |
+| `src/SignaCore.Database.Migrations.*` | SQLite migration assembly |
 | `src/SignaCore.Domain` | Authentication, token, key, SMS, LDAP, and audit logic |
 | `src/SignaCore.Host` | ASP.NET Core host, HTTP API, SPA hosting, and Dockerfile |
 | `src/SignaCore.Admin` | Vue 3 administrative console |

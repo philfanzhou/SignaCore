@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using MySqlConnector;
 using Npgsql;
 using SignaCore.Database;
 using SignaCore.Host.Models;
@@ -18,7 +17,6 @@ namespace SignaCore.Host.Bootstrap;
 internal static class BootstrapDatabaseRequestBinder
 {
     private const int DefaultPostgreSqlPort = 5432;
-    private const int DefaultMySqlPort = 3306;
 
     public static bool TryBind(
         BootstrapDatabaseRequest request,
@@ -112,28 +110,6 @@ internal static class BootstrapDatabaseRequestBinder
                     Port = request.Port ?? DefaultPostgreSqlPort,
                     Database = request.Database!.Trim(),
                     Username = request.Username!.Trim(),
-                    Password = request.Password ?? string.Empty
-                };
-                connectionString = builder.ConnectionString;
-                return true;
-            }
-
-            case DatabaseProvider.MySql:
-            case DatabaseProvider.MariaDb:
-            {
-                if (!Require(request.Host, "Host", out error) ||
-                    !Require(request.Database, "Database", out error) ||
-                    !Require(request.Username, "Username", out error))
-                {
-                    return false;
-                }
-
-                var builder = new MySqlConnectionStringBuilder
-                {
-                    Server = request.Host!.Trim(),
-                    Port = (uint)(request.Port ?? DefaultMySqlPort),
-                    Database = request.Database!.Trim(),
-                    UserID = request.Username!.Trim(),
                     Password = request.Password ?? string.Empty
                 };
                 connectionString = builder.ConnectionString;

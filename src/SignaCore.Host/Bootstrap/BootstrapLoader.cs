@@ -172,7 +172,7 @@ internal static class BootstrapLoader
         {
             throw new BootstrapException(
                 $"The SignaCore bootstrap file at '{filePath}' is missing 'Database.Provider'. " +
-                "Supported values are PostgreSQL, MySQL, MariaDB, and SQLite.");
+                "Supported values are PostgreSQL and SQLite.");
         }
 
         if (string.IsNullOrWhiteSpace(section.ConnectionString))
