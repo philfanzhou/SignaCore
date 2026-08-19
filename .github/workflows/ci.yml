@@ -42,7 +42,30 @@ jobs:
         working-directory: src/SignaCore.Admin
         run: |
           npm ci
-          npm audit --audit-level=high
+
+          # `npm audit` exits 1 both for a real advisory and for a registry-side failure, and the
+          # advisory endpoint it calls is being retired and intermittently answers 400 with a
+          # misleading "Invalid package tree" message. Retry only on the transport signature, so a
+          # genuine high-severity finding still fails the build on the first attempt.
+          for attempt in 1 2 3; do
+            if audit_output=$(npm audit --audit-level=high 2>&1); then
+              printf '%s\n' "$audit_output"
+              break
+            fi
+            printf '%s\n' "$audit_output"
+            if ! printf '%s' "$audit_output" |
+              grep -Eq 'audit endpoint returned an error|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN'; then
+              echo "npm audit found advisories at or above high severity." >&2
+              exit 1
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "npm audit could not reach the advisory endpoint after 3 attempts." >&2
+              exit 1
+            fi
+            echo "npm audit hit a transient registry error; retrying in $((attempt * 10))s." >&2
+            sleep $((attempt * 10))
+          done
+
           npm run build
 
       - name: Build image
@@ -531,9 +554,14 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY_IMAGE }}
+          # The default `latest=auto` adds its own `latest` for every semver match, on top of the
+          # explicitly gated row below, and the action does not de-duplicate the two. Turning the
+          # flavour off leaves that gate as the only source of `latest`.
+          flavor: latest=false
           tags: |
-            # Only produced on a default-branch push; a moving name, so no per-commit tag
-            # accumulates in the registry.
+            # Only produced on a default-branch push. The tag moves rather than accumulating, but
+            # each push leaves the previous manifest, with its provenance and SBOM attestations,
+            # behind as an untagged package version, which GHCR does not prune on its own.
             type=edge,branch=${{ github.event.repository.default_branch }}
             # The semver rules read the tag name and yield nothing on a branch ref.
             type=semver,pattern={{version}}
@@ -567,8 +595,12 @@ jobs:
             echo
             echo "- Digest: \`${{ steps.push.outputs.digest }}\`"
             echo "- Tags:"
+            # `continue` rather than a trailing `&&`: the last command of the loop body sets the
+            # status of the loop, the group, and the step, so a blank final line would fail the
+            # step after the image is already pushed.
             while IFS= read -r image_tag; do
-              [ -n "$image_tag" ] && echo "  - \`${image_tag}\`"
+              [ -n "$image_tag" ] || continue
+              printf '  - `%s`\n' "$image_tag"
             done <<< "${META_TAGS}"
           } >> "$GITHUB_STEP_SUMMARY"
 

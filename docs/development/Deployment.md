@@ -8,9 +8,21 @@ IMAGE_TAG=latest ./build.sh
 
 This produces `signacore:latest` from `src/SignaCore.Host/Dockerfile`. The image builds the Vue admin application, restores and publishes `SignaCore.Host`, runs as the non-root `app` user, exposes port 5002, and starts `SignaCore.Host.dll`.
 
+## The `edge` image
+
+Every push to the default branch that passes the full pipeline publishes
+`ghcr.io/philfanzhou/signacore:edge`. The tag moves to the newest such commit, so it names whatever
+the default branch currently is â€” not a release. Use it for development environments and for
+verifying a change in a real container; never pin a deployment to it, because the digest behind it
+changes without notice.
+
+Each push leaves the previously tagged manifest, together with its provenance and SBOM attestations,
+as an untagged version of the package. GHCR does not remove those, so the untagged versions
+accumulate and are pruned by hand when they become inconvenient.
+
 ## Releasing
 
-Releases are driven entirely by pushing a tag. Nothing is published by hand.
+Releases are driven entirely by pushing a tag. No release is published by hand.
 
 ```bash
 git tag -a 0.1.4 -m "SignaCore 0.1.4"
@@ -23,7 +35,8 @@ containerised first-run and smoke assertions, and the database contract matrix â
 it passes does the release happen, in two steps:
 
 1. **Publish GHCR Image** builds and pushes `ghcr.io/philfanzhou/signacore`, tagged with the exact
-   version, the `MAJOR.MINOR` line, and `latest`, with provenance and an SBOM attached.
+   version, the `MAJOR.MINOR` line, and `latest`, with provenance and an SBOM attached. `latest`
+   moves only for a tag; a default-branch push never touches it.
 2. **Publish GitHub Release** creates the release for the tag, quoting the digest that was actually
    published and appending GitHub's generated changelog.
 
