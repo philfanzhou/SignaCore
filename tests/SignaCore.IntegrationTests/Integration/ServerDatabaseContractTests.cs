@@ -14,6 +14,17 @@ namespace SignaCore.IntegrationTests.Integration;
 
 public sealed class ServerDatabaseContractTests
 {
+    /// <summary>
+    /// The PostgreSQL image the container matrix runs against. CI overrides it with a mirror of the
+    /// same official image, because Docker Hub meters anonymous pulls per client address and hosted
+    /// runners share their egress addresses. A local run with the variable unset keeps the plain
+    /// Docker Hub name.
+    /// </summary>
+    private static readonly string PostgreSqlImage =
+        Environment.GetEnvironmentVariable("SIGNACORE_POSTGRES_IMAGE") is { Length: > 0 } image
+            ? image
+            : "postgres:15-alpine";
+
     private readonly ITestOutputHelper _output;
 
     public ServerDatabaseContractTests(ITestOutputHelper output)
@@ -58,7 +69,7 @@ public sealed class ServerDatabaseContractTests
             return;
         }
 
-        var container = new PostgreSqlBuilder("postgres:15-alpine")
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
             .WithDatabase("identity")
             .WithUsername("postgres")
             .WithPassword("postgres")
@@ -120,7 +131,7 @@ public sealed class ServerDatabaseContractTests
     {
         return provider switch
         {
-            "PostgreSQL" => new PostgreSqlBuilder("postgres:15-alpine")
+            "PostgreSQL" => new PostgreSqlBuilder(PostgreSqlImage)
                 .WithDatabase("identity")
                 .WithUsername("postgres")
                 .WithPassword("postgres")

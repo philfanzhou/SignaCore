@@ -1,7 +1,10 @@
-# syntax=docker/dockerfile:1
+# No `syntax` directive: it would make every build pull the frontend image from Docker Hub, which
+# meters anonymous pulls per client address. Nothing here needs a feature beyond the frontend that
+# BuildKit already ships. Re-add the directive if that changes, and expect the Docker Hub pull back.
 
-# Build the administrative frontend.
-FROM node:24-alpine AS frontend-build
+# Build the administrative frontend. Official images come from the AWS public mirror, for the same
+# reason: it serves the same images, needs no credentials, and is not metered per client address.
+FROM public.ecr.aws/docker/library/node:24-alpine AS frontend-build
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 ENV npm_config_registry=${NPM_REGISTRY}
 WORKDIR /app

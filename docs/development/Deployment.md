@@ -8,6 +8,23 @@ IMAGE_TAG=latest ./build.sh
 
 This produces `signacore:latest` from `src/SignaCore.Host/Dockerfile`. The image builds the Vue admin application, restores and publishes `SignaCore.Host`, runs as the non-root `app` user, exposes port 5002, and starts `SignaCore.Host.dll`.
 
+### Where base images come from
+
+The .NET stages pull from Microsoft's container registry, and the Node stage pulls the official
+image from the AWS public mirror (`public.ecr.aws/docker/library/`) rather than from Docker Hub.
+Docker Hub meters anonymous pulls per client address, so shared egress — a CI runner, an office
+network — exhausts a quota that unrelated traffic consumed, and the pull then fails with
+`unauthorized: authentication required`. The mirror serves the same official images, needs no
+credentials, and is not metered that way. The Dockerfile also carries no `syntax` directive,
+because that alone would restore a Docker Hub pull on every build.
+
+The container tests follow the same rule: they request `SIGNACORE_POSTGRES_IMAGE` when it is set
+and fall back to the plain Docker Hub name when it is not, and CI sets it to the mirror.
+
+One Docker Hub pull remains. The release job's BuildKit builder image is published only there, so
+it is pulled anonymously on default-branch pushes and release tags. Pull requests never reach that
+job.
+
 ## The `edge` image
 
 Every push to the default branch that passes the full pipeline publishes
