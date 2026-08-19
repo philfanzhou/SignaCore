@@ -114,10 +114,7 @@ jobs:
             --no-restore
 
       - name: Pre-pull PostgreSQL image
-        run: |
-          echo "::group::docker pull postgres:15-alpine"
-          time docker pull postgres:15-alpine
-          echo "::endgroup::"
+        run: .github/scripts/docker-pull.sh postgres:15-alpine
 
       - name: Start PostgreSQL
         run: |
@@ -480,11 +477,7 @@ jobs:
 
       - name: Pre-pull database images
         run: |
-          for image in postgres:15-alpine; do
-            echo "::group::docker pull $image"
-            time docker pull "$image"
-            echo "::endgroup::"
-          done
+          .github/scripts/docker-pull.sh postgres:15-alpine
           docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'
 
       - name: Database contract matrix
