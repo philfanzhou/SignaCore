@@ -486,9 +486,14 @@ jobs:
           path: reports/
           if-no-files-found: ignore
 
+  # Runs for release tags and for default-branch pushes. A default-branch push publishes only the
+  # moving `edge` tag; `latest` and the semver tags stay tag-only, gated below.
   publish-container:
     name: Publish GHCR Image
-    if: startsWith(github.ref, 'refs/tags/')
+    if: >-
+      github.event_name == 'push' &&
+      (startsWith(github.ref, 'refs/tags/') ||
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     needs: [build-test, database-contracts]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -503,6 +508,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           if [[ ! "${GITHUB_REF_NAME}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -526,9 +532,16 @@ jobs:
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
+            # Only produced on a default-branch push; a moving name, so no per-commit tag
+            # accumulates in the registry.
+            type=edge,branch=${{ github.event.repository.default_branch }}
+            # The semver rules read the tag name and yield nothing on a branch ref.
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+            # Release tags carry no `v` prefix here, so the gate must not require one. Without
+            # this gate the rule is unconditional and the first default-branch push would move
+            # `latest` onto a development build.
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
 
       - name: Build and publish image
         id: push
@@ -546,12 +559,17 @@ jobs:
           sbom: true
 
       - name: Record published image
+        env:
+          META_TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           {
             echo "### Published container"
             echo
-            echo "- Image: \`${REGISTRY_IMAGE}:${GITHUB_REF_NAME}\`"
             echo "- Digest: \`${{ steps.push.outputs.digest }}\`"
+            echo "- Tags:"
+            while IFS= read -r image_tag; do
+              [ -n "$image_tag" ] && echo "  - \`${image_tag}\`"
+            done <<< "${META_TAGS}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Runs last so a release only ever exists for a tag whose tests passed and whose image is
