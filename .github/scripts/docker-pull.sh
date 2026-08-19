@@ -2,11 +2,11 @@
 #
 # Pull container images, retrying only the failures that a retry can actually fix.
 #
-# Anonymous pulls from Docker Hub intermittently fail with "unauthorized: authentication
-# required" or a rate-limit message. That fails the job for a reason unrelated to the change
-# under test, and the message points at credentials rather than at the registry being unhappy.
-# Everything pulled here is public, so those responses are treated as transient. Anything else
-# fails on the first attempt, so a missing or misspelled image is still reported immediately.
+# Anonymous pulls intermittently fail with "unauthorized: authentication required" or a rate-limit
+# message. That fails the job for a reason unrelated to the change under test, and the message
+# points at credentials rather than at the registry being unhappy. Everything pulled here is
+# public, so those responses are treated as transient. Anything else fails on the first attempt,
+# so a missing or misspelled image is still reported immediately.
 set -euo pipefail
 
 readonly attempts=3

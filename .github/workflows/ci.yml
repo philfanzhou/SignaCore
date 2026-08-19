@@ -18,6 +18,16 @@ concurrency:
 permissions:
   contents: read
 
+# Official images come from the AWS public mirror rather than from Docker Hub. Docker Hub meters
+# anonymous pulls per client address, and GitHub-hosted runners share their egress addresses with
+# every other tenant, so unrelated traffic exhausts the quota and the pull fails with
+# "unauthorized: authentication required" for a reason that has nothing to do with the change under
+# test. The mirror serves the same official images, needs no credentials, and is not metered that
+# way. The database contract tests read this variable too, so the image they request is the image
+# the pre-pull step warmed.
+env:
+  SIGNACORE_POSTGRES_IMAGE: public.ecr.aws/docker/library/postgres:15-alpine
+
 jobs:
   build-test:
     name: Build & Test
@@ -114,7 +124,7 @@ jobs:
             --no-restore
 
       - name: Pre-pull PostgreSQL image
-        run: .github/scripts/docker-pull.sh postgres:15-alpine
+        run: .github/scripts/docker-pull.sh "$SIGNACORE_POSTGRES_IMAGE"
 
       - name: Start PostgreSQL
         run: |
@@ -149,7 +159,7 @@ jobs:
           docker network create signacore-smoke
           docker run -d --name signacore-smoke-pg --network signacore-smoke \
             -e POSTGRES_PASSWORD="$PG_PASSWORD" \
-            postgres:15-alpine
+            "$SIGNACORE_POSTGRES_IMAGE"
 
           for i in $(seq 1 30); do
             if docker exec signacore-smoke-pg pg_isready -U postgres -q; then
@@ -477,7 +487,7 @@ jobs:
 
       - name: Pre-pull database images
         run: |
-          .github/scripts/docker-pull.sh postgres:15-alpine
+          .github/scripts/docker-pull.sh "$SIGNACORE_POSTGRES_IMAGE"
           docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'
 
       - name: Database contract matrix
