@@ -286,6 +286,10 @@ app.UseForwardedHeaders();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseCors("AdminWeb");
+// Rate limiting must run before authentication/authorization. Both gateway schemes perform a
+// database lookup (and valid AppIds additionally verify a BCrypt secret), so rejected credentials
+// must not be able to bypass the limiter by short-circuiting in authorization.
+app.UseRateLimiter();
 app.UseAuthentication();
 
 // ---- Sensitive Header Redaction Middleware ----
@@ -295,7 +299,6 @@ app.UseAuthentication();
 app.UseMiddleware<SensitiveHeaderRedactionMiddleware>();
 
 app.UseAuthorization();
-app.UseRateLimiter();
 
 // ---- Health ----
 app.MapHealthChecks(HealthEndpoints.Live, new()

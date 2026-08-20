@@ -18,6 +18,7 @@ using SignaCore.Domain.Services.WeChat;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.HealthChecks;
+using SignaCore.Host.Http;
 using SignaCore.Host.Security;
 using SignaCore.Host.Services;
 
@@ -222,7 +223,9 @@ public static class ServiceCollectionExtensions
         {
             options.AddPolicy("sms-code", httpContext =>
             {
-                var appId = httpContext.User.FindFirst(IdentityConstants.ClaimClientId)?.Value ?? "unknown";
+                // The limiter deliberately runs before authentication so invalid credentials cannot
+                // bypass it. AppId is only a partition hint here; authorization still validates it.
+                var appId = httpContext.GetAppId() ?? "unknown";
                 var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
                 return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     $"{appId}|{clientIp}",
@@ -265,7 +268,7 @@ public static class ServiceCollectionExtensions
             });
             options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<
                 Microsoft.AspNetCore.Http.HttpContext,
-                System.Net.IPAddress>(httpContext =>
+                string>(httpContext =>
             {
                 var path = httpContext.Request.Path.Value ?? string.Empty;
                 // Exempt infrastructure endpoints from global rate limiting
@@ -274,12 +277,12 @@ public static class ServiceCollectionExtensions
                     WellKnownEndpoints.IsJwks(path))
                 {
                     return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter(
-                        System.Net.IPAddress.Loopback);
+                        "infrastructure");
                 }
 
                 var remoteIp = httpContext.Connection.RemoteIpAddress ?? System.Net.IPAddress.Loopback;
                 return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                    remoteIp,
+                    $"client:{remoteIp}",
                     _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                     {
                         AutoReplenishment = true,

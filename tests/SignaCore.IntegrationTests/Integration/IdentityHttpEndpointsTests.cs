@@ -561,6 +561,43 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 }
 
+/// <summary>
+/// Uses a dedicated server fixture because this test intentionally exhausts a limiter partition.
+/// Sharing that state with the general endpoint contract tests would make their order observable.
+/// </summary>
+public sealed class RateLimitingHttpTests : IClassFixture<IdentityServerFixture>
+{
+    private readonly IdentityServerFixture _fixture;
+
+    public RateLimitingHttpTests(IdentityServerFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Fact]
+    public async Task InvalidGatewayCredentials_AreRateLimitedBeforeAuthorization()
+    {
+        using var http = _fixture.CreateHttpClient();
+        http.DefaultRequestHeaders.Add("X-Admin-AppId", "rate-limit-probe-not-registered");
+        http.DefaultRequestHeaders.Add("X-Admin-AppSecret", "invalid");
+
+        var statuses = new List<HttpStatusCode>();
+        for (var attempt = 0; attempt < 101; attempt++)
+        {
+            using var response = await http.PostAsJsonAsync(
+                "/api/auth/token",
+                new { GrantType = IdentityConstants.GrantTypePassword },
+                TestContext.Current.CancellationToken);
+            statuses.Add(response.StatusCode);
+        }
+
+        Assert.Contains(HttpStatusCode.TooManyRequests, statuses);
+
+        using var health = await http.GetAsync("/health", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+    }
+}
+
 public class IdentityServerFixture : IAsyncLifetime
 {
     public const string GatewayAppId = "http-contract-app";
