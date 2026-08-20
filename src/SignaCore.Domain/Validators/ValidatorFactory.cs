@@ -21,7 +21,8 @@ public class ValidatorFactory
         if (!_validators.TryGetValue(grantType, out var validator))
         {
             _logger.LogWarning("No validator found for grant type: {GrantType}, available: {AvailableTypes}",
-                grantType, string.Join(", ", _validators.Keys));
+                LogValueSanitizer.Sanitize(grantType),
+                LogValueSanitizer.Sanitize(string.Join(", ", _validators.Keys)));
             throw new KeyNotFoundException($"No validator registered for grant type: {grantType}");
         }
         return validator;

@@ -55,7 +55,8 @@ public class AuditService : IAuditService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to record login history for Username={Username}, EventType={EventType}", username, eventType);
+            _logger.LogError(ex, "Failed to record login history for Username={Username}, EventType={EventType}",
+                LogValueSanitizer.Sanitize(username), LogValueSanitizer.Sanitize(eventType));
         }
     }
 
@@ -86,7 +87,9 @@ public class AuditService : IAuditService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to record audit log: Action={Action}, TargetType={TargetType}, TargetId={TargetId}", action, targetType, targetId);
+            _logger.LogError(ex, "Failed to record audit log: Action={Action}, TargetType={TargetType}, TargetId={TargetId}",
+                LogValueSanitizer.Sanitize(action), LogValueSanitizer.Sanitize(targetType),
+                LogValueSanitizer.Sanitize(targetId));
         }
     }
 }

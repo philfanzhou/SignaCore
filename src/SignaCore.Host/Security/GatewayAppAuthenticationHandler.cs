@@ -3,6 +3,7 @@ using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 using SignaCore.Database;
+using SignaCore.Domain;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Http;
 using SignaCore.Host.Models;
@@ -43,8 +44,8 @@ public sealed class GatewayAppAuthenticationHandler : AuthenticationHandler<Auth
         {
             Logger.LogWarning(
                 "Gateway application authentication failed: AppId={AppId}, Reason={Reason}",
-                appId,
-                validation.ErrorMessage);
+                LogValueSanitizer.Sanitize(appId),
+                LogValueSanitizer.Sanitize(validation.ErrorMessage));
             return AuthenticateResult.Fail("Invalid gateway credentials.");
         }
 

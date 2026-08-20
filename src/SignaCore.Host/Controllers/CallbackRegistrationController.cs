@@ -69,7 +69,8 @@ public class CallbackRegistrationController : ControllerBase
 
         if (HttpContext.GetValidatedApp() is null && !BCrypt.Net.BCrypt.Verify(appSecret, app.AppSecretHash))
         {
-            _logger.LogWarning("Callback registration failed: AppId={AppId}, Reason=AppSecret mismatch", appId);
+            _logger.LogWarning("Callback registration failed: AppId={AppId}, Reason=AppSecret mismatch",
+                LogValueSanitizer.Sanitize(appId));
             return Ok(new RegisterCallbackResponse { Success = false, Message = "AppSecret mismatch" });
         }
 

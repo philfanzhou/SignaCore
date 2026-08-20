@@ -46,7 +46,7 @@ public class PasswordValidator : IIdentityValidator
         {
             _logger.LogWarning(
                 "Password validation failed: account is locked out, Username={Username}, LockoutUntil={LockoutUntil}",
-                request.Username, loginAttempt.LockoutUntil);
+                LogValueSanitizer.Sanitize(request.Username), loginAttempt.LockoutUntil);
             return ValidationResult.Failure(
                 $"Account is locked. Try again after {loginAttempt.LockoutUntil:HH:mm:ss} UTC.");
         }
@@ -55,20 +55,23 @@ public class PasswordValidator : IIdentityValidator
 
         if (credential == null)
         {
-            _logger.LogWarning("Password validation failed: username not found, Username={Username}", request.Username);
+            _logger.LogWarning("Password validation failed: username not found, Username={Username}",
+                LogValueSanitizer.Sanitize(request.Username));
             return ValidationResult.Failure("Wrong username or password");
         }
 
         var account = await _accountRepository.GetByIdAsync(credential.AccountId);
         if (account == null || !account.IsActive)
         {
-            _logger.LogWarning("Password validation failed: account not found or disabled, Username={Username}", request.Username);
+            _logger.LogWarning("Password validation failed: account not found or disabled, Username={Username}",
+                LogValueSanitizer.Sanitize(request.Username));
             return ValidationResult.Failure("Account is disabled");
         }
 
         if (!_passwordHasher.VerifyPassword(request.Password, credential.PasswordHash))
         {
-            _logger.LogWarning("Password validation failed: wrong password, Username={Username}", request.Username);
+            _logger.LogWarning("Password validation failed: wrong password, Username={Username}",
+                LogValueSanitizer.Sanitize(request.Username));
             await RecordFailedAttemptAsync(request.Username);
             return ValidationResult.Failure("Wrong username or password");
         }
@@ -79,7 +82,8 @@ public class PasswordValidator : IIdentityValidator
             await _unitOfWork.SaveChangesAsync();
         }
 
-        _logger.LogInformation("Password validated successfully: Username={Username}", request.Username);
+        _logger.LogInformation("Password validated successfully: Username={Username}",
+            LogValueSanitizer.Sanitize(request.Username));
         return ValidationResult.Success(account, IdentityConstants.AuthMethodPassword, credential.Username);
     }
 
@@ -91,7 +95,7 @@ public class PasswordValidator : IIdentityValidator
         {
             _logger.LogWarning(
                 "Account locked due to too many failed attempts, Username={Username}, LockoutUntil={LockoutUntil}",
-                username,
+                LogValueSanitizer.Sanitize(username),
                 loginAttempt.LockoutUntil);
         }
     }
