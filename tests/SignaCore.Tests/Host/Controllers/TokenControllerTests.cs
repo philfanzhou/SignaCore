@@ -331,6 +331,12 @@ public class TokenControllerTests
             It.IsAny<RsaSecurityKey>(),
             It.IsAny<int>(),
             It.IsAny<string?>()), Times.Never);
+        _refreshTokenServiceMock.Verify(service => service.HandleRefreshTokenAsync(
+            It.IsAny<string>(),
+            It.IsAny<string?>(),
+            It.IsAny<AccountEntity>(),
+            It.IsAny<string?>(),
+            It.IsAny<Guid?>()), Times.Never);
     }
 
     [Fact]
@@ -365,7 +371,34 @@ public class TokenControllerTests
                 It.IsAny<RsaSecurityKey>(),
                 It.IsAny<int>(),
                 It.IsAny<string?>()),
-            Times.Never);
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RefreshTokenRotation_WhenJwtGenerationFails_LeavesPresentedTokenUntouched()
+    {
+        var account = CreateTestAccount();
+        var validatorMock = CreateRefreshValidator(account);
+        _tokenServiceMock.Setup(service => service.GenerateJwtToken(
+                It.IsAny<List<Claim>>(),
+                It.IsAny<RsaSecurityKey>(),
+                It.IsAny<int>(),
+                It.IsAny<string?>()))
+            .Throws(new InvalidOperationException("signing failed"));
+        var controller = CreateController(new[] { validatorMock.Object });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => controller.GetToken(new TokenRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = "still-valid-refresh-token"
+        }, CancellationToken.None));
+
+        _refreshTokenServiceMock.Verify(service => service.HandleRefreshTokenAsync(
+            It.IsAny<string>(),
+            It.IsAny<string?>(),
+            It.IsAny<AccountEntity>(),
+            It.IsAny<string?>(),
+            It.IsAny<Guid?>()), Times.Never);
     }
 
     #endregion
