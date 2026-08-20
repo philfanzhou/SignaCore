@@ -46,16 +46,26 @@ git tag -a 0.1.4 -m "SignaCore 0.1.4"
 git push origin 0.1.4
 ```
 
-The tag must be numeric `MAJOR.MINOR.PATCH`; CI rejects anything else. Pushing it runs the full
+Release candidates use the same process with an `-rc.NUMBER` suffix:
+
+```bash
+git tag -a 0.1.8-rc.1 -m "SignaCore 0.1.8-rc.1"
+git push origin 0.1.8-rc.1
+```
+
+The tag must use `MAJOR.MINOR.PATCH` or `MAJOR.MINOR.PATCH-rc.NUMBER`; CI rejects anything else.
+Pushing it runs the full
 pipeline — build, unit tests, integration and HTTP contract tests, the image vulnerability scan, the
 containerised first-run and smoke assertions, and the database contract matrix — and only if all of
 it passes does the release happen, in two steps:
 
-1. **Publish GHCR Image** builds and pushes `ghcr.io/philfanzhou/signacore`, tagged with the exact
-   version, the `MAJOR.MINOR` line, and `latest`, with provenance and an SBOM attached. `latest`
-   moves only for a tag; a default-branch push never touches it.
+1. **Publish GHCR Image** builds and pushes `ghcr.io/philfanzhou/signacore` with provenance and an
+   SBOM attached. A stable release updates the exact version, the `MAJOR.MINOR` line, and `latest`.
+   A release candidate publishes only its exact immutable version and never moves either stable
+   channel.
 2. **Publish GitHub Release** creates the release for the tag, quoting the digest that was actually
-   published and appending GitHub's generated changelog.
+   published and appending GitHub's generated changelog. Release candidates are marked as GitHub
+   pre-releases; stable versions are marked latest.
 
 Because the release job runs last, a release only ever exists for a tag whose tests passed and whose
 image is pullable. A tag whose pipeline fails publishes neither; fix the cause, then tag a new
