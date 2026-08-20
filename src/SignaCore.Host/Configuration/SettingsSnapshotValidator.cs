@@ -1,6 +1,9 @@
 using System.Globalization;
 using System.Text.Json;
 using SignaCore.Database.Entity;
+using SignaCore.Domain.Services.Ldap;
+using SignaCore.Domain.Services.Sms;
+using SignaCore.Domain.Services.WeChat;
 
 namespace SignaCore.Host.Configuration;
 
@@ -14,7 +17,9 @@ namespace SignaCore.Host.Configuration;
 /// </summary>
 internal static class SettingsSnapshotValidator
 {
-    public static IReadOnlyList<string> Validate(IReadOnlyDictionary<string, string> values)
+    public static IReadOnlyList<string> Validate(
+        IReadOnlyDictionary<string, string> values,
+        bool isDevelopment = false)
     {
         var errors = new List<string>();
 
@@ -33,6 +38,7 @@ internal static class SettingsSnapshotValidator
         RequireNonEmpty(values, SystemSettingKeys.JwtAudience, errors);
         RequireNonEmpty(values, SystemSettingKeys.AdminUsername, errors);
         ValidateRanges(values, errors);
+        ValidateRuntimeOptions(values, isDevelopment, errors);
 
         return errors;
     }
@@ -41,9 +47,11 @@ internal static class SettingsSnapshotValidator
     /// Throws when the snapshot is unusable, listing every problem at once so an operator can fix a
     /// deployment in a single pass instead of restarting per error.
     /// </summary>
-    public static void ThrowIfInvalid(IReadOnlyDictionary<string, string> values)
+    public static void ThrowIfInvalid(
+        IReadOnlyDictionary<string, string> values,
+        bool isDevelopment = false)
     {
-        var errors = Validate(values);
+        var errors = Validate(values, isDevelopment);
         if (errors.Count == 0)
         {
             return;
@@ -147,6 +155,87 @@ internal static class SettingsSnapshotValidator
         RequirePositive(values, SystemSettingKeys.JwtTokenExpirationHours, 1, 24, errors);
         RequirePositive(values, SystemSettingKeys.RefreshTokenExpirationDays, 1, 365, errors);
         RequirePositive(values, SystemSettingKeys.PasswordHasherWorkFactor, 10, 15, errors);
+    }
+
+    /// <summary>
+    /// Runs the same option binders and validators used while composing the application. Structural
+    /// JSON validity alone is insufficient: a syntactically valid SMS/LDAP/WeChat document can still
+    /// make the next process startup fail.
+    /// </summary>
+    private static void ValidateRuntimeOptions(
+        IReadOnlyDictionary<string, string> values,
+        bool isDevelopment,
+        List<string> errors)
+    {
+        var entries = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var definition in SystemSettingsCatalog.Definitions)
+            {
+                if (!values.TryGetValue(definition.Key, out var value))
+                {
+                    continue;
+                }
+
+                if (definition.ValueType == SettingValueTypes.Json)
+                {
+                    JsonSettingFlattener.Flatten(definition.Key, value, entries);
+                }
+                else
+                {
+                    entries[definition.Key] = value;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // ValidateType already records the key-specific JSON error.
+            return;
+        }
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(entries)
+            .Build();
+
+        CaptureValidationError(() =>
+        {
+            var options = configuration.GetSection(SmsOptions.SectionName).Get<SmsOptions>() ?? new SmsOptions();
+            options.Validate(isDevelopment);
+        }, errors);
+
+        CaptureValidationError(() =>
+        {
+            var options = configuration.GetSection(LdapOptions.SectionName).Get<LdapOptions>() ?? new LdapOptions();
+            options.Validate();
+        }, errors);
+
+        CaptureValidationError(() =>
+        {
+            var options = configuration.GetSection(WechatOptions.SectionName).Get<WechatOptions>() ?? new WechatOptions();
+            options.Validate();
+        }, errors);
+
+        foreach (var proxy in configuration
+                     .GetSection(SystemSettingKeys.ReverseProxyKnownProxies)
+                     .Get<string[]>() ?? [])
+        {
+            if (!System.Net.IPAddress.TryParse(proxy, out _))
+            {
+                errors.Add($"{SystemSettingKeys.ReverseProxyKnownProxies} contains an invalid IP address: '{proxy}'.");
+            }
+        }
+    }
+
+    private static void CaptureValidationError(Action validate, List<string> errors)
+    {
+        try
+        {
+            validate();
+        }
+        catch (InvalidOperationException exception)
+        {
+            errors.Add(exception.Message);
+        }
     }
 
     private static void RequireNonEmpty(
