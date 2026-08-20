@@ -18,6 +18,14 @@ public interface IKeyManager
     /// </summary>
     IReadOnlyList<SecurityKey> GetValidationKeys();
 
+    /// <summary>
+    /// Refreshes the in-memory signing and validation key ring from the shared database.
+    /// Multi-instance callers use this before signing and when an unfamiliar JWT <c>kid</c> is seen.
+    /// </summary>
+    // Default keeps third-party/test implementations of the existing interface source-compatible;
+    // the built-in database-backed manager overrides it with multi-instance synchronization.
+    Task RefreshKeysAsync() => Task.CompletedTask;
+
     Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync();
     Task<bool> NeedsKeyRotationAsync();
     Task RotateKeyAsync();
@@ -49,6 +57,7 @@ public class KeyManager : IKeyManager
     private readonly ILogger<KeyManager> _logger;
     private readonly TaskCompletionSource<bool> _initializationTcs = new();
     private readonly object _keyLock = new();
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private RsaSecurityKey? _currentKey;
     private IReadOnlyList<SecurityKey> _validationKeys = Array.Empty<SecurityKey>();
 
@@ -195,6 +204,39 @@ public class KeyManager : IKeyManager
     }
 
     /// <summary>
+    /// Reconciles this process with the database-backed key ring. The asynchronous gate prevents a
+    /// burst of requests carrying the same newly-rotated <c>kid</c> from all decrypting and replacing
+    /// the same key material concurrently.
+    /// </summary>
+    public async Task RefreshKeysAsync()
+    {
+        await _initializationTcs.Task;
+        await _refreshLock.WaitAsync();
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
+            var activeKey = await keyRepo.GetActiveKeyAsync();
+
+            if (activeKey is null ||
+                string.Equals(GetCurrentKey().KeyId, activeKey.KeyId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            SetCurrentKey(LoadKeyFromEntity(activeKey));
+            _logger.LogInformation(
+                "Adopted signing key {KeyId} created by another service instance",
+                activeKey.KeyId);
+            await RefreshValidationKeysAsync();
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+    }
+
+    /// <summary>
     /// 从库里读全部未过期密钥。不等待 <see cref="InitializationCompleted"/>，
     /// 因此初始化流程内部也能调用。
     /// <para>
@@ -259,35 +301,44 @@ public class KeyManager : IKeyManager
 
     public async Task RotateKeyAsync()
     {
-        using var scope = _scopeFactory.CreateScope();
-        var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
-        var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-
-        var existingKey = await keyRepo.GetActiveKeyAsync();
-
-        if (existingKey != null && !IsInRotationWindow(existingKey, DateTimeOffset.UtcNow))
+        await _initializationTcs.Task;
+        await _refreshLock.WaitAsync();
+        try
         {
-            _logger.LogDebug("Active key still has sufficient lifetime, skipping rotation");
-            return;
+            using var scope = _scopeFactory.CreateScope();
+            var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
+            var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+            var existingKey = await keyRepo.GetActiveKeyAsync();
+
+            if (existingKey != null && !IsInRotationWindow(existingKey, DateTimeOffset.UtcNow))
+            {
+                _logger.LogDebug("Active key still has sufficient lifetime, skipping rotation");
+                return;
+            }
+
+            _logger.LogInformation("Rotating RSA key pair");
+
+            // 停用所有 IsActive 行，而不是只停用 GetActiveKeyAsync 返回的那一条：后者带过期过滤，
+            // 密钥过期后返回 null，旧行会永远留在 IsActive=true 且被 RemoveExpiredInactiveAsync 漏掉。
+            // 不在这里 SaveChanges——与下面新密钥的插入合并成一次提交，中途不出现零个活跃密钥。
+            var deactivatedCount = await keyRepo.DeactivateAllActiveAsync();
+
+            SetCurrentKey(await GenerateAndSaveKeyAsync(keyRepo, unitOfWork, KeyGenerationReason.Rotation));
+
+            // 停用是在上面那次 SaveChanges 里才落库的，日志必须等提交完成后再发：
+            // 提交失败时不能留下一条"已停用 N 把密钥"、而实际已回滚的记录去误导排查。
+            if (deactivatedCount > 0)
+            {
+                _logger.LogInformation("Deactivated {Count} previously active key(s)", deactivatedCount);
+            }
+
+            await RefreshValidationKeysAsync();
         }
-
-        _logger.LogInformation("Rotating RSA key pair");
-
-        // 停用所有 IsActive 行，而不是只停用 GetActiveKeyAsync 返回的那一条：后者带过期过滤，
-        // 密钥过期后返回 null，旧行会永远留在 IsActive=true 且被 RemoveExpiredInactiveAsync 漏掉。
-        // 不在这里 SaveChanges——与下面新密钥的插入合并成一次提交，中途不出现零个活跃密钥。
-        var deactivatedCount = await keyRepo.DeactivateAllActiveAsync();
-
-        SetCurrentKey(await GenerateAndSaveKeyAsync(keyRepo, unitOfWork, KeyGenerationReason.Rotation));
-
-        // 停用是在上面那次 SaveChanges 里才落库的，日志必须等提交完成后再发：
-        // 提交失败时不能留下一条"已停用 N 把密钥"、而实际已回滚的记录去误导排查。
-        if (deactivatedCount > 0)
+        finally
         {
-            _logger.LogInformation("Deactivated {Count} previously active key(s)", deactivatedCount);
+            _refreshLock.Release();
         }
-
-        await RefreshValidationKeysAsync();
     }
 
     private async Task<RsaSecurityKey> LoadOrCreateKeyAsync()

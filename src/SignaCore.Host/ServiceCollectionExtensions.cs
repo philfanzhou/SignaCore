@@ -437,6 +437,49 @@ public static class ServiceCollectionExtensions
                 _ => { })
             .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
             {
+                options.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = async context =>
+                    {
+                        var authorization = context.Request.Headers.Authorization.ToString();
+                        const string bearerPrefix = "Bearer ";
+                        if (!authorization.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return;
+                        }
+
+                        var compactToken = authorization[bearerPrefix.Length..].Trim();
+                        var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                        if (!handler.CanReadToken(compactToken))
+                        {
+                            return;
+                        }
+
+                        string? keyId;
+                        try
+                        {
+                            keyId = handler.ReadJwtToken(compactToken).Header.Kid;
+                        }
+                        catch (ArgumentException)
+                        {
+                            return;
+                        }
+
+                        if (string.IsNullOrEmpty(keyId))
+                        {
+                            return;
+                        }
+
+                        var manager = context.HttpContext.RequestServices.GetRequiredService<IKeyManager>();
+                        if (manager.GetValidationKeys().Any(key =>
+                                string.Equals(key.KeyId, keyId, StringComparison.Ordinal)))
+                        {
+                            return;
+                        }
+
+                        await manager.RefreshKeysAsync();
+                    }
+                };
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,

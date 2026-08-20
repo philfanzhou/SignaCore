@@ -174,6 +174,9 @@ public sealed class TokenIssuanceService
 
         await InjectBootstrapAdminRoleAsync(request, account, claims);
 
+        // The signing key is database-backed and may have been rotated by another replica. Refresh
+        // before signing so this instance never continues minting tokens with a stale private key.
+        await _keyManager.RefreshKeysAsync();
         var rsaKey = _keyManager.GetCurrentKey();
         var audience = JwtTokenService.ResolveAudience(request.App, _jwtOptions);
         var accessToken = _tokenService.GenerateJwtToken(

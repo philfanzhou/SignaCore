@@ -255,6 +255,35 @@ public class KeyManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task RefreshKeys_WhenAnotherInstanceRotated_AdoptsDatabaseActiveKey()
+    {
+        SetEnvironmentMasterKey();
+
+        var originalKey = CreateTestSecurityKeyEntity();
+        originalKey.KeyId = "original-key";
+        var replacementKey = CreateTestSecurityKeyEntity();
+        replacementKey.KeyId = "replacement-key";
+
+        var activeKey = originalKey;
+        var keyRepoMock = CreateKeyRepoMock();
+        keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(() => activeKey);
+        keyRepoMock.Setup(r => r.GetValidKeysAsync()).ReturnsAsync(() => new[] { activeKey });
+
+        var keyManager = new KeyManager(
+            CreateMockScopeFactory(keyRepoMock).Object,
+            CreateProtector(),
+            NullLogger<KeyManager>.Instance);
+        await keyManager.InitializationCompleted;
+        Assert.Equal("original-key", keyManager.GetCurrentKey().KeyId);
+
+        activeKey = replacementKey;
+        await keyManager.RefreshKeysAsync();
+
+        Assert.Equal("replacement-key", keyManager.GetCurrentKey().KeyId);
+        Assert.Contains(keyManager.GetValidationKeys(), key => key.KeyId == "replacement-key");
+    }
+
+    [Fact]
     public async Task RotateKey_WhenKeyNeedsRotation_GeneratesNewKey()
     {
         SetEnvironmentMasterKey();

@@ -28,6 +28,7 @@ internal static class AuthTestDoubles
     {
         var mock = new Mock<IKeyManager>();
         mock.Setup(k => k.GetCurrentKey()).Returns(new RsaSecurityKey(RSA.Create(2048)));
+        mock.Setup(k => k.RefreshKeysAsync()).Returns(Task.CompletedTask);
         mock.Setup(k => k.NeedsKeyRotationAsync()).ReturnsAsync(false);
         mock.Setup(k => k.InitializationCompleted).Returns(Task.CompletedTask);
         return mock;
