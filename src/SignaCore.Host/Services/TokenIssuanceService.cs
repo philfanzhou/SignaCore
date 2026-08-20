@@ -124,26 +124,6 @@ public sealed class TokenIssuanceService
         var account = validationResult.Account;
         var authMethod = validationResult.AuthMethod;
         var displayName = ResolveDisplayName(account, validationResult.DisplayName, request.GrantType);
-        var newRefreshToken = await _refreshTokenService.HandleRefreshTokenAsync(
-            request.GrantType, request.RefreshToken, account, appId,
-            validationResult.LdapCredentialId, validationResult.SmsUserLoginId,
-            validationResult.WechatUserLoginId, validationResult.SourceAppId);
-
-        if (request.GrantType == IdentityConstants.GrantTypeRefreshToken && newRefreshToken == null)
-        {
-            _logger.LogWarning(
-                "Refresh token rotation failed because the token was already consumed: AccountId={AccountId}, AppId={AppId}",
-                account.Id, appId);
-            return await FailAsync(
-                request,
-                stopwatch,
-                errorCode: OAuthErrorCodes.InvalidGrant,
-                metricReason: "invalid_grant",
-                responseMessage: "invalid_grant",
-                auditFailureReason: "invalid_grant",
-                auditUsername: displayName ?? account.Id.ToString(),
-                accountId: account.Id);
-        }
 
         var claims = _claimsResolver.ResolveBasicClaims(account, displayName);
         claims.Add(new Claim(IdentityConstants.ClaimAuthMethod, authMethod));
@@ -183,6 +163,33 @@ public sealed class TokenIssuanceService
         var roles = claims.Where(c => c.Type == IdentityConstants.ClaimRole).Select(c => c.Value).ToList();
         var permissions = claims.Where(c => c.Type == IdentityConstants.ClaimPermission).Select(c => c.Value).ToList();
 
+        // Keep the presented refresh token usable until every fallible step required to construct
+        // the response has succeeded. Once rotation commits, no callback, signing, or account update
+        // may strand the client without either the old token or the replacement plaintext.
+        await _accountLoginInfoService.UpdateLoginInfoAsync(
+            account, request.ClientIp, validationResult.AuthMethod ?? request.GrantType);
+
+        var newRefreshToken = await _refreshTokenService.HandleRefreshTokenAsync(
+            request.GrantType, request.RefreshToken, account, appId,
+            validationResult.LdapCredentialId, validationResult.SmsUserLoginId,
+            validationResult.WechatUserLoginId, validationResult.SourceAppId);
+
+        if (request.GrantType == IdentityConstants.GrantTypeRefreshToken && newRefreshToken == null)
+        {
+            _logger.LogWarning(
+                "Refresh token rotation failed because the token was already consumed: AccountId={AccountId}, AppId={AppId}",
+                account.Id, appId);
+            return await FailAsync(
+                request,
+                stopwatch,
+                errorCode: OAuthErrorCodes.InvalidGrant,
+                metricReason: "invalid_grant",
+                responseMessage: "invalid_grant",
+                auditFailureReason: "invalid_grant",
+                auditUsername: displayName ?? account.Id.ToString(),
+                accountId: account.Id);
+        }
+
         stopwatch.Stop();
         _authMetrics.RecordLoginSuccess(request.GrantType);
         _authMetrics.RecordLoginDuration(stopwatch.Elapsed.TotalMilliseconds, request.GrantType);
@@ -196,9 +203,6 @@ public sealed class TokenIssuanceService
         await _auditService.RecordLoginAsync(
             account.Id, displayName ?? account.Id.ToString(), request.GrantType, "login_success",
             request.ClientIp, request.UserAgent, null, appId, request.CorrelationId);
-
-        await _accountLoginInfoService.UpdateLoginInfoAsync(
-            account, request.ClientIp, validationResult.AuthMethod ?? request.GrantType);
 
         return TokenIssuanceOutcome.Success(
             accessToken,
