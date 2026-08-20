@@ -16,9 +16,10 @@ public sealed class ConfigurationXmlEncryptor : IXmlEncryptor, IXmlDecryptor
 
     private readonly IConfigurationProtector _protector;
 
-    public ConfigurationXmlEncryptor(IConfigurationProtector protector)
+    public ConfigurationXmlEncryptor(IServiceProvider services)
     {
-        _protector = protector;
+        ArgumentNullException.ThrowIfNull(services);
+        _protector = services.GetRequiredService<IConfigurationProtector>();
     }
 
     public EncryptedXmlInfo Encrypt(XElement plaintextElement)
