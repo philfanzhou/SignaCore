@@ -25,4 +25,24 @@ public class LogValueSanitizerTests
     {
         Assert.Equal(string.Empty, LogValueSanitizer.Sanitize(value));
     }
+
+    [Theory]
+    [InlineData("password")]
+    [InlineData("sms")]
+    [InlineData("wechat_code")]
+    [InlineData("refresh_token")]
+    [InlineData("ldap")]
+    public void SanitizeGrantType_SupportedValue_ReturnsFixedLabel(string value)
+    {
+        Assert.Equal(value, LogValueSanitizer.SanitizeGrantType(value));
+    }
+
+    [Theory]
+    [InlineData("custom\r\nforged")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void SanitizeGrantType_UnsupportedValue_ReturnsFixedMarker(string? value)
+    {
+        Assert.Equal("<unsupported>", LogValueSanitizer.SanitizeGrantType(value));
+    }
 }

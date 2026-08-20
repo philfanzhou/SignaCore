@@ -78,7 +78,7 @@ public sealed class TokenIssuanceService
         if (!_validatorFactory.IsSupportedGrantType(request.GrantType))
         {
             _logger.LogWarning("Unsupported grant_type: {GrantType}",
-                LogValueSanitizer.Sanitize(request.GrantType)); // lgtm[cs/cleartext-storage-of-sensitive-information] OAuth grant type, not a credential
+                LogValueSanitizer.SanitizeGrantType(request.GrantType));
             return await FailAsync(
                 request,
                 stopwatch,
@@ -106,7 +106,7 @@ public sealed class TokenIssuanceService
         {
             _logger.LogWarning(
                 "Authentication failed: GrantType={GrantType}, Reason={Reason}",
-                LogValueSanitizer.Sanitize(request.GrantType), // lgtm[cs/cleartext-storage-of-sensitive-information] OAuth grant type, not a credential
+                LogValueSanitizer.SanitizeGrantType(request.GrantType),
                 LogValueSanitizer.Sanitize(validationResult.ErrorMessage));
             return await FailAsync(
                 request,
@@ -190,7 +190,7 @@ public sealed class TokenIssuanceService
         _logger.LogInformation(
             "Token issued: AccountId={AccountId}, GrantType={GrantType}, AppId={AppId}",
             account.Id,
-            LogValueSanitizer.Sanitize(request.GrantType), // lgtm[cs/cleartext-storage-of-sensitive-information] OAuth grant type, not a credential
+            LogValueSanitizer.SanitizeGrantType(request.GrantType),
             LogValueSanitizer.Sanitize(appId));
 
         await _auditService.RecordLoginAsync(
