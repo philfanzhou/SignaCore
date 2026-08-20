@@ -404,7 +404,7 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
             values = new Dictionary<string, string>
             {
                 ["Sms:MaxSendsPerHour"] = "7",
-                ["WeChat:AppSecret"] = "a-new-wechat-secret"
+                ["Sms:OtpHmacKey"] = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
             }
         }, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -417,16 +417,16 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
 
         var secret = await db.SystemSettings.AsNoTracking()
-            .SingleAsync(setting => setting.Key == "WeChat:AppSecret", cancellationToken: TestContext.Current.CancellationToken);
+            .SingleAsync(setting => setting.Key == "Sms:OtpHmacKey", cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(secret.IsSecret);
-        Assert.DoesNotContain("a-new-wechat-secret", secret.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", secret.Value, StringComparison.Ordinal);
 
         var audit = await db.AuditLogs.AsNoTracking()
             .Where(entry => entry.Action == "settings_updated")
             .OrderByDescending(entry => entry.CreatedAt)
             .FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Contains("WeChat:AppSecret", audit.Description ?? string.Empty, StringComparison.Ordinal);
-        Assert.DoesNotContain("a-new-wechat-secret", audit.Description ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("Sms:OtpHmacKey", audit.Description ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", audit.Description ?? string.Empty, StringComparison.Ordinal);
     }
 
     /// <summary>

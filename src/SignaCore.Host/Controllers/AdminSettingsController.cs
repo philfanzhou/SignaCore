@@ -216,7 +216,7 @@ public sealed class AdminSettingsController : ControllerBase
                 return SettingsUpdateOutcome.Unchanged(state.ConfigurationVersion);
             }
 
-            var errors = SettingsSnapshotValidator.Validate(proposed);
+            var errors = SettingsSnapshotValidator.Validate(proposed, _environment.IsDevelopment());
             if (errors.Count > 0)
             {
                 return SettingsUpdateOutcome.Failed(string.Join(" ", errors), isConflict: false);

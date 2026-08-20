@@ -74,6 +74,7 @@ internal static class BootstrapPhase
                     configuration,
                     settingsStore,
                     logger,
+                    environment.IsDevelopment(),
                     cancellationToken);
                 phase = InstallationPhase.Completed;
             }
@@ -100,7 +101,7 @@ internal static class BootstrapPhase
 
             // Fail closed. A completed installation is never rolled back to Pending because settings
             // are missing: that would reopen anonymous setup against a database that owns accounts.
-            SettingsSnapshotValidator.ThrowIfInvalid(snapshot.Values);
+            SettingsSnapshotValidator.ThrowIfInvalid(snapshot.Values, environment.IsDevelopment());
 
             logger.LogInformation(
                 "Loaded configuration snapshot: InstallationId={InstallationId}, " +

@@ -169,6 +169,44 @@ public class SettingsSnapshotValidatorTests
     }
 
     [Theory]
+    [InlineData(SystemSettingKeys.SmsOtpTtlSeconds, "59")]
+    [InlineData(SystemSettingKeys.SmsMaxAttempts, "0")]
+    [InlineData(SystemSettingKeys.SmsLockoutSeconds, "59")]
+    [InlineData(SystemSettingKeys.SmsMinSendIntervalSeconds, "29")]
+    [InlineData(SystemSettingKeys.SmsMaxSendsPerHour, "0")]
+    public void Validate_RejectsSmsLimitsThatWouldFailApplicationStartup(string key, string value)
+    {
+        var values = CompleteSnapshot();
+        values[key] = value;
+
+        var errors = SettingsSnapshotValidator.Validate(values);
+
+        Assert.Contains(errors, error => error.Contains("SMS verification-code limits", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_RejectsEnabledLdapWithoutAUsableDirectory()
+    {
+        var values = CompleteSnapshot();
+        values[SystemSettingKeys.LdapEnabled] = "true";
+
+        var errors = SettingsSnapshotValidator.Validate(values);
+
+        Assert.Contains(errors, error => error.Contains(SystemSettingKeys.LdapDirectories, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_RejectsAnInvalidTrustedProxyAddress()
+    {
+        var values = CompleteSnapshot();
+        values[SystemSettingKeys.ReverseProxyKnownProxies] = "[\"not-an-ip\"]";
+
+        var errors = SettingsSnapshotValidator.Validate(values);
+
+        Assert.Contains(errors, error => error.Contains(SystemSettingKeys.ReverseProxyKnownProxies, StringComparison.Ordinal));
+    }
+
+    [Theory]
     [InlineData("https://identity.example.test/", "https://identity.example.test")]
     [InlineData("  https://identity.example.test  ", "https://identity.example.test")]
     [InlineData("https://identity.example.test:8443", "https://identity.example.test:8443")]

@@ -21,6 +21,7 @@ internal static class LegacyConfigurationImporter
         IConfiguration configuration,
         SystemSettingsStore settingsStore,
         ILogger logger,
+        bool isDevelopment,
         CancellationToken cancellationToken = default)
     {
         var values = SystemSettingsCatalog.BuildDefaults();
@@ -73,7 +74,7 @@ internal static class LegacyConfigurationImporter
                 SystemSettingKeys.SecurityAllowNonHttpsIssuer);
         }
 
-        SettingsSnapshotValidator.ThrowIfInvalid(values);
+        SettingsSnapshotValidator.ThrowIfInvalid(values, isDevelopment);
 
         const int configurationVersion = 1;
 
