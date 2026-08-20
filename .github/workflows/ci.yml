@@ -550,8 +550,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release tag must use the numeric MAJOR.MINOR.PATCH format." >&2
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "Release tag must use MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-rc.NUMBER." >&2
             exit 1
           fi
 
@@ -580,12 +580,14 @@ jobs:
             # behind as an untagged package version, which GHCR does not prune on its own.
             type=edge,branch=${{ github.event.repository.default_branch }}
             # The semver rules read the tag name and yield nothing on a branch ref.
+            # A pre-release gets only its exact immutable version. Stable releases additionally
+            # move the minor channel and latest; an RC must never replace either production tag.
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') }}
             # Release tags carry no `v` prefix here, so the gate must not require one. Without
             # this gate the rule is unconditional and the first default-branch push would move
             # `latest` onto a development build.
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') }}
 
       - name: Build and publish image
         id: push
@@ -650,14 +652,21 @@ jobs:
             exit 0
           fi
 
-          minor="${GITHUB_REF_NAME%.*}"
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            release_flags=(--prerelease)
+            channel_note="Pre-release image; the stable minor channel and latest tag were not changed."
+          else
+            minor="${GITHUB_REF_NAME%.*}"
+            release_flags=(--latest)
+            channel_note="Also tagged ${minor} and latest."
+          fi
 
           # printf keeps the Markdown backticks literal; a heredoc would need them escaped.
           {
             printf '## Container image\n\n'
             printf '```\n%s:%s\n```\n\n' "${REGISTRY_IMAGE}" "${GITHUB_REF_NAME}"
             printf 'Digest: `%s`\n\n' "${IMAGE_DIGEST}"
-            printf 'Also tagged `%s` and `latest`.\n' "${minor}"
+            printf '%s\n' "${channel_note}"
           } > release-notes.md
 
           # --generate-notes appends GitHub's commit and pull-request changelog underneath.
@@ -666,7 +675,7 @@ jobs:
             --notes-file release-notes.md \
             --generate-notes \
             --verify-tag \
-            --latest
+            "${release_flags[@]}"
 
           {
             echo "### Published release"
