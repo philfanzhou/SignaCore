@@ -25,24 +25,14 @@ public sealed class ServerDatabaseContractTests
             ? image
             : "postgres:15-alpine";
 
-    private readonly ITestOutputHelper _output;
-
-    public ServerDatabaseContractTests(ITestOutputHelper output)
-    {
-        _output = output;
-    }
-
     [Theory]
     [InlineData("PostgreSQL")]
     public async Task ProviderContract_MigrationCrudNormalizationAndConcurrency(
         string provider)
     {
-        if (!ShouldRunContainerMatrix())
-        {
-            _output.WriteLine(
-                $"SKIPPED {provider}: set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the container matrix.");
-            return;
-        }
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            $"Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the {provider} container matrix.");
 
         var container = CreateContainer(provider);
         await using (container)
@@ -62,12 +52,9 @@ public sealed class ServerDatabaseContractTests
     [Fact]
     public async Task PostgreSqlLegacyHistory_UpgradesInPlace()
     {
-        if (!ShouldRunContainerMatrix())
-        {
-            _output.WriteLine(
-                "SKIPPED PostgreSQL legacy upgrade: set RUN_SIGNACORE_DATABASE_CONTRACTS=true.");
-            return;
-        }
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL legacy upgrade.");
 
         var container = new PostgreSqlBuilder(PostgreSqlImage)
             .WithDatabase("identity")

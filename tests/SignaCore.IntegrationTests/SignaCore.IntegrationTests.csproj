@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
     <!-- Supplies the hang dump option, the Microsoft.Testing.Platform replacement for VSTest blame-hang. -->
     <PackageReference Include="Microsoft.Testing.Extensions.HangDump" />
     <PackageReference Include="Moq" />

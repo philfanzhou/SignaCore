@@ -7,6 +7,7 @@ dotnet build SignaCore.slnx --configuration Release
 dotnet test tests/SignaCore.Tests/SignaCore.Tests.csproj --configuration Release
 npm --prefix src/SignaCore.Admin ci
 npm --prefix src/SignaCore.Admin audit --audit-level=high
+npm --prefix src/SignaCore.Admin run test:coverage
 npm --prefix src/SignaCore.Admin run build
 ```
 
@@ -53,7 +54,10 @@ from JWKS, exercise refresh rotation, and confirm migration history in the selec
 
 CI runs the full integration project, verifies refresh rotation/replay rejection and digest-only
 storage against the containerized PostgreSQL smoke deployment, blocks high/critical fixed container
-vulnerabilities, uploads an SPDX JSON SBOM, and runs CodeQL for C# and JavaScript/TypeScript.
+vulnerabilities, uploads an SPDX JSON SBOM, and runs CodeQL for C# and JavaScript/TypeScript. Unit
+test coverage is collected with Microsoft Testing Platform after excluding generated migrations and
+test assemblies; CI enforces a 45% line and branch baseline. The frontend coverage command enforces
+its own checked-in baseline in `vitest.config.ts`.
 
 ## Rename audit
 

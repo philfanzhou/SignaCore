@@ -31,6 +31,7 @@ bld/
 appsettings.Development.json
 appsettings.*.json
 !appsettings.Production.json
+!appsettings.Development.example.json
 !.gitignore
 *.env
 .env.local
@@ -62,6 +63,7 @@ Thumbs.db
 [Bb]uild[Ll]og.*
 coverage*.json
 coverage*.xml
+!tests/coverage.settings.xml
 coverage*.info
 *.coverage
 *.trx

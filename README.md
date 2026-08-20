@@ -39,13 +39,15 @@ dotnet build SignaCore.slnx --configuration Release
 dotnet test tests/SignaCore.Tests/SignaCore.Tests.csproj
 dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj
 npm --prefix src/SignaCore.Admin ci
+npm --prefix src/SignaCore.Admin run test:coverage
 npm --prefix src/SignaCore.Admin run build
 ```
 
 ## Run locally
 
-Point `appsettings.Development.json` at a local PostgreSQL instance (or override
-`Database__ConnectionString`), then run:
+Copy `src/SignaCore.Host/appsettings.Development.example.json` to
+`src/SignaCore.Host/appsettings.Development.json`, point it at a local PostgreSQL instance (or
+override `Database__ConnectionString`), then run:
 
 ```bash
 dotnet run --project src/SignaCore.Host/SignaCore.Host.csproj

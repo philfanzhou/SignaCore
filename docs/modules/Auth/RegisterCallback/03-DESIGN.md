@@ -14,7 +14,7 @@ CallbackRegistrationController, CallbackUrlValidator, and AppRegistrationReposit
 
 ## Interface
 
-Primary interface: POST /api/auth/callback.
+Primary interface: POST /api/auth/callback/register.
 
 ## Persistence
 

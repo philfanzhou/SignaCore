@@ -56,9 +56,9 @@ A missing file starts protected Bootstrap Configuration Mode: liveness remains t
 false, normal APIs return `503 bootstrap_configuration_required`, and `/bootstrap` requires the
 one-time code printed to standard output. A present but unreadable or malformed file is a fatal
 startup error whose message names the expected path without disclosing secrets. Development falls
-back to a `Database` section in
-`appsettings.Development.json` when the file is absent, so a clone-and-run developer setup works
-without preparing a secret; the fallback is refused outside Development.
+back to a `Database` section in `appsettings.Development.json` when the file is absent. Create that
+ignored local file from the tracked `appsettings.Development.example.json`; the fallback is refused
+outside Development.
 
 `Bootstrap:FilePath` may point at an equivalent file elsewhere. It exists for tests and for
 orchestrators that mount secrets at a non-default path; production deployments do not need it.

@@ -76,6 +76,7 @@ jobs:
             sleep $((attempt * 10))
           done
 
+          npm run test:coverage
           npm run build
 
       - name: Build image
@@ -108,16 +109,28 @@ jobs:
           dotnet restore tests/SignaCore.Tests/SignaCore.Tests.csproj
           dotnet test tests/SignaCore.Tests/SignaCore.Tests.csproj \
             --configuration Release \
+            --coverage \
+            --coverage-output signacore-ut.cobertura.xml \
+            --coverage-output-format cobertura \
+            --coverage-settings tests/coverage.settings.xml \
             --report-xunit-trx \
             --report-xunit-trx-filename signacore-ut.trx \
             --results-directory reports \
             --no-restore
+          python .github/scripts/verify_coverage.py \
+            reports/signacore-ut.cobertura.xml \
+            --minimum-line-rate 0.45 \
+            --minimum-branch-rate 0.45
 
       - name: Integration and HTTP contract tests
         run: |
           dotnet restore tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj
           dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj \
             --configuration Release \
+            --coverage \
+            --coverage-output signacore-integration.cobertura.xml \
+            --coverage-output-format cobertura \
+            --coverage-settings tests/coverage.settings.xml \
             --report-xunit-trx \
             --report-xunit-trx-filename signacore-integration.trx \
             --results-directory reports \

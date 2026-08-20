@@ -9,6 +9,7 @@ dotnet build SignaCore.slnx
 dotnet test tests/SignaCore.Tests/SignaCore.Tests.csproj
 dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj
 npm --prefix src/SignaCore.Admin ci
+npm --prefix src/SignaCore.Admin run test:coverage
 npm --prefix src/SignaCore.Admin run build
 ```
 

@@ -6,7 +6,7 @@ An authenticated application registers an allow-listed callback URL used to enri
 
 ## Primary interface
 
-POST /api/auth/callback
+POST /api/auth/callback/register
 
 ## Acceptance summary
 

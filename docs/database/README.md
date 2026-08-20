@@ -19,9 +19,9 @@ SignaCore uses one EF Core model with provider-specific migrations for PostgreSQ
 | [security_keys](./tables/security_keys.md) | RSA signing-key metadata and encrypted private parameters. |
 | [system_settings](./tables/system_settings.md) | Global application configuration, with secret values encrypted. |
 | [user_logins](./tables/user_logins.md) | External provider identity bindings, including phone and WeChat identities. |
-| `ldap_credentials` | LDAP directory identity bindings |
-| `app_ldap_access` | Per-application LDAP access approvals |
-| `app_sms_access` | Per-application SMS user approvals |
+| [ldap_credentials](./tables/ldap_credentials.md) | LDAP directory identity bindings. |
+| [app_ldap_accesses](./tables/app_ldap_accesses.md) | Per-application LDAP identity admissions. |
+| [app_sms_accesses](./tables/app_sms_accesses.md) | Per-application SMS identity admissions. |
 | [app_wechat_accesses](./tables/app_wechat_accesses.md) | Per-application WeChat identity admissions |
 
 See [relationships](./relations.md) and [migration operations](./migrations.md).
