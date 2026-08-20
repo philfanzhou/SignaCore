@@ -77,9 +77,9 @@ public sealed class TokenIssuanceService
 
         if (!_validatorFactory.IsSupportedGrantType(request.GrantType))
         {
-            // "password" is an OAuth grant type identifier, not a password or credential value.
-            // codeql[cs/cleartext-storage-of-sensitive-information]
             _logger.LogWarning("Unsupported grant_type: {GrantType}",
+                // "password" is an OAuth grant type identifier, not a password or credential value.
+                // codeql[cs/cleartext-storage-of-sensitive-information]
                 LogValueSanitizer.Sanitize(request.GrantType));
             return await FailAsync(
                 request,
@@ -106,10 +106,10 @@ public sealed class TokenIssuanceService
 
         if (!validationResult.IsSuccess)
         {
-            // "password" is an OAuth grant type identifier, not a password or credential value.
-            // codeql[cs/cleartext-storage-of-sensitive-information]
             _logger.LogWarning(
                 "Authentication failed: GrantType={GrantType}, Reason={Reason}",
+                // "password" is an OAuth grant type identifier, not a password or credential value.
+                // codeql[cs/cleartext-storage-of-sensitive-information]
                 LogValueSanitizer.Sanitize(request.GrantType),
                 LogValueSanitizer.Sanitize(validationResult.ErrorMessage));
             return await FailAsync(
@@ -191,11 +191,13 @@ public sealed class TokenIssuanceService
         _authMetrics.RecordLoginSuccess(request.GrantType);
         _authMetrics.RecordLoginDuration(stopwatch.Elapsed.TotalMilliseconds, request.GrantType);
 
-        // "password" is an OAuth grant type identifier, not a password or credential value.
-        // codeql[cs/cleartext-storage-of-sensitive-information]
         _logger.LogInformation(
             "Token issued: AccountId={AccountId}, GrantType={GrantType}, AppId={AppId}",
-            account.Id, LogValueSanitizer.Sanitize(request.GrantType), LogValueSanitizer.Sanitize(appId));
+            account.Id,
+            // "password" is an OAuth grant type identifier, not a password or credential value.
+            // codeql[cs/cleartext-storage-of-sensitive-information]
+            LogValueSanitizer.Sanitize(request.GrantType),
+            LogValueSanitizer.Sanitize(appId));
 
         await _auditService.RecordLoginAsync(
             account.Id, displayName ?? account.Id.ToString(), request.GrantType, "login_success",
