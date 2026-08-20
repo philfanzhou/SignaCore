@@ -21,9 +21,7 @@ public class ValidatorFactory
         if (!_validators.TryGetValue(grantType, out var validator))
         {
             _logger.LogWarning("No validator found for grant type: {GrantType}, available: {AvailableTypes}",
-                // "password" is an OAuth grant type identifier, not a password or credential value.
-                // codeql[cs/cleartext-storage-of-sensitive-information]
-                LogValueSanitizer.Sanitize(grantType),
+                LogValueSanitizer.Sanitize(grantType), // lgtm[cs/cleartext-storage-of-sensitive-information] OAuth grant type, not a credential
                 LogValueSanitizer.Sanitize(string.Join(", ", _validators.Keys)));
             throw new KeyNotFoundException($"No validator registered for grant type: {grantType}");
         }
