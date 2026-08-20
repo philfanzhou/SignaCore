@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -83,6 +85,18 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPrivateKeyProtector, AesGcmPrivateKeyProtector>();
         services.AddSingleton<IConfigurationProtector, AesGcmConfigurationProtector>();
         services.AddSingleton<IKeyManager, KeyManager>();
+
+        // Administrative cookies must survive process restarts and be readable by every replica.
+        // The custom repository encrypts the XML before persisting it in the shared database.
+        services.AddSingleton<IXmlRepository, DatabaseDataProtectionKeyRepository>();
+        services.AddSingleton<ConfigurationXmlEncryptor>();
+        services.AddDataProtection().SetApplicationName("SignaCore.Admin");
+        services.AddOptions<Microsoft.AspNetCore.DataProtection.KeyManagement.KeyManagementOptions>()
+            .Configure<IXmlRepository, ConfigurationXmlEncryptor>((options, repository, encryptor) =>
+            {
+                options.XmlRepository = repository;
+                options.XmlEncryptor = encryptor;
+            });
 
         // ---- JWT Options ----
         var jwtOptions = services.RegisterSingleton(new JwtOptions

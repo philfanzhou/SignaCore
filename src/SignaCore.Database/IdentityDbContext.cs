@@ -32,6 +32,7 @@ public class IdentityDbContext : DbContext
     public DbSet<AppExchangeTrustEntity> AppExchangeTrusts => Set<AppExchangeTrustEntity>();
     public DbSet<SystemSettingEntity> SystemSettings => Set<SystemSettingEntity>();
     public DbSet<InstallationStateEntity> InstallationStates => Set<InstallationStateEntity>();
+    public DbSet<DataProtectionKeyEntity> DataProtectionKeys => Set<DataProtectionKeyEntity>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
@@ -249,6 +250,18 @@ public class IdentityDbContext : DbContext
             ConfigureInstant(entity.Property(e => e.ExpiresAt).HasColumnName("expires_at"));
             entity.Property(e => e.IsActive).HasColumnName("is_active");
             entity.HasIndex(e => e.KeyId).IsUnique();
+        });
+
+        modelBuilder.Entity<DataProtectionKeyEntity>(entity =>
+        {
+            entity.ToTable("data_protection_keys");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.FriendlyName)
+                .HasColumnName("friendly_name")
+                .HasMaxLength(256);
+            entity.Property(e => e.ProtectedXml).HasColumnName("protected_xml");
+            entity.HasIndex(e => e.FriendlyName).IsUnique();
         });
 
         modelBuilder.Entity<OtpEntity>(entity =>
