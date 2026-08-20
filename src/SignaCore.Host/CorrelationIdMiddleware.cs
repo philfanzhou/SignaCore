@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using SignaCore.Domain;
 
 namespace SignaCore.Host;
 
@@ -30,7 +31,7 @@ public class CorrelationIdMiddleware
 
         using var scope = _logger.BeginScope(new Dictionary<string, object>
         {
-            [CorrelationIdLogKey] = correlationId
+            [CorrelationIdLogKey] = LogValueSanitizer.Sanitize(correlationId)
         });
 
         try
@@ -40,7 +41,9 @@ public class CorrelationIdMiddleware
         catch (Exception ex)
         {
             _logger.LogError(ex, "HTTP request failed: CorrelationId={CorrelationId}, Method={Method}, Path={Path}",
-                correlationId, context.Request.Method, context.Request.Path);
+                LogValueSanitizer.Sanitize(correlationId),
+                LogValueSanitizer.Sanitize(context.Request.Method),
+                LogValueSanitizer.Sanitize(context.Request.Path.Value));
             throw;
         }
     }

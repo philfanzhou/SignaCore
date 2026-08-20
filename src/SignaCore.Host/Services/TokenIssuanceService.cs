@@ -77,7 +77,8 @@ public sealed class TokenIssuanceService
 
         if (!_validatorFactory.IsSupportedGrantType(request.GrantType))
         {
-            _logger.LogWarning("Unsupported grant_type: {GrantType}", request.GrantType);
+            _logger.LogWarning("Unsupported grant_type: {GrantType}",
+                LogValueSanitizer.SanitizeGrantType(request.GrantType));
             return await FailAsync(
                 request,
                 stopwatch,
@@ -105,7 +106,8 @@ public sealed class TokenIssuanceService
         {
             _logger.LogWarning(
                 "Authentication failed: GrantType={GrantType}, Reason={Reason}",
-                request.GrantType, validationResult.ErrorMessage);
+                LogValueSanitizer.SanitizeGrantType(request.GrantType),
+                LogValueSanitizer.Sanitize(validationResult.ErrorMessage));
             return await FailAsync(
                 request,
                 stopwatch,
@@ -187,7 +189,9 @@ public sealed class TokenIssuanceService
 
         _logger.LogInformation(
             "Token issued: AccountId={AccountId}, GrantType={GrantType}, AppId={AppId}",
-            account.Id, request.GrantType, appId);
+            account.Id,
+            LogValueSanitizer.SanitizeGrantType(request.GrantType),
+            LogValueSanitizer.Sanitize(appId));
 
         await _auditService.RecordLoginAsync(
             account.Id, displayName ?? account.Id.ToString(), request.GrantType, "login_success",

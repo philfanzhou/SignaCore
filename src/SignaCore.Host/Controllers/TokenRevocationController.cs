@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using SignaCore.Domain;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Http;
 using SignaCore.Host.Models;
@@ -34,12 +35,14 @@ public class TokenRevocationController : ControllerBase
 
         if (string.IsNullOrEmpty(request.RefreshToken))
         {
-            _logger.LogWarning("Refresh token revocation failed: empty token, ClientIp={ClientIp}, CorrelationId={CorrelationId}", clientIp, correlationId);
+            _logger.LogWarning("Refresh token revocation failed: empty token, ClientIp={ClientIp}, CorrelationId={CorrelationId}",
+                LogValueSanitizer.Sanitize(clientIp), LogValueSanitizer.Sanitize(correlationId));
             return Ok(new RevokeResponse { Success = false });
         }
 
         var success = await _refreshTokenService.RevokeAsync(request.RefreshToken);
-        _logger.LogInformation("Refresh token revoked: Success={Success}, ClientIp={ClientIp}, CorrelationId={CorrelationId}", success, clientIp, correlationId);
+        _logger.LogInformation("Refresh token revoked: Success={Success}, ClientIp={ClientIp}, CorrelationId={CorrelationId}",
+            success, LogValueSanitizer.Sanitize(clientIp), LogValueSanitizer.Sanitize(correlationId));
         return Ok(new RevokeResponse { Success = success });
     }
 }

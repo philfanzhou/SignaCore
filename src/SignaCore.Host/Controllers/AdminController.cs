@@ -189,7 +189,7 @@ public class AdminController : ControllerBase
         _logger.LogInformation(
             "User created from Admin API: UserId={UserId}, Username={Username}",
             account.Id,
-            credential.Username);
+            LogValueSanitizer.Sanitize(credential.Username));
 
         var (actorId, actorName) = GetAdminIdentity();
         await auditService.RecordActionAsync("account_created", "Account", account.Id.ToString(),
