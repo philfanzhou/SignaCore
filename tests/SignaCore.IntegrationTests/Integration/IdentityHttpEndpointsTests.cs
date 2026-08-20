@@ -429,6 +429,64 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         Assert.DoesNotContain("a-new-wechat-secret", audit.Description ?? string.Empty, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Bootstrap metadata is an authenticated, read-only view of the instance-local file. The
+    /// response exposes whether a key exists but never returns the key or connection string.
+    /// </summary>
+    [Fact]
+    public async Task BootstrapSettingsApi_RequiresAdminAndNeverReturnsSecrets()
+    {
+        using var anonymous = _fixture.CreateHttpClient();
+        Assert.Equal(
+            HttpStatusCode.Unauthorized,
+            (await anonymous.GetAsync(
+                "/api/admin/bootstrap",
+                TestContext.Current.CancellationToken)).StatusCode);
+
+        using var admin = await _fixture.CreateAdminHttpClientAsync();
+        var response = await admin.GetAsync(
+            "/api/admin/bootstrap",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var responseText = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(IdentityServerFixture.RootSecret, responseText, StringComparison.Ordinal);
+        Assert.DoesNotContain("ConnectionString", responseText, StringComparison.OrdinalIgnoreCase);
+
+        using var body = JsonDocument.Parse(responseText);
+        Assert.Equal("SQLite", body.RootElement.GetProperty("provider").GetString());
+        Assert.True(body.RootElement.GetProperty("masterKeyConfigured").GetBoolean());
+        Assert.True(body.RootElement.GetProperty("editable").GetBoolean());
+        Assert.True(body.RootElement.GetProperty("singleInstanceOnly").GetBoolean());
+    }
+
+    [Fact]
+    public async Task BootstrapSettingsApi_RefusesAnUnconfirmedDatabaseChange()
+    {
+        using var admin = await _fixture.CreateAdminHttpClientAsync();
+
+        var response = await admin.PutAsJsonAsync("/api/admin/bootstrap", new
+        {
+            database = new
+            {
+                provider = "SQLite",
+                filePath = "replacement.db"
+            },
+            confirm = false
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var responseText = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("explicit confirmation", responseText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(IdentityServerFixture.RootSecret, responseText, StringComparison.Ordinal);
+
+        using var healthClient = _fixture.CreateHttpClient();
+        using var health = await healthClient.GetAsync(
+            "/health/ready",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+    }
+
     /// <summary>Browser navigation to /setup goes to the console once installation is complete.</summary>
     [Fact]
     public async Task SetupPage_AfterInstallation_RedirectsToAdminConsole()

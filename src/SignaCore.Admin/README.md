@@ -7,6 +7,7 @@ Vue 3, TypeScript, Vite, and Element Plus power the administrative UI embedded i
 ```bash
 npm ci
 npm run dev
+npm run test:coverage
 npm run build
 npm run preview
 ```

@@ -2,7 +2,7 @@
 
 ## Required coverage
 
-Tests should cover creating password and phone users, paging and filtering, editing remarks, validating LDAP inputs, duplicate identities, and deletion.
+Tests should cover creating password and phone users, paging and filtering, editing remarks, status changes, validating LDAP inputs, and duplicate identities.
 
 ## Test layers
 

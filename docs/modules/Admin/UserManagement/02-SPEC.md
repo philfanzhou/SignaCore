@@ -2,7 +2,7 @@
 
 ## Overview
 
-Administrators create, inspect, update, and remove local, phone, and LDAP-backed user accounts.
+Administrators create, inspect, update, and deactivate local, phone, and LDAP-backed user accounts.
 
 ## Functional requirements
 

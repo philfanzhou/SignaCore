@@ -18,7 +18,7 @@ Primary interface: POST/GET/DELETE /api/admin/apps.
 
 ## Persistence
 
-Relevant tables: app_registrations, app_exchange_trusts, app_ldap_access, and app_sms_access. PostgreSQL migrations live in Database, while SQLite uses its provider-specific migration assembly.
+Relevant tables: app_registrations, app_exchange_trusts, app_ldap_accesses, and app_sms_accesses. PostgreSQL migrations live in Database, while SQLite uses its provider-specific migration assembly.
 
 ## Design constraints
 

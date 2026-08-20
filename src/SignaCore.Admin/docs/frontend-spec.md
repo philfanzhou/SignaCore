@@ -45,6 +45,7 @@ Interactive controls require labels and visible focus. Modals trap focus and sup
 
 ```bash
 npm ci
+npm run test:coverage
 npm run build
 ```
 

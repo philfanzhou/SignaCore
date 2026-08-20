@@ -17,6 +17,7 @@ dotnet test tests/SignaCore.Tests/SignaCore.Tests.csproj --configuration Release
 dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj --configuration Release
 npm --prefix src/SignaCore.Admin ci
 npm --prefix src/SignaCore.Admin audit --audit-level=high
+npm --prefix src/SignaCore.Admin run test:coverage
 npm --prefix src/SignaCore.Admin run build
 ```
 

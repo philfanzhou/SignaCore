@@ -15,10 +15,11 @@ dotnet build SignaCore.slnx
 dotnet run --project src/SignaCore.Host/SignaCore.Host.csproj
 ```
 
-The database connection comes from the writable protected bootstrap file. In Development only, when
-`config/signacore.bootstrap.json` is absent, the `Database` section of `appsettings.Development.json`
-is used instead, so a clone-and-run setup works without preparing a secret file. Override it with
-`Database__ConnectionString` if your local database differs.
+The database connection comes from the writable protected bootstrap file. For local development,
+copy `src/SignaCore.Host/appsettings.Development.example.json` to
+`src/SignaCore.Host/appsettings.Development.json` and adjust the connection string. When
+`config/signacore.bootstrap.json` is absent, Development uses that file's `Database` section as a
+convenience fallback. Override it with `Database__ConnectionString` if your local database differs.
 
 Everything else — public base URL, issuer, SMS, WeChat, LDAP — lives in the database. The first run
 against an empty database enters Setup Mode: open `http://localhost:5002/setup` and enter the
@@ -33,6 +34,7 @@ at a file elsewhere.
 ```bash
 npm --prefix src/SignaCore.Admin ci
 npm --prefix src/SignaCore.Admin run dev
+npm --prefix src/SignaCore.Admin run test:coverage
 npm --prefix src/SignaCore.Admin run build
 ```
 

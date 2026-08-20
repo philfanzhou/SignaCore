@@ -66,7 +66,7 @@ All logs and errors must redact passwords, application secrets, refresh tokens, 
 
 ## Data
 
-The feature owns or reads app_registrations, app_exchange_trusts, app_ldap_access, and app_sms_access. Database access remains behind repository interfaces and the unit-of-work/IdentityDbContext boundaries.
+The feature owns or reads app_registrations, app_exchange_trusts, app_ldap_accesses, and app_sms_accesses. Database access remains behind repository interfaces and the unit-of-work/IdentityDbContext boundaries.
 
 ## Compatibility
 
