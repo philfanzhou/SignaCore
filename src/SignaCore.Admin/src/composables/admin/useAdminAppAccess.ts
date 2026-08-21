@@ -155,6 +155,38 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
     }
   }
 
+  async function revokeWechatUser(loginId: string) {
+    if (!selectedApp.value) return;
+    try {
+      await ElMessageBox.confirm(
+        "撤销后该微信账号不能通过当前应用登录，后续需要管理员手动恢复。",
+        "撤销微信准入",
+        {
+          confirmButtonText: "撤销",
+          cancelButtonText: "取消",
+          type: "warning",
+        },
+      );
+      await adminClient.revokeAppWechatUser(selectedApp.value.appId, loginId);
+      await loadAppAccess(selectedApp.value.appId);
+      notify("微信准入已撤销");
+    } catch (error) {
+      if (error !== "cancel" && error !== "close")
+        handleApiError("撤销微信准入失败", error);
+    }
+  }
+
+  async function restoreWechatUser(loginId: string) {
+    if (!selectedApp.value) return;
+    try {
+      await adminClient.restoreAppWechatUser(selectedApp.value.appId, loginId);
+      await loadAppAccess(selectedApp.value.appId);
+      notify("微信准入已恢复");
+    } catch (error) {
+      handleApiError("恢复微信准入失败", error);
+    }
+  }
+
   async function addTrust() {
     if (!selectedApp.value || !trustSourceAppId.value.trim())
       return notify("请输入来源 App ID");
@@ -233,6 +265,8 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
     revokeSmsUser,
     addLdapUser,
     revokeLdapUser,
+    revokeWechatUser,
+    restoreWechatUser,
     addTrust,
     removeTrust,
     clearAccess,

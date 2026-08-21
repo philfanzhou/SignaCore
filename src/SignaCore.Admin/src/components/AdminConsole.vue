@@ -13,6 +13,7 @@ import AdminOverviewView from "./admin/AdminOverviewView.vue";
 import AdminResourcesView from "./admin/AdminResourcesView.vue";
 import AdminSecurityView from "./admin/AdminSecurityView.vue";
 import AdminSettingsView from "./admin/AdminSettingsView.vue";
+import AdminTokenModal from "./admin/AdminTokenModal.vue";
 
 type ViewKey =
   | "overview"
@@ -297,5 +298,6 @@ onUnmounted(() => {
       </section>
     </div>
     <div v-if="toast" class="console-toast" role="status">{{ toast }}</div>
+    <AdminTokenModal />
   </div>
 </template>

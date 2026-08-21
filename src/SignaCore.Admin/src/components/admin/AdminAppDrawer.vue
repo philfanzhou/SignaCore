@@ -25,6 +25,8 @@ const {
   revokeSmsUser,
   addLdapUser,
   revokeLdapUser,
+  revokeWechatUser,
+  restoreWechatUser,
   addTrust,
   removeTrust,
   closeAppDrawer,
@@ -282,6 +284,18 @@ const { tokenModalOpen } = useAdminSecurity();
               <span
                 ><b class="mono">{{ item.openId }}</b
                 ><small>{{ formatDate(item.createdAt) }}</small></span
+              ><button
+                v-if="item.isActive"
+                class="text-button danger-text"
+                @click="revokeWechatUser(item.loginId)"
+              >
+                撤销</button
+              ><button
+                v-else
+                class="text-button"
+                @click="restoreWechatUser(item.loginId)"
+              >
+                恢复</button
               ><span
                 class="status-pill"
                 :class="item.isActive ? 'green' : 'gray'"
