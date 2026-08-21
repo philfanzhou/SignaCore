@@ -116,6 +116,28 @@ export interface AdminSession {
   isAuthenticated: boolean
 }
 
+export interface AdminLoginHistoryItem {
+  authMethod: string
+  eventType: string
+  clientIp: string
+  userAgent: string
+  failureReason: string | null
+  appId: string | null
+  createdAt: number
+}
+
+export interface AdminAuditLogItem {
+  action: string
+  targetType: string
+  targetId: string
+  actorId: string | null
+  actorName: string | null
+  description: string | null
+  clientIp: string | null
+  correlationId: string | null
+  createdAt: number
+}
+
 class AdminApiClient {
   private client: AxiosInstance
 
@@ -165,6 +187,12 @@ class AdminApiClient {
 
   async updateUserStatus(userId: string, isActive: boolean) {
     await this.client.patch(`/api/admin/users/${userId}/status`, { isActive })
+  }
+
+  async getUserLoginHistory(userId: string, params: { page?: number; pageSize?: number } = {}) {
+    const response = await this.client.get<PagedResponse<AdminLoginHistoryItem>>(
+      `/api/admin/users/${userId}/login-history`, { params })
+    return response.data
   }
 
   async getApps() {
@@ -290,6 +318,19 @@ class AdminApiClient {
 
   async revokeRefreshToken(refreshToken: string) {
     await this.client.post('/api/admin/tokens/revoke', { refreshToken })
+  }
+
+  async getAuditLogs(params: {
+    action?: string
+    targetType?: string
+    targetId?: string
+    actorId?: string
+    page?: number
+    pageSize?: number
+  } = {}) {
+    const response = await this.client.get<PagedResponse<AdminAuditLogItem>>(
+      '/api/admin/audit-logs', { params })
+    return response.data
   }
 
   async getSettings() {
