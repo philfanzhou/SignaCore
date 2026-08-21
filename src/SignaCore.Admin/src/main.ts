@@ -11,5 +11,6 @@ import './styles/overlays.css'
 import './styles/toast.css'
 import './styles/utilities.css'
 import './styles/responsive.css'
+import './styles/redesign.css'
 
 createApp(App).mount('#app')
