@@ -4,10 +4,13 @@ import { appTitle, handleLogout, session } from "../composables/useSession";
 import { useAdminFeedback } from "../composables/admin/useAdminFeedback";
 import { useAdminApps } from "../composables/admin/useAdminApps";
 import { useAdminSecurity } from "../composables/admin/useAdminSecurity";
-import { useAdminSettings } from "../composables/admin/useAdminSettings";
+import {
+  adminSettingsSections,
+  useAdminSettings,
+  type SettingsSectionKey,
+} from "../composables/admin/useAdminSettings";
 import { useAdminUsers } from "../composables/admin/useAdminUsers";
 import { getInitials } from "../utils/format";
-import AdminBoundaryView from "./admin/AdminBoundaryView.vue";
 import AdminIdentityView from "./admin/AdminIdentityView.vue";
 import AdminOverviewView from "./admin/AdminOverviewView.vue";
 import AdminResourcesView from "./admin/AdminResourcesView.vue";
@@ -20,52 +23,33 @@ type ViewKey =
   | "identity"
   | "resources"
   | "security"
-  | "settings"
-  | "boundary";
-type NavItem = { key: ViewKey; label: string; mark: string; hint: string };
+  | SettingsSectionKey;
+type NavItem = { key: ViewKey; label: string; mark: string };
+
+const settingsNavItems: NavItem[] = adminSettingsSections.map(
+  (section, index) => ({
+    key: section.key,
+    label: section.label,
+    mark: ["◌", "◇", "▣", "⌁", "∿", "◈", "◎", "≋", "◍", "▤"][index] ?? "·",
+  }),
+);
 
 const navGroups: { label: string; items: NavItem[] }[] = [
   {
-    label: "工作台",
+    label: "管理",
     items: [
-      { key: "overview", label: "运行总览", mark: "◈", hint: "状态与待办" },
+      { key: "overview", label: "概览", mark: "◈" },
+      { key: "identity", label: "用户管理", mark: "◎" },
+      { key: "resources", label: "应用管理", mark: "▦" },
     ],
   },
   {
-    label: "身份目录",
+    label: "安全",
     items: [
-      { key: "identity", label: "账户目录", mark: "◎", hint: "用户与登录历史" },
+      { key: "security", label: "审计日志", mark: "⌁" },
     ],
   },
-  {
-    label: "接入资源",
-    items: [
-      {
-        key: "resources",
-        label: "应用与策略",
-        mark: "▦",
-        hint: "OAuth 与身份源",
-      },
-    ],
-  },
-  {
-    label: "安全中心",
-    items: [
-      {
-        key: "security",
-        label: "审计与会话",
-        mark: "⌁",
-        hint: "操作记录与撤销",
-      },
-    ],
-  },
-  {
-    label: "系统",
-    items: [
-      { key: "settings", label: "运行配置", mark: "◌", hint: "配置版本与引导" },
-      { key: "boundary", label: "能力边界", mark: "△", hint: "当前版本说明" },
-    ],
-  },
+  { label: "系统配置", items: settingsNavItems },
 ];
 
 const activeView = ref<ViewKey>("overview");
@@ -84,6 +68,12 @@ const activeNavLabel = computed(
     navGroups
       .flatMap((group) => group.items)
       .find((item) => item.key === activeView.value)?.label ?? "运行总览",
+);
+
+const activeSettingsSection = computed<SettingsSectionKey>(() =>
+  adminSettingsSections.some((section) => section.key === activeView.value)
+    ? (activeView.value as SettingsSectionKey)
+    : "settings-identity",
 );
 
 function navigate(view: ViewKey) {
@@ -141,8 +131,7 @@ onUnmounted(() => {
       <div class="console-brand">
         <div class="console-brand-mark">SC</div>
         <div>
-          <strong>{{ appTitle }}</strong
-          ><span>Identity operations</span>
+          <strong>{{ appTitle }}</strong>
         </div>
       </div>
       <nav class="console-nav">
@@ -150,6 +139,7 @@ onUnmounted(() => {
           v-for="group in navGroups"
           :key="group.label"
           class="console-nav-group"
+          :class="{ 'settings-menu-group': group.label === '系统配置' }"
         >
           <div class="console-nav-label">{{ group.label }}</div>
           <button
@@ -163,15 +153,11 @@ onUnmounted(() => {
             <span class="console-nav-mark" aria-hidden="true">{{
               item.mark
             }}</span
-            ><span class="console-nav-copy"
-              ><b>{{ item.label }}</b
-              ><small>{{ item.hint }}</small></span
-            >
+            ><span class="console-nav-copy"><b>{{ item.label }}</b></span>
           </button>
         </div>
       </nav>
       <div class="console-sidebar-footer">
-        <div class="console-signal"><span></span>管理会话已建立</div>
         <button class="console-account-mini" @click="sessionModalOpen = true">
           <span class="console-avatar">{{
             getInitials(session?.username || "A").slice(0, 2)
@@ -194,11 +180,10 @@ onUnmounted(() => {
           ☰
         </button>
         <div class="console-location">
-          <span>SignaCore /</span><strong>{{ activeNavLabel }}</strong>
+          <strong>{{ activeNavLabel }}</strong>
         </div>
         <div class="console-header-actions">
-          <span class="console-environment"><i></i>内部环境</span
-          ><button
+          <button
             class="console-header-icon"
             title="刷新当前数据"
             @click="loadInitial"
@@ -235,8 +220,9 @@ onUnmounted(() => {
             v-else-if="activeView === 'identity'" /><AdminResourcesView
             v-else-if="activeView === 'resources'" /><AdminSecurityView
             v-else-if="activeView === 'security'" /><AdminSettingsView
-            v-else-if="activeView === 'settings'" /><AdminBoundaryView v-else
-        /></template>
+            v-else
+            :section="activeSettingsSection"
+          /></template>
       </main>
     </section>
 
@@ -253,7 +239,6 @@ onUnmounted(() => {
       >
         <div class="modal-header">
           <div>
-            <span class="console-eyebrow">ADMIN SESSION</span>
             <h2 id="session-title">当前管理会话</h2>
           </div>
           <button

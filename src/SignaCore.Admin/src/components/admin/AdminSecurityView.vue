@@ -20,7 +20,6 @@ const {
   <section class="console-view">
     <div class="console-page-heading">
       <div>
-        <p class="console-eyebrow">SECURITY CENTER</p>
         <h1>审计与会话</h1>
         <p>追踪管理操作，必要时按原始 refresh token 撤销会话。</p>
       </div>
@@ -31,7 +30,6 @@ const {
     <article class="console-panel list-panel">
       <div class="panel-heading">
         <div>
-          <p class="console-eyebrow">AUDIT TRAIL</p>
           <h2>审计日志</h2>
         </div>
         <span class="panel-note">后端默认保留 365 天</span>

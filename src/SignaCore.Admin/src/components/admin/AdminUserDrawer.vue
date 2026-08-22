@@ -31,7 +31,6 @@ const {
     >
       <div class="drawer-header">
         <div>
-          <span class="console-eyebrow">ACCOUNT DETAIL</span>
           <h2>
             {{
               selectedUser.displayName ||

@@ -8,6 +8,80 @@ import {
 import { handleApiError } from "../useSession";
 import { notify } from "./useAdminFeedback";
 
+export type SettingsSectionKey =
+  | "settings-identity"
+  | "settings-admin"
+  | "settings-network"
+  | "settings-sms"
+  | "settings-wechat"
+  | "settings-ldap"
+  | "settings-observability"
+  | "settings-consul"
+  | "settings-bootstrap";
+
+export type AdminSettingsSection = {
+  key: SettingsSectionKey;
+  label: string;
+  description: string;
+  prefixes?: string[];
+};
+
+export const adminSettingsSections: AdminSettingsSection[] = [
+  {
+    key: "settings-identity",
+    label: "域名与令牌",
+    description: "配置公开地址、JWT、刷新令牌及密码哈希策略。",
+    prefixes: ["Endpoints", "Jwt", "RefreshToken", "PasswordHasher", "Security"],
+  },
+  {
+    key: "settings-admin",
+    label: "管理端",
+    description: "配置管理端允许的来源和初始管理员标识。",
+    prefixes: ["Admin", "AdminWeb"],
+  },
+  {
+    key: "settings-network",
+    label: "回调与代理",
+    description: "配置回调地址边界和反向代理可信来源。",
+    prefixes: ["Callback", "ReverseProxy"],
+  },
+  {
+    key: "settings-sms",
+    label: "短信登录",
+    description: "配置短信验证码限制、绕过规则和短信服务档案。",
+    prefixes: ["Sms"],
+  },
+  {
+    key: "settings-wechat",
+    label: "微信登录",
+    description: "配置微信应用标识、密钥和接口地址。",
+    prefixes: ["WeChat"],
+  },
+  {
+    key: "settings-ldap",
+    label: "LDAP 目录",
+    description: "配置 LDAP 开关、默认目录和目录连接信息。",
+    prefixes: ["Ldap"],
+  },
+  {
+    key: "settings-observability",
+    label: "日志与监控",
+    description: "配置 Loki 和 OpenTelemetry 的上报地址。",
+    prefixes: ["Loki", "OpenTelemetry"],
+  },
+  {
+    key: "settings-consul",
+    label: "服务发现",
+    description: "配置 Consul 连接和服务注册发现行为。",
+    prefixes: ["Consul"],
+  },
+  {
+    key: "settings-bootstrap",
+    label: "数据库引导",
+    description: "切换当前实例的引导数据库目标；操作会重启服务。",
+  },
+];
+
 const settings = ref<AdminSetting[]>([]);
 const settingsLoading = ref(false);
 const settingsSaving = ref(false);
@@ -58,6 +132,19 @@ const hasBootstrapForm = computed(() =>
   Boolean(bootstrapSettings.value?.editable),
 );
 
+function getSettingsSection(key: SettingsSectionKey) {
+  return adminSettingsSections.find((section) => section.key === key)!;
+}
+
+function getSettingsForSection(key: SettingsSectionKey) {
+  const section = getSettingsSection(key);
+  if (!section.prefixes) return [];
+  return settings.value.filter((setting) => {
+    const prefix = setting.key.split(":")[0];
+    return section.prefixes?.includes(prefix) ?? false;
+  });
+}
+
 function formatValue(setting: AdminSetting) {
   if (setting.isSecret)
     return setting.hasValue ? "已配置（不会回显）" : "未配置";
@@ -86,17 +173,30 @@ async function loadSettings() {
   }
 }
 
-async function saveSettings() {
-  if (!changedSettings.value.length) return;
+async function saveSettings(keys?: string[]) {
+  const keySet = keys ? new Set(keys) : null;
+  const pending = changedSettings.value.filter(
+    (setting) => !keySet || keySet.has(setting.key),
+  );
+  if (!pending.length) return;
+  const savedKeys = new Set(pending.map((setting) => setting.key));
+  const draftsToPreserve = new Map(
+    changedSettings.value
+      .filter((setting) => !savedKeys.has(setting.key))
+      .map((setting) => [setting.key, settingsDraft[setting.key] ?? ""]),
+  );
   settingsSaving.value = true;
   try {
     const values: Record<string, string> = {};
-    for (const setting of changedSettings.value)
+    for (const setting of pending)
       values[setting.key] = settingsDraft[setting.key] ?? "";
     const result = await adminClient.updateSettings(values);
     restartPending.value = result.restartRequired;
     notify(result.message);
     await loadSettings();
+    const availableKeys = new Set(settings.value.map((setting) => setting.key));
+    for (const [key, value] of draftsToPreserve)
+      if (availableKeys.has(key)) settingsDraft[key] = value;
   } catch (error) {
     handleApiError("保存运行配置失败", error);
   } finally {
@@ -104,9 +204,12 @@ async function saveSettings() {
   }
 }
 
-function discardSettings() {
-  for (const setting of settings.value)
+function discardSettings(keys?: string[]) {
+  const keySet = keys ? new Set(keys) : null;
+  for (const setting of settings.value) {
+    if (keySet && !keySet.has(setting.key)) continue;
     settingsDraft[setting.key] = setting.isSecret ? "" : (setting.value ?? "");
+  }
   notify("已撤销未保存修改");
 }
 
@@ -196,6 +299,8 @@ export function useAdminSettings() {
     bootstrapForm,
     changedSettings,
     settingGroups,
+    getSettingsSection,
+    getSettingsForSection,
     hasBootstrapForm,
     formatValue,
     loadSettings,

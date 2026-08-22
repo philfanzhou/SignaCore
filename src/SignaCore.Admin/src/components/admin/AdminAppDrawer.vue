@@ -48,7 +48,6 @@ const { tokenModalOpen } = useAdminSecurity();
     >
       <div class="drawer-header">
         <div>
-          <span class="console-eyebrow">RESOURCE DETAIL</span>
           <h2>{{ selectedApp.appName }}</h2>
           <p class="mono">{{ selectedApp.appId }}</p>
         </div>

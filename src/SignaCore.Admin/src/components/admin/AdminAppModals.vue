@@ -33,7 +33,6 @@ const {
     >
       <div class="modal-header">
         <div>
-          <span class="console-eyebrow">NEW RESOURCE</span>
           <h2 id="app-modal-title">注册应用</h2>
         </div>
         <button
@@ -93,7 +92,6 @@ const {
     >
       <div class="modal-header">
         <div>
-          <span class="console-eyebrow">ONE-TIME CREDENTIAL</span>
           <h2 id="secret-title">保存新的 App Secret</h2>
         </div>
       </div>
@@ -141,7 +139,6 @@ const {
     >
       <div class="modal-header">
         <div>
-          <span class="console-eyebrow">ROTATE CREDENTIAL</span>
           <h2 id="reset-title">重置 App Secret？</h2>
         </div>
         <button
@@ -194,7 +191,6 @@ const {
     >
       <div class="modal-header">
         <div>
-          <span class="console-eyebrow">IRREVERSIBLE ACTION</span>
           <h2 id="delete-title">删除 {{ selectedApp.appName }}？</h2>
         </div>
         <button

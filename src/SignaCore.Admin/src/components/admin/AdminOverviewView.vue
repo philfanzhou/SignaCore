@@ -2,7 +2,10 @@
 import { computed } from "vue";
 import { useAdminApps } from "../../composables/admin/useAdminApps";
 import { useAdminSecurity } from "../../composables/admin/useAdminSecurity";
-import { useAdminSettings } from "../../composables/admin/useAdminSettings";
+import {
+  useAdminSettings,
+  type SettingsSectionKey,
+} from "../../composables/admin/useAdminSettings";
 import { useAdminUsers } from "../../composables/admin/useAdminUsers";
 import { formatDate } from "../../utils/format";
 
@@ -11,8 +14,7 @@ type ViewKey =
   | "identity"
   | "resources"
   | "security"
-  | "settings"
-  | "boundary";
+  | SettingsSectionKey;
 const props = defineProps<{ navigate: (view: ViewKey) => void }>();
 const { userTotal, users } = useAdminUsers();
 const { apps } = useAdminApps();
@@ -34,18 +36,9 @@ const disabledApps = computed(
   <section class="console-view">
     <div class="console-page-heading">
       <div>
-        <p class="console-eyebrow">
-          CONTROL PLANE / {{ new Date().getFullYear() }}
-        </p>
-        <h1>运行总览</h1>
-        <p>把身份、接入资源和变更风险放在同一张工作台上。</p>
+        <h1>概览</h1>
+        <p>查看用户、应用和配置状态。</p>
       </div>
-      <button
-        class="console-button secondary"
-        @click="props.navigate('boundary')"
-      >
-        查看能力边界 <span>→</span>
-      </button>
     </div>
     <div class="console-metric-grid">
       <article class="console-metric">
@@ -83,7 +76,6 @@ const disabledApps = computed(
       <article class="console-panel attention-panel">
         <div class="panel-heading">
           <div>
-            <p class="console-eyebrow">ATTENTION QUEUE</p>
             <h2>需要关注</h2>
           </div>
           <span class="console-count">{{
@@ -100,7 +92,7 @@ const disabledApps = computed(
               }}。
             </p>
           </div>
-          <button @click="props.navigate('settings')">查看</button>
+          <button @click="props.navigate('settings-identity')">查看</button>
         </div>
         <div v-if="disabledApps" class="console-attention-item">
           <span>○</span>
@@ -120,7 +112,6 @@ const disabledApps = computed(
       <article class="console-panel">
         <div class="panel-heading">
           <div>
-            <p class="console-eyebrow">RECENT ACTIVITY</p>
             <h2>最近审计</h2>
           </div>
           <button class="text-button" @click="props.navigate('security')">
@@ -148,32 +139,5 @@ const disabledApps = computed(
         </div>
       </article>
     </div>
-    <article class="console-panel state-panel">
-      <div class="panel-heading">
-        <div>
-          <p class="console-eyebrow">STATE LANGUAGE</p>
-          <h2>状态语言</h2>
-        </div>
-        <span class="panel-note">统一反馈，避免误判</span>
-      </div>
-      <div class="state-grid">
-        <div>
-          <span class="status-pill green"><i></i>已启用</span
-          ><small>可继续操作</small>
-        </div>
-        <div>
-          <span class="status-pill amber"><i></i>等待重启</span
-          ><small>变更已保存</small>
-        </div>
-        <div>
-          <span class="status-pill gray"><i></i>未配置</span
-          ><small>需要补齐</small>
-        </div>
-        <div>
-          <span class="status-pill red"><i></i>错误</span
-          ><small>可重试或联系维护者</small>
-        </div>
-      </div>
-    </article>
   </section>
 </template>
