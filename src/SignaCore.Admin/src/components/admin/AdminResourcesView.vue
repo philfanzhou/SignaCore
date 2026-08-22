@@ -11,15 +11,10 @@ const {
   filteredApps,
   appPages,
   appPageItems,
-  allVisibleAppsSelected,
-  selectedAppIds,
   appModalOpen,
   resetAppForm,
   loadApps,
   openApp,
-  toggleAppSelection,
-  toggleVisibleApps,
-  showUnsupported,
 } = useAdminApps();
 
 function formatMode(mode: string) {
@@ -40,17 +35,11 @@ function formatMode(mode: string) {
   <section class="console-view">
     <div class="console-page-heading">
       <div>
-        <p class="console-eyebrow">RESOURCE REGISTRY</p>
-        <h1>应用与策略</h1>
-        <p>以应用为边界集中管理回调、登录准入、换票信任和生命周期。</p>
+        <h1>应用管理</h1>
+        <p>管理应用注册、回调地址、登录准入和换票信任。</p>
       </div>
       <div class="heading-actions">
         <button
-          class="console-button ghost"
-          @click="showUnsupported('应用列表服务端分页与导出')"
-        >
-          导出说明</button
-        ><button
           class="console-button primary"
           @click="
             resetAppForm();
@@ -90,20 +79,6 @@ function formatMode(mode: string) {
           <option value="Disabled">关闭</option>
         </select>
       </div>
-      <div class="batch-strip" :class="{ active: selectedAppIds.length }">
-        <span>{{
-          selectedAppIds.length
-            ? `已选择 ${selectedAppIds.length} 个应用`
-            : "选择应用后可查看批量能力边界"
-        }}</span
-        ><button
-          v-if="selectedAppIds.length"
-          class="console-button ghost compact"
-          @click="showUnsupported('应用批量启停、批量删除和导出')"
-        >
-          批量操作</button
-        ><span v-else class="panel-note">当前后端只提供单应用操作</span>
-      </div>
       <div v-if="appsLoading" class="console-table-state">
         <span class="console-spinner"></span>读取应用目录…
       </div>
@@ -119,14 +94,6 @@ function formatMode(mode: string) {
         <table class="console-table resource-table">
           <thead>
             <tr>
-              <th class="check-col">
-                <input
-                  type="checkbox"
-                  :checked="allVisibleAppsSelected"
-                  aria-label="选择当前页"
-                  @change="toggleVisibleApps"
-                />
-              </th>
               <th>应用资源</th>
               <th>回调与受众</th>
               <th>登录准入</th>
@@ -142,14 +109,6 @@ function formatMode(mode: string) {
               @click="openApp(app)"
               @keydown.enter="openApp(app)"
             >
-              <td class="check-col" @click.stop>
-                <input
-                  type="checkbox"
-                  :checked="selectedAppIds.includes(app.appId)"
-                  :aria-label="`选择 ${app.appName}`"
-                  @change="toggleAppSelection(app.appId)"
-                />
-              </td>
               <td>
                 <div class="table-primary">
                   <span class="resource-glyph">▦</span

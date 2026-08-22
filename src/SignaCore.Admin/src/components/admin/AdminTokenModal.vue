@@ -24,7 +24,6 @@ const {
     >
       <div class="modal-header">
         <div>
-          <span class="console-eyebrow">SESSION REVOCATION</span>
           <h2 id="token-title">撤销 refresh token</h2>
         </div>
         <button class="close-button" aria-label="关闭" @click="closeTokenModal">

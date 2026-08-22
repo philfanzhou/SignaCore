@@ -18,7 +18,6 @@ const appQuery = reactive({
 });
 const appPage = ref(1);
 const appPageSize = 8;
-const selectedAppIds = ref<string[]>([]);
 const selectedApp = ref<AdminApp | null>(null);
 const appDrawerOpen = ref(false);
 const appTab = ref<AppTab>("overview");
@@ -75,12 +74,6 @@ const appPageItems = computed(() =>
     appPage.value * appPageSize,
   ),
 );
-const allVisibleAppsSelected = computed(
-  () =>
-    appPageItems.value.length > 0 &&
-    appPageItems.value.every((app) => selectedAppIds.value.includes(app.appId)),
-);
-
 function resetAppForm() {
   Object.assign(createAppForm, {
     appName: "",
@@ -95,9 +88,6 @@ async function loadApps() {
   try {
     apps.value = await adminClient.getApps();
     if (appPage.value > appPages.value) appPage.value = 1;
-    selectedAppIds.value = selectedAppIds.value.filter((id) =>
-      apps.value.some((app) => app.appId === id),
-    );
   } catch (error) {
     appsError.value = getErrorMessage(error);
     handleApiError("加载应用目录失败", error);
@@ -228,28 +218,6 @@ async function deleteApp() {
   }
 }
 
-function toggleAppSelection(appId: string) {
-  selectedAppIds.value = selectedAppIds.value.includes(appId)
-    ? selectedAppIds.value.filter((id) => id !== appId)
-    : [...selectedAppIds.value, appId];
-}
-function toggleVisibleApps() {
-  if (allVisibleAppsSelected.value)
-    selectedAppIds.value = selectedAppIds.value.filter(
-      (id) => !appPageItems.value.some((app) => app.appId === id),
-    );
-  else
-    selectedAppIds.value = [
-      ...new Set([
-        ...selectedAppIds.value,
-        ...appPageItems.value.map((app) => app.appId),
-      ]),
-    ];
-}
-function showUnsupported(message: string) {
-  notify(`当前后端暂不支持：${message}`);
-}
-
 function closeAppDrawer() {
   appDrawerOpen.value = false;
   selectedApp.value = null;
@@ -287,8 +255,6 @@ export function useAdminApps() {
     filteredApps,
     appPages,
     appPageItems,
-    allVisibleAppsSelected,
-    selectedAppIds,
     selectedApp,
     appDrawerOpen,
     appTab,
@@ -310,9 +276,6 @@ export function useAdminApps() {
     createApp,
     resetAppSecret,
     deleteApp,
-    toggleAppSelection,
-    toggleVisibleApps,
-    showUnsupported,
     closeAppDrawer,
     closeActionModal,
     copySecret,

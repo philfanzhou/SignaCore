@@ -19,7 +19,6 @@ const { userMode, userModalOpen, userSaving, createUserForm, saveUser } =
     >
       <div class="modal-header">
         <div>
-          <span class="console-eyebrow">NEW ACCOUNT</span>
           <h2 id="user-modal-title">
             创建{{ userMode === "password" ? "密码" : "手机" }}账户
           </h2>

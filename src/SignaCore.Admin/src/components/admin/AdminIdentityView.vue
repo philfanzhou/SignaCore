@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { useAdminUsers } from "../../composables/admin/useAdminUsers";
-import { notify } from "../../composables/admin/useAdminFeedback";
 import { formatDate, getInitials } from "../../utils/format";
 import AdminUserDrawer from "./AdminUserDrawer.vue";
 import AdminUserModal from "./AdminUserModal.vue";
@@ -21,17 +20,12 @@ const {
   userModalOpen,
   resetUserForm,
 } = useAdminUsers();
-
-function notifyUnsupported() {
-  notify("当前后端暂不支持：用户批量状态变更和导出");
-}
 </script>
 
 <template>
   <section class="console-view">
     <div class="console-page-heading">
       <div>
-        <p class="console-eyebrow">IDENTITY DIRECTORY</p>
         <h1>账户目录</h1>
         <p>管理平台账户状态，并在详情中核对登录历史。</p>
       </div>
@@ -84,13 +78,7 @@ function notifyUnsupported() {
           <option value="active">已启用</option>
           <option value="disabled">已禁用</option></select
         ><button class="console-button secondary compact" @click="searchUsers">
-          搜索</button
-        ><span class="filter-spacer"></span
-        ><button
-          class="console-button ghost compact"
-          @click="notifyUnsupported"
-        >
-          批量操作
+          搜索
         </button>
       </div>
       <div class="list-summary">
