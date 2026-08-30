@@ -34,12 +34,13 @@ session cookie does that.
 2. If `post_logout_redirect_uri` is present, match it exactly against that client's
    `post_logout_redirect_uris`. No match → local error page, HTTP 400, **no redirect**. Same rule as
    the authorization endpoint: an unverified URI is never a destination.
-3. Resolve the request's own session: unprotect `__Host-signacore_identity` and load the session it
-   names. Revoke that session **only if** its identifier equals `sid` from the hint and it belongs to
-   the account in `sub`. No cookie, an unusable cookie, or a cookie naming a different session →
-   revoke nothing and continue at step 4. A cookie that names exactly the hint's `sid` but a session
-   bound to some other account is an inconsistent request → local error page, HTTP 400, nothing
-   revoked and the cookie left alone.
+3. Resolve the request's own session: unprotect `__Host-signacore_identity`, then load and lock the
+   session it names. Revoke that session **only if** its identifier equals `sid` from the hint and it
+   belongs to the account in `sub`. The lock is the same one code redemption takes before its final
+   live-session check. No cookie, an unusable cookie, or a cookie naming a different session → revoke
+   nothing and continue at step 4. A cookie that names exactly the hint's `sid` but a session bound
+   to some other account is an inconsistent request → local error page, HTTP 400, nothing revoked and
+   the cookie left alone.
 4. Delete `__Host-signacore_identity` with the same attributes it was set with.
 5. Redirect to the verified `post_logout_redirect_uri` with `state` echoed if supplied; if none was
    supplied, render a local "you have signed out" page, HTTP 200.
@@ -73,7 +74,7 @@ account-security feature, not a protocol one, and is not in this phase.
 | --- | --- |
 | The identity session named by `sid`, when the request's cookie names that same session | Revoked immediately, on every instance |
 | `__Host-signacore_identity` | Deleted from this browser |
-| Unredeemed authorization codes from that session | Invalidated |
+| Unredeemed authorization codes from that session | Rejected at redemption because the session is revoked; the code row is not marked consumed |
 | Refresh tokens bound to that session | Revoked, for every application |
 | Access tokens issued from that session | **Not** revoked; they expire within 15 minutes |
 | `qz_admin_session` | Untouched |

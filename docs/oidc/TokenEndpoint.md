@@ -42,9 +42,12 @@ whose code was issued for one must not be able to redeem it while claiming the o
 8. The record's `redirect_uri` equals the request's, ordinal. Mismatch → `invalid_grant`.
 9. PKCE: `BASE64URL(SHA256(ASCII(code_verifier)))` equals the stored `code_challenge`, compared in
    constant time. Mismatch → `invalid_grant`.
-10. Consume the record atomically. Lost race → `invalid_grant` and replay handling.
+10. Load and lock the identity session named by the record. It must belong to the same account, must
+    not be revoked, and must be before both its idle and absolute expiry. Otherwise →
+    `invalid_grant`, with no replay handling.
 11. The account is still enabled and the application still active. Otherwise → `invalid_grant`.
-12. Issue tokens.
+12. Consume the record atomically. Lost race → `invalid_grant` and replay handling.
+13. Issue tokens and commit the issuance transaction.
 
 Every failure from step 4 onward returns the same `invalid_grant` with the same
 `error_description` — `"The authorization code is invalid, expired, or has already been used."` —
@@ -68,6 +71,15 @@ Exactly one concurrent caller gets a row; the other gets zero rows and fails. `R
 makes it one statement — a `SELECT` before the `UPDATE` reintroduces the window the statement exists
 to close. On SQLite the same statement is used; the guarantee comes additionally from there being
 one writer, which is why [Persistence](./Persistence.md) keeps SQLite single-instance.
+
+The live-state checks and this update run in the token-issuance transaction. Before the update, that
+transaction locks the identity-session row; logout and administrative session revocation take the
+same lock before changing it. The race therefore has one serial outcome: redemption first may issue
+tokens, after which logout revokes any refresh token it produced; revocation first makes redemption
+fail without consuming the code. Idle and absolute expiry need no invalidation write — step 10 reads
+their timestamps. A failure at step 10 or 11 rolls the transaction back and MUST NOT set
+`consumed_at`, so a later presentation cannot be mistaken for a replay. Replay handling applies only
+when a committed redemption already consumed the code.
 
 The digest is computed by the same construction as refresh tokens (`RefreshTokenDigest`): SHA-256 of
 the ASCII code, lowercase hex, `sha256:` prefix, 71 characters, unique-indexed. The plaintext code is
@@ -141,6 +153,7 @@ inside this phase, and the existing grants keep today's rotation semantics uncha
 | `allow_authorization_code` is false | `unauthorized_client` | 400 |
 | Missing/malformed `code`, `redirect_uri`, `code_verifier`; `scope` present | `invalid_request` | 400 |
 | Code unknown, expired, consumed, wrong client, wrong redirect URI, or wrong verifier | `invalid_grant` | 400 |
+| Identity session missing, revoked, idle-expired, or absolute-expired | `invalid_grant` | 400 |
 | Account disabled or application deactivated between authorization and redemption | `invalid_grant` | 400 |
 | Signing key unavailable, database unreachable | `server_error` | 500 |
 

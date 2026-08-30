@@ -84,8 +84,9 @@ resume the *original* request. The original request is not carried through the l
 3. The login page renders no part of the authorization request. Not the redirect URI, not the scope,
    not the state.
 4. On a successful credential check, SignaCore establishes the identity session, consumes the
-   handle, reloads the stored request, and resumes at step 11 of the
-   [validation order](./AuthorizationEndpoint.md#validation-order).
+   handle, reloads the stored request, and re-runs steps 1–9 and 11 of the
+   [validation order](./AuthorizationEndpoint.md#validation-order). Step 10 is skipped because this
+   operation has just established and validated the session that step 10 would inspect.
 
 Storing the request server-side is what keeps the login page from becoming a redirect surface: with
 a `returnUrl`-style parameter, anything that can reach the login page can choose where the browser
@@ -96,10 +97,11 @@ A handle that is expired, unknown, or already consumed produces a local error pa
 to start again from their application. It MUST NOT redirect, because a consumed handle no longer has
 a verified redirect URI attached to it.
 
-Re-validation at step 4 is not optional. Between the authorization request and the login, the
-application may have been deactivated, its redirect URI removed, or its scopes narrowed. The stored
-request is re-checked against current configuration, and a failure that would have been redirectable
-at step 3 is redirectable now.
+This re-validation is not optional. Between the authorization request and the login, the application
+may have been deactivated, its redirect URI removed, or its scopes narrowed. The stored request is
+re-checked against current configuration from step 1: failures at steps 1 and 2 still produce a local
+error page with no redirect; only failures at steps 3–9 or 11 may return to the newly re-verified
+redirect URI. The fact that the URI was valid before login does not make a removed URI safe now.
 
 ## Login CSRF
 

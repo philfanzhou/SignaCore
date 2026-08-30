@@ -130,10 +130,13 @@ in the series adds tables and columns and changes none.
 
 ### Discovery advertises only what has shipped
 
-`DiscoveryDocument` gains each field in the pull request that makes the corresponding capability
-real, never earlier. Documentation in this repository may describe the target design, but it must
-label it as target, and the running service must not claim to be an OpenID Provider until an
-`id_token` is actually issued.
+`DiscoveryDocument` gains fields in the pull request that makes the advertised capability usable end
+to end, never earlier. Authorization, code redemption, and ID-token issuance are one core capability,
+so their OIDC discovery fields appear together in #54 only when all three work; preparatory tasks may
+register the authorization-code validator but keep it and the other core fields out of discovery.
+Documentation in this repository may describe the target design, but it must label it as target, and
+the running service must not claim to be an OpenID Provider until it can actually complete the flow
+and issue an `id_token`.
 
 ### Common infrastructure is consumed, not rebuilt
 

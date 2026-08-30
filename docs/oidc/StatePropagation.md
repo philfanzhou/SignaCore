@@ -12,18 +12,18 @@ Rows are triggers. Cells say what happens and when.
 
 | Trigger | Identity session | Unredeemed codes | Refresh tokens | Access tokens | New authorizations |
 | --- | --- | --- | --- | --- | --- |
-| RP-initiated logout | Revoked, immediate | Invalidated | Revoked for that session, all applications | Valid until `exp`, ≤ 15 min | Denied for that session |
-| Identity session idle expiry | Unusable | Invalidated | Still valid | Valid until `exp` | Login required |
-| Identity session absolute expiry | Unusable | Invalidated | Still valid | Valid until `exp` | Login required |
-| Account disabled | Every session, immediate | Invalidated | Revoked, all applications | Valid until `exp` | Denied |
-| Account deleted | Every session, immediate | Invalidated | Revoked | Valid until `exp` | Denied |
-| Application deactivated (`IsActive = false`) | Untouched | Invalidated for that application | Revoked for that application | Valid until `exp` | Denied for that application |
-| `allow_authorization_code` set to false | Untouched | Invalidated for that application | Kept | Valid until `exp` | Denied for that application |
+| RP-initiated logout | Revoked, immediate | Rejected at redemption | Revoked for that session, all applications | Valid until `exp`, ≤ 15 min | Denied for that session |
+| Identity session idle expiry | Unusable | Rejected at redemption | Still valid | Valid until `exp` | Login required |
+| Identity session absolute expiry | Unusable | Rejected at redemption | Still valid | Valid until `exp` | Login required |
+| Account disabled | Every session, immediate | Rejected at redemption | Revoked, all applications | Valid until `exp` | Denied |
+| Account deleted | Every session, immediate | Rejected at redemption | Revoked | Valid until `exp` | Denied |
+| Application deactivated (`IsActive = false`) | Untouched | Rejected at redemption for that application | Revoked for that application | Valid until `exp` | Denied for that application |
+| `allow_authorization_code` set to false | Untouched | Rejected at redemption for that application | Kept | Valid until `exp` | Denied for that application |
 | `allow_refresh_token` set to false | Untouched | Untouched | Revoked for that application | Valid until `exp` | Allowed, without `offline_access` |
 | Redirect URI removed | Untouched | Codes for that URI keep their 60 s | Untouched | Valid until `exp` | Denied for that URI |
 | Scope removed from the allow list | Untouched | Untouched | Kept until next refresh | Valid until `exp` | Granted scope narrows |
 | `/oauth2/revoke` on a refresh token | Untouched | Untouched | That token revoked | Valid until `exp` | Allowed |
-| Authorization code replayed | Revoked | Invalidated | The family from the first redemption revoked | Valid until `exp` | Login required |
+| Authorization code replayed | Revoked | Other codes from that session are rejected at redemption | The family from the first redemption revoked | Valid until `exp` | Login required |
 | Refresh token replayed | Untouched | Untouched | Every live descendant of that family revoked | Valid until `exp` | Allowed |
 | Signing key rotated | Untouched | Untouched | Untouched | Valid until `exp`, old key stays in JWKS | Allowed |
 
@@ -65,8 +65,11 @@ this system can satisfy today, in either direction, because the operation does n
 - Revocation is committed in the same transaction as the state change that caused it. An account
   disabled but whose sessions survive because a second write failed is not a state this design
   permits.
-- Invalidating an authorization code means the same atomic conditional update the token endpoint
-  uses, so a redemption racing a revocation resolves one way or the other, never both.
+- Session, account, and application state changes do not mark an authorization code as consumed.
+  Redemption re-checks that live state; a state failure returns `invalid_grant` without replay
+  handling. Redemption and session revocation take the same identity-session row lock, so their race
+  resolves one way or the other: redemption first may issue tokens before revocation recalls its
+  refresh token, while revocation first rejects redemption without consuming the code.
 - On PostgreSQL, revocation applies to every instance because every instance reads the same rows.
   There is no cache to invalidate, which is why the identity session has no in-memory copy.
 
