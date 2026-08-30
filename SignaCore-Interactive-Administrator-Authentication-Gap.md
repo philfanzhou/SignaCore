@@ -1,5 +1,17 @@
 # SignaCore 交互式管理员认证能力缺口
 
+> **本文已被取代（Superseded），仅作历史记录保留。**
+>
+> 本文是最初的能力缺口分析，其中的“开放问题”和“待定选择”已经全部作出决定。规范性的事实来源是：
+>
+> - [ADR 0005](docs/adr/0005-interactive-oidc-authorization-code.md)：决策及其理由。
+> - [docs/oidc](docs/oidc/README.md)：字段级协议契约、错误矩阵与安全要求。
+> - [docs/overview/StandardsConformance.md](docs/overview/StandardsConformance.md)：当前实际实现的能力。
+>
+> 本文与上述文档冲突时，以上述文档为准。实现任务不得引用本文作为契约依据。已知的具体差异：本文
+> 第 9 节建议对 `nonce` 做摘要存储，实际决定是明文存储（`nonce` 必须原样写入 ID Token，摘要无法
+> 使用，且它不是凭据）；本文第 17 节列出的开放问题已在 ADR 0005 中逐条定案。
+
 ## 1. 文档目的
 
 本文记录 SignaCore 当前在“为其他服务的管理控制台提供统一管理员认证”场景中的能力缺口，并给出建议的目标能力、安全边界和实施范围。

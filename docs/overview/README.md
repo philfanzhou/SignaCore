@@ -8,5 +8,6 @@
 - [Key flows](./KeyFlows.md)
 - [Data ownership](./DataOwnership.md)
 - [OAuth 2.0 / OpenID Connect conformance](./StandardsConformance.md)
+- [Interactive OIDC protocol contract](../oidc/README.md) — target design, not yet implemented
 
 Database-backed configuration, first-run setup, and Consul behavior are documented in [Development](../development/README.md).

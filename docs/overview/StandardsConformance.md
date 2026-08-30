@@ -13,6 +13,18 @@ and lockout behave identically; only the wire format differs.
 **SignaCore is still not an OpenID Connect provider.** It issues OAuth 2.0 access tokens. There is no
 `id_token`, no authorization endpoint, and no UserInfo endpoint.
 
+## Current fact versus target design
+
+This page is a record of **current fact**: everything it states in the present tense is true of the
+running service, and discovery advertises exactly this and nothing more.
+
+The interactive OIDC capability — authorization endpoint, PKCE, `id_token`, UserInfo, RP-initiated
+logout — is **target design** and is not implemented. Its decisions are recorded in
+[ADR 0005](../adr/0005-interactive-oidc-authorization-code.md) and its field-level contracts in
+[docs/oidc](../oidc/README.md). Those documents describe what will be built; this one describes what
+runs. When an implementation task ships a capability, it moves the corresponding row here from *What
+does not conform* to *What conforms today* in the same pull request that adds the discovery field.
+
 ## The standards endpoint
 
 ### `POST /oauth2/token`
@@ -109,6 +121,15 @@ are made from the `client_id` claim, not from `aud`.
 | No refresh-token reuse detection | OAuth 2.0 Security BCP §4.14 | Replaying a consumed refresh token fails, but descendants of the replayed token are not revoked |
 | Development `Jwt:Issuer` defaults to `SignaCore` | RFC 8414 §2 | Development remains convenient; production startup requires an absolute HTTPS issuer unless an explicit temporary legacy override is enabled |
 | Legacy `/api/auth/*` routes | RFC 6749 | Kept deliberately; not standards-shaped and not advertised in discovery |
+
+Four of these gaps — no `id_token`, no authorization endpoint or PKCE, no UserInfo endpoint, and no
+`scope` — are addressed by the target design in [docs/oidc](../oidc/README.md) for pre-registered
+first-party confidential clients. Until those tasks merge, the rows above remain accurate.
+
+The remaining gaps are not addressed by it. The `password` grant stays, refresh-token reuse detection
+stays absent, and the legacy routes stay frozen; the interactive design neither fixes nor worsens
+them, and [Tokens](../oidc/Tokens.md#refresh-token) states how it works around the reuse-detection
+limitation rather than assuming it away.
 
 ## Deployment guidance
 

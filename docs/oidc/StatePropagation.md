@@ -1,0 +1,77 @@
+# State Propagation and Invalidation
+
+**Status: target design.** See [README](./README.md).
+
+One question, answered once: when something is turned off, what stops working, and how soon? The
+answers are scattered across five documents otherwise, and a disagreement between any two of them is
+a security bug.
+
+## The matrix
+
+Rows are triggers. Cells say what happens and when.
+
+| Trigger | Identity session | Unredeemed codes | Refresh tokens | Access tokens | New authorizations |
+| --- | --- | --- | --- | --- | --- |
+| RP-initiated logout | Revoked, immediate | Invalidated | Revoked for that session, all applications | Valid until `exp`, ≤ 15 min | Denied for that session |
+| Identity session idle expiry | Unusable | Invalidated | Still valid | Valid until `exp` | Login required |
+| Identity session absolute expiry | Unusable | Invalidated | Still valid | Valid until `exp` | Login required |
+| Account disabled | Every session, immediate | Invalidated | Revoked, all applications | Valid until `exp` | Denied |
+| Account deleted | Every session, immediate | Invalidated | Revoked | Valid until `exp` | Denied |
+| Application deactivated (`IsActive = false`) | Untouched | Invalidated for that application | Revoked for that application | Valid until `exp` | Denied for that application |
+| `allow_authorization_code` set to false | Untouched | Invalidated for that application | Kept | Valid until `exp` | Denied for that application |
+| `allow_refresh_token` set to false | Untouched | Untouched | Revoked for that application | Valid until `exp` | Allowed, without `offline_access` |
+| Redirect URI removed | Untouched | Codes for that URI keep their 60 s | Untouched | Valid until `exp` | Denied for that URI |
+| Scope removed from the allow list | Untouched | Untouched | Kept until next refresh | Valid until `exp` | Granted scope narrows |
+| `/oauth2/revoke` on a refresh token | Untouched | Untouched | That token revoked | Valid until `exp` | Allowed |
+| Authorization code replayed | Revoked | Invalidated | The one from the first redemption revoked | Valid until `exp` | Login required |
+| Password changed | Untouched | Untouched | Untouched | Valid until `exp` | Allowed |
+| Signing key rotated | Untouched | Untouched | Untouched | Valid until `exp`, old key stays in JWKS | Allowed |
+
+"Immediate" means the next request that touches the artifact fails, on any instance, because
+authority lives in the database rather than in the cookie or the token. It does not mean a push is
+sent anywhere.
+
+## The one column that is always "valid until `exp`"
+
+Access tokens are self-contained and there is no revocation list or introspection endpoint in this
+phase. Nothing in the table revokes one. This is the single most important thing for a downstream
+service to understand: a token is a statement about a moment in the past, and validating its
+signature does not re-check the account.
+
+The mitigations, in order of how much they matter:
+
+1. Interactive access tokens live 15 minutes, so the worst case is bounded.
+2. A downstream service that needs stronger revocation checks its own state, not just the token.
+3. Nothing in this design lengthens an access token's life or widens its audience.
+
+Adding a revocation list or introspection endpoint is a later decision. It would trade a database
+read on every downstream call for a shorter revocation window, and that trade belongs to a
+deployment that has stated it needs it.
+
+## Password change
+
+Changing a password does **not** end sessions or revoke tokens. This is the existing behaviour and
+this design does not alter it; noting it here because the opposite is often assumed, and because
+"change your password to lock out an intruder" is advice that does not work against this system
+today. Making a password change revoke sessions is a reasonable feature and a separate one.
+
+## Ordering guarantees
+
+- Revocation is committed in the same transaction as the state change that caused it. An account
+  disabled but whose sessions survive because a second write failed is not a state this design
+  permits.
+- Invalidating an authorization code means the same atomic conditional update the token endpoint
+  uses, so a redemption racing a revocation resolves one way or the other, never both.
+- On PostgreSQL, revocation applies to every instance because every instance reads the same rows.
+  There is no cache to invalidate, which is why the identity session has no in-memory copy.
+
+## Cleanup
+
+The existing 24-hour cleanup job (`CleanupIntervalHours`) gains the new tables. It removes expired
+and consumed authorization codes, expired continuation handles, and identity sessions past their
+absolute expiry.
+
+Consumed codes are kept for 24 hours rather than deleted at consumption. That retention is what
+makes replay detectable: a deleted code is indistinguishable from one that never existed, and both
+would return `invalid_grant` — but only one of them should revoke a refresh token and raise an audit
+event.

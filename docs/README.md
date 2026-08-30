@@ -9,4 +9,5 @@ All maintained documentation is written in English.
 | [Database](./database/README.md) | Schema ownership, relationships, and migrations |
 | [Development](./development/README.md) | Local setup, database-backed configuration, first-run setup, deployment, errors, and verification |
 | [Integrations](./integrations/README.md) | External integration entry point |
+| [Interactive OIDC](./oidc/README.md) | Target design: the OIDC Authorization Code + PKCE protocol contract, not yet implemented |
 | [ADRs](./adr/README.md) | Architecture decisions |
