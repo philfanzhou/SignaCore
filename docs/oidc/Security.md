@@ -20,6 +20,7 @@ to become a test.
 | Cross-client token acceptance | `aud` is one `client_id`; `PerApplication` audience is required for interactive clients | [Tokens](./Tokens.md), [ClientModel](./ClientModel.md#audience) | A's token rejected at B |
 | Mix-up between issuers | `iss` on every authorization response, success and error (RFC 9207) | [AuthorizationEndpoint](./AuthorizationEndpoint.md#success-response) | `iss` present in both cases |
 | CSRF on the client's callback | `state` required, echoed byte-for-byte | [AuthorizationEndpoint](./AuthorizationEndpoint.md#request-parameters) | Missing `state` → `invalid_request` |
+| Session revocation by a bearer of an ID token | Logout revokes only when the request's identity cookie names the session in `id_token_hint` | [Logout](./Logout.md#processing) | Hint replayed without the cookie → session survives, response still succeeds |
 | Login CSRF | Antiforgery token on the login POST, `__Host-` cookie, independent of the session | [IdentitySession](./IdentitySession.md#login-csrf) | POST without token → 400 |
 | Session fixation | A new session identifier is generated on every successful login; a pre-existing cookie is never reused | This document | Cookie value differs before and after login |
 | Cookie theft via script | `HttpOnly`, `__Host-` prefix, `Secure` | [IdentitySession](./IdentitySession.md#cookie-attributes) | Attribute assertions on `Set-Cookie` |

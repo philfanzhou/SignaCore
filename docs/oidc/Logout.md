@@ -34,29 +34,44 @@ session cookie does that.
 2. If `post_logout_redirect_uri` is present, match it exactly against that client's
    `post_logout_redirect_uris`. No match → local error page, HTTP 400, **no redirect**. Same rule as
    the authorization endpoint: an unverified URI is never a destination.
-3. Read `sid` from the hint. If a session with that identifier exists and belongs to the account in
-   `sub`, revoke it.
+3. Resolve the request's own session: unprotect `__Host-signacore_identity` and load the session it
+   names. Revoke that session **only if** its identifier equals `sid` from the hint and it belongs to
+   the account in `sub`. No cookie, an unusable cookie, or a cookie naming a different session →
+   revoke nothing and continue at step 4. A cookie that names exactly the hint's `sid` but a session
+   bound to some other account is an inconsistent request → local error page, HTTP 400, nothing
+   revoked and the cookie left alone.
 4. Delete `__Host-signacore_identity` with the same attributes it was set with.
 5. Redirect to the verified `post_logout_redirect_uri` with `state` echoed if supplied; if none was
    supplied, render a local "you have signed out" page, HTTP 200.
+
+Step 3 is where the split in the paragraph above becomes concrete: the hint says *which* session,
+the cookie is what authorizes ending it, and revocation needs both to agree. Without the cookie
+check, anyone holding a copy of an ID token less than 24 hours old could end that session and every
+application's refresh tokens under it, from any browser — a denial-of-service rather than a
+disclosure, but a free one, and exactly the "logout CSRF" the required hint was introduced to close.
+
+A mismatch is not an error. It takes the same success path as an already-expired session for the
+same reason: distinguishing the two would tell the caller whether this browser holds the session
+named in the hint, which is session state leaked to whoever supplies the hint.
 
 There is no confirmation prompt. The request is authenticated by `id_token_hint` and by the session
 cookie, and the specification's prompt exists for the unauthenticated case this design does not
 allow.
 
-Steps 3 and 4 are idempotent. Logging out twice, or logging out with a session that has already
-expired, succeeds and redirects: reporting "you were not signed in" would be an oracle for session
-state and would strand a user whose session expired mid-click.
+Steps 3 and 4 are idempotent. Logging out twice, logging out with a session that has already expired,
+and presenting a hint for a session this browser no longer holds all succeed and redirect: reporting
+"you were not signed in" would be an oracle for session state and would strand a user whose session
+expired mid-click.
 
-Step 3 revokes only the session named by `sid`. Other sessions for the same account, in other
-browsers, are untouched. "Sign out everywhere" is an account-security feature, not a protocol one,
-and is not in this phase.
+Step 3 revokes only the session named by `sid`, and only from the browser that holds it. Other
+sessions for the same account, in other browsers, are untouched. "Sign out everywhere" is an
+account-security feature, not a protocol one, and is not in this phase.
 
 ## What logout revokes
 
 | Artifact | Effect |
 | --- | --- |
-| The identity session named by `sid` | Revoked immediately, on every instance |
+| The identity session named by `sid`, when the request's cookie names that same session | Revoked immediately, on every instance |
 | `__Host-signacore_identity` | Deleted from this browser |
 | Unredeemed authorization codes from that session | Invalidated |
 | Refresh tokens bound to that session | Revoked, for every application |
@@ -79,8 +94,9 @@ must not sign an operator out of SignaCore's own console, any more than the reve
 | `id_token_hint` missing, malformed, wrong issuer, wrong signature, or `iat` older than 24 hours | Local page, 400 |
 | `aud` resolves to no application, or an inactive one | Local page, 400 |
 | `post_logout_redirect_uri` supplied but unregistered | Local page, 400 |
-| No session cookie, or the session is already gone | Success — revoke what can be revoked, redirect as normal |
-| `sid` names a session belonging to a different account than `sub` | Local page, 400; nothing is revoked |
+| No session cookie, an unusable one, or the session is already gone | Success — nothing is revoked, the cookie is deleted, redirect as normal |
+| The cookie names a session other than the hint's `sid` | Success — nothing is revoked, the cookie is deleted, redirect as normal |
+| The cookie names the hint's `sid`, but that session belongs to a different account than `sub` | Local page, 400; nothing is revoked |
 | Internal failure | Local page, 500; the cookie is deleted anyway |
 
 The local error page follows the same rules as the authorization endpoint's: no reflected
