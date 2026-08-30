@@ -18,10 +18,12 @@ is corrected before implementation.
 | [Interactive Client Model](./ClientModel.md) | Confidential-BFF registration, redirect URI ownership, scope policy, and compatibility |
 | [Authorization Endpoint](./AuthorizationEndpoint.md) | Browser request orchestration, validation stages, safe error routing, and response boundary |
 | [Identity Login](./IdentityLogin.md) | Isolated identity cookie, server-side continuation, Password login, CSRF, cancellation, and revalidation |
+| [Authorization Code Redemption](./TokenEndpoint.md) | Code storage, token request validation, atomic redemption, replay, and transaction boundaries |
+| [Interactive Tokens](./Tokens.md) | ID-token and access-token claims, lifetimes, consumers, validation duties, and response separation |
 
-Later tasks add Token, UserInfo, logout, refresh-family, persistence, security, ownership, Discovery,
-and ADR explanations. Until those tasks close, their canonical rows remain target decisions without
-a second prose contract.
+Later tasks add UserInfo, logout, refresh-family, persistence, security, ownership, Discovery, and
+ADR explanations. Until those tasks close, their canonical rows remain target decisions without a
+second prose contract.
 
 ## First-phase boundary
 
