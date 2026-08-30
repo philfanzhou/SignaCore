@@ -145,9 +145,10 @@ if (!string.IsNullOrWhiteSpace(lokiUri))
 
 builder.Host.UseAgentSerilog("SignaCore");
 
-// 未处理异常会让进程立刻退出，而 Loki Sink 是批量异步投递的，缓冲区里的日志
-// （包括致命异常本身）会整批丢失，只能进容器 stdout。正常关停时 host 释放
-// logger 会刷盘，这里补上崩溃退出这条路径，让启动失败的原因也能进 Loki。
+// An unhandled exception terminates the process immediately, while the Loki sink sends batches
+// asynchronously. Without this handler, its buffered logs, including the fatal exception itself,
+// may be lost and appear only in container stdout. Normal host shutdown flushes the logger; this
+// covers the crash path so startup failures can also reach Loki.
 AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
 {
     if (eventArgs.ExceptionObject is Exception unhandled)
@@ -191,7 +192,7 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
 // ---- Consul Service Discovery (optional) ----
 builder.Services.AddConsulDiscoveryIfEnabled(builder.Configuration);
 
-// ---- Infrastructure (DI, Auth, CORS, 限流, OpenTelemetry) ----
+// ---- Infrastructure (DI, Auth, CORS, Rate Limiting, OpenTelemetry) ----
 var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(
     builder.Configuration,
     builder.Environment,
@@ -270,13 +271,14 @@ app.Logger.LogInformation("KeyManager initialization verified");
 // ---- Configure JWT Bearer signing key resolver after KeyManager is ready ----
 var jwtBearerOptions = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<JwtBearerOptions>>();
 var bearerOptions = jwtBearerOptions.Get(JwtBearerDefaults.AuthenticationScheme);
-// 返回全部未过期密钥（与 JWKS 发布的是同一批），而不是只返回当前签名密钥：
-// 否则轮换瞬间，本服务会拒掉自己刚签发、仍在有效期内的旧密钥 token，而下游微服务却认。
-// GetValidationKeys 是纯内存快照，不做 DB 往返。
+// Return every unexpired key, matching the set published by JWKS, rather than only the current
+// signing key. Otherwise, during rotation this service would reject its own still-valid tokens
+// signed by the previous key while downstream services continue to accept them.
+// GetValidationKeys returns an in-memory snapshot without a database round trip.
 bearerOptions.TokenValidationParameters.IssuerSigningKeyResolver =
     (_, _, _, _) => keyManager.GetValidationKeys();
 
-// ---- Swagger（仅开发环境）----
+// ---- Swagger (Development only) ----
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -378,9 +380,9 @@ app.Use(async (context, next) =>
 });
 
 // ---- Discovery metadata ----
-// 同一份文档挂两个标准路径：OIDC Discovery 的 openid-configuration 与
-// RFC 8414 的 oauth-authorization-server。issuer 必须与 token 里的 iss 完全相同，
-// 所以取 JwtOptions.Issuer，而不是再写一遍字面量。
+// Serve the same document at both standard paths: OIDC Discovery's openid-configuration and RFC
+// 8414's oauth-authorization-server. The issuer must exactly match the token's iss claim, so use
+// JwtOptions.Issuer instead of repeating a literal value.
 IResult BuildDiscoveryDocument(HttpContext httpContext, IConfiguration configuration) =>
     Results.Ok(DiscoveryDocument.Create(
             app.Services.GetRequiredService<JwtOptions>().Issuer,

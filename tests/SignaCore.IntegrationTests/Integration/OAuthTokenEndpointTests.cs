@@ -13,9 +13,10 @@ using Xunit;
 namespace SignaCore.Tests.Integration;
 
 /// <summary>
-/// <c>/oauth2/token</c> 的 RFC 6749 线格式契约：form-encoded 入参、Basic/post 客户端认证、
-/// <c>access_token</c>/<c>token_type</c>/<c>expires_in</c> 出参、失败用 4xx + <c>error</c> 码。
-/// 与历史的 <c>/api/auth/token</c>（JSON、失败 200）并存，两条路共用同一套发 token 流程。
+/// RFC 6749 wire contract for <c>/oauth2/token</c>: form-encoded input, Basic/post client
+/// authentication, <c>access_token</c>/<c>token_type</c>/<c>expires_in</c> output, and 4xx failures with
+/// an <c>error</c> code. It coexists with the legacy <c>/api/auth/token</c> JSON endpoint, which returns
+/// 200 for failures, and both routes share the same token issuance pipeline.
 /// </summary>
 public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
 {
@@ -59,7 +60,10 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    /// <summary>RFC 9068 §2.1 + 每客户端 aud：签出的 token 头是 at+jwt，默认仍是共享 audience。</summary>
+    /// <summary>
+    /// RFC 9068 §2.1 plus per-application audiences: issued tokens use a typ of at+jwt and retain the
+    /// shared audience by default.
+    /// </summary>
     [Fact]
     public async Task Token_IssuesAnAccessTokenMarkedAsAtJwt()
     {
@@ -74,7 +78,9 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
             claim.Type == IdentityConstants.ClaimClientId && claim.Value == IdentityServerFixture.GatewayAppId);
     }
 
-    /// <summary>RFC 6749 §5.2：客户端认证失败是 401 + WWW-Authenticate + invalid_client。</summary>
+    /// <summary>
+    /// RFC 6749 §5.2: client authentication failures return 401 with WWW-Authenticate and invalid_client.
+    /// </summary>
     [Fact]
     public async Task Token_WithoutClientCredentials_Returns401InvalidClient()
     {
@@ -98,7 +104,7 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    /// <summary>失败必须是 400 + error 码，而不是历史端点的 200 + success=false。</summary>
+    /// <summary>Failures return 400 with an error code, not the legacy endpoint's 200 with success=false.</summary>
     [Fact]
     public async Task Token_WithWrongPassword_Returns400InvalidGrant()
     {
@@ -132,7 +138,7 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         Assert.Equal("invalid_request", body.GetProperty("error").GetString());
     }
 
-    /// <summary>历史短名在标准端点上不被接受，必须用 URN。</summary>
+    /// <summary>Legacy short names are not accepted at the standards endpoint; a URN is required.</summary>
     [Theory]
     [InlineData("sms")]
     [InlineData("wechat_code")]
@@ -151,7 +157,10 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         Assert.Equal("unsupported_grant_type", body.GetProperty("error").GetString());
     }
 
-    /// <summary>URN 名字被识别；本应用没开短信，所以走到策略拒绝而不是"不认识这个 grant"。</summary>
+    /// <summary>
+    /// The URN is recognized; because SMS is disabled for this application, policy rejects it instead
+    /// of treating the grant as unknown.
+    /// </summary>
     [Fact]
     public async Task Token_WithTheSmsUrnGrant_ReachesThePolicyCheck()
     {
@@ -205,7 +214,7 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotEqual(refreshToken, body.GetProperty("refresh_token").GetString());
 
-        // 旧 token 已被消费，重放必须失败。
+        // The old token has been consumed, so replay must fail.
         var replay = await http.PostAsync("/oauth2/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["grant_type"] = IdentityConstants.GrantTypeRefreshToken,
@@ -214,7 +223,9 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(HttpStatusCode.BadRequest, replay.StatusCode);
     }
 
-    /// <summary>RFC 7009 §2.2：撤销对已存在和不存在的 token 都返回 200，不泄露 token 是否有效。</summary>
+    /// <summary>
+    /// RFC 7009 §2.2: revocation returns 200 for known and unknown tokens without revealing validity.
+    /// </summary>
     [Fact]
     public async Task Revoke_ReturnsOkForBothKnownAndUnknownTokens()
     {
@@ -237,8 +248,9 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
-    /// RFC 7009 §2.1：只能撤销签发给自己的 token。持有别的客户端的 refresh token 不足以
-    /// 终止对方的会话——响应仍是 200，不泄露 token 归属，但对方的 token 必须还能用。
+    /// RFC 7009 §2.1: a client can revoke only its own tokens. Possessing another client's refresh
+    /// token is not enough to terminate that client's session. The response remains 200 to avoid
+    /// revealing ownership, and the other client's token must remain usable.
     /// </summary>
     [Fact]
     public async Task Revoke_DoesNotRevokeATokenIssuedToAnotherClient()
@@ -260,7 +272,7 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
 
         Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
 
-        // 受害者的 token 必须仍然可用。
+        // The victim's token must remain usable.
         var refresh = await victim.PostAsync("/oauth2/token", new FormUrlEncodedContent(
             new Dictionary<string, string>
             {
@@ -283,7 +295,7 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    /// <summary>撤销后，用同一张 refresh token 再换 token 必须失败。</summary>
+    /// <summary>After revocation, exchanging the same refresh token again must fail.</summary>
     [Fact]
     public async Task Revoke_InvalidatesTheRefreshToken()
     {
@@ -307,8 +319,9 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
-    /// 受众隔离：默认（Shared）所有应用拿到同一个部署级 aud——这正是"给 A 签的 token 在 B 也过"
-    /// 的成因；切到 PerApplication 后 aud 变成该应用自己的 AppId，受众才真正成为边界。
+    /// Audience isolation: in the default Shared mode every application receives the same deployment-wide
+    /// aud, so a token issued to one application also validates at another. In PerApplication mode, aud is
+    /// the application's AppId and becomes an actual boundary.
     /// </summary>
     [Fact]
     public async Task AccessTokenAudience_FollowsTheApplicationAudienceMode()

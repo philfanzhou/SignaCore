@@ -164,7 +164,7 @@ public class CallbackUrlValidatorTests
         Assert.Contains("not in the allowed domains list", result.ErrorMessage);
     }
 
-    // ========== ValidateAsync 测试 ==========
+    // ========== ValidateAsync tests ==========
 
     [Fact]
     public async Task ValidateAsync_WithValidHttpsUrl_ReturnsValid()
