@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SignaCore.Database;
 using SignaCore.Database.Repositories;
-// CallbackUrlValidator 的命名空间是 SignaCore.Domain，尽管文件在 Domain/Services/ 下
+// CallbackUrlValidator belongs to SignaCore.Domain even though its file is under Domain/Services.
 using SignaCore.Domain;
 using SignaCore.Host.Http;
 using SignaCore.Host.Models;
@@ -11,8 +11,8 @@ using SignaCore.Host.Security;
 namespace SignaCore.Host.Controllers;
 
 /// <summary>
-/// POST /api/auth/callback/register —— 业务系统注册自己的 claims 回调 URL。
-/// 与 <see cref="TokenController"/> 不同，本端点 AppId/AppSecret 是**必填**的。
+/// POST /api/auth/callback/register allows an application to register its claims callback URL.
+/// Unlike <see cref="TokenController"/>, this endpoint requires AppId and AppSecret.
 /// </summary>
 [Route("api/auth")]
 [ApiController]

@@ -90,7 +90,7 @@ public class CallbackUrlValidator
     }
 
     /// <summary>
-    /// 异步验证回调 URL，避免同步 DNS 解析阻塞请求线程。
+    /// Validates the callback URL asynchronously so DNS resolution does not block the request thread.
     /// </summary>
     public async Task<ValidationResult> ValidateAsync(
         string callbackUrl,

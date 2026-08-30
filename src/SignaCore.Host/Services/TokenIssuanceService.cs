@@ -12,12 +12,13 @@ using SignaCore.Domain.Validators;
 namespace SignaCore.Host.Services;
 
 /// <summary>
-/// 一次登录换 token 的完整流程：选校验器 → 校验 → 处理 refresh token → 组 claims →
-/// 回调补充 claims → 注入 bootstrap admin 角色 → 签发 → 埋点 → 审计 → 更新登录信息。
+/// The complete flow for exchanging a login for tokens: select a validator, validate, process the
+/// refresh token, assemble claims, enrich them through the callback, inject the bootstrap admin role,
+/// issue tokens, record metrics and audit data, and update login information.
 /// <para>
-/// 两个传输端点共用这里：<c>/api/auth/token</c>（历史 JSON 契约，失败也返回 HTTP 200）与
-/// <c>/oauth2/token</c>（RFC 6749 form-encoded，失败返回 4xx + error 码）。流程只能有一份——
-/// 两份实现迟早会在"哪个分支记了审计、哪个没记"上分叉。
+/// Both transport endpoints share this flow: <c>/api/auth/token</c> uses the legacy JSON contract and
+/// returns HTTP 200 even for failures, while <c>/oauth2/token</c> is RFC 6749 form-encoded and returns
+/// 4xx responses with error codes. Keeping one flow prevents their audit behavior from diverging.
 /// </para>
 /// </summary>
 public sealed class TokenIssuanceService
@@ -119,8 +120,8 @@ public sealed class TokenIssuanceService
                 auditUsername: request.Username ?? request.Phone ?? "unknown");
         }
 
-        // 在成功分支入口一次性捕获：MemberNotNullWhen 给出的非空流状态在跨越
-        // 后面的 await（回调取外部 claims）之后不再保留，捕获成局部变量最省事。
+        // Capture these once at the start of the success branch. The non-null flow state supplied by
+        // MemberNotNullWhen is not preserved across the later await that fetches external claims.
         var account = validationResult.Account;
         var authMethod = validationResult.AuthMethod;
         var displayName = ResolveDisplayName(account, validationResult.DisplayName, request.GrantType);
@@ -220,14 +221,16 @@ public sealed class TokenIssuanceService
     }
 
     /// <summary>
-    /// 统一失败出口：停表 → 记失败指标 → 记耗时 → 写审计 → 返回失败结果。这四步顺序固定
-    /// 且缺一不可，新增失败分支时只调用本方法，不要再手写一遍（历史上四个分支各抄了一份）。
+    /// The unified failure exit stops the timer, records the failure and duration metrics, writes the
+    /// audit entry, and returns the failure result in that fixed order. New failure branches must call
+    /// this method instead of duplicating the sequence.
     /// <para>
-    /// <paramref name="metricReason"/>、<paramref name="auditFailureReason"/>、
-    /// <paramref name="responseMessage"/>、<paramref name="errorCode"/> 是四个**可以互不相同**的值，
-    /// 不要合并：unsupported_grant_type 分支的审计原因带具体 grant_type 后缀而响应文案不带；
-    /// 校验失败分支的审计原因允许为 null 而响应文案有兜底。响应文案是 /api/auth/token 的对外契约，
-    /// 错误码是 /oauth2/token 的对外契约，见 docs/modules/Auth/GetToken/06-CONVENTIONS.md。
+    /// <paramref name="metricReason"/>, <paramref name="auditFailureReason"/>,
+    /// <paramref name="responseMessage"/>, and <paramref name="errorCode"/> may all differ and must not
+    /// be merged. The unsupported_grant_type audit reason includes the concrete grant_type suffix while
+    /// the response message does not; a validation failure may have a null audit reason while its response
+    /// message has a fallback. The response message is part of the /api/auth/token contract, and the error
+    /// code is part of the /oauth2/token contract. See docs/modules/Auth/GetToken/06-CONVENTIONS.md.
     /// </para>
     /// </summary>
     private async Task<TokenIssuanceOutcome> FailAsync(
@@ -252,18 +255,20 @@ public sealed class TokenIssuanceService
     }
 
     /// <summary>
-    /// 当已认证账号就是 <see cref="AdminIdentityOptions.Username"/> 配置的 bootstrap admin 时，
-    /// 无条件注入 <c>role:admin</c>（已存在则跳过）。这是绕过门户回调机制的"超管"捷径，
-    /// 使 bootstrap admin 无论从哪个门户登录或刷新都能拿到 admin 角色。
+    /// Unconditionally injects <c>role:admin</c>, unless already present, when the authenticated account
+    /// is the bootstrap admin configured by <see cref="AdminIdentityOptions.Username"/>. This super-admin
+    /// path bypasses the application callback mechanism so the bootstrap admin receives the admin role
+    /// when signing in to or refreshing through any application.
     /// <para>
-    /// 身份一律从已校验的账号推导，绝不信任客户端可控的请求字段：
+    /// Identity is always derived from the validated account; client-controlled request fields are never trusted:
     /// <list type="bullet">
-    /// <item><c>password</c>：比对已通过密码校验的 <c>request.Username</c> 与配置的用户名（忽略大小写）。</item>
-    /// <item><c>refresh_token</c>：通过
-    /// <see cref="IAccountRepository.GetByPasswordCredentialUsernameAsync"/> 解析出 bootstrap 账号，
-    /// 与已认证的 <paramref name="authenticatedAccount"/> 比对 Id。请求体里的 username 被刻意忽略，
-    /// 防止普通账号伪造 <c>username=admin</c> 提权。</item>
-    /// <item><c>sms</c> / <c>wechat_code</c> / <c>ldap</c>：不触发注入。</item>
+    /// <item><c>password</c>: compare the password-validated <c>request.Username</c> with the configured
+    /// username, ignoring case.</item>
+    /// <item><c>refresh_token</c>: resolve the bootstrap account through
+    /// <see cref="IAccountRepository.GetByPasswordCredentialUsernameAsync"/> and compare its Id with the
+    /// validated <paramref name="authenticatedAccount"/>. The request body's username is deliberately
+    /// ignored so an ordinary account cannot elevate privileges by sending <c>username=admin</c>.</item>
+    /// <item><c>sms</c>, <c>wechat_code</c>, and <c>ldap</c>: do not trigger injection.</item>
     /// </list>
     /// </para>
     /// </summary>
@@ -335,12 +340,12 @@ public sealed class TokenIssuanceService
         if (grantType == IdentityConstants.GrantTypeWechat)
             return $"WeChat_{account.Id.ToString()[..8]}";
 
-        // password/sms 的兜底：用账号 ID 前缀，避免空显示名
+        // Password/SMS fallback: use the account ID prefix to avoid an empty display name.
         return $"User_{account.Id.ToString()[..8]}";
     }
 }
 
-/// <summary>传输无关的发 token 输入。两个端点各自把自己的请求形态映射到这里。</summary>
+/// <summary>Transport-neutral token issuance input; each endpoint maps its request shape here.</summary>
 public sealed record TokenIssuanceRequest(
     string GrantType,
     AppRegistrationEntity App,

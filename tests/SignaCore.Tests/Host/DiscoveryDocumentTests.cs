@@ -12,8 +12,8 @@ public class DiscoveryDocumentTests
         [IdentityConstants.GrantTypeRefreshToken, IdentityConstants.GrantTypePassword, IdentityConstants.GrantTypeSms];
 
     /// <summary>
-    /// 发现文档指向符合标准的 /oauth2/* 端点，而不是历史的 /api/auth/*——
-    /// 读发现文档的客户端只会说标准协议。
+    /// Discovery points to the standards-conforming /oauth2/* endpoints rather than the legacy
+    /// /api/auth/* endpoints because clients that consume discovery speak the standard protocol.
     /// </summary>
     [Fact]
     public void Create_BuildsEndpointsFromTheGivenOrigin()
@@ -26,8 +26,9 @@ public class DiscoveryDocumentTests
     }
 
     /// <summary>
-    /// 元数据里的 grant_types_supported 来自实际注册的校验器，不是字面量：
-    /// 新增一种 grant 而忘了更新文档，这条会挂。扩展 grant 按 RFC 6749 §4.5 用绝对 URI 广播。
+    /// grant_types_supported comes from the registered validators rather than a literal list, so this
+    /// test fails if a grant is added without updating discovery. RFC 6749 §4.5 extension grants are
+    /// advertised as absolute URIs.
     /// </summary>
     [Fact]
     public void Create_AdvertisesTheActualGrantTypesUnderTheirWireNames()
@@ -49,7 +50,7 @@ public class DiscoveryDocumentTests
             document.TokenEndpointAuthMethodsSupported);
     }
 
-    /// <summary>没有 authorization endpoint，就不能声明任何 response_type。</summary>
+    /// <summary>No response type can be advertised without an authorization endpoint.</summary>
     [Fact]
     public void Create_DoesNotAdvertiseAnyResponseType()
     {
@@ -87,8 +88,8 @@ public class DiscoveryDocumentTests
     }
 
     /// <summary>
-    /// 回归：旧实现把 Endpoints:Http 拼进 URL，TLS 终结在反代上时会广播
-    /// https://host:5002 这种打不通的地址。
+    /// Regression: the old implementation appended Endpoints:Http and advertised an unreachable URL
+    /// such as https://host:5002 when TLS terminated at a reverse proxy.
     /// </summary>
     [Fact]
     public void Resolve_DoesNotAppendTheInternalListenPort()
@@ -128,7 +129,10 @@ public class DiscoveryDocumentTests
         Assert.Equal("https://id.example.com", origin);
     }
 
-    /// <summary>转发头不被隐式信任：伪造 X-Forwarded-Host 不能把客户端引到别处的 JWKS。</summary>
+    /// <summary>
+    /// Forwarded headers are not implicitly trusted, so a forged X-Forwarded-Host cannot direct clients
+    /// to an attacker's JWKS endpoint.
+    /// </summary>
     [Fact]
     public void Resolve_IgnoresForwardedHeadersThatWereNotProcessedByTheHost()
     {

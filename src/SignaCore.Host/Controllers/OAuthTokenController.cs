@@ -47,7 +47,7 @@ public sealed class OAuthTokenController : ControllerBase
             return Error(OAuthErrorCodes.InvalidRequest, "grant_type is required.");
         }
 
-        // 未知的 wire 名字 → unsupported_grant_type，不进入发 token 流程。
+        // An unknown wire name maps to unsupported_grant_type without entering token issuance.
         var grantType = OAuthGrantTypes.ToInternal(wireGrantType);
         if (grantType == null || !_tokenIssuanceService.IsSupportedGrantType(grantType))
         {
@@ -56,8 +56,8 @@ public sealed class OAuthTokenController : ControllerBase
                 $"grant_type '{wireGrantType}' is not supported.");
         }
 
-        // RFC 6749 §3.3：本服务暂不支持 scope，客户端显式要 scope 时如实拒绝，
-        // 而不是静默忽略后签出一个权限范围与请求不符的 token。
+        // RFC 6749 §3.3: scopes are not supported, so reject an explicit scope instead of silently
+        // issuing a token whose authority differs from what the client requested.
         var requestedScope = form["scope"].ToString();
         if (!string.IsNullOrWhiteSpace(requestedScope))
         {
@@ -83,7 +83,7 @@ public sealed class OAuthTokenController : ControllerBase
             return Error(outcome.ErrorCode, outcome.ErrorMessage);
         }
 
-        // RFC 6749 §5.1: 成功响应必须带 no-store，避免中间层缓存 token。
+        // RFC 6749 §5.1: successful responses must use no-store so intermediaries do not cache tokens.
         Response.Headers.CacheControl = "no-store";
         Response.Headers.Pragma = "no-cache";
 
@@ -119,7 +119,7 @@ public sealed class OAuthTokenController : ControllerBase
             return Error(OAuthErrorCodes.InvalidRequest, "token is required.");
         }
 
-        // RFC 7009 §2.2.1: 只支持 refresh_token；access token 是自包含的，无法撤销。
+        // RFC 7009 §2.2.1: only refresh tokens can be revoked; access tokens are self-contained.
         var hint = Request.Form["token_type_hint"].ToString();
         if (!string.IsNullOrWhiteSpace(hint) &&
             !string.Equals(hint, "refresh_token", StringComparison.Ordinal) &&
@@ -128,8 +128,9 @@ public sealed class OAuthTokenController : ControllerBase
             return Error("unsupported_token_type", $"token_type_hint '{hint}' is not supported.");
         }
 
-        // RFC 7009 §2.1: 只撤销签发给该客户端的 token。持有别人的 token 不足以终止别人的会话。
-        // 不匹配时仍然返回 200——响应不能变成"这张 token 是否存在/属于谁"的探针。
+        // RFC 7009 §2.1: revoke only tokens issued to this client. Possessing another client's token
+        // is not enough to terminate its session. A mismatch still returns 200 so the response cannot
+        // become an oracle for whether a token exists or who owns it.
         await _refreshTokenService.RevokeForAppAsync(token, app.AppId);
         return Ok();
     }
@@ -141,7 +142,7 @@ public sealed class OAuthTokenController : ControllerBase
     }
 
     /// <summary>
-    /// RFC 6749 §5.2: 除 invalid_client 用 401（由认证处理器发出）外，全部用 400。
+    /// RFC 6749 §5.2: all errors use 400 except invalid_client, for which authentication returns 401.
     /// </summary>
     private IActionResult Error(string error, string description)
     {
