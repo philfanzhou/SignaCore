@@ -45,6 +45,7 @@ its own session cookie.
 | `id_token`, `/oauth2/userinfo` | Aggregated or distributed claims, `claims` parameter |
 | RP-initiated logout with post-logout redirect | Front-channel or back-channel logout |
 | Refresh token when the application allows it and `offline_access` is granted | Refresh token by default |
+| Refresh-token families with reuse detection and descendant revocation | Reuse detection for the existing non-interactive grants |
 | PostgreSQL multi-instance, SQLite single-instance | SQLite multi-instance |
 
 Explicit non-goals for this phase. Public SPA clients are tracked as a separate epic; MFA and
@@ -70,13 +71,15 @@ The capability is complete when all of the following hold:
    revokes what the first redemption produced.
 5. The authorization request and the token request may land on different instances and still
    succeed, on PostgreSQL.
-6. Issuer, signature, lifetime, audience, and `nonce` on the ID token are all verifiable by the
+6. Replaying a consumed refresh token revokes every live descendant of its family, consistently
+   across instances.
+7. Issuer, signature, lifetime, audience, and `nonce` on the ID token are all verifiable by the
    client, and a token minted for one application is rejected by another.
-7. A downstream service grants and revokes its own administrator role from `issuer + subject` alone.
-8. No password, authorization code, `code_verifier`, token, cookie value, client secret, or
+8. A downstream service grants and revokes its own administrator role from `issuer + subject` alone.
+9. No password, authorization code, `code_verifier`, token, cookie value, client secret, or
    `Authorization` header appears in any log or audit record.
-9. Discovery advertises exactly the capabilities that exist.
-10. Every existing grant, the legacy `/api/auth/*` contract, existing callbacks, shared-audience
+10. Discovery advertises exactly the capabilities that exist.
+11. Every existing grant, the legacy `/api/auth/*` contract, existing callbacks, shared-audience
     applications, and `qz_admin_session` behave exactly as they did before.
 
 ## Conventions used in these documents

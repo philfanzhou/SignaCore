@@ -105,10 +105,24 @@ something neither considered: the exchange grant assumes a token that stands for
 relationship, while an interactive token stands for a browser session that can be revoked out from
 under it.
 
-**Known limitation, unchanged by this design:** rotation is not reuse detection. Replaying a
-consumed refresh token fails, but the token minted from it stays valid. This is why
-`allow_refresh_token` defaults to `false` and why the ID token is short. Adding reuse detection is a
-separate change with its own migration.
+### Reuse detection
+
+Today's rotation is not reuse detection: replaying a consumed refresh token fails, but the token
+minted from it stays valid. That gap is closed **within this phase**, for interactive clients, by the
+refresh-family tasks (#70 → #97, #98).
+
+| Property | Rule |
+| --- | --- |
+| Family | Every token records a family identifier, a root, and its parent. Rotation keeps the family and appends a child |
+| Rotation | Atomic: concurrent rotation of one token yields at most one valid child |
+| Reuse | Presenting a token already consumed revokes **every live descendant of that family**, not just the presented token |
+| Binding | Family membership is bound to account, application, granted scope, and identity session |
+| Scope | Interactive clients. The existing grants keep today's rotation semantics and today's wire contract |
+
+So `allow_refresh_token` defaults to `false` for the reason stated above — a BFF with a server-side
+session does not need a long-lived credential — and not because reuse would go undetected.
+
+The family model and its migration are specified in [Persistence](./Persistence.md#refresh-token-families).
 
 ## Lifetime summary
 

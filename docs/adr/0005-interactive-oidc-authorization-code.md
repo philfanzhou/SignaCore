@@ -43,9 +43,10 @@ The existing facts that constrain the answer:
 3. **The admin console already owns a cookie.** `qz_admin_session` means "this person may administer
    SignaCore itself". An identity session means "this person proved who they are". Conflating them
    would make every account that can log in a candidate SignaCore administrator.
-4. **Refresh tokens rotate but do not detect reuse.** A replayed refresh token fails; its
-   descendants survive. An interactive flow that hands refresh tokens to browsers' back ends widens
-   the window in which that matters.
+4. **Refresh tokens rotate but do not detect reuse.** Today a replayed refresh token fails while its
+   descendants survive. An interactive flow that hands refresh tokens to a browser's back end widens
+   the window in which that matters, so this phase closes the gap for interactive clients with a
+   refresh-token family model rather than inheriting it.
 5. **SQLite is a supported provider.** Authorization codes are one-shot shared state. On PostgreSQL
    they are consumed atomically across instances; on SQLite there is exactly one instance and the
    guarantee comes from there being one writer.
@@ -193,7 +194,9 @@ OIDC-specific rate-limit partitions. The full split is in [Ownership](../oidc/Ow
   on the identity assertion.
 - **Issuing refresh tokens to interactive clients by default.** Rejected. A BFF already keeps
   server-side state; the refresh token buys a longer session at the cost of a long-lived credential
-  in a new place. Applications that genuinely need one enable `offline_access` explicitly.
+  in a new place. Applications that genuinely need one enable `offline_access` explicitly. The
+  default is off because the credential is unnecessary, not because its reuse would go undetected —
+  interactive refresh tokens get a family model with reuse detection in this same phase.
 - **A consent screen in this phase.** Rejected. Every client is first-party and pre-registered by an
   administrator, so consent would ask a question whose answer is already recorded, and the screen is
   another redirect surface to secure. It becomes necessary the moment third-party clients do, and

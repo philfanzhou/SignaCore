@@ -79,7 +79,7 @@ Presenting an already-consumed code is treated as evidence that the code leaked,
 client never does it.
 
 1. The request fails with `invalid_grant`.
-2. The refresh token issued by the first redemption of that code, if any, is revoked.
+2. The refresh token family issued by the first redemption of that code, if any, is revoked.
 3. The identity session recorded on the code is revoked.
 4. An audit record is written naming the application, the account, and the code's identifier — never
    the code.
@@ -128,8 +128,9 @@ use, the old token revoked — with two additions:
 - If the identity session named by `sid` has been revoked, the refresh fails with `invalid_grant`.
   A refresh token issued interactively does not outlive the session it came from.
 
-Reuse detection for refresh tokens is unchanged and remains a known limitation: a replayed token
-fails, its descendants survive. It is the reason `allow_refresh_token` defaults to `false`.
+Reuse of a consumed refresh token revokes every live descendant of its family, not only the token
+presented. See [Tokens](./Tokens.md#reuse-detection); the behaviour is delivered by #97 and #98
+inside this phase, and the existing grants keep today's rotation semantics unchanged.
 
 ## Error matrix
 

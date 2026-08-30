@@ -80,6 +80,28 @@ The stored request behind a login continuation handle.
 | `expires_at` | timestamptz | `created_at` + 10 minutes |
 | `consumed_at` | timestamptz, null | Single-use, same conditional update |
 
+### Refresh token families
+
+`refresh_tokens` gains the columns a family model needs, specified by #97 and consumed by #98.
+
+| Column | Type | Rules |
+| --- | --- | --- |
+| `family_id` | UUID | Shared by every token descended from one authorization |
+| `parent_id` | UUID, null | The token this one was rotated from; null at the root |
+| `identity_session_id` | UUID, null | The session that produced the family; null for the existing grants |
+| `scope` | string(200), null | Granted scope, null for the existing grants |
+| `consumed_at` | timestamptz, null | Set when rotated; distinct from `is_revoked` |
+
+Indexes: `(family_id)` for descendant revocation; `(identity_session_id)` for session revocation.
+
+Compatibility with existing rows is the hard part and belongs to #97: tokens issued before the
+migration have no family. They are backfilled as single-member families rooted at themselves, so
+rotation keeps working and a replay of a legacy token revokes exactly what it does today. The
+existing grants' wire contract does not change.
+
+`consumed_at` is separate from `is_revoked` on purpose. A rotated token and a revoked token are
+different states, and only the first should trigger descendant revocation when presented again.
+
 ### Interactive client configuration
 
 The fields in [ClientModel](./ClientModel.md#interactive-client-configuration) are stored as follows.

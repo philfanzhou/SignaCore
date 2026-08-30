@@ -23,7 +23,8 @@ Rows are triggers. Cells say what happens and when.
 | Redirect URI removed | Untouched | Codes for that URI keep their 60 s | Untouched | Valid until `exp` | Denied for that URI |
 | Scope removed from the allow list | Untouched | Untouched | Kept until next refresh | Valid until `exp` | Granted scope narrows |
 | `/oauth2/revoke` on a refresh token | Untouched | Untouched | That token revoked | Valid until `exp` | Allowed |
-| Authorization code replayed | Revoked | Invalidated | The one from the first redemption revoked | Valid until `exp` | Login required |
+| Authorization code replayed | Revoked | Invalidated | The family from the first redemption revoked | Valid until `exp` | Login required |
+| Refresh token replayed | Untouched | Untouched | Every live descendant of that family revoked | Valid until `exp` | Allowed |
 | Password changed | Untouched | Untouched | Untouched | Valid until `exp` | Allowed |
 | Signing key rotated | Untouched | Untouched | Untouched | Valid until `exp`, old key stays in JWKS | Allowed |
 

@@ -13,7 +13,8 @@ to become a test.
 | Redirect URI substitution | Exact ordinal match, no normalization at request time, no wildcards | [ClientModel](./ClientModel.md#request-time-comparison) | Each row of the comparison table |
 | Authorization code interception | PKCE `S256`, mandatory, no `plain`, no per-client toggle | [TokenEndpoint](./TokenEndpoint.md#verification-order) | Wrong `code_verifier` → `invalid_grant` |
 | PKCE downgrade | `code_challenge_method` must be exactly `S256`; absence and `plain` both fail | [AuthorizationEndpoint](./AuthorizationEndpoint.md#request-parameters) | `plain`, empty, and absent all → `invalid_request` |
-| Code replay | Atomic conditional consumption; a second redemption revokes the first's refresh token and the session | [TokenEndpoint](./TokenEndpoint.md#replay-handling) | Sequential and concurrent redemption |
+| Code replay | Atomic conditional consumption; a second redemption revokes the first's refresh family and the session | [TokenEndpoint](./TokenEndpoint.md#replay-handling) | Sequential and concurrent redemption |
+| Refresh token replay | Family model; reuse revokes every live descendant | [Tokens](./Tokens.md#reuse-detection) | Replay a rotated token, assert descendants die |
 | Code injection into another client | The code's client must equal the authenticated client | [TokenEndpoint](./TokenEndpoint.md#verification-order) | Client B redeems A's code → `invalid_grant` |
 | ID token replay | `nonce` required, echoed verbatim, verified by the client; 5-minute lifetime | [Tokens](./Tokens.md#id-token) | Reused `nonce` rejected by the client |
 | Cross-client token acceptance | `aud` is one `client_id`; `PerApplication` audience is required for interactive clients | [Tokens](./Tokens.md), [ClientModel](./ClientModel.md#audience) | A's token rejected at B |
@@ -89,6 +90,7 @@ Written to the existing `audit_logs` table, using its existing columns.
 | `oidc.login.failed` | `Account` | Submitted username, normalized | Generic reason only |
 | `oidc.code.redeemed` | `Application` | `client_id` | Code record id in `Description` |
 | `oidc.code.replayed` | `Application` | `client_id` | What was revoked in response |
+| `oidc.refresh.replayed` | `Application` | `client_id` | Family id and how many descendants were revoked |
 | `oidc.session.created` | `Account` | Account id | Session id in `Description` |
 | `oidc.session.revoked` | `Account` | Account id | Cause: logout, disablement, replay, administrative |
 | `oidc.logout` | `Account` | Account id | Session id |
@@ -97,7 +99,8 @@ Written to the existing `audit_logs` table, using its existing columns.
 `ClientIp` and `CorrelationId` are populated from the existing accessors. `BeforeSnapshot` and
 `AfterSnapshot` are used only for `oidc.client.updated`, and MUST exclude `app_secret_hash`.
 
-`oidc.code.replayed` is the event an operator should alert on. A correct client never produces it.
+`oidc.code.replayed` and `oidc.refresh.replayed` are the events an operator should alert on. A
+correct client never produces either.
 
 ## Metrics
 

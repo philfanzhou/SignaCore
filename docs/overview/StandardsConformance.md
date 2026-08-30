@@ -118,7 +118,7 @@ are made from the `client_id` claim, not from `aud`.
 | No UserInfo endpoint | OIDC Core 1.0 §5.3 | Profile data is only available through the JWT and the callback mechanism |
 | No `scope` | RFC 6749 §3.3 | There is no way to request or restrict a subset of authority |
 | The `password` grant is the primary flow | OAuth 2.1 draft, BCP 240 | The resource-owner password grant is deprecated in current guidance; it remains here because clients depend on it |
-| No refresh-token reuse detection | OAuth 2.0 Security BCP §4.14 | Replaying a consumed refresh token fails, but descendants of the replayed token are not revoked |
+| No refresh-token reuse detection | OAuth 2.0 Security BCP §4.14 | Replaying a consumed refresh token fails, but descendants of the replayed token are not revoked. The [target design](../oidc/Tokens.md#reuse-detection) closes this for interactive clients only; the existing grants keep today's behaviour |
 | Development `Jwt:Issuer` defaults to `SignaCore` | RFC 8414 §2 | Development remains convenient; production startup requires an absolute HTTPS issuer unless an explicit temporary legacy override is enabled |
 | Legacy `/api/auth/*` routes | RFC 6749 | Kept deliberately; not standards-shaped and not advertised in discovery |
 
@@ -126,10 +126,13 @@ Four of these gaps — no `id_token`, no authorization endpoint or PKCE, no User
 `scope` — are addressed by the target design in [docs/oidc](../oidc/README.md) for pre-registered
 first-party confidential clients. Until those tasks merge, the rows above remain accurate.
 
-The remaining gaps are not addressed by it. The `password` grant stays, refresh-token reuse detection
-stays absent, and the legacy routes stay frozen; the interactive design neither fixes nor worsens
-them, and [Tokens](../oidc/Tokens.md#refresh-token) states how it works around the reuse-detection
-limitation rather than assuming it away.
+Refresh-token reuse detection is addressed **only for interactive clients**: the target design gives
+them a token family with descendant revocation, while `password`, `sms`, `ldap`, `wechat_code`, and
+the legacy routes keep today's rotation semantics and today's wire contract. The row above therefore
+stays accurate for every existing consumer.
+
+The other gaps are not addressed at all. The `password` grant stays and the legacy routes stay
+frozen; the interactive design neither fixes nor worsens them.
 
 ## Deployment guidance
 
