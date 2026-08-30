@@ -30,6 +30,13 @@ earlier and never in a preparatory change. Concretely:
 | `claims_supported` gains `auth_time`, `sid`, `amr`, `nonce` | ID token issuance | Appended to the existing list |
 | `end_session_endpoint` | `GET /oauth2/logout` | `{origin}/oauth2/logout` |
 
+`sid` enters `claims_supported` as an ID token claim. The same claim is also carried by interactive
+access tokens, and so is `scope` ([Tokens](./Tokens.md#access-token)), but neither is registered on
+that account: `claims_supported` describes the claims a client may ask this provider for in an ID
+token or a UserInfo response, and an access token is opaque to the client that receives it. `scope`
+is therefore never listed there — `scopes_supported` is where a client learns which scope values
+exist.
+
 `grant_types_supported` is already derived from the registered validators rather than from a
 literal, so `authorization_code` appears there automatically when the grant is registered. That is
 the pattern the other fields should follow where they can.

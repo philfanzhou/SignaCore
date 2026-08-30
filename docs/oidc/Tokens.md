@@ -66,17 +66,33 @@ Existing structure, existing pipeline, existing claims — `sub`, `name`, `role`
 `auth_method`, `client_id`, plus callback-injected `Permission` claims. `typ` is `at+jwt` (RFC 9068)
 as it is today.
 
-Two differences for interactive issuance:
+Three differences for interactive issuance:
 
 | Property | Existing grants | Interactive |
 | --- | --- | --- |
 | `aud` | `AudienceMode` decides; `Shared` by default | Always the application's own AppId — `PerApplication` is required |
 | Lifetime | `TokenExpirationHours`, default 2 hours | 15 minutes |
+| Claims | Neither `scope` nor `sid` | Both are added, as below |
+
+| Claim | Presence | Value |
+| --- | --- | --- |
+| `scope` | Interactive only | The granted scope, space-delimited in the order `openid profile offline_access` — byte-for-byte the `scope` of the token response (RFC 9068 §2.2) |
+| `sid` | Interactive only | The identity session the token was issued from; identical to `sid` in the ID token issued beside it |
+
+These two claims are what makes [UserInfo](./UserInfo.md#validation) implementable: its step 5 reads
+`scope` to require `openid`, and its step 7 reads `sid` to check that the session is still live. A
+token from `password`, `sms`, `ldap`, or `wechat_code` carries neither, which is exactly how UserInfo
+tells the two issuance paths apart — no new flag, and no change to the existing grants' tokens.
+
+On a refreshed access token, `scope` is the granted scope of the refresh family, unchanged by the
+refresh, and `sid` is carried forward from the code that started the family.
 
 The lifetime difference is deliberate and is not a global change: existing grants keep their
 configured lifetime exactly. An interactive access token lives in a BFF that can refresh silently
 against a live identity session, so a short lifetime costs little, and it is the only bound on a
-token that leaks — there is no revocation list for self-contained tokens.
+token that leaks — there is no revocation list for self-contained tokens. `sid` does not change that:
+it lets UserInfo, which reads live state anyway, refuse a token from a revoked session, but a
+downstream resource server validates the signature and `exp` and nothing else.
 
 15 minutes is the invariant for this phase, not a per-application setting. Making it configurable
 means the first deployment under pressure sets it to two hours and the bound disappears.

@@ -25,13 +25,17 @@ Authorization: Bearer <access token>
 3. `iss` matches, `exp` is in the future, `nbf`/`iat` are sane within 120 seconds of skew.
 4. `typ` is `at+jwt`. An ID token presented here fails — it is `JWT` and its `aud` is a client, not
    a resource.
-5. The token was issued through the authorization-code flow with `openid` in its granted scope.
+5. The token carries a `scope` claim with `openid` in it. Only interactive issuance sets that claim,
+   so this is also the check that the token came from the authorization-code flow.
 6. The account still exists and is enabled.
-7. The identity session named by `sid`, if the token carries one, has not been revoked.
+7. The identity session named by the token's `sid` claim has not been revoked.
 
-Step 5 is what keeps this endpoint from becoming a profile API for the existing grants. A token from
-`password` or `sms` has no granted scope and no `sid`, so it does not authorize a UserInfo call. That
-is not an oversight: `/api/user/profile` already serves that need and its contract is frozen.
+Steps 5 and 7 read claims that only interactive access tokens carry; both are specified in
+[Tokens](./Tokens.md#access-token). Step 5 is what keeps this endpoint from becoming a profile API
+for the existing grants: a token from `password` or `sms` has neither `scope` nor `sid`, so it does
+not authorize a UserInfo call. That is not an oversight — `/api/user/profile` already serves that
+need and its contract is frozen. A token that has one claim and not the other is malformed for this
+endpoint and is rejected the same way.
 
 Step 7 means a signed-out user's access token stops working here even before it expires. UserInfo
 reads live account state, so serving it from a revoked session would be answering a question the
