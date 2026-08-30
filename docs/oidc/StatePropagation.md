@@ -25,7 +25,6 @@ Rows are triggers. Cells say what happens and when.
 | `/oauth2/revoke` on a refresh token | Untouched | Untouched | That token revoked | Valid until `exp` | Allowed |
 | Authorization code replayed | Revoked | Invalidated | The family from the first redemption revoked | Valid until `exp` | Login required |
 | Refresh token replayed | Untouched | Untouched | Every live descendant of that family revoked | Valid until `exp` | Allowed |
-| Password changed | Untouched | Untouched | Untouched | Valid until `exp` | Allowed |
 | Signing key rotated | Untouched | Untouched | Untouched | Valid until `exp`, old key stays in JWKS | Allowed |
 
 "Immediate" means the next request that touches the artifact fails, on any instance, because
@@ -49,12 +48,17 @@ Adding a revocation list or introspection endpoint is a later decision. It would
 read on every downstream call for a shorter revocation window, and that trade belongs to a
 deployment that has stated it needs it.
 
-## Password change
+## Password change is absent, not silent
 
-Changing a password does **not** end sessions or revoke tokens. This is the existing behaviour and
-this design does not alter it; noting it here because the opposite is often assumed, and because
-"change your password to lock out an intruder" is advice that does not work against this system
-today. Making a password change revoke sessions is a reasonable feature and a separate one.
+There is no row for "password changed" because **SignaCore has no password-change operation**.
+`IPasswordCredentialRepository` exposes `Get`, `Add`, and `Exists` and no update; a password hash is
+written only by first-run installation and by an administrator creating an account.
+
+This is stated here so that no implementation task assumes an unstated default. When a
+password-change or password-reset capability is added, its effect on identity sessions and refresh
+families is an open decision that MUST be made by that task, not inherited from this document. The
+security-relevant expectation — "change your password to lock out an intruder" — is not something
+this system can satisfy today, in either direction, because the operation does not exist.
 
 ## Ordering guarantees
 
