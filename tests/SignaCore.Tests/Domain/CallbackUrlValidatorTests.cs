@@ -239,12 +239,74 @@ public class CallbackUrlValidatorTests
     [Fact]
     public async Task ValidateAsync_WhenPublicAddressIsRequired_RejectsUnresolvableHost()
     {
-        var validator = new CallbackUrlValidator(allowPrivateAddresses: false);
+        var resolver = new StubCallbackHostResolver([]);
+        var validator = CreatePublicAddressValidator(resolver);
 
-        var result = await validator.ValidateAsync("https://callback.invalid/claims", TestContext.Current.CancellationToken);
+        var result = await validator.ValidateAsync("https://callback.example.test/claims", TestContext.Current.CancellationToken);
 
         Assert.False(result.IsValid);
         Assert.Contains("could not be resolved", result.ErrorMessage);
+        Assert.Equal("callback.example.test", resolver.ResolvedHost);
+    }
+
+    [Theory]
+    [InlineData("127.0.0.1")]
+    [InlineData("169.254.169.254")]
+    [InlineData("100.64.0.1")]
+    [InlineData("10.0.0.1")]
+    [InlineData("172.31.255.255")]
+    [InlineData("192.168.1.1")]
+    [InlineData("192.0.2.1")]
+    [InlineData("198.18.0.1")]
+    [InlineData("198.51.100.1")]
+    [InlineData("203.0.113.1")]
+    [InlineData("224.0.0.1")]
+    [InlineData("::1")]
+    [InlineData("::ffff:127.0.0.1")]
+    [InlineData("fc00::1")]
+    [InlineData("ff02::1")]
+    [InlineData("2001:db8::1")]
+    public async Task ValidateAsync_WhenPublicAddressIsRequired_RejectsRestrictedResolvedAddress(string value)
+    {
+        var resolver = new StubCallbackHostResolver([IPAddress.Parse(value)]);
+        var validator = CreatePublicAddressValidator(resolver);
+
+        var result = await validator.ValidateAsync(
+            "https://callback.example.test/claims",
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsValid);
+        Assert.Contains("must not resolve to a private/internal IP address", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WhenPublicAddressIsRequired_AcceptsPublicResolvedAddress()
+    {
+        var resolver = new StubCallbackHostResolver([IPAddress.Parse("8.8.8.8")]);
+        var validator = CreatePublicAddressValidator(resolver);
+
+        var result = await validator.ValidateAsync(
+            "https://callback.example.test/claims",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WhenResolutionIsCanceled_PropagatesCancellationToken()
+    {
+        using var cancellationTokenSource = new CancellationTokenSource();
+        cancellationTokenSource.Cancel();
+        var resolver = new StubCallbackHostResolver(
+            (_, cancellationToken) => Task.FromCanceled<IPAddress[]?>(cancellationToken));
+        var validator = CreatePublicAddressValidator(resolver);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            validator.ValidateAsync(
+                "https://callback.example.test/claims",
+                cancellationTokenSource.Token));
+
+        Assert.Equal(cancellationTokenSource.Token, resolver.CancellationToken);
     }
 
     [Theory]
@@ -278,5 +340,41 @@ public class CallbackUrlValidatorTests
     public void IsNonPublicAddress_AcceptsPublicAddresses(string value)
     {
         Assert.False(CallbackUrlValidator.IsNonPublicAddress(IPAddress.Parse(value)));
+    }
+
+    private static CallbackUrlValidator CreatePublicAddressValidator(
+        StubCallbackHostResolver hostResolver) =>
+        new(
+            allowedDomains: null,
+            allowPrivateAddresses: false,
+            requireHttps: false,
+            resolveHostAddressesAsync: hostResolver.ResolveAsync);
+
+    private sealed class StubCallbackHostResolver
+    {
+        private readonly Func<string, CancellationToken, Task<IPAddress[]?>> _resolveAsync;
+
+        internal StubCallbackHostResolver(IPAddress[] addresses)
+            : this((_, _) => Task.FromResult<IPAddress[]?>(addresses))
+        {
+        }
+
+        internal StubCallbackHostResolver(
+            Func<string, CancellationToken, Task<IPAddress[]?>> resolveAsync)
+        {
+            _resolveAsync = resolveAsync;
+        }
+
+        internal string? ResolvedHost { get; private set; }
+        internal CancellationToken CancellationToken { get; private set; }
+
+        internal Task<IPAddress[]?> ResolveAsync(
+            string host,
+            CancellationToken cancellationToken)
+        {
+            ResolvedHost = host;
+            CancellationToken = cancellationToken;
+            return _resolveAsync(host, cancellationToken);
+        }
     }
 }

@@ -7,17 +7,32 @@ public class CallbackUrlValidator
     private readonly HashSet<string> _allowedDomains;
     private readonly bool _allowPrivateAddresses;
     private readonly bool _requireHttps;
+    private readonly CallbackHostResolver _resolveHostAddressesAsync;
 
     public CallbackUrlValidator(
         IEnumerable<string>? allowedDomains = null,
         bool allowPrivateAddresses = true,
         bool requireHttps = false)
+        : this(
+            allowedDomains,
+            allowPrivateAddresses,
+            requireHttps,
+            ResolveHostAddressesAsync)
+    {
+    }
+
+    internal CallbackUrlValidator(
+        IEnumerable<string>? allowedDomains,
+        bool allowPrivateAddresses,
+        bool requireHttps,
+        CallbackHostResolver resolveHostAddressesAsync)
     {
         _allowedDomains = new HashSet<string>(
             allowedDomains ?? Enumerable.Empty<string>(),
             StringComparer.OrdinalIgnoreCase);
         _allowPrivateAddresses = allowPrivateAddresses;
         _requireHttps = requireHttps;
+        _resolveHostAddressesAsync = resolveHostAddressesAsync;
     }
 
     public ValidationResult Validate(string callbackUrl)
@@ -118,7 +133,7 @@ public class CallbackUrlValidator
 
         if (!_allowPrivateAddresses && !IPAddress.TryParse(host, out _))
         {
-            var addresses = await ResolveHostAddressesAsync(host, cancellationToken);
+            var addresses = await _resolveHostAddressesAsync(host, cancellationToken);
             if (addresses is null or { Length: 0 })
             {
                 return ValidationResult.Invalid("Callback URL host could not be resolved");
@@ -132,6 +147,10 @@ public class CallbackUrlValidator
 
         return ValidationResult.Valid();
     }
+
+    internal delegate Task<IPAddress[]?> CallbackHostResolver(
+        string host,
+        CancellationToken cancellationToken);
 
     private static IPAddress[]? ResolveHostAddresses(string host)
     {
