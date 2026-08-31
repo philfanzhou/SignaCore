@@ -10,7 +10,7 @@ SignaCore exposes two token surfaces:
 Both run the same issuance pipeline (`TokenIssuanceService`), so authentication policy, auditing, metrics,
 and lockout behave identically; only the wire format differs.
 
-**SignaCore is still not an OpenID Connect provider.** It issues OAuth 2.0 access tokens. There is no
+**This page describes the current runtime. SignaCore is still not an OpenID Connect provider.** It issues OAuth 2.0 access tokens. There is no
 `id_token`, no authorization endpoint, and no UserInfo endpoint.
 
 ## The standards endpoint
@@ -109,6 +109,31 @@ are made from the `client_id` claim, not from `aud`.
 | No refresh-token reuse detection | OAuth 2.0 Security BCP §4.14 | Replaying a consumed refresh token fails, but descendants of the replayed token are not revoked |
 | Development `Jwt:Issuer` defaults to `SignaCore` | RFC 8414 §2 | Development remains convenient; production startup requires an absolute HTTPS issuer unless an explicit temporary legacy override is enabled |
 | Legacy `/api/auth/*` routes | RFC 6749 | Kept deliberately; not standards-shaped and not advertised in discovery |
+
+## Target design, not current behavior
+
+The [interactive OIDC target design](../oidc/README.md) closes the design-level gaps for a
+pre-registered confidential BFF using Authorization Code with mandatory PKCE S256, ID/access-token
+separation, database-backed identity sessions, UserInfo, prepared logout, and interactive refresh
+families. Its [canonical semantic model](../oidc/CanonicalSemanticModel.md) is normative for the
+future implementation. The design documents do not add routes, metadata, database objects, or
+runtime guarantees.
+
+Future metadata changes are governed by the
+[Discovery activation graph](../oidc/Discovery.md). In particular, the core authorization capability
+is advertised only after the end-to-end code and ID-token slice is usable; UserInfo and
+`offline_access` are published later. Prepared logout intentionally does not publish a standard
+`end_session_endpoint`. The [security contract](../oidc/Security.md) remains a production release
+gate even after individual routes exist.
+
+The target follows [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html),
+[OpenID Connect Discovery 1.0](https://openid.net/specs/openid-connect-discovery-1_0.html),
+[RFC 6749](https://www.rfc-editor.org/rfc/rfc6749),
+[RFC 7636](https://www.rfc-editor.org/rfc/rfc7636),
+[RFC 8414](https://www.rfc-editor.org/rfc/rfc8414),
+[RFC 9207](https://www.rfc-editor.org/rfc/rfc9207), and
+[RFC 9700](https://www.rfc-editor.org/rfc/rfc9700). Its prepared logout transport is not a claim of
+RP-Initiated Logout conformance.
 
 ## Deployment guidance
 

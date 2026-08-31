@@ -26,9 +26,14 @@ is corrected before implementation.
 | [Non-refresh State Propagation](./StatePropagation.md) | Verification ledger from state events to implementation and test owners |
 | [Interactive Refresh Families](./RefreshTokens.md) | Refresh input, family rotation, reuse handling, state enforcement, and legacy isolation |
 | [Interactive Persistence](./Persistence.md) | Additive family schema, legacy backfill, provider symmetry, cleanup, and rollback gates |
+| [Security Contract](./Security.md) | Attack verification, audit, metrics, rate limits, sensitive-value canaries, and production gate |
+| [Discovery Activation](./Discovery.md) | Current metadata facts, real implementation dependencies, and staged publication |
+| [Ownership](./Ownership.md) | SignaCore, ServiceMantle, BFF, resource-service, and operator boundaries |
+| [Integration Audit](./IntegrationAudit.md) | Final semantic replay of every canonical end-to-end scenario |
 
-Later tasks add security, ownership, Discovery, and ADR explanations. Until those tasks close,
-their canonical rows remain target decisions without a second prose contract.
+The architectural choice and rejected alternatives are recorded in
+[ADR 0005](../adr/0005-interactive-oidc-confidential-bff.md). Together these documents complete the
+design baseline; runtime activation still follows `AC-01..14` and the open implementation tasks.
 
 ## First-phase boundary
 
