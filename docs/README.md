@@ -10,3 +10,4 @@ All maintained documentation is written in English.
 | [Development](./development/README.md) | Local setup, database-backed configuration, first-run setup, deployment, errors, and verification |
 | [Integrations](./integrations/README.md) | External integration entry point |
 | [ADRs](./adr/README.md) | Architecture decisions |
+| [Interactive OIDC target](./oidc/README.md) | Canonical design, endpoint contracts, security, activation, ownership, and semantic audit |
