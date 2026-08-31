@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
+using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using Xunit;
 
@@ -73,13 +74,35 @@ public sealed class SqliteDatabaseContractTests
             });
             await context.SaveChangesAsync(TestContext.Current.CancellationToken);
 
+            var boundaryInput = "https://example.com?" + new string('a', 480);
+            Assert.Equal(500, boundaryInput.Length);
+            var boundaryCanonicalUri = OidcRedirectUriValidator.ValidateAndCanonicalize(
+                boundaryInput,
+                isDevelopment: false).Value;
+            Assert.Equal(501, boundaryCanonicalUri.Length);
+            context.AppRedirectUris.Add(new AppRedirectUriEntity
+            {
+                Id = Guid.NewGuid(),
+                AppRegistrationId = appId,
+                Kind = RedirectUriKind.Redirect,
+                CanonicalUri = boundaryCanonicalUri
+            });
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(
+                boundaryCanonicalUri,
+                await context.AppRedirectUris
+                    .AsNoTracking()
+                    .Where(uri => uri.CanonicalUri == boundaryCanonicalUri)
+                    .Select(uri => uri.CanonicalUri)
+                    .SingleAsync(TestContext.Current.CancellationToken));
+
             var repository = new AppRegistrationRepository(context);
             var withOidcConfiguration = await repository
                 .GetByAppIdWithOidcConfigurationAsync(
                     "OIDC-MIGRATION-APP",
                     TestContext.Current.CancellationToken);
             Assert.NotNull(withOidcConfiguration);
-            Assert.Equal(2, withOidcConfiguration.RedirectUris.Count);
+            Assert.Equal(3, withOidcConfiguration.RedirectUris.Count);
 
             context.AppRegistrations.Remove(withOidcConfiguration);
             await context.SaveChangesAsync(TestContext.Current.CancellationToken);

@@ -8,7 +8,8 @@ the application's server-to-server claims callback.
 - id (UUID, primary key)
 - app_registration_id (foreign key to `app_registrations.id`)
 - kind (`Redirect` or `PostLogout` enum value)
-- canonical_uri (1–500 ASCII characters)
+- canonical_uri (1–501 ASCII characters; registration input is limited to 500 characters, and
+  empty-path canonicalization can add one `/`)
 
 ## Relationships and invariants
 

@@ -142,4 +142,18 @@ public sealed class OidcRedirectUriValidatorTests
                 value,
                 isDevelopment: false));
     }
+
+    [Fact]
+    public void ValidateAndCanonicalize_AllowsFiveHundredCharacterInputThatExpandsEmptyPath()
+    {
+        var value = "https://example.com?" + new string('a', 480);
+
+        Assert.Equal(500, value.Length);
+        var result = OidcRedirectUriValidator.ValidateAndCanonicalize(
+            value,
+            isDevelopment: false);
+
+        Assert.Equal(501, result.Value.Length);
+        Assert.StartsWith("https://example.com/?", result.Value, StringComparison.Ordinal);
+    }
 }

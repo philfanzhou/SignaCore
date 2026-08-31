@@ -168,7 +168,7 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
 
                     b.Property<string>("CanonicalUri")
                         .IsRequired()
-                        .HasMaxLength(500)
+                        .HasMaxLength(501)
                         .HasColumnType("TEXT")
                         .HasColumnName("canonical_uri");
 

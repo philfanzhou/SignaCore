@@ -167,7 +167,7 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.Kind).HasColumnName("kind");
             entity.Property(e => e.CanonicalUri)
                 .HasColumnName("canonical_uri")
-                .HasMaxLength(IdentityConstants.MaxOidcRedirectUriLength);
+                .HasMaxLength(IdentityConstants.MaxOidcCanonicalRedirectUriLength);
             entity.HasIndex(e => new { e.AppRegistrationId, e.Kind, e.CanonicalUri }).IsUnique();
             entity.HasOne(e => e.AppRegistration)
                 .WithMany(e => e.RedirectUris)

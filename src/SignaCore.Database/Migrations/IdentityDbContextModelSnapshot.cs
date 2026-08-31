@@ -170,8 +170,8 @@ namespace SignaCore.Database.Migrations
 
                     b.Property<string>("CanonicalUri")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
+                        .HasMaxLength(501)
+                        .HasColumnType("character varying(501)")
                         .HasColumnName("canonical_uri");
 
                     b.Property<int>("Kind")

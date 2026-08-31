@@ -53,7 +53,7 @@ namespace SignaCore.Database.Migrations
                     id = table.Column<Guid>(type: "uuid", nullable: false),
                     app_registration_id = table.Column<Guid>(type: "uuid", nullable: false),
                     kind = table.Column<int>(type: "integer", nullable: false),
-                    canonical_uri = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false)
+                    canonical_uri = table.Column<string>(type: "character varying(501)", maxLength: 501, nullable: false)
                 },
                 constraints: table =>
                 {
