@@ -23,6 +23,15 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
     /// </summary>
     private const string ListAppId = "oidc-endpoint-list-app";
 
+    /// <summary>
+    /// The round trip enables the code flow and leaves a redirect registration behind — the last
+    /// one cannot be removed while the flow is on — so it must not run against the application
+    /// whose untouched state <see cref="WithoutAnAdminSession_NoInteractiveEndpointAnswers"/>
+    /// asserts. Test order within the class is not fixed, so sharing that id makes both outcomes
+    /// depend on which one runs first.
+    /// </summary>
+    private const string RoundTripAppId = "oidc-endpoint-round-trip-app";
+
     private readonly IdentityServerFixture _fixture;
 
     public AdminOidcClientEndpointTests(IdentityServerFixture fixture)
@@ -78,23 +87,23 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
     [Fact]
     public async Task AnAdministrator_CanConfigureAndReadBackAnInteractiveClient()
     {
-        await SeedAsync();
+        await SeedAsync(RoundTripAppId);
         using var http = await _fixture.CreateAdminHttpClientAsync();
 
         var added = await http.PostAsJsonAsync(
-            $"/api/admin/apps/{AppId}/oidc/redirect-uris",
+            $"/api/admin/apps/{RoundTripAppId}/oidc/redirect-uris",
             new { kind = "Redirect", uris = new[] { "HTTPS://BFF.Endpoint.Test:443/callback" } },
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, added.StatusCode);
 
         var addedPostLogout = await http.PostAsJsonAsync(
-            $"/api/admin/apps/{AppId}/oidc/redirect-uris",
+            $"/api/admin/apps/{RoundTripAppId}/oidc/redirect-uris",
             new { kind = "PostLogout", uris = new[] { "https://bff.endpoint.test/signed-out" } },
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, addedPostLogout.StatusCode);
 
         var policy = await http.PutAsJsonAsync(
-            $"/api/admin/apps/{AppId}/oidc-policy",
+            $"/api/admin/apps/{RoundTripAppId}/oidc-policy",
             new
             {
                 clientType = "Confidential",
@@ -107,7 +116,7 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(HttpStatusCode.OK, policy.StatusCode);
 
         var read = await http.GetFromJsonAsync<JsonElement>(
-            $"/api/admin/apps/{AppId}/oidc",
+            $"/api/admin/apps/{RoundTripAppId}/oidc",
             TestContext.Current.CancellationToken);
         Assert.True(read.GetProperty("allowAuthorizationCode").GetBoolean());
         Assert.Equal(
@@ -123,13 +132,13 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
 
         // The last redirect URI cannot go while the code flow is on.
         var refused = await http.DeleteAsync(
-            $"/api/admin/apps/{AppId}/oidc/redirect-uris/{registration.GetProperty("id").GetGuid()}",
+            $"/api/admin/apps/{RoundTripAppId}/oidc/redirect-uris/{registration.GetProperty("id").GetGuid()}",
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
 
         // The post-logout registration is a different set and can go.
         var removed = await http.DeleteAsync(
-            $"/api/admin/apps/{AppId}/oidc/redirect-uris/{read.GetProperty("postLogoutRedirectUris").EnumerateArray().Single().GetProperty("id").GetGuid()}",
+            $"/api/admin/apps/{RoundTripAppId}/oidc/redirect-uris/{read.GetProperty("postLogoutRedirectUris").EnumerateArray().Single().GetProperty("id").GetGuid()}",
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
     }
