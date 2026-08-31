@@ -48,4 +48,22 @@ public class AppRegistrationEntity
     /// <see cref="AudienceMode.Shared"/> so existing downstream validators keep working.
     /// </summary>
     public AudienceMode AudienceMode { get; set; } = AudienceMode.Shared;
+
+    /// <summary>Interactive OIDC client type. Public clients remain reserved and fail closed.</summary>
+    public OidcClientType ClientType { get; set; } = OidcClientType.Confidential;
+
+    /// <summary>Whether the interactive Authorization Code flow is enabled.</summary>
+    public bool AllowAuthorizationCode { get; set; }
+
+    /// <summary>Canonical, space-delimited interactive OIDC scope allow list.</summary>
+    public string AllowedScopes { get; set; } = "openid";
+
+    /// <summary>Whether future interactive refresh-token issuance is allowed.</summary>
+    public bool AllowRefreshToken { get; set; }
+
+    /// <summary>Optional application-specific identity-session maximum age in seconds.</summary>
+    public int? IdentitySessionMaxAgeSeconds { get; set; }
+
+    /// <summary>Browser redirect registrations, kept separate from the claims callback.</summary>
+    public ICollection<AppRedirectUriEntity> RedirectUris { get; set; } = [];
 }

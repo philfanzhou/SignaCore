@@ -9,6 +9,7 @@ SignaCore uses one EF Core model with provider-specific migrations for PostgreSQ
 | [accounts](./tables/accounts.md) | Canonical user account state. |
 | [app_exchange_trusts](./tables/app_exchange_trusts.md) | Directed trust edges allowing a refresh token to be exchanged across applications. |
 | [app_registrations](./tables/app_registrations.md) | Registered client applications and their authentication policies. |
+| [app_redirect_uris](./tables/app_redirect_uris.md) | Canonical interactive OIDC redirect and post-logout registrations. |
 | [audit_logs](./tables/audit_logs.md) | Administrative and security-relevant change records. |
 | [installation_state](./tables/installation_state.md) | Singleton first-run/installation marker and one-time setup-code state. |
 | [login_attempts](./tables/login_attempts.md) | Password-login failure counts and lockout state by normalized username. |

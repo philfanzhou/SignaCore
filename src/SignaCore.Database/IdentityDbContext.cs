@@ -20,6 +20,7 @@ public class IdentityDbContext : DbContext
     public DbSet<UserLoginEntity> UserLogins => Set<UserLoginEntity>();
     public DbSet<RefreshTokenEntity> RefreshTokens => Set<RefreshTokenEntity>();
     public DbSet<AppRegistrationEntity> AppRegistrations => Set<AppRegistrationEntity>();
+    public DbSet<AppRedirectUriEntity> AppRedirectUris => Set<AppRedirectUriEntity>();
     public DbSet<SecurityKeyEntity> SecurityKeys => Set<SecurityKeyEntity>();
     public DbSet<OtpEntity> Otps => Set<OtpEntity>();
     public DbSet<LoginAttemptEntity> LoginAttempts => Set<LoginAttemptEntity>();
@@ -139,7 +140,39 @@ public class IdentityDbContext : DbContext
             entity.Property(e => e.SmsProfileKey).HasColumnName("sms_profile_key").HasMaxLength(64);
             entity.Property(e => e.WechatLoginMode).HasColumnName("wechat_login_mode");
             entity.Property(e => e.AudienceMode).HasColumnName("audience_mode");
+            entity.Property(e => e.ClientType)
+                .HasColumnName("client_type")
+                .HasDefaultValue(OidcClientType.Confidential);
+            entity.Property(e => e.AllowAuthorizationCode)
+                .HasColumnName("allow_authorization_code")
+                .HasDefaultValue(false);
+            entity.Property(e => e.AllowedScopes)
+                .HasColumnName("allowed_scopes")
+                .HasMaxLength(IdentityConstants.MaxOidcAllowedScopesLength)
+                .HasDefaultValue("openid");
+            entity.Property(e => e.AllowRefreshToken)
+                .HasColumnName("allow_refresh_token")
+                .HasDefaultValue(false);
+            entity.Property(e => e.IdentitySessionMaxAgeSeconds)
+                .HasColumnName("identity_session_max_age_seconds");
             entity.HasIndex(e => e.AppIdNormalized).IsUnique();
+        });
+
+        modelBuilder.Entity<AppRedirectUriEntity>(entity =>
+        {
+            entity.ToTable("app_redirect_uris");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.AppRegistrationId).HasColumnName("app_registration_id");
+            entity.Property(e => e.Kind).HasColumnName("kind");
+            entity.Property(e => e.CanonicalUri)
+                .HasColumnName("canonical_uri")
+                .HasMaxLength(IdentityConstants.MaxOidcRedirectUriLength);
+            entity.HasIndex(e => new { e.AppRegistrationId, e.Kind, e.CanonicalUri }).IsUnique();
+            entity.HasOne(e => e.AppRegistration)
+                .WithMany(e => e.RedirectUris)
+                .HasForeignKey(e => e.AppRegistrationId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<LdapCredentialEntity>(entity =>

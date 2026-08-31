@@ -63,6 +63,10 @@ public static class IdentityConstants
     public const int MaxAppIdLength = 100;
     public const int MaxAppSecretLength = 256;
     public const int MaxCallbackUrlLength = 500;
+    public const int MaxOidcRedirectUriLength = 500;
+    public const int MaxOidcRedirectUrisPerKind = 10;
+    public const int MaxOidcAllowedScopesLength = 32;
+    public const int MaxIdentitySessionAgeSeconds = 12 * 60 * 60;
     public const int MaxRemarkLength = 500;
     public const int MaxNicknameLength = 100;
     public const int MaxKeyNameLength = 100;
