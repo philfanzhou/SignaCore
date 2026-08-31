@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
+using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -14,6 +15,8 @@ namespace SignaCore.IntegrationTests.Integration;
 
 public sealed class ServerDatabaseContractTests
 {
+    private const string PreOidcMigration = "20260820091041_PersistDataProtectionKeys";
+
     /// <summary>
     /// The PostgreSQL image the container matrix runs against. CI overrides it with a mirror of the
     /// same official image, because Docker Hub meters anonymous pulls per client address and hosted
@@ -111,6 +114,41 @@ public sealed class ServerDatabaseContractTests
             Assert.Contains(
                 "20260730134156_EnforceNormalizedIdentityValues",
                 appliedMigrations);
+
+            await migrator.MigrateAsync(
+                PreOidcMigration,
+                TestContext.Current.CancellationToken);
+            Assert.False(await PostgreSqlTableExistsAsync(context, "app_redirect_uris"));
+            var columns = await GetPostgreSqlColumnsAsync(context, "app_registrations");
+            Assert.DoesNotContain("allow_authorization_code", columns);
+            Assert.DoesNotContain("allow_refresh_token", columns);
+            Assert.DoesNotContain("allowed_scopes", columns);
+            Assert.DoesNotContain("client_type", columns);
+            Assert.DoesNotContain("identity_session_max_age_seconds", columns);
+
+            var legacyAppId = Guid.NewGuid();
+            const string callbackUrl = "https://claims.example.com/callback?tenant=legacy";
+            await InsertLegacyApplicationAsync(context, legacyAppId, callbackUrl);
+            await migrator.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+            var upgradedApplication = await context.AppRegistrations
+                .AsNoTracking()
+                .SingleAsync(
+                    app => app.Id == legacyAppId,
+                    TestContext.Current.CancellationToken);
+            Assert.Equal(callbackUrl, upgradedApplication.CallbackUrl);
+            Assert.Equal(LdapLoginMode.ManualApproval, upgradedApplication.LdapLoginMode);
+            Assert.Equal(SmsLoginMode.AutoProvision, upgradedApplication.SmsLoginMode);
+            Assert.Equal("legacy-profile", upgradedApplication.SmsProfileKey);
+            Assert.Equal(WechatLoginMode.BindRequired, upgradedApplication.WechatLoginMode);
+            Assert.Equal(AudienceMode.Shared, upgradedApplication.AudienceMode);
+            Assert.Equal(OidcClientType.Confidential, upgradedApplication.ClientType);
+            Assert.False(upgradedApplication.AllowAuthorizationCode);
+            Assert.Equal("openid", upgradedApplication.AllowedScopes);
+            Assert.False(upgradedApplication.AllowRefreshToken);
+            Assert.Null(upgradedApplication.IdentitySessionMaxAgeSeconds);
+            Assert.Empty(await context.AppRedirectUris.AsNoTracking().ToListAsync(
+                TestContext.Current.CancellationToken));
         }
     }
 
@@ -305,6 +343,8 @@ public sealed class ServerDatabaseContractTests
             Assert.Equal(sourceInstant.UtcTicks / 10, account.CreatedAt.UtcTicks / 10);
         }
 
+        await VerifyInteractiveOidcFreshDatabaseContractAsync(options);
+
         var rotateResults = await Task.WhenAll(
             TryRotateAsync(options, token, accountId),
             TryRotateAsync(options, token, accountId));
@@ -339,6 +379,148 @@ public sealed class ServerDatabaseContractTests
             ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
             AppId = "database-contract-app"
         });
+    }
+
+    private static async Task VerifyInteractiveOidcFreshDatabaseContractAsync(
+        DbContextOptions<IdentityDbContext> options)
+    {
+        var appId = Guid.NewGuid();
+        const string canonicalUri = "https://example.com/callback?tenant=one";
+
+        await using var context = new IdentityDbContext(options);
+        await InsertLegacyApplicationAsync(context, appId, callbackUrl: null);
+
+        var application = await context.AppRegistrations
+            .AsNoTracking()
+            .SingleAsync(app => app.Id == appId);
+        Assert.Equal(OidcClientType.Confidential, application.ClientType);
+        Assert.False(application.AllowAuthorizationCode);
+        Assert.Equal("openid", application.AllowedScopes);
+        Assert.False(application.AllowRefreshToken);
+        Assert.Null(application.IdentitySessionMaxAgeSeconds);
+
+        context.AppRedirectUris.Add(new AppRedirectUriEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = appId,
+            Kind = RedirectUriKind.Redirect,
+            CanonicalUri = canonicalUri
+        });
+        await context.SaveChangesAsync();
+
+        context.AppRedirectUris.Add(new AppRedirectUriEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = appId,
+            Kind = RedirectUriKind.Redirect,
+            CanonicalUri = canonicalUri
+        });
+        await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());
+        context.ChangeTracker.Clear();
+
+        context.AppRedirectUris.Add(new AppRedirectUriEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = appId,
+            Kind = RedirectUriKind.PostLogout,
+            CanonicalUri = canonicalUri
+        });
+        await context.SaveChangesAsync();
+
+        var boundaryInput = "https://example.com?" + new string('a', 480);
+        Assert.Equal(500, boundaryInput.Length);
+        var boundaryCanonicalUri = OidcRedirectUriValidator.ValidateAndCanonicalize(
+            boundaryInput,
+            isDevelopment: false).Value;
+        Assert.Equal(501, boundaryCanonicalUri.Length);
+        context.AppRedirectUris.Add(new AppRedirectUriEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = appId,
+            Kind = RedirectUriKind.Redirect,
+            CanonicalUri = boundaryCanonicalUri
+        });
+        await context.SaveChangesAsync();
+        Assert.Equal(
+            boundaryCanonicalUri,
+            await context.AppRedirectUris
+                .AsNoTracking()
+                .Where(uri => uri.CanonicalUri == boundaryCanonicalUri)
+                .Select(uri => uri.CanonicalUri)
+                .SingleAsync());
+
+        var repository = new AppRegistrationRepository(context);
+        var withOidcConfiguration = await repository.GetByAppIdWithOidcConfigurationAsync(
+            "OIDC-MIGRATION-APP",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(withOidcConfiguration);
+        Assert.Equal(3, withOidcConfiguration.RedirectUris.Count);
+
+        context.AppRegistrations.Remove(withOidcConfiguration);
+        await context.SaveChangesAsync();
+        Assert.Empty(await context.AppRedirectUris.AsNoTracking().ToListAsync());
+
+        context.AppRedirectUris.Add(new AppRedirectUriEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = Guid.NewGuid(),
+            Kind = RedirectUriKind.Redirect,
+            CanonicalUri = "https://example.com/orphan"
+        });
+        await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync());
+    }
+
+    private static Task<int> InsertLegacyApplicationAsync(
+        IdentityDbContext context,
+        Guid id,
+        string? callbackUrl)
+    {
+        return context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO app_registrations
+                (id, app_id, app_id_normalized, app_secret_hash, app_name, callback_url,
+                 is_active, created_at, ldap_login_mode, sms_login_mode, sms_profile_key,
+                 wechat_login_mode, audience_mode)
+            VALUES
+                ({id}, {"oidc-migration-app"}, {"OIDC-MIGRATION-APP"}, {"hash"},
+                 {"OIDC Migration"}, {callbackUrl}, {true}, {DateTimeOffset.UtcNow},
+                 {(int)LdapLoginMode.ManualApproval}, {(int)SmsLoginMode.AutoProvision}, {"legacy-profile"},
+                 {(int)WechatLoginMode.BindRequired}, {(int)AudienceMode.Shared});
+            """, cancellationToken: TestContext.Current.CancellationToken);
+    }
+
+    private static async Task<bool> PostgreSqlTableExistsAsync(
+        IdentityDbContext context,
+        string tableName)
+    {
+        await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = @name";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "name";
+        parameter.Value = tableName;
+        command.Parameters.Add(parameter);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken)) > 0;
+    }
+
+    private static async Task<HashSet<string>> GetPostgreSqlColumnsAsync(
+        IdentityDbContext context,
+        string tableName)
+    {
+        await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = @name";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "name";
+        parameter.Value = tableName;
+        command.Parameters.Add(parameter);
+        await using var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken);
+        var columns = new HashSet<string>(StringComparer.Ordinal);
+        while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+        {
+            columns.Add(reader.GetString(0));
+        }
+
+        return columns;
     }
 
     private static async Task<bool> TryConsumeOtpAsync(

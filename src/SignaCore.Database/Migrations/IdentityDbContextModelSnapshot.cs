@@ -157,12 +157,61 @@ namespace SignaCore.Database.Migrations
                     b.ToTable("app_ldap_accesses", (string)null);
                 });
 
+            modelBuilder.Entity("SignaCore.Database.Entity.AppRedirectUriEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("app_registration_id");
+
+                    b.Property<string>("CanonicalUri")
+                        .IsRequired()
+                        .HasMaxLength(501)
+                        .HasColumnType("character varying(501)")
+                        .HasColumnName("canonical_uri");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer")
+                        .HasColumnName("kind");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppRegistrationId", "Kind", "CanonicalUri")
+                        .IsUnique();
+
+                    b.ToTable("app_redirect_uris", (string)null);
+                });
+
             modelBuilder.Entity("SignaCore.Database.Entity.AppRegistrationEntity", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
+
+                    b.Property<bool>("AllowAuthorizationCode")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("allow_authorization_code");
+
+                    b.Property<bool>("AllowRefreshToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("allow_refresh_token");
+
+                    b.Property<string>("AllowedScopes")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("openid")
+                        .HasColumnName("allowed_scopes");
 
                     b.Property<string>("AppId")
                         .IsRequired()
@@ -201,9 +250,19 @@ namespace SignaCore.Database.Migrations
                         .HasColumnType("character varying(500)")
                         .HasColumnName("callback_url");
 
+                    b.Property<int>("ClientType")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("client_type");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
+
+                    b.Property<int?>("IdentitySessionMaxAgeSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("identity_session_max_age_seconds");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean")
@@ -1003,6 +1062,17 @@ namespace SignaCore.Database.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("SignaCore.Database.Entity.AppRedirectUriEntity", b =>
+                {
+                    b.HasOne("SignaCore.Database.Entity.AppRegistrationEntity", "AppRegistration")
+                        .WithMany("RedirectUris")
+                        .HasForeignKey("AppRegistrationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AppRegistration");
+                });
+
             modelBuilder.Entity("SignaCore.Database.Entity.AppSmsAccessEntity", b =>
                 {
                     b.HasOne("SignaCore.Database.Entity.AppRegistrationEntity", null)
@@ -1049,6 +1119,11 @@ namespace SignaCore.Database.Migrations
                         .HasForeignKey("AppRegistrationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("SignaCore.Database.Entity.AppRegistrationEntity", b =>
+                {
+                    b.Navigation("RedirectUris");
                 });
 #pragma warning restore 612, 618
         }

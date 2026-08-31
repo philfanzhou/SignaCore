@@ -20,6 +20,18 @@ public class AppRegistrationRepository : IAppRegistrationRepository
             .FirstOrDefaultAsync(a => a.AppIdNormalized == normalizedAppId);
     }
 
+    public async Task<AppRegistrationEntity?> GetByAppIdWithOidcConfigurationAsync(
+        string appId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedAppId = IdentityValueNormalizer.Normalize(appId);
+        return await _dbContext.AppRegistrations
+            .Include(app => app.RedirectUris)
+            .FirstOrDefaultAsync(
+                app => app.AppIdNormalized == normalizedAppId,
+                cancellationToken);
+    }
+
     public Task AddAsync(AppRegistrationEntity app)
     {
         _dbContext.AppRegistrations.Add(app);
