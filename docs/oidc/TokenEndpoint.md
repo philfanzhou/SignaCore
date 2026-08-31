@@ -43,7 +43,7 @@ explains why every persisted value exists without defining a second schema:
 | --- | --- |
 | Credential lookup | Only a versioned SHA-256 digest and a public record id are stored; the raw 43-character code is returned once |
 | Static binding | Client, account, exact redirect URI, canonical scope, nonce, S256 challenge, and authentication facts are snapshots |
-| Live authority | The session foreign key reaches the current session/account state; current application policy is loaded separately |
+| Live authority | The non-null restrictive session reference reaches the current session/account state; current application policy is loaded separately |
 | Lifecycle | Created, expiry, and consumed times keep `expired` and `consumed` distinct |
 | Replay output | Nullable `refresh_family_id` points to the exact root created by this code's first redemption |
 
@@ -52,6 +52,12 @@ together under `EV-21`. Without it, `EV-20` commits a null link. Replay handling
 account, client, session, or scope, because two independent codes can share all four and still create
 different families (`SC-07`–`SC-09`). The family shape and rotation behavior belong to the later
 refresh-family document.
+
+`PS-23` fixes when that session reference exists: #50 creates the authorization-code table complete,
+after #95 has created the session authority, so no history state stores a code whose session cannot
+be resolved and no domain-only substitute for the reference is ever written. The nullable
+`refresh_family_id` column is the one reference #50 creates without a constraint, because the family
+root it names does not exist until #97.
 
 Raw code and verifier handling follows `DF-03` and `DF-04`. The verifier is never persisted, while
 the S256 challenge is a code snapshot. A valid verifier is transformed exactly as `IN-24` specifies
@@ -79,8 +85,10 @@ Within that boundary, the implementation distinguishes these decisions:
    proof follows `EV-23`; it cannot trigger replay side effects.
 4. Lock the named session, then the code, and repeat the static checks against the locked row.
 5. If the correctly bound code is already consumed, execute `EV-24`. Committed consumption proves
-   replay even if the linked session row is now missing; an expired-but-retained consumed code is
-   still a replay.
+   replay from `consumed_at` alone and must not depend on reading the session row; an
+   expired-but-retained consumed code is still a replay. The restrictive reference and the no-cascade
+   retention rule mean that row is normally still present, so this independence is a fail-closed
+   requirement rather than a routine branch.
 6. For an unconsumed code, use one captured UTC time to check code expiry, current scope/refresh
    policy, live session including application max-age, active account, and active application.
    `EV-04`, `EV-05`, `EV-08`, `EV-09`, `EV-11`, and `EV-13` provide the state-specific result;
@@ -144,6 +152,7 @@ continue rejecting scope at the standards endpoint and return neither `id_token`
 Interactive refresh remains a separately identified future family path and does not reinterpret a
 legacy refresh row.
 
-#50 activates storage only (`AC-03`), and #53 activates internal code redemption only (`AC-06`).
+#50 activates storage only (`AC-03`) and runs after #95 so its table carries the session reference
+from creation (`PS-23`); #53 activates internal code redemption only (`AC-06`).
 Discovery remains unchanged until #54 and its persistent-session prerequisites complete the whole
 core flow (`AC-07`). This document itself activates no route or metadata (`AC-14`).

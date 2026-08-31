@@ -4,7 +4,7 @@
 [canonical model](./CanonicalSemanticModel.md), and
 [interactive refresh families](./RefreshTokens.md) first.
 
-Canonical `PS-01` through `PS-22` own artifact relationships. This document projects only the
+Canonical `PS-01` through `PS-23` own artifact relationships. This document projects only the
 refresh-family additions and migration procedure needed by #97; it does not redefine the schemas
 owned by authorization, session, logout, or client-policy implementation tasks.
 
@@ -41,6 +41,17 @@ The migration retains the unique digest index and adds:
 - lookup indexes on `family_id` and `identity_session_id` for family/session revocation;
 - the restrictive nullable authorization-code `refresh_family_id` reference to a root created and
   linked by the same `EV-21` transaction.
+
+That last reference is the single deferred one named by `PS-23`: #50 creates the nullable
+`refresh_family_id` column with the authorization-code table, but no family root shape exists until
+this migration, so the reference itself is added here. It is added last, after the backfill, and
+both providers add it the same way. Every other authorization-code reference, including the non-null
+restrictive session reference of `PS-05`, is created with that table by #50 and is not part of this
+migration. The asymmetry cost of deferring is the reason `PS-23` defers nothing else: PostgreSQL adds
+a reference to a populated table in place, while SQLite has to rebuild and copy that table, so the
+two histories stop sharing one statement shape and the rebuild has to preserve every retained code
+row. That cost is accepted only here, where the referenced root cannot exist earlier, and it is
+bounded because `refresh_family_id` stays null until #98 writes the first interactive root.
 
 No relationship cascades on delete. Cleanup must prove that code, session, root, parent, and
 descendant references are no longer needed before deleting them. Account/application values keep
