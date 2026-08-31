@@ -196,6 +196,54 @@ See [Consul integration](./ConsulIntegration.md).
 Image name, container name, host port, bind mounts, restart policy, timezone, and .NET runtime
 switches are deployment concerns owned by the launcher or orchestrator.
 
+### The application pre-seed file
+
+`BootstrapApps:FilePath` points at an optional JSON file that registers applications on first start.
+A missing file is normal and only logged; a file that cannot be read or parsed is a warning and does
+not stop startup. An `AppId` that already exists is skipped, so the file never overwrites a
+registration an administrator has since changed.
+
+Each entry needs `AppId` and `AppSecret`; `AppName` and `CallbackUrl` are optional. `CallbackUrl` is
+the server-to-server claims callback.
+
+An entry may also carry an optional `Oidc` section with the interactive OIDC configuration:
+
+```json
+{
+  "Apps": [
+    {
+      "AppId": "order-service-bff",
+      "AppSecret": "…",
+      "AppName": "OrderService BFF",
+      "Oidc": {
+        "ClientType": "Confidential",
+        "AllowAuthorizationCode": true,
+        "AllowedScopes": ["openid", "profile"],
+        "AllowRefreshToken": false,
+        "IdentitySessionMaxAgeSeconds": 1800,
+        "AudienceMode": "PerApplication",
+        "RedirectUris": ["https://bff.example.test/callback"],
+        "PostLogoutRedirectUris": ["https://bff.example.test/signed-out"]
+      }
+    }
+  ]
+}
+```
+
+Omitting the section — as every file written before it existed does — pre-seeds exactly what it
+always did and leaves the application fail closed: `ClientType` `Confidential`,
+`AllowAuthorizationCode` `false`, `AllowedScopes` `["openid"]`, `AllowRefreshToken` `false`, no
+session max age, and no URI registrations. `CallbackUrl` is never copied into `RedirectUris`.
+
+The section is validated by the same domain rules as
+[the administration API](../modules/Admin/AppManagement/02-SPEC.md#interactive-oidc-client-configuration),
+so a configuration one path refuses is refused by the other. Validation runs before anything is
+written: an entry whose section is unacceptable is logged and skipped, and no partial registration
+is left behind. `AudienceMode` appears here because enabling the code flow requires
+`PerApplication`, and a pre-seeded application has no administrator to set it first.
+
+Pre-seeding an application activates no OIDC endpoint and changes neither discovery document.
+
 ## How secret settings are protected
 
 Sensitive settings are encrypted before being written to `system_settings`. The external root key

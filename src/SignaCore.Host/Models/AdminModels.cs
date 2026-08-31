@@ -28,6 +28,17 @@ public sealed record AdminUpdateNicknameRequest(string? Nickname);
 
 public sealed record AdminUpdateStatusRequest(bool IsActive);
 
+/// <summary>
+/// One row of the application list. The interactive OIDC members are appended after the existing
+/// ones: a console built against the earlier shape keeps reading the same names in the same order,
+/// and an application that predates interactive configuration reports the fail-closed defaults
+/// rather than nothing.
+/// <para>
+/// <c>CallbackUrl</c> is the server-to-server claims callback and has nothing to do with
+/// <c>RedirectUris</c>. They are separate registrations with separate validation, and no value is
+/// ever copied between them.
+/// </para>
+/// </summary>
 public sealed record AdminAppListItemResponse(
     string AppId,
     string AppName,
@@ -40,7 +51,46 @@ public sealed record AdminAppListItemResponse(
     string? SmsProfileKey,
     string WechatLoginMode,
     string AudienceMode,
-    string Audience);
+    string Audience,
+    string ClientType,
+    bool AllowAuthorizationCode,
+    IReadOnlyList<string> AllowedScopes,
+    bool AllowRefreshToken,
+    int? IdentitySessionMaxAgeSeconds,
+    IReadOnlyList<string> RedirectUris,
+    IReadOnlyList<string> PostLogoutRedirectUris);
+
+/// <summary>One registered browser URI. The id is stable across unrelated policy edits.</summary>
+public sealed record AdminAppRedirectUriResponse(Guid Id, string Kind, string Uri);
+
+/// <summary>
+/// The interactive OIDC configuration of one application, with the two URI sets kept apart by kind.
+/// </summary>
+public sealed record AdminAppOidcResponse(
+    string AppId,
+    string ClientType,
+    bool AllowAuthorizationCode,
+    IReadOnlyList<string> AllowedScopes,
+    bool AllowRefreshToken,
+    int? IdentitySessionMaxAgeSeconds,
+    string AudienceMode,
+    IReadOnlyList<AdminAppRedirectUriResponse> RedirectUris,
+    IReadOnlyList<AdminAppRedirectUriResponse> PostLogoutRedirectUris);
+
+/// <summary>
+/// A complete replacement of the interactive policy fields. The audience mode is deliberately
+/// absent: it has its own endpoint, and enabling the code flow without a per-application audience
+/// is a rejection rather than an implicit audience change.
+/// </summary>
+public sealed record AdminUpdateOidcPolicyRequest(
+    string? ClientType,
+    bool AllowAuthorizationCode,
+    IReadOnlyList<string>? AllowedScopes,
+    bool AllowRefreshToken,
+    int? IdentitySessionMaxAgeSeconds);
+
+/// <summary>Adds URIs to one kind. Either every value is registered or none is.</summary>
+public sealed record AdminAddRedirectUrisRequest(string Kind, IReadOnlyList<string>? Uris);
 
 public sealed record AdminCreateAppRequest(string AppName, string? CallbackUrl, int TtlSeconds);
 

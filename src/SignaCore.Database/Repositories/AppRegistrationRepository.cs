@@ -38,6 +38,18 @@ public class AppRegistrationRepository : IAppRegistrationRepository
         return Task.CompletedTask;
     }
 
+    public Task AddRedirectUrisAsync(IEnumerable<AppRedirectUriEntity> registrations)
+    {
+        _dbContext.AppRedirectUris.AddRange(registrations);
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveRedirectUrisAsync(IEnumerable<AppRedirectUriEntity> registrations)
+    {
+        _dbContext.AppRedirectUris.RemoveRange(registrations);
+        return Task.CompletedTask;
+    }
+
     public Task DeleteAsync(AppRegistrationEntity app)
     {
         _dbContext.AppRegistrations.Remove(app);

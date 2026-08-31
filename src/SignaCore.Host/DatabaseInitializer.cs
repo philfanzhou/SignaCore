@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.Domain.Services;
+using SignaCore.Domain.Validators;
 
 namespace SignaCore.Host;
 
@@ -32,10 +34,13 @@ internal static class DatabaseInitializer
 
         using var scope = serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var isDevelopment = scope.ServiceProvider
+            .GetRequiredService<IHostEnvironment>()
+            .IsDevelopment();
 
         try
         {
-            await SeedBootstrapAppsAsync(configuration, db, logger);
+            await SeedBootstrapAppsAsync(configuration, db, logger, isDevelopment);
         }
         catch (Exception exception)
         {
@@ -87,10 +92,11 @@ internal static class DatabaseInitializer
     /// 文件不存在属正常情况，只打 INFO；读取或解析失败只打 Warning 不中断启动，
     /// 因为它是便利机制，应用注册也可以事后从管理控制台补建。
     /// </summary>
-    private static async Task SeedBootstrapAppsAsync(
+    internal static async Task SeedBootstrapAppsAsync(
         IConfiguration configuration,
         IdentityDbContext db,
-        ILogger logger)
+        ILogger logger,
+        bool isDevelopment)
     {
         var filePath = configuration["BootstrapApps:FilePath"] ?? DefaultBootstrapAppsFilePath;
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
@@ -113,7 +119,7 @@ internal static class DatabaseInitializer
 
             foreach (var entry in bootstrapApps?.Apps ?? [])
             {
-                await SeedBootstrapAppAsync(entry, db, logger);
+                await SeedBootstrapAppAsync(entry, db, logger, isDevelopment);
             }
         }
         catch (Exception exception)
@@ -128,7 +134,8 @@ internal static class DatabaseInitializer
     private static async Task SeedBootstrapAppAsync(
         BootstrapAppEntry entry,
         IdentityDbContext db,
-        ILogger logger)
+        ILogger logger,
+        bool isDevelopment)
     {
         if (string.IsNullOrWhiteSpace(entry.AppId) || string.IsNullOrWhiteSpace(entry.AppSecret))
         {
@@ -149,7 +156,7 @@ internal static class DatabaseInitializer
             return;
         }
 
-        db.AppRegistrations.Add(new AppRegistrationEntity
+        var app = new AppRegistrationEntity
         {
             Id = Guid.NewGuid(),
             AppId = entry.AppId,
@@ -158,7 +165,31 @@ internal static class DatabaseInitializer
             CallbackUrl = entry.CallbackUrl,
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow
-        });
+        };
+
+        // An entry without the optional section keeps the fail-closed upgrade defaults, so a file
+        // written before interactive configuration existed pre-seeds exactly what it always did.
+        // The domain applier owns every rule; validation runs before the row is tracked, so a
+        // rejected entry adds no partial registration.
+        if (entry.Oidc != null)
+        {
+            try
+            {
+                // The change lists are irrelevant here: the application itself is new, so adding it
+                // below stages its registrations with it.
+                OidcClientConfigurationApplier.Apply(app, entry.Oidc, isDevelopment);
+            }
+            catch (OidcClientConfigurationException exception)
+            {
+                logger.LogWarning(
+                    "Bootstrap app entry skipped: AppId={AppId} has an unacceptable interactive OIDC configuration. {Reason}",
+                    entry.AppId,
+                    exception.Message);
+                return;
+            }
+        }
+
+        db.AppRegistrations.Add(app);
         await db.SaveChangesAsync();
 
         logger.LogInformation(
