@@ -24,10 +24,11 @@ is corrected before implementation.
 | [UserInfo](./UserInfo.md) | Bearer input, live-authority validation, claims, errors, and server-only response boundary |
 | [Prepared Logout](./Logout.md) | Authenticated preparation, browser handle completion, redirects, sensitive values, and races |
 | [Non-refresh State Propagation](./StatePropagation.md) | Verification ledger from state events to implementation and test owners |
+| [Interactive Refresh Families](./RefreshTokens.md) | Refresh input, family rotation, reuse handling, state enforcement, and legacy isolation |
+| [Interactive Persistence](./Persistence.md) | Additive family schema, legacy backfill, provider symmetry, cleanup, and rollback gates |
 
-Later tasks add refresh-family, persistence, security, ownership, Discovery, and ADR explanations.
-Until those tasks close, their canonical rows remain target decisions without a second prose
-contract.
+Later tasks add security, ownership, Discovery, and ADR explanations. Until those tasks close,
+their canonical rows remain target decisions without a second prose contract.
 
 ## First-phase boundary
 
