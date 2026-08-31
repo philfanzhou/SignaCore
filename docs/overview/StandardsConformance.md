@@ -11,7 +11,9 @@ Both run the same issuance pipeline (`TokenIssuanceService`), so authentication 
 and lockout behave identically; only the wire format differs.
 
 **This page describes the current runtime. SignaCore is still not an OpenID Connect provider.** It issues OAuth 2.0 access tokens. There is no
-`id_token`, no authorization endpoint, and no UserInfo endpoint.
+`id_token` and no UserInfo endpoint. `GET /oauth2/authorize` exists as a route but cannot complete
+an authorization: it validates the request and answers locally, issues no authorization code, and is
+advertised in neither discovery document.
 
 ## The standards endpoint
 
@@ -102,7 +104,7 @@ are made from the `client_id` claim, not from `aud`.
 | Gap | Specification | Impact |
 | --- | --- | --- |
 | No `id_token` | OIDC Core 1.0 §2 | The defining OIDC artifact is absent; this is an OAuth 2.0 authorization server, not an OP |
-| No authorization endpoint, no authorization-code flow, no PKCE | RFC 6749 §4.1, RFC 7636 | Browser and mobile clients cannot use a redirect-based flow; only direct credential grants exist |
+| No authorization-code flow | RFC 6749 §4.1, RFC 7636 | `GET /oauth2/authorize` validates requests and routes protocol errors, but issues no code and establishes no identity session, so browser clients still cannot complete a redirect-based flow; only direct credential grants exist |
 | No UserInfo endpoint | OIDC Core 1.0 §5.3 | Profile data is only available through the JWT and the callback mechanism |
 | No `scope` | RFC 6749 §3.3 | There is no way to request or restrict a subset of authority |
 | The `password` grant is the primary flow | OAuth 2.1 draft, BCP 240 | The resource-owner password grant is deprecated in current guidance; it remains here because clients depend on it |
