@@ -105,7 +105,7 @@ public sealed class OAuthAuthorizationController : ControllerBase
                 _logger.LogInformation(
                     "Authorization request rejected locally. Reason={Reason}, CorrelationId={CorrelationId}",
                     local.Reason,
-                    HttpContext.GetCorrelationId());
+                    LogValueSanitizer.Sanitize(HttpContext.GetCorrelationId()));
                 return LocalError();
 
             case OidcAuthorizationValidationResult.RedirectRejection redirect:
