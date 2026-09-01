@@ -2,12 +2,10 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
-using Microsoft.Extensions.Logging.Abstractions;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Validators;
-using SignaCore.Host;
 using Xunit;
 
 namespace SignaCore.IntegrationTests.Integration;
@@ -182,62 +180,6 @@ public sealed class SqliteDatabaseContractTests
         {
             SqliteConnection.ClearAllPools();
             if (File.Exists(databasePath)) File.Delete(databasePath);
-        }
-    }
-
-    [Fact]
-    public async Task LegacyRefreshTokenProtection_TranslatesAndRewritesOnRelationalProvider()
-    {
-        var databasePath = Path.Combine(
-            Path.GetTempPath(),
-            $"signacore-refresh-protection-{Guid.NewGuid():N}.db");
-        var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
-        optionsBuilder.UseIdentityDatabase(new DatabaseOptions
-        {
-            Provider = "SQLite",
-            ConnectionString = $"Data Source={databasePath}"
-        });
-        const string legacyToken = "legacy-relational-token";
-
-        try
-        {
-            await using var context = new IdentityDbContext(optionsBuilder.Options);
-            await context.Database.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
-            var accountId = Guid.NewGuid();
-            context.Accounts.Add(new AccountEntity
-            {
-                Id = accountId,
-                IsActive = true,
-                CreatedAt = DateTimeOffset.UtcNow
-            });
-            context.RefreshTokens.Add(new RefreshTokenEntity
-            {
-                Id = Guid.NewGuid(),
-                AccountId = accountId,
-                TokenValue = legacyToken,
-                AppId = "legacy-protection-app",
-                CreatedAt = DateTimeOffset.UtcNow,
-                ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
-            });
-            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-            await DatabaseInitializer.ProtectLegacyRefreshTokensAsync(
-                context,
-                NullLogger.Instance);
-
-            Assert.Equal(
-                RefreshTokenDigest.Compute(legacyToken),
-                await context.RefreshTokens.AsNoTracking()
-                    .Select(token => token.TokenValue)
-                    .SingleAsync(cancellationToken: TestContext.Current.CancellationToken));
-        }
-        finally
-        {
-            SqliteConnection.ClearAllPools();
-            if (File.Exists(databasePath))
-            {
-                File.Delete(databasePath);
-            }
         }
     }
 

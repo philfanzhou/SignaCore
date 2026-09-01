@@ -195,3 +195,13 @@ silently rotate or replace signing keys.
    redeploy. Anything still supplied is logged as an ignored legacy override.
 5. Change settings from then on through the administration pages, followed by a coordinated rolling
    restart.
+
+## Minimum supported upgrade version
+
+The oldest supported direct upgrade source is SignaCore `0.1.1`. That release introduced one-way
+digests for stored refresh tokens and converted existing plaintext values during startup. Current
+startup no longer performs that one-time plaintext-to-digest conversion.
+
+Before upgrading a deployment older than `0.1.1`, clear all rows from `refresh_tokens`. Existing
+sessions will no longer be refreshable, so users must sign in again after the upgrade. The table
+schema and refresh-token digest format are unchanged.
