@@ -347,41 +347,32 @@ public class AdminController : ControllerBase
     {
         var allApps = await dbContext.AppRegistrations
             .AsNoTracking()
+            .Include(app => app.RedirectUris)
             .ToListAsync();
 
-        var apps = allApps
+        var items = allApps
             .OrderByDescending(app => app.CreatedAt)
-            .Select(app => new
-            {
+            .Select(app => new AdminAppListItemResponse(
                 app.AppId,
                 app.AppName,
-                app.CallbackUrl,
-                app.CallbackExpiresAt,
+                app.CallbackUrl ?? string.Empty,
+                app.CallbackExpiresAt.HasValue ? app.CallbackExpiresAt.Value.ToUnixTimeSeconds() : null,
                 app.IsActive,
-                app.CreatedAt,
-                app.LdapLoginMode,
-                app.SmsLoginMode,
+                app.CreatedAt.ToUnixTimeSeconds(),
+                app.LdapLoginMode.ToString(),
+                app.SmsLoginMode.ToString(),
                 app.SmsProfileKey,
-                app.WechatLoginMode,
-                app.AudienceMode,
+                app.WechatLoginMode.ToString(),
+                app.AudienceMode.ToString(),
                 // 直接把生效的 aud 值算出来给管理台，省得前端复制一份解析规则。
-                Audience = JwtTokenService.ResolveAudience(app, jwtOptions)
-            })
-            .ToList();
-
-        var items = apps.Select(app => new AdminAppListItemResponse(
-            app.AppId,
-            app.AppName,
-            app.CallbackUrl ?? string.Empty,
-            app.CallbackExpiresAt.HasValue ? app.CallbackExpiresAt.Value.ToUnixTimeSeconds() : null,
-            app.IsActive,
-            app.CreatedAt.ToUnixTimeSeconds(),
-            app.LdapLoginMode.ToString(),
-            app.SmsLoginMode.ToString(),
-            app.SmsProfileKey,
-            app.WechatLoginMode.ToString(),
-            app.AudienceMode.ToString(),
-            app.Audience))
+                JwtTokenService.ResolveAudience(app, jwtOptions),
+                app.ClientType.ToString(),
+                app.AllowAuthorizationCode,
+                SplitCanonicalScopes(app.AllowedScopes),
+                app.AllowRefreshToken,
+                app.IdentitySessionMaxAgeSeconds,
+                RegisteredUris(app, RedirectUriKind.Redirect),
+                RegisteredUris(app, RedirectUriKind.PostLogout)))
             .ToList();
 
         return Ok((IReadOnlyList<AdminAppListItemResponse>)items);
@@ -699,6 +690,271 @@ public class AdminController : ControllerBase
             after: new { Mode = mode.ToString(), Audience = audience });
         return Ok(new OperationResponse(true, $"Access tokens for this application now carry aud={audience}."));
     }
+
+    /// <summary>
+    /// GET /api/admin/apps/{appId}/oidc — the interactive OIDC configuration of one application.
+    /// <para>
+    /// The two URI sets are separate registrations and are returned separately. Neither is the
+    /// claims callback, which stays on its own endpoint and is never mixed in here.
+    /// </para>
+    /// </summary>
+    [HttpGet("apps/{appId}/oidc")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> GetOidcConfiguration(
+        string appId,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        CancellationToken cancellationToken)
+    {
+        var app = await appRegistrationRepository.GetByAppIdWithOidcConfigurationAsync(
+            appId,
+            cancellationToken);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+
+        return Ok(Describe(app));
+    }
+
+    /// <summary>
+    /// PUT /api/admin/apps/{appId}/oidc-policy — replaces the interactive policy fields.
+    /// <para>
+    /// The whole resulting configuration, including the URI registrations the request does not
+    /// mention, is revalidated together. That is what makes a request such as "enable the code flow"
+    /// fail when the application has no redirect URI, instead of committing a policy the
+    /// authorization endpoint could never honour.
+    /// </para>
+    /// </summary>
+    [HttpPut("apps/{appId}/oidc-policy")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> UpdateOidcPolicy(
+        string appId,
+        [FromBody] AdminUpdateOidcPolicyRequest request,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IAuditService auditService,
+        [FromServices] IWebHostEnvironment environment,
+        CancellationToken cancellationToken)
+    {
+        var app = await appRegistrationRepository.GetByAppIdWithOidcConfigurationAsync(
+            appId,
+            cancellationToken);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+
+        var before = Snapshot(app);
+        return await ApplyOidcConfigurationAsync(
+            app,
+            new OidcClientConfigurationInput
+            {
+                ClientType = request.ClientType,
+                AllowAuthorizationCode = request.AllowAuthorizationCode,
+                AllowedScopes = request.AllowedScopes,
+                AllowRefreshToken = request.AllowRefreshToken,
+                IdentitySessionMaxAgeSeconds = request.IdentitySessionMaxAgeSeconds,
+                RedirectUris = RegisteredUris(app, RedirectUriKind.Redirect),
+                PostLogoutRedirectUris = RegisteredUris(app, RedirectUriKind.PostLogout)
+            },
+            before,
+            "app_oidc_policy_updated",
+            "Interactive OIDC policy updated.",
+            appRegistrationRepository,
+            unitOfWork,
+            auditService,
+            environment,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// POST /api/admin/apps/{appId}/oidc/redirect-uris — registers one or more URIs of one kind.
+    /// <para>
+    /// The request is one unit: if any submitted value fails registration policy, or the resulting
+    /// set would break a cross-field rule, nothing is registered.
+    /// </para>
+    /// </summary>
+    [HttpPost("apps/{appId}/oidc/redirect-uris")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> AddOidcRedirectUris(
+        string appId,
+        [FromBody] AdminAddRedirectUrisRequest request,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IAuditService auditService,
+        [FromServices] IWebHostEnvironment environment,
+        CancellationToken cancellationToken)
+    {
+        var app = await appRegistrationRepository.GetByAppIdWithOidcConfigurationAsync(
+            appId,
+            cancellationToken);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+        if (!Enum.TryParse<RedirectUriKind>(request.Kind, true, out var kind) || !Enum.IsDefined(kind))
+            return BadRequest(new ErrorResponse("Invalid redirect URI kind."));
+        if (request.Uris == null || request.Uris.Count == 0)
+            return BadRequest(new ErrorResponse("At least one redirect URI is required."));
+
+        var before = Snapshot(app);
+        var redirect = RegisteredUris(app, RedirectUriKind.Redirect).ToList();
+        var postLogout = RegisteredUris(app, RedirectUriKind.PostLogout).ToList();
+        (kind == RedirectUriKind.Redirect ? redirect : postLogout).AddRange(request.Uris);
+
+        return await ApplyOidcConfigurationAsync(
+            app,
+            CurrentPolicyWith(app, redirect, postLogout),
+            before,
+            "app_oidc_redirect_uris_added",
+            "Redirect URI registrations updated.",
+            appRegistrationRepository,
+            unitOfWork,
+            auditService,
+            environment,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// DELETE /api/admin/apps/{appId}/oidc/redirect-uris/{registrationId} — removes one registration.
+    /// <para>
+    /// Removing the last redirect URI of an application that still has the code flow enabled is
+    /// rejected: an interactive client with no destination is not a configuration the authorization
+    /// endpoint can act on.
+    /// </para>
+    /// </summary>
+    [HttpDelete("apps/{appId}/oidc/redirect-uris/{registrationId:guid}")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> RemoveOidcRedirectUri(
+        string appId,
+        Guid registrationId,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IAuditService auditService,
+        [FromServices] IWebHostEnvironment environment,
+        CancellationToken cancellationToken)
+    {
+        var app = await appRegistrationRepository.GetByAppIdWithOidcConfigurationAsync(
+            appId,
+            cancellationToken);
+        if (app == null) return NotFound(new ErrorResponse("App not found."));
+
+        var registration = app.RedirectUris.FirstOrDefault(uri => uri.Id == registrationId);
+        if (registration == null) return NotFound(new ErrorResponse("Redirect URI registration not found."));
+
+        var before = Snapshot(app);
+        var redirect = RegisteredUris(app, RedirectUriKind.Redirect).ToList();
+        var postLogout = RegisteredUris(app, RedirectUriKind.PostLogout).ToList();
+        (registration.Kind == RedirectUriKind.Redirect ? redirect : postLogout)
+            .Remove(registration.CanonicalUri);
+
+        return await ApplyOidcConfigurationAsync(
+            app,
+            CurrentPolicyWith(app, redirect, postLogout),
+            before,
+            "app_oidc_redirect_uris_removed",
+            "Redirect URI registrations updated.",
+            appRegistrationRepository,
+            unitOfWork,
+            auditService,
+            environment,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Validates and commits one interactive configuration change, then audits it.
+    /// <para>
+    /// Validation runs before anything is staged, so a rejected request leaves the row exactly as it
+    /// was and one <c>SaveChanges</c> makes an accepted one effective as a unit. The audit row is
+    /// written after that commit rather than inside it; that gap is tracked separately and is not
+    /// closed here.
+    /// </para>
+    /// </summary>
+    private async Task<IActionResult> ApplyOidcConfigurationAsync(
+        AppRegistrationEntity app,
+        OidcClientConfigurationInput input,
+        object before,
+        string auditAction,
+        string successMessage,
+        IAppRegistrationRepository appRegistrationRepository,
+        IUnitOfWork unitOfWork,
+        IAuditService auditService,
+        IWebHostEnvironment environment,
+        CancellationToken cancellationToken)
+    {
+        OidcClientConfigurationChange change;
+        try
+        {
+            change = OidcClientConfigurationApplier.Apply(app, input, environment.IsDevelopment());
+        }
+        catch (OidcClientConfigurationException exception)
+        {
+            return BadRequest(new ErrorResponse(exception.Message));
+        }
+
+        await appRegistrationRepository.AddRedirectUrisAsync(change.AddedRegistrations);
+        await appRegistrationRepository.RemoveRedirectUrisAsync(change.RemovedRegistrations);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var (actorId, actorName) = GetAdminIdentity();
+        await auditService.RecordActionAsync(
+            auditAction, "AppRegistration", app.AppId, actorId, actorName,
+            successMessage, GetClientIp(), before: before, after: Snapshot(app));
+
+        return Ok(Describe(app));
+    }
+
+    /// <summary>The current policy fields with a different pair of URI sets.</summary>
+    private static OidcClientConfigurationInput CurrentPolicyWith(
+        AppRegistrationEntity app,
+        IReadOnlyList<string> redirectUris,
+        IReadOnlyList<string> postLogoutRedirectUris) => new()
+        {
+            ClientType = app.ClientType.ToString(),
+            AllowAuthorizationCode = app.AllowAuthorizationCode,
+            AllowedScopes = SplitCanonicalScopes(app.AllowedScopes),
+            AllowRefreshToken = app.AllowRefreshToken,
+            IdentitySessionMaxAgeSeconds = app.IdentitySessionMaxAgeSeconds,
+            RedirectUris = redirectUris,
+            PostLogoutRedirectUris = postLogoutRedirectUris
+        };
+
+    private static AdminAppOidcResponse Describe(AppRegistrationEntity app) => new(
+        app.AppId,
+        app.ClientType.ToString(),
+        app.AllowAuthorizationCode,
+        SplitCanonicalScopes(app.AllowedScopes),
+        app.AllowRefreshToken,
+        app.IdentitySessionMaxAgeSeconds,
+        app.AudienceMode.ToString(),
+        Registrations(app, RedirectUriKind.Redirect),
+        Registrations(app, RedirectUriKind.PostLogout));
+
+    /// <summary>
+    /// The audit snapshot. It carries policy and registered URIs only: no secret, no hash, and no
+    /// untrusted value, because every URI here has already passed registration policy.
+    /// </summary>
+    private static object Snapshot(AppRegistrationEntity app) => new
+    {
+        ClientType = app.ClientType.ToString(),
+        app.AllowAuthorizationCode,
+        AllowedScopes = app.AllowedScopes,
+        app.AllowRefreshToken,
+        app.IdentitySessionMaxAgeSeconds,
+        AudienceMode = app.AudienceMode.ToString(),
+        RedirectUris = RegisteredUris(app, RedirectUriKind.Redirect),
+        PostLogoutRedirectUris = RegisteredUris(app, RedirectUriKind.PostLogout)
+    };
+
+    private static IReadOnlyList<AdminAppRedirectUriResponse> Registrations(
+        AppRegistrationEntity app,
+        RedirectUriKind kind) =>
+        app.RedirectUris
+            .Where(uri => uri.Kind == kind)
+            .OrderBy(uri => uri.CanonicalUri, StringComparer.Ordinal)
+            .Select(uri => new AdminAppRedirectUriResponse(uri.Id, uri.Kind.ToString(), uri.CanonicalUri))
+            .ToList();
+
+    private static IReadOnlyList<string> RegisteredUris(AppRegistrationEntity app, RedirectUriKind kind) =>
+        app.RedirectUris
+            .Where(uri => uri.Kind == kind)
+            .Select(uri => uri.CanonicalUri)
+            .OrderBy(uri => uri, StringComparer.Ordinal)
+            .ToList();
+
+    private static IReadOnlyList<string> SplitCanonicalScopes(string canonicalScopes) =>
+        canonicalScopes.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
     /// <summary>
     /// GET /api/admin/apps/{appId}/exchange-trusts — 本应用愿意接受哪些应用签发的 refresh token。
