@@ -1,14 +1,16 @@
 namespace SignaCore.Domain;
 
 /// <summary>
-/// 敏感字段脱敏工具。所有写入日志（含 Loki）的手机号、OpenId 等字段必须经此工具脱敏。
-/// 规则参见 docs/development/ErrorHandling.md「敏感字段脱敏」。
+/// The masking helper for sensitive fields. Every phone number, OpenId and similar field written to
+/// the logs, Loki included, has to be masked through it.
+/// See the sensitive field masking rules in docs/development/ErrorHandling.md.
 /// </summary>
 public static class SensitiveDataMasker
 {
     /// <summary>
-    /// 手机号脱敏：保留前 3 + 后 4，中间用 **** 替换。例如 13812341234 → 138****1234。
-    /// 长度不足 7 位时全部替换为 ****。
+    /// Masks a phone number: the first 3 and the last 4 characters are kept and everything between
+    /// them is replaced with ****. For example, 13812341234 becomes 138****1234.
+    /// Anything shorter than 7 characters is replaced with **** entirely.
     /// </summary>
     public static string MaskPhone(string? phone)
     {
@@ -19,8 +21,9 @@ public static class SensitiveDataMasker
     }
 
     /// <summary>
-    /// 微信 OpenId 脱敏：保留前 4 + 后 4，中间用 **** 替换。例如 o1QxYzAbcdefghijklwxyz → o1Qx****wxyz。
-    /// 长度不足 8 位时全部替换为 ****。
+    /// Masks a WeChat OpenId: the first 4 and the last 4 characters are kept and everything between
+    /// them is replaced with ****. For example, o1QxYzAbcdefghijklwxyz becomes o1Qx****wxyz.
+    /// Anything shorter than 8 characters is replaced with **** entirely.
     /// </summary>
     public static string MaskOpenId(string? openId)
     {

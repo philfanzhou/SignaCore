@@ -102,7 +102,7 @@ public class CallbackServiceTests
     [Fact]
     public async Task FetchExternalClaimsAsync_WithTooManyRoles_TruncatesToMax()
     {
-        // 生成超过 50 个角色
+        // Produce more than 50 roles.
         var roles = Enumerable.Range(0, 55).Select(i => $"role_{i}").ToList();
         var json = $"{{\"roles\":[{string.Join(",", roles.Select(r => $"\"{r}\""))}]}}";
         var handler = new MockHttpMessageHandler(json, HttpStatusCode.OK);

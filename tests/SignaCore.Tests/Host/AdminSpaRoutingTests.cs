@@ -7,8 +7,9 @@ using Xunit;
 namespace SignaCore.Tests.Host;
 
 /// <summary>
-/// SPA 分支是终止分支：被它接走的请求永远到不了 MapControllers()。
-/// 这些用例守住"什么不能被 SPA 接走"——回归一次就是整条 API 静默 404。
+/// The SPA branch is a terminal branch: a request it takes never reaches MapControllers().
+/// These tests hold the line on what the SPA must not take — one regression there silently 404s a
+/// whole API.
 /// </summary>
 public class AdminSpaRoutingTests
 {
@@ -25,8 +26,9 @@ public class AdminSpaRoutingTests
     }
 
     /// <summary>
-    /// 回归：/oauth2 曾经不在排除列表里，生产上整个 OAuth 端点被 SPA 分支吞掉，
-    /// 而 TestServer 的 LocalPort 是 0 让测试完全看不到。
+    /// Regression: /oauth2 was once missing from the exclusion list, so in production the SPA branch
+    /// swallowed the entire OAuth endpoint, while TestServer's LocalPort of 0 kept the tests from
+    /// seeing any of it.
     /// </summary>
     [Theory]
     [InlineData("/api/auth/token")]
@@ -47,8 +49,9 @@ public class AdminSpaRoutingTests
     }
 
     /// <summary>
-    /// 主防线是"路由已经选中了 endpoint"，不是前缀名单：新加的路由自动被排除，
-    /// 不需要有人记得回来改这个列表。
+    /// The main line of defence is that routing has already selected an endpoint, not the prefix
+    /// list: a newly added route is excluded automatically, without anyone having to remember to
+    /// come back and edit that list.
     /// </summary>
     [Fact]
     public void ShouldServeSpa_ExcludesAnyPathThatRoutingAlreadyMatched()
@@ -65,7 +68,9 @@ public class AdminSpaRoutingTests
         Assert.False(AdminSpaRouting.ShouldServeSpa(Context("/admin", port: 9443), HttpPort));
     }
 
-    /// <summary>前缀比较按路径段：/apifoo 不是 /api 下的东西。</summary>
+    /// <summary>
+    /// Prefixes are compared on segment boundaries: /apifoo is not something under /api.
+    /// </summary>
     [Fact]
     public void ShouldServeSpa_MatchesPrefixesOnSegmentBoundaries()
     {

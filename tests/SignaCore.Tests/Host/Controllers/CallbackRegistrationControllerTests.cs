@@ -49,7 +49,7 @@ public class CallbackRegistrationControllerTests
     [Fact]
     public async Task RegisterCallback_WithoutAppIdHeader_ReturnsAppIdRequiredError()
     {
-        // 刻意不设置 X-Admin-AppId / X-Admin-AppSecret 头
+        // The X-Admin-AppId / X-Admin-AppSecret headers are deliberately left unset.
         var controller = CreateController();
 
         var request = new RegisterCallbackRequest

@@ -4,9 +4,10 @@ using SignaCore.Domain;
 namespace SignaCore.Host;
 
 /// <summary>
-/// HTTP CorrelationId 中间件：从请求头 x-correlation-id 读取或新建 CorrelationId，
-/// 通过 ILogger.BeginScope 注入日志上下文，并回写响应头便于调用方关联。
-/// 详见 docs/development/ErrorHandling.md「CorrelationId 流转」。
+/// The HTTP correlation id middleware: it reads the correlation id from the x-correlation-id request
+/// header or creates a new one, injects it into the logging context through ILogger.BeginScope, and
+/// writes it back on the response headers so the caller can correlate.
+/// See how the correlation id propagates in docs/development/ErrorHandling.md.
 /// </summary>
 public class CorrelationIdMiddleware
 {

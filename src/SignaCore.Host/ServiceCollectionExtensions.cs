@@ -80,7 +80,8 @@ public static class ServiceCollectionExtensions
         });
 
         // ---- RSA Key Manager ----
-        // 主密钥来源与私钥加解密是两个独立关注点，KeyManager 只负责密钥生命周期编排。
+        // Where the master key comes from and how private keys are encrypted are two separate
+        // concerns; KeyManager only orchestrates the key lifecycle.
         services.AddSingleton(masterKeyProvider);
         services.AddSingleton<IPrivateKeyProtector, AesGcmPrivateKeyProtector>();
         services.AddSingleton<IConfigurationProtector, AesGcmConfigurationProtector>();
@@ -361,7 +362,8 @@ public static class ServiceCollectionExtensions
                     }
                     else
                     {
-                        // 生产环境必须显式配置 AdminWeb:AllowedOrigins，否则不启用 CORS
+                        // Production has to configure AdminWeb:AllowedOrigins explicitly, or CORS
+                        // stays off.
                         origins = Array.Empty<string>();
                     }
                 }
@@ -379,7 +381,8 @@ public static class ServiceCollectionExtensions
                 }
                 else
                 {
-                    // 无来源时仅允许基本请求，不携带凭据
+                    // With no origins, only simple requests are allowed and no credentials are
+                    // carried.
                     policy.AllowAnyHeader()
                         .AllowAnyMethod();
                 }
@@ -506,16 +509,21 @@ public static class ServiceCollectionExtensions
                     ValidateIssuerSigningKey = true,
                     ValidIssuer = jwtOptions.Issuer,
                     ClockSkew = TimeSpan.FromSeconds(30),
-                    // 这条 scheme 只服务本服务自己的 /api/profile/*，它是"用户自助"接口，不属于
-                    // 任何单个应用：任何一个已注册应用签出的 token，用户都应该能用来管理自己的资料。
-                    // 所以这里的判定实质是"这张 token 是我们签的"，而不是受众授权——放行部署级共享
-                    // audience，或与同一张 token 里 client_id 一致的 aud（PerApplication 模式下
-                    // 两者相等，等价于接受全部自签 token）。
+                    // This scheme serves only this service's own /api/profile/*, which is the user
+                    // self-service API and belongs to no single application: a user should be able
+                    // to manage their own profile with a token issued for any registered
+                    // application. So what is decided here is really "did we sign this token?"
+                    // rather than audience authorization — it admits the deployment-level shared
+                    // audience, or an aud that matches the client_id inside the same token (under
+                    // PerApplication mode the two are equal, which amounts to accepting every token
+                    // we signed ourselves).
                     //
-                    // 注意：这不削弱 AudienceMode 的目标。受众隔离要挡的是**下游服务**拿 A 的 token
-                    // 当 B 的用，而下游用自己的 ValidAudience 校验，不走这里。真正的应用级授权由
-                    // client_id claim 决定（见 ProfileController 里的微信绑定作用域）。
-                    // 详见 docs/overview/StandardsConformance.md。
+                    // Note that this does not weaken the goal of AudienceMode. Audience isolation
+                    // exists to stop a *downstream service* from taking A's token as B's, and a
+                    // downstream service validates with its own ValidAudience, which does not come
+                    // through here. Application-level authorization proper is decided by the
+                    // client_id claim (see the WeChat binding scope in ProfileController).
+                    // See docs/overview/StandardsConformance.md for the details.
                     AudienceValidator = (audiences, securityToken, _) =>
                     {
                         var clientId = (securityToken as System.IdentityModel.Tokens.Jwt.JwtSecurityToken)?
@@ -594,8 +602,10 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// 解析短信绕过白名单。Consul KV 里写 JSON 数组，环境变量里写逗号分隔字符串，两种都支持。
-    /// 未配置时返回空列表——此时即使配了 BypassCode，<c>SmsValidator</c> 也不会放行任何号码。
+    /// Resolves the SMS bypass allow-list. Consul KV holds a JSON array and an environment variable
+    /// holds a comma-separated string; both are supported.
+    /// An empty list is returned when it is not configured, and then <c>SmsValidator</c> admits no
+    /// number at all, even with a BypassCode configured.
     /// </summary>
     internal static IReadOnlyList<string> ResolveBypassPhones(IConfiguration configuration)
     {
