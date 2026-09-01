@@ -1,9 +1,11 @@
+using System.Data.Common;
 using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SignaCore.Database;
@@ -473,6 +475,281 @@ public sealed class AuditTransactionTests
         Assert.Contains(sourceApp.AppId, audit.BeforeSnapshot, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task RevokeSmsUser_WhenCleanupDeletesTokenBeforeTheUpdate_StillRevokesAndAudits()
+    {
+        // CleanupWorker.RemoveExpiredAndRevokedAsync deletes expired-but-unrevoked rows, which the
+        // revocation query also matches. Drop one such row just before the revoking UPDATE runs.
+        var interceptor = new DeleteRowBeforeRefreshTokenUpdateInterceptor("sms-expired");
+        await using var database = await SqliteTestDatabase.CreateAsync(interceptor);
+        var targets = await SeedRevocationTargetsAsync(database.Context);
+
+        var result = await CreateAdminController().RevokeSmsUser(
+            targets.App.AppId,
+            targets.UserLoginId,
+            database.Context,
+            CreateAuditService(database.Context),
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.True(interceptor.Fired);
+
+        database.Context.ChangeTracker.Clear();
+        Assert.False(await database.Context.AppSmsAccesses
+            .Select(access => access.IsActive)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        Assert.False(await database.Context.RefreshTokens
+            .AnyAsync(token => token.Id == targets.ExpiredSmsTokenId, TestContext.Current.CancellationToken));
+        Assert.True(await database.Context.RefreshTokens
+            .Where(token => token.Id == targets.ActiveSmsTokenId)
+            .Select(token => token.IsRevoked)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        var audit = await database.Context.AuditLogs.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("app_sms_user_revoked", audit.Action);
+        Assert.Equal(targets.App.AppId, audit.TargetId);
+    }
+
+    [Fact]
+    public async Task RevokeSmsUser_WhenAuditInsertFails_RollsBackAccessAndTokenRevocation()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var targets = await SeedRevocationTargetsAsync(database.Context);
+        await FailAuditLogInsertAsync(database.Context);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => CreateAdminController().RevokeSmsUser(
+            targets.App.AppId,
+            targets.UserLoginId,
+            database.Context,
+            CreateAuditService(database.Context),
+            TestContext.Current.CancellationToken));
+
+        await AssertRevocationRolledBackAsync(database.Context, targets.ActiveSmsTokenId);
+        Assert.True(await database.Context.AppSmsAccesses
+            .Select(access => access.IsActive)
+            .SingleAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task RevokeWechatUser_WhenAuditInsertFails_RollsBackAccessAndTokenRevocation()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var targets = await SeedRevocationTargetsAsync(database.Context);
+        await FailAuditLogInsertAsync(database.Context);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => CreateAdminController().RevokeWechatUser(
+            targets.App.AppId,
+            targets.UserLoginId,
+            database.Context,
+            CreateAuditService(database.Context),
+            TestContext.Current.CancellationToken));
+
+        await AssertRevocationRolledBackAsync(database.Context, targets.ActiveWechatTokenId);
+        Assert.True(await database.Context.AppWechatAccesses
+            .Select(access => access.IsActive)
+            .SingleAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task RevokeLdapUser_WhenAuditInsertFails_RollsBackAccessAndTokenRevocation()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var targets = await SeedRevocationTargetsAsync(database.Context);
+        await FailAuditLogInsertAsync(database.Context);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => CreateAdminController().RevokeLdapUser(
+            targets.App.AppId,
+            targets.LdapCredentialId,
+            database.Context,
+            CreateAuditService(database.Context),
+            TestContext.Current.CancellationToken));
+
+        await AssertRevocationRolledBackAsync(database.Context, targets.ActiveLdapTokenId);
+        Assert.True(await database.Context.AppLdapAccesses
+            .Select(access => access.IsActive)
+            .SingleAsync(TestContext.Current.CancellationToken));
+    }
+
+    private static async Task AssertRevocationRolledBackAsync(IdentityDbContext context, Guid tokenId)
+    {
+        context.ChangeTracker.Clear();
+        Assert.False(await context.RefreshTokens
+            .Where(token => token.Id == tokenId)
+            .Select(token => token.IsRevoked)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        Assert.False(await context.AuditLogs.AnyAsync(TestContext.Current.CancellationToken));
+    }
+
+    private static Task FailAuditLogInsertAsync(IdentityDbContext context) =>
+        context.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TRIGGER fail_audit_insert
+            BEFORE INSERT ON audit_logs
+            BEGIN
+                SELECT RAISE(ABORT, 'audit insert failed');
+            END;
+            """,
+            TestContext.Current.CancellationToken);
+
+    private static async Task<RevocationTargets> SeedRevocationTargetsAsync(IdentityDbContext context)
+    {
+        var account = CreateAccount();
+        var app = CreateApp("revoke-app");
+        var userLogin = new UserLoginEntity
+        {
+            Id = Guid.NewGuid(),
+            AccountId = account.Id,
+            ProviderName = "Sms",
+            ProviderNameNormalized = "sms",
+            ProviderUserId = "+8613800000000"
+        };
+        var ldapCredential = new LdapCredentialEntity
+        {
+            Id = Guid.NewGuid(),
+            AccountId = account.Id,
+            DirectoryKey = "corp",
+            DirectoryKeyNormalized = "corp",
+            ObjectGuid = Guid.NewGuid(),
+            UserPrincipalName = "member@corp.example",
+            UserPrincipalNameNormalized = "member@corp.example",
+            SamAccountName = "member",
+            SamAccountNameNormalized = "member",
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        var now = DateTimeOffset.UtcNow;
+        var activeSmsToken = CreateRefreshToken(account.Id, app.AppId, "sms-active", now.AddHours(1));
+        activeSmsToken.SmsUserLoginId = userLogin.Id;
+        var expiredSmsToken = CreateRefreshToken(account.Id, app.AppId, "sms-expired", now.AddHours(-1));
+        expiredSmsToken.SmsUserLoginId = userLogin.Id;
+        var activeWechatToken = CreateRefreshToken(account.Id, app.AppId, "wechat-active", now.AddHours(1));
+        activeWechatToken.WechatUserLoginId = userLogin.Id;
+        var activeLdapToken = CreateRefreshToken(account.Id, app.AppId, "ldap-active", now.AddHours(1));
+        activeLdapToken.LdapCredentialId = ldapCredential.Id;
+
+        context.Accounts.Add(account);
+        context.AppRegistrations.Add(app);
+        context.UserLogins.Add(userLogin);
+        context.LdapCredentials.Add(ldapCredential);
+        context.AppSmsAccesses.Add(new AppSmsAccessEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = app.Id,
+            UserLoginId = userLogin.Id,
+            ApprovalSource = SmsAccessApprovalSource.Admin,
+            IsActive = true,
+            CreatedAt = now
+        });
+        context.AppWechatAccesses.Add(new AppWechatAccessEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = app.Id,
+            UserLoginId = userLogin.Id,
+            ApprovalSource = WechatAccessApprovalSource.SelfBind,
+            IsActive = true,
+            CreatedAt = now
+        });
+        context.AppLdapAccesses.Add(new AppLdapAccessEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = app.Id,
+            LdapCredentialId = ldapCredential.Id,
+            ApprovalSource = LdapAccessApprovalSource.Admin,
+            IsActive = true,
+            CreatedAt = now
+        });
+        context.RefreshTokens.AddRange(
+            activeSmsToken, expiredSmsToken, activeWechatToken, activeLdapToken);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        context.ChangeTracker.Clear();
+
+        return new RevocationTargets(
+            app,
+            userLogin.Id,
+            ldapCredential.Id,
+            activeSmsToken.Id,
+            expiredSmsToken.Id,
+            activeWechatToken.Id,
+            activeLdapToken.Id);
+    }
+
+    private static RefreshTokenEntity CreateRefreshToken(
+        Guid accountId, string appId, string tokenValue, DateTimeOffset expiresAt) => new()
+    {
+        Id = Guid.NewGuid(),
+        AccountId = accountId,
+        AppId = appId,
+        TokenValue = tokenValue,
+        ExpiresAt = expiresAt,
+        CreatedAt = DateTimeOffset.UtcNow,
+        IsRevoked = false
+    };
+
+    private sealed record RevocationTargets(
+        AppRegistrationEntity App,
+        Guid UserLoginId,
+        Guid LdapCredentialId,
+        Guid ActiveSmsTokenId,
+        Guid ExpiredSmsTokenId,
+        Guid ActiveWechatTokenId,
+        Guid ActiveLdapTokenId);
+
+    /// <summary>
+    /// Deletes one refresh token on the same connection immediately before the statement that
+    /// revokes refresh tokens, reproducing a cleanup pass that removes a matched row after the
+    /// request started. A tracked per-row update would report zero affected rows here and throw
+    /// <see cref="DbUpdateConcurrencyException"/>.
+    /// </summary>
+    private sealed class DeleteRowBeforeRefreshTokenUpdateInterceptor : DbCommandInterceptor
+    {
+        private readonly string _tokenValue;
+        private int _fired;
+
+        public DeleteRowBeforeRefreshTokenUpdateInterceptor(string tokenValue) => _tokenValue = tokenValue;
+
+        public bool Fired => Volatile.Read(ref _fired) == 1;
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            DeleteIfRevokingRefreshTokens(command);
+            return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        // A tracked per-row update is sent as "UPDATE ... RETURNING 1", which executes as a reader
+        // rather than a non-query, so both paths have to be covered for the seam to hold whichever
+        // shape the endpoint uses.
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            DeleteIfRevokingRefreshTokens(command);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        private void DeleteIfRevokingRefreshTokens(DbCommand command)
+        {
+            if (!command.CommandText.Contains("refresh_tokens", StringComparison.Ordinal) ||
+                !command.CommandText.TrimStart().StartsWith("UPDATE", StringComparison.OrdinalIgnoreCase) ||
+                Interlocked.Exchange(ref _fired, 1) != 0)
+            {
+                return;
+            }
+
+            using var delete = command.Connection!.CreateCommand();
+            delete.Transaction = command.Transaction;
+            delete.CommandText = "DELETE FROM refresh_tokens WHERE token_value = $token";
+            var parameter = delete.CreateParameter();
+            parameter.ParameterName = "$token";
+            parameter.Value = _tokenValue;
+            delete.Parameters.Add(parameter);
+            delete.ExecuteNonQuery();
+        }
+    }
+
     private static AdminController CreateAdminController()
     {
         var controller = new AdminController(NullLogger<AdminController>.Instance);
@@ -689,12 +966,13 @@ public sealed class AuditTransactionTests
 
         public IdentityDbContext Context { get; }
 
-        public static async Task<SqliteTestDatabase> CreateAsync()
+        public static async Task<SqliteTestDatabase> CreateAsync(IInterceptor? interceptor = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync(TestContext.Current.CancellationToken);
-            var context = new IdentityDbContext(
-                new DbContextOptionsBuilder<IdentityDbContext>().UseSqlite(connection).Options);
+            var builder = new DbContextOptionsBuilder<IdentityDbContext>().UseSqlite(connection);
+            if (interceptor != null) builder.AddInterceptors(interceptor);
+            var context = new IdentityDbContext(builder.Options);
             await context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
             return new SqliteTestDatabase(connection, context);
         }

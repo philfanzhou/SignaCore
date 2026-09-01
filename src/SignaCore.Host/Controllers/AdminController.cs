@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication;
@@ -177,6 +178,54 @@ public class AdminController : ControllerBase
             await using var transaction = await dbContext.Database.BeginTransactionAsync();
             await StageAndSaveAsync();
             await transaction.CommitAsync();
+        });
+    }
+
+    /// <summary>
+    /// Deactivates one application access row and revokes the refresh tokens it issued inside a
+    /// single retryable transaction, so the access flag, the revocations and the audit entry commit
+    /// or roll back together.
+    /// </summary>
+    /// <remarks>
+    /// The tokens are revoked with a conditional set-based update instead of tracked per-row
+    /// updates: <c>CleanupWorker</c> concurrently deletes expired-or-revoked rows, so a row loaded
+    /// here can be gone by the time the change is saved, which would fail the whole request with a
+    /// concurrency exception instead of skipping the row. The access row is reloaded inside the
+    /// transaction because a retry restarts from a cleared change tracker.
+    /// </remarks>
+    /// <returns><c>false</c> when the access row no longer exists; the caller reports that as 404.</returns>
+    private static async Task<bool> RevokeAppAccessAsync<TAccess>(
+        IdentityDbContext dbContext,
+        Guid accessId,
+        Action<TAccess> deactivate,
+        Expression<Func<RefreshTokenEntity, bool>> issuedTokens,
+        Func<Task> stageAuditAsync,
+        CancellationToken cancellationToken)
+        where TAccess : class
+    {
+        var strategy = dbContext.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            dbContext.ChangeTracker.Clear();
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            var access = await dbContext.Set<TAccess>().FirstOrDefaultAsync(
+                item => EF.Property<Guid>(item, "Id") == accessId, cancellationToken);
+            if (access == null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                return false;
+            }
+
+            deactivate(access);
+            await dbContext.RefreshTokens
+                .Where(issuedTokens)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(token => token.IsRevoked, true), cancellationToken);
+            await stageAuditAsync();
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return true;
         });
     }
 
@@ -742,20 +791,18 @@ public class AdminController : ControllerBase
             item => item.AppRegistrationId == app.Id && item.UserLoginId == loginId, cancellationToken);
         if (access == null) return NotFound(new ErrorResponse("SMS application access not found."));
 
-        access.IsActive = false;
-        var refreshTokens = await dbContext.RefreshTokens
-            .Where(token => token.AppId == app.AppId && token.SmsUserLoginId == loginId && !token.IsRevoked)
-            .ToListAsync(cancellationToken);
-        foreach (var refreshToken in refreshTokens)
-        {
-            refreshToken.IsRevoked = true;
-        }
         var (actorId, actorName) = GetAdminIdentity();
-        await auditService.RecordActionAsync(
-            "app_sms_user_revoked", "AppRegistration", appId, actorId, actorName,
-            "Administrator revoked an SMS identity for the application", GetClientIp(),
-            after: new { LoginId = loginId, IsActive = false });
-        await dbContext.SaveChangesAsync(cancellationToken);
+        var revoked = await RevokeAppAccessAsync<AppSmsAccessEntity>(
+            dbContext,
+            access.Id,
+            item => item.IsActive = false,
+            token => token.AppId == app.AppId && token.SmsUserLoginId == loginId && !token.IsRevoked,
+            () => auditService.RecordActionAsync(
+                "app_sms_user_revoked", "AppRegistration", appId, actorId, actorName,
+                "Administrator revoked an SMS identity for the application", GetClientIp(),
+                after: new { LoginId = loginId, IsActive = false }),
+            cancellationToken);
+        if (!revoked) return NotFound(new ErrorResponse("SMS application access not found."));
         return Ok(new OperationResponse(true, "SMS application access revoked."));
     }
 
@@ -1267,20 +1314,18 @@ public class AdminController : ControllerBase
             item => item.AppRegistrationId == app.Id && item.UserLoginId == loginId, cancellationToken);
         if (access == null) return NotFound(new ErrorResponse("WeChat application access not found."));
 
-        access.IsActive = false;
-        var refreshTokens = await dbContext.RefreshTokens
-            .Where(token => token.AppId == app.AppId && token.WechatUserLoginId == loginId && !token.IsRevoked)
-            .ToListAsync(cancellationToken);
-        foreach (var refreshToken in refreshTokens)
-        {
-            refreshToken.IsRevoked = true;
-        }
         var (actorId, actorName) = GetAdminIdentity();
-        await auditService.RecordActionAsync(
-            "app_wechat_user_revoked", "AppRegistration", appId, actorId, actorName,
-            "Administrator revoked a WeChat identity for the application", GetClientIp(),
-            after: new { LoginId = loginId, IsActive = false });
-        await dbContext.SaveChangesAsync(cancellationToken);
+        var revoked = await RevokeAppAccessAsync<AppWechatAccessEntity>(
+            dbContext,
+            access.Id,
+            item => item.IsActive = false,
+            token => token.AppId == app.AppId && token.WechatUserLoginId == loginId && !token.IsRevoked,
+            () => auditService.RecordActionAsync(
+                "app_wechat_user_revoked", "AppRegistration", appId, actorId, actorName,
+                "Administrator revoked a WeChat identity for the application", GetClientIp(),
+                after: new { LoginId = loginId, IsActive = false }),
+            cancellationToken);
+        if (!revoked) return NotFound(new ErrorResponse("WeChat application access not found."));
         return Ok(new OperationResponse(true, "WeChat application access revoked."));
     }
 
@@ -1481,25 +1526,25 @@ public class AdminController : ControllerBase
             return NotFound(new ErrorResponse("LDAP application access not found."));
         }
 
-        access.IsActive = false;
-        var refreshTokens = await dbContext.RefreshTokens
-            .Where(token => token.AppId == app.AppId && token.LdapCredentialId == credentialId && !token.IsRevoked)
-            .ToListAsync(cancellationToken);
-        foreach (var refreshToken in refreshTokens)
-        {
-            refreshToken.IsRevoked = true;
-        }
-
         var (actorId, actorName) = GetAdminIdentity();
-        await auditService.RecordActionAsync(
-            "app_ldap_user_revoked",
-            "AppRegistration",
-            appId,
-            actorId,
-            actorName,
-            $"Administrator revoked LDAP credential {credentialId} from the application",
-            GetClientIp());
-        await dbContext.SaveChangesAsync(cancellationToken);
+        var revoked = await RevokeAppAccessAsync<AppLdapAccessEntity>(
+            dbContext,
+            access.Id,
+            item => item.IsActive = false,
+            token => token.AppId == app.AppId && token.LdapCredentialId == credentialId && !token.IsRevoked,
+            () => auditService.RecordActionAsync(
+                "app_ldap_user_revoked",
+                "AppRegistration",
+                appId,
+                actorId,
+                actorName,
+                $"Administrator revoked LDAP credential {credentialId} from the application",
+                GetClientIp()),
+            cancellationToken);
+        if (!revoked)
+        {
+            return NotFound(new ErrorResponse("LDAP application access not found."));
+        }
 
         return Ok(new OperationResponse(true, "LDAP application access revoked."));
     }
