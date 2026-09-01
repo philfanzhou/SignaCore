@@ -15,6 +15,7 @@ using SignaCore.Domain.Services;
 using SignaCore.Host;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Models;
+using SignaCore.Host.Provisioning;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Controllers;
@@ -567,7 +568,7 @@ public class AdminOidcClientTests : IDisposable
             })
             .Build();
 
-        await DatabaseInitializer.SeedBootstrapAppsAsync(
+        await BootstrapAppSeeder.SeedBootstrapAppsAsync(
             configuration,
             _dbContext,
             NullLogger.Instance,
@@ -679,7 +680,7 @@ public class AdminOidcClientTests : IDisposable
                 })
                 .Build();
 
-            await DatabaseInitializer.SeedBootstrapAppsAsync(
+            await BootstrapAppSeeder.SeedBootstrapAppsAsync(
                 configuration,
                 _dbContext,
                 NullLogger.Instance,

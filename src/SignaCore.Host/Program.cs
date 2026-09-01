@@ -10,6 +10,7 @@ using SignaCore.Host.Configuration;
 using SignaCore.Host.HealthChecks;
 using SignaCore.Host.Installation;
 using SignaCore.Host.Middleware;
+using SignaCore.Host.Provisioning;
 using SignaCore.Host.Security;
 using SignaCore.Host.Startup;
 
@@ -260,8 +261,17 @@ if (!hasHttpsEndpoint)
 
 // ---- Application-phase data seeding ----
 // Schema migration and installation state were settled in the bootstrap phase; what is left is the
-// optional bootstrap-apps.json pre-seed.
-await DatabaseInitializer.InitializeAsync(app.Services, builder.Configuration);
+// optional bootstrap-apps.json pre-seed, which is a product capability rather than migration work.
+using (var seedScope = app.Services.CreateScope())
+{
+    await BootstrapAppSeeder.SeedBootstrapAppsAsync(
+        builder.Configuration,
+        seedScope.ServiceProvider.GetRequiredService<IdentityDbContext>(),
+        app.Services
+            .GetRequiredService<ILoggerFactory>()
+            .CreateLogger(typeof(BootstrapAppSeeder).FullName!),
+        seedScope.ServiceProvider.GetRequiredService<IHostEnvironment>().IsDevelopment());
+}
 
 // ---- Wait for KeyManager initialization before accepting requests ----
 var keyManager = app.Services.GetRequiredService<IKeyManager>();
