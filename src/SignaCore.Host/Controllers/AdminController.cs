@@ -18,6 +18,7 @@ using SignaCore.Domain.Services.WeChat;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Http;
 using SignaCore.Host.Models;
+using SignaCore.Host.Services;
 
 namespace SignaCore.Host.Controllers;
 
@@ -39,7 +40,9 @@ public class AdminController : ControllerBase
         [FromServices] ValidatorFactory validatorFactory,
         [FromServices] AdminIdentityOptions adminIdentity,
         [FromServices] IAuditService auditService,
-        [FromServices] IUnitOfWork unitOfWork)
+        [FromServices] ILoginAttemptRepository loginAttemptRepository,
+        [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IdentityDbContext dbContext)
     {
         if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
         {
@@ -58,9 +61,16 @@ public class AdminController : ControllerBase
         // Success(account, ...) 的 account 是非空参数，成功分支不可能没有账号。
         if (!result.IsSuccess)
         {
-            await auditService.RecordLoginAsync(null, request.Username.Trim(), "admin_login", "login_failure",
-                GetClientIp(), HttpContext.Request.Headers.UserAgent, result.ErrorMessage);
-            await unitOfWork.SaveChangesAsync();
+            await CommitAdminLoginStateAsync(
+                result,
+                null,
+                request.Username.Trim(),
+                "login_failure",
+                result.ErrorMessage,
+                loginAttemptRepository,
+                auditService,
+                unitOfWork,
+                dbContext);
             return StatusCode(StatusCodes.Status401Unauthorized, new { message = result.ErrorMessage });
         }
 
@@ -69,9 +79,16 @@ public class AdminController : ControllerBase
         if (string.IsNullOrWhiteSpace(configuredAdmin)
             || !string.Equals(username, configuredAdmin, StringComparison.OrdinalIgnoreCase))
         {
-            await auditService.RecordLoginAsync(result.Account.Id, username, "admin_login", "login_failure",
-                GetClientIp(), HttpContext.Request.Headers.UserAgent, "bootstrap_admin_required");
-            await unitOfWork.SaveChangesAsync();
+            await CommitAdminLoginStateAsync(
+                result,
+                result.Account.Id,
+                username,
+                "login_failure",
+                "bootstrap_admin_required",
+                loginAttemptRepository,
+                auditService,
+                unitOfWork,
+                dbContext);
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only the bootstrap administrator can sign in to admin web." });
         }
 
@@ -84,6 +101,17 @@ public class AdminController : ControllerBase
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         var principal = new ClaimsPrincipal(identity);
 
+        await CommitAdminLoginStateAsync(
+            result,
+            result.Account.Id,
+            username,
+            "login_success",
+            null,
+            loginAttemptRepository,
+            auditService,
+            unitOfWork,
+            dbContext);
+
         await HttpContext.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
             principal,
@@ -94,14 +122,62 @@ public class AdminController : ControllerBase
                 ExpiresUtc = DateTimeOffset.UtcNow.AddHours(request.RememberMe ? 7 * 24 : 12)
             });
 
-        await auditService.RecordLoginAsync(result.Account.Id, username, "admin_login", "login_success",
-            GetClientIp(), HttpContext.Request.Headers.UserAgent);
-        await unitOfWork.SaveChangesAsync();
-
         return Ok(new AdminSessionResponse(
             result.Account.Id.ToString(),
             username,
             true));
+    }
+
+    private async Task CommitAdminLoginStateAsync(
+        ValidationResult validationResult,
+        Guid? accountId,
+        string username,
+        string eventType,
+        string? failureReason,
+        ILoginAttemptRepository loginAttemptRepository,
+        IAuditService auditService,
+        IUnitOfWork unitOfWork,
+        IdentityDbContext dbContext)
+    {
+        async Task StageAndSaveAsync()
+        {
+            var loginAttempt = await LoginAttemptChangeApplier.ApplyAsync(
+                validationResult.LoginAttemptChange,
+                loginAttemptRepository);
+            if (loginAttempt?.LockoutUntil > DateTimeOffset.UtcNow)
+            {
+                _logger.LogWarning(
+                    "Account locked due to too many failed attempts, Username={Username}, LockoutUntil={LockoutUntil}",
+                    LogValueSanitizer.Sanitize(loginAttempt.Username),
+                    loginAttempt.LockoutUntil);
+            }
+            await auditService.RecordLoginAsync(
+                accountId,
+                username,
+                "admin_login",
+                eventType,
+                GetClientIp(),
+                HttpContext.Request.Headers.UserAgent,
+                failureReason);
+            await unitOfWork.SaveChangesAsync();
+        }
+
+        if (validationResult.LoginAttemptChange?.Kind != LoginAttemptChangeKind.RecordFailure)
+        {
+            await StageAndSaveAsync();
+            return;
+        }
+
+        // The failed-attempt repository performs an immediate atomic update. Enclose it and the
+        // login-history insert in one retryable transaction, while cookie I/O remains outside.
+        var strategy = dbContext.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            dbContext.ChangeTracker.Clear();
+            await using var transaction = await dbContext.Database.BeginTransactionAsync();
+            await StageAndSaveAsync();
+            await transaction.CommitAsync();
+        });
     }
 
     [HttpGet("session/me")]

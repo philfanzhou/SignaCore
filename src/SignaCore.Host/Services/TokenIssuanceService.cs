@@ -35,6 +35,7 @@ public sealed class TokenIssuanceService
     private readonly IAuditService _auditService;
     private readonly IAccountLoginInfoService _accountLoginInfoService;
     private readonly IAccountRepository _accountRepository;
+    private readonly ILoginAttemptRepository _loginAttemptRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IdentityDbContext _dbContext;
     private readonly AdminIdentityOptions _adminIdentityOptions;
@@ -52,6 +53,7 @@ public sealed class TokenIssuanceService
         IAuditService auditService,
         IAccountLoginInfoService accountLoginInfoService,
         IAccountRepository accountRepository,
+        ILoginAttemptRepository loginAttemptRepository,
         IUnitOfWork unitOfWork,
         IdentityDbContext dbContext,
         AdminIdentityOptions adminIdentityOptions,
@@ -68,6 +70,7 @@ public sealed class TokenIssuanceService
         _auditService = auditService;
         _accountLoginInfoService = accountLoginInfoService;
         _accountRepository = accountRepository;
+        _loginAttemptRepository = loginAttemptRepository;
         _unitOfWork = unitOfWork;
         _dbContext = dbContext;
         _adminIdentityOptions = adminIdentityOptions;
@@ -124,7 +127,8 @@ public sealed class TokenIssuanceService
                 responseMessage: validationResult.ErrorMessage,
                 auditFailureReason: validationResult.ErrorMessage,
                 // OTPs and provider authorization codes are credentials, never audit identities.
-                auditUsername: request.Username ?? request.Phone ?? "unknown");
+                auditUsername: request.Username ?? request.Phone ?? "unknown",
+                loginAttemptChange: validationResult.LoginAttemptChange);
         }
 
         // Capture these once at the start of the success branch. The non-null flow state supplied by
@@ -212,6 +216,9 @@ public sealed class TokenIssuanceService
         }
         else
         {
+            await LoginAttemptChangeApplier.ApplyAsync(
+                validationResult.LoginAttemptChange,
+                _loginAttemptRepository);
             await StageLoginStateAsync();
             newRefreshToken = await StageRefreshTokenAsync();
             await StageLoginAuditAsync();
@@ -289,18 +296,50 @@ public sealed class TokenIssuanceService
         string responseMessage,
         string? auditFailureReason,
         string auditUsername = "unknown",
-        Guid? accountId = null)
+        Guid? accountId = null,
+        LoginAttemptChange? loginAttemptChange = null)
     {
         stopwatch.Stop();
         _authMetrics.RecordLoginFailure(request.GrantType, metricReason);
         _authMetrics.RecordLoginDuration(stopwatch.Elapsed.TotalMilliseconds, request.GrantType);
 
-        await _auditService.RecordLoginAsync(
-            accountId, auditUsername, request.GrantType, "login_failure",
-            request.ClientIp, request.UserAgent, auditFailureReason, request.App.AppId, request.CorrelationId);
-        await _unitOfWork.SaveChangesAsync();
+        if (loginAttemptChange == null)
+        {
+            await StageAuditAsync();
+            await _unitOfWork.SaveChangesAsync();
+        }
+        else
+        {
+            // RecordFailureAsync contains an atomic SQL update (and a SaveChanges fallback for the
+            // first row), so the Host owns a short explicit transaction that also includes the
+            // login-history insert. External validation and token work stay outside this boundary.
+            var strategy = _dbContext.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                _dbContext.ChangeTracker.Clear();
+                await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+                var loginAttempt = await LoginAttemptChangeApplier.ApplyAsync(
+                    loginAttemptChange,
+                    _loginAttemptRepository);
+                if (request.GrantType == IdentityConstants.GrantTypePassword &&
+                    loginAttempt?.LockoutUntil > DateTimeOffset.UtcNow)
+                {
+                    _logger.LogWarning(
+                        "Account locked due to too many failed attempts, Username={Username}, LockoutUntil={LockoutUntil}",
+                        LogValueSanitizer.Sanitize(loginAttemptChange.Username),
+                        loginAttempt.LockoutUntil);
+                }
+                await StageAuditAsync();
+                await _unitOfWork.SaveChangesAsync();
+                await transaction.CommitAsync();
+            });
+        }
 
         return TokenIssuanceOutcome.Failure(errorCode, responseMessage);
+
+        Task StageAuditAsync() => _auditService.RecordLoginAsync(
+            accountId, auditUsername, request.GrantType, "login_failure",
+            request.ClientIp, request.UserAgent, auditFailureReason, request.App.AppId, request.CorrelationId);
     }
 
     private sealed record AccountLoginState(

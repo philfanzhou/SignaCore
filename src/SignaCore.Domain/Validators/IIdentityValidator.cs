@@ -96,6 +96,13 @@ public class ValidationResult
     /// </summary>
     public string? SourceAppId { get; private set; }
 
+    /// <summary>
+    /// A login-attempt state change discovered while validating Password or LDAP credentials.
+    /// Validation itself never persists this change: the Host applies it in the same unit of work
+    /// as the corresponding login-history row.
+    /// </summary>
+    public LoginAttemptChange? LoginAttemptChange { get; private set; }
+
     public static ValidationResult Success(
         AccountEntity account,
         string authMethod,
@@ -133,4 +140,18 @@ public class ValidationResult
         SourceAppId = sourceAppId;
         return this;
     }
+
+    internal ValidationResult WithLoginAttemptChange(LoginAttemptChange? change)
+    {
+        LoginAttemptChange = change;
+        return this;
+    }
 }
+
+public enum LoginAttemptChangeKind
+{
+    RecordFailure,
+    Clear
+}
+
+public sealed record LoginAttemptChange(LoginAttemptChangeKind Kind, string Username);

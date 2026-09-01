@@ -11,11 +11,14 @@ using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Ldap;
 using SignaCore.Domain.Services.Sms;
+using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Http;
 using SignaCore.Host.Models;
+using SignaCore.Host.Services;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Controllers;
@@ -131,6 +134,285 @@ public sealed class AuditTransactionTests
         Assert.Equal("correlation-148", entry.CorrelationId);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PasswordFailure_WhenLoginHistoryInsertFails_RollsBackAttemptIncrease(
+        bool hasExistingAttempt)
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var passwordHasher = CreatePasswordHasher();
+        var account = CreateAccount();
+        database.Context.Accounts.Add(account);
+        database.Context.PasswordCredentials.Add(CreatePasswordCredential(
+            account.Id,
+            "password-user",
+            passwordHasher.HashPassword("correct-value")));
+        if (hasExistingAttempt)
+        {
+            database.Context.LoginAttempts.Add(CreateLoginAttempt("password-user"));
+        }
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await FailLoginHistoryInsertAsync(database.Context);
+        var loginAttemptRepository = new LoginAttemptRepository(database.Context);
+        var validator = new PasswordValidator(
+            new PasswordCredentialRepository(database.Context),
+            new AccountRepository(database.Context),
+            loginAttemptRepository,
+            passwordHasher,
+            NullLogger<PasswordValidator>.Instance);
+        var service = CreateTokenIssuanceService(
+            database.Context,
+            validator,
+            loginAttemptRepository);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => service.IssueAsync(
+            CreateIssuanceRequest(
+                IdentityConstants.GrantTypePassword,
+                username: "password-user",
+                password: "wrong-value"),
+            TestContext.Current.CancellationToken));
+
+        database.Context.ChangeTracker.Clear();
+        var attempts = await database.Context.LoginAttempts
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken);
+        if (hasExistingAttempt)
+        {
+            Assert.Equal(1, Assert.Single(attempts).FailedAttempts);
+        }
+        else
+        {
+            Assert.Empty(attempts);
+        }
+        Assert.Empty(await database.Context.LoginHistories
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task PasswordSuccess_WhenLoginHistoryInsertFails_RollsBackAttemptClear()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var passwordHasher = CreatePasswordHasher();
+        var account = CreateAccount();
+        database.Context.Accounts.Add(account);
+        database.Context.PasswordCredentials.Add(CreatePasswordCredential(
+            account.Id,
+            "password-user",
+            passwordHasher.HashPassword("correct-value")));
+        database.Context.LoginAttempts.Add(CreateLoginAttempt("password-user"));
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await FailLoginHistoryInsertAsync(database.Context);
+        var loginAttemptRepository = new LoginAttemptRepository(database.Context);
+        var validator = new PasswordValidator(
+            new PasswordCredentialRepository(database.Context),
+            new AccountRepository(database.Context),
+            loginAttemptRepository,
+            passwordHasher,
+            NullLogger<PasswordValidator>.Instance);
+        var service = CreateTokenIssuanceService(
+            database.Context,
+            validator,
+            loginAttemptRepository);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => service.IssueAsync(
+            CreateIssuanceRequest(
+                IdentityConstants.GrantTypePassword,
+                username: "password-user",
+                password: "correct-value"),
+            TestContext.Current.CancellationToken));
+
+        database.Context.ChangeTracker.Clear();
+        Assert.Equal(1, (await database.Context.LoginAttempts
+            .AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken)).FailedAttempts);
+        Assert.Equal(0, (await database.Context.Accounts
+            .AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken)).TotalLoginCount);
+        Assert.Empty(await database.Context.LoginHistories
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task LdapFailure_WhenLoginHistoryInsertFails_RollsBackAttemptIncrease()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var app = CreateApp("ldap-app");
+        app.LdapLoginMode = LdapLoginMode.AutoProvision;
+        var directory = new LdapDirectoryOptions { Key = "corp" };
+        var identity = new LdapDirectoryIdentity(
+            directory.Key,
+            Guid.NewGuid(),
+            "alice@corp.example.test",
+            "alice",
+            true);
+        var directoryClient = new Mock<ILdapDirectoryClient>();
+        directoryClient.Setup(client => client.ResolveDirectory("alice")).Returns(directory);
+        directoryClient.Setup(client => client.FindUserAsync(
+                directory.Key,
+                "alice",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(identity);
+        directoryClient.Setup(client => client.ValidateCredentialsAsync(
+                directory.Key,
+                identity.UserPrincipalName,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(LdapCredentialValidationResult.InvalidCredentials);
+        var accountService = new Mock<ILdapAccountService>();
+        accountService.Setup(service => service.GetCredentialByObjectGuidAsync(
+                directory.Key,
+                identity.ObjectGuid))
+            .ReturnsAsync((LdapCredentialEntity?)null);
+        await FailLoginHistoryInsertAsync(database.Context);
+        var loginAttemptRepository = new LoginAttemptRepository(database.Context);
+        var validator = new LdapValidator(
+            new LdapOptions { Enabled = true },
+            directoryClient.Object,
+            accountService.Object,
+            new AccountRepository(database.Context),
+            loginAttemptRepository,
+            AuthTestDoubles.AuthMetrics(),
+            NullLogger<LdapValidator>.Instance);
+        var service = CreateTokenIssuanceService(
+            database.Context,
+            validator,
+            loginAttemptRepository);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => service.IssueAsync(
+            CreateIssuanceRequest(
+                IdentityConstants.GrantTypeLdap,
+                app,
+                username: "alice",
+                password: "wrong-value"),
+            TestContext.Current.CancellationToken));
+
+        database.Context.ChangeTracker.Clear();
+        Assert.Empty(await database.Context.LoginAttempts
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await database.Context.LoginHistories
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task LdapSuccess_WhenLoginHistoryInsertFails_RollsBackAttemptClear()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var app = CreateApp("ldap-app");
+        app.LdapLoginMode = LdapLoginMode.ManualApproval;
+        var account = CreateAccount();
+        var objectGuid = Guid.NewGuid();
+        var credential = new LdapCredentialEntity
+        {
+            Id = Guid.NewGuid(),
+            AccountId = account.Id,
+            DirectoryKey = "corp",
+            ObjectGuid = objectGuid,
+            UserPrincipalName = "alice@corp.example.test",
+            SamAccountName = "alice"
+        };
+        var access = new AppLdapAccessEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = app.Id,
+            LdapCredentialId = credential.Id,
+            ApprovalSource = LdapAccessApprovalSource.Admin,
+            IsActive = true
+        };
+        var attemptKey = $"ldap:corp:{objectGuid:N}";
+        database.Context.Accounts.Add(account);
+        database.Context.LoginAttempts.Add(CreateLoginAttempt(attemptKey));
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await FailLoginHistoryInsertAsync(database.Context);
+        var directory = new LdapDirectoryOptions { Key = "corp" };
+        var directoryClient = new Mock<ILdapDirectoryClient>();
+        directoryClient.Setup(client => client.ResolveDirectory("alice")).Returns(directory);
+        directoryClient.Setup(client => client.ValidateCredentialsAsync(
+                directory.Key,
+                credential.UserPrincipalName,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(LdapCredentialValidationResult.Success);
+        var accountService = new Mock<ILdapAccountService>();
+        accountService.Setup(service => service.FindCredentialByLoginAsync(directory.Key, "alice"))
+            .ReturnsAsync(credential);
+        accountService.Setup(service => service.GetAccessAsync(app.Id, credential.Id))
+            .ReturnsAsync(access);
+        var loginAttemptRepository = new LoginAttemptRepository(database.Context);
+        var validator = new LdapValidator(
+            new LdapOptions { Enabled = true },
+            directoryClient.Object,
+            accountService.Object,
+            new AccountRepository(database.Context),
+            loginAttemptRepository,
+            AuthTestDoubles.AuthMetrics(),
+            NullLogger<LdapValidator>.Instance);
+        var service = CreateTokenIssuanceService(
+            database.Context,
+            validator,
+            loginAttemptRepository);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => service.IssueAsync(
+            CreateIssuanceRequest(
+                IdentityConstants.GrantTypeLdap,
+                app,
+                username: "alice",
+                password: "valid-value"),
+            TestContext.Current.CancellationToken));
+
+        database.Context.ChangeTracker.Clear();
+        Assert.Equal(attemptKey, (await database.Context.LoginAttempts
+            .AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken)).Username);
+        Assert.Empty(await database.Context.LoginHistories
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task AdminPasswordFailure_WhenLoginHistoryInsertFails_RollsBackAttemptIncrease()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var passwordHasher = CreatePasswordHasher();
+        var account = CreateAccount();
+        database.Context.Accounts.Add(account);
+        database.Context.PasswordCredentials.Add(CreatePasswordCredential(
+            account.Id,
+            "admin",
+            passwordHasher.HashPassword("correct-value")));
+        database.Context.LoginAttempts.Add(CreateLoginAttempt("admin"));
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await FailLoginHistoryInsertAsync(database.Context);
+        var loginAttemptRepository = new LoginAttemptRepository(database.Context);
+        var validator = new PasswordValidator(
+            new PasswordCredentialRepository(database.Context),
+            new AccountRepository(database.Context),
+            loginAttemptRepository,
+            passwordHasher,
+            NullLogger<PasswordValidator>.Instance);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => CreateAdminController().Login(
+            new AdminLoginRequest("admin", "wrong-value", false),
+            new ValidatorFactory([validator], NullLogger<ValidatorFactory>.Instance),
+            new AdminIdentityOptions { Username = "admin" },
+            CreateAuditService(database.Context),
+            loginAttemptRepository,
+            new EfCoreUnitOfWork(database.Context),
+            database.Context));
+
+        database.Context.ChangeTracker.Clear();
+        Assert.Equal(1, (await database.Context.LoginAttempts
+            .AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken)).FailedAttempts);
+        Assert.Empty(await database.Context.LoginHistories
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
     [Fact]
     public async Task RemoveExchangeTrust_WhenConcurrentDeleteLoses_ReturnsNotFoundWithoutAudit()
     {
@@ -207,6 +489,90 @@ public sealed class AuditTransactionTests
 
     private static AuditService CreateAuditService(IdentityDbContext context) =>
         new(new LoginHistoryRepository(context), new AuditLogRepository(context));
+
+    private static IPasswordHasher CreatePasswordHasher() =>
+        new BCryptPasswordHasher(new PasswordHasherOptions { WorkFactor = 4 });
+
+    private static AccountEntity CreateAccount() => new()
+    {
+        Id = Guid.NewGuid(),
+        IsActive = true,
+        CreatedAt = DateTimeOffset.UtcNow
+    };
+
+    private static PasswordCredentialEntity CreatePasswordCredential(
+        Guid accountId,
+        string username,
+        string passwordHash) => new()
+        {
+            Id = Guid.NewGuid(),
+            AccountId = accountId,
+            Username = username,
+            PasswordHash = passwordHash,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+    private static LoginAttemptEntity CreateLoginAttempt(string username) => new()
+    {
+        Id = Guid.NewGuid(),
+        Username = username,
+        FailedAttempts = 1,
+        LastAttemptAt = DateTimeOffset.UtcNow
+    };
+
+    private static Task FailLoginHistoryInsertAsync(IdentityDbContext context) =>
+        context.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TRIGGER fail_login_history_insert
+            BEFORE INSERT ON login_histories
+            BEGIN
+                SELECT RAISE(ABORT, 'login history insert failed');
+            END;
+            """,
+            TestContext.Current.CancellationToken);
+
+    private static TokenIssuanceRequest CreateIssuanceRequest(
+        string grantType,
+        AppRegistrationEntity? app = null,
+        string? username = null,
+        string? password = null) => new(
+            grantType,
+            app ?? CreateApp("token-app"),
+            Username: username,
+            Password: password,
+            ClientIp: "192.0.2.30",
+            UserAgent: "audit-transaction-test",
+            CorrelationId: "correlation-148");
+
+    private static TokenIssuanceService CreateTokenIssuanceService(
+        IdentityDbContext context,
+        IIdentityValidator validator,
+        ILoginAttemptRepository loginAttemptRepository)
+    {
+        var accountRepository = new AccountRepository(context);
+        return new TokenIssuanceService(
+            AuthTestDoubles.KeyManager().Object,
+            AuthTestDoubles.TokenService().Object,
+            new JwtOptions
+            {
+                Issuer = "https://issuer.example.test",
+                Audience = "audit-tests",
+                TokenExpirationHours = 1
+            },
+            AuthTestDoubles.RefreshTokenService().Object,
+            new ClaimsResolver(NullLogger<ClaimsResolver>.Instance),
+            new ValidatorFactory([validator], NullLogger<ValidatorFactory>.Instance),
+            null,
+            AuthTestDoubles.AuthMetrics(),
+            CreateAuditService(context),
+            new AccountLoginInfoService(accountRepository),
+            accountRepository,
+            loginAttemptRepository,
+            new EfCoreUnitOfWork(context),
+            context,
+            new AdminIdentityOptions { Username = "bootstrap-admin" },
+            NullLogger<TokenIssuanceService>.Instance);
+    }
 
     private static AppRegistrationEntity CreateApp(string appId) => new()
     {

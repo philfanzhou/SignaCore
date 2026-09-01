@@ -11,7 +11,6 @@ public class PasswordValidator : IIdentityValidator
     private readonly IPasswordCredentialRepository _passwordCredentialRepository;
     private readonly IAccountRepository _accountRepository;
     private readonly ILoginAttemptRepository _loginAttemptRepository;
-    private readonly IUnitOfWork _unitOfWork;
     private readonly IPasswordHasher _passwordHasher;
     private readonly ILogger<PasswordValidator> _logger;
 
@@ -19,14 +18,12 @@ public class PasswordValidator : IIdentityValidator
         IPasswordCredentialRepository passwordCredentialRepository,
         IAccountRepository accountRepository,
         ILoginAttemptRepository loginAttemptRepository,
-        IUnitOfWork unitOfWork,
         IPasswordHasher passwordHasher,
         ILogger<PasswordValidator> logger)
     {
         _passwordCredentialRepository = passwordCredentialRepository;
         _accountRepository = accountRepository;
         _loginAttemptRepository = loginAttemptRepository;
-        _unitOfWork = unitOfWork;
         _passwordHasher = passwordHasher;
         _logger = logger;
     }
@@ -72,31 +69,25 @@ public class PasswordValidator : IIdentityValidator
         {
             _logger.LogWarning("Password validation failed: wrong password, Username={Username}",
                 LogValueSanitizer.Sanitize(request.Username));
-            await RecordFailedAttemptAsync(request.Username);
-            return ValidationResult.Failure("Wrong username or password");
+            return ValidationResult.Failure("Wrong username or password")
+                .WithLoginAttemptChange(new LoginAttemptChange(
+                    LoginAttemptChangeKind.RecordFailure,
+                    request.Username));
         }
 
+        var result = ValidationResult.Success(
+            account,
+            IdentityConstants.AuthMethodPassword,
+            credential.Username);
         if (loginAttempt != null && loginAttempt.FailedAttempts > 0)
         {
-            await _loginAttemptRepository.RemoveAsync(loginAttempt);
-            await _unitOfWork.SaveChangesAsync();
+            result.WithLoginAttemptChange(new LoginAttemptChange(
+                LoginAttemptChangeKind.Clear,
+                request.Username));
         }
 
         _logger.LogInformation("Password validated successfully: Username={Username}",
             LogValueSanitizer.Sanitize(request.Username));
-        return ValidationResult.Success(account, IdentityConstants.AuthMethodPassword, credential.Username);
-    }
-
-    private async Task RecordFailedAttemptAsync(string username)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var loginAttempt = await _loginAttemptRepository.RecordFailureAsync(username, now);
-        if (loginAttempt.LockoutUntil > now)
-        {
-            _logger.LogWarning(
-                "Account locked due to too many failed attempts, Username={Username}, LockoutUntil={LockoutUntil}",
-                LogValueSanitizer.Sanitize(username),
-                loginAttempt.LockoutUntil);
-        }
+        return result;
     }
 }

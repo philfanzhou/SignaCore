@@ -30,6 +30,7 @@ public class TokenControllerTests : IDisposable
     private readonly Mock<IAuditService> _auditServiceMock = AuthTestDoubles.AuditService();
     private readonly Mock<IAccountLoginInfoService> _accountLoginInfoServiceMock = AuthTestDoubles.AccountLoginInfoService();
     private readonly Mock<IAccountRepository> _accountRepositoryMock = new();
+    private readonly Mock<ILoginAttemptRepository> _loginAttemptRepositoryMock = new();
     private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
     private readonly ClaimsResolver _claimsResolver = new(NullLogger<ClaimsResolver>.Instance);
     private readonly SqliteConnection _connection;
@@ -108,6 +109,7 @@ public class TokenControllerTests : IDisposable
             _auditServiceMock.Object,
             _accountLoginInfoServiceMock.Object,
             _accountRepositoryMock.Object,
+            _loginAttemptRepositoryMock.Object,
             _unitOfWorkMock.Object,
             _dbContext,
             adminIdentityOptions,
