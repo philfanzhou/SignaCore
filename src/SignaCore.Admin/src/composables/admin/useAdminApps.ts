@@ -4,8 +4,9 @@ import { getErrorMessage, type AdminApp } from "../../services/adminApi";
 import { handleApiError } from "../useSession";
 import { notify } from "./useAdminFeedback";
 import { useAdminAppAccess } from "./useAdminAppAccess";
+import { useAdminAppOidc } from "./useAdminAppOidc";
 
-export type AppTab = "overview" | "access" | "trust" | "danger";
+export type AppTab = "overview" | "access" | "oidc" | "trust" | "danger";
 export type AppActionModal = "secret" | "reset-secret" | "delete-app" | null;
 
 const apps = ref<AdminApp[]>([]);
@@ -33,6 +34,7 @@ const appConfig = reactive({
   audienceMode: "Shared" as AdminApp["audienceMode"],
 });
 const appAccess = useAdminAppAccess(selectedApp);
+const appOidc = useAdminAppOidc(selectedApp);
 const appModalOpen = ref(false);
 const appSavingNew = ref(false);
 const createAppForm = reactive({
@@ -116,7 +118,10 @@ async function openApp(app: AdminApp) {
   appTab.value = "overview";
   syncAppForm(app);
   appDrawerOpen.value = true;
-  await appAccess.loadAppDetails(app.appId);
+  await Promise.all([
+    appAccess.loadAppDetails(app.appId),
+    appOidc.loadOidc(app.appId),
+  ]);
 }
 
 async function saveAppConfig() {
@@ -222,6 +227,7 @@ function closeAppDrawer() {
   appDrawerOpen.value = false;
   selectedApp.value = null;
   appAccess.clearAccess();
+  appOidc.clearOidc();
 }
 function closeActionModal() {
   if (appActionModal.value === "secret" && !secretAcknowledged.value)
@@ -261,6 +267,7 @@ export function useAdminApps() {
     appSaving,
     appConfig,
     ...appAccess,
+    ...appOidc,
     appModalOpen,
     appSavingNew,
     createAppForm,

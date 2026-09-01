@@ -16,6 +16,18 @@ const {
   appWechatUsers,
   appLdapUsers,
   appTrusts,
+  oidcConfig,
+  oidcLoading,
+  oidcSaving,
+  oidcError,
+  oidcPolicyForm,
+  redirectUriDraft,
+  postLogoutUriDraft,
+  isPublicClient,
+  saveOidcPolicy,
+  addRedirectUri,
+  removeRedirectUri,
+  resetPolicyForm,
   accessForm,
   trustSourceAppId,
   appActionModal,
@@ -70,6 +82,11 @@ const { tokenModalOpen } = useAdminSecurity();
           @click="appTab = 'access'"
         >
           准入名单</button
+        ><button
+          :class="{ active: appTab === 'oidc' }"
+          @click="appTab = 'oidc'"
+        >
+          交互式 OIDC</button
         ><button
           :class="{ active: appTab === 'trust' }"
           @click="appTab = 'trust'"
@@ -302,6 +319,175 @@ const { tokenModalOpen } = useAdminSecurity();
               >
             </div>
           </div></template
+        >
+        <template v-else-if="appTab === 'oidc'"
+          ><div v-if="oidcLoading" class="drawer-loading">
+            <span class="console-spinner"></span>加载交互式 OIDC 配置…
+          </div>
+          <template v-else
+            ><div class="drawer-section">
+              <div class="section-heading">
+                <h3>客户端类型与状态</h3>
+                <span>GET /oidc</span>
+              </div>
+              <p class="section-description">
+                这一页配置的是浏览器授权码登录。它与「概览与策略」里的 Callback URL
+                无关：Callback URL 是服务端到服务端的 claims 回调，两者是各自独立的注册，任何一方
+                都不会被写入另一方。
+              </p>
+              <div class="access-row">
+                <span
+                  ><b>客户端类型</b
+                  ><small>{{ oidcConfig.clientType }} · aud 模式
+                    {{ oidcConfig.audienceMode }}</small
+                  ></span
+                ><span
+                  class="status-pill"
+                  :class="oidcConfig.allowAuthorizationCode ? 'green' : 'gray'"
+                  ><i></i
+                  >{{
+                    oidcConfig.allowAuthorizationCode ? "已启用" : "未启用"
+                  }}</span
+                >
+              </div>
+              <p v-if="isPublicClient" class="section-description">
+                Public 客户端目前是保留状态，控制台不提供启用路径，也不会提交 Public
+                配置。
+              </p>
+              <p v-if="oidcError" class="inline-error">
+                {{ oidcError }}
+              </p>
+            </div>
+            <div class="drawer-section">
+              <div class="section-heading">
+                <h3>授权码策略</h3>
+                <span>PUT /oidc-policy</span>
+              </div>
+              <label class="confirm-line"
+                ><input
+                  v-model="oidcPolicyForm.allowAuthorizationCode"
+                  type="checkbox"
+                  :disabled="isPublicClient"
+                />启用授权码流程</label
+              ><label class="drawer-field"
+                >允许的 scope（空格分隔）<input
+                  v-model="oidcPolicyForm.allowedScopes"
+                  class="console-input"
+                  :disabled="isPublicClient"
+                  placeholder="openid profile" /></label
+              ><label class="confirm-line"
+                ><input
+                  v-model="oidcPolicyForm.allowRefreshToken"
+                  type="checkbox"
+                  :disabled="isPublicClient"
+                />允许签发 refresh token</label
+              ><label class="drawer-field"
+                >身份会话最长有效期（秒，留空表示不限制）<input
+                  v-model="oidcPolicyForm.identitySessionMaxAgeSeconds"
+                  class="console-input"
+                  type="number"
+                  min="1"
+                  :disabled="isPublicClient" /></label
+              >
+              <div class="drawer-inline-form">
+                <button
+                  class="console-button primary compact"
+                  :disabled="oidcSaving || isPublicClient"
+                  @click="saveOidcPolicy"
+                >
+                  {{ oidcSaving ? "保存中…" : "保存授权码策略" }}</button
+                ><button
+                  class="console-button secondary compact"
+                  :disabled="oidcSaving"
+                  @click="resetPolicyForm"
+                >
+                  取消编辑
+                </button>
+              </div>
+            </div>
+            <div class="drawer-section">
+              <div class="section-heading">
+                <h3>Redirect URI</h3>
+                <span>{{ oidcConfig.redirectUris.length }} 条</span>
+              </div>
+              <p class="section-description">
+                注册值按你输入的精确形式比较：尾斜杠、大小写与端口差异都会让后续授权请求不匹配。
+              </p>
+              <div class="drawer-inline-form">
+                <input
+                  v-model="redirectUriDraft"
+                  class="console-input mono"
+                  placeholder="https://bff.example.test/signin-oidc"
+                /><button
+                  class="console-button secondary compact"
+                  :disabled="oidcSaving"
+                  @click="addRedirectUri('Redirect')"
+                >
+                  注册
+                </button>
+              </div>
+              <div v-if="!oidcConfig.redirectUris.length" class="console-empty-inline">
+                暂无 Redirect URI 注册
+              </div>
+              <div
+                v-for="item in oidcConfig.redirectUris"
+                :key="item.id"
+                class="access-row"
+              >
+                <span
+                  ><b class="mono">{{ item.uri }}</b
+                  ><small class="mono">{{ item.id }}</small></span
+                ><button
+                  class="text-button danger-text"
+                  :disabled="oidcSaving"
+                  @click="removeRedirectUri(item)"
+                >
+                  移除
+                </button>
+              </div>
+            </div>
+            <div class="drawer-section">
+              <div class="section-heading">
+                <h3>Post Logout URI</h3>
+                <span>{{ oidcConfig.postLogoutRedirectUris.length }} 条</span>
+              </div>
+              <div class="drawer-inline-form">
+                <input
+                  v-model="postLogoutUriDraft"
+                  class="console-input mono"
+                  placeholder="https://bff.example.test/signout-callback-oidc"
+                /><button
+                  class="console-button secondary compact"
+                  :disabled="oidcSaving"
+                  @click="addRedirectUri('PostLogout')"
+                >
+                  注册
+                </button>
+              </div>
+              <div
+                v-if="!oidcConfig.postLogoutRedirectUris.length"
+                class="console-empty-inline"
+              >
+                暂无 Post Logout URI 注册
+              </div>
+              <div
+                v-for="item in oidcConfig.postLogoutRedirectUris"
+                :key="item.id"
+                class="access-row"
+              >
+                <span
+                  ><b class="mono">{{ item.uri }}</b
+                  ><small class="mono">{{ item.id }}</small></span
+                ><button
+                  class="text-button danger-text"
+                  :disabled="oidcSaving"
+                  @click="removeRedirectUri(item)"
+                >
+                  移除
+                </button>
+              </div>
+            </div></template
+          ></template
         >
         <template v-else-if="appTab === 'trust'"
           ><div class="drawer-section risk-section">

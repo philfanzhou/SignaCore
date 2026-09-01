@@ -61,6 +61,73 @@ describe('AdminApiClient', () => {
     })
   })
 
+  it('reads the interactive OIDC configuration of one application', async () => {
+    const payload = {
+      appId: 'orders',
+      clientType: 'Confidential',
+      allowAuthorizationCode: false,
+      allowedScopes: ['openid'],
+      allowRefreshToken: false,
+      identitySessionMaxAgeSeconds: null,
+      audienceMode: 'Shared',
+      redirectUris: [],
+      postLogoutRedirectUris: [],
+    }
+    mocks.http.get.mockResolvedValue({ data: payload })
+
+    const result = await createAdminApiClient().getAppOidc('orders')
+
+    expect(mocks.http.get).toHaveBeenCalledWith('/api/admin/apps/orders/oidc')
+    expect(result).toBe(payload)
+  })
+
+  it('replaces the interactive policy fields in one request', async () => {
+    mocks.http.put.mockResolvedValue({ data: undefined })
+
+    await createAdminApiClient().updateOidcPolicy('orders', {
+      clientType: 'Confidential',
+      allowAuthorizationCode: true,
+      allowedScopes: ['openid', 'profile'],
+      allowRefreshToken: false,
+      identitySessionMaxAgeSeconds: 3600,
+    })
+
+    expect(mocks.http.put).toHaveBeenCalledWith('/api/admin/apps/orders/oidc-policy', {
+      clientType: 'Confidential',
+      allowAuthorizationCode: true,
+      allowedScopes: ['openid', 'profile'],
+      allowRefreshToken: false,
+      identitySessionMaxAgeSeconds: 3600,
+    })
+  })
+
+  it('registers redirect and post logout URIs under their own kind', async () => {
+    mocks.http.post.mockResolvedValue({ data: undefined })
+    const client = createAdminApiClient()
+
+    await client.addOidcRedirectUris('orders', 'Redirect', ['https://bff.example.test/signin-oidc'])
+    await client.addOidcRedirectUris('orders', 'PostLogout', ['https://bff.example.test/signout'])
+
+    expect(mocks.http.post).toHaveBeenNthCalledWith(1, '/api/admin/apps/orders/oidc/redirect-uris', {
+      kind: 'Redirect',
+      uris: ['https://bff.example.test/signin-oidc'],
+    })
+    expect(mocks.http.post).toHaveBeenNthCalledWith(2, '/api/admin/apps/orders/oidc/redirect-uris', {
+      kind: 'PostLogout',
+      uris: ['https://bff.example.test/signout'],
+    })
+  })
+
+  it('removes one URI registration by its registration id', async () => {
+    mocks.http.delete.mockResolvedValue({ data: undefined })
+
+    await createAdminApiClient().removeOidcRedirectUri('orders', 'registration-1')
+
+    expect(mocks.http.delete).toHaveBeenCalledWith(
+      '/api/admin/apps/orders/oidc/redirect-uris/registration-1',
+    )
+  })
+
   it('keeps bootstrap replacement behind the dedicated endpoint and confirmation payload', async () => {
     const payload = {
       database: {
