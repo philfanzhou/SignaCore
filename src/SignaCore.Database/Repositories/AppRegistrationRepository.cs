@@ -13,11 +13,15 @@ public class AppRegistrationRepository : IAppRegistrationRepository
         _dbContext = dbContext;
     }
 
-    public async Task<AppRegistrationEntity?> GetByAppIdAsync(string appId)
+    public async Task<AppRegistrationEntity?> GetByAppIdAsync(
+        string appId,
+        CancellationToken cancellationToken = default)
     {
         var normalizedAppId = IdentityValueNormalizer.Normalize(appId);
         return await _dbContext.AppRegistrations
-            .FirstOrDefaultAsync(a => a.AppIdNormalized == normalizedAppId);
+            .FirstOrDefaultAsync(
+                a => a.AppIdNormalized == normalizedAppId,
+                cancellationToken);
     }
 
     public async Task<AppRegistrationEntity?> GetByAppIdWithOidcConfigurationAsync(
@@ -32,34 +36,50 @@ public class AppRegistrationRepository : IAppRegistrationRepository
                 cancellationToken);
     }
 
-    public Task AddAsync(AppRegistrationEntity app)
+    public Task AddAsync(
+        AppRegistrationEntity app,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _dbContext.AppRegistrations.Add(app);
         return Task.CompletedTask;
     }
 
-    public Task AddRedirectUrisAsync(IEnumerable<AppRedirectUriEntity> registrations)
+    public Task AddRedirectUrisAsync(
+        IEnumerable<AppRedirectUriEntity> registrations,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _dbContext.AppRedirectUris.AddRange(registrations);
         return Task.CompletedTask;
     }
 
-    public Task RemoveRedirectUrisAsync(IEnumerable<AppRedirectUriEntity> registrations)
+    public Task RemoveRedirectUrisAsync(
+        IEnumerable<AppRedirectUriEntity> registrations,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _dbContext.AppRedirectUris.RemoveRange(registrations);
         return Task.CompletedTask;
     }
 
-    public Task DeleteAsync(AppRegistrationEntity app)
+    public Task DeleteAsync(
+        AppRegistrationEntity app,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _dbContext.AppRegistrations.Remove(app);
         return Task.CompletedTask;
     }
 
-    public async Task<int> DeactivateExpiredCallbacksAsync(DateTimeOffset utcNow)
+    public async Task<int> DeactivateExpiredCallbacksAsync(
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken = default)
     {
         return await _dbContext.AppRegistrations
             .Where(a => a.CallbackExpiresAt.HasValue && a.IsActive && a.CallbackExpiresAt! < utcNow)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(a => a.IsActive, false));
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(a => a.IsActive, false),
+                cancellationToken);
     }
 }

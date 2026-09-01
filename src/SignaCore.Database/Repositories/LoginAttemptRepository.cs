@@ -13,22 +13,30 @@ public class LoginAttemptRepository : ILoginAttemptRepository
         _dbContext = dbContext;
     }
 
-    public async Task<LoginAttemptEntity?> GetByUsernameAsync(string username)
+    public async Task<LoginAttemptEntity?> GetByUsernameAsync(
+        string username,
+        CancellationToken cancellationToken = default)
     {
         var normalizedUsername = IdentityValueNormalizer.Normalize(username);
         return await _dbContext.LoginAttempts
-            .FirstOrDefaultAsync(l => l.UsernameNormalized == normalizedUsername);
+            .FirstOrDefaultAsync(
+                l => l.UsernameNormalized == normalizedUsername,
+                cancellationToken);
     }
 
-    public Task AddAsync(LoginAttemptEntity loginAttempt)
+    public Task AddAsync(
+        LoginAttemptEntity loginAttempt,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _dbContext.LoginAttempts.Add(loginAttempt);
         return Task.CompletedTask;
     }
 
     public async Task<LoginAttemptEntity> RecordFailureAsync(
         string username,
-        DateTimeOffset utcNow)
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken = default)
     {
         var normalizedUsername = IdentityValueNormalizer.Normalize(username);
         var lockoutUntil = utcNow.AddMinutes(IdentityConstants.LoginLockoutMinutes);
@@ -36,7 +44,8 @@ public class LoginAttemptRepository : ILoginAttemptRepository
         var affectedRows = await IncrementExistingAsync(
             normalizedUsername,
             utcNow,
-            lockoutUntil);
+            lockoutUntil,
+            cancellationToken);
         if (affectedRows == 0)
         {
             var loginAttempt = new LoginAttemptEntity
@@ -51,7 +60,7 @@ public class LoginAttemptRepository : ILoginAttemptRepository
 
             try
             {
-                await _dbContext.SaveChangesAsync();
+                await _dbContext.SaveChangesAsync(cancellationToken);
             }
             catch (DbUpdateException)
             {
@@ -59,7 +68,8 @@ public class LoginAttemptRepository : ILoginAttemptRepository
                 affectedRows = await IncrementExistingAsync(
                     normalizedUsername,
                     utcNow,
-                    lockoutUntil);
+                    lockoutUntil,
+                    cancellationToken);
                 if (affectedRows == 0)
                 {
                     throw;
@@ -69,26 +79,34 @@ public class LoginAttemptRepository : ILoginAttemptRepository
 
         return await _dbContext.LoginAttempts
             .AsNoTracking()
-            .SingleAsync(attempt => attempt.UsernameNormalized == normalizedUsername);
+            .SingleAsync(
+                attempt => attempt.UsernameNormalized == normalizedUsername,
+                cancellationToken);
     }
 
-    public Task RemoveAsync(LoginAttemptEntity loginAttempt)
+    public Task RemoveAsync(
+        LoginAttemptEntity loginAttempt,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _dbContext.LoginAttempts.Remove(loginAttempt);
         return Task.CompletedTask;
     }
 
-    public async Task RemoveExpiredAsync(DateTimeOffset cutoff)
+    public async Task RemoveExpiredAsync(
+        DateTimeOffset cutoff,
+        CancellationToken cancellationToken = default)
     {
         await _dbContext.LoginAttempts
             .Where(l => l.LastAttemptAt < cutoff)
-            .ExecuteDeleteAsync();
+            .ExecuteDeleteAsync(cancellationToken);
     }
 
     private async Task<int> IncrementExistingAsync(
         string normalizedUsername,
         DateTimeOffset utcNow,
-        DateTimeOffset lockoutUntil)
+        DateTimeOffset lockoutUntil,
+        CancellationToken cancellationToken)
     {
         return await _dbContext.LoginAttempts
             .Where(attempt => attempt.UsernameNormalized == normalizedUsername)
@@ -103,6 +121,7 @@ public class LoginAttemptRepository : ILoginAttemptRepository
                         attempt.FailedAttempts + 1 >=
                             IdentityConstants.MaxFailedLoginAttempts
                         ? lockoutUntil
-                        : attempt.LockoutUntil));
+                        : attempt.LockoutUntil),
+                cancellationToken);
     }
 }

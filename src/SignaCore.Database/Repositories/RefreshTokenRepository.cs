@@ -13,27 +13,34 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         _dbContext = dbContext;
     }
 
-    public async Task<RefreshTokenEntity?> GetByTokenValueAsync(string tokenValue)
+    public async Task<RefreshTokenEntity?> GetByTokenValueAsync(
+        string tokenValue,
+        CancellationToken cancellationToken = default)
     {
         var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
         return await _dbContext.RefreshTokens
-            .FirstOrDefaultAsync(r => r.TokenValue == tokenDigest);
+            .FirstOrDefaultAsync(r => r.TokenValue == tokenDigest, cancellationToken);
     }
 
-    public Task AddAsync(RefreshTokenEntity refreshToken)
+    public Task AddAsync(
+        RefreshTokenEntity refreshToken,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         refreshToken.TokenValue = RefreshTokenDigest.EnsureDigest(refreshToken.TokenValue);
         _dbContext.RefreshTokens.Add(refreshToken);
         return Task.CompletedTask;
     }
 
-    public async Task<bool> TryRevokeAsync(string tokenValue)
+    public async Task<bool> TryRevokeAsync(
+        string tokenValue,
+        CancellationToken cancellationToken = default)
     {
         var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
         var affectedRows = await _dbContext.RefreshTokens
             .Where(token => token.TokenValue == tokenDigest && !token.IsRevoked)
             .ExecuteUpdateAsync(setters => setters
-                .SetProperty(token => token.IsRevoked, true));
+                .SetProperty(token => token.IsRevoked, true), cancellationToken);
         return affectedRows == 1;
     }
 
@@ -44,7 +51,10 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     /// that, <c>IdentityValueNormalizer.Normalize</c> does not translate to SQL, so putting it here
     /// would drag the whole query to client-side evaluation.
     /// </summary>
-    public async Task<bool> TryRevokeForAppAsync(string tokenValue, string appId)
+    public async Task<bool> TryRevokeForAppAsync(
+        string tokenValue,
+        string appId,
+        CancellationToken cancellationToken = default)
     {
         var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
         var affectedRows = await _dbContext.RefreshTokens
@@ -52,7 +62,7 @@ public class RefreshTokenRepository : IRefreshTokenRepository
                 && !token.IsRevoked
                 && token.AppId == appId)
             .ExecuteUpdateAsync(setters => setters
-                .SetProperty(token => token.IsRevoked, true));
+                .SetProperty(token => token.IsRevoked, true), cancellationToken);
         return affectedRows == 1;
     }
 
@@ -75,7 +85,10 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     /// again; nothing may be lifted out of it.
     /// </para>
     /// </summary>
-    public async Task<bool> TryRotateAsync(string tokenValue, RefreshTokenEntity replacement)
+    public async Task<bool> TryRotateAsync(
+        string tokenValue,
+        RefreshTokenEntity replacement,
+        CancellationToken cancellationToken = default)
     {
         var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
         replacement.TokenValue = RefreshTokenDigest.EnsureDigest(replacement.TokenValue);
@@ -100,9 +113,10 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         }
 
         var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
-        return await executionStrategy.ExecuteAsync(async () =>
+        return await executionStrategy.ExecuteAsync(async operationCancellationToken =>
         {
-            await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+                operationCancellationToken);
 
             // The concurrency semantics come from this conditional update plus the lock the
             // transaction holds: when two requests rotate the same token at once, the later one
@@ -111,7 +125,7 @@ public class RefreshTokenRepository : IRefreshTokenRepository
             var affectedRows = await _dbContext.RefreshTokens
                 .Where(token => token.TokenValue == tokenDigest && !token.IsRevoked)
                 .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(token => token.IsRevoked, true));
+                    .SetProperty(token => token.IsRevoked, true), operationCancellationToken);
 
             if (affectedRows != 1)
             {
@@ -120,7 +134,7 @@ public class RefreshTokenRepository : IRefreshTokenRepository
                 // explicitly any later SaveChanges in this request would persist a token that must
                 // not exist.
                 _dbContext.Entry(replacement).State = EntityState.Detached;
-                await transaction.RollbackAsync();
+                await transaction.RollbackAsync(operationCancellationToken);
                 return false;
             }
 
@@ -131,24 +145,30 @@ public class RefreshTokenRepository : IRefreshTokenRepository
             // SaveChanges, and if the commit failed and triggered a retry the replay would not
             // insert it again, leaving the half-finished state of "old token revoked, replacement
             // lost".
-            await _dbContext.SaveChangesAsync(acceptAllChangesOnSuccess: false);
-            await transaction.CommitAsync();
+            await _dbContext.SaveChangesAsync(
+                acceptAllChangesOnSuccess: false,
+                operationCancellationToken);
+            await transaction.CommitAsync(operationCancellationToken);
             _dbContext.ChangeTracker.AcceptAllChanges();
             return true;
-        });
+        }, cancellationToken);
     }
 
-    public Task RemoveRangeAsync(IEnumerable<RefreshTokenEntity> tokens)
+    public Task RemoveRangeAsync(
+        IEnumerable<RefreshTokenEntity> tokens,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _dbContext.RefreshTokens.RemoveRange(tokens);
         return Task.CompletedTask;
     }
 
-    public async Task<int> RemoveExpiredAndRevokedAsync()
+    public async Task<int> RemoveExpiredAndRevokedAsync(
+        CancellationToken cancellationToken = default)
     {
         var now = DateTimeOffset.UtcNow;
         return await _dbContext.RefreshTokens
             .Where(r => r.IsRevoked || r.ExpiresAt < now)
-            .ExecuteDeleteAsync();
+            .ExecuteDeleteAsync(cancellationToken);
     }
 }

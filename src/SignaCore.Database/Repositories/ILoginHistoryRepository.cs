@@ -4,8 +4,16 @@ namespace SignaCore.Database.Repositories;
 
 public interface ILoginHistoryRepository
 {
-    Task AddAsync(LoginHistoryEntity loginHistory);
-    Task<List<LoginHistoryEntity>> GetByAccountIdAsync(Guid accountId, int pageSize, int skip);
-    Task<int> CountByAccountIdAsync(Guid accountId);
-    Task<int> RemoveOlderThanAsync(DateTimeOffset cutoff);
+    Task AddAsync(LoginHistoryEntity loginHistory, CancellationToken cancellationToken = default);
+    Task<List<LoginHistoryEntity>> GetByAccountIdAsync(
+        Guid accountId,
+        int pageSize,
+        int skip,
+        CancellationToken cancellationToken = default);
+    Task<int> CountByAccountIdAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default);
+    Task<int> RemoveOlderThanAsync(
+        DateTimeOffset cutoff,
+        CancellationToken cancellationToken = default);
 }

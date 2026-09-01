@@ -4,8 +4,16 @@ namespace SignaCore.Database.Repositories;
 
 public interface IPasswordCredentialRepository
 {
-    Task<PasswordCredentialEntity?> GetByUsernameAsync(string username);
-    Task<PasswordCredentialEntity?> GetByAccountIdAsync(Guid accountId);
-    Task AddAsync(PasswordCredentialEntity credential);
-    Task<bool> ExistsByUsernameAsync(string username);
+    Task<PasswordCredentialEntity?> GetByUsernameAsync(
+        string username,
+        CancellationToken cancellationToken = default);
+    Task<PasswordCredentialEntity?> GetByAccountIdAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default);
+    Task AddAsync(
+        PasswordCredentialEntity credential,
+        CancellationToken cancellationToken = default);
+    Task<bool> ExistsByUsernameAsync(
+        string username,
+        CancellationToken cancellationToken = default);
 }

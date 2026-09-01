@@ -13,29 +13,40 @@ public class PasswordCredentialRepository : IPasswordCredentialRepository
         _dbContext = dbContext;
     }
 
-    public async Task<PasswordCredentialEntity?> GetByUsernameAsync(string username)
+    public async Task<PasswordCredentialEntity?> GetByUsernameAsync(
+        string username,
+        CancellationToken cancellationToken = default)
     {
         var normalizedUsername = IdentityValueNormalizer.Normalize(username);
         return await _dbContext.PasswordCredentials
-            .FirstOrDefaultAsync(c => c.UsernameNormalized == normalizedUsername);
+            .FirstOrDefaultAsync(
+                c => c.UsernameNormalized == normalizedUsername,
+                cancellationToken);
     }
 
-    public async Task<PasswordCredentialEntity?> GetByAccountIdAsync(Guid accountId)
+    public async Task<PasswordCredentialEntity?> GetByAccountIdAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default)
     {
         return await _dbContext.PasswordCredentials
-            .FirstOrDefaultAsync(c => c.AccountId == accountId);
+            .FirstOrDefaultAsync(c => c.AccountId == accountId, cancellationToken);
     }
 
-    public Task AddAsync(PasswordCredentialEntity credential)
+    public Task AddAsync(
+        PasswordCredentialEntity credential,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _dbContext.PasswordCredentials.Add(credential);
         return Task.CompletedTask;
     }
 
-    public async Task<bool> ExistsByUsernameAsync(string username)
+    public async Task<bool> ExistsByUsernameAsync(
+        string username,
+        CancellationToken cancellationToken = default)
     {
         var normalizedUsername = IdentityValueNormalizer.Normalize(username);
         return await _dbContext.PasswordCredentials
-            .AnyAsync(c => c.UsernameNormalized == normalizedUsername);
+            .AnyAsync(c => c.UsernameNormalized == normalizedUsername, cancellationToken);
     }
 }
