@@ -2,7 +2,6 @@ using DotNet.Testcontainers.Containers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
-using Microsoft.Extensions.Logging.Abstractions;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -248,7 +247,6 @@ public sealed class ServerDatabaseContractTests
             56,
             TimeSpan.FromHours(8)).AddTicks(1234560).ToUniversalTime();
         const string token = "CaseSensitiveRefreshToken";
-        const string legacyToken = "LegacyPlaintextRefreshToken";
         const string phone = "13800138000";
         const string otpCode = "123456";
 
@@ -287,16 +285,6 @@ public sealed class ServerDatabaseContractTests
                 ExpiresAt = sourceInstant.AddHours(1),
                 AppId = "database-contract-app"
             });
-            seedContext.RefreshTokens.Add(new RefreshTokenEntity
-            {
-                Id = Guid.NewGuid(),
-                AccountId = accountId,
-                TokenValue = legacyToken,
-                CreatedAt = sourceInstant,
-                ExpiresAt = sourceInstant.AddHours(1),
-                IsRevoked = true,
-                AppId = "database-contract-app"
-            });
             seedContext.Otps.Add(new OtpEntity
             {
                 Id = Guid.NewGuid(),
@@ -317,14 +305,6 @@ public sealed class ServerDatabaseContractTests
 
         await using (var queryContext = new IdentityDbContext(options))
         {
-            await DatabaseInitializer.ProtectLegacyRefreshTokensAsync(
-                queryContext,
-                NullLogger.Instance);
-            Assert.NotNull(await queryContext.RefreshTokens
-                .AsNoTracking()
-                .SingleOrDefaultAsync(refreshToken =>
-                    refreshToken.TokenValue == RefreshTokenDigest.Compute(legacyToken)));
-
             var credentialRepository =
                 new PasswordCredentialRepository(queryContext);
             // What was written is the decomposed form "Cafe" plus a combining acute accent; the

@@ -267,6 +267,8 @@ using (var seedScope = app.Services.CreateScope())
     await BootstrapAppSeeder.SeedBootstrapAppsAsync(
         builder.Configuration,
         seedScope.ServiceProvider.GetRequiredService<IdentityDbContext>(),
+        seedScope.ServiceProvider.GetRequiredService<IAuditService>(),
+        seedScope.ServiceProvider.GetRequiredService<IPasswordHasher>(),
         app.Services
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger(typeof(BootstrapAppSeeder).FullName!),
