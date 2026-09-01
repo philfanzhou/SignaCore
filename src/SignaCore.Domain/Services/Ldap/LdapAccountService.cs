@@ -22,12 +22,17 @@ public interface ILdapAccountService
         Guid credentialId,
         LdapAccessApprovalSource source,
         CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Provisions the identity and invokes <paramref name="beforeCommit"/> after state is staged but
+    /// before the service's single transactional commit.
+    /// </summary>
     Task<LdapProvisioningResult> ProvisionAsync(
         LdapDirectoryIdentity identity,
         AppRegistrationEntity app,
         LdapAccessApprovalSource source,
         Guid? approvedBy,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        Func<LdapProvisioningResult, Task>? beforeCommit = null);
 }
 
 public sealed record LdapProvisioningResult(
@@ -119,7 +124,8 @@ public sealed class LdapAccountService : ILdapAccountService
         AppRegistrationEntity app,
         LdapAccessApprovalSource source,
         Guid? approvedBy,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<LdapProvisioningResult, Task>? beforeCommit = null)
     {
         for (var attempt = 0; attempt < 2; attempt++)
         {
@@ -201,9 +207,15 @@ public sealed class LdapAccountService : ILdapAccountService
                         access.ApprovedBy = approvedBy;
                     }
 
+                    var result = new LdapProvisioningResult(
+                        account, credential, access, accountCreated, accessCreated);
+                    if (beforeCommit is not null)
+                    {
+                        await beforeCommit(result);
+                    }
                     await _dbContext.SaveChangesAsync(cancellationToken);
                     await transaction.CommitAsync(cancellationToken);
-                    return new LdapProvisioningResult(account, credential, access, accountCreated, accessCreated);
+                    return result;
                 });
             }
             catch (DbUpdateException) when (attempt == 0)

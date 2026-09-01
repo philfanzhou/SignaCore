@@ -8,16 +8,13 @@ namespace SignaCore.Domain.Services;
 public class RefreshTokenService : IRefreshTokenService
 {
     private readonly IRefreshTokenRepository _refreshTokenRepository;
-    private readonly IUnitOfWork _unitOfWork;
     private readonly RefreshTokenOptions _refreshTokenOptions;
 
     public RefreshTokenService(
         IRefreshTokenRepository refreshTokenRepository,
-        IUnitOfWork unitOfWork,
         RefreshTokenOptions refreshTokenOptions)
     {
         _refreshTokenRepository = refreshTokenRepository;
-        _unitOfWork = unitOfWork;
         _refreshTokenOptions = refreshTokenOptions;
     }
 
@@ -87,7 +84,6 @@ public class RefreshTokenService : IRefreshTokenService
         var (rawToken, refreshToken) = CreateRefreshToken(
             account, appId, ldapCredentialId, smsUserLoginId, wechatUserLoginId, sourceAppId);
         await _refreshTokenRepository.AddAsync(refreshToken);
-        await _unitOfWork.SaveChangesAsync();
         return rawToken;
     }
 

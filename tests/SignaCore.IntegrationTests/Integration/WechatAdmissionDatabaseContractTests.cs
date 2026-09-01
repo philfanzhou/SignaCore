@@ -2,6 +2,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.Database.Repositories;
+using SignaCore.Domain.Services;
 using SignaCore.Domain.Services.WeChat;
 using Xunit;
 
@@ -65,6 +67,51 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
         Assert.NotNull(admission);
         Assert.Equal(accountId, admission!.Account.Id);
         Assert.Equal(WechatAccessApprovalSource.SelfBind, admission.Access.ApprovalSource);
+    }
+
+    [Fact]
+    public async Task Bind_WhenAuditInsertFails_RollsBackBindingAndAdmission()
+    {
+        var app = await SeedAppAsync(WechatLoginMode.BindRequired);
+        var accountId = await SeedAccountAsync();
+
+        await using (var context = CreateContext())
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TRIGGER fail_wechat_bind_audit
+                BEFORE INSERT ON audit_logs
+                BEGIN
+                    SELECT RAISE(ABORT, 'audit insert failed');
+                END;
+                """,
+                TestContext.Current.CancellationToken);
+            var auditService = new AuditService(
+                new LoginHistoryRepository(context),
+                new AuditLogRepository(context));
+
+            await Assert.ThrowsAsync<DbUpdateException>(() =>
+                new WechatAdmissionService(context).BindAsync(
+                    app,
+                    accountId,
+                    OpenId,
+                    TestContext.Current.CancellationToken,
+                    _ => auditService.RecordActionAsync(
+                        "wechat_bound",
+                        "Account",
+                        accountId.ToString(),
+                        accountId,
+                        null,
+                        $"WeChat identity bound for application {app.AppId}")));
+        }
+
+        await using var verify = CreateContext();
+        Assert.Empty(await verify.UserLogins.AsNoTracking().ToListAsync(
+            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(await verify.AppWechatAccesses.AsNoTracking().ToListAsync(
+            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(await verify.AuditLogs.AsNoTracking().ToListAsync(
+            cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]

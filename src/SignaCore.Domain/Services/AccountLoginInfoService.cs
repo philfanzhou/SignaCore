@@ -6,12 +6,10 @@ namespace SignaCore.Domain.Services;
 public class AccountLoginInfoService : IAccountLoginInfoService
 {
     private readonly IAccountRepository _accountRepository;
-    private readonly IUnitOfWork _unitOfWork;
 
-    public AccountLoginInfoService(IAccountRepository accountRepository, IUnitOfWork unitOfWork)
+    public AccountLoginInfoService(IAccountRepository accountRepository)
     {
         _accountRepository = accountRepository;
-        _unitOfWork = unitOfWork;
     }
 
     public async Task UpdateLoginInfoAsync(AccountEntity account, string? clientIp, string authMethod)
@@ -21,6 +19,5 @@ public class AccountLoginInfoService : IAccountLoginInfoService
         account.LastLoginMethod = authMethod;
         account.TotalLoginCount++;
         await _accountRepository.UpdateAsync(account);
-        await _unitOfWork.SaveChangesAsync();
     }
 }

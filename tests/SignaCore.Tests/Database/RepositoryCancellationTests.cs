@@ -200,6 +200,35 @@ public sealed class RepositoryCancellationTests
     }
 
     [Fact]
+    public async Task RefreshTokenRepository_PreCanceledAmbientRotation_DoesNotRotateToken()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        const string presentedToken = "repository-cancellation-ambient-rotation-token";
+        var source = await SeedRefreshTokenAsync(database.Context, presentedToken);
+        var replacement = CreateRefreshToken(source.AccountId, "unused-ambient-replacement-token");
+        var repository = new RefreshTokenRepository(database.Context);
+        await using var transaction = await database.Context.Database.BeginTransactionAsync(
+            TestContext.Current.CancellationToken);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await repository.TryRotateAsync(
+                presentedToken,
+                replacement,
+                CanceledToken));
+
+        Assert.Equal(EntityState.Detached, database.Context.Entry(replacement).State);
+        var storedSource = await database.Context.RefreshTokens.AsNoTracking()
+            .SingleAsync(
+                token => token.Id == source.Id,
+                TestContext.Current.CancellationToken);
+        Assert.False(storedSource.IsRevoked);
+        Assert.False(await database.Context.RefreshTokens.AsNoTracking()
+            .AnyAsync(
+                token => token.Id == replacement.Id,
+                TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task RefreshTokenRepository_CanceledBeforeCommit_RollsBackSourceAndReplacement()
     {
         using var cancellationSource = new CancellationTokenSource();

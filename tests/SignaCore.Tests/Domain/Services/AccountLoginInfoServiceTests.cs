@@ -9,12 +9,10 @@ namespace SignaCore.Tests.Domain.Services;
 public class AccountLoginInfoServiceTests
 {
     [Fact]
-    public async Task UpdateLoginInfoAsync_UpdatesFieldsAndPersistsOnce()
+    public async Task UpdateLoginInfoAsync_UpdatesFieldsAndStagesAccount()
     {
         var accountRepoMock = new Mock<IAccountRepository>();
-        var unitOfWorkMock = new Mock<IUnitOfWork>();
-        unitOfWorkMock.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
-        var service = new AccountLoginInfoService(accountRepoMock.Object, unitOfWorkMock.Object);
+        var service = new AccountLoginInfoService(accountRepoMock.Object);
         var account = new AccountEntity
         {
             Id = Guid.NewGuid(),
@@ -31,6 +29,5 @@ public class AccountLoginInfoServiceTests
         Assert.NotNull(account.LastLoginAt);
         Assert.True(account.LastLoginAt > DateTimeOffset.UtcNow.AddSeconds(-5));
         accountRepoMock.Verify(r => r.UpdateAsync(account), Times.Once);
-        unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 }

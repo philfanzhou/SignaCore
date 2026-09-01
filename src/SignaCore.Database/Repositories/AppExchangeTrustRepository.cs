@@ -68,7 +68,6 @@ public sealed class AppExchangeTrustRepository : IAppExchangeTrustRepository
                 CreatedAt = DateTimeOffset.UtcNow
             };
             _dbContext.AppExchangeTrusts.Add(existing);
-            await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
         return new AppExchangeTrust(
@@ -81,10 +80,16 @@ public sealed class AppExchangeTrustRepository : IAppExchangeTrustRepository
         Guid sourceAppRegistrationId,
         CancellationToken cancellationToken = default)
     {
-        var removed = await _dbContext.AppExchangeTrusts
-            .Where(trust => trust.AppRegistrationId == appRegistrationId &&
-                trust.SourceAppRegistrationId == sourceAppRegistrationId)
-            .ExecuteDeleteAsync(cancellationToken);
-        return removed > 0;
+        var trust = await _dbContext.AppExchangeTrusts.FirstOrDefaultAsync(
+            item => item.AppRegistrationId == appRegistrationId &&
+                item.SourceAppRegistrationId == sourceAppRegistrationId,
+            cancellationToken);
+        if (trust is null)
+        {
+            return false;
+        }
+
+        _dbContext.AppExchangeTrusts.Remove(trust);
+        return true;
     }
 }

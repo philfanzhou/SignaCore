@@ -10,15 +10,14 @@ namespace SignaCore.Tests.Domain.Services;
 public class RefreshTokenServiceTests
 {
     private readonly Mock<IRefreshTokenRepository> _repoMock;
-    private readonly Mock<IUnitOfWork> _unitOfWorkMock;
     private readonly RefreshTokenService _service;
 
     public RefreshTokenServiceTests()
     {
         _repoMock = new Mock<IRefreshTokenRepository>();
-        _unitOfWorkMock = new Mock<IUnitOfWork>();
-        _unitOfWorkMock.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
-        _service = new RefreshTokenService(_repoMock.Object, _unitOfWorkMock.Object, new RefreshTokenOptions { RefreshTokenExpirationDays = 7 });
+        _service = new RefreshTokenService(
+            _repoMock.Object,
+            new RefreshTokenOptions { RefreshTokenExpirationDays = 7 });
     }
 
     private static AccountEntity CreateAccount() => new()
@@ -48,7 +47,6 @@ public class RefreshTokenServiceTests
             !t.IsRevoked &&
             t.AppId == "app-1" &&
             t.ExpiresAt > DateTimeOffset.UtcNow.AddDays(6))), Times.Once);
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -74,7 +72,6 @@ public class RefreshTokenServiceTests
                     replacement.AppId == "app-1")),
             Times.Once);
         _repoMock.Verify(r => r.AddAsync(It.IsAny<RefreshTokenEntity>()), Times.Never);
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -96,7 +93,6 @@ public class RefreshTokenServiceTests
             // Marks the token as already exchanged, so it cannot be exchanged a second time.
             minted.SourceAppId == "source-app" &&
             !minted.IsRevoked)), Times.Once);
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -154,9 +150,6 @@ public class RefreshTokenServiceTests
 
         Assert.True(result);
         _repoMock.Verify(r => r.TryRevokeAsync("t"), Times.Once);
-        _unitOfWorkMock.Verify(
-            u => u.SaveChangesAsync(It.IsAny<CancellationToken>()),
-            Times.Never);
     }
 
     [Fact]
@@ -167,6 +160,5 @@ public class RefreshTokenServiceTests
         var result = await _service.RevokeAsync("missing");
 
         Assert.False(result);
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 }

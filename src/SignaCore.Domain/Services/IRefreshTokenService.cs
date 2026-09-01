@@ -9,6 +9,8 @@ public interface IRefreshTokenService
     /// presented token is revoked and replaced. When <paramref name="exchangedFromAppId"/> is set the
     /// grant is a cross-application exchange, and the presented token — which belongs to another
     /// application's session — is left alone. See docs/adr/0003-cross-application-refresh-grant.md.
+    /// Newly issued entities are staged for the caller's unit of work. Rotation participates in a
+    /// caller-owned transaction when one exists, so account state and login history can share its commit.
     /// </summary>
     Task<string?> HandleRefreshTokenAsync(
         string grantType,

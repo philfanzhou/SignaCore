@@ -137,7 +137,21 @@ public class ProfileController : ControllerBase
             return BadRequest(new ErrorResponse("WeChat authentication failed."));
         }
 
-        var result = await admissionService.BindAsync(app, accountId.Value, openId, cancellationToken);
+        var result = await admissionService.BindAsync(
+            app,
+            accountId.Value,
+            openId,
+            cancellationToken,
+            async bindResult =>
+            {
+                if (bindResult.IsSuccess)
+                {
+                    await auditService.RecordActionAsync(
+                        "wechat_bound", "Account", accountId.Value.ToString(), accountId, null,
+                        $"WeChat identity bound for application {app.AppId}", HttpContext.GetClientIp(),
+                        correlationId: HttpContext.GetCorrelationId());
+                }
+            });
         if (!result.IsSuccess)
         {
             return result.Outcome switch
@@ -153,11 +167,6 @@ public class ProfileController : ControllerBase
                 _ => Unauthorized()
             };
         }
-
-        await auditService.RecordActionAsync(
-            "wechat_bound", "Account", accountId.Value.ToString(), accountId, null,
-            $"WeChat identity bound for application {app.AppId}", HttpContext.GetClientIp(),
-            correlationId: HttpContext.GetCorrelationId());
 
         return Ok(new WechatBindingResponse(true, SensitiveDataMasker.MaskOpenId(openId)));
     }
@@ -179,14 +188,13 @@ public class ProfileController : ControllerBase
             return Unauthorized();
         }
 
-        var removed = await admissionService.UnbindAsync(accountId.Value, cancellationToken);
-        if (removed)
-        {
-            await auditService.RecordActionAsync(
+        var removed = await admissionService.UnbindAsync(
+            accountId.Value,
+            cancellationToken,
+            () => auditService.RecordActionAsync(
                 "wechat_unbound", "Account", accountId.Value.ToString(), accountId, null,
                 "WeChat identity unbound", HttpContext.GetClientIp(),
-                correlationId: HttpContext.GetCorrelationId());
-        }
+                correlationId: HttpContext.GetCorrelationId()));
 
         return Ok(new OperationResponse(removed, removed ? "WeChat unbound." : "No WeChat binding to remove."));
     }

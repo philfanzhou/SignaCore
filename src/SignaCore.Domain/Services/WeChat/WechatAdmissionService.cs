@@ -19,12 +19,14 @@ public interface IWechatAdmissionService
     /// <summary>
     /// Binds an OpenId to an already-authenticated account and admits it for the calling application.
     /// A previously revoked admission is not restored — see <see cref="WechatBindOutcome.AccessRevoked"/>.
+    /// <paramref name="beforeCommit"/> runs after a successful result is staged and before commit.
     /// </summary>
     Task<WechatBindResult> BindAsync(
         AppRegistrationEntity app,
         Guid accountId,
         string openId,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        Func<WechatBindResult, Task>? beforeCommit = null);
 
     /// <summary>
     /// Admits an existing WeChat login for <paramref name="app"/> without a WeChat authorization, for
@@ -38,8 +40,14 @@ public interface IWechatAdmissionService
         WechatAccessApprovalSource source,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Removes the account's WeChat binding and every application admission that depends on it.</summary>
-    Task<bool> UnbindAsync(Guid accountId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Removes the account's WeChat binding and every application admission that depends on it.
+    /// <paramref name="beforeCommit"/> runs after removal is staged and before commit.
+    /// </summary>
+    Task<bool> UnbindAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default,
+        Func<Task>? beforeCommit = null);
 
     Task<UserLoginEntity?> GetBindingAsync(Guid accountId, CancellationToken cancellationToken = default);
 }
@@ -184,7 +192,8 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
         AppRegistrationEntity app,
         Guid accountId,
         string openId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Func<WechatBindResult, Task>? beforeCommit = null)
     {
         var provider = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodWechat);
         var existing = await FindLoginAsync(openId, cancellationToken);
@@ -230,10 +239,13 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
             return access.IsActive
                 ? new WechatBindResult(WechatBindOutcome.Bound, login)
                 : new WechatBindResult(WechatBindOutcome.AccessRevoked, login);
-        }, cancellationToken);
+        }, cancellationToken, beforeCommit);
     }
 
-    public async Task<bool> UnbindAsync(Guid accountId, CancellationToken cancellationToken = default)
+    public async Task<bool> UnbindAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default,
+        Func<Task>? beforeCommit = null)
     {
         var provider = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodWechat);
         var login = await _dbContext.UserLogins.FirstOrDefaultAsync(
@@ -247,6 +259,10 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
         // Application admissions cascade with the binding; refresh tokens issued from
         // this identity stop validating because the admission row disappears with it.
         _dbContext.UserLogins.Remove(login);
+        if (beforeCommit is not null)
+        {
+            await beforeCommit();
+        }
         await _dbContext.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -311,7 +327,10 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
     /// writer wins the unique index. Mirrors <see cref="Sms.SmsAdmissionService"/>: the execution
     /// strategy can replay the delegate, so tracked state is cleared before every attempt.
     /// </summary>
-    private async Task<T> ExecuteWithRetryAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken)
+    private async Task<T> ExecuteWithRetryAsync<T>(
+        Func<Task<T>> operation,
+        CancellationToken cancellationToken,
+        Func<T, Task>? beforeCommit = null)
     {
         for (var attempt = 0; attempt < 2; attempt++)
         {
@@ -323,6 +342,10 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
                     _dbContext.ChangeTracker.Clear();
                     await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
                     var result = await operation();
+                    if (beforeCommit is not null)
+                    {
+                        await beforeCommit(result);
+                    }
                     await _dbContext.SaveChangesAsync(cancellationToken);
                     await transaction.CommitAsync(cancellationToken);
                     return result;

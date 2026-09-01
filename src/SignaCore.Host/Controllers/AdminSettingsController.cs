@@ -144,17 +144,6 @@ public sealed class AdminSettingsController : ControllerBase
         var configurationVersion = outcome.ConfigurationVersion;
         var changedKeys = outcome.ChangedKeys;
 
-        var actorId = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : (Guid?)null;
-        // Keys only. Recording old or new values here would put secrets into the audit trail.
-        await auditService.RecordActionAsync(
-            "settings_updated",
-            "Settings",
-            configurationVersion.ToString(),
-            actorId,
-            User.Identity?.Name,
-            $"Updated {changedKeys.Count} settings: {string.Join(", ", changedKeys)}",
-            HttpContext.GetClientIp());
-
         _logger.LogInformation(
             "Settings updated to version {Version}: {Keys}",
             configurationVersion,
@@ -233,6 +222,21 @@ public sealed class AdminSettingsController : ControllerBase
 
             state.ConfigurationVersion = nextVersion;
             _db.InstallationStates.Update(state);
+
+            var actorId = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
+                ? id
+                : (Guid?)null;
+            // Keys only. Recording old or new values here would put secrets into the audit trail.
+            // AuditService resolves the same scoped IdentityDbContext as this controller, so this
+            // row is part of the transaction and the single SaveChanges below.
+            await auditService.RecordActionAsync(
+                "settings_updated",
+                "Settings",
+                nextVersion.ToString(),
+                actorId,
+                User.Identity?.Name,
+                $"Updated {pendingKeys.Count} settings: {string.Join(", ", pendingKeys)}",
+                HttpContext.GetClientIp());
             await _db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
@@ -241,8 +245,8 @@ public sealed class AdminSettingsController : ControllerBase
     }
 
     /// <summary>
-    /// What the retriable transaction decided, kept separate from the HTTP result so the audit entry
-    /// and the response are written once after it commits rather than on every replayed attempt.
+    /// What the retriable transaction decided, kept separate from the HTTP result so the response
+    /// and operational log are produced once after a successful commit.
     /// </summary>
     private sealed record SettingsUpdateOutcome(
         string? Error,

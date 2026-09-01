@@ -81,6 +81,14 @@ public sealed class LdapValidatorTests
                 null,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LdapProvisioningResult(account, credential, access, true, true));
+        fixture.LoginAttemptRepository.Setup(repository => repository.GetByUsernameAsync(It.IsAny<string>()))
+            .ReturnsAsync(new LoginAttemptEntity
+            {
+                Id = Guid.NewGuid(),
+                Username = "ldap:corp:prior",
+                FailedAttempts = 1,
+                LastAttemptAt = DateTimeOffset.UtcNow
+            });
 
         var result = await fixture.Validator.ValidateAsync(fixture.Request("alice"));
 
@@ -88,6 +96,10 @@ public sealed class LdapValidatorTests
         Assert.Equal(account.Id, result.Account!.Id);
         Assert.Equal(credential.Id, result.LdapCredentialId);
         Assert.Equal(IdentityConstants.AuthMethodLdap, result.AuthMethod);
+        Assert.Equal(LoginAttemptChangeKind.Clear, result.LoginAttemptChange?.Kind);
+        fixture.LoginAttemptRepository.Verify(repository => repository.RemoveAsync(
+            It.IsAny<LoginAttemptEntity>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -108,6 +120,11 @@ public sealed class LdapValidatorTests
         var result = await fixture.Validator.ValidateAsync(fixture.Request("alice"));
 
         Assert.False(result.IsSuccess);
+        Assert.Equal(LoginAttemptChangeKind.RecordFailure, result.LoginAttemptChange?.Kind);
+        fixture.LoginAttemptRepository.Verify(repository => repository.RecordFailureAsync(
+            It.IsAny<string>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Never);
         fixture.AccountService.Verify(service => service.ProvisionAsync(
             It.IsAny<LdapDirectoryIdentity>(),
             It.IsAny<AppRegistrationEntity>(),
@@ -147,12 +164,6 @@ public sealed class LdapValidatorTests
             DirectoryClient.Setup(client => client.ResolveDirectory(It.IsAny<string>())).Returns(Directory);
             LoginAttemptRepository.Setup(repository => repository.GetByUsernameAsync(It.IsAny<string>()))
                 .ReturnsAsync((LoginAttemptEntity?)null);
-            LoginAttemptRepository.Setup(repository => repository.RecordFailureAsync(
-                    It.IsAny<string>(), It.IsAny<DateTimeOffset>()))
-                .ReturnsAsync(new LoginAttemptEntity());
-
-            var unitOfWork = new Mock<IUnitOfWork>();
-            unitOfWork.Setup(item => item.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
             Validator = new LdapValidator(
                 new LdapOptions
                 {
@@ -164,7 +175,6 @@ public sealed class LdapValidatorTests
                 AccountService.Object,
                 AccountRepository.Object,
                 LoginAttemptRepository.Object,
-                unitOfWork.Object,
                 CreateMetrics(),
                 NullLogger<LdapValidator>.Instance);
         }

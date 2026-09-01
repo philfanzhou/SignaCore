@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -31,9 +30,7 @@ public class BootstrapAppSeederTests : IDisposable
         _dbContext = new TestIdentityDbContext(options);
         _auditService = new AuditService(
             new LoginHistoryRepository(_dbContext),
-            new AuditLogRepository(_dbContext),
-            new EfCoreUnitOfWork(_dbContext),
-            NullLogger<AuditService>.Instance);
+            new AuditLogRepository(_dbContext));
     }
 
     [Fact]

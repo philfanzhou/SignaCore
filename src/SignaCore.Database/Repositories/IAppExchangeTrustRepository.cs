@@ -24,8 +24,8 @@ public interface IAppExchangeTrustRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Adds an edge if it is absent and returns it. Returns the existing edge unchanged when the
-    /// pair is already trusted, so adding twice is not an error.
+    /// Stages an edge if it is absent and returns it. Returns the existing edge unchanged when the
+    /// pair is already trusted, so adding twice is not an error. The caller commits the unit of work.
     /// </summary>
     Task<AppExchangeTrust> AddAsync(
         AppRegistrationEntity app,
@@ -33,7 +33,7 @@ public interface IAppExchangeTrustRepository
         Guid? approvedBy,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Removes the edge. False when it did not exist.</summary>
+    /// <summary>Stages removal of the edge. False when it did not exist. The caller commits the unit of work.</summary>
     Task<bool> RemoveAsync(
         Guid appRegistrationId,
         Guid sourceAppRegistrationId,

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SignaCore.Database.Entity;
+using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Services.Sms;
 using SignaCore.Host.Controllers;
@@ -15,6 +16,7 @@ public class SmsCodeControllerTests
     private readonly Mock<IOtpService> _otpServiceMock = new();
     private readonly Mock<ISmsAdmissionService> _admissionServiceMock = new();
     private readonly Mock<IAuditService> _auditServiceMock = AuthTestDoubles.AuditService();
+    private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
 
     private SmsCodeController CreateController()
     {
@@ -22,6 +24,7 @@ public class SmsCodeControllerTests
             _otpServiceMock.Object,
             _admissionServiceMock.Object,
             _auditServiceMock.Object,
+            _unitOfWorkMock.Object,
             NullLogger<SmsCodeController>.Instance)
             .WithHttpContext();
         controller.HttpContext.Items[IdentityHeaders.ValidatedApp] = new AppRegistrationEntity
@@ -71,6 +74,9 @@ public class SmsCodeControllerTests
             null, "+8613800138000", "sms", "sms_code_sent",
             It.IsAny<string?>(), It.IsAny<string?>(), null,
             It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
+        _unitOfWorkMock.Verify(
+            unitOfWork => unitOfWork.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

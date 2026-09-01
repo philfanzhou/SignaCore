@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -24,28 +22,28 @@ public class AuditServiceTests
         return mock;
     }
 
-    private static Mock<IUnitOfWork> CreateUnitOfWorkMock()
-    {
-        var mock = new Mock<IUnitOfWork>();
-        mock.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
-        return mock;
-    }
-
     [Fact]
-    public async Task RecordLoginAsync_SavesLoginHistory()
+    public async Task RecordLoginAsync_StagesLoginHistoryWithAllFields()
     {
         var loginHistoryRepoMock = CreateLoginHistoryRepoMock();
         var auditLogRepoMock = CreateAuditLogRepoMock();
-        var unitOfWorkMock = CreateUnitOfWorkMock();
-        var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object, unitOfWorkMock.Object, NullLogger<AuditService>.Instance);
+        var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object);
+        var accountId = Guid.NewGuid();
 
-        await service.RecordLoginAsync(Guid.NewGuid(), "testuser", "Password", "login_success", "127.0.0.1", "TestAgent");
+        await service.RecordLoginAsync(
+            accountId, "testuser", "Password", "login_success", "127.0.0.1", "TestAgent",
+            appId: "app-1", correlationId: "correlation-1");
 
         loginHistoryRepoMock.Verify(r => r.AddAsync(It.Is<LoginHistoryEntity>(e =>
+            e.AccountId == accountId &&
             e.Username == "testuser" &&
             e.AuthMethod == "Password" &&
-            e.EventType == "login_success")), Times.Once);
-        unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+            e.EventType == "login_success" &&
+            e.ClientIp == "127.0.0.1" &&
+            e.UserAgent == "TestAgent" &&
+            e.FailureReason == null &&
+            e.AppId == "app-1" &&
+            e.CorrelationId == "correlation-1")), Times.Once);
     }
 
     [Fact]
@@ -53,8 +51,7 @@ public class AuditServiceTests
     {
         var loginHistoryRepoMock = CreateLoginHistoryRepoMock();
         var auditLogRepoMock = CreateAuditLogRepoMock();
-        var unitOfWorkMock = CreateUnitOfWorkMock();
-        var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object, unitOfWorkMock.Object, NullLogger<AuditService>.Instance);
+        var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object);
 
         await service.RecordLoginAsync(null, "unknown", "Password", "login_failure", "127.0.0.1", "TestAgent", "wrong_password");
 
@@ -65,36 +62,40 @@ public class AuditServiceTests
     }
 
     [Fact]
-    public async Task RecordLoginAsync_WhenRepositoryThrows_DoesNotPropagateException()
+    public async Task RecordLoginAsync_WhenRepositoryThrows_PropagatesException()
     {
         var loginHistoryRepoMock = CreateLoginHistoryRepoMock();
         loginHistoryRepoMock.Setup(r => r.AddAsync(It.IsAny<LoginHistoryEntity>())).ThrowsAsync(new Exception("DB error"));
         var auditLogRepoMock = CreateAuditLogRepoMock();
-        var unitOfWorkMock = CreateUnitOfWorkMock();
-        var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object, unitOfWorkMock.Object, NullLogger<AuditService>.Instance);
+        var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object);
 
-        var exception = await Record.ExceptionAsync(() =>
+        var exception = await Assert.ThrowsAsync<Exception>(() =>
             service.RecordLoginAsync(Guid.NewGuid(), "testuser", "Password", "login_success", "127.0.0.1", "TestAgent"));
 
-        Assert.Null(exception);
+        Assert.Equal("DB error", exception.Message);
     }
 
     [Fact]
-    public async Task RecordActionAsync_SavesAuditLog()
+    public async Task RecordActionAsync_StagesAuditLogWithAllFields()
     {
         var loginHistoryRepoMock = CreateLoginHistoryRepoMock();
         var auditLogRepoMock = CreateAuditLogRepoMock();
-        var unitOfWorkMock = CreateUnitOfWorkMock();
-        var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object, unitOfWorkMock.Object, NullLogger<AuditService>.Instance);
+        var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object);
+        var actorId = Guid.NewGuid();
 
-        await service.RecordActionAsync("account_created", "Account", "123", Guid.NewGuid(), "admin", "Created account", "127.0.0.1");
+        await service.RecordActionAsync(
+            "account_created", "Account", "123", actorId, "admin", "Created account",
+            "127.0.0.1", "correlation-1");
 
         auditLogRepoMock.Verify(r => r.AddAsync(It.Is<AuditLogEntity>(e =>
             e.Action == "account_created" &&
             e.TargetType == "Account" &&
             e.TargetId == "123" &&
-            e.Description == "Created account")), Times.Once);
-        unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+            e.ActorId == actorId &&
+            e.ActorName == "admin" &&
+            e.Description == "Created account" &&
+            e.ClientIp == "127.0.0.1" &&
+            e.CorrelationId == "correlation-1")), Times.Once);
     }
 
     [Fact]
@@ -102,8 +103,7 @@ public class AuditServiceTests
     {
         var loginHistoryRepoMock = CreateLoginHistoryRepoMock();
         var auditLogRepoMock = CreateAuditLogRepoMock();
-        var unitOfWorkMock = CreateUnitOfWorkMock();
-        var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object, unitOfWorkMock.Object, NullLogger<AuditService>.Instance);
+        var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object);
 
         var before = new { IsActive = true };
         var after = new { IsActive = false };
@@ -111,22 +111,21 @@ public class AuditServiceTests
         await service.RecordActionAsync("status_changed", "Account", "123", Guid.NewGuid(), "admin", "Changed status", "127.0.0.1", before: before, after: after);
 
         auditLogRepoMock.Verify(r => r.AddAsync(It.Is<AuditLogEntity>(e =>
-            e.BeforeSnapshot != null &&
-            e.AfterSnapshot != null)), Times.Once);
+            e.BeforeSnapshot == "{\"isActive\":true}" &&
+            e.AfterSnapshot == "{\"isActive\":false}")), Times.Once);
     }
 
     [Fact]
-    public async Task RecordActionAsync_WhenRepositoryThrows_DoesNotPropagateException()
+    public async Task RecordActionAsync_WhenRepositoryThrows_PropagatesException()
     {
         var loginHistoryRepoMock = CreateLoginHistoryRepoMock();
         var auditLogRepoMock = CreateAuditLogRepoMock();
         auditLogRepoMock.Setup(r => r.AddAsync(It.IsAny<AuditLogEntity>())).ThrowsAsync(new Exception("DB error"));
-        var unitOfWorkMock = CreateUnitOfWorkMock();
-        var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object, unitOfWorkMock.Object, NullLogger<AuditService>.Instance);
+        var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object);
 
-        var exception = await Record.ExceptionAsync(() =>
+        var exception = await Assert.ThrowsAsync<Exception>(() =>
             service.RecordActionAsync("test", "Account", "123", null, null, null));
 
-        Assert.Null(exception);
+        Assert.Equal("DB error", exception.Message);
     }
 }

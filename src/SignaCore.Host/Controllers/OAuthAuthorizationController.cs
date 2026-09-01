@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Primitives;
 using SignaCore.Database;
+using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
@@ -60,6 +61,7 @@ public sealed class OAuthAuthorizationController : ControllerBase
 
     private readonly IOidcAuthorizationRequestValidator _validator;
     private readonly IAuditService _auditService;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly AuthMetrics _metrics;
     private readonly JwtOptions _jwtOptions;
     private readonly ILogger<OAuthAuthorizationController> _logger;
@@ -67,12 +69,14 @@ public sealed class OAuthAuthorizationController : ControllerBase
     public OAuthAuthorizationController(
         IOidcAuthorizationRequestValidator validator,
         IAuditService auditService,
+        IUnitOfWork unitOfWork,
         AuthMetrics metrics,
         JwtOptions jwtOptions,
         ILogger<OAuthAuthorizationController> logger)
     {
         _validator = validator;
         _auditService = auditService;
+        _unitOfWork = unitOfWork;
         _metrics = metrics;
         _jwtOptions = jwtOptions;
         _logger = logger;
@@ -191,13 +195,12 @@ public sealed class OAuthAuthorizationController : ControllerBase
     /// Records the outcome for a resolved application. The target is the application record id and
     /// the description is a closed-set outcome name; no state, nonce, challenge, scope, or raw URI
     /// is written. Audit persistence is not part of a transaction here — this endpoint commits no
-    /// state of its own — so a failed audit write is logged by the audit service and does not turn
-    /// a validated rejection into a server error.
+    /// state of its own, so this helper explicitly commits the staged row before returning.
     /// </summary>
-    private Task RecordAuditAsync(Guid applicationId, string outcome, CancellationToken cancellationToken)
+    private async Task RecordAuditAsync(Guid applicationId, string outcome, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return _auditService.RecordActionAsync(
+        await _auditService.RecordActionAsync(
             AuditAction,
             AuditTargetType,
             applicationId.ToString("D"),
@@ -206,6 +209,7 @@ public sealed class OAuthAuthorizationController : ControllerBase
             description: outcome,
             clientIp: HttpContext.GetClientIp(),
             correlationId: HttpContext.GetCorrelationId());
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
     private static IReadOnlyList<string> ToValues(StringValues values)

@@ -20,26 +20,6 @@ public class PasswordValidatorTests
     {
         var mock = new Mock<ILoginAttemptRepository>();
         mock.Setup(r => r.GetByUsernameAsync(It.IsAny<string>())).ReturnsAsync((LoginAttemptEntity?)null);
-        mock.Setup(r => r.RecordFailureAsync(
-                It.IsAny<string>(),
-                It.IsAny<DateTimeOffset>()))
-            .ReturnsAsync((
-                string username,
-                DateTimeOffset utcNow,
-                CancellationToken _) => new LoginAttemptEntity
-            {
-                Id = Guid.NewGuid(),
-                Username = username,
-                LastAttemptAt = utcNow,
-                FailedAttempts = 1
-            });
-        return mock;
-    }
-
-    private static Mock<IUnitOfWork> CreateUnitOfWorkMock()
-    {
-        var mock = new Mock<IUnitOfWork>();
-        mock.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         return mock;
     }
 
@@ -58,7 +38,6 @@ public class PasswordValidatorTests
             passwordRepoMock.Object,
             accountRepoMock.Object,
             CreateLoginAttemptRepoMock().Object,
-            CreateUnitOfWorkMock().Object,
             CreatePasswordHasher(),
             CreateLogger());
 
@@ -81,11 +60,11 @@ public class PasswordValidatorTests
         var accountRepoMock = new Mock<IAccountRepository>();
         accountRepoMock.Setup(r => r.GetByIdAsync(account.Id)).ReturnsAsync(account);
 
+        var loginAttemptRepository = CreateLoginAttemptRepoMock();
         var validator = new PasswordValidator(
             passwordRepoMock.Object,
             accountRepoMock.Object,
-            CreateLoginAttemptRepoMock().Object,
-            CreateUnitOfWorkMock().Object,
+            loginAttemptRepository.Object,
             CreatePasswordHasher(),
             CreateLogger());
 
@@ -93,6 +72,12 @@ public class PasswordValidatorTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Wrong username or password", result.ErrorMessage);
+        Assert.Equal(LoginAttemptChangeKind.RecordFailure, result.LoginAttemptChange?.Kind);
+        Assert.Equal("testuser", result.LoginAttemptChange?.Username);
+        loginAttemptRepository.Verify(repository => repository.RecordFailureAsync(
+            It.IsAny<string>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -106,7 +91,6 @@ public class PasswordValidatorTests
             passwordRepoMock.Object,
             accountRepoMock.Object,
             CreateLoginAttemptRepoMock().Object,
-            CreateUnitOfWorkMock().Object,
             CreatePasswordHasher(),
             CreateLogger());
 
@@ -125,7 +109,6 @@ public class PasswordValidatorTests
             passwordRepoMock.Object,
             accountRepoMock.Object,
             CreateLoginAttemptRepoMock().Object,
-            CreateUnitOfWorkMock().Object,
             CreatePasswordHasher(),
             CreateLogger());
 
@@ -150,7 +133,6 @@ public class PasswordValidatorTests
             passwordRepoMock.Object,
             accountRepoMock.Object,
             CreateLoginAttemptRepoMock().Object,
-            CreateUnitOfWorkMock().Object,
             CreatePasswordHasher(),
             CreateLogger());
 
@@ -185,7 +167,6 @@ public class PasswordValidatorTests
             passwordRepoMock.Object,
             accountRepoMock.Object,
             loginAttemptRepoMock.Object,
-            CreateUnitOfWorkMock().Object,
             CreatePasswordHasher(),
             CreateLogger());
 
@@ -193,5 +174,59 @@ public class PasswordValidatorTests
 
         Assert.False(result.IsSuccess);
         Assert.Contains("locked", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_WithValidCredentialsAndPriorFailure_ReturnsDeferredClear()
+    {
+        var account = new AccountEntity
+        {
+            Id = Guid.NewGuid(),
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        var credential = new PasswordCredentialEntity
+        {
+            Id = Guid.NewGuid(),
+            AccountId = account.Id,
+            Username = "testuser",
+            PasswordHash = CreatePasswordHasher().HashPassword("password"),
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        var passwordRepository = new Mock<IPasswordCredentialRepository>();
+        passwordRepository.Setup(repository => repository.GetByUsernameAsync("testuser"))
+            .ReturnsAsync(credential);
+        var accountRepository = new Mock<IAccountRepository>();
+        accountRepository.Setup(repository => repository.GetByIdAsync(account.Id))
+            .ReturnsAsync(account);
+        var loginAttemptRepository = new Mock<ILoginAttemptRepository>();
+        loginAttemptRepository.Setup(repository => repository.GetByUsernameAsync("testuser"))
+            .ReturnsAsync(new LoginAttemptEntity
+            {
+                Id = Guid.NewGuid(),
+                Username = "testuser",
+                FailedAttempts = 1,
+                LastAttemptAt = DateTimeOffset.UtcNow
+            });
+        var validator = new PasswordValidator(
+            passwordRepository.Object,
+            accountRepository.Object,
+            loginAttemptRepository.Object,
+            CreatePasswordHasher(),
+            CreateLogger());
+
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypePassword,
+            Username = "testuser",
+            Password = "password"
+        });
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(LoginAttemptChangeKind.Clear, result.LoginAttemptChange?.Kind);
+        Assert.Equal("testuser", result.LoginAttemptChange?.Username);
+        loginAttemptRepository.Verify(repository => repository.RemoveAsync(
+            It.IsAny<LoginAttemptEntity>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 }

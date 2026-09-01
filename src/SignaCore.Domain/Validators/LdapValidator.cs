@@ -14,7 +14,6 @@ public sealed class LdapValidator : IIdentityValidator
     private readonly ILdapAccountService _accountService;
     private readonly IAccountRepository _accountRepository;
     private readonly ILoginAttemptRepository _loginAttemptRepository;
-    private readonly IUnitOfWork _unitOfWork;
     private readonly AuthMetrics _metrics;
     private readonly ILogger<LdapValidator> _logger;
 
@@ -24,7 +23,6 @@ public sealed class LdapValidator : IIdentityValidator
         ILdapAccountService accountService,
         IAccountRepository accountRepository,
         ILoginAttemptRepository loginAttemptRepository,
-        IUnitOfWork unitOfWork,
         AuthMetrics metrics,
         ILogger<LdapValidator> logger)
     {
@@ -33,7 +31,6 @@ public sealed class LdapValidator : IIdentityValidator
         _accountService = accountService;
         _accountRepository = accountRepository;
         _loginAttemptRepository = loginAttemptRepository;
-        _unitOfWork = unitOfWork;
         _metrics = metrics;
         _logger = logger;
     }
@@ -106,19 +103,20 @@ public sealed class LdapValidator : IIdentityValidator
             return ValidationResult.Failure("Account is disabled");
         }
 
-        var bindError = await ValidateBindAsync(
+        var bind = await ValidateBindAsync(
             credential.DirectoryKey,
             credential.ObjectGuid,
             credential.UserPrincipalName,
             request.Password!,
             request.CancellationToken);
-        return bindError == null
+        var result = bind.Error == null
             ? ValidationResult.Success(
                 account,
                 IdentityConstants.AuthMethodLdap,
                 credential.UserPrincipalName,
                 credential.Id)
-            : ValidationResult.Failure(bindError);
+            : ValidationResult.Failure(bind.Error);
+        return result.WithLoginAttemptChange(bind.LoginAttemptChange);
     }
 
     private async Task<ValidationResult> ValidateAutomaticAsync(
@@ -156,15 +154,16 @@ public sealed class LdapValidator : IIdentityValidator
             }
         }
 
-        var bindError = await ValidateBindAsync(
+        var bind = await ValidateBindAsync(
             directory.Key,
             identity.ObjectGuid,
             identity.UserPrincipalName,
             request.Password!,
             request.CancellationToken);
-        if (bindError != null)
+        if (bind.Error != null)
         {
-            return ValidationResult.Failure(bindError);
+            return ValidationResult.Failure(bind.Error)
+                .WithLoginAttemptChange(bind.LoginAttemptChange);
         }
 
         var result = await _accountService.ProvisionAsync(
@@ -192,10 +191,11 @@ public sealed class LdapValidator : IIdentityValidator
             result.Account,
             IdentityConstants.AuthMethodLdap,
             identity.UserPrincipalName,
-            result.Credential.Id);
+            result.Credential.Id)
+            .WithLoginAttemptChange(bind.LoginAttemptChange);
     }
 
-    private async Task<string?> ValidateBindAsync(
+    private async Task<BindValidationResult> ValidateBindAsync(
         string directoryKey,
         Guid objectGuid,
         string userPrincipalName,
@@ -207,7 +207,7 @@ public sealed class LdapValidator : IIdentityValidator
         var attempt = await _loginAttemptRepository.GetByUsernameAsync(attemptKey);
         if (attempt?.LockoutUntil > DateTimeOffset.UtcNow)
         {
-            return "Account is temporarily locked";
+            return new BindValidationResult("Account is temporarily locked", null);
         }
 
         var validation = await _directoryClient.ValidateCredentialsAsync(
@@ -217,16 +217,19 @@ public sealed class LdapValidator : IIdentityValidator
             cancellationToken);
         if (validation != LdapCredentialValidationResult.Success)
         {
-            await _loginAttemptRepository.RecordFailureAsync(attemptKey, DateTimeOffset.UtcNow);
-            return InvalidCredentialsMessage;
+            return new BindValidationResult(
+                InvalidCredentialsMessage,
+                new LoginAttemptChange(LoginAttemptChangeKind.RecordFailure, attemptKey));
         }
 
-        if (attempt != null)
-        {
-            await _loginAttemptRepository.RemoveAsync(attempt);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-        }
-
-        return null;
+        return new BindValidationResult(
+            null,
+            attempt == null
+                ? null
+                : new LoginAttemptChange(LoginAttemptChangeKind.Clear, attemptKey));
     }
+
+    private sealed record BindValidationResult(
+        string? Error,
+        LoginAttemptChange? LoginAttemptChange);
 }
