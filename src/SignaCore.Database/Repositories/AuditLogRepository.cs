@@ -13,24 +13,39 @@ public class AuditLogRepository : IAuditLogRepository
         _dbContext = dbContext;
     }
 
-    public Task AddAsync(AuditLogEntity auditLog)
+    public Task AddAsync(
+        AuditLogEntity auditLog,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _dbContext.AuditLogs.Add(auditLog);
         return Task.CompletedTask;
     }
 
-    public async Task<List<AuditLogEntity>> QueryAsync(string? action, string? targetType, string? targetId, Guid? actorId, int pageSize, int skip)
+    public async Task<List<AuditLogEntity>> QueryAsync(
+        string? action,
+        string? targetType,
+        string? targetId,
+        Guid? actorId,
+        int pageSize,
+        int skip,
+        CancellationToken cancellationToken = default)
     {
         return await Filter(action, targetType, targetId, actorId)
             .OrderByDescending(a => a.CreatedAt)
             .Skip(skip)
             .Take(pageSize)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
     }
 
-    public async Task<int> CountAsync(string? action, string? targetType, string? targetId, Guid? actorId)
+    public async Task<int> CountAsync(
+        string? action,
+        string? targetType,
+        string? targetId,
+        Guid? actorId,
+        CancellationToken cancellationToken = default)
     {
-        return await Filter(action, targetType, targetId, actorId).CountAsync();
+        return await Filter(action, targetType, targetId, actorId).CountAsync(cancellationToken);
     }
 
     private IQueryable<AuditLogEntity> Filter(string? action, string? targetType, string? targetId, Guid? actorId)
@@ -52,10 +67,12 @@ public class AuditLogRepository : IAuditLogRepository
         return query;
     }
 
-    public async Task<int> RemoveOlderThanAsync(DateTimeOffset cutoff)
+    public async Task<int> RemoveOlderThanAsync(
+        DateTimeOffset cutoff,
+        CancellationToken cancellationToken = default)
     {
         return await _dbContext.AuditLogs
             .Where(a => a.CreatedAt < cutoff)
-            .ExecuteDeleteAsync();
+            .ExecuteDeleteAsync(cancellationToken);
     }
 }

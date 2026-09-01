@@ -13,33 +13,44 @@ public class LoginHistoryRepository : ILoginHistoryRepository
         _dbContext = dbContext;
     }
 
-    public Task AddAsync(LoginHistoryEntity loginHistory)
+    public Task AddAsync(
+        LoginHistoryEntity loginHistory,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _dbContext.LoginHistories.Add(loginHistory);
         return Task.CompletedTask;
     }
 
-    public async Task<List<LoginHistoryEntity>> GetByAccountIdAsync(Guid accountId, int pageSize, int skip)
+    public async Task<List<LoginHistoryEntity>> GetByAccountIdAsync(
+        Guid accountId,
+        int pageSize,
+        int skip,
+        CancellationToken cancellationToken = default)
     {
         return await _dbContext.LoginHistories
             .Where(h => h.AccountId == accountId)
             .OrderByDescending(h => h.CreatedAt)
             .Skip(skip)
             .Take(pageSize)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
     }
 
-    public async Task<int> CountByAccountIdAsync(Guid accountId)
+    public async Task<int> CountByAccountIdAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default)
     {
         return await _dbContext.LoginHistories
             .Where(h => h.AccountId == accountId)
-            .CountAsync();
+            .CountAsync(cancellationToken);
     }
 
-    public async Task<int> RemoveOlderThanAsync(DateTimeOffset cutoff)
+    public async Task<int> RemoveOlderThanAsync(
+        DateTimeOffset cutoff,
+        CancellationToken cancellationToken = default)
     {
         return await _dbContext.LoginHistories
             .Where(h => h.CreatedAt < cutoff)
-            .ExecuteDeleteAsync();
+            .ExecuteDeleteAsync(cancellationToken);
     }
 }
