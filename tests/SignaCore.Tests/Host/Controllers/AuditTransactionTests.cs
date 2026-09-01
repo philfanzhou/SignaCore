@@ -131,6 +131,66 @@ public sealed class AuditTransactionTests
         Assert.Equal("correlation-148", entry.CorrelationId);
     }
 
+    [Fact]
+    public async Task RemoveExchangeTrust_WhenConcurrentDeleteLoses_ReturnsNotFoundWithoutAudit()
+    {
+        await using var database = await SharedSqliteTestDatabase.CreateAsync();
+        var acceptingApp = CreateApp("accepting-app");
+        var sourceApp = CreateApp("source-app");
+        await using (var seedContext = database.CreateContext())
+        {
+            seedContext.AppRegistrations.AddRange(acceptingApp, sourceApp);
+            seedContext.AppExchangeTrusts.Add(new AppExchangeTrustEntity
+            {
+                Id = Guid.NewGuid(),
+                AppRegistrationId = acceptingApp.Id,
+                SourceAppRegistrationId = sourceApp.Id,
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+            await seedContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await using var firstContext = database.CreateContext();
+        await using var secondContext = database.CreateContext();
+        var bothDeletesStaged = new AsyncBarrier(participantCount: 2);
+        var firstSaveCompleted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var firstTask = CreateAdminController().RemoveExchangeTrust(
+            acceptingApp.AppId,
+            sourceApp.AppId,
+            new AppRegistrationRepository(firstContext),
+            new CoordinatedExchangeTrustRepository(firstContext, bothDeletesStaged),
+            CreateAuditService(firstContext),
+            new OrderedUnitOfWork(firstContext, Task.CompletedTask, firstSaveCompleted),
+            firstContext,
+            TestContext.Current.CancellationToken);
+        var secondTask = CreateAdminController().RemoveExchangeTrust(
+            acceptingApp.AppId,
+            sourceApp.AppId,
+            new AppRegistrationRepository(secondContext),
+            new CoordinatedExchangeTrustRepository(secondContext, bothDeletesStaged),
+            CreateAuditService(secondContext),
+            new OrderedUnitOfWork(secondContext, firstSaveCompleted.Task),
+            secondContext,
+            TestContext.Current.CancellationToken);
+
+        var results = await Task.WhenAll(firstTask, secondTask);
+
+        Assert.IsType<OkObjectResult>(results[0]);
+        Assert.IsType<NotFoundObjectResult>(results[1]);
+        Assert.Empty(secondContext.ChangeTracker.Entries());
+
+        await using var verificationContext = database.CreateContext();
+        Assert.False(await verificationContext.AppExchangeTrusts
+            .AnyAsync(TestContext.Current.CancellationToken));
+        var audit = await verificationContext.AuditLogs
+            .SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("app_exchange_trust_removed", audit.Action);
+        Assert.Equal(acceptingApp.AppId, audit.TargetId);
+        Assert.Contains(sourceApp.AppId, audit.BeforeSnapshot, StringComparison.Ordinal);
+    }
+
     private static AdminController CreateAdminController()
     {
         var controller = new AdminController(NullLogger<AdminController>.Instance);
@@ -147,6 +207,109 @@ public sealed class AuditTransactionTests
 
     private static AuditService CreateAuditService(IdentityDbContext context) =>
         new(new LoginHistoryRepository(context), new AuditLogRepository(context));
+
+    private static AppRegistrationEntity CreateApp(string appId) => new()
+    {
+        Id = Guid.NewGuid(),
+        AppId = appId,
+        AppIdNormalized = IdentityValueNormalizer.Normalize(appId),
+        AppName = appId,
+        AppSecretHash = "not-used",
+        IsActive = true,
+        CreatedAt = DateTimeOffset.UtcNow
+    };
+
+    private sealed class AsyncBarrier
+    {
+        private readonly TaskCompletionSource _released = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _remaining;
+
+        public AsyncBarrier(int participantCount) => _remaining = participantCount;
+
+        public async Task SignalAndWaitAsync(CancellationToken cancellationToken)
+        {
+            if (Interlocked.Decrement(ref _remaining) == 0)
+            {
+                _released.TrySetResult();
+            }
+
+            await _released.Task.WaitAsync(cancellationToken);
+        }
+    }
+
+    private sealed class CoordinatedExchangeTrustRepository : IAppExchangeTrustRepository
+    {
+        private readonly AppExchangeTrustRepository _inner;
+        private readonly AsyncBarrier _barrier;
+
+        public CoordinatedExchangeTrustRepository(IdentityDbContext context, AsyncBarrier barrier)
+        {
+            _inner = new AppExchangeTrustRepository(context);
+            _barrier = barrier;
+        }
+
+        public Task<bool> IsTrustedSourceAsync(
+            Guid appRegistrationId,
+            string sourceAppId,
+            CancellationToken cancellationToken = default) =>
+            _inner.IsTrustedSourceAsync(appRegistrationId, sourceAppId, cancellationToken);
+
+        public Task<IReadOnlyList<AppExchangeTrust>> ListSourcesAsync(
+            Guid appRegistrationId,
+            CancellationToken cancellationToken = default) =>
+            _inner.ListSourcesAsync(appRegistrationId, cancellationToken);
+
+        public Task<AppExchangeTrust> AddAsync(
+            AppRegistrationEntity app,
+            AppRegistrationEntity sourceApp,
+            Guid? approvedBy,
+            CancellationToken cancellationToken = default) =>
+            _inner.AddAsync(app, sourceApp, approvedBy, cancellationToken);
+
+        public async Task<bool> RemoveAsync(
+            Guid appRegistrationId,
+            Guid sourceAppRegistrationId,
+            CancellationToken cancellationToken = default)
+        {
+            var removed = await _inner.RemoveAsync(
+                appRegistrationId,
+                sourceAppRegistrationId,
+                cancellationToken);
+            await _barrier.SignalAndWaitAsync(cancellationToken);
+            return removed;
+        }
+    }
+
+    private sealed class OrderedUnitOfWork : IUnitOfWork
+    {
+        private readonly IdentityDbContext _context;
+        private readonly Task _waitBeforeSave;
+        private readonly TaskCompletionSource? _saveCompleted;
+
+        public OrderedUnitOfWork(
+            IdentityDbContext context,
+            Task waitBeforeSave,
+            TaskCompletionSource? saveCompleted = null)
+        {
+            _context = context;
+            _waitBeforeSave = waitBeforeSave;
+            _saveCompleted = saveCompleted;
+        }
+
+        public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            await _waitBeforeSave.WaitAsync(cancellationToken);
+            try
+            {
+                return await _context.SaveChangesAsync(cancellationToken);
+            }
+            finally
+            {
+                _saveCompleted?.TrySetResult();
+            }
+        }
+    }
 
     private sealed class SqliteTestDatabase : IAsyncDisposable
     {
@@ -175,5 +338,35 @@ public sealed class AuditTransactionTests
             await Context.DisposeAsync();
             await Connection.DisposeAsync();
         }
+    }
+
+    private sealed class SharedSqliteTestDatabase : IAsyncDisposable
+    {
+        private readonly string _connectionString;
+        private readonly SqliteConnection _keepAliveConnection;
+
+        private SharedSqliteTestDatabase(string connectionString, SqliteConnection keepAliveConnection)
+        {
+            _connectionString = connectionString;
+            _keepAliveConnection = keepAliveConnection;
+        }
+
+        public static async Task<SharedSqliteTestDatabase> CreateAsync()
+        {
+            var connectionString = $"Data Source=audit-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+            var keepAliveConnection = new SqliteConnection(connectionString);
+            await keepAliveConnection.OpenAsync(TestContext.Current.CancellationToken);
+            var database = new SharedSqliteTestDatabase(connectionString, keepAliveConnection);
+            await using var context = database.CreateContext();
+            await context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
+            return database;
+        }
+
+        public IdentityDbContext CreateContext() => new(
+            new DbContextOptionsBuilder<IdentityDbContext>()
+                .UseSqlite(_connectionString)
+                .Options);
+
+        public async ValueTask DisposeAsync() => await _keepAliveConnection.DisposeAsync();
     }
 }

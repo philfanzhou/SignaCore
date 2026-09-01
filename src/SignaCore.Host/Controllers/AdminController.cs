@@ -1084,6 +1084,7 @@ public class AdminController : ControllerBase
         [FromServices] IAppExchangeTrustRepository exchangeTrustRepository,
         [FromServices] IAuditService auditService,
         [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IdentityDbContext dbContext,
         CancellationToken cancellationToken)
     {
         var app = await appRegistrationRepository.GetByAppIdAsync(appId);
@@ -1100,7 +1101,21 @@ public class AdminController : ControllerBase
             "app_exchange_trust_removed", "AppRegistration", appId, actorId, actorName,
             $"Application no longer accepts refresh tokens issued to {sourceApp.AppId}", GetClientIp(),
             before: new { SourceAppId = sourceApp.AppId });
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException exception) when (
+            exception.Entries.Count == 1 &&
+            exception.Entries[0].Entity is AppExchangeTrustEntity)
+        {
+            // Another request deleted the edge after this request loaded it. SaveChanges rolled its
+            // audit insert back with the failed delete; clear both staged entries so this scoped
+            // context cannot persist the losing audit in a later save.
+            dbContext.ChangeTracker.Clear();
+            return NotFound(new ErrorResponse("Exchange trust not found."));
+        }
+
         return Ok(new OperationResponse(true, "Exchange trust removed."));
     }
 
