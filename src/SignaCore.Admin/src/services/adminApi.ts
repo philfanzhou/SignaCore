@@ -35,6 +35,40 @@ export interface AdminApp {
   audience: string
 }
 
+/** 一条 Redirect URI 注册。id 是删除时使用的 registrationId。 */
+export interface AdminAppRedirectUri {
+  id: string
+  kind: 'Redirect' | 'PostLogout'
+  uri: string
+}
+
+/**
+ * 应用的交互式 OIDC 配置。
+ *
+ * 这里的 Redirect URI 与 AdminApp.callbackUrl（服务端到服务端的 claims callback）是两套互不相干的
+ * 注册，任何一侧都不会被写入另一侧。
+ */
+export interface AdminAppOidc {
+  appId: string
+  clientType: 'Confidential' | 'Public'
+  allowAuthorizationCode: boolean
+  allowedScopes: string[]
+  allowRefreshToken: boolean
+  identitySessionMaxAgeSeconds: number | null
+  audienceMode: AdminApp['audienceMode']
+  redirectUris: AdminAppRedirectUri[]
+  postLogoutRedirectUris: AdminAppRedirectUri[]
+}
+
+/** 整体替换交互式策略字段；audienceMode 有自己的端点，不在其中。 */
+export interface AdminUpdateOidcPolicyRequest {
+  clientType: AdminAppOidc['clientType']
+  allowAuthorizationCode: boolean
+  allowedScopes: string[]
+  allowRefreshToken: boolean
+  identitySessionMaxAgeSeconds: number | null
+}
+
 export interface AdminLdapUser {
   credentialId: string
   userId: string
@@ -248,6 +282,25 @@ class AdminApiClient {
 
   async updateAudienceMode(appId: string, mode: AdminApp['audienceMode']) {
     await this.client.put(`/api/admin/apps/${appId}/audience-mode`, { mode })
+  }
+
+  /** 交互式 OIDC 配置：未配置过的应用返回 Confidential、未启用授权码、空 URI 集合。 */
+  async getAppOidc(appId: string) {
+    const response = await this.client.get<AdminAppOidc>(`/api/admin/apps/${appId}/oidc`)
+    return response.data
+  }
+
+  async updateOidcPolicy(appId: string, payload: AdminUpdateOidcPolicyRequest) {
+    await this.client.put(`/api/admin/apps/${appId}/oidc-policy`, payload)
+  }
+
+  /** 一次提交按 kind 归属的一组 URI：全部注册成功，或者一个都不注册。 */
+  async addOidcRedirectUris(appId: string, kind: AdminAppRedirectUri['kind'], uris: string[]) {
+    await this.client.post(`/api/admin/apps/${appId}/oidc/redirect-uris`, { kind, uris })
+  }
+
+  async removeOidcRedirectUri(appId: string, registrationId: string) {
+    await this.client.delete(`/api/admin/apps/${appId}/oidc/redirect-uris/${registrationId}`)
   }
 
   async getExchangeTrusts(appId: string) {

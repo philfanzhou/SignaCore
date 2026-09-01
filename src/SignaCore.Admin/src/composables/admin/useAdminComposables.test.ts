@@ -23,6 +23,10 @@ const mocks = vi.hoisted(() => ({
     updateSmsPolicy: vi.fn(),
     updateWechatPolicy: vi.fn(),
     updateAudienceMode: vi.fn(),
+    getAppOidc: vi.fn(),
+    updateOidcPolicy: vi.fn(),
+    addOidcRedirectUris: vi.fn(),
+    removeOidcRedirectUri: vi.fn(),
     createApp: vi.fn(),
     resetAppSecret: vi.fn(),
     deleteApp: vi.fn(),
@@ -51,8 +55,9 @@ vi.mock('../useSession', () => ({ handleApiError: mocks.handleApiError }))
 vi.mock('./useAdminFeedback', () => ({ notify: mocks.notify }))
 vi.mock('element-plus', () => ({ ElMessageBox: { confirm: mocks.confirm } }))
 
-import type { AdminApp, AdminSetting, AdminUser } from '../../services/adminApi'
+import type { AdminApp, AdminAppOidc, AdminSetting, AdminUser } from '../../services/adminApi'
 import { useAdminAppAccess } from './useAdminAppAccess'
+import { useAdminAppOidc } from './useAdminAppOidc'
 import { useAdminApps } from './useAdminApps'
 import { useAdminSecurity } from './useAdminSecurity'
 import { useAdminSettings } from './useAdminSettings'
@@ -72,6 +77,22 @@ function app(overrides: Partial<AdminApp> = {}): AdminApp {
     wechatLoginMode: 'Disabled',
     audienceMode: 'Shared',
     audience: 'SignaCore.Services',
+    ...overrides,
+  }
+}
+
+/** 未配置过交互式 OIDC 的应用在服务端就是这套值。 */
+function oidc(overrides: Partial<AdminAppOidc> = {}): AdminAppOidc {
+  return {
+    appId: 'orders',
+    clientType: 'Confidential',
+    allowAuthorizationCode: false,
+    allowedScopes: [],
+    allowRefreshToken: false,
+    identitySessionMaxAgeSeconds: null,
+    audienceMode: 'PerApplication',
+    redirectUris: [],
+    postLogoutRedirectUris: [],
     ...overrides,
   }
 }
@@ -101,6 +122,7 @@ beforeEach(() => {
   mocks.api.getAppWechatUsers.mockResolvedValue([])
   mocks.api.getAppLdapUsers.mockResolvedValue([])
   mocks.api.getExchangeTrusts.mockResolvedValue([])
+  mocks.api.getAppOidc.mockResolvedValue(oidc())
   mocks.api.getSmsProfiles.mockResolvedValue([])
   mocks.api.getLdapDirectories.mockResolvedValue([])
   mocks.api.getUsers.mockResolvedValue(emptyPage)
@@ -372,5 +394,181 @@ describe('admin security and runtime settings', () => {
     mocks.api.updateBootstrapSettings.mockResolvedValue({ message: 'saved' })
     await state.saveBootstrapSettings()
     expect(mocks.api.updateBootstrapSettings).toHaveBeenCalled()
+  })
+})
+
+describe('interactive OIDC client configuration', () => {
+  function axiosRejection(status: number, message: string) {
+    return {
+      isAxiosError: true,
+      response: { status, data: { message } },
+      message: 'Request failed',
+    }
+  }
+
+  it('shows an application that predates interactive configuration as not enabled', async () => {
+    const selected = ref<AdminApp | null>(app())
+    const state = useAdminAppOidc(selected)
+
+    await state.loadOidc('orders')
+
+    expect(mocks.api.getAppOidc).toHaveBeenCalledWith('orders')
+    expect(state.oidcConfig.value.clientType).toBe('Confidential')
+    expect(state.oidcConfig.value.allowAuthorizationCode).toBe(false)
+    expect(state.oidcConfig.value.redirectUris).toEqual([])
+    expect(state.oidcConfig.value.postLogoutRedirectUris).toEqual([])
+    expect(state.isPublicClient.value).toBe(false)
+    expect(state.oidcError.value).toBe('')
+  })
+
+  it('reflects the reloaded configuration after enabling the code flow', async () => {
+    const selected = ref<AdminApp | null>(app())
+    const state = useAdminAppOidc(selected)
+    mocks.api.getAppOidc.mockResolvedValueOnce(oidc({
+      redirectUris: [{ id: 'reg-1', kind: 'Redirect', uri: 'https://bff.example.test/signin-oidc' }],
+    }))
+    await state.loadOidc('orders')
+
+    mocks.api.getAppOidc.mockResolvedValueOnce(oidc({
+      allowAuthorizationCode: true,
+      allowedScopes: ['openid', 'profile'],
+      redirectUris: [{ id: 'reg-1', kind: 'Redirect', uri: 'https://bff.example.test/signin-oidc' }],
+    }))
+    state.oidcPolicyForm.allowAuthorizationCode = true
+    state.oidcPolicyForm.allowedScopes = 'openid profile'
+    state.oidcPolicyForm.identitySessionMaxAgeSeconds = 3600
+    await state.saveOidcPolicy()
+
+    expect(mocks.api.updateOidcPolicy).toHaveBeenCalledWith('orders', {
+      clientType: 'Confidential',
+      allowAuthorizationCode: true,
+      allowedScopes: ['openid', 'profile'],
+      allowRefreshToken: false,
+      identitySessionMaxAgeSeconds: 3600,
+    })
+    expect(state.oidcConfig.value.allowAuthorizationCode).toBe(true)
+    expect(state.oidcPolicyForm.allowedScopes).toBe('openid profile')
+  })
+
+  it('shows the rejection message verbatim and returns to the state before the save', async () => {
+    const selected = ref<AdminApp | null>(app())
+    const state = useAdminAppOidc(selected)
+    await state.loadOidc('orders')
+    const rejection = 'Enabling the authorization code flow requires at least one redirect URI.'
+    mocks.api.updateOidcPolicy.mockRejectedValueOnce(axiosRejection(400, rejection))
+
+    state.oidcPolicyForm.allowAuthorizationCode = true
+    await state.saveOidcPolicy()
+
+    expect(state.oidcError.value).toBe(rejection)
+    expect(state.oidcPolicyForm.allowAuthorizationCode).toBe(false)
+    expect(state.oidcConfig.value.allowAuthorizationCode).toBe(false)
+  })
+
+  it('submits each kind under its own registration and deletes by registration id', async () => {
+    const selected = ref<AdminApp | null>(app())
+    const state = useAdminAppOidc(selected)
+    await state.loadOidc('orders')
+
+    state.redirectUriDraft.value = '  https://BFF.example.test:8443/Signin-Oidc/  '
+    await state.addRedirectUri('Redirect')
+    state.postLogoutUriDraft.value = 'https://bff.example.test/signout'
+    await state.addRedirectUri('PostLogout')
+
+    // 除首尾空白外逐字符原样提交：不补尾斜杠、不小写化、不补默认端口。
+    expect(mocks.api.addOidcRedirectUris).toHaveBeenNthCalledWith(1, 'orders', 'Redirect', [
+      'https://BFF.example.test:8443/Signin-Oidc/',
+    ])
+    expect(mocks.api.addOidcRedirectUris).toHaveBeenNthCalledWith(2, 'orders', 'PostLogout', [
+      'https://bff.example.test/signout',
+    ])
+    expect(state.redirectUriDraft.value).toBe('')
+    expect(state.postLogoutUriDraft.value).toBe('')
+
+    await state.removeRedirectUri({ id: 'reg-1', kind: 'Redirect', uri: 'https://bff.example.test/signin-oidc' })
+    expect(mocks.api.removeOidcRedirectUri).toHaveBeenCalledWith('orders', 'reg-1')
+  })
+
+  it('never writes between the claims callback and the redirect registrations', async () => {
+    const state = useAdminApps()
+    const selected = app({ callbackUrl: 'https://claims.example.test/permissions' })
+    mocks.api.getApps.mockResolvedValue([selected])
+    mocks.api.getAppOidc.mockResolvedValue(oidc({
+      redirectUris: [{ id: 'reg-1', kind: 'Redirect', uri: 'https://bff.example.test/signin-oidc' }],
+    }))
+
+    await state.openApp(selected)
+    await nextTick()
+
+    // 抽屉里的两份表单各自独立：任何一侧的值都不会预填到另一侧。
+    expect(state.appConfig.callbackUrl).toBe('https://claims.example.test/permissions')
+    expect(state.redirectUriDraft.value).toBe('')
+    expect(state.oidcConfig.value.redirectUris[0].uri).toBe('https://bff.example.test/signin-oidc')
+
+    state.redirectUriDraft.value = 'https://bff.example.test/second'
+    await state.addRedirectUri('Redirect')
+    expect(mocks.api.updateCallback).not.toHaveBeenCalled()
+    expect(state.appConfig.callbackUrl).toBe('https://claims.example.test/permissions')
+
+    state.appConfig.callbackUrl = 'https://claims.example.test/changed'
+    await state.saveAppConfig()
+    expect(mocks.api.addOidcRedirectUris).toHaveBeenCalledTimes(1)
+    expect(mocks.api.updateOidcPolicy).not.toHaveBeenCalled()
+  })
+
+  it('keeps a public client fail closed and never submits it', async () => {
+    const selected = ref<AdminApp | null>(app())
+    const state = useAdminAppOidc(selected)
+    mocks.api.getAppOidc.mockResolvedValueOnce(oidc({ clientType: 'Public' }))
+
+    await state.loadOidc('orders')
+    expect(state.isPublicClient.value).toBe(true)
+
+    state.oidcPolicyForm.allowAuthorizationCode = true
+    await state.saveOidcPolicy()
+
+    expect(mocks.api.updateOidcPolicy).not.toHaveBeenCalled()
+    expect(mocks.notify).toHaveBeenCalledWith(
+      'Public 客户端保持保留状态，当前无法从控制台启用。',
+    )
+  })
+
+  it('drops uncommitted edits when the administrator cancels', async () => {
+    const selected = ref<AdminApp | null>(app())
+    const state = useAdminAppOidc(selected)
+    mocks.api.getAppOidc.mockResolvedValueOnce(oidc({
+      allowAuthorizationCode: true,
+      allowedScopes: ['openid'],
+      allowRefreshToken: true,
+      identitySessionMaxAgeSeconds: 1800,
+    }))
+    await state.loadOidc('orders')
+
+    state.oidcPolicyForm.allowAuthorizationCode = false
+    state.oidcPolicyForm.allowedScopes = 'openid profile email'
+    state.oidcPolicyForm.allowRefreshToken = false
+    state.oidcPolicyForm.identitySessionMaxAgeSeconds = 60
+    state.redirectUriDraft.value = 'https://bff.example.test/unsubmitted'
+    state.resetPolicyForm()
+
+    expect(state.oidcPolicyForm.allowAuthorizationCode).toBe(true)
+    expect(state.oidcPolicyForm.allowedScopes).toBe('openid')
+    expect(state.oidcPolicyForm.allowRefreshToken).toBe(true)
+    expect(state.oidcPolicyForm.identitySessionMaxAgeSeconds).toBe(1800)
+    expect(state.redirectUriDraft.value).toBe('')
+    expect(mocks.api.updateOidcPolicy).not.toHaveBeenCalled()
+  })
+
+  it('routes an expired session through the shared unauthorized handler', async () => {
+    const selected = ref<AdminApp | null>(app())
+    const state = useAdminAppOidc(selected)
+    mocks.api.getAppOidc.mockRejectedValueOnce(axiosRejection(401, 'Unauthorized'))
+
+    await state.loadOidc('orders')
+
+    expect(mocks.handleApiError).toHaveBeenCalledWith(
+      '加载交互式 OIDC 配置失败',
+      expect.objectContaining({ isAxiosError: true }),
+    )
   })
 })
