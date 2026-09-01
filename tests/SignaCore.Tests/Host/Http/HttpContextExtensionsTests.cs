@@ -7,8 +7,9 @@ using Xunit;
 namespace SignaCore.Tests.Host.Http;
 
 /// <summary>
-/// 这些取值方法此前在 Admin/Auth/Gateway 三个 controller 里各有一份且行为不一致，
-/// 收敛到 HttpContextExtensions 后由本文件锁定唯一契约。
+/// The Admin, Auth and Gateway controllers each used to carry their own copy of these accessors, and
+/// they did not behave alike. Now that they have converged on HttpContextExtensions, this file pins
+/// the single contract.
 /// </summary>
 public class HttpContextExtensionsTests
 {
@@ -39,8 +40,9 @@ public class HttpContextExtensionsTests
     [InlineData("   ")]
     public void GetClientIp_WithBlankForwardedHeader_FallsBackToRemoteAddress(string forwarded)
     {
-        // 行为统一点：AuthController 那份旧实现在这种情况下返回空字符串，
-        // 导致同一个客户端的审计记录因为走哪个 controller 而不同。
+        // The point where the behaviours converged: the old AuthController copy returned an empty
+        // string in this case, which made the audit records of one and the same client differ
+        // depending on which controller had served the request.
         var context = ContextWithRemoteIp();
         context.Request.Headers[IdentityHeaders.ForwardedFor] = forwarded;
 

@@ -8,7 +8,7 @@ namespace SignaCore.Host;
 /// Global HTTP exception handling middleware — Phase 2 replacement for
 /// ExceptionHandlingInterceptor. Maps domain exceptions to RFC 7807-style
 /// ProblemDetails JSON responses.
-/// 详见 docs/development/ErrorHandling.md「异常映射」。
+/// See the exception mapping rules in docs/development/ErrorHandling.md.
 /// </summary>
 public class ExceptionHandlingMiddleware
 {
