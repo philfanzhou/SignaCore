@@ -49,8 +49,9 @@ public class SecurityKeyRepository : ISecurityKeyRepository
 
     public async Task<int> DeactivateAllActiveAsync()
     {
-        // security_keys 行数极少（< 10），走变更跟踪而不是 ExecuteUpdateAsync：
-        // 这样停用旧密钥与插入新密钥能合并进调用方的同一次 SaveChanges。
+        // security_keys holds very few rows (< 10), so this goes through change tracking rather
+        // than ExecuteUpdateAsync: that lets deactivating the old keys and inserting the new one
+        // land in the caller's single SaveChanges.
         var activeKeys = await _dbContext.SecurityKeys
             .Where(k => k.IsActive)
             .ToListAsync();

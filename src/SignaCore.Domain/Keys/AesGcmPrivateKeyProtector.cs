@@ -5,12 +5,13 @@ using SignaCore.Database;
 namespace SignaCore.Domain.Keys;
 
 /// <summary>
-/// AES-GCM 实现。每次加密随机生成 16 字节 salt，用
-/// <c>HKDF-SHA256(masterKey, salt, PrivateKeyHkdfInfo)</c> 派生 32 字节数据密钥，
-/// 再以随机 12 字节 nonce 加密。
+/// The AES-GCM implementation. Every encryption draws a random 16-byte salt, derives a 32-byte data
+/// key with <c>HKDF-SHA256(masterKey, salt, PrivateKeyHkdfInfo)</c>, and encrypts under a random
+/// 12-byte nonce.
 /// <para>
-/// 持久化布局（base64 前的字节序）：<c>nonce(12) || tag(16) || ciphertext(N)</c>，
-/// salt 与密文分列存储。**这些常量与顺序都是存量数据的契约，不可更改。**
+/// Persisted layout (byte order before base64): <c>nonce(12) || tag(16) || ciphertext(N)</c>, with
+/// the salt stored in its own column beside the ciphertext. <b>These sizes and this order are a
+/// contract with the data already in the database and must not be changed.</b>
 /// </para>
 /// </summary>
 public sealed class AesGcmPrivateKeyProtector : IPrivateKeyProtector

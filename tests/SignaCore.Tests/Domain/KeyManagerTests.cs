@@ -22,11 +22,13 @@ public class KeyManagerTests : IDisposable
     private bool _envVarSet;
 
     /// <summary>
-    /// 统一的仓储 mock 工厂：预置 <c>GetValidKeysAsync</c> 返回空集合。
+    /// The single repository mock factory, with <c>GetValidKeysAsync</c> preset to an empty set.
     /// <para>
-    /// Moq 4.20 对 <c>Task&lt;IReadOnlyList&lt;T&gt;&gt;</c> 的默认返回是 null 而不是空集合，
-    /// 而 KeyManager 初始化时必定调用它来刷新校验密钥快照，不预置就会 NRE。
-    /// 需要具体返回值的用例在拿到 mock 后再 Setup 一次覆盖即可。
+    /// Moq 4.20 returns null rather than an empty collection by default for
+    /// <c>Task&lt;IReadOnlyList&lt;T&gt;&gt;</c>, and KeyManager always calls it during
+    /// initialization to refresh the validation key snapshot, so without the preset it would throw
+    /// a NullReferenceException. A test that needs a specific return value simply sets it up again
+    /// on the mock it is handed.
     /// </para>
     /// </summary>
     private static Mock<ISecurityKeyRepository> CreateKeyRepoMock()
@@ -65,8 +67,9 @@ public class KeyManagerTests : IDisposable
     }
 
     /// <summary>
-    /// 生产用的真实加解密实现（配合 bootstrap 文件中的外部根密钥）。
-    /// 加解密逻辑本身另有 AesGcmPrivateKeyProtectorTests 覆盖，这里只是让 KeyManager 能跑起来。
+    /// The real production encryption implementation, paired with the external root secret from the
+    /// bootstrap file. The encryption logic itself is covered by AesGcmPrivateKeyProtectorTests;
+    /// here it only exists so KeyManager can run.
     /// </summary>
     private static IPrivateKeyProtector CreateProtector(string rootSecret = TestRootSecret) =>
         new AesGcmPrivateKeyProtector(
@@ -341,9 +344,11 @@ public class KeyManagerTests : IDisposable
     }
 
     /// <summary>
-    /// 密钥已过期时 <c>GetActiveKeyAsync</c> 因带 <c>ExpiresAt &gt; now</c> 过滤而返回 null。
-    /// 停用必须走 <c>DeactivateAllActiveAsync</c>——否则旧行永远卡在 IsActive=true，
-    /// 而 <c>RemoveExpiredInactiveAsync</c> 只删 !IsActive，每轮换一次就多一条清不掉的僵尸行。
+    /// Once a key has expired, <c>GetActiveKeyAsync</c> returns null because it filters on
+    /// <c>ExpiresAt &gt; now</c>. Deactivation therefore has to go through
+    /// <c>DeactivateAllActiveAsync</c>: otherwise the old row stays stuck at IsActive=true, and
+    /// since <c>RemoveExpiredInactiveAsync</c> only deletes !IsActive rows, every rotation would
+    /// leave behind one more zombie row that can never be cleaned up.
     /// </summary>
     [Fact]
     public async Task RotateKey_WhenActiveKeyAlreadyExpired_StillDeactivatesStaleRows()
@@ -371,16 +376,18 @@ public class KeyManagerTests : IDisposable
     }
 
     /// <summary>
-    /// 回归：轮换必须在密钥过期**之前**触发（SPEC AC-FR-04/05，剩余寿命不足一半即轮换）。
-    /// 此前的实现是 <c>ExpiresAt &lt; now</c>，只有过期后才返回 true，而 JWKS 只发布未过期密钥，
-    /// 于是过期到下次 CleanupWorker tick 之间 JWKS 返回空数组，下游全部验签失败。
+    /// Regression: rotation has to trigger <b>before</b> the key expires (SPEC AC-FR-04/05: rotate
+    /// once less than half the lifetime remains). The earlier implementation used
+    /// <c>ExpiresAt &lt; now</c> and only returned true after expiry, and since JWKS publishes
+    /// unexpired keys only, JWKS returned an empty array between expiry and the next CleanupWorker
+    /// tick, failing validation for every downstream consumer.
     /// </summary>
     [Fact]
     public async Task NeedsKeyRotation_WhenKeyPastHalfLifeButNotExpired_ReturnsTrue()
     {
         SetEnvironmentMasterKey();
 
-        // 30 天寿命的密钥只剩 10 天 —— 已过半衰期，但远未过期
+        // A key with a 30-day lifetime has 10 days left: past its half-life, but far from expired.
         var keyEntity = CreateTestSecurityKeyEntity(expiresInDays: 10);
         var keyRepoMock = CreateKeyRepoMock();
         keyRepoMock.Setup(r => r.GetLatestKeyAsync()).ReturnsAsync(keyEntity);
@@ -396,8 +403,10 @@ public class KeyManagerTests : IDisposable
     }
 
     /// <summary>
-    /// <c>IssuerSigningKeyResolver</c> 用的快照必须包含全部未过期密钥，而不只是当前签名密钥，
-    /// 否则轮换瞬间本服务会拒掉自己刚签发、仍在有效期内的旧密钥 token，而下游微服务却认。
+    /// The snapshot behind <c>IssuerSigningKeyResolver</c> has to contain every unexpired key, not
+    /// only the current signing key. Otherwise, at the moment of a rotation this service would
+    /// reject tokens it had just issued under the previous key and that are still within their
+    /// lifetime, while downstream microservices went on accepting them.
     /// </summary>
     [Fact]
     public async Task GetValidationKeys_ReturnsAllValidKeys_NotOnlyCurrentKey()
@@ -430,8 +439,10 @@ public class KeyManagerTests : IDisposable
     }
 
     /// <summary>
-    /// 校验密钥快照挂在单例上、生命周期与进程等长，而验签只需要公钥——
-    /// 私钥没有理由常驻其中。导出私钥参数应当抛 CryptographicException。
+    /// The validation key snapshot lives on a singleton for the lifetime of the process, and
+    /// validation only needs public keys, so there is no reason for private key material to stay
+    /// resident in it. Exporting the private parameters is expected to throw
+    /// CryptographicException.
     /// </summary>
     [Fact]
     public async Task GetValidationKeys_ContainsPublicKeysOnly()
@@ -453,22 +464,25 @@ public class KeyManagerTests : IDisposable
 
         var rsaKey = Assert.IsType<RsaSecurityKey>(Assert.Single(keyManager.GetValidationKeys()));
 
-        // 公钥可用（验签所需）
+        // The public key is usable, which is what validation needs.
         var publicParameters = rsaKey.Rsa!.ExportParameters(includePrivateParameters: false);
         Assert.NotNull(publicParameters.Modulus);
         Assert.NotNull(publicParameters.Exponent);
 
-        // 私钥不在里面。用 ThrowsAny 而非 Throws：后者要求异常类型精确匹配，而
-        // Windows(RSACng) 与 Linux(RSAOpenSsl) 抛的可能是 CryptographicException 的不同派生类，
-        // CI 跑在 Linux 上、本地开发在 Windows 上，精确匹配会让测试在换平台时无谓地红。
+        // The private key is not there. ThrowsAny rather than Throws: the latter requires an exact
+        // exception type, and Windows (RSACng) and Linux (RSAOpenSsl) may throw different subclasses
+        // of CryptographicException. CI runs on Linux and local development on Windows, so an exact
+        // match would make this test fail for no reason when the platform changes.
         Assert.ThrowsAny<CryptographicException>(
             () => rsaKey.Rsa!.ExportParameters(includePrivateParameters: true));
     }
 
     /// <summary>
-    /// 当前签名密钥必须**永远**在校验集里。<c>RotateKeyAsync</c> 是先 <c>SetCurrentKey</c>
-    /// 再刷快照，刷新一旦失败，快照会停在不含当前密钥的旧内容上——它非空，所以"空则兜底"
-    /// 救不了，服务会拒掉自己刚签发的每一个 token，且异常被 CleanupWorker 吞成一条日志。
+    /// The current signing key must be in the validation set at all times. <c>RotateKeyAsync</c>
+    /// calls <c>SetCurrentKey</c> before refreshing the snapshot, so a failed refresh leaves the
+    /// snapshot on old content that does not contain the current key. That snapshot is not empty,
+    /// so the empty-snapshot fallback does not help: the service would reject every token it has
+    /// just issued, with the exception swallowed into a single CleanupWorker log line.
     /// </summary>
     [Fact]
     public async Task GetValidationKeys_AlwaysIncludesCurrentKey_EvenWhenSnapshotIsStale()
@@ -483,7 +497,8 @@ public class KeyManagerTests : IDisposable
 
         var keyRepoMock = CreateKeyRepoMock();
         keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(currentKey);
-        // 快照非空、但不含当前签名密钥——模拟刷新失败后残留的旧快照
+        // A non-empty snapshot that does not contain the current signing key: the stale snapshot
+        // left behind by a failed refresh.
         keyRepoMock.Setup(r => r.GetValidKeysAsync()).ReturnsAsync(new[] { staleEntry });
 
         var scopeFactoryMock = CreateMockScopeFactory(keyRepoMock);
@@ -497,9 +512,9 @@ public class KeyManagerTests : IDisposable
     }
 
     /// <summary>
-    /// JwksMapper.ToJwk 要求 <c>RsaSecurityKey.Rsa</c> 非 null（见 JwksMapperTests）。
-    /// 公钥复制若图省事写成 <c>new RsaSecurityKey(RSAParameters)</c>，该属性会是 null，
-    /// JWKS 端点直接 500。
+    /// JwksMapper.ToJwk requires <c>RsaSecurityKey.Rsa</c> to be non-null (see JwksMapperTests).
+    /// Taking the shortcut of <c>new RsaSecurityKey(RSAParameters)</c> for the public key copy would
+    /// leave that property null and make the JWKS endpoint return 500.
     /// </summary>
     [Fact]
     public async Task GetValidationKeys_KeysExposeRsaInstance_ForJwksMapper()
