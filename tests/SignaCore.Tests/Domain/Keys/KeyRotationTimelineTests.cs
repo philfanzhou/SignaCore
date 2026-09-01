@@ -12,14 +12,17 @@ using Xunit;
 namespace SignaCore.Tests.Domain.Keys;
 
 /// <summary>
-/// 密钥轮换的时间线测试：用**真实**的 <see cref="SecurityKeyRepository"/> 跑通
-/// <c>NeedsKeyRotationAsync</c> → <c>RotateKeyAsync</c> → <c>GetValidKeysAsync</c> 全链路。
+/// Timeline tests for key rotation: they drive the whole
+/// <c>NeedsKeyRotationAsync</c> → <c>RotateKeyAsync</c> → <c>GetValidKeysAsync</c> chain against a
+/// <b>real</b> <see cref="SecurityKeyRepository"/>.
 /// <para>
-/// 存在的理由：KeyManagerTests 全部用 Moq，各自把 <c>GetActiveKeyAsync</c> 摆成测试想要的状态，
-/// 于是"<c>NeedsKeyRotationAsync</c> 说该轮换时，<c>GetActiveKeyAsync</c> 实际会返回什么"这个
-/// 跨方法的契约无人覆盖——历史上正是这里出的问题：轮换只在密钥过期后触发，而
-/// <c>GetValidKeysAsync</c>/<c>GetActiveKeyAsync</c> 都过滤掉了过期密钥，导致 JWKS 空窗。
-/// 这类 bug 只有让两个方法面对同一份真实数据才暴露得出来。
+/// Why they exist: KeyManagerTests are entirely Moq-based and each arranges
+/// <c>GetActiveKeyAsync</c> into whatever state that test wants, which leaves the cross-method
+/// contract — "when <c>NeedsKeyRotationAsync</c> says it is time to rotate, what does
+/// <c>GetActiveKeyAsync</c> actually return?" — uncovered. That is exactly where the historical bug
+/// was: rotation only triggered after a key had expired, while both <c>GetValidKeysAsync</c> and
+/// <c>GetActiveKeyAsync</c> filter expired keys out, leaving a JWKS blackout. A bug of that shape
+/// only shows up when both methods face the same real data.
 /// </para>
 /// </summary>
 [Collection(MasterKeyStateCollection.Name)]
@@ -49,8 +52,9 @@ public sealed class KeyRotationTimelineTests : IDisposable
     }
 
     /// <summary>
-    /// 真实的 <see cref="SecurityKeyRepository"/> 与 <see cref="EfCoreUnitOfWork"/> 共享同一个
-    /// DbContext——生产里二者同属一个 scope，停用旧密钥与插入新密钥必须落进同一次 SaveChanges。
+    /// The real <see cref="SecurityKeyRepository"/> and <see cref="EfCoreUnitOfWork"/> share one
+    /// DbContext: in production they belong to the same scope, and deactivating the old keys must
+    /// land in the same SaveChanges as inserting the new one.
     /// </summary>
     private static IServiceScopeFactory CreateRealRepositoryScopeFactory(IdentityDbContext dbContext)
     {
@@ -70,7 +74,10 @@ public sealed class KeyRotationTimelineTests : IDisposable
         return scopeFactory.Object;
     }
 
-    /// <summary>把当前活跃密钥的时间轴整体往前推 <paramref name="days"/> 天，模拟时间流逝。</summary>
+    /// <summary>
+    /// Shifts the timeline of the stored keys back by <paramref name="days"/> days, simulating the
+    /// passage of time.
+    /// </summary>
     private async Task AdvanceKeyAgeAsync(int days)
     {
         var keys = await _dbContext.SecurityKeys.ToListAsync();
@@ -83,12 +90,15 @@ public sealed class KeyRotationTimelineTests : IDisposable
     }
 
     /// <summary>
-    /// 核心回归：JWKS 在密钥寿命的**任何**时刻都必须至少发布一把公钥——包括两次
-    /// CleanupWorker tick 之间。下游微服务是随时来拉的，不会等 Identity 做完清理。
+    /// The core regression: JWKS has to publish at least one public key at <b>every</b> moment of a
+    /// key's lifetime, including between two CleanupWorker ticks. Downstream microservices fetch
+    /// whenever they like; they do not wait for Identity to finish its cleanup.
     /// <para>
-    /// 关键在 tick **之前**那次断言：轮换检查与轮换动作发生在同一次 tick 里，如果只在
-    /// tick 之后查 JWKS，永远观察不到空窗。旧实现（<c>ExpiresAt &lt; now</c> 才轮换）会在
-    /// 第 30 天的 tick 前断言处失败——密钥已过期、新密钥尚未生成，JWKS 返回空数组。
+    /// The assertion <b>before</b> the tick is the one that matters: the rotation check and the
+    /// rotation itself happen within the same tick, so checking JWKS only after the tick would never
+    /// observe the blackout. The old implementation (rotate only once <c>ExpiresAt &lt; now</c>)
+    /// fails at the pre-tick assertion on day 30 — the key has expired, the new one does not exist
+    /// yet, and JWKS returns an empty array.
     /// </para>
     /// </summary>
     [Fact]
@@ -99,7 +109,8 @@ public sealed class KeyRotationTimelineTests : IDisposable
         var rotationCount = 0;
         var lastKeyId = _keyManager.GetCurrentKey().KeyId;
 
-        // 45 天覆盖到第三次轮换，确认稳态而不只是第一轮
+        // 45 days reaches the third rotation, so this covers the steady state rather than only the
+        // first round.
         for (var day = 1; day <= 45; day++)
         {
             await AdvanceKeyAgeAsync(1);
@@ -108,7 +119,7 @@ public sealed class KeyRotationTimelineTests : IDisposable
                 (await _keyManager.GetValidKeysAsync()).Count > 0,
                 $"第 {day} 天、CleanupWorker tick 之前 JWKS 为空——下游此刻拉到零个公钥");
 
-            // CleanupWorker 每 24h tick 一次
+            // CleanupWorker ticks once every 24h.
             if (await _keyManager.NeedsKeyRotationAsync())
             {
                 await _keyManager.RotateKeyAsync();
@@ -126,14 +137,18 @@ public sealed class KeyRotationTimelineTests : IDisposable
             }
         }
 
-        // 上界同样是回归点：一个「每次 tick 都轮换」的实现照样能让 JWKS 全程非空，
-        // 但会每天换一次密钥——表膨胀，且 15 天新旧重叠期的设计意图丢失。
-        // 30 天寿命 + 半衰期轮换 = 每 15 天一次，45 天内期望 3 次。
+        // The upper bound is a regression point too: an implementation that rotated on every tick
+        // would also keep JWKS non-empty throughout, but it would replace the key daily — the table
+        // grows without bound and the intended 15-day overlap between old and new keys is lost.
+        // A 30-day lifetime with half-life rotation means one rotation every 15 days, so 3 are
+        // expected within 45 days.
         Assert.InRange(rotationCount, 2, 4);
     }
 
     /// <summary>
-    /// 轮换必须在过期前发生，且新旧密钥有重叠期：下游微服务缓存的旧公钥在其 token 过期前始终有效。
+    /// Rotation has to happen before expiry, with an overlap between the old and new keys, so that
+    /// the old public key a downstream microservice has cached stays valid until the tokens signed
+    /// with it have expired.
     /// </summary>
     [Fact]
     public async Task Rotation_HappensBeforeExpiry_AndOldKeyStaysPublished()
@@ -141,7 +156,7 @@ public sealed class KeyRotationTimelineTests : IDisposable
         await _keyManager.InitializationCompleted;
         var originalKeyId = _keyManager.GetCurrentKey().KeyId;
 
-        // 第 16 天：已过半衰期（15 天），但离过期还有 14 天
+        // Day 16: past the half-life of 15 days, but still 14 days from expiry.
         await AdvanceKeyAgeAsync(16);
 
         Assert.True(
@@ -153,22 +168,24 @@ public sealed class KeyRotationTimelineTests : IDisposable
         var rotatedKeyId = _keyManager.GetCurrentKey().KeyId;
         Assert.NotEqual(originalKeyId, rotatedKeyId);
 
-        // 新旧并存：旧密钥虽已停用但尚未过期，仍需出现在 JWKS 里
+        // Both keys coexist: the old key is deactivated but not yet expired, so it still has to
+        // appear in JWKS.
         var jwksKeyIds = (await _keyManager.GetValidKeysAsync()).Select(k => k.KeyId).ToList();
         Assert.Contains(rotatedKeyId, jwksKeyIds);
         Assert.Contains(originalKeyId, jwksKeyIds);
     }
 
     /// <summary>
-    /// 轮换后库里有且只有一条 <c>IsActive=true</c>。旧实现在密钥已过期时
-    /// <c>GetActiveKeyAsync</c> 返回 null，跳过停用，旧行永久残留在 IsActive=true。
+    /// After a rotation the database holds exactly one <c>IsActive=true</c> row. In the old
+    /// implementation <c>GetActiveKeyAsync</c> returned null once the key had expired, deactivation
+    /// was skipped, and the old row stayed at IsActive=true forever.
     /// </summary>
     [Fact]
     public async Task AfterRotation_ExactlyOneActiveKeyRemains()
     {
         await _keyManager.InitializationCompleted;
 
-        // 连续两轮换，确认没有累积僵尸行
+        // Two rotations in a row, to confirm no zombie rows accumulate.
         for (var round = 0; round < 2; round++)
         {
             await AdvanceKeyAgeAsync(16);
@@ -184,15 +201,17 @@ public sealed class KeyRotationTimelineTests : IDisposable
     }
 
     /// <summary>
-    /// 即使密钥已经过期才轮换（例如服务停机数日后重启），残留的 IsActive 行也要被停用，
-    /// 否则 <c>RemoveExpiredInactiveAsync</c>（只删 !IsActive）永远清不掉它。
+    /// Even when rotation only happens after the key has expired (for instance after the service was
+    /// down for several days), the leftover IsActive row still has to be deactivated; otherwise
+    /// <c>RemoveExpiredInactiveAsync</c>, which only deletes !IsActive rows, could never clean it
+    /// up.
     /// </summary>
     [Fact]
     public async Task RotationAfterExpiry_LeavesNoStaleActiveRow()
     {
         await _keyManager.InitializationCompleted;
 
-        await AdvanceKeyAgeAsync(35);   // 已过期 5 天
+        await AdvanceKeyAgeAsync(35);   // Expired 5 days ago.
 
         Assert.Null(await new SecurityKeyRepository(_dbContext).GetActiveKeyAsync());
 
@@ -206,10 +225,12 @@ public sealed class KeyRotationTimelineTests : IDisposable
     }
 
     /// <summary>
-    /// 轮换时刻意**不**释放上一份校验密钥快照：并发请求可能正持有 <c>GetValidationKeys</c>
-    /// 返回的引用，释放会让验签中途抛 <see cref="ObjectDisposedException"/>。
+    /// A rotation deliberately does <b>not</b> dispose the previous validation key snapshot:
+    /// concurrent requests may still hold a reference handed out by <c>GetValidationKeys</c>, and
+    /// disposing it would make validation throw <see cref="ObjectDisposedException"/> mid-flight.
     /// <para>
-    /// 不需要真起并发——"拿到引用 → 轮换 → 引用仍可用"就足以覆盖这个决策。
+    /// Real concurrency is not needed here — "take a reference, rotate, the reference still works"
+    /// covers the decision.
     /// </para>
     /// </summary>
     [Fact]
@@ -217,7 +238,8 @@ public sealed class KeyRotationTimelineTests : IDisposable
     {
         await _keyManager.InitializationCompleted;
 
-        // 模拟一个正在处理中的请求：先拿到引用，之后才发生轮换
+        // Simulates a request already in flight: it takes the reference first, and the rotation
+        // happens afterwards.
         var heldByInFlightRequest = _keyManager.GetValidationKeys();
         Assert.NotEmpty(heldByInFlightRequest);
 
@@ -226,13 +248,16 @@ public sealed class KeyRotationTimelineTests : IDisposable
 
         foreach (var key in heldByInFlightRequest.Cast<RsaSecurityKey>())
         {
-            // 不抛 ObjectDisposedException 即为通过
+            // Not throwing ObjectDisposedException is what passing means here.
             var parameters = key.Rsa!.ExportParameters(includePrivateParameters: false);
             Assert.NotNull(parameters.Modulus);
         }
     }
 
-    /// <summary>轮换后校验密钥快照要立刻跟上，包含新旧两把——不能等下次重启。</summary>
+    /// <summary>
+    /// The validation key snapshot has to catch up immediately after a rotation and contain both the
+    /// old and the new key; it must not wait for the next restart.
+    /// </summary>
     [Fact]
     public async Task ValidationKeys_RefreshImmediatelyAfterRotation()
     {

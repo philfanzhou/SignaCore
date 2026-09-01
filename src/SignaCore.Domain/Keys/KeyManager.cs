@@ -13,8 +13,9 @@ public interface IKeyManager
     RsaSecurityKey GetCurrentKey();
 
     /// <summary>
-    /// JwtBearer 校验用的密钥快照——同步、纯内存，不做 DB 往返（每个已认证请求都会调用）。
-    /// 内容与 JWKS 发布的是同一批密钥，见 <see cref="KeyManager.GetValidationKeys"/>。
+    /// The key snapshot JwtBearer validates against: synchronous, purely in memory, and without a
+    /// database round trip (every authenticated request calls it). It holds the same set of keys
+    /// JWKS publishes; see <see cref="KeyManager.GetValidationKeys"/>.
     /// </summary>
     IReadOnlyList<SecurityKey> GetValidationKeys();
 
@@ -32,22 +33,27 @@ public interface IKeyManager
     Task InitializationCompleted { get; }
 }
 
-/// <summary>生成新密钥对的场景。用于区分调用来源，不要再靠日志文案区分。</summary>
+/// <summary>
+/// Why a new key pair is being generated. It exists so callers can be told apart by value rather
+/// than by the wording of a log message.
+/// </summary>
 internal enum KeyGenerationReason
 {
-    /// <summary>库里没有可用密钥，首次生成。</summary>
+    /// <summary>No usable key exists in the database yet; this is the first generation.</summary>
     Initial,
 
-    /// <summary>到期轮换。</summary>
+    /// <summary>The current key is due for rotation.</summary>
     Rotation
 }
 
 /// <summary>
-/// RSA 签名密钥的生命周期编排：启动时加载或创建当前密钥、按需轮换、对外提供
-/// 当前密钥与全部有效公钥（供 JWKS）。
+/// Lifecycle orchestration for the RSA signing keys: load or create the current key at startup,
+/// rotate it when it is due, and expose the current key together with every valid public key for
+/// JWKS.
 /// <para>
-/// 主密钥的来源交给 <see cref="IMasterKeyProvider"/>，私钥的加解密交给
-/// <see cref="IPrivateKeyProtector"/>——本类不接触任何密钥字节。
+/// Where the master key comes from is <see cref="IMasterKeyProvider"/>'s concern, and encrypting or
+/// decrypting a private key is <see cref="IPrivateKeyProtector"/>'s — this class never touches any
+/// key material itself.
 /// </para>
 /// </summary>
 public class KeyManager : IKeyManager
@@ -72,9 +78,9 @@ public class KeyManager : IKeyManager
         _protector = protector;
         _logger = logger;
 
-        // 即发即弃：构造函数不能 await。异常通过 _initializationTcs 传给
-        // Program.cs 里的 `await keyManager.InitializationCompleted`，
-        // 初始化失败即启动失败。
+        // Fire and forget: a constructor cannot await. Failures travel through _initializationTcs
+        // to the `await keyManager.InitializationCompleted` in Program.cs, so a failed
+        // initialization is a failed startup.
         _ = InitializeAsync();
     }
 
@@ -84,8 +90,9 @@ public class KeyManager : IKeyManager
         {
             var key = await LoadOrCreateKeyAsync();
             SetCurrentKey(key);
-            // 必须在 SetResult 之前刷快照，否则第一批请求会拿到空的校验密钥集。
-            // 这里只能调不等待 TCS 的私有版本，公开的 GetValidKeysAsync 会死锁。
+            // The snapshot has to be refreshed before SetResult, or the first requests would see
+            // an empty validation key set. Only the private variant, which does not await the TCS,
+            // can be called here; the public GetValidKeysAsync would deadlock.
             await RefreshValidationKeysAsync();
             _initializationTcs.SetResult(true);
             _logger.LogInformation("KeyManager initialization completed");
@@ -99,8 +106,8 @@ public class KeyManager : IKeyManager
 
     public RsaSecurityKey GetCurrentKey()
     {
-        // 单次加锁读取：此前的写法在锁外做 null 检查、锁内再读一次，
-        // 读者得自己推演一遍才能确认没有竞态。
+        // One read under one lock. The earlier shape null-checked outside the lock and read again
+        // inside it, which left the reader to work out for themselves that there was no race.
         lock (_keyLock)
         {
             return _currentKey
@@ -118,17 +125,22 @@ public class KeyManager : IKeyManager
     }
 
     /// <summary>
-    /// JwtBearer 的 <c>IssuerSigningKeyResolver</c> 走这里，返回本实例已知的**全部**未过期密钥，
-    /// 而不只是当前签名密钥：轮换后旧密钥签发的 token 仍在有效期内、JWKS 也还在发布它们，
-    /// 本服务自己的 /api/profile/* 不能比下游微服务更严格。JWT 库按 <c>kid</c> 自动匹配。
+    /// The resolver behind JwtBearer's <c>IssuerSigningKeyResolver</c>. It returns <b>every</b>
+    /// unexpired key this instance knows about rather than only the current signing key: after a
+    /// rotation, tokens signed by the previous key are still within their lifetime and JWKS still
+    /// publishes them, so this service's own /api/profile/* must not be stricter than a downstream
+    /// microservice. The JWT library matches by <c>kid</c>.
     /// <para>
-    /// 快照在初始化与轮换时刷新，新鲜度与 <see cref="GetCurrentKey"/> 一致——每请求读库对这个
-    /// 调用频次来说不可接受。快照意外为空时兜底返回当前密钥，避免退化成"全部 401"。
+    /// The snapshot is refreshed at initialization and at rotation, which makes it exactly as fresh
+    /// as <see cref="GetCurrentKey"/> — a database read per request is not acceptable at this call
+    /// rate. If the snapshot is unexpectedly empty, the current key is returned as a fallback so the
+    /// service does not degrade into rejecting everything with 401.
     /// </para>
     /// <para>
-    /// 快照里只有公钥：验签不需要私钥，而这个字段挂在单例上、生命周期与进程等长。
-    /// 当前签名密钥 <see cref="_currentKey"/> 仍带私钥并被无条件并入返回值，但那是签发用的
-    /// 密钥，本来就得常驻。
+    /// The snapshot holds public keys only: signature validation does not need a private key, and
+    /// this field lives on a singleton for the lifetime of the process. The current signing key
+    /// <see cref="_currentKey"/> still carries its private key and is merged into the result
+    /// unconditionally, but that is the issuing key and has to stay resident anyway.
     /// </para>
     /// </summary>
     public IReadOnlyList<SecurityKey> GetValidationKeys()
@@ -140,7 +152,8 @@ public class KeyManager : IKeyManager
                 return _validationKeys;
             }
 
-            // 正常路径：刷新成功的快照必然含当前密钥，直接返回，无额外分配。
+            // The normal path: a successfully refreshed snapshot always contains the current key,
+            // so it is returned as is, with no extra allocation.
             foreach (var key in _validationKeys)
             {
                 if (key.KeyId == _currentKey.KeyId)
@@ -149,11 +162,13 @@ public class KeyManager : IKeyManager
                 }
             }
 
-            // 当前签名密钥必须**永远**在校验集里。快照只在初始化与轮换时刷新，
-            // 而 RotateKeyAsync 是先 SetCurrentKey 再刷快照：刷新一旦抛异常，
-            // _currentKey 已是新密钥而快照还是旧的那份——它非空，所以"空则兜底"救不了，
-            // 服务会拒掉自己刚签发的每一个 token，直到下次轮换（15 天）或重启，
-            // 且异常被 CleanupWorker 吞成一条日志，健康检查全绿。
+            // The current signing key must be in the validation set at all times. The snapshot is
+            // only refreshed at initialization and at rotation, and RotateKeyAsync calls
+            // SetCurrentKey before refreshing it: if that refresh throws, _currentKey is already the
+            // new key while the snapshot is still the old one. That snapshot is not empty, so the
+            // empty-snapshot fallback does not help, and the service would reject every token it
+            // has just issued until the next rotation (15 days) or a restart — with the exception
+            // swallowed into a single CleanupWorker log line and every health check still green.
             var withCurrentKey = new List<SecurityKey>(_validationKeys.Count + 1);
             withCurrentKey.AddRange(_validationKeys);
             withCurrentKey.Add(_currentKey);
@@ -165,30 +180,34 @@ public class KeyManager : IKeyManager
     {
         var keys = await LoadValidKeysAsync();
 
-        // 验签只需要公钥。LoadValidKeysAsync 返回的是带私钥的密钥（解密成功与否同时充当
-        // "本实例是否仍掌握这把密钥"的准入判据，见 LoadValidKeysAsync 的注释），这里只取公钥部分
-        // 存进快照——快照是单例上的长生命周期字段，没有理由让私钥常驻其中。
+        // Validation only needs public keys. LoadValidKeysAsync returns keys that carry their
+        // private half (whether decryption succeeds doubles as the admission test for "does this
+        // instance still hold this key"; see the comments on LoadValidKeysAsync), so only the public
+        // part goes into the snapshot — that field is long-lived on a singleton, and there is no
+        // reason for private key material to stay resident in it.
         var publicOnlyKeys = new List<SecurityKey>(keys.Count);
         foreach (var key in keys)
         {
             publicOnlyKeys.Add(ToPublicOnlyKey(key));
-            // 私钥副本用完即弃，不等 GC 的终结器
+            // The private key copy is finished with here; do not wait for the GC finalizer.
             key.Rsa?.Dispose();
         }
 
         lock (_keyLock)
         {
-            // 刻意不释放上一份快照：并发请求可能正持有从 GetValidationKeys 拿到的引用，
-            // 释放会让验签中途抛 ObjectDisposedException。轮换 15 天才一次，交给 GC。
+            // The previous snapshot is deliberately not disposed: concurrent requests may still
+            // hold a reference handed out by GetValidationKeys, and disposing it would make
+            // validation throw ObjectDisposedException mid-flight. Rotation happens once every 15
+            // days, so the GC can have it.
             _validationKeys = publicOnlyKeys;
         }
     }
 
     /// <summary>
-    /// 复制出一把只含公钥的 <see cref="RsaSecurityKey"/>。
-    /// 用 <see cref="RSA.ImportParameters"/> 而非直接 <c>new RsaSecurityKey(RSAParameters)</c>：
-    /// 后者的 <c>Rsa</c> 属性为 null，会让 <c>JwksMapper.ToJwk</c> 抛异常，
-    /// 也不符合调用方对该属性可用的预期。
+    /// Copies a key into a public-key-only <see cref="RsaSecurityKey"/>.
+    /// <see cref="RSA.ImportParameters"/> is used instead of <c>new RsaSecurityKey(RSAParameters)</c>
+    /// because the latter leaves the <c>Rsa</c> property null, which makes <c>JwksMapper.ToJwk</c>
+    /// throw and breaks the expectation callers have that the property is usable.
     /// </summary>
     private static RsaSecurityKey ToPublicOnlyKey(RsaSecurityKey key)
     {
@@ -237,20 +256,23 @@ public class KeyManager : IKeyManager
     }
 
     /// <summary>
-    /// 从库里读全部未过期密钥。不等待 <see cref="InitializationCompleted"/>，
-    /// 因此初始化流程内部也能调用。
+    /// Reads every unexpired key from the database. It does not await
+    /// <see cref="InitializationCompleted"/>, so the initialization flow itself can call it.
     /// <para>
-    /// 这里**必须**走私钥解密（<see cref="LoadKeyFromEntity"/>）而不是直接读
-    /// <c>PublicKeyModulus</c> / <c>PublicKeyExponent</c> 明文列：解密成功与否同时充当
-    /// "本实例是否仍掌握这把私钥"的准入判据。主密钥一旦变更，用旧主密钥保护的密钥就解不开——
-    /// 此时那把私钥可能仍在他人手中，其公钥绝不能继续出现在 JWKS 里，否则等于替对方背书。
-    /// 解不开的密钥记 Warning 后跳过。
+    /// It <b>must</b> go through private key decryption (<see cref="LoadKeyFromEntity"/>) rather
+    /// than read the plaintext <c>PublicKeyModulus</c> / <c>PublicKeyExponent</c> columns directly:
+    /// whether decryption succeeds doubles as the admission test for "does this instance still hold
+    /// this private key". Once the master key changes, a key protected by the previous master key no
+    /// longer decrypts here — and that private key may well still be in someone else's hands, so its
+    /// public key must not keep appearing in JWKS, which would amount to vouching for them. A key
+    /// that does not decrypt is logged as a Warning and skipped.
     /// </para>
     /// <para>
-    /// **所有权契约**：每次调用都构造全新的 <see cref="RsaSecurityKey"/>，不复用、不缓存，
-    /// 调用方独占所有权并可自行释放（<see cref="RefreshValidationKeysAsync"/> 就依赖这一点）。
-    /// 若将来在此处加缓存，必须同步改掉那边的 Dispose，否则 JWKS 请求会撞
-    /// <see cref="ObjectDisposedException"/>。
+    /// <b>Ownership contract</b>: every call constructs brand new <see cref="RsaSecurityKey"/>
+    /// instances; nothing is reused or cached, so the caller owns them exclusively and may dispose
+    /// them (<see cref="RefreshValidationKeysAsync"/> relies on exactly that). Adding a cache here
+    /// later would require changing that disposal too, or JWKS requests would hit
+    /// <see cref="ObjectDisposedException"/>.
     /// </para>
     /// </summary>
     private async Task<IReadOnlyList<RsaSecurityKey>> LoadValidKeysAsync()
@@ -276,13 +298,17 @@ public class KeyManager : IKeyManager
     }
 
     /// <summary>
-    /// 轮换窗口：剩余寿命不足总寿命的一半即进入（SPEC AC-FR-04/05）。
+    /// The rotation window: a key enters it once less than half of its total lifetime remains
+    /// (SPEC AC-FR-04/05).
     /// <para>
-    /// <see cref="NeedsKeyRotationAsync"/> 与 <see cref="RotateKeyAsync"/> 必须共用这一个判断。
-    /// 此前二者阈值不同——前者是"已过期"、后者是"剩余不足一半"——于是轮换只可能发生在密钥
-    /// **过期之后**，而 JWKS 只发布未过期的密钥（<c>GetValidKeysAsync</c> 过滤 <c>ExpiresAt &gt; now</c>），
-    /// 从密钥过期到 CleanupWorker 下一次 tick（最长 24h）之间 JWKS 会返回空数组，
-    /// 下游微服务拿不到任何公钥、全部 token 验签失败，而本服务仍在用内存里那把过期密钥继续签发。
+    /// <see cref="NeedsKeyRotationAsync"/> and <see cref="RotateKeyAsync"/> must share this single
+    /// decision. They once used different thresholds — "already expired" for the former and "less
+    /// than half remaining" for the latter — so rotation could only ever happen <b>after</b> a key
+    /// had expired. JWKS publishes unexpired keys only (<c>GetValidKeysAsync</c> filters on
+    /// <c>ExpiresAt &gt; now</c>), so between the moment a key expired and the next CleanupWorker
+    /// tick (up to 24h) JWKS returned an empty array: downstream microservices had no public key at
+    /// all and every token failed validation, while this service kept signing with the expired key
+    /// still held in memory.
     /// </para>
     /// </summary>
     private static bool IsInRotationWindow(SecurityKeyEntity key, DateTimeOffset utcNow) =>
@@ -319,15 +345,18 @@ public class KeyManager : IKeyManager
 
             _logger.LogInformation("Rotating RSA key pair");
 
-            // 停用所有 IsActive 行，而不是只停用 GetActiveKeyAsync 返回的那一条：后者带过期过滤，
-            // 密钥过期后返回 null，旧行会永远留在 IsActive=true 且被 RemoveExpiredInactiveAsync 漏掉。
-            // 不在这里 SaveChanges——与下面新密钥的插入合并成一次提交，中途不出现零个活跃密钥。
+            // Deactivate every IsActive row rather than only the one GetActiveKeyAsync returns:
+            // that one filters on expiry and returns null once the key has expired, which would
+            // leave the old row at IsActive=true forever and out of reach of
+            // RemoveExpiredInactiveAsync. No SaveChanges here — this is committed together with the
+            // insert of the new key below, so there is never a moment with zero active keys.
             var deactivatedCount = await keyRepo.DeactivateAllActiveAsync();
 
             SetCurrentKey(await GenerateAndSaveKeyAsync(keyRepo, unitOfWork, KeyGenerationReason.Rotation));
 
-            // 停用是在上面那次 SaveChanges 里才落库的，日志必须等提交完成后再发：
-            // 提交失败时不能留下一条"已停用 N 把密钥"、而实际已回滚的记录去误导排查。
+            // The deactivation only reaches the database in that SaveChanges above, so this log
+            // line has to wait until the commit has succeeded: a failed commit must not leave behind
+            // a "deactivated N key(s)" record of something that was in fact rolled back.
             if (deactivatedCount > 0)
             {
                 _logger.LogInformation("Deactivated {Count} previously active key(s)", deactivatedCount);

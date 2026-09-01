@@ -3,15 +3,16 @@ using Xunit;
 namespace SignaCore.Tests.Domain.Keys;
 
 /// <summary>
-/// 把所有会改动进程级主密钥状态的测试类归到同一个 collection，避免并行互相踩。
+/// Groups every test class that mutates process-level master key state into one collection so they
+/// cannot trample each other in parallel.
 /// <para>
-/// 涉及的共享状态有两处，都是进程/文件系统全局的：
+/// Two pieces of shared state are involved, both global to the process or the file system:
 /// <list type="bullet">
-/// <item>环境变量 <c>RSA_MASTER_KEY</c></item>
-/// <item>文件 <c>{BaseDirectory}/data/master-key/master-key.json</c></item>
+/// <item>the <c>RSA_MASTER_KEY</c> environment variable</item>
+/// <item>the file <c>{BaseDirectory}/data/master-key/master-key.json</c></item>
 /// </list>
-/// xUnit 默认并行执行不同测试类；同属一个 collection 的类则串行。
-/// 没有这个约束时实测约每 5 次全量跑会偶发失败一次。
+/// xUnit runs different test classes in parallel by default; classes in the same collection run
+/// serially. Without this constraint, roughly one in five full runs failed intermittently.
 /// </para>
 /// </summary>
 [CollectionDefinition(Name)]
