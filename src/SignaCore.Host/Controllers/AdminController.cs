@@ -385,6 +385,7 @@ public class AdminController : ControllerBase
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
         [FromServices] CallbackUrlValidator callbackUrlValidator,
         [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IAuditService auditService,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.AppName))
@@ -429,6 +430,22 @@ public class AdminController : ControllerBase
         await appRegistrationRepository.AddAsync(app);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
+        // The application did not exist before, so there is no before snapshot. The generated
+        // secret and its hash stay out of the record: only the fields an operator needs to read the
+        // registration back are captured.
+        var (actorId, actorName) = GetAdminIdentity();
+        await auditService.RecordActionAsync(
+            "app_created", "AppRegistration", app.AppId, actorId, actorName,
+            $"Admin created app: {app.AppName}", GetClientIp(),
+            after: new
+            {
+                app.AppId,
+                app.AppName,
+                app.CallbackUrl,
+                CallbackExpiresAt = app.CallbackExpiresAt?.ToUnixTimeSeconds(),
+                app.IsActive
+            });
+
         return Ok(new AdminCreateAppResponse(
             app.AppId,
             newAppSecret,
@@ -445,6 +462,7 @@ public class AdminController : ControllerBase
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
         [FromServices] CallbackUrlValidator callbackUrlValidator,
         [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IAuditService auditService,
         CancellationToken cancellationToken = default)
     {
         var app = await appRegistrationRepository.GetByAppIdAsync(appId);
@@ -452,6 +470,15 @@ public class AdminController : ControllerBase
         {
             return NotFound(new ErrorResponse("App not found."));
         }
+
+        // Captured before the entity is mutated. IsActive is part of the snapshot because
+        // deactivating an application is a security-relevant state change.
+        var before = new
+        {
+            app.CallbackUrl,
+            CallbackExpiresAt = app.CallbackExpiresAt?.ToUnixTimeSeconds(),
+            app.IsActive
+        };
 
         if (string.IsNullOrWhiteSpace(request.CallbackUrl))
         {
@@ -478,6 +505,18 @@ public class AdminController : ControllerBase
 
         app.IsActive = request.IsActive;
         await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var (actorId, actorName) = GetAdminIdentity();
+        await auditService.RecordActionAsync(
+            "app_callback_updated", "AppRegistration", app.AppId, actorId, actorName,
+            $"Admin updated callback configuration for app: {app.AppName}", GetClientIp(),
+            before: before,
+            after: new
+            {
+                app.CallbackUrl,
+                CallbackExpiresAt = app.CallbackExpiresAt?.ToUnixTimeSeconds(),
+                app.IsActive
+            });
 
         return Ok(new OperationResponse(true, "Callback configuration updated."));
     }
