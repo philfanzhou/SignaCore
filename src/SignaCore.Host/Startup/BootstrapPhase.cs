@@ -59,7 +59,6 @@ internal static class BootstrapPhase
             }
 
             await SchemaMigrator.MigrateAsync(db, bootstrap.Database, cancellationToken);
-            await DatabaseInitializer.ProtectLegacyRefreshTokensAsync(db, logger);
 
             var (phase, state, plaintextSetupCode) =
                 await InstallationStateResolver.ResolveAsync(db, cancellationToken);
