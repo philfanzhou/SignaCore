@@ -11,25 +11,31 @@ using Xunit;
 namespace SignaCore.IntegrationTests.Integration;
 
 /// <summary>
-/// 守住 <see cref="RefreshTokenRepository.TryRotateAsync"/> 在**重试型 execution strategy**
-/// 下的行为。生产上 PostgreSQL 开了 <c>EnableRetryOnFailure()</c>
-/// （见 <see cref="IdentityDatabaseOptionsExtensions"/>），此时 EF Core 禁止在"调用方自己开的事务"
-/// 里执行命令，旋转 refresh token 会在第一条命令上抛
-/// <c>InvalidOperationException: ... does not support user-initiated transactions</c>，
-/// 经 ExceptionHandlingMiddleware 变成 HTTP 409——就是 refresh token 原子换票失败的现场。
+/// Pins the behaviour of <see cref="RefreshTokenRepository.TryRotateAsync"/> under a <b>retrying
+/// execution strategy</b>. In production PostgreSQL enables <c>EnableRetryOnFailure()</c> (see
+/// <see cref="IdentityDatabaseOptionsExtensions"/>), and EF Core then forbids running commands
+/// inside a transaction the caller started itself, so rotating a refresh token throws on its first
+/// command with
+/// <c>InvalidOperationException: ... does not support user-initiated transactions</c>, which
+/// ExceptionHandlingMiddleware turns into an HTTP 409 — the exact scene of a failed atomic refresh
+/// token rotation.
 /// <para>
-/// 真实 provider 的矩阵在 <see cref="ServerDatabaseContractTests"/>（需要 Docker/Testcontainers）。
-/// 这里改用 SQLite + 手工注入的重试型 strategy：抛异常的判定在 EF Core 通用的
-/// <c>ExecutionStrategy.OnFirstExecution</c> 里，与 provider 无关，因此无容器环境也能复现并守住回归。
-/// 类名带 <c>DatabaseContractTests</c> 后缀是有意的——CI 的 Database Contract Test 阶段按
-/// <c>FullyQualifiedName~DatabaseContractTests</c> 过滤，本组用例不需要 Docker，任何环境都会跑到。
+/// The real provider matrix lives in <see cref="ServerDatabaseContractTests"/>, which needs
+/// Docker/Testcontainers. These tests use SQLite plus a hand-installed retrying strategy instead:
+/// the decision that throws lives in EF Core's provider-agnostic
+/// <c>ExecutionStrategy.OnFirstExecution</c>, so the regression can be reproduced and held without a
+/// container environment. The <c>DatabaseContractTests</c> suffix in the class name is deliberate —
+/// CI's Database Contract Test stage filters on
+/// <c>FullyQualifiedName~DatabaseContractTests</c>, and this group needs no Docker, so it runs in
+/// every environment.
 /// </para>
 /// </summary>
 public sealed class RefreshTokenRotationDatabaseContractTests
 {
     /// <summary>
-    /// 修复前：TryRotateAsync 直接 BeginTransactionAsync，第一条 ExecuteUpdateAsync 就抛
-    /// InvalidOperationException。修复后：整个事务跑在 execution strategy 里，正常旋转。
+    /// Before the fix: TryRotateAsync called BeginTransactionAsync directly and the first
+    /// ExecuteUpdateAsync threw InvalidOperationException. After the fix: the whole transaction runs
+    /// inside the execution strategy and the rotation succeeds.
     /// </summary>
     [Fact]
     public async Task TryRotate_UnderRetryingExecutionStrategy_RotatesInsteadOfThrowing()
@@ -52,10 +58,11 @@ public sealed class RefreshTokenRotationDatabaseContractTests
     }
 
     /// <summary>
-    /// 首次尝试在插入 replacement 时遭遇"瞬时故障"，strategy 重跑整个 lambda。
-    /// 重试后 ChangeTracker 必须仍把 replacement 当成待插入实体重新落库，
-    /// 且最终只留下一条有效 replacement——不能出现"旧 token 已撤销、replacement 丢失"的半完成状态，
-    /// 也不能重复插入导致主键/token 冲突。
+    /// The first attempt hits an injected transient failure while inserting the replacement, and the
+    /// strategy replays the whole lambda. After the retry the ChangeTracker still has to treat the
+    /// replacement as pending and insert it again, and exactly one valid replacement may remain: no
+    /// half-finished "old token revoked, replacement lost" state, and no duplicate insert colliding
+    /// on the primary key or the token value.
     /// </summary>
     [Fact]
     public async Task TryRotate_WhenFirstAttemptFailsTransiently_InsertsReplacementExactlyOnce()
@@ -112,7 +119,8 @@ public sealed class RefreshTokenRotationDatabaseContractTests
     }
 
     /// <summary>
-    /// 文件型 SQLite 测试库 + 生产同款迁移链，可按需挂上重试型 execution strategy 与拦截器。
+    /// A file-backed SQLite test database on the same migration chain as production, onto which a
+    /// retrying execution strategy and interceptors can be attached as needed.
     /// </summary>
     private sealed class SqliteTestDatabase : IDisposable
     {
@@ -130,8 +138,9 @@ public sealed class RefreshTokenRotationDatabaseContractTests
                 {
                     providerOptions.MigrationsAssembly(
                         "SignaCore.Database.Migrations.Sqlite");
-                    // SQLite 没有 EnableRetryOnFailure，这里手工装一个会重试的 strategy，
-                    // 等价于 PostgreSQL 生产配置下的 RetriesOnFailure == true。
+                    // SQLite has no EnableRetryOnFailure, so a retrying strategy is installed by
+                    // hand here, which is equivalent to RetriesOnFailure == true under the
+                    // production PostgreSQL configuration.
                     providerOptions.ExecutionStrategy(
                         dependencies => new TestRetryingExecutionStrategy(dependencies));
                 });
@@ -181,9 +190,10 @@ public sealed class RefreshTokenRotationDatabaseContractTests
     }
 
     /// <summary>
-    /// 只重试 <see cref="TransientFailureInterceptor"/> 注入的标记异常。
-    /// 关键在于 <c>MaxRetryCount &gt; 0</c>，使 EF Core 的 <c>RetriesOnFailure</c> 为 true，
-    /// 从而触发与 NpgsqlRetryingExecutionStrategy 相同的 user-initiated transaction 检查。
+    /// Retries only the marker exception injected by <see cref="TransientFailureInterceptor"/>. What
+    /// matters is <c>MaxRetryCount &gt; 0</c>, which makes EF Core's <c>RetriesOnFailure</c> true and
+    /// therefore triggers the same user-initiated transaction check as
+    /// NpgsqlRetryingExecutionStrategy.
     /// </summary>
     private sealed class TestRetryingExecutionStrategy : ExecutionStrategy
     {
@@ -208,7 +218,8 @@ public sealed class RefreshTokenRotationDatabaseContractTests
     }
 
     /// <summary>
-    /// 在写入 refresh_tokens 的 INSERT 上注入前 N 次瞬时故障，模拟提交前掉线。
+    /// Injects transient failures into the first N INSERTs against refresh_tokens, simulating a
+    /// connection lost just before the commit.
     /// </summary>
     private sealed class TransientFailureInterceptor : DbCommandInterceptor
     {

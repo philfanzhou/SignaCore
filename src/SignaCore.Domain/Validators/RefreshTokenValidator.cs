@@ -82,7 +82,8 @@ public class RefreshTokenValidator : IIdentityValidator
             return ValidationResult.Failure("Account is disabled");
         }
 
-        // 成功结果统一过这里：跨应用换票要把来源 AppId 带给签发路径，它据此改成只签发不轮换。
+        // Every success result goes through here: a cross-application exchange has to carry the
+        // source AppId to the issuance path, which uses it to issue without rotating.
         ValidationResult Issue(ValidationResult result) => exchange.IsCrossApplication
             ? result.AsCrossApplicationExchange(refreshToken.AppId)
             : result;
@@ -117,9 +118,12 @@ public class RefreshTokenValidator : IIdentityValidator
             if (admission == null && exchange.IsCrossApplication &&
                 request.App.SmsLoginMode == SmsLoginMode.AutoProvision)
             {
-                // 来源应用已经验过这个手机号，目标应用又是自动准入，所以把准入派生过来——但记成
-                // ExchangeGranted，不是 AutoProvision：这里没有验过任何验证码。ManualApproval 故意
-                // 不走这条路，落到下面按"必须已有管理员批准的行"判定。
+                // The source application has already verified this phone number and the target
+                // application provisions automatically, so the admission is derived across — but
+                // recorded as ExchangeGranted rather than AutoProvision, because no verification
+                // code was checked here. ManualApproval deliberately does not take this path and
+                // falls through to the check below, which requires a row an administrator has
+                // already approved.
                 admission = await _smsAdmissionService.GrantByLoginIdAsync(
                     request.App, loginId, SmsAccessApprovalSource.ExchangeGranted, request.CancellationToken);
             }
@@ -161,7 +165,10 @@ public class RefreshTokenValidator : IIdentityValidator
         return Issue(ValidationResult.Success(account, IdentityConstants.AuthMethodRefreshToken));
     }
 
-    /// <summary>换票判定：同应用刷新、被信任边放行的跨应用换票，或拒绝。</summary>
+    /// <summary>
+    /// The exchange decision: a same-application refresh, a cross-application exchange admitted by a
+    /// trust edge, or a rejection.
+    /// </summary>
     private readonly record struct ExchangeDecision(bool IsCrossApplication, ValidationResult? Rejection)
     {
         public static readonly ExchangeDecision SameApplication = new(false, null);
@@ -170,8 +177,8 @@ public class RefreshTokenValidator : IIdentityValidator
     }
 
     /// <summary>
-    /// presented token 属于别的应用时，判断有没有信任边放行。见
-    /// docs/adr/0003-cross-application-refresh-grant.md。
+    /// Decides whether a trust edge admits the exchange when the presented token belongs to another
+    /// application. See docs/adr/0003-cross-application-refresh-grant.md.
     /// </summary>
     private async Task<ExchangeDecision> ResolveExchangeAsync(
         ValidationRequest request,
@@ -185,8 +192,8 @@ public class RefreshTokenValidator : IIdentityValidator
             return ExchangeDecision.SameApplication;
         }
 
-        // 三种拒绝共用同一句对外文案：哪个应用信任哪个应用不是调用方可以试探出来的信息。
-        // 区分留在日志里。
+        // All three rejections share one outward message: which application trusts which is not
+        // something a caller may probe for. The distinction stays in the logs.
         var rejection = ValidationResult.Failure("Refresh token is not valid for this application");
 
         if (string.IsNullOrWhiteSpace(refreshToken.AppId)
@@ -222,7 +229,7 @@ public class RefreshTokenValidator : IIdentityValidator
         return ExchangeDecision.CrossApplication;
     }
 
-    /// <summary>刷新时 LDAP 分支的判定结果，带 OAuth 错误码。</summary>
+    /// <summary>The outcome of the LDAP branch during a refresh, carrying an OAuth error code.</summary>
     private readonly record struct LdapAdmission(
         bool IsSuccess,
         string? ErrorMessage,

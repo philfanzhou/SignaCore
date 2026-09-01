@@ -8,12 +8,12 @@ using SignaCore.Host.Services;
 namespace SignaCore.Host.Controllers;
 
 /// <summary>
-/// POST /api/auth/token —— 签发 access token（历史 JSON 契约）。
-/// AppId/AppSecret 通过 X-Admin-AppId / X-Admin-AppSecret 请求头传递并强制校验。
+/// POST /api/auth/token — issues access tokens under the historical JSON contract.
+/// AppId/AppSecret travel in the X-Admin-AppId / X-Admin-AppSecret headers and are enforced.
 /// <para>
-/// 这是既有下游依赖的契约端点，形态不动。符合 RFC 6749 的等价能力在
-/// <see cref="OAuthTokenController"/>（<c>/oauth2/token</c>）上，两者共用
-/// <see cref="TokenIssuanceService"/>。
+/// This is the contract endpoint existing downstream consumers depend on, and its shape does not
+/// change. The RFC 6749 conformant equivalent lives on <see cref="OAuthTokenController"/>
+/// (<c>/oauth2/token</c>); both share <see cref="TokenIssuanceService"/>.
 /// </para>
 /// </summary>
 [Route("api/auth")]
@@ -28,9 +28,9 @@ public class TokenController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/auth/token — 统一发 token（OAuth2 grant_type 模式）。
-    /// 失败时返回 HTTP 200 + Success=false，不是 4xx；错误文案是契约，
-    /// 见 docs/modules/Auth/GetToken/06-CONVENTIONS.md。
+    /// POST /api/auth/token — the single token issuance entry point, in the OAuth2 grant_type shape.
+    /// A failure returns HTTP 200 with Success=false rather than a 4xx, and the message text is part
+    /// of the contract; see docs/modules/Auth/GetToken/06-CONVENTIONS.md.
     /// </summary>
     [HttpPost("token")]
     [Authorize(Policy = GatewayAppAuthenticationDefaults.Policy)]
@@ -57,7 +57,8 @@ public class TokenController : ControllerBase
 
         if (!outcome.IsSuccess)
         {
-            // 失败也是 HTTP 200：这是对外契约，不要改成 4xx。
+            // A failure is HTTP 200 as well: that is the outward contract, not something to turn
+            // into a 4xx.
             return Ok(new TokenResponse { Success = false, Message = outcome.ErrorMessage });
         }
 

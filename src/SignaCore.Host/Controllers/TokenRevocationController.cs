@@ -8,7 +8,7 @@ using SignaCore.Host.Models;
 namespace SignaCore.Host.Controllers;
 
 /// <summary>
-/// POST /api/auth/revoke —— 撤销 refresh token。
+/// POST /api/auth/revoke — revokes a refresh token.
 /// </summary>
 [Route("api/auth")]
 [ApiController]

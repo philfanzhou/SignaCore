@@ -40,9 +40,10 @@ public class RefreshTokenService : IRefreshTokenService
 
         if (grantType == IdentityConstants.GrantTypeRefreshToken && !string.IsNullOrEmpty(existingRefreshToken))
         {
-            // 跨应用换票只签发不轮换：presented token 是来源应用的会话凭据，轮换会把它吊销，
-            // 于是目标应用开一个会话的副作用是结束了来源应用那个——而且要等到来源那边的
-            // access token 过期才看得出来。
+            // A cross-application exchange issues without rotating: the presented token is the
+            // source application's session credential, and rotating it would revoke it, so opening
+            // a session in the target application would have the side effect of ending the source
+            // one — and only visibly so once the source side's access token expired.
             if (!string.IsNullOrWhiteSpace(exchangedFromAppId))
             {
                 return await GenerateRefreshTokenAsync(

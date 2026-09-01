@@ -9,8 +9,10 @@ using Xunit;
 namespace SignaCore.Tests.Integration;
 
 /// <summary>
-/// 跨应用换票的端到端契约：默认拒绝，管理员加上有向信任边后放行，来源应用的会话不受影响，
-/// 换出来的 token 不能再换第二次。见 docs/adr/0003-cross-application-refresh-grant.md。
+/// The end-to-end contract of cross-application exchange: rejected by default, admitted once an
+/// administrator adds a directed trust edge, the source application's session is left untouched, and
+/// an exchanged token cannot be exchanged a second time. See
+/// docs/adr/0003-cross-application-refresh-grant.md.
 /// </summary>
 public class CrossApplicationExchangeTests : IClassFixture<IdentityServerFixture>
 {
@@ -29,7 +31,8 @@ public class CrossApplicationExchangeTests : IClassFixture<IdentityServerFixture
 
         var sourceRefreshToken = await SignInAsync(source);
 
-        // 没有信任边时，refresh token 就是应用绑定的凭据，别的应用拿着也换不到。
+        // Without a trust edge, a refresh token is a credential bound to its application: holding
+        // it gets another application nothing.
         var rejected = await RefreshAsync(target, sourceRefreshToken);
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
         Assert.Equal("invalid_grant", await ReadErrorAsync(rejected));
@@ -45,8 +48,9 @@ public class CrossApplicationExchangeTests : IClassFixture<IdentityServerFixture
     [Fact]
     public async Task AnExchangeDoesNotEndTheSourceApplicationSession()
     {
-        // 换票如果走轮换，来源应用的 refresh token 会被顺手吊销——用户在来源站点会在下一次
-        // 刷新时被登出，而且要等到那边 access token 过期才看得出来。
+        // If an exchange rotated, the source application's refresh token would be revoked along the
+        // way: the user would be signed out of the source site on its next refresh, and only
+        // visibly so once that side's access token expired.
         var source = await SeedAppAsync("keepalive-source");
         var target = await SeedAppAsync("keepalive-target");
         await AddExchangeTrustAsync(target.AppId, source.AppId);
@@ -62,7 +66,7 @@ public class CrossApplicationExchangeTests : IClassFixture<IdentityServerFixture
     [Fact]
     public async Task ExchangeTrustDoesNotComposeAcrossTwoHops()
     {
-        // first → second 和 second → third 两条边不等于 first → third。
+        // The edges first → second and second → third do not add up to first → third.
         var first = await SeedAppAsync("hop-first");
         var second = await SeedAppAsync("hop-second");
         var third = await SeedAppAsync("hop-third");
@@ -78,7 +82,8 @@ public class CrossApplicationExchangeTests : IClassFixture<IdentityServerFixture
         Assert.Equal(HttpStatusCode.BadRequest, thirdHop.StatusCode);
         Assert.Equal("invalid_grant", await ReadErrorAsync(thirdHop));
 
-        // 同一个 token 在它自己的应用里刷新仍然正常——被拒的是"再换一次"，不是这张票本身。
+        // The same token still refreshes normally within its own application: what was rejected is
+        // the second exchange, not the token itself.
         var ownApplication = await RefreshAsync(second, secondRefreshToken);
         Assert.Equal(HttpStatusCode.OK, ownApplication.StatusCode);
     }
@@ -92,7 +97,7 @@ public class CrossApplicationExchangeTests : IClassFixture<IdentityServerFixture
 
         var targetOwnToken = await SignInAsync(target);
 
-        // target 信任 source，不代表 source 信任 target。
+        // target trusting source does not mean source trusts target.
         var reverse = await RefreshAsync(source, targetOwnToken);
         Assert.Equal(HttpStatusCode.BadRequest, reverse.StatusCode);
         Assert.Equal("invalid_grant", await ReadErrorAsync(reverse));

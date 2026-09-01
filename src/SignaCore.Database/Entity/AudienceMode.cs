@@ -11,8 +11,8 @@ namespace SignaCore.Database.Entity;
 /// <para>
 /// The mode is per application on purpose. A downstream service validates the audience with its own
 /// configuration, so a global switch would force every consumer to cut over in the same deployment
-/// window. Per application, the rollout is:配置下游同时接受两个 audience → flip this mode → drop the
-/// shared value downstream.
+/// window. Per application, the rollout is: configure the downstream service to accept both audiences
+/// → flip this mode → drop the shared value downstream.
 /// </para>
 /// </summary>
 public enum AudienceMode
