@@ -1,5 +1,7 @@
+using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -198,26 +200,36 @@ public sealed class RepositoryCancellationTests
     }
 
     [Fact]
-    public async Task RefreshTokenRepository_PreCanceledRotate_LeavesSourceAndReplacementUnchanged()
+    public async Task RefreshTokenRepository_CanceledBeforeCommit_RollsBackSourceAndReplacement()
     {
-        await using var database = await TestDatabase.CreateAsync();
+        using var cancellationSource = new CancellationTokenSource();
+        var interceptor = new CancelBeforeCommitInterceptor(cancellationSource);
+        await using var database = await TestDatabase.CreateAsync(interceptor);
         const string presentedToken = "repository-cancellation-rotate-token";
         var source = await SeedRefreshTokenAsync(database.Context, presentedToken);
         var replacement = CreateRefreshToken(source.AccountId, "unused-replacement-token");
         var repository = new RefreshTokenRepository(database.Context);
+        interceptor.Arm();
+        Assert.False(cancellationSource.IsCancellationRequested);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             async () => await repository.TryRotateAsync(
                 presentedToken,
                 replacement,
-                CanceledToken));
+                cancellationSource.Token));
 
-        database.Context.ChangeTracker.Clear();
-        var stored = await database.Context.RefreshTokens.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken);
-        Assert.Single(stored);
-        Assert.False(stored[0].IsRevoked);
-        Assert.Equal(source.Id, stored[0].Id);
+        Assert.True(cancellationSource.IsCancellationRequested);
+        Assert.Equal(1, interceptor.CanceledCommits);
+        await using var assertionContext = database.CreateContext();
+        var storedSource = await assertionContext.RefreshTokens.AsNoTracking()
+            .SingleAsync(
+                token => token.Id == source.Id,
+                TestContext.Current.CancellationToken);
+        Assert.False(storedSource.IsRevoked);
+        Assert.False(await assertionContext.RefreshTokens.AsNoTracking()
+            .AnyAsync(
+                token => token.Id == replacement.Id,
+                TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -314,31 +326,81 @@ public sealed class RepositoryCancellationTests
     private sealed class TestDatabase : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
+        private readonly DbContextOptions<IdentityDbContext> _options;
 
-        private TestDatabase(SqliteConnection connection, IdentityDbContext context)
+        private TestDatabase(
+            SqliteConnection connection,
+            DbContextOptions<IdentityDbContext> options,
+            IdentityDbContext context)
         {
             _connection = connection;
+            _options = options;
             Context = context;
         }
 
         public IdentityDbContext Context { get; }
 
-        public static async Task<TestDatabase> CreateAsync()
+        public IdentityDbContext CreateContext() => new(_options);
+
+        public static async Task<TestDatabase> CreateAsync(IInterceptor? interceptor = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync(TestContext.Current.CancellationToken);
-            var options = new DbContextOptionsBuilder<IdentityDbContext>()
-                .UseSqlite(connection)
-                .Options;
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>()
+                .UseSqlite(connection);
+            if (interceptor != null)
+            {
+                optionsBuilder.AddInterceptors(interceptor);
+            }
+
+            var options = optionsBuilder.Options;
             var context = new IdentityDbContext(options);
             await context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
-            return new TestDatabase(connection, context);
+            return new TestDatabase(connection, options, context);
         }
 
         public async ValueTask DisposeAsync()
         {
             await Context.DisposeAsync();
             await _connection.DisposeAsync();
+        }
+    }
+
+    private sealed class CancelBeforeCommitInterceptor : DbTransactionInterceptor
+    {
+        private readonly CancellationTokenSource _cancellationSource;
+        private bool _armed;
+
+        public CancelBeforeCommitInterceptor(CancellationTokenSource cancellationSource)
+        {
+            _cancellationSource = cancellationSource;
+        }
+
+        public int CanceledCommits { get; private set; }
+
+        public void Arm()
+        {
+            _armed = true;
+        }
+
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
+            DbTransaction transaction,
+            TransactionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            if (_armed)
+            {
+                _armed = false;
+                CanceledCommits++;
+                _cancellationSource.Cancel();
+            }
+
+            return base.TransactionCommittingAsync(
+                transaction,
+                eventData,
+                result,
+                cancellationToken);
         }
     }
 }
