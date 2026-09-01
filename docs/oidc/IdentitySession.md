@@ -83,7 +83,9 @@ persistence failure, or required audit failure before commit rolls the whole uni
 after commit cannot undo it (`EV-18`). Cleanup may remove only expired/revoked sessions past their
 retention point and after referential-integrity rules following `PS-22` allow it. It must not erase a
 session while a retained code, logout request, or refresh-family fact still needs that authority or
-audit correlation.
+audit correlation. For authorization codes that rule is also enforced by the schema: the code table
+is created with a non-null restrictive reference to this authority (`PS-23`), so cleanup that would
+strand a retained code fails instead of silently erasing evidence.
 
 ## Test mapping and compatibility
 
@@ -93,5 +95,6 @@ write threshold, absolute-expiry capping, application max-age isolation, cross-s
 rejection, provider lock order, and cleanup referential integrity.
 
 This design changes no current cookie, admin session, profile API, grant, migration, or runtime
-route. Storage/lifecycle and state propagation activate only through #67 and #69 (`AC-09`). This
-document itself changes no Discovery metadata (`AC-14`).
+route. Storage/lifecycle and state propagation activate only through #67 and #69 (`AC-09`), whose
+#95 storage slice precedes the authorization-code table required by `AC-03`. This document itself
+changes no Discovery metadata (`AC-14`).

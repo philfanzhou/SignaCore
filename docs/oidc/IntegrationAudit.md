@@ -47,6 +47,9 @@ canonical branch rather than an omitted artifact. Rows not listed are not part o
   token, credential, handle, `state`, or `nonce` in diagnostics.
 - The activation graph has no path from route existence to premature metadata. Operational release
   is a separate gate and prepared logout never claims standard wire compatibility.
+- `PS-23` fixes the migration phase in which each persisted reference appears. It is a history-shape
+  rule with no runtime traversal, so it is listed in no scenario trace above; its provider symmetry
+  and rollback boundary are audited by the migration owners named in that row.
 
 The twelve review threads from superseded PR #127 were also mapped to the closed design decisions in
 #129..#133 and the Discovery gate in #134; no thread requires reopening a predecessor. The mapping is
