@@ -4,10 +4,11 @@ namespace SignaCore.Database.Repositories;
 
 public interface ISecurityKeyRepository
 {
-    Task<SecurityKeyEntity?> GetActiveKeyAsync();
-    Task<SecurityKeyEntity?> GetLatestKeyAsync();
-    Task<IReadOnlyList<SecurityKeyEntity>> GetValidKeysAsync();
-    Task AddAsync(SecurityKeyEntity key);
+    Task<SecurityKeyEntity?> GetActiveKeyAsync(CancellationToken cancellationToken = default);
+    Task<SecurityKeyEntity?> GetLatestKeyAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SecurityKeyEntity>> GetValidKeysAsync(
+        CancellationToken cancellationToken = default);
+    Task AddAsync(SecurityKeyEntity key, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Marks every <c>IsActive=true</c> row as inactive and returns the number of rows affected. It
@@ -21,8 +22,10 @@ public interface ISecurityKeyRepository
     /// never clean it up.
     /// </para>
     /// </summary>
-    Task<int> DeactivateAllActiveAsync();
+    Task<int> DeactivateAllActiveAsync(CancellationToken cancellationToken = default);
 
-    Task RemoveRangeAsync(IEnumerable<SecurityKeyEntity> keys);
-    Task RemoveExpiredInactiveAsync();
+    Task RemoveRangeAsync(
+        IEnumerable<SecurityKeyEntity> keys,
+        CancellationToken cancellationToken = default);
+    Task RemoveExpiredInactiveAsync(CancellationToken cancellationToken = default);
 }

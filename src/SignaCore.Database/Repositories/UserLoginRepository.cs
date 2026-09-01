@@ -13,41 +13,56 @@ public class UserLoginRepository : IUserLoginRepository
         _dbContext = dbContext;
     }
 
-    public async Task<UserLoginEntity?> GetByProviderAsync(string providerName, string providerUserId)
+    public async Task<UserLoginEntity?> GetByProviderAsync(
+        string providerName,
+        string providerUserId,
+        CancellationToken cancellationToken = default)
     {
         var normalizedProviderName = IdentityValueNormalizer.Normalize(providerName);
         return await _dbContext.UserLogins
             .FirstOrDefaultAsync(l =>
                 l.ProviderNameNormalized == normalizedProviderName &&
-                l.ProviderUserId == providerUserId);
+                l.ProviderUserId == providerUserId,
+                cancellationToken);
     }
 
-    public async Task<UserLoginEntity?> GetBySmsPhoneAsync(string phone)
+    public async Task<UserLoginEntity?> GetBySmsPhoneAsync(
+        string phone,
+        CancellationToken cancellationToken = default)
     {
         var normalizedProviderName =
             IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms);
         return await _dbContext.UserLogins
             .FirstOrDefaultAsync(l =>
                 l.ProviderNameNormalized == normalizedProviderName &&
-                l.ProviderUserId == phone);
+                l.ProviderUserId == phone,
+                cancellationToken);
     }
 
-    public Task AddAsync(UserLoginEntity userLogin)
+    public Task AddAsync(
+        UserLoginEntity userLogin,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _dbContext.UserLogins.Add(userLogin);
         return Task.CompletedTask;
     }
 
-    public Task RemoveAsync(UserLoginEntity userLogin)
+    public Task RemoveAsync(
+        UserLoginEntity userLogin,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _dbContext.UserLogins.Remove(userLogin);
         return Task.CompletedTask;
     }
 
-    public async Task<List<UserLoginEntity>> GetByAccountIdAsync(Guid accountId)
+    public async Task<List<UserLoginEntity>> GetByAccountIdAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default)
     {
         return await _dbContext.UserLogins
             .Where(l => l.AccountId == accountId)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
     }
 }

@@ -43,7 +43,8 @@ public class DbOtpServiceTests
         OtpEntity? stored = null;
         _repository.Setup(value => value.GetAsync(_appId, "+8613800138000")).ReturnsAsync((OtpEntity?)null);
         _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
-            .Callback<OtpEntity>(value => stored = value).Returns(Task.CompletedTask);
+            .Callback<OtpEntity, CancellationToken>((value, _) => stored = value)
+            .Returns(Task.CompletedTask);
 
         var code = await _service.GenerateAndSendAsync(_appId, "13800138000", "test", TestContext.Current.CancellationToken);
 
@@ -62,7 +63,8 @@ public class DbOtpServiceTests
         _repository.Setup(value => value.GetAsync(_appId, "+8613800138000"))
             .ReturnsAsync(() => stored);
         _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
-            .Callback<OtpEntity>(value => stored = value).Returns(Task.CompletedTask);
+            .Callback<OtpEntity, CancellationToken>((value, _) => stored = value)
+            .Returns(Task.CompletedTask);
         var code = await _service.GenerateAndSendAsync(_appId, "+8613800138000", "test", TestContext.Current.CancellationToken);
         _repository.Setup(value => value.TryConsumeAsync(
             _appId, "+8613800138000", stored!.CodeMac, It.IsAny<DateTimeOffset>(), It.IsAny<int>())).ReturnsAsync(true);
@@ -117,7 +119,7 @@ public class DbOtpServiceTests
         _repository.Setup(value => value.GetAsync(_appId, "+8613800138000"))
             .ReturnsAsync((OtpEntity?)null);
         _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
-            .Callback<OtpEntity>(value => stored = value)
+            .Callback<OtpEntity, CancellationToken>((value, _) => stored = value)
             .Returns(Task.CompletedTask);
         _sender.Setup(value => value.SendAsync(
                 It.IsAny<SmsProviderProfile>(), It.IsAny<SmsVerificationMessage>(), It.IsAny<CancellationToken>()))
@@ -145,7 +147,7 @@ public class DbOtpServiceTests
         _repository.Setup(value => value.GetAsync(_appId, "+8613800138000"))
             .ReturnsAsync(() => stored);
         _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
-            .Callback<OtpEntity>(value => stored = value)
+            .Callback<OtpEntity, CancellationToken>((value, _) => stored = value)
             .Returns(Task.CompletedTask);
         await _service.GenerateAndSendAsync(
             _appId,

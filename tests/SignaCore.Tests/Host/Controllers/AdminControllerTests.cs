@@ -917,7 +917,8 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         _appRegRepoMock.Setup(r => r.AddAsync(It.IsAny<AppRegistrationEntity>()))
-            .Callback<AppRegistrationEntity>(app => Assert.Null(app.CallbackExpiresAt))
+            .Callback<AppRegistrationEntity, CancellationToken>(
+                (app, _) => Assert.Null(app.CallbackExpiresAt))
             .Returns(Task.CompletedTask);
 
         var result = await _controller.CreateApp(
@@ -935,7 +936,7 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         _appRegRepoMock.Setup(r => r.AddAsync(It.IsAny<AppRegistrationEntity>()))
-            .Callback<AppRegistrationEntity>(app =>
+            .Callback<AppRegistrationEntity, CancellationToken>((app, _) =>
             {
                 Assert.Null(app.CallbackUrl);
                 Assert.Null(app.CallbackExpiresAt);
@@ -959,7 +960,7 @@ public class AdminControllerTests : IDisposable
         SetAdminUser();
         var before = DateTimeOffset.UtcNow;
         _appRegRepoMock.Setup(r => r.AddAsync(It.IsAny<AppRegistrationEntity>()))
-            .Callback<AppRegistrationEntity>(app =>
+            .Callback<AppRegistrationEntity, CancellationToken>((app, _) =>
             {
                 Assert.NotNull(app.CallbackExpiresAt);
                 Assert.InRange(app.CallbackExpiresAt!.Value, before.AddSeconds(IdentityConstants.DefaultCallbackTtlSeconds - 5), before.AddSeconds(IdentityConstants.DefaultCallbackTtlSeconds + 5));
@@ -980,7 +981,7 @@ public class AdminControllerTests : IDisposable
         SetAdminUser();
         AppRegistrationEntity? created = null;
         _appRegRepoMock.Setup(r => r.AddAsync(It.IsAny<AppRegistrationEntity>()))
-            .Callback<AppRegistrationEntity>(app => created = app)
+            .Callback<AppRegistrationEntity, CancellationToken>((app, _) => created = app)
             .Returns(Task.CompletedTask);
         var snapshots = CaptureSnapshots();
 

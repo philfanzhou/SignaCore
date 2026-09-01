@@ -23,7 +23,10 @@ public class PasswordValidatorTests
         mock.Setup(r => r.RecordFailureAsync(
                 It.IsAny<string>(),
                 It.IsAny<DateTimeOffset>()))
-            .ReturnsAsync((string username, DateTimeOffset utcNow) => new LoginAttemptEntity
+            .ReturnsAsync((
+                string username,
+                DateTimeOffset utcNow,
+                CancellationToken _) => new LoginAttemptEntity
             {
                 Id = Guid.NewGuid(),
                 Username = username,
