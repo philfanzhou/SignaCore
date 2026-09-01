@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.Domain;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 
@@ -29,6 +30,8 @@ internal static class BootstrapAppSeeder
     internal static async Task SeedBootstrapAppsAsync(
         IConfiguration configuration,
         IdentityDbContext db,
+        IAuditService auditService,
+        IPasswordHasher passwordHasher,
         ILogger logger,
         bool isDevelopment)
     {
@@ -41,40 +44,94 @@ internal static class BootstrapAppSeeder
             return;
         }
 
+        BootstrapAppsOptions? bootstrapApps;
         try
         {
             var json = await File.ReadAllTextAsync(filePath);
-            var bootstrapApps = System.Text.Json.JsonSerializer.Deserialize<BootstrapAppsOptions>(
+            bootstrapApps = System.Text.Json.JsonSerializer.Deserialize<BootstrapAppsOptions>(
                 json,
                 new System.Text.Json.JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
                 });
-
-            foreach (var entry in bootstrapApps?.Apps ?? [])
-            {
-                await SeedBootstrapAppAsync(entry, db, logger, isDevelopment);
-            }
         }
         catch (Exception exception)
         {
             logger.LogWarning(
-                exception,
-                "Failed to read or process bootstrap apps file: {FilePath}",
-                filePath);
+                "Failed to read or parse bootstrap apps file: {FilePath}. " +
+                "Zero entries were processed. ErrorType={ErrorType}",
+                filePath,
+                exception.GetType().Name);
+            return;
         }
+
+        var created = 0;
+        var skippedExisting = 0;
+        var skippedInvalid = 0;
+        var failedEntries = new List<BootstrapAppFailure>();
+
+        foreach (var entry in bootstrapApps?.Apps ?? [])
+        {
+            if (entry == null)
+            {
+                skippedInvalid++;
+                logger.LogWarning("Bootstrap app entry skipped: entry is null.");
+                continue;
+            }
+
+            try
+            {
+                var result = await SeedBootstrapAppAsync(
+                    entry,
+                    db,
+                    auditService,
+                    passwordHasher,
+                    logger,
+                    isDevelopment);
+                switch (result)
+                {
+                    case BootstrapAppSeedResult.Created:
+                        created++;
+                        break;
+                    case BootstrapAppSeedResult.SkippedExisting:
+                        skippedExisting++;
+                        break;
+                    case BootstrapAppSeedResult.SkippedInvalid:
+                        skippedInvalid++;
+                        break;
+                }
+            }
+            catch (Exception exception)
+            {
+                failedEntries.Add(new BootstrapAppFailure(
+                    LogValueSanitizer.Sanitize(entry.AppId),
+                    exception.GetType().Name));
+                // A failed SaveChanges can leave Added/Modified entities in the tracker. Clear them
+                // so this entry cannot be retried accidentally by the next entry's commit.
+                db.ChangeTracker.Clear();
+            }
+        }
+
+        LogSummary(
+            logger,
+            created,
+            skippedExisting,
+            skippedInvalid,
+            failedEntries);
     }
 
-    private static async Task SeedBootstrapAppAsync(
+    private static async Task<BootstrapAppSeedResult> SeedBootstrapAppAsync(
         BootstrapAppEntry entry,
         IdentityDbContext db,
+        IAuditService auditService,
+        IPasswordHasher passwordHasher,
         ILogger logger,
         bool isDevelopment)
     {
         if (string.IsNullOrWhiteSpace(entry.AppId) || string.IsNullOrWhiteSpace(entry.AppSecret))
         {
             logger.LogWarning("Bootstrap app entry skipped: AppId or AppSecret is empty.");
-            return;
+            return BootstrapAppSeedResult.SkippedInvalid;
         }
 
         var normalizedAppId = IdentityValueNormalizer.Normalize(entry.AppId);
@@ -87,14 +144,14 @@ internal static class BootstrapAppSeeder
                 "Bootstrap app registration already exists: AppId={AppId}, AppName={AppName}",
                 entry.AppId,
                 entry.AppName);
-            return;
+            return BootstrapAppSeedResult.SkippedExisting;
         }
 
         var app = new AppRegistrationEntity
         {
             Id = Guid.NewGuid(),
             AppId = entry.AppId,
-            AppSecretHash = BCrypt.Net.BCrypt.HashPassword(entry.AppSecret),
+            AppSecretHash = passwordHasher.HashPassword(entry.AppSecret),
             AppName = entry.AppName,
             CallbackUrl = entry.CallbackUrl,
             IsActive = true,
@@ -119,16 +176,81 @@ internal static class BootstrapAppSeeder
                     "Bootstrap app entry skipped: AppId={AppId} has an unacceptable interactive OIDC configuration. {Reason}",
                     entry.AppId,
                     exception.Message);
-                return;
+                return BootstrapAppSeedResult.SkippedInvalid;
             }
         }
 
         db.AppRegistrations.Add(app);
+        await auditService.RecordActionAsync(
+            "app_created",
+            "AppRegistration",
+            app.AppId,
+            actorId: null,
+            actorName: "bootstrap",
+            description: $"Bootstrap pre-seed created app: {app.AppName}",
+            clientIp: null,
+            after: new
+            {
+                app.AppId,
+                app.AppName,
+                app.CallbackUrl,
+                CallbackExpiresAt = app.CallbackExpiresAt?.ToUnixTimeSeconds(),
+                app.IsActive
+            });
         await db.SaveChangesAsync();
 
         logger.LogInformation(
             "Bootstrap app registration created: AppId={AppId}, AppName={AppName}",
             entry.AppId,
             entry.AppName);
+
+        return BootstrapAppSeedResult.Created;
     }
+
+    private static void LogSummary(
+        ILogger logger,
+        int created,
+        int skippedExisting,
+        int skippedInvalid,
+        IReadOnlyList<BootstrapAppFailure> failedEntries)
+    {
+        var failures = failedEntries.Count == 0
+            ? "none"
+            : string.Join(
+                ", ",
+                failedEntries.Select(entry => $"{entry.AppId} ({entry.Reason})"));
+        const string message =
+            "Bootstrap app pre-seeding completed: created={Created}, " +
+            "skipped-existing={SkippedExisting}, skipped-invalid={SkippedInvalid}, failed={Failed}, " +
+            "FailedEntries={FailedEntries}";
+
+        if (failedEntries.Count == 0)
+        {
+            logger.LogInformation(
+                message,
+                created,
+                skippedExisting,
+                skippedInvalid,
+                failedEntries.Count,
+                failures);
+            return;
+        }
+
+        logger.LogWarning(
+            message,
+            created,
+            skippedExisting,
+            skippedInvalid,
+            failedEntries.Count,
+            failures);
+    }
+
+    private enum BootstrapAppSeedResult
+    {
+        Created,
+        SkippedExisting,
+        SkippedInvalid
+    }
+
+    private sealed record BootstrapAppFailure(string AppId, string Reason);
 }

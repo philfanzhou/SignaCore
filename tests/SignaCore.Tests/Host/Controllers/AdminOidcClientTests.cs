@@ -41,6 +41,8 @@ public class AdminOidcClientTests : IDisposable
     private readonly IAppRegistrationRepository _repository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly Mock<IAuditService> _auditServiceMock = new();
+    private readonly IPasswordHasher _passwordHasher = new BCryptPasswordHasher(
+        new PasswordHasherOptions { WorkFactor = 4 });
     private readonly IWebHostEnvironment _environment = ProductionEnvironment();
 
     private static readonly JwtOptions TestJwtOptions = new()
@@ -571,6 +573,8 @@ public class AdminOidcClientTests : IDisposable
         await BootstrapAppSeeder.SeedBootstrapAppsAsync(
             configuration,
             _dbContext,
+            _auditServiceMock.Object,
+            _passwordHasher,
             NullLogger.Instance,
             isDevelopment: false);
 
@@ -683,6 +687,8 @@ public class AdminOidcClientTests : IDisposable
             await BootstrapAppSeeder.SeedBootstrapAppsAsync(
                 configuration,
                 _dbContext,
+                _auditServiceMock.Object,
+                _passwordHasher,
                 NullLogger.Instance,
                 isDevelopment: false);
             _dbContext.ChangeTracker.Clear();
