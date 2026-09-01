@@ -33,4 +33,25 @@ public static class OAuthErrorCodes
 
     /// <summary>The service is temporarily unable to handle the request.</summary>
     public const string TemporarilyUnavailable = "temporarily_unavailable";
+
+    /// <summary>
+    /// The resource owner or authorization server denied the request (RFC 6749 §4.1.2.1). The
+    /// authorization endpoint uses it for an explicit login cancellation.
+    /// </summary>
+    public const string AccessDenied = "access_denied";
+
+    /// <summary>
+    /// The authorization server does not support obtaining an authorization code using this
+    /// response type (RFC 6749 §4.1.2.1).
+    /// </summary>
+    public const string UnsupportedResponseType = "unsupported_response_type";
+
+    /// <summary>The authorization server does not support the OIDC Core <c>request</c> parameter.</summary>
+    public const string RequestNotSupported = "request_not_supported";
+
+    /// <summary>The authorization server does not support the OIDC Core <c>request_uri</c> parameter.</summary>
+    public const string RequestUriNotSupported = "request_uri_not_supported";
+
+    /// <summary>The authorization server does not support the OIDC Core <c>registration</c> parameter.</summary>
+    public const string RegistrationNotSupported = "registration_not_supported";
 }
