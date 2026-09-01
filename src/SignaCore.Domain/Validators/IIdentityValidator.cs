@@ -16,7 +16,10 @@ public class ValidationRequest
     public string? Password { get; set; }
     public string? Phone { get; set; }
 
-    /// <summary>短信验证码或微信 code，按 <see cref="GrantType"/> 解释。</summary>
+    /// <summary>
+    /// The SMS verification code or the WeChat code, interpreted according to
+    /// <see cref="GrantType"/>.
+    /// </summary>
     public string? Code { get; set; }
 
     public string? RefreshToken { get; set; }
@@ -28,17 +31,21 @@ public class ValidationRequest
 public class ValidationResult
 {
     /// <summary>
-    /// 校验是否通过。
+    /// Whether validation passed.
     /// <para>
-    /// 三条 <see cref="MemberNotNullWhenAttribute"/> 把工厂方法的签名保证交给编译器：
-    /// <see cref="Success"/> 的 <c>account</c> / <c>authMethod</c> 与 <see cref="Failure"/>
-    /// 的 <c>message</c> 都是非空参数，而实例只能由这两个方法产生（属性都是 private set），
-    /// 所以成功分支里 <see cref="Account"/> / <see cref="AuthMethod"/> 必然非 null，
-    /// 失败分支里 <see cref="ErrorMessage"/> 必然非 null。
+    /// The three <see cref="MemberNotNullWhenAttribute"/> annotations hand the guarantees in the
+    /// factory method signatures to the compiler: <c>account</c> / <c>authMethod</c> on
+    /// <see cref="Success"/> and <c>message</c> on <see cref="Failure"/> are all non-nullable
+    /// parameters, and an instance can only be produced by those two methods (every property is
+    /// private set). So <see cref="Account"/> and <see cref="AuthMethod"/> are necessarily non-null
+    /// in a success branch, and <see cref="ErrorMessage"/> is necessarily non-null in a failure
+    /// branch.
     /// </para>
     /// <para>
-    /// 与 <see cref="Services.GatewayAuthResult"/> 同一套做法：不变量写进类型，调用点就不必
-    /// 各自 <c>!</c> 或 <c>?? "兜底文案"</c>——那样迟早会漏，而漏掉的那处就成了 nullable 警告。
+    /// The same approach as <see cref="Services.GatewayAuthResult"/>: with the invariant written
+    /// into the type, no call site has to reach for <c>!</c> or <c>?? "some fallback text"</c> of
+    /// its own — sooner or later one of them is forgotten, and the forgotten one becomes a nullable
+    /// warning.
     /// </para>
     /// </summary>
     [MemberNotNullWhen(false, nameof(ErrorMessage))]
@@ -52,7 +59,9 @@ public class ValidationResult
 
     public string? AuthMethod { get; private set; }
 
-    /// <summary>展示名，允许为 null（<see cref="Success"/> 的可选参数）。</summary>
+    /// <summary>
+    /// The display name; null is allowed, as it is an optional parameter of <see cref="Success"/>.
+    /// </summary>
     public string? DisplayName { get; private set; }
 
     public Guid? LdapCredentialId { get; private set; }
@@ -62,22 +71,29 @@ public class ValidationResult
     public Guid? WechatUserLoginId { get; private set; }
 
     /// <summary>
-    /// OAuth 2.0 错误码（RFC 6749 §5.2）。<c>/api/auth/token</c> 不用它——那条路的对外契约是
-    /// HTTP 200 + 文案；<c>/oauth2/token</c> 用它决定 <c>error</c> 字段。默认
-    /// <see cref="OAuthErrorCodes.InvalidGrant"/>：凭据类失败是绝大多数，只有"参数缺失"和
-    /// "该应用未开通此登录方式"需要在调用点显式给别的码。
+    /// The OAuth 2.0 error code (RFC 6749 §5.2). <c>/api/auth/token</c> does not use it — the
+    /// outward contract of that path is HTTP 200 plus message text; <c>/oauth2/token</c> uses it to
+    /// decide the <c>error</c> field. It defaults to
+    /// <see cref="OAuthErrorCodes.InvalidGrant"/> because credential failures are the vast majority;
+    /// only "a parameter is missing" and "this application has not enabled this login method" need
+    /// a different code stated explicitly at the call site.
     /// </summary>
     public string ErrorCode { get; private set; } = OAuthErrorCodes.InvalidGrant;
 
     /// <summary>
-    /// 该次 refresh 是跨应用换票：presented token 属于 <see cref="SourceAppId"/>，由信任边放行。
-    /// 签发路径据此改为"只签发不轮换"——presented token 是别的应用的会话凭据，在这里吊销它
-    /// 等于顺手结束了那边的登录。见 docs/adr/0003-cross-application-refresh-grant.md。
+    /// This refresh is a cross-application exchange: the presented token belongs to
+    /// <see cref="SourceAppId"/> and is admitted by a trust edge. The issuance path uses this to
+    /// issue without rotating — the presented token is another application's session credential, and
+    /// revoking it here would end that sign-in along the way. See
+    /// docs/adr/0003-cross-application-refresh-grant.md.
     /// </summary>
     [MemberNotNullWhen(true, nameof(SourceAppId))]
     public bool IsCrossApplicationExchange { get; private set; }
 
-    /// <summary>被换的 refresh token 所属的 AppId；非跨应用换票时为 null。</summary>
+    /// <summary>
+    /// The AppId the exchanged refresh token belongs to; null when this is not a cross-application
+    /// exchange.
+    /// </summary>
     public string? SourceAppId { get; private set; }
 
     public static ValidationResult Success(
@@ -105,9 +121,11 @@ public class ValidationResult
     };
 
     /// <summary>
-    /// 把一次成功的 refresh 校验标记为跨应用换票。只在 <see cref="RefreshTokenValidator"/> 里紧跟
-    /// <see cref="Success"/> 调用——写成实例方法而不是再往 Success 上加两个可选参数，是因为这条信息
-    /// 只有一个 grant type 用得上，塞进公共工厂签名会让其余四个调用点都要跳过它。
+    /// Marks a successful refresh validation as a cross-application exchange. It is only called in
+    /// <see cref="RefreshTokenValidator"/>, immediately after <see cref="Success"/>. It is an
+    /// instance method rather than two more optional parameters on Success because only one grant
+    /// type has any use for this information, and putting it into the shared factory signature would
+    /// force the other four call sites to skip past it.
     /// </summary>
     public ValidationResult AsCrossApplicationExchange(string sourceAppId)
     {

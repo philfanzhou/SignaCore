@@ -69,7 +69,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
-    /// 发现文档挂在 OIDC 与 RFC 8414 两个标准路径上，且两处返回同一份内容。
+    /// The discovery document is served from both the OIDC and the RFC 8414 standard paths, and both
+    /// return the same content.
     /// </summary>
     [Theory]
     [InlineData("/.well-known/openid-configuration")]
@@ -94,8 +95,9 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         Assert.Contains(IdentityConstants.GrantTypePassword, grantTypes);
         Assert.Contains(IdentityConstants.GrantTypeRefreshToken, grantTypes);
 
-        // 广播的每个 grant 名字都必须被 token 端点真正认识：任何一个换回
-        // unsupported_grant_type，说明发现文档和端点已经对不上了。
+        // Every advertised grant name has to be one the token endpoint genuinely knows: if any of
+        // them comes back as unsupported_grant_type, the discovery document and the endpoint have
+        // already drifted apart.
         using var oauth = CreateOAuthClient();
         foreach (var grantType in grantTypes)
         {
@@ -118,8 +120,9 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
-    /// 发现文档的 issuer 必须与真实签发 token 的 iss 完全一致，否则任何按标准校验
-    /// issuer 的客户端都会拒掉本服务签发的 token。
+    /// The issuer in the discovery document has to match the iss of an actually issued token exactly;
+    /// otherwise any client that validates the issuer per the standard rejects the tokens this
+    /// service issues.
     /// </summary>
     [Fact]
     public async Task DiscoveryIssuer_MatchesTheIssuerClaimOfAnIssuedToken()
@@ -152,9 +155,10 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
-    /// 锁定对外 HTTP 路由清单。/api/auth 下四个端点原本在同一个 AuthController 上，
-    /// 后来按职责拆成四个 controller——路由必须一个不多、一个不少、也不能重复注册
-    /// （重复注册在 ASP.NET Core 里要到实际请求时才会抛 AmbiguousMatchException）。
+    /// Pins the outward HTTP route list. The four endpoints under /api/auth used to live on a single
+    /// AuthController and were later split by responsibility into four controllers — the routes have
+    /// to be neither more nor fewer, and none may be registered twice (in ASP.NET Core a duplicate
+    /// registration only throws AmbiguousMatchException once a request actually arrives).
     /// </summary>
     [Theory]
     [InlineData("POST", "api/auth/token")]
@@ -185,11 +189,14 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
-    /// 管理台 SPA 分支是终止分支：被它接走的请求到不了 MapControllers()。
+    /// The administration console SPA branch is a terminal branch: a request it takes never reaches
+    /// MapControllers().
     /// <para>
-    /// 这里遍历**真实注册的每一条路由**，只用前缀名单这道防线去判（不设置 endpoint），
-    /// 断言没有任何一条会被 SPA 吞掉。当初漏加 <c>/oauth2</c> 时这条会直接挂——
-    /// 而按方法逐个写的用例只能覆盖作者当时想到的路径。
+    /// This walks <b>every route that is actually registered</b> and judges each one using only the
+    /// prefix list line of defence, without setting an endpoint, asserting that none of them can be
+    /// swallowed by the SPA. Back when <c>/oauth2</c> was missing from that list, this test would
+    /// have failed outright — whereas tests written out one method at a time only cover the paths
+    /// their author happened to think of.
     /// </para>
     /// </summary>
     [Fact]
@@ -202,7 +209,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
             .Select(endpoint => endpoint.RoutePattern.RawText)
             .Where(template => !string.IsNullOrWhiteSpace(template))
             .Select(template => "/" + template!.TrimStart('/'))
-            // 路由参数换成占位值，得到一条可用于前缀判断的具体路径。
+            // Route parameters are replaced with a placeholder to get a concrete path the prefix
+            // check can be applied to.
             .Select(path => System.Text.RegularExpressions.Regex.Replace(path, @"\{[^}]*\}", "x"))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -237,7 +245,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         var response = await http.PostAsJsonAsync("/api/auth/token", new { grantType = "no_such_grant" },
             cancellationToken: TestContext.Current.CancellationToken);
 
-        // 失败也返回 200 + Success=false 是对外契约，见 docs/modules/Auth/GetToken/06-CONVENTIONS.md
+        // Returning 200 with Success=false on failure is the outward contract; see
+        // docs/modules/Auth/GetToken/06-CONVENTIONS.md
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("unsupported_grant_type", body);

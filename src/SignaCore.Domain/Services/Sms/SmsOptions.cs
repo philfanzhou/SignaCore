@@ -20,10 +20,13 @@ public class SmsOptions
     public string? BypassCode { get; set; }
 
     /// <summary>
-    /// 允许使用 <see cref="BypassCode"/> 的手机号白名单。
-    /// 空列表 = 绕过整体禁用，即使 <see cref="BypassCode"/> 已配置。
-    /// 通过 Sms:BypassPhones（JSON 数组或逗号分隔字符串）或 SMS_BYPASS_PHONES 环境变量配置。
-    /// 号码大小写不敏感规则不适用，按原样 Ordinal 比对（仅去首尾空白）。
+    /// The allow-list of phone numbers that may use <see cref="BypassCode"/>.
+    /// An empty list means the bypass is disabled entirely, even when <see cref="BypassCode"/> is
+    /// configured.
+    /// Set via Sms:BypassPhones (a JSON array or a comma-separated string) or the SMS_BYPASS_PHONES
+    /// environment variable.
+    /// Case-insensitive rules do not apply to phone numbers: they are compared as written, using
+    /// Ordinal comparison, with leading and trailing whitespace removed.
     /// </summary>
     public IReadOnlyList<string> BypassPhones { get; set; } = Array.Empty<string>();
 

@@ -1,10 +1,12 @@
 namespace SignaCore.Host.Models;
 
-// 管理控制台、业务网关、终端用户三个调用面共用的通用响应体。
-// 不带 Admin 前缀是刻意的——改这里会同时影响 /api/admin、/api/gateway、/api/profile。
+// The shared response bodies of all three call surfaces: the administration console, the business
+// gateway, and end users.
+// The absence of an Admin prefix is deliberate — changing anything here affects /api/admin,
+// /api/gateway and /api/profile at once.
 
-/// <summary>4xx 响应体。</summary>
+/// <summary>The body of a 4xx response.</summary>
 public sealed record ErrorResponse(string Message);
 
-/// <summary>无返回值的写操作的成功响应体。</summary>
+/// <summary>The success body of a write operation that returns no value.</summary>
 public sealed record OperationResponse(bool Success, string Message);

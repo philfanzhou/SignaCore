@@ -9,12 +9,13 @@ using SignaCore.Host.Security;
 namespace SignaCore.Host.Controllers;
 
 /// <summary>
-/// Gateway API — 供内部微服务通过 AppId/AppSecret 凭证调用。
-/// 安全模型：
-///   - 本接口仅限 Docker 内部网络或受信任的内网环境调用；
-///   - AppSecret 通过 HTTP 请求头传递，生产环境必须启用 HTTPS（或 TLS 终结于反向代理层），
-///     以防止网络嗅探导致凭证泄露；
-///   - 请求日志中间件已对 X-Admin-AppSecret 头做脱敏处理，确保该值不会出现在结构化日志中。
+/// Gateway API — called by internal microservices with AppId/AppSecret credentials.
+/// Security model:
+///   - this API is only for calls from the Docker internal network or a trusted internal network;
+///   - the AppSecret travels in an HTTP request header, so production must enable HTTPS (or
+///     terminate TLS at the reverse proxy) to keep network sniffing from leaking the credential;
+///   - the request logging middleware already redacts the X-Admin-AppSecret header, so that value
+///     never appears in the structured logs.
 /// </summary>
 [Route("api/gateway")]
 [ApiController]
