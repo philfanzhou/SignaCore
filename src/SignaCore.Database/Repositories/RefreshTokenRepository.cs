@@ -79,6 +79,26 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     {
         var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
         replacement.TokenValue = RefreshTokenDigest.EnsureDigest(replacement.TokenValue);
+
+        // Token issuance owns a wider transaction that also contains the account update and login
+        // history row. In that path this repository stages the replacement and leaves the only
+        // SaveChanges/commit to the caller; the conditional update is protected by that ambient
+        // transaction. Standalone callers retain the self-contained transaction below.
+        if (_dbContext.Database.CurrentTransaction is not null)
+        {
+            var affectedRows = await _dbContext.RefreshTokens
+                .Where(token => token.TokenValue == tokenDigest && !token.IsRevoked)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(token => token.IsRevoked, true));
+            if (affectedRows != 1)
+            {
+                return false;
+            }
+
+            _dbContext.RefreshTokens.Add(replacement);
+            return true;
+        }
+
         var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
         return await executionStrategy.ExecuteAsync(async () =>
         {

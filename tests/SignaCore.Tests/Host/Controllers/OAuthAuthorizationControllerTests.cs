@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SignaCore.Database;
+using SignaCore.Database.Repositories;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Host;
@@ -68,6 +70,51 @@ public class OAuthAuthorizationControllerTests
         Assert.Contains("0123456789abcdef0123456789abcdef", entry, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task RedirectRejection_StagesExactAuditFieldsAndExplicitlyCommits()
+    {
+        var applicationId = Guid.NewGuid();
+        var validator = new Mock<IOidcAuthorizationRequestValidator>();
+        validator.Setup(service => service.ValidateAsync(
+                It.IsAny<OidcAuthorizationParameters>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OidcAuthorizationValidationResult.RedirectRejection(
+                "client-1",
+                applicationId,
+                "https://client.example/callback",
+                "invalid_request",
+                "The request is invalid.",
+                null));
+        var audit = new Mock<IAuditService>();
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+        var controller = new OAuthAuthorizationController(
+            validator.Object,
+            audit.Object,
+            unitOfWork.Object,
+            AuthTestDoubles.AuthMetrics(),
+            new JwtOptions { Issuer = "https://issuer.example" },
+            NullLogger<OAuthAuthorizationController>.Instance).WithHttpContext();
+        controller.HttpContext.Items[CorrelationIdMiddleware.HttpContextItemsKey] = "correlation-148";
+
+        var result = await controller.Authorize(TestContext.Current.CancellationToken);
+
+        Assert.IsType<RedirectResult>(result);
+        audit.Verify(service => service.RecordActionAsync(
+            "oidc.authorize.validated",
+            "OidcAuthorizationRequest",
+            applicationId.ToString("D"),
+            null,
+            null,
+            "invalid_request",
+            "127.0.0.1",
+            "correlation-148",
+            null,
+            null), Times.Once);
+        unitOfWork.Verify(
+            value => value.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     private static OAuthAuthorizationController CreateController(
         OidcAuthorizationValidationResult result,
         ILogger<OAuthAuthorizationController> logger,
@@ -83,6 +130,7 @@ public class OAuthAuthorizationControllerTests
         var controller = new OAuthAuthorizationController(
             validator.Object,
             new Mock<IAuditService>().Object,
+            new Mock<IUnitOfWork>().Object,
             AuthTestDoubles.AuthMetrics(),
             new JwtOptions(),
             logger);

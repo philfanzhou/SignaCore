@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using SignaCore.Database.Entity;
 using SignaCore.Database;
+using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Services.Sms;
@@ -24,17 +25,20 @@ public class SmsCodeController : ControllerBase
     private readonly IOtpService _otpService;
     private readonly ISmsAdmissionService _admissionService;
     private readonly IAuditService _auditService;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SmsCodeController> _logger;
 
     public SmsCodeController(
         IOtpService otpService,
         ISmsAdmissionService admissionService,
         IAuditService auditService,
+        IUnitOfWork unitOfWork,
         ILogger<SmsCodeController> logger)
     {
         _otpService = otpService;
         _admissionService = admissionService;
         _auditService = auditService;
+        _unitOfWork = unitOfWork;
         _logger = logger;
     }
 
@@ -87,6 +91,7 @@ public class SmsCodeController : ControllerBase
 
             await _auditService.RecordLoginAsync(null, phone, IdentityConstants.GrantTypeSms, "sms_code_sent",
                 HttpContext.GetClientIp(), HttpContext.GetUserAgent(), null, appId, HttpContext.GetCorrelationId());
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             return Ok(new SmsCodeResponse { Success = true, Message = "Verification code sent" });
         }

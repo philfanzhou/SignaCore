@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -19,7 +21,7 @@ using Xunit;
 
 namespace SignaCore.Tests.Host.Controllers;
 
-public class TokenControllerTests
+public class TokenControllerTests : IDisposable
 {
     private readonly Mock<IKeyManager> _keyManagerMock = AuthTestDoubles.KeyManager();
     private readonly Mock<ITokenService> _tokenServiceMock = AuthTestDoubles.TokenService();
@@ -28,7 +30,28 @@ public class TokenControllerTests
     private readonly Mock<IAuditService> _auditServiceMock = AuthTestDoubles.AuditService();
     private readonly Mock<IAccountLoginInfoService> _accountLoginInfoServiceMock = AuthTestDoubles.AccountLoginInfoService();
     private readonly Mock<IAccountRepository> _accountRepositoryMock = new();
+    private readonly Mock<IUnitOfWork> _unitOfWorkMock = new();
     private readonly ClaimsResolver _claimsResolver = new(NullLogger<ClaimsResolver>.Instance);
+    private readonly SqliteConnection _connection;
+    private readonly IdentityDbContext _dbContext;
+
+    public TokenControllerTests()
+    {
+        _connection = new SqliteConnection("Data Source=:memory:");
+        _connection.Open();
+        _dbContext = new IdentityDbContext(
+            new DbContextOptionsBuilder<IdentityDbContext>().UseSqlite(_connection).Options);
+        _dbContext.Database.EnsureCreated();
+        _unitOfWorkMock
+            .Setup(unitOfWork => unitOfWork.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+    }
+
+    public void Dispose()
+    {
+        _dbContext.Dispose();
+        _connection.Dispose();
+    }
 
     private readonly JwtOptions _jwtOptions = new()
     {
@@ -85,6 +108,8 @@ public class TokenControllerTests
             _auditServiceMock.Object,
             _accountLoginInfoServiceMock.Object,
             _accountRepositoryMock.Object,
+            _unitOfWorkMock.Object,
+            _dbContext,
             adminIdentityOptions,
             NullLogger<TokenIssuanceService>.Instance);
 
@@ -205,6 +230,9 @@ public class TokenControllerTests
                 It.IsAny<string?>(),
                 It.IsAny<Guid?>()),
             Times.Once);
+        _unitOfWorkMock.Verify(
+            unitOfWork => unitOfWork.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     #endregion
@@ -247,6 +275,9 @@ public class TokenControllerTests
             null, "unknown", "sms", "login_failure",
             It.IsAny<string?>(), It.IsAny<string?>(), "invalid code",
             It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
+        _unitOfWorkMock.Verify(
+            unitOfWork => unitOfWork.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

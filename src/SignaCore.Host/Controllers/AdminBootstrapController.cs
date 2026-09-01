@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SignaCore.Database;
+using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Http;
@@ -101,6 +102,7 @@ public sealed class AdminBootstrapController : ControllerBase
     public async Task<ActionResult<BootstrapSaveResponse>> UpdateAsync(
         [FromBody] UpdateBootstrapRequest request,
         [FromServices] IAuditService auditService,
+        [FromServices] IUnitOfWork unitOfWork,
         CancellationToken cancellationToken)
     {
         if (_bootstrap is null || _service is null)
@@ -180,6 +182,7 @@ public sealed class AdminBootstrapController : ControllerBase
             $"Bootstrap database target changed to {result.Inspection?.Endpoint} " +
             $"({request.Database.Provider}) on this instance.",
             HttpContext.GetClientIp());
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         ScheduleRestart();
 

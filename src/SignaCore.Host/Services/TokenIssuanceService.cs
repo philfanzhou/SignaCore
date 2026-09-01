@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
@@ -34,6 +35,8 @@ public sealed class TokenIssuanceService
     private readonly IAuditService _auditService;
     private readonly IAccountLoginInfoService _accountLoginInfoService;
     private readonly IAccountRepository _accountRepository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IdentityDbContext _dbContext;
     private readonly AdminIdentityOptions _adminIdentityOptions;
     private readonly ILogger<TokenIssuanceService> _logger;
 
@@ -49,6 +52,8 @@ public sealed class TokenIssuanceService
         IAuditService auditService,
         IAccountLoginInfoService accountLoginInfoService,
         IAccountRepository accountRepository,
+        IUnitOfWork unitOfWork,
+        IdentityDbContext dbContext,
         AdminIdentityOptions adminIdentityOptions,
         ILogger<TokenIssuanceService> logger)
     {
@@ -63,6 +68,8 @@ public sealed class TokenIssuanceService
         _auditService = auditService;
         _accountLoginInfoService = accountLoginInfoService;
         _accountRepository = accountRepository;
+        _unitOfWork = unitOfWork;
+        _dbContext = dbContext;
         _adminIdentityOptions = adminIdentityOptions;
         _logger = logger;
     }
@@ -167,16 +174,49 @@ public sealed class TokenIssuanceService
         var roles = claims.Where(c => c.Type == IdentityConstants.ClaimRole).Select(c => c.Value).ToList();
         var permissions = claims.Where(c => c.Type == IdentityConstants.ClaimPermission).Select(c => c.Value).ToList();
 
-        // Keep the presented refresh token usable until every fallible step required to construct
-        // the response has succeeded. Once rotation commits, no callback, signing, or account update
-        // may strand the client without either the old token or the replacement plaintext.
-        await _accountLoginInfoService.UpdateLoginInfoAsync(
-            account, request.ClientIp, validationResult.AuthMethod ?? request.GrantType);
+        // A normal grant only stages tracked entities, so one SaveChanges atomically persists the
+        // account update, refresh token, and login history. Rotation also performs a conditional
+        // SQL update; its explicit transaction keeps that update in the same commit.
+        var requiresRotation = request.GrantType == IdentityConstants.GrantTypeRefreshToken &&
+            string.IsNullOrWhiteSpace(validationResult.SourceAppId);
+        var originalLoginState = new AccountLoginState(
+            account.LastLoginAt,
+            account.LastLoginIp,
+            account.LastLoginMethod,
+            account.TotalLoginCount);
 
-        var newRefreshToken = await _refreshTokenService.HandleRefreshTokenAsync(
-            request.GrantType, request.RefreshToken, account, appId,
-            validationResult.LdapCredentialId, validationResult.SmsUserLoginId,
-            validationResult.WechatUserLoginId, validationResult.SourceAppId);
+        string? newRefreshToken;
+        if (requiresRotation)
+        {
+            var strategy = _dbContext.Database.CreateExecutionStrategy();
+            newRefreshToken = await strategy.ExecuteAsync(async () =>
+            {
+                _dbContext.ChangeTracker.Clear();
+                originalLoginState.Restore(account);
+                await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+                await StageLoginStateAsync();
+                var replacement = await StageRefreshTokenAsync();
+                if (replacement is null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    _dbContext.ChangeTracker.Clear();
+                    return null;
+                }
+
+                await StageLoginAuditAsync();
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return replacement;
+            });
+        }
+        else
+        {
+            await StageLoginStateAsync();
+            newRefreshToken = await StageRefreshTokenAsync();
+            await StageLoginAuditAsync();
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
 
         if (request.GrantType == IdentityConstants.GrantTypeRefreshToken && newRefreshToken == null)
         {
@@ -204,10 +244,6 @@ public sealed class TokenIssuanceService
             LogValueSanitizer.SanitizeGrantType(request.GrantType),
             LogValueSanitizer.Sanitize(appId));
 
-        await _auditService.RecordLoginAsync(
-            account.Id, displayName ?? account.Id.ToString(), request.GrantType, "login_success",
-            request.ClientIp, request.UserAgent, null, appId, request.CorrelationId);
-
         return TokenIssuanceOutcome.Success(
             accessToken,
             newRefreshToken ?? string.Empty,
@@ -218,6 +254,18 @@ public sealed class TokenIssuanceService
             authMethod,
             roles,
             permissions);
+
+        Task StageLoginStateAsync() => _accountLoginInfoService.UpdateLoginInfoAsync(
+            account, request.ClientIp, validationResult.AuthMethod ?? request.GrantType);
+
+        Task<string?> StageRefreshTokenAsync() => _refreshTokenService.HandleRefreshTokenAsync(
+            request.GrantType, request.RefreshToken, account, appId,
+            validationResult.LdapCredentialId, validationResult.SmsUserLoginId,
+            validationResult.WechatUserLoginId, validationResult.SourceAppId);
+
+        Task StageLoginAuditAsync() => _auditService.RecordLoginAsync(
+            account.Id, displayName ?? account.Id.ToString(), request.GrantType, "login_success",
+            request.ClientIp, request.UserAgent, null, appId, request.CorrelationId);
     }
 
     /// <summary>
@@ -250,8 +298,24 @@ public sealed class TokenIssuanceService
         await _auditService.RecordLoginAsync(
             accountId, auditUsername, request.GrantType, "login_failure",
             request.ClientIp, request.UserAgent, auditFailureReason, request.App.AppId, request.CorrelationId);
+        await _unitOfWork.SaveChangesAsync();
 
         return TokenIssuanceOutcome.Failure(errorCode, responseMessage);
+    }
+
+    private sealed record AccountLoginState(
+        DateTimeOffset? LastLoginAt,
+        string? LastLoginIp,
+        string? LastLoginMethod,
+        int TotalLoginCount)
+    {
+        public void Restore(AccountEntity account)
+        {
+            account.LastLoginAt = LastLoginAt;
+            account.LastLoginIp = LastLoginIp;
+            account.LastLoginMethod = LastLoginMethod;
+            account.TotalLoginCount = TotalLoginCount;
+        }
     }
 
     /// <summary>
