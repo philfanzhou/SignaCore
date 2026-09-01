@@ -856,7 +856,8 @@ public class AdminControllerTests : IDisposable
         SetAdminUser();
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("", null, 0),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
     }
@@ -869,7 +870,8 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://cb.example.com", 3600),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateAppResponse>(ok.Value);
@@ -895,6 +897,7 @@ public class AdminControllerTests : IDisposable
             _appRegRepoMock.Object,
             CallbackValidator,
             _unitOfWorkMock.Object,
+            _auditServiceMock.Object,
             TestContext.Current.CancellationToken);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
@@ -919,7 +922,8 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://cb.example.com", IdentityConstants.CallbackTtlNeverExpire),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateAppResponse>(ok.Value);
@@ -940,7 +944,8 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "", 0),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateAppResponse>(ok.Value);
@@ -963,9 +968,73 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://cb.example.com", -10),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task CreateApp_RecordsAnAuditEntryWithoutTheSecret()
+    {
+        SetAdminUser();
+        AppRegistrationEntity? created = null;
+        _appRegRepoMock.Setup(r => r.AddAsync(It.IsAny<AppRegistrationEntity>()))
+            .Callback<AppRegistrationEntity>(app => created = app)
+            .Returns(Task.CompletedTask);
+        var snapshots = CaptureSnapshots();
+
+        var result = await _controller.CreateApp(
+            new AdminCreateAppRequest("MyApp", "https://cb.example.com", 3600),
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
+
+        var response = Assert.IsType<AdminCreateAppResponse>(
+            Assert.IsType<OkObjectResult>(result).Value);
+        _auditServiceMock.Verify(a => a.RecordActionAsync(
+            "app_created", "AppRegistration", response.AppId,
+            AdminId, AdminName, "Admin created app: MyApp", It.IsAny<string?>(),
+            It.IsAny<string?>(), null, It.IsAny<object?>()), Times.Once);
+
+        // A creation has no before state; the after snapshot carries exactly the fields an operator
+        // reads the registration back by.
+        var (before, after) = Assert.Single(snapshots);
+        Assert.Null(before);
+        var afterJson = Serialize(after);
+        Assert.Contains("\"appId\":\"" + response.AppId + "\"", afterJson);
+        Assert.Contains("\"appName\":\"MyApp\"", afterJson);
+        Assert.Contains("\"callbackUrl\":\"https://cb.example.com\"", afterJson);
+        Assert.Contains("\"callbackExpiresAt\":", afterJson);
+        Assert.Contains("\"isActive\":true", afterJson);
+
+        Assert.NotNull(created);
+        AssertNoSecret(afterJson, response.AppSecret, created!.AppSecretHash);
+    }
+
+    [Fact]
+    public async Task CreateApp_WithEmptyAppName_RecordsNoAudit()
+    {
+        SetAdminUser();
+
+        await _controller.CreateApp(
+            new AdminCreateAppRequest("", null, 0),
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
+
+        VerifyNoAudit();
+    }
+
+    [Fact]
+    public async Task CreateApp_WithInvalidCallback_RecordsNoAudit()
+    {
+        SetAdminUser();
+
+        await _controller.CreateApp(
+            new AdminCreateAppRequest("MyApp", "https://user:secret@cb.example.com/claims", 3600),
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
+
+        VerifyNoAudit();
     }
 
     #endregion
@@ -980,7 +1049,8 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("missing",
             new AdminUpdateCallbackRequest("https://cb", 3600, true),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         Assert.IsType<NotFoundObjectResult>(result);
     }
@@ -1002,7 +1072,8 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("", 0, true),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
@@ -1021,7 +1092,8 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://new", 7200, false),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Equal("https://new", app.CallbackUrl);
@@ -1049,6 +1121,7 @@ public class AdminControllerTests : IDisposable
             _appRegRepoMock.Object,
             CallbackValidator,
             _unitOfWorkMock.Object,
+            _auditServiceMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
@@ -1068,10 +1141,137 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://cb", IdentityConstants.CallbackTtlNeverExpire, true),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, TestContext.Current.CancellationToken);
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Null(app.CallbackExpiresAt);
+    }
+
+    [Fact]
+    public async Task UpdateCallback_RecordsAnAuditEntryShowingTheDeactivation()
+    {
+        SetAdminUser();
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "a",
+            AppName = "MyApp",
+            AppSecretHash = "hashed-secret-value",
+            CallbackUrl = "https://old.example.com/claims",
+            CallbackExpiresAt = DateTimeOffset.FromUnixTimeSeconds(1_700_000_000),
+            IsActive = true
+        };
+        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+        var snapshots = CaptureSnapshots();
+
+        var result = await _controller.UpdateCallback("a",
+            new AdminUpdateCallbackRequest("https://new.example.com/claims", 7200, false),
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(result);
+        _auditServiceMock.Verify(a => a.RecordActionAsync(
+            "app_callback_updated", "AppRegistration", "a",
+            AdminId, AdminName, "Admin updated callback configuration for app: MyApp",
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>()),
+            Times.Once);
+
+        // The deactivation has to be readable from the two snapshots alone.
+        var (before, after) = Assert.Single(snapshots);
+        var beforeJson = Serialize(before);
+        var afterJson = Serialize(after);
+        Assert.Contains("\"callbackUrl\":\"https://old.example.com/claims\"", beforeJson);
+        Assert.Contains("\"callbackExpiresAt\":1700000000", beforeJson);
+        Assert.Contains("\"isActive\":true", beforeJson);
+        Assert.Contains("\"callbackUrl\":\"https://new.example.com/claims\"", afterJson);
+        Assert.Contains("\"callbackExpiresAt\":", afterJson);
+        Assert.Contains("\"isActive\":false", afterJson);
+        AssertNoSecret(beforeJson + afterJson, "plaintext-app-secret", app.AppSecretHash);
+    }
+
+    [Fact]
+    public async Task UpdateCallback_WhenAppNotFound_RecordsNoAudit()
+    {
+        SetAdminUser();
+        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("missing")).ReturnsAsync((AppRegistrationEntity?)null);
+
+        await _controller.UpdateCallback("missing",
+            new AdminUpdateCallbackRequest("https://cb", 3600, true),
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
+
+        VerifyNoAudit();
+    }
+
+    [Fact]
+    public async Task UpdateCallback_WithInvalidCallback_RecordsNoAudit()
+    {
+        SetAdminUser();
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "a",
+            AppName = "A",
+            CallbackUrl = "https://old.example.com/claims",
+            IsActive = true
+        };
+        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+
+        await _controller.UpdateCallback("a",
+            new AdminUpdateCallbackRequest("ftp://cb.example.com/claims", 7200, false),
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
+
+        VerifyNoAudit();
+    }
+
+    /// <summary>
+    /// Captures the before/after snapshot arguments handed to <see cref="IAuditService"/> so that a
+    /// test can assert on what the audit record would contain.
+    /// </summary>
+    private List<(object? Before, object? After)> CaptureSnapshots()
+    {
+        var snapshots = new List<(object? Before, object? After)>();
+        _auditServiceMock.Setup(a => a.RecordActionAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>()))
+            .Callback<string, string, string, Guid?, string?, string?, string?, string?, object?, object?>(
+                (_, _, _, _, _, _, _, _, before, after) => snapshots.Add((before, after)))
+            .Returns(Task.CompletedTask);
+        return snapshots;
+    }
+
+    private void VerifyNoAudit() =>
+        _auditServiceMock.Verify(a => a.RecordActionAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>()), Times.Never);
+
+    /// <summary>
+    /// Serializes a snapshot exactly the way <c>AuditService</c> does, so the assertions run against
+    /// the text that would be persisted.
+    /// </summary>
+    private static string Serialize(object? snapshot) =>
+        snapshot == null
+            ? string.Empty
+            : System.Text.Json.JsonSerializer.Serialize(
+                snapshot,
+                new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                    WriteIndented = false
+                });
+
+    private static void AssertNoSecret(string json, string appSecret, string? appSecretHash)
+    {
+        Assert.DoesNotContain(appSecret, json, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret", json, StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(appSecretHash))
+        {
+            Assert.DoesNotContain(appSecretHash, json, StringComparison.Ordinal);
+        }
     }
 
     #endregion
