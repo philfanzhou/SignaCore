@@ -102,7 +102,7 @@ public class RefreshTokenRepository : IRefreshTokenRepository
             var affectedRows = await _dbContext.RefreshTokens
                 .Where(token => token.TokenValue == tokenDigest && !token.IsRevoked)
                 .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(token => token.IsRevoked, true));
+                    .SetProperty(token => token.IsRevoked, true), cancellationToken);
             if (affectedRows != 1)
             {
                 return false;
