@@ -18,8 +18,9 @@ public class OAuthGrantTypesTests
     }
 
     /// <summary>
-    /// 历史短名不是 /oauth2/token 的合法输入：扩展 grant 必须用 URN（RFC 6749 §4.5）。
-    /// 两套名字并存时，这条守住"标准端点只认标准名"。
+    /// The historical short names are not valid input to /oauth2/token: an extension grant has to
+    /// use a URN (RFC 6749 §4.5). While both sets of names exist, this test holds the line that the
+    /// standard endpoint only accepts standard names.
     /// </summary>
     [Theory]
     [InlineData("sms")]
@@ -42,7 +43,8 @@ public class OAuthGrantTypesTests
     }
 
     /// <summary>
-    /// 还没给 URN 的新 grant 也要出现在发现文档里（用内部名兜底），而不是从元数据里消失。
+    /// A new grant that has not been given a URN yet still has to appear in the discovery document,
+    /// falling back to its internal name, rather than vanish from the metadata.
     /// </summary>
     [Fact]
     public void ToWire_FallsBackToTheInternalNameForAnUnmappedGrant()

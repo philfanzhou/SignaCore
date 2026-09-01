@@ -18,7 +18,10 @@ public class JwtAudienceTests
         TokenExpirationHours = 2
     };
 
-    /// <summary>默认模式保持历史行为：所有应用共用部署级 audience。</summary>
+    /// <summary>
+    /// The default mode keeps the historical behaviour: every application shares the
+    /// deployment-level audience.
+    /// </summary>
     [Fact]
     public void ResolveAudience_SharedMode_UsesTheDeploymentAudience()
     {
@@ -28,7 +31,8 @@ public class JwtAudienceTests
     }
 
     /// <summary>
-    /// 隔离模式下 aud 是应用自己的 AppId——这正是"给 A 签的 token 在 B 也能用"这一问题的修复点。
+    /// In the isolating mode, <c>aud</c> is the application's own AppId — which is exactly the fix
+    /// for "a token minted for A also validates at B".
     /// </summary>
     [Fact]
     public void ResolveAudience_PerApplicationMode_UsesTheApplicationIdentifier()
@@ -54,7 +58,7 @@ public class JwtAudienceTests
         Assert.Equal("SignaCore.Services", Assert.Single(token.Audiences));
     }
 
-    /// <summary>RFC 9068 §2.1：access token 必须带 typ: at+jwt。</summary>
+    /// <summary>RFC 9068 §2.1: an access token has to carry typ: at+jwt.</summary>
     [Fact]
     public void GenerateJwtToken_MarksTheTokenAsAnAccessToken()
     {

@@ -37,7 +37,8 @@ public class TokenControllerTests
         TokenExpirationHours = 2
     };
 
-    // 管理员用户名默认 admin；个别测试通过 AuthTestDoubles.AdminIdentity(...) 覆盖。
+    // The administrator username defaults to admin; individual tests override it through
+    // AuthTestDoubles.AdminIdentity(...).
     private readonly AdminIdentityOptions _adminIdentityOptions = AuthTestDoubles.AdminIdentity();
 
     private TokenController CreateController(IIdentityValidator[] validators) =>
@@ -64,8 +65,9 @@ public class TokenControllerTests
     }
 
     /// <summary>
-    /// 发 token 的流程本体在 <see cref="TokenIssuanceService"/>，controller 只做传输映射。
-    /// 这些用例继续从 controller 打进去：断言的是"经过完整流程后对外看到什么"。
+    /// The token issuance flow itself lives in <see cref="TokenIssuanceService"/>; the controller
+    /// only maps transport. These tests still enter through the controller, because what they assert
+    /// is what an outside caller sees after the complete flow.
     /// </summary>
     private TokenIssuanceService CreateIssuanceService(
         IIdentityValidator[] validators,
@@ -86,7 +88,7 @@ public class TokenControllerTests
             adminIdentityOptions,
             NullLogger<TokenIssuanceService>.Instance);
 
-    // 由 token service 的 mock 回调写入，供断言 claims 使用。
+    // Written by the token service mock's callback, so the tests can assert on the claims.
     private List<Claim>? _capturedClaims;
 
     private void BeginCaptureGeneratedClaims()
@@ -139,7 +141,7 @@ public class TokenControllerTests
         return validatorMock;
     }
 
-    #region 基本流程
+    #region Core flow
 
     [Fact]
     public async Task GetToken_WithUnsupportedGrantType_ReturnsUnsupportedGrantTypeMessage()
@@ -207,15 +209,16 @@ public class TokenControllerTests
 
     #endregion
 
-    #region 失败分支
+    #region Failure branches
 
     [Fact]
     public async Task GetToken_AuditsCorrelationIdProducedByMiddleware()
     {
         var controller = CreateController(new[] { CreateFailingValidator("sms", "invalid code").Object });
 
-        // CorrelationIdMiddleware 在管道最前面把 ID 放进 HttpContext.Items，
-        // 请求头上没有。Controller 必须复用它，而不是自己 Guid.NewGuid()。
+        // CorrelationIdMiddleware puts the id into HttpContext.Items at the very front of the
+        // pipeline; it is not on the request headers. The controller has to reuse it rather than
+        // call Guid.NewGuid() of its own.
         controller.HttpContext.Items[CorrelationIdMiddleware.HttpContextItemsKey] = "corr-from-middleware";
 
         await controller.GetToken(new TokenRequest { GrantType = "sms" }, CancellationToken.None);
@@ -231,7 +234,7 @@ public class TokenControllerTests
     {
         var controller = CreateController(new[] { CreateFailingValidator("sms", "invalid code").Object });
 
-        // Username/Phone/Code 全为 null -> failedUsername 兜底为 "unknown"
+        // Username/Phone/Code are all null, so failedUsername falls back to "unknown".
         var request = new TokenRequest { GrantType = "sms" };
 
         var actionResult = await controller.GetToken(request, CancellationToken.None);
@@ -403,13 +406,14 @@ public class TokenControllerTests
 
     #endregion
 
-    #region Bootstrap admin 角色注入
+    #region Bootstrap admin role injection
 
     [Fact]
     public async Task BootstrapAdminLogin_AlwaysGetsAdminRole()
     {
-        // bootstrap admin "admin" 走 password 登录；回调不返回任何角色
-        // （模拟从某个业务门户登录、而该账号在那边没有任何业务角色的场景）。
+        // The bootstrap admin "admin" signs in through password; the callback returns no roles at
+        // all, simulating a sign-in from a business portal where that account holds no business
+        // role.
         var account = CreateTestAccount();
         var validatorMock = CreatePasswordValidator(account, "admin");
         var controller = CreateController(new[] { validatorMock.Object });
@@ -435,8 +439,8 @@ public class TokenControllerTests
     [Fact]
     public async Task BootstrapAdminLogin_DoesNotDuplicateAdminRole()
     {
-        // bootstrap admin 从 admin_portal 登录，回调已经返回了 ["admin"]。
-        // 注入逻辑必须去重，role=admin 只能出现一次。
+        // The bootstrap admin signs in from admin_portal and the callback has already returned
+        // ["admin"]. The injection has to deduplicate, so role=admin may appear only once.
         var account = CreateTestAccount();
         var validatorMock = CreatePasswordValidator(account, "admin");
 
@@ -452,8 +456,8 @@ public class TokenControllerTests
             AuthTestDoubles.AdminIdentity("admin"),
             callbackMock.Object);
 
-        // 提供一个带回调 URL 的 app，让回调分支真正执行。
-        // AppSecretHash 必须能 BCrypt 校验通过请求里带的 secret。
+        // Supply an app with a callback URL so the callback branch actually runs. AppSecretHash has
+        // to BCrypt-verify against the secret carried on the request.
         var appReg = new AppRegistrationEntity
         {
             CallbackUrl = "http://localhost/api/auth/callback",
@@ -478,7 +482,7 @@ public class TokenControllerTests
     [Fact]
     public async Task NonBootstrapAdminLogin_NoAdminRoleInjected()
     {
-        // 普通用户（非 bootstrap admin）登录，回调不返回角色。
+        // A regular user, not the bootstrap admin, signs in and the callback returns no roles.
         var account = CreateTestAccount();
         var validatorMock = CreatePasswordValidator(account, "regularuser");
         var controller = CreateController(new[] { validatorMock.Object });
@@ -498,7 +502,8 @@ public class TokenControllerTests
     [Fact]
     public async Task BootstrapAdminLogin_EmptyConfig_SkipsInjection()
     {
-        // AdminBootstrap:Username 为空（未配置）时，用户名 "admin" 也不能拿到角色。
+        // When AdminBootstrap:Username is empty, meaning unconfigured, even the username "admin"
+        // must not receive the role.
         var account = CreateTestAccount();
         var validatorMock = CreatePasswordValidator(account, "admin");
         var controller = CreateController(
@@ -520,7 +525,8 @@ public class TokenControllerTests
     [Fact]
     public async Task BootstrapAdminLogin_CaseInsensitive()
     {
-        // 配置的用户名是 "admin"（小写），登录用 "ADMIN"（大写）。
+        // The configured username is "admin" in lower case, while the sign-in uses "ADMIN" in upper
+        // case.
         var account = CreateTestAccount();
         var validatorMock = CreatePasswordValidator(account, "ADMIN");
         var controller = CreateController(
@@ -541,14 +547,15 @@ public class TokenControllerTests
 
     #endregion
 
-    #region refresh 时的角色保持与提权防护
+    #region Role preservation and privilege escalation defence on refresh
 
     [Fact]
     public async Task BootstrapAdminRefresh_PreservesAdminRoleWithoutUsername()
     {
-        // bootstrap admin "admin" 走 refresh_token 刷新，request.Username 不设置。
-        // refresh 校验器返回 bootstrap 账号，仓储按 "admin" 查也返回同一账号。
-        // 必须基于账号 id 比对重新注入 role=admin，而不是靠 request.Username（此处为空）。
+        // The bootstrap admin "admin" refreshes through refresh_token with request.Username unset.
+        // The refresh validator returns the bootstrap account, and looking "admin" up in the
+        // repository returns that same account. role=admin has to be re-injected by comparing
+        // account ids, not by relying on request.Username, which is empty here.
         var bootstrapAccount = CreateTestAccount();
         _accountRepositoryMock
             .Setup(r => r.GetByPasswordCredentialUsernameAsync("admin"))
@@ -562,7 +569,7 @@ public class TokenControllerTests
         {
             GrantType = IdentityConstants.GrantTypeRefreshToken,
             RefreshToken = "existing-refresh-token"
-            // Username 刻意不设置：refresh 流程不携带用户名。
+            // Username is deliberately unset: the refresh flow carries no username.
         };
 
         var actionResult = await controller.GetToken(request, CancellationToken.None);
@@ -579,9 +586,10 @@ public class TokenControllerTests
     [Fact]
     public async Task RegularUserRefresh_WithBootstrapUsername_DoesNotReceiveAdminRole()
     {
-        // 普通（非 bootstrap）账号刷新，请求里恶意带上 Username = "admin" 试图提权。
-        // 仓储按 "admin" 查返回的是另一个 bootstrap 账号。必须不注入 role=admin，
-        // 因为 refresh 流程比对的是已认证的 AccountEntity.Id，不是 request.Username。
+        // A regular, non-bootstrap account refreshes while maliciously carrying Username = "admin"
+        // to escalate. Looking "admin" up in the repository returns a different, bootstrap account.
+        // role=admin must not be injected, because the refresh flow compares the authenticated
+        // AccountEntity.Id rather than request.Username.
         var regularAccount = CreateTestAccount();
         var bootstrapAccount = CreateTestAccount();
         Assert.NotEqual(regularAccount.Id, bootstrapAccount.Id);
@@ -598,7 +606,7 @@ public class TokenControllerTests
         {
             GrantType = IdentityConstants.GrantTypeRefreshToken,
             RefreshToken = "regular-refresh-token",
-            Username = "admin" // 恶意：客户端可控，不能据此授予 admin 角色。
+            Username = "admin" // Malicious: client-controlled, never a basis for the admin role.
         };
 
         var actionResult = await controller.GetToken(request, CancellationToken.None);
@@ -614,8 +622,9 @@ public class TokenControllerTests
     [Fact]
     public async Task BootstrapAccountSmsLogin_DoesNotReceiveBootstrapAdminRole()
     {
-        // SMS 校验器返回的就是 bootstrap 账号本身，仓储按 "admin" 查也返回同一账号。
-        // sms 流程不得触发 bootstrap admin 注入，因此没有 role=admin（回调不返回角色）。
+        // The SMS validator returns the bootstrap account itself, and looking "admin" up in the
+        // repository returns that same account. The sms flow must not trigger the bootstrap admin
+        // injection, so there is no role=admin, the callback returning no roles.
         var bootstrapAccount = CreateTestAccount();
         _accountRepositoryMock
             .Setup(r => r.GetByPasswordCredentialUsernameAsync("admin"))
@@ -649,8 +658,9 @@ public class TokenControllerTests
     [Fact]
     public async Task BootstrapAccountWechatLogin_DoesNotReceiveBootstrapAdminRole()
     {
-        // 微信校验器返回的就是 bootstrap 账号本身，仓储按 "admin" 查也返回同一账号。
-        // wechat_code 流程不得触发 bootstrap admin 注入。
+        // The WeChat validator returns the bootstrap account itself, and looking "admin" up in the
+        // repository returns that same account. The wechat_code flow must not trigger the bootstrap
+        // admin injection.
         var bootstrapAccount = CreateTestAccount();
         _accountRepositoryMock
             .Setup(r => r.GetByPasswordCredentialUsernameAsync("admin"))
