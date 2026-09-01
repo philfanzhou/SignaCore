@@ -6,16 +6,19 @@ namespace SignaCore.Domain.Services;
 public class GatewayAuthResult
 {
     /// <summary>
-    /// 网关校验是否通过。
+    /// Whether gateway validation passed.
     /// <para>
-    /// <see cref="MemberNotNullWhenAttribute"/> 把"失败一定带原因"这条不变量交给编译器：
-    /// <see cref="Failure"/> 的参数是非空 <see cref="string"/>，而实例只可能由下面两个工厂
-    /// 方法产生（属性都是 private set，外部构造不出来），因此 <c>if (!result.IsSuccess)</c>
-    /// 分支里 <see cref="ErrorMessage"/> 必然非 null。
+    /// <see cref="MemberNotNullWhenAttribute"/> hands the invariant "a failure always carries a
+    /// reason" to the compiler: the parameter of <see cref="Failure"/> is a non-nullable
+    /// <see cref="string"/>, and an instance can only be produced by the two factory methods below
+    /// (every property is private set, so nothing outside can construct one). Therefore
+    /// <see cref="ErrorMessage"/> is necessarily non-null inside an
+    /// <c>if (!result.IsSuccess)</c> branch.
     /// </para>
     /// <para>
-    /// 没有这条标注时，每个调用点只能各自 <c>!</c> 或 <c>?? "兜底文案"</c>——同一个不变量
-    /// 一度在四处有四种写法，其中一处漏写就留下了 nullable 警告。
+    /// Without this annotation each call site has to reach for <c>!</c> or
+    /// <c>?? "some fallback text"</c> of its own — one invariant once had four different spellings
+    /// across four places, and the one that was forgotten left a nullable warning behind.
     /// </para>
     /// </summary>
     [MemberNotNullWhen(false, nameof(ErrorMessage))]

@@ -1,6 +1,6 @@
 namespace SignaCore.Host.Models;
 
-// 终端用户自助接口（/api/profile/*，JwtBearer + UserProfile 策略）。
+// The end-user self-service API (/api/profile/*, JwtBearer plus the UserProfile policy).
 
 public sealed record ProfileResponse(
     string UserId,

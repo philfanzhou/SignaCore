@@ -13,8 +13,9 @@ using SignaCore.Host.Security;
 namespace SignaCore.Host.Controllers;
 
 /// <summary>
-/// POST /api/auth/sms-code —— 申请短信验证码。
-/// 与 <see cref="TokenController"/> 一样，AppId/AppSecret 头必须通过统一应用认证。
+/// POST /api/auth/sms-code — requests an SMS verification code.
+/// As with <see cref="TokenController"/>, the AppId/AppSecret headers have to pass the shared
+/// application authentication.
 /// </summary>
 [Route("api/auth")]
 [ApiController]
@@ -38,7 +39,8 @@ public class SmsCodeController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/auth/sms-code — 申请短信验证码。失败同样返回 HTTP 200 + Success=false。
+    /// POST /api/auth/sms-code — requests an SMS verification code. A failure returns HTTP 200 with
+    /// Success=false here too.
     /// </summary>
     [HttpPost("sms-code")]
     [Authorize(Policy = GatewayAppAuthenticationDefaults.Policy)]

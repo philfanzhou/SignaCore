@@ -36,9 +36,10 @@ public class WechatApiClient : IWechatApiClient
             var response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
 
-            // jscode2session 的 Content-Type 是 text/plain，不是 application/json。
-            // ReadFromJsonAsync 会先校验媒体类型并抛 NotSupportedException，所以这里显式
-            // 读字符串再反序列化，不依赖对端把 Content-Type 写对。
+            // The Content-Type of jscode2session is text/plain, not application/json.
+            // ReadFromJsonAsync checks the media type first and throws NotSupportedException, so the
+            // string is read and deserialized explicitly here rather than depending on the other
+            // side getting Content-Type right.
             var payload = await response.Content.ReadAsStringAsync(cancellationToken);
             var result = JsonSerializer.Deserialize<WechatSessionResponse>(payload, SerializerOptions);
             if (result == null)
@@ -64,7 +65,8 @@ public class WechatApiClient : IWechatApiClient
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or OperationCanceledException)
         {
-            // 登录失败要能被上层当成"认证失败"处理，不能变成未处理异常打成 500。
+            // A failed sign-in has to be treatable as an authentication failure by the layer above,
+            // not turn into an unhandled exception reported as a 500.
             _logger.LogError(ex, "WeChat API request failed");
             return null;
         }

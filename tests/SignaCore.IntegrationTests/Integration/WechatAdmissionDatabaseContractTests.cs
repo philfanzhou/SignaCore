@@ -8,10 +8,11 @@ using Xunit;
 namespace SignaCore.IntegrationTests.Integration;
 
 /// <summary>
-/// <see cref="WechatAdmissionService"/> 的行为几乎全部由数据库约束与事务决定
-/// （provider+provider_user_id 唯一索引、app_wechat_accesses 的级联删除），
-/// 所以用真实 SQLite + 生产同款迁移链来守，而不是内存 provider。
-/// 类名的 <c>DatabaseContractTests</c> 后缀与 CI 的过滤保持一致。
+/// Almost everything <see cref="WechatAdmissionService"/> does is decided by database constraints and
+/// transactions — the provider+provider_user_id unique index and the cascade delete on
+/// app_wechat_accesses — so this is pinned against real SQLite on the same migration chain as
+/// production rather than the in-memory provider.
+/// The <c>DatabaseContractTests</c> suffix in the class name matches CI's filter.
 /// </summary>
 public sealed class WechatAdmissionDatabaseContractTests : IDisposable
 {
@@ -121,9 +122,11 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
     }
 
     /// <summary>
-    /// 撤销是管理员状态：既不能靠再次登录（AutoProvision）恢复，也不能靠用户重新绑定恢复。
-    /// 否则 DELETE /api/admin/apps/{appId}/wechat-users/{loginId} 只是个建议——用户换个方式
-    /// 登录进来重绑一次就自己解封了。恢复只能由管理员发起。
+    /// A revocation is administrator state: neither signing in again (AutoProvision) nor rebinding
+    /// as the user restores it. Otherwise
+    /// DELETE /api/admin/apps/{appId}/wechat-users/{loginId} would be a mere suggestion — a user
+    /// could sign in another way, rebind once, and unblock themselves. Only an administrator can
+    /// restore it.
     /// </summary>
     [Fact]
     public async Task RevokedAccess_IsRestoredByNeitherReloginNorRebinding()

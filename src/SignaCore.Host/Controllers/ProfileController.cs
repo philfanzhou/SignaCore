@@ -70,7 +70,7 @@ public class ProfileController : ControllerBase
     }
 
     /// <summary>
-    /// GET /api/profile/wechat — 当前账号的微信绑定状态。
+    /// GET /api/profile/wechat — the WeChat binding state of the current account.
     /// </summary>
     [HttpGet("wechat")]
     public async Task<IActionResult> GetWechatBinding(
@@ -90,9 +90,10 @@ public class ProfileController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/profile/wechat — 把微信 code 换到的 OpenId 绑定到当前已认证账号，
-    /// 并为调用方应用开通微信登录准入。这是 <c>wechat_code</c> 授权在
-    /// <see cref="WechatLoginMode.BindRequired"/> 模式下唯一的绑定入口。
+    /// POST /api/profile/wechat — binds the OpenId obtained from a WeChat code to the currently
+    /// authenticated account and admits WeChat login for the calling application. It is the only
+    /// binding entry point for the <c>wechat_code</c> grant in
+    /// <see cref="WechatLoginMode.BindRequired"/> mode.
     /// </summary>
     [HttpPost("wechat")]
     public async Task<IActionResult> BindWechat(
@@ -114,7 +115,8 @@ public class ProfileController : ControllerBase
             return BadRequest(new ErrorResponse("WeChat code cannot be empty."));
         }
 
-        // 绑定的准入范围是"签发这张 token 的应用"，不是全局：与登录时的 App 作用域保持一致。
+        // The admission granted by a binding is scoped to the application that issued this token,
+        // not global: the same App scope that applies at sign-in.
         var appId = User.FindFirstValue(IdentityConstants.ClaimClientId);
         var app = string.IsNullOrWhiteSpace(appId)
             ? null
@@ -144,7 +146,7 @@ public class ProfileController : ControllerBase
                     Conflict(new ErrorResponse("This WeChat identity is already bound to another account.")),
                 WechatBindOutcome.AccountAlreadyBound =>
                     Conflict(new ErrorResponse("This account is already bound to a different WeChat identity.")),
-                // 撤销是管理员状态，用户重新绑定不能把它清掉。
+                // A revocation is administrator state; a user rebinding must not clear it.
                 WechatBindOutcome.AccessRevoked =>
                     StatusCode(StatusCodes.Status403Forbidden,
                         new ErrorResponse("WeChat access for this application has been revoked by an administrator.")),
@@ -161,8 +163,9 @@ public class ProfileController : ControllerBase
     }
 
     /// <summary>
-    /// DELETE /api/profile/wechat — 解绑。绑定行被删除后，依赖它的应用准入随之级联删除，
-    /// 由该身份签发的 refresh token 在下一次刷新时失效。
+    /// DELETE /api/profile/wechat — unbinds. Once the binding row is deleted, the application
+    /// admissions that depend on it cascade away with it, and refresh tokens issued for that
+    /// identity stop working at their next refresh.
     /// </summary>
     [HttpDelete("wechat")]
     public async Task<IActionResult> UnbindWechat(

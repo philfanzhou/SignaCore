@@ -18,9 +18,9 @@ using Xunit;
 namespace SignaCore.Tests.Host.Controllers;
 
 /// <summary>
-/// /api/auth/* 四个 controller 的测试共用的替身工厂。
-/// 原先这些都长在 AuthControllerTests 里，controller 拆开后提到这里，
-/// 每个测试类只装配自己那几个依赖。
+/// The shared test double factory for the four /api/auth/* controllers.
+/// These used to live inside AuthControllerTests; once the controller was split apart they were
+/// lifted here, so each test class assembles only the dependencies it needs.
 /// </summary>
 internal static class AuthTestDoubles
 {
@@ -93,11 +93,14 @@ internal static class AuthTestDoubles
     public static GatewayValidationService GatewayValidator(Mock<IAppRegistrationRepository> appRegRepoMock) =>
         new(appRegRepoMock.Object, NullLogger<GatewayValidationService>.Instance);
 
-    /// <summary>管理员身份配置，默认用户名 admin；个别测试可通过 username 覆盖。</summary>
+    /// <summary>
+    /// The administrator identity configuration, with the username defaulting to admin; individual
+    /// tests override it through the username parameter.
+    /// </summary>
     public static AdminIdentityOptions AdminIdentity(string username = "admin") =>
         new() { Username = username };
 
-    /// <summary>给 controller 装一个带固定远端 IP 的 HttpContext。</summary>
+    /// <summary>Gives the controller an HttpContext with a fixed remote IP.</summary>
     public static T WithHttpContext<T>(this T controller) where T : ControllerBase
     {
         var httpContext = new DefaultHttpContext();

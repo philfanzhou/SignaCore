@@ -55,8 +55,9 @@ public class WechatApiClientTests
     }
 
     /// <summary>
-    /// jscode2session 的失败响应是 HTTP 200 + **数字** errcode。之前 ErrCode 声明成 string，
-    /// 真实响应会在反序列化时抛 JsonException 被吞掉——这条用例锁定数字形态。
+    /// A jscode2session failure comes back as HTTP 200 with a <b>numeric</b> errcode. ErrCode used to
+    /// be declared as a string, which made a real response throw JsonException during
+    /// deserialization and be swallowed — this test pins the numeric shape.
     /// </summary>
     [Fact]
     public async Task CodeToSessionAsync_NumericErrorCode_ReturnsNull()
@@ -80,7 +81,7 @@ public class WechatApiClientTests
         Assert.Null(result);
     }
 
-    /// <summary>errcode 为 0 是成功语义，不能当失败处理。</summary>
+    /// <summary>An errcode of 0 means success and must not be treated as a failure.</summary>
     [Fact]
     public async Task CodeToSessionAsync_ZeroErrorCode_ReturnsOpenId()
     {
@@ -117,9 +118,10 @@ public class WechatApiClientTests
     }
 
     /// <summary>
-    /// 回归：jscode2session 的 Content-Type 是 text/plain。之前用 ReadFromJsonAsync 会抛
-    /// NotSupportedException（不是 JsonException），逃出 catch 变成未处理异常 → HTTP 500。
-    /// 所有旧用例都用 application/json 的 helper，恰好绕过了真实形态。
+    /// Regression: the Content-Type of jscode2session is text/plain. ReadFromJsonAsync used to throw
+    /// NotSupportedException, which is not a JsonException, so it escaped the catch and became an
+    /// unhandled exception reported as HTTP 500. Every older test used the application/json helper
+    /// and happened to sidestep the real shape.
     /// </summary>
     [Fact]
     public async Task CodeToSessionAsync_WithWechatsTextPlainContentType_ReturnsOpenId()
@@ -149,7 +151,10 @@ public class WechatApiClientTests
         Assert.Null(await client.CodeToSessionAsync("bad-code", TestContext.Current.CancellationToken));
     }
 
-    /// <summary>非 JSON 响应体（网关错误页之类）也必须归为登录失败，而不是抛出去。</summary>
+    /// <summary>
+    /// A non-JSON body, such as a gateway error page, also has to count as a failed sign-in rather
+    /// than propagate as an exception.
+    /// </summary>
     [Fact]
     public async Task CodeToSessionAsync_WithNonJsonBody_ReturnsNull()
     {
