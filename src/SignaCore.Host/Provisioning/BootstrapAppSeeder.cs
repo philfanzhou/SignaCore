@@ -33,7 +33,8 @@ internal static class BootstrapAppSeeder
         IAuditService auditService,
         IPasswordHasher passwordHasher,
         ILogger logger,
-        bool isDevelopment)
+        bool isDevelopment,
+        CancellationToken cancellationToken = default)
     {
         var filePath = configuration["BootstrapApps:FilePath"] ?? DefaultBootstrapAppsFilePath;
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
@@ -47,13 +48,17 @@ internal static class BootstrapAppSeeder
         BootstrapAppsOptions? bootstrapApps;
         try
         {
-            var json = await File.ReadAllTextAsync(filePath);
+            var json = await File.ReadAllTextAsync(filePath, cancellationToken);
             bootstrapApps = System.Text.Json.JsonSerializer.Deserialize<BootstrapAppsOptions>(
                 json,
                 new System.Text.Json.JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
                 });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception)
         {
@@ -87,7 +92,8 @@ internal static class BootstrapAppSeeder
                     auditService,
                     passwordHasher,
                     logger,
-                    isDevelopment);
+                    isDevelopment,
+                    cancellationToken);
                 switch (result)
                 {
                     case BootstrapAppSeedResult.Created:
@@ -100,6 +106,10 @@ internal static class BootstrapAppSeeder
                         skippedInvalid++;
                         break;
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception exception)
             {
@@ -126,7 +136,8 @@ internal static class BootstrapAppSeeder
         IAuditService auditService,
         IPasswordHasher passwordHasher,
         ILogger logger,
-        bool isDevelopment)
+        bool isDevelopment,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(entry.AppId) || string.IsNullOrWhiteSpace(entry.AppSecret))
         {
@@ -137,7 +148,7 @@ internal static class BootstrapAppSeeder
         var normalizedAppId = IdentityValueNormalizer.Normalize(entry.AppId);
         var alreadyExists = await db.AppRegistrations
             .AsNoTracking()
-            .AnyAsync(app => app.AppIdNormalized == normalizedAppId);
+            .AnyAsync(app => app.AppIdNormalized == normalizedAppId, cancellationToken);
         if (alreadyExists)
         {
             logger.LogInformation(
@@ -197,7 +208,7 @@ internal static class BootstrapAppSeeder
                 CallbackExpiresAt = app.CallbackExpiresAt?.ToUnixTimeSeconds(),
                 app.IsActive
             });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
             "Bootstrap app registration created: AppId={AppId}, AppName={AppName}",

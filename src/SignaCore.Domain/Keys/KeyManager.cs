@@ -25,11 +25,11 @@ public interface IKeyManager
     /// </summary>
     // Default keeps third-party/test implementations of the existing interface source-compatible;
     // the built-in database-backed manager overrides it with multi-instance synchronization.
-    Task RefreshKeysAsync() => Task.CompletedTask;
+    Task RefreshKeysAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-    Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync();
-    Task<bool> NeedsKeyRotationAsync();
-    Task RotateKeyAsync();
+    Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync(CancellationToken cancellationToken = default);
+    Task<bool> NeedsKeyRotationAsync(CancellationToken cancellationToken = default);
+    Task RotateKeyAsync(CancellationToken cancellationToken = default);
     Task InitializationCompleted { get; }
 }
 
@@ -176,9 +176,9 @@ public class KeyManager : IKeyManager
         }
     }
 
-    private async Task RefreshValidationKeysAsync()
+    private async Task RefreshValidationKeysAsync(CancellationToken cancellationToken = default)
     {
-        var keys = await LoadValidKeysAsync();
+        var keys = await LoadValidKeysAsync(cancellationToken);
 
         // Validation only needs public keys. LoadValidKeysAsync returns keys that carry their
         // private half (whether decryption succeeds doubles as the admission test for "does this
@@ -216,10 +216,11 @@ public class KeyManager : IKeyManager
         return new RsaSecurityKey(publicRsa) { KeyId = key.KeyId };
     }
 
-    public async Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync()
+    public async Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync(
+        CancellationToken cancellationToken = default)
     {
-        await _initializationTcs.Task;
-        return await LoadValidKeysAsync();
+        await _initializationTcs.Task.WaitAsync(cancellationToken);
+        return await LoadValidKeysAsync(cancellationToken);
     }
 
     /// <summary>
@@ -227,15 +228,15 @@ public class KeyManager : IKeyManager
     /// burst of requests carrying the same newly-rotated <c>kid</c> from all decrypting and replacing
     /// the same key material concurrently.
     /// </summary>
-    public async Task RefreshKeysAsync()
+    public async Task RefreshKeysAsync(CancellationToken cancellationToken = default)
     {
-        await _initializationTcs.Task;
-        await _refreshLock.WaitAsync();
+        await _initializationTcs.Task.WaitAsync(cancellationToken);
+        await _refreshLock.WaitAsync(cancellationToken);
         try
         {
             using var scope = _scopeFactory.CreateScope();
             var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
-            var activeKey = await keyRepo.GetActiveKeyAsync();
+            var activeKey = await keyRepo.GetActiveKeyAsync(cancellationToken);
 
             if (activeKey is null ||
                 string.Equals(GetCurrentKey().KeyId, activeKey.KeyId, StringComparison.Ordinal))
@@ -247,7 +248,7 @@ public class KeyManager : IKeyManager
             _logger.LogInformation(
                 "Adopted signing key {KeyId} created by another service instance",
                 activeKey.KeyId);
-            await RefreshValidationKeysAsync();
+            await RefreshValidationKeysAsync(cancellationToken);
         }
         finally
         {
@@ -275,11 +276,12 @@ public class KeyManager : IKeyManager
     /// <see cref="ObjectDisposedException"/>.
     /// </para>
     /// </summary>
-    private async Task<IReadOnlyList<RsaSecurityKey>> LoadValidKeysAsync()
+    private async Task<IReadOnlyList<RsaSecurityKey>> LoadValidKeysAsync(
+        CancellationToken cancellationToken = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
-        var keyEntities = await keyRepo.GetValidKeysAsync();
+        var keyEntities = await keyRepo.GetValidKeysAsync(cancellationToken);
 
         var keys = new List<RsaSecurityKey>();
         foreach (var entity in keyEntities)
@@ -314,28 +316,28 @@ public class KeyManager : IKeyManager
     private static bool IsInRotationWindow(SecurityKeyEntity key, DateTimeOffset utcNow) =>
         key.ExpiresAt <= utcNow.AddDays(IdentityConstants.KeyRotationDays / 2.0);
 
-    public async Task<bool> NeedsKeyRotationAsync()
+    public async Task<bool> NeedsKeyRotationAsync(CancellationToken cancellationToken = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
-        var keyEntity = await keyRepo.GetLatestKeyAsync();
+        var keyEntity = await keyRepo.GetLatestKeyAsync(cancellationToken);
 
         if (keyEntity == null) return true;
 
         return IsInRotationWindow(keyEntity, DateTimeOffset.UtcNow);
     }
 
-    public async Task RotateKeyAsync()
+    public async Task RotateKeyAsync(CancellationToken cancellationToken = default)
     {
-        await _initializationTcs.Task;
-        await _refreshLock.WaitAsync();
+        await _initializationTcs.Task.WaitAsync(cancellationToken);
+        await _refreshLock.WaitAsync(cancellationToken);
         try
         {
             using var scope = _scopeFactory.CreateScope();
             var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
             var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
 
-            var existingKey = await keyRepo.GetActiveKeyAsync();
+            var existingKey = await keyRepo.GetActiveKeyAsync(cancellationToken);
 
             if (existingKey != null && !IsInRotationWindow(existingKey, DateTimeOffset.UtcNow))
             {
@@ -350,9 +352,13 @@ public class KeyManager : IKeyManager
             // leave the old row at IsActive=true forever and out of reach of
             // RemoveExpiredInactiveAsync. No SaveChanges here — this is committed together with the
             // insert of the new key below, so there is never a moment with zero active keys.
-            var deactivatedCount = await keyRepo.DeactivateAllActiveAsync();
+            var deactivatedCount = await keyRepo.DeactivateAllActiveAsync(cancellationToken);
 
-            SetCurrentKey(await GenerateAndSaveKeyAsync(keyRepo, unitOfWork, KeyGenerationReason.Rotation));
+            SetCurrentKey(await GenerateAndSaveKeyAsync(
+                keyRepo,
+                unitOfWork,
+                KeyGenerationReason.Rotation,
+                cancellationToken));
 
             // The deactivation only reaches the database in that SaveChanges above, so this log
             // line has to wait until the commit has succeeded: a failed commit must not leave behind
@@ -362,7 +368,7 @@ public class KeyManager : IKeyManager
                 _logger.LogInformation("Deactivated {Count} previously active key(s)", deactivatedCount);
             }
 
-            await RefreshValidationKeysAsync();
+            await RefreshValidationKeysAsync(cancellationToken);
         }
         finally
         {
@@ -370,16 +376,21 @@ public class KeyManager : IKeyManager
         }
     }
 
-    private async Task<RsaSecurityKey> LoadOrCreateKeyAsync()
+    private async Task<RsaSecurityKey> LoadOrCreateKeyAsync(
+        CancellationToken cancellationToken = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
-        var keyEntity = await keyRepo.GetActiveKeyAsync();
+        var keyEntity = await keyRepo.GetActiveKeyAsync(cancellationToken);
 
         if (keyEntity == null)
         {
-            return await GenerateAndSaveKeyAsync(keyRepo, unitOfWork, KeyGenerationReason.Initial);
+            return await GenerateAndSaveKeyAsync(
+                keyRepo,
+                unitOfWork,
+                KeyGenerationReason.Initial,
+                cancellationToken);
         }
 
         try
@@ -404,7 +415,8 @@ public class KeyManager : IKeyManager
     private async Task<RsaSecurityKey> GenerateAndSaveKeyAsync(
         ISecurityKeyRepository keyRepo,
         IUnitOfWork unitOfWork,
-        KeyGenerationReason reason)
+        KeyGenerationReason reason,
+        CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Generating new RSA key pair: Reason={Reason}", reason);
 
@@ -426,8 +438,8 @@ public class KeyManager : IKeyManager
             IsActive = true
         };
 
-        await keyRepo.AddAsync(keyEntity);
-        await unitOfWork.SaveChangesAsync();
+        await keyRepo.AddAsync(keyEntity, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("RSA private key encrypted and saved, KeyId: {KeyId}", keyEntity.KeyId);
 

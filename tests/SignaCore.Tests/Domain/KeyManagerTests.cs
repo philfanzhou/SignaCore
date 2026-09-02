@@ -375,6 +375,46 @@ public class KeyManagerTests : IDisposable
         keyRepoMock.Verify(r => r.AddAsync(It.Is<SecurityKeyEntity>(k => k.IsActive)), Times.AtLeastOnce);
     }
 
+    [Fact]
+    public async Task AsyncOperations_PropagateTheCallerCancellationToken()
+    {
+        SetEnvironmentMasterKey();
+
+        using var cancellationSource = new CancellationTokenSource();
+        var cancellationToken = cancellationSource.Token;
+        var activeKey = CreateTestSecurityKeyEntity(expiresInDays: 1);
+        var keyRepoMock = CreateKeyRepoMock();
+        keyRepoMock.Setup(r => r.GetActiveKeyAsync()).ReturnsAsync(activeKey);
+        keyRepoMock.Setup(r => r.GetValidKeysAsync(cancellationToken)).ReturnsAsync(new[] { activeKey });
+        keyRepoMock.Setup(r => r.GetLatestKeyAsync(cancellationToken)).ReturnsAsync(activeKey);
+        keyRepoMock.Setup(r => r.GetActiveKeyAsync(cancellationToken)).ReturnsAsync(activeKey);
+        keyRepoMock.Setup(r => r.DeactivateAllActiveAsync(cancellationToken)).ReturnsAsync(1);
+        keyRepoMock.Setup(r => r.AddAsync(It.IsAny<SecurityKeyEntity>(), cancellationToken))
+            .Returns(Task.CompletedTask);
+
+        var unitOfWorkMock = new Mock<IUnitOfWork>();
+        unitOfWorkMock.Setup(u => u.SaveChangesAsync(cancellationToken)).ReturnsAsync(1);
+        var keyManager = new KeyManager(
+            CreateMockScopeFactory(keyRepoMock, unitOfWorkMock).Object,
+            CreateProtector(),
+            NullLogger<KeyManager>.Instance);
+        await keyManager.InitializationCompleted;
+
+        await keyManager.GetValidKeysAsync(cancellationToken);
+        await keyManager.RefreshKeysAsync(cancellationToken);
+        Assert.True(await keyManager.NeedsKeyRotationAsync(cancellationToken));
+        await keyManager.RotateKeyAsync(cancellationToken);
+
+        keyRepoMock.Verify(r => r.GetValidKeysAsync(cancellationToken), Times.Exactly(2));
+        keyRepoMock.Verify(r => r.GetLatestKeyAsync(cancellationToken), Times.Once);
+        keyRepoMock.Verify(r => r.GetActiveKeyAsync(cancellationToken), Times.Exactly(2));
+        keyRepoMock.Verify(r => r.DeactivateAllActiveAsync(cancellationToken), Times.Once);
+        keyRepoMock.Verify(
+            r => r.AddAsync(It.IsAny<SecurityKeyEntity>(), cancellationToken),
+            Times.Once);
+        unitOfWorkMock.Verify(u => u.SaveChangesAsync(cancellationToken), Times.Once);
+    }
+
     /// <summary>
     /// Regression: rotation has to trigger <b>before</b> the key expires (SPEC AC-FR-04/05: rotate
     /// once less than half the lifetime remains). The earlier implementation used

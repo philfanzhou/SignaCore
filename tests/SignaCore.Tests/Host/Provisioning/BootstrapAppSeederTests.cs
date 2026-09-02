@@ -262,13 +262,38 @@ public class BootstrapAppSeederTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task CancellationBeforeCommit_IsPropagatedAndDoesNotPersistTheEntry()
+    {
+        using var cancellationSource = new CancellationTokenSource();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => SeedAsync(
+            """
+            {
+              "Apps": [
+                { "appId": "canceled-app", "appSecret": "unused-input", "appName": "Canceled App" }
+              ]
+            }
+            """,
+            new CancelingAuditService(cancellationSource),
+            cancellationSource.Token));
+
+        Assert.Equal(cancellationSource.Token, _dbContext.LastSaveCancellationToken);
+        _dbContext.ChangeTracker.Clear();
+        Assert.Empty(await _dbContext.AppRegistrations.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
     public void Dispose()
     {
         _dbContext.Dispose();
         GC.SuppressFinalize(this);
     }
 
-    private async Task SeedAsync(string json, IAuditService? auditService = null)
+    private async Task SeedAsync(
+        string json,
+        IAuditService? auditService = null,
+        CancellationToken cancellationToken = default)
     {
         var path = Path.Combine(Path.GetTempPath(), $"bootstrap-apps-{Guid.NewGuid():N}.json");
         await File.WriteAllTextAsync(path, json, TestContext.Current.CancellationToken);
@@ -287,7 +312,8 @@ public class BootstrapAppSeederTests : IDisposable
                 auditService ?? _auditService,
                 _passwordHasher,
                 _logger,
-                isDevelopment: false);
+                isDevelopment: false,
+                cancellationToken: cancellationToken);
             _dbContext.ChangeTracker.Clear();
         }
         finally
@@ -304,11 +330,13 @@ public class BootstrapAppSeederTests : IDisposable
         }
 
         public List<SaveBatch> SaveBatches { get; } = [];
+        public CancellationToken LastSaveCancellationToken { get; private set; }
 
         public override Task<int> SaveChangesAsync(
             bool acceptAllChangesOnSuccess,
             CancellationToken cancellationToken = default)
         {
+            LastSaveCancellationToken = cancellationToken;
             SaveBatches.Add(new SaveBatch(
                 ChangeTracker.Entries<AppRegistrationEntity>()
                     .Count(entry => entry.State == EntityState.Added),
@@ -404,6 +432,44 @@ public class BootstrapAppSeederTests : IDisposable
                 correlationId,
                 before,
                 after);
+        }
+    }
+
+    private sealed class CancelingAuditService : IAuditService
+    {
+        private readonly CancellationTokenSource _cancellationSource;
+
+        public CancelingAuditService(CancellationTokenSource cancellationSource)
+        {
+            _cancellationSource = cancellationSource;
+        }
+
+        public Task RecordLoginAsync(
+            Guid? accountId,
+            string username,
+            string authMethod,
+            string eventType,
+            string? clientIp,
+            string? userAgent,
+            string? failureReason = null,
+            string? appId = null,
+            string? correlationId = null) =>
+            Task.CompletedTask;
+
+        public Task RecordActionAsync(
+            string action,
+            string targetType,
+            string targetId,
+            Guid? actorId,
+            string? actorName,
+            string? description,
+            string? clientIp = null,
+            string? correlationId = null,
+            object? before = null,
+            object? after = null)
+        {
+            _cancellationSource.Cancel();
+            return Task.CompletedTask;
         }
     }
 

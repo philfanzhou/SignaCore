@@ -31,6 +31,10 @@ public class CleanupWorker : BackgroundService
             {
                 await CleanupExpiredDataAsync(stoppingToken);
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Cleanup task failed");
@@ -42,6 +46,7 @@ public class CleanupWorker : BackgroundService
 
     private async Task CleanupExpiredDataAsync(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _logger.LogInformation("Starting cleanup of expired data...");
 
         using var scope = _serviceProvider.CreateScope();
@@ -53,48 +58,63 @@ public class CleanupWorker : BackgroundService
         var auditLogRepo = scope.ServiceProvider.GetRequiredService<IAuditLogRepository>();
         var otpRepo = scope.ServiceProvider.GetService<IOtpRepository>();
 
-        var deletedTokens = await refreshTokenRepo.RemoveExpiredAndRevokedAsync();
+        var deletedTokens = await refreshTokenRepo.RemoveExpiredAndRevokedAsync(cancellationToken);
         if (deletedTokens > 0)
         {
             _logger.LogInformation("Deleted {Count} expired/revoked refresh tokens", deletedTokens);
         }
 
-        var deactivatedApps = await appRegRepo.DeactivateExpiredCallbacksAsync(DateTimeOffset.UtcNow);
+        cancellationToken.ThrowIfCancellationRequested();
+        var deactivatedApps = await appRegRepo.DeactivateExpiredCallbacksAsync(
+            DateTimeOffset.UtcNow,
+            cancellationToken);
         if (deactivatedApps > 0)
         {
             _logger.LogInformation("Deactivated {Count} expired app registrations", deactivatedApps);
         }
 
-        await securityKeyRepo.RemoveExpiredInactiveAsync();
+        cancellationToken.ThrowIfCancellationRequested();
+        await securityKeyRepo.RemoveExpiredInactiveAsync(cancellationToken);
 
+        cancellationToken.ThrowIfCancellationRequested();
         var lockoutCleanupCutoff = DateTimeOffset.UtcNow.AddDays(-1);
-        await loginAttemptRepo.RemoveExpiredAsync(lockoutCleanupCutoff);
+        await loginAttemptRepo.RemoveExpiredAsync(lockoutCleanupCutoff, cancellationToken);
 
         if (otpRepo != null)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var now = DateTimeOffset.UtcNow;
-            var deletedOtps = await otpRepo.RemoveInactiveAsync(now.AddDays(-2), now);
+            var deletedOtps = await otpRepo.RemoveInactiveAsync(
+                now.AddDays(-2),
+                now,
+                cancellationToken);
             if (deletedOtps > 0)
                 _logger.LogInformation("Deleted {Count} inactive SMS OTP challenges", deletedOtps);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var loginHistoryCutoff = DateTimeOffset.UtcNow.AddDays(-IdentityConstants.LoginHistoryRetentionDays);
-        var deletedHistories = await loginHistoryRepo.RemoveOlderThanAsync(loginHistoryCutoff);
+        var deletedHistories = await loginHistoryRepo.RemoveOlderThanAsync(
+            loginHistoryCutoff,
+            cancellationToken);
         if (deletedHistories > 0)
         {
             _logger.LogInformation("Deleted {Count} old login history records", deletedHistories);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var auditLogCutoff = DateTimeOffset.UtcNow.AddDays(-IdentityConstants.AuditLogRetentionDays);
-        var deletedLogs = await auditLogRepo.RemoveOlderThanAsync(auditLogCutoff);
+        var deletedLogs = await auditLogRepo.RemoveOlderThanAsync(auditLogCutoff, cancellationToken);
         if (deletedLogs > 0)
         {
             _logger.LogInformation("Deleted {Count} old audit log records", deletedLogs);
         }
 
-        if (await _keyManager.NeedsKeyRotationAsync())
+        cancellationToken.ThrowIfCancellationRequested();
+        if (await _keyManager.NeedsKeyRotationAsync(cancellationToken))
         {
-            await _keyManager.RotateKeyAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+            await _keyManager.RotateKeyAsync(cancellationToken);
         }
 
         _logger.LogInformation("Cleanup task completed");

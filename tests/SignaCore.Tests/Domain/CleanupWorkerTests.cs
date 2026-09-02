@@ -59,6 +59,19 @@ public class CleanupWorkerTests
         return scopeFactoryMock;
     }
 
+    private sealed class TestableCleanupWorker : CleanupWorker
+    {
+        public TestableCleanupWorker(
+            IServiceProvider serviceProvider,
+            IKeyManager keyManager,
+            ILogger<CleanupWorker> logger)
+            : base(serviceProvider, keyManager, logger)
+        {
+        }
+
+        public Task RunAsync(CancellationToken cancellationToken) => ExecuteAsync(cancellationToken);
+    }
+
     private static async Task RunWorkerUntilAsync(
         CleanupWorker worker,
         Func<bool> completed)
@@ -85,21 +98,24 @@ public class CleanupWorkerTests
     public async Task CleanupExpiredDataAsync_RemovesExpiredAndRevokedTokens()
     {
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
-        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync()).ReturnsAsync(5);
+        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(5);
 
         var appRegRepoMock = new Mock<IAppRegistrationRepository>();
-        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>())).ReturnsAsync(0);
+        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var securityKeyRepoMock = new Mock<ISecurityKeyRepository>();
-        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync()).Returns(Task.CompletedTask);
+        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var loginAttemptRepoMock = new Mock<ILoginAttemptRepository>();
-        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(It.IsAny<DateTimeOffset>())).Returns(Task.CompletedTask);
+        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         var serviceProviderMock = CreateMockServiceProvider(refreshTokenRepoMock, appRegRepoMock, securityKeyRepoMock, loginAttemptRepoMock);
         var scopeFactoryMock = CreateMockScopeFactory(serviceProviderMock);
         var keyManagerMock = new Mock<IKeyManager>();
-        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync()).ReturnsAsync(false);
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
@@ -107,28 +123,33 @@ public class CleanupWorkerTests
             worker,
             () => refreshTokenRepoMock.Invocations.Count > 0);
 
-        refreshTokenRepoMock.Verify(r => r.RemoveExpiredAndRevokedAsync(), Times.AtLeastOnce);
+        refreshTokenRepoMock.Verify(
+            r => r.RemoveExpiredAndRevokedAsync(It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
     }
 
     [Fact]
     public async Task CleanupExpiredDataAsync_DeactivatesExpiredAppRegistrations()
     {
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
-        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync()).ReturnsAsync(0);
+        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var appRegRepoMock = new Mock<IAppRegistrationRepository>();
-        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>())).ReturnsAsync(3);
+        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).ReturnsAsync(3);
 
         var securityKeyRepoMock = new Mock<ISecurityKeyRepository>();
-        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync()).Returns(Task.CompletedTask);
+        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var loginAttemptRepoMock = new Mock<ILoginAttemptRepository>();
-        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(It.IsAny<DateTimeOffset>())).Returns(Task.CompletedTask);
+        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         var serviceProviderMock = CreateMockServiceProvider(refreshTokenRepoMock, appRegRepoMock, securityKeyRepoMock, loginAttemptRepoMock);
         var scopeFactoryMock = CreateMockScopeFactory(serviceProviderMock);
         var keyManagerMock = new Mock<IKeyManager>();
-        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync()).ReturnsAsync(false);
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
@@ -136,28 +157,32 @@ public class CleanupWorkerTests
             worker,
             () => appRegRepoMock.Invocations.Count > 0);
 
-        appRegRepoMock.Verify(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>()), Times.AtLeastOnce);
+        appRegRepoMock.Verify(r => r.DeactivateExpiredCallbacksAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [Fact]
     public async Task CleanupExpiredDataAsync_RemovesExpiredInactiveKeys()
     {
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
-        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync()).ReturnsAsync(0);
+        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var appRegRepoMock = new Mock<IAppRegistrationRepository>();
-        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>())).ReturnsAsync(0);
+        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var securityKeyRepoMock = new Mock<ISecurityKeyRepository>();
-        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync()).Returns(Task.CompletedTask);
+        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var loginAttemptRepoMock = new Mock<ILoginAttemptRepository>();
-        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(It.IsAny<DateTimeOffset>())).Returns(Task.CompletedTask);
+        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         var serviceProviderMock = CreateMockServiceProvider(refreshTokenRepoMock, appRegRepoMock, securityKeyRepoMock, loginAttemptRepoMock);
         var scopeFactoryMock = CreateMockScopeFactory(serviceProviderMock);
         var keyManagerMock = new Mock<IKeyManager>();
-        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync()).ReturnsAsync(false);
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
@@ -165,28 +190,33 @@ public class CleanupWorkerTests
             worker,
             () => securityKeyRepoMock.Invocations.Count > 0);
 
-        securityKeyRepoMock.Verify(r => r.RemoveExpiredInactiveAsync(), Times.AtLeastOnce);
+        securityKeyRepoMock.Verify(
+            r => r.RemoveExpiredInactiveAsync(It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
     }
 
     [Fact]
     public async Task CleanupExpiredDataAsync_CleansUpExpiredLoginAttempts()
     {
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
-        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync()).ReturnsAsync(0);
+        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var appRegRepoMock = new Mock<IAppRegistrationRepository>();
-        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>())).ReturnsAsync(0);
+        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var securityKeyRepoMock = new Mock<ISecurityKeyRepository>();
-        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync()).Returns(Task.CompletedTask);
+        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var loginAttemptRepoMock = new Mock<ILoginAttemptRepository>();
-        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(It.IsAny<DateTimeOffset>())).Returns(Task.CompletedTask);
+        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         var serviceProviderMock = CreateMockServiceProvider(refreshTokenRepoMock, appRegRepoMock, securityKeyRepoMock, loginAttemptRepoMock);
         var scopeFactoryMock = CreateMockScopeFactory(serviceProviderMock);
         var keyManagerMock = new Mock<IKeyManager>();
-        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync()).ReturnsAsync(false);
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
@@ -194,29 +224,33 @@ public class CleanupWorkerTests
             worker,
             () => loginAttemptRepoMock.Invocations.Count > 0);
 
-        loginAttemptRepoMock.Verify(r => r.RemoveExpiredAsync(It.IsAny<DateTimeOffset>()), Times.AtLeastOnce);
+        loginAttemptRepoMock.Verify(r => r.RemoveExpiredAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [Fact]
     public async Task CleanupExpiredDataAsync_WhenKeyNeedsRotation_RotatesKey()
     {
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
-        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync()).ReturnsAsync(0);
+        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var appRegRepoMock = new Mock<IAppRegistrationRepository>();
-        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>())).ReturnsAsync(0);
+        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var securityKeyRepoMock = new Mock<ISecurityKeyRepository>();
-        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync()).Returns(Task.CompletedTask);
+        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var loginAttemptRepoMock = new Mock<ILoginAttemptRepository>();
-        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(It.IsAny<DateTimeOffset>())).Returns(Task.CompletedTask);
+        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         var serviceProviderMock = CreateMockServiceProvider(refreshTokenRepoMock, appRegRepoMock, securityKeyRepoMock, loginAttemptRepoMock);
         var scopeFactoryMock = CreateMockScopeFactory(serviceProviderMock);
         var keyManagerMock = new Mock<IKeyManager>();
-        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync()).ReturnsAsync(true);
-        keyManagerMock.Setup(k => k.RotateKeyAsync()).Returns(Task.CompletedTask);
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        keyManagerMock.Setup(k => k.RotateKeyAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
@@ -225,29 +259,34 @@ public class CleanupWorkerTests
             () => keyManagerMock.Invocations.Any(
                 invocation => invocation.Method.Name == nameof(IKeyManager.RotateKeyAsync)));
 
-        keyManagerMock.Verify(k => k.NeedsKeyRotationAsync(), Times.AtLeastOnce);
-        keyManagerMock.Verify(k => k.RotateKeyAsync(), Times.AtLeastOnce);
+        keyManagerMock.Verify(
+            k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+        keyManagerMock.Verify(k => k.RotateKeyAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [Fact]
     public async Task CleanupExpiredDataAsync_WhenKeyDoesNotNeedRotation_DoesNotRotateKey()
     {
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
-        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync()).ReturnsAsync(0);
+        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var appRegRepoMock = new Mock<IAppRegistrationRepository>();
-        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>())).ReturnsAsync(0);
+        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).ReturnsAsync(0);
 
         var securityKeyRepoMock = new Mock<ISecurityKeyRepository>();
-        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync()).Returns(Task.CompletedTask);
+        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         var loginAttemptRepoMock = new Mock<ILoginAttemptRepository>();
-        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(It.IsAny<DateTimeOffset>())).Returns(Task.CompletedTask);
+        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         var serviceProviderMock = CreateMockServiceProvider(refreshTokenRepoMock, appRegRepoMock, securityKeyRepoMock, loginAttemptRepoMock);
         var scopeFactoryMock = CreateMockScopeFactory(serviceProviderMock);
         var keyManagerMock = new Mock<IKeyManager>();
-        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync()).ReturnsAsync(false);
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
 
@@ -256,15 +295,86 @@ public class CleanupWorkerTests
             () => keyManagerMock.Invocations.Any(
                 invocation => invocation.Method.Name == nameof(IKeyManager.NeedsKeyRotationAsync)));
 
-        keyManagerMock.Verify(k => k.NeedsKeyRotationAsync(), Times.AtLeastOnce);
-        keyManagerMock.Verify(k => k.RotateKeyAsync(), Times.Never);
+        keyManagerMock.Verify(
+            k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+        keyManagerMock.Verify(k => k.RotateKeyAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenRepositoryObservesStoppingCancellation_ExitsWithoutStartingLaterWork()
+    {
+        using var stoppingSource = new CancellationTokenSource();
+        var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
+        refreshTokenRepoMock
+            .Setup(r => r.RemoveExpiredAndRevokedAsync(stoppingSource.Token))
+            .Returns<CancellationToken>(token =>
+            {
+                stoppingSource.Cancel();
+                return Task.FromCanceled<int>(token);
+            });
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+        var serviceProviderMock = CreateMockServiceProvider(
+            refreshTokenRepoMock,
+            appRegRepoMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var worker = new TestableCleanupWorker(
+            serviceProviderMock.Object,
+            Mock.Of<IKeyManager>(),
+            NullLogger<CleanupWorker>.Instance);
+
+        await worker.RunAsync(stoppingSource.Token);
+
+        refreshTokenRepoMock.Verify(
+            r => r.RemoveExpiredAndRevokedAsync(stoppingSource.Token),
+            Times.Once);
+        appRegRepoMock.Verify(
+            r => r.DeactivateExpiredCallbacksAsync(
+                It.IsAny<DateTimeOffset>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenCancellationFollowsCommittedBatch_KeepsBatchAndStopsLaterWork()
+    {
+        using var stoppingSource = new CancellationTokenSource();
+        var committedBatchCount = 0;
+        var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
+        refreshTokenRepoMock
+            .Setup(r => r.RemoveExpiredAndRevokedAsync(stoppingSource.Token))
+            .Returns<CancellationToken>(_ =>
+            {
+                committedBatchCount++;
+                stoppingSource.Cancel();
+                return Task.FromResult(1);
+            });
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+        var serviceProviderMock = CreateMockServiceProvider(
+            refreshTokenRepoMock,
+            appRegRepoMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var worker = new TestableCleanupWorker(
+            serviceProviderMock.Object,
+            Mock.Of<IKeyManager>(),
+            NullLogger<CleanupWorker>.Instance);
+
+        await worker.RunAsync(stoppingSource.Token);
+
+        Assert.Equal(1, committedBatchCount);
+        appRegRepoMock.Verify(
+            r => r.DeactivateExpiredCallbacksAsync(
+                It.IsAny<DateTimeOffset>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
     public async Task CleanupExpiredDataAsync_WhenExceptionOccurs_ContinuesRunning()
     {
         var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
-        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync()).ThrowsAsync(new Exception("Test exception"));
+        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("Test exception"));
 
         var serviceProviderMock = CreateMockServiceProvider(refreshTokenRepoMock);
         var scopeFactoryMock = CreateMockScopeFactory(serviceProviderMock);
