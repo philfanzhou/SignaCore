@@ -58,14 +58,18 @@ public class SmsCodeControllerTests
     [Fact]
     public async Task RequestSmsCode_Success_ReturnsSentAndAudits()
     {
+        using var cancellation = new CancellationTokenSource();
         _otpServiceMock.Setup(o => o.GenerateAndSendAsync(
-                It.IsAny<Guid>(), "+8613800138000", "test", It.IsAny<CancellationToken>()))
+                It.IsAny<Guid>(), "+8613800138000", "test", cancellation.Token))
             .ReturnsAsync("123456");
+        _unitOfWorkMock
+            .Setup(unitOfWork => unitOfWork.SaveChangesAsync(cancellation.Token))
+            .ReturnsAsync(2);
         var controller = CreateController();
 
         var request = new SmsCodeRequest { Phone = "13800138000" };
 
-        var actionResult = await controller.RequestSmsCode(request, CancellationToken.None);
+        var actionResult = await controller.RequestSmsCode(request, cancellation.Token);
 
         var ok = AuthTestDoubles.ExtractOk(actionResult);
         var response = Assert.IsType<SmsCodeResponse>(ok.Value!);
@@ -75,7 +79,35 @@ public class SmsCodeControllerTests
             It.IsAny<string?>(), It.IsAny<string?>(), null,
             It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
         _unitOfWorkMock.Verify(
-            unitOfWork => unitOfWork.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            unitOfWork => unitOfWork.SaveChangesAsync(cancellation.Token),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RequestSmsCode_WhenFinalCommitIsCanceled_PropagatesCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        _otpServiceMock.Setup(o => o.GenerateAndSendAsync(
+                It.IsAny<Guid>(), "+8613800138000", "test", cancellation.Token))
+            .ReturnsAsync("123456");
+        _unitOfWorkMock
+            .Setup(unitOfWork => unitOfWork.SaveChangesAsync(cancellation.Token))
+            .ThrowsAsync(new OperationCanceledException(cancellation.Token));
+        var controller = CreateController();
+        cancellation.Cancel();
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            controller.RequestSmsCode(
+                new SmsCodeRequest { Phone = "13800138000" },
+                cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        _auditServiceMock.Verify(a => a.RecordLoginAsync(
+            null, "+8613800138000", "sms", "sms_code_sent",
+            It.IsAny<string?>(), It.IsAny<string?>(), null,
+            It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
+        _unitOfWorkMock.Verify(
+            unitOfWork => unitOfWork.SaveChangesAsync(cancellation.Token),
             Times.Once);
     }
 
@@ -95,6 +127,13 @@ public class SmsCodeControllerTests
         var response = Assert.IsType<SmsCodeResponse>(ok.Value!);
         Assert.False(response.Success);
         Assert.Equal("Too many attempts. Please try again in 590 seconds.", response.Message);
+        _auditServiceMock.Verify(a => a.RecordLoginAsync(
+            It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
+        _unitOfWorkMock.Verify(
+            unitOfWork => unitOfWork.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]

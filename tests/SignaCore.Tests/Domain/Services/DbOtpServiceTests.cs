@@ -41,10 +41,19 @@ public class DbOtpServiceTests
     public async Task Generate_StoresMacAndAppBinding_ThenMarksSent()
     {
         OtpEntity? stored = null;
+        var events = new List<string>();
         _repository.Setup(value => value.GetAsync(_appId, "+8613800138000")).ReturnsAsync((OtpEntity?)null);
         _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
             .Callback<OtpEntity, CancellationToken>((value, _) => stored = value)
             .Returns(Task.CompletedTask);
+        _unitOfWork.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Callback<CancellationToken>(_ => events.Add($"save:{stored!.Status}"))
+            .ReturnsAsync(1);
+        _sender.Setup(value => value.SendAsync(
+                It.IsAny<SmsProviderProfile>(), It.IsAny<SmsVerificationMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<SmsProviderProfile, SmsVerificationMessage, CancellationToken>(
+                (_, _, _) => events.Add("send"))
+            .ReturnsAsync(new SmsSendResult("Test", "message-1"));
 
         var code = await _service.GenerateAndSendAsync(_appId, "13800138000", "test", TestContext.Current.CancellationToken);
 
@@ -54,6 +63,11 @@ public class DbOtpServiceTests
         Assert.DoesNotContain(code, stored.CodeMac, StringComparison.Ordinal);
         Assert.Equal(OtpStatus.Sent, stored.Status);
         Assert.Equal("message-1", stored.ProviderMessageId);
+        Assert.NotNull(stored.SentAt);
+        Assert.Equal(["save:PendingDelivery", "send"], events);
+        _unitOfWork.Verify(
+            value => value.SaveChangesAsync(TestContext.Current.CancellationToken),
+            Times.Once);
     }
 
     [Fact]
@@ -108,6 +122,9 @@ public class DbOtpServiceTests
                 TestContext.Current.CancellationToken));
 
         Assert.Contains("already being sent", exception.Message, StringComparison.Ordinal);
+        _unitOfWork.Verify(
+            value => value.SaveChangesAsync(TestContext.Current.CancellationToken),
+            Times.Once);
         _sender.Verify(value => value.SendAsync(
             It.IsAny<SmsProviderProfile>(), It.IsAny<SmsVerificationMessage>(), It.IsAny<CancellationToken>()), Times.Never);
     }
