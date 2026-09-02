@@ -1553,7 +1553,8 @@ public class AdminControllerTests : IDisposable
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<PagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
-        // 回归防护：这里曾经返回 items.Count（当前页条数），前端据此算出的总页数永远是 1。
+        // Regression guard: this once returned items.Count (the current page count), making the
+        // frontend calculate exactly one total page.
         Assert.Equal(137, response.Total);
         Assert.Single(response.Items);
     }
@@ -1650,7 +1651,8 @@ public class AdminControllerTests : IDisposable
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
-        // 回归防护：同上，Total 必须是过滤后的总条数，不是当前页条数。
+        // Regression guard: as above, Total must be the filtered total count, not the current page
+        // count.
         Assert.Equal(84, response.Total);
         Assert.Single(response.Items);
     }
@@ -1698,8 +1700,9 @@ public class AdminControllerTests : IDisposable
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
         Assert.Equal(1, response.Page);
-        // pageSize<1 视为未指定，回落到默认 20（与 /api/admin/users、/api/gateway/users/search 一致）。
-        // 改统一走 PageRequest.Normalize 之前，这里曾经因为写法不同而返回 1。
+        // pageSize < 1 is treated as unspecified and falls back to the default 20, matching
+        // /api/admin/users and /api/gateway/users/search. Before all endpoints used
+        // PageRequest.Normalize, this returned 1 because their implementations differed.
         Assert.Equal(PageRequest.DefaultPageSize, response.PageSize);
     }
 

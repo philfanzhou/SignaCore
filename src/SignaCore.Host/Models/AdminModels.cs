@@ -1,6 +1,7 @@
 namespace SignaCore.Host.Models;
 
-// 仅管理控制台（/api/admin/*）使用的请求/响应。三个调用面共用的通用响应见 ApiModels.cs。
+// Requests and responses used only by the admin console (/api/admin/*). See ApiModels.cs for
+// common responses shared by all three API surfaces.
 
 public sealed record AdminLoginRequest(string Username, string Password, bool RememberMe);
 
