@@ -375,9 +375,9 @@ public class AdminOidcClientTests : IDisposable
             .Setup(audit => audit.RecordActionAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                It.IsAny<object?>(), It.IsAny<object?>()))
-            .Callback<string, string, string, Guid?, string?, string?, string?, string?, object?, object?>(
-                (action, targetType, targetId, _, actorName, description, _, _, before, after) =>
+                It.IsAny<object?>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, string, Guid?, string?, string?, string?, string?, object?, object?, CancellationToken>(
+                (action, targetType, targetId, _, actorName, description, _, _, before, after, _) =>
                     snapshots.Add(string.Join(
                         "|",
                         action, targetType, targetId, actorName, description,

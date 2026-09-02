@@ -18,7 +18,9 @@ namespace SignaCore.Host.Controllers;
 public class ProfileController : ControllerBase
 {
     [HttpGet("me")]
-    public async Task<IActionResult> GetProfile([FromServices] IAccountRepository accountRepository)
+    public async Task<IActionResult> GetProfile(
+        [FromServices] IAccountRepository accountRepository,
+        CancellationToken cancellationToken)
     {
         var accountId = GetAccountId();
         if (accountId == null)
@@ -26,7 +28,7 @@ public class ProfileController : ControllerBase
             return Unauthorized();
         }
 
-        var account = await accountRepository.GetByIdAsync(accountId.Value);
+        var account = await accountRepository.GetByIdAsync(accountId.Value, cancellationToken);
         if (account == null)
         {
             return Unauthorized();
@@ -43,7 +45,8 @@ public class ProfileController : ControllerBase
     public async Task<IActionResult> UpdateNickname(
         [FromBody] UpdateProfileNicknameRequest request,
         [FromServices] IAccountRepository accountRepository,
-        [FromServices] IUnitOfWork unitOfWork)
+        [FromServices] IUnitOfWork unitOfWork,
+        CancellationToken cancellationToken)
     {
         var accountId = GetAccountId();
         if (accountId == null)
@@ -51,7 +54,7 @@ public class ProfileController : ControllerBase
             return Unauthorized();
         }
 
-        var account = await accountRepository.GetByIdAsync(accountId.Value);
+        var account = await accountRepository.GetByIdAsync(accountId.Value, cancellationToken);
         if (account == null)
         {
             return Unauthorized();
@@ -63,8 +66,8 @@ public class ProfileController : ControllerBase
         }
 
         account.Nickname = string.IsNullOrWhiteSpace(request.Nickname) ? null : request.Nickname.Trim();
-        await accountRepository.UpdateAsync(account);
-        await unitOfWork.SaveChangesAsync();
+        await accountRepository.UpdateAsync(account, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new OperationResponse(true, "Nickname updated."));
     }
@@ -120,7 +123,7 @@ public class ProfileController : ControllerBase
         var appId = User.FindFirstValue(IdentityConstants.ClaimClientId);
         var app = string.IsNullOrWhiteSpace(appId)
             ? null
-            : await appRegistrationRepository.GetByAppIdAsync(appId);
+            : await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app is not { IsActive: true })
         {
             return BadRequest(new ErrorResponse("The calling application is not registered."));
@@ -149,7 +152,8 @@ public class ProfileController : ControllerBase
                     await auditService.RecordActionAsync(
                         "wechat_bound", "Account", accountId.Value.ToString(), accountId, null,
                         $"WeChat identity bound for application {app.AppId}", HttpContext.GetClientIp(),
-                        correlationId: HttpContext.GetCorrelationId());
+                        correlationId: HttpContext.GetCorrelationId(),
+                        cancellationToken: cancellationToken);
                 }
             });
         if (!result.IsSuccess)
@@ -194,7 +198,8 @@ public class ProfileController : ControllerBase
             () => auditService.RecordActionAsync(
                 "wechat_unbound", "Account", accountId.Value.ToString(), accountId, null,
                 "WeChat identity unbound", HttpContext.GetClientIp(),
-                correlationId: HttpContext.GetCorrelationId()));
+                correlationId: HttpContext.GetCorrelationId(),
+                cancellationToken: cancellationToken));
 
         return Ok(new OperationResponse(removed, removed ? "WeChat unbound." : "No WeChat binding to remove."));
     }

@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SignaCore.Database;
@@ -16,10 +17,10 @@ public class CallbackRegistrationControllerTests
     private readonly Mock<IAppRegistrationRepository> _appRegistrationRepoMock = new();
     private readonly Mock<IUnitOfWork> _unitOfWorkMock = AuthTestDoubles.UnitOfWork();
 
-    private CallbackRegistrationController CreateController() =>
+    private CallbackRegistrationController CreateController(CallbackUrlValidator? validator = null) =>
         new CallbackRegistrationController(
             _appRegistrationRepoMock.Object,
-            new CallbackUrlValidator(),
+            validator ?? new CallbackUrlValidator(),
             _unitOfWorkMock.Object,
             NullLogger<CallbackRegistrationController>.Instance)
             .WithHttpContext();
@@ -42,7 +43,9 @@ public class CallbackRegistrationControllerTests
             AppName = "App",
             IsActive = true
         };
-        _appRegistrationRepoMock.Setup(r => r.GetByAppIdAsync(appId)).ReturnsAsync(app);
+        _appRegistrationRepoMock
+            .Setup(r => r.GetByAppIdAsync(appId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(app);
         return app;
     }
 
@@ -144,5 +147,60 @@ public class CallbackRegistrationControllerTests
         Assert.True(response.Success);
         Assert.Equal(0, response.ExpiresAt);
         Assert.Null(app.CallbackExpiresAt);
+    }
+
+    [Fact]
+    public async Task RegisterCallback_PropagatesSameActionTokenToValidationFallbackQueryAndCommit()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var resolvedToken = CancellationToken.None;
+        var validator = new CallbackUrlValidator(
+            allowedDomains: null,
+            allowPrivateAddresses: false,
+            requireHttps: false,
+            (host, token) =>
+            {
+                Assert.Equal("public.example", host);
+                resolvedToken = token;
+                return Task.FromResult<IPAddress[]?>([IPAddress.Parse("8.8.8.8")]);
+            });
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "app-1",
+            AppSecretHash = BCrypt.Net.BCrypt.HashPassword("real-secret"),
+            AppName = "App",
+            IsActive = true
+        };
+        _appRegistrationRepoMock
+            .Setup(r => r.GetByAppIdAsync(app.AppId, cancellation.Token))
+            .ReturnsAsync(app);
+        _unitOfWorkMock
+            .Setup(u => u.SaveChangesAsync(cancellation.Token))
+            .ReturnsAsync(1);
+        var controller = new CallbackRegistrationController(
+                _appRegistrationRepoMock.Object,
+                validator,
+                _unitOfWorkMock.Object,
+                NullLogger<CallbackRegistrationController>.Instance)
+            .WithHttpContext();
+        controller.HttpContext.Request.Headers[IdentityHeaders.AppId] = app.AppId;
+        controller.HttpContext.Request.Headers[IdentityHeaders.AppSecret] = "real-secret";
+
+        var actionResult = await controller.RegisterCallback(
+            new RegisterCallbackRequest
+            {
+                CallbackUrl = "https://public.example/callback",
+                TtlSeconds = 3600
+            },
+            cancellation.Token);
+
+        var response = Assert.IsType<RegisterCallbackResponse>(AuthTestDoubles.ExtractOk(actionResult).Value);
+        Assert.True(response.Success);
+        Assert.Equal(cancellation.Token, resolvedToken);
+        _appRegistrationRepoMock.Verify(
+            r => r.GetByAppIdAsync(app.AppId, cancellation.Token),
+            Times.Once);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(cancellation.Token), Times.Once);
     }
 }

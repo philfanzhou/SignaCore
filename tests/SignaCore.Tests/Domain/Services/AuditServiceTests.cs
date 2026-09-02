@@ -11,14 +11,16 @@ public class AuditServiceTests
     private static Mock<ILoginHistoryRepository> CreateLoginHistoryRepoMock()
     {
         var mock = new Mock<ILoginHistoryRepository>();
-        mock.Setup(r => r.AddAsync(It.IsAny<LoginHistoryEntity>())).Returns(Task.CompletedTask);
+        mock.Setup(r => r.AddAsync(It.IsAny<LoginHistoryEntity>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         return mock;
     }
 
     private static Mock<IAuditLogRepository> CreateAuditLogRepoMock()
     {
         var mock = new Mock<IAuditLogRepository>();
-        mock.Setup(r => r.AddAsync(It.IsAny<AuditLogEntity>())).Returns(Task.CompletedTask);
+        mock.Setup(r => r.AddAsync(It.IsAny<AuditLogEntity>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         return mock;
     }
 
@@ -32,7 +34,8 @@ public class AuditServiceTests
 
         await service.RecordLoginAsync(
             accountId, "testuser", "Password", "login_success", "127.0.0.1", "TestAgent",
-            appId: "app-1", correlationId: "correlation-1");
+            appId: "app-1", correlationId: "correlation-1",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         loginHistoryRepoMock.Verify(r => r.AddAsync(It.Is<LoginHistoryEntity>(e =>
             e.AccountId == accountId &&
@@ -43,7 +46,7 @@ public class AuditServiceTests
             e.UserAgent == "TestAgent" &&
             e.FailureReason == null &&
             e.AppId == "app-1" &&
-            e.CorrelationId == "correlation-1")), Times.Once);
+            e.CorrelationId == "correlation-1"), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -53,26 +56,59 @@ public class AuditServiceTests
         var auditLogRepoMock = CreateAuditLogRepoMock();
         var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object);
 
-        await service.RecordLoginAsync(null, "unknown", "Password", "login_failure", "127.0.0.1", "TestAgent", "wrong_password");
+        await service.RecordLoginAsync(
+            null, "unknown", "Password", "login_failure", "127.0.0.1", "TestAgent", "wrong_password",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         loginHistoryRepoMock.Verify(r => r.AddAsync(It.Is<LoginHistoryEntity>(e =>
             e.EventType == "login_failure" &&
             e.FailureReason == "wrong_password" &&
-            e.AccountId == null)), Times.Once);
+            e.AccountId == null), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task RecordLoginAsync_WhenRepositoryThrows_PropagatesException()
     {
         var loginHistoryRepoMock = CreateLoginHistoryRepoMock();
-        loginHistoryRepoMock.Setup(r => r.AddAsync(It.IsAny<LoginHistoryEntity>())).ThrowsAsync(new Exception("DB error"));
+        loginHistoryRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<LoginHistoryEntity>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("DB error"));
         var auditLogRepoMock = CreateAuditLogRepoMock();
         var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object);
 
         var exception = await Assert.ThrowsAsync<Exception>(() =>
-            service.RecordLoginAsync(Guid.NewGuid(), "testuser", "Password", "login_success", "127.0.0.1", "TestAgent"));
+            service.RecordLoginAsync(
+                Guid.NewGuid(), "testuser", "Password", "login_success", "127.0.0.1", "TestAgent",
+                cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal("DB error", exception.Message);
+    }
+
+    [Fact]
+    public async Task RecordLoginAsync_WithPreCanceledToken_PropagatesWithoutStagingEntry()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var stagedEntries = new List<LoginHistoryEntity>();
+        var loginHistoryRepoMock = new Mock<ILoginHistoryRepository>();
+        loginHistoryRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<LoginHistoryEntity>(), cancellation.Token))
+            .Returns((LoginHistoryEntity entry, CancellationToken token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                stagedEntries.Add(entry);
+                return Task.CompletedTask;
+            });
+        var service = new AuditService(loginHistoryRepoMock.Object, CreateAuditLogRepoMock().Object);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.RecordLoginAsync(
+            Guid.NewGuid(), "testuser", "Password", "login_success", "127.0.0.1", "TestAgent",
+            cancellationToken: cancellation.Token));
+
+        Assert.Empty(stagedEntries);
+        loginHistoryRepoMock.Verify(
+            r => r.AddAsync(It.IsAny<LoginHistoryEntity>(), cancellation.Token),
+            Times.Once);
     }
 
     [Fact]
@@ -85,7 +121,8 @@ public class AuditServiceTests
 
         await service.RecordActionAsync(
             "account_created", "Account", "123", actorId, "admin", "Created account",
-            "127.0.0.1", "correlation-1");
+            "127.0.0.1", "correlation-1",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         auditLogRepoMock.Verify(r => r.AddAsync(It.Is<AuditLogEntity>(e =>
             e.Action == "account_created" &&
@@ -95,7 +132,7 @@ public class AuditServiceTests
             e.ActorName == "admin" &&
             e.Description == "Created account" &&
             e.ClientIp == "127.0.0.1" &&
-            e.CorrelationId == "correlation-1")), Times.Once);
+            e.CorrelationId == "correlation-1"), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -108,11 +145,13 @@ public class AuditServiceTests
         var before = new { IsActive = true };
         var after = new { IsActive = false };
 
-        await service.RecordActionAsync("status_changed", "Account", "123", Guid.NewGuid(), "admin", "Changed status", "127.0.0.1", before: before, after: after);
+        await service.RecordActionAsync(
+            "status_changed", "Account", "123", Guid.NewGuid(), "admin", "Changed status", "127.0.0.1",
+            before: before, after: after, cancellationToken: TestContext.Current.CancellationToken);
 
         auditLogRepoMock.Verify(r => r.AddAsync(It.Is<AuditLogEntity>(e =>
             e.BeforeSnapshot == "{\"isActive\":true}" &&
-            e.AfterSnapshot == "{\"isActive\":false}")), Times.Once);
+            e.AfterSnapshot == "{\"isActive\":false}"), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -120,12 +159,43 @@ public class AuditServiceTests
     {
         var loginHistoryRepoMock = CreateLoginHistoryRepoMock();
         var auditLogRepoMock = CreateAuditLogRepoMock();
-        auditLogRepoMock.Setup(r => r.AddAsync(It.IsAny<AuditLogEntity>())).ThrowsAsync(new Exception("DB error"));
+        auditLogRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<AuditLogEntity>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("DB error"));
         var service = new AuditService(loginHistoryRepoMock.Object, auditLogRepoMock.Object);
 
         var exception = await Assert.ThrowsAsync<Exception>(() =>
-            service.RecordActionAsync("test", "Account", "123", null, null, null));
+            service.RecordActionAsync(
+                "test", "Account", "123", null, null, null,
+                cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal("DB error", exception.Message);
+    }
+
+    [Fact]
+    public async Task RecordActionAsync_WithPreCanceledToken_PropagatesWithoutStagingEntry()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var stagedEntries = new List<AuditLogEntity>();
+        var auditLogRepoMock = new Mock<IAuditLogRepository>();
+        auditLogRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<AuditLogEntity>(), cancellation.Token))
+            .Returns((AuditLogEntity entry, CancellationToken token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                stagedEntries.Add(entry);
+                return Task.CompletedTask;
+            });
+        var service = new AuditService(CreateLoginHistoryRepoMock().Object, auditLogRepoMock.Object);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.RecordActionAsync(
+            "test", "Account", "123", null, null, null,
+            cancellationToken: cancellation.Token));
+
+        Assert.Empty(stagedEntries);
+        auditLogRepoMock.Verify(
+            r => r.AddAsync(It.IsAny<AuditLogEntity>(), cancellation.Token),
+            Times.Once);
     }
 }
