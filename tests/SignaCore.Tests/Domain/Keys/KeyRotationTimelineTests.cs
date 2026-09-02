@@ -117,7 +117,7 @@ public sealed class KeyRotationTimelineTests : IDisposable
 
             Assert.True(
                 (await _keyManager.GetValidKeysAsync()).Count > 0,
-                $"第 {day} 天、CleanupWorker tick 之前 JWKS 为空——下游此刻拉到零个公钥");
+                $"JWKS is empty on day {day} before the CleanupWorker tick—downstream services would fetch zero public keys at this point");
 
             // CleanupWorker ticks once every 24h.
             if (await _keyManager.NeedsKeyRotationAsync())
@@ -127,7 +127,7 @@ public sealed class KeyRotationTimelineTests : IDisposable
 
             Assert.True(
                 (await _keyManager.GetValidKeysAsync()).Count > 0,
-                $"第 {day} 天、CleanupWorker tick 之后 JWKS 为空");
+                $"JWKS is empty on day {day} after the CleanupWorker tick");
 
             var currentKeyId = _keyManager.GetCurrentKey().KeyId;
             if (currentKeyId != lastKeyId)
@@ -161,7 +161,7 @@ public sealed class KeyRotationTimelineTests : IDisposable
 
         Assert.True(
             await _keyManager.NeedsKeyRotationAsync(),
-            "过半衰期就该轮换，不能等到过期");
+            "The key should rotate once it passes its half-life, not wait until expiry");
 
         await _keyManager.RotateKeyAsync();
 

@@ -58,8 +58,9 @@ public class AdminController : ControllerBase
             Password = request.Password
         });
 
-        // result.Account == null 这个额外判断已由 ValidationResult 上的 MemberNotNullWhen 承担：
-        // Success(account, ...) 的 account 是非空参数，成功分支不可能没有账号。
+        // An extra result.Account == null check is unnecessary because MemberNotNullWhen on
+        // ValidationResult carries the invariant: Success(account, ...) takes a non-null account,
+        // so the success branch cannot lack one.
         if (!result.IsSuccess)
         {
             await CommitAdminLoginStateAsync(
@@ -496,7 +497,8 @@ public class AdminController : ControllerBase
                 app.SmsProfileKey,
                 app.WechatLoginMode.ToString(),
                 app.AudienceMode.ToString(),
-                // 直接把生效的 aud 值算出来给管理台，省得前端复制一份解析规则。
+                // Compute the effective aud value for the admin console so the frontend does not
+                // duplicate the resolution rules.
                 JwtTokenService.ResolveAudience(app, jwtOptions),
                 app.ClientType.ToString(),
                 app.AllowAuthorizationCode,
@@ -836,9 +838,11 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
-    /// PUT /api/admin/apps/{appId}/audience-mode — 切换该应用 access token 的 aud。
-    /// 切到 PerApplication 前，下游必须已经能同时接受共享 audience 与本应用 AppId，
-    /// 否则正在使用的 token 会在下游校验失败。见 docs/overview/StandardsConformance.md。
+    /// PUT /api/admin/apps/{appId}/audience-mode — changes the <c>aud</c> of access tokens issued
+    /// for this application. Before switching to <c>PerApplication</c>, downstream services must
+    /// already accept both the shared audience and this application's <c>AppId</c>; otherwise,
+    /// tokens already in use will fail downstream validation. See
+    /// docs/overview/StandardsConformance.md.
     /// </summary>
     [HttpPut("apps/{appId}/audience-mode")]
     [Authorize(Policy = "AdminSession")]
@@ -1132,8 +1136,10 @@ public class AdminController : ControllerBase
         canonicalScopes.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
     /// <summary>
-    /// GET /api/admin/apps/{appId}/exchange-trusts — 本应用愿意接受哪些应用签发的 refresh token。
-    /// 边是有向的：这里列出的是来源，反向不成立。见 docs/adr/0003-cross-application-refresh-grant.md。
+    /// GET /api/admin/apps/{appId}/exchange-trusts — lists the source applications whose refresh
+    /// tokens this application accepts. Trust edges are directed: this endpoint lists sources;
+    /// the reverse direction is not implied. See
+    /// docs/adr/0003-cross-application-refresh-grant.md.
     /// </summary>
     [HttpGet("apps/{appId}/exchange-trusts")]
     [Authorize(Policy = "AdminSession")]
@@ -1156,9 +1162,12 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/admin/apps/{appId}/exchange-trusts — 允许本应用接受来源应用签发的 refresh token。
-    /// 加这条边等于：任何持有来源应用 refresh token 的人都能为同一账号换到本应用的会话。本应用比来源
-    /// 应用权限更高时，差异必须由本应用的回调和授权规则守住，不能指望这条边不存在。
+    /// POST /api/admin/apps/{appId}/exchange-trusts — allows this application to accept refresh
+    /// tokens issued by a source application. Adding this edge means anyone holding a refresh token
+    /// from the source application can exchange it for a session in this application for the same
+    /// account. If this application is more privileged than the source, its callback and
+    /// authorization rules must enforce the difference rather than assuming this edge does not
+    /// exist.
     /// </summary>
     [HttpPost("apps/{appId}/exchange-trusts")]
     [Authorize(Policy = "AdminSession")]
@@ -1195,8 +1204,9 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
-    /// DELETE /api/admin/apps/{appId}/exchange-trusts/{sourceAppId} — 撤销信任边。
-    /// 已经换出去的会话不会因此结束：它们绑定在本应用和本应用的准入记录上，要终止得按应用撤销。
+    /// DELETE /api/admin/apps/{appId}/exchange-trusts/{sourceAppId} — revokes a trust edge.
+    /// Sessions already exchanged through the edge do not end: they are bound to this application
+    /// and its admission records, and must be terminated through application revocation.
     /// </summary>
     [HttpDelete("apps/{appId}/exchange-trusts/{sourceAppId}")]
     [Authorize(Policy = "AdminSession")]
@@ -1258,7 +1268,7 @@ public class AdminController : ControllerBase
             .OrderByDescending(item => item.access.CreatedAt)
             .ToListAsync();
 
-        // 掩码在内存里做：SensitiveDataMasker 不能翻译成 SQL。
+        // Mask in memory because SensitiveDataMasker cannot be translated to SQL.
         var users = rows.Select(item => new AdminWechatUserResponse(
             item.login.Id.ToString(), item.login.AccountId.ToString(),
             SensitiveDataMasker.MaskOpenId(item.login.ProviderUserId),
@@ -1268,9 +1278,10 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
-    /// POST /api/admin/apps/{appId}/wechat-users/{loginId}/restore — 恢复被撤销的微信准入。
-    /// 用户自助重新绑定**不会**清除撤销状态（见 WechatAdmissionService.EnsureAccessAsync），
-    /// 所以恢复只能从这里走。
+    /// POST /api/admin/apps/{appId}/wechat-users/{loginId}/restore — restores revoked WeChat
+    /// admission. User-initiated rebinding <b>does not</b> clear revoked state (see
+    /// <c>WechatAdmissionService.EnsureAccessAsync</c>), so restoration is only possible through
+    /// this endpoint.
     /// </summary>
     [HttpPost("apps/{appId}/wechat-users/{loginId:guid}/restore")]
     [Authorize(Policy = "AdminSession")]
