@@ -272,7 +272,8 @@ using (var seedScope = app.Services.CreateScope())
         app.Services
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger(typeof(BootstrapAppSeeder).FullName!),
-        seedScope.ServiceProvider.GetRequiredService<IHostEnvironment>().IsDevelopment());
+        seedScope.ServiceProvider.GetRequiredService<IHostEnvironment>().IsDevelopment(),
+        app.Lifetime.ApplicationStopping);
 }
 
 // ---- Wait for KeyManager initialization before accepting requests ----
