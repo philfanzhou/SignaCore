@@ -61,7 +61,7 @@ public class CallbackRegistrationController : ControllerBase
             }
         }
 
-        app ??= await _appRegistrationRepository.GetByAppIdAsync(appId!);
+        app ??= await _appRegistrationRepository.GetByAppIdAsync(appId!, cancellationToken);
         if (app is null)
         {
             return Ok(new RegisterCallbackResponse { Success = false, Message = "AppId not registered" });

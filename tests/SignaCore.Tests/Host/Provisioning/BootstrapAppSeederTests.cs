@@ -392,7 +392,8 @@ public class BootstrapAppSeederTests : IDisposable
             string? userAgent,
             string? failureReason = null,
             string? appId = null,
-            string? correlationId = null) =>
+            string? correlationId = null,
+            CancellationToken cancellationToken = default) =>
             _inner.RecordLoginAsync(
                 accountId,
                 username,
@@ -402,7 +403,8 @@ public class BootstrapAppSeederTests : IDisposable
                 userAgent,
                 failureReason,
                 appId,
-                correlationId);
+                correlationId,
+                cancellationToken);
 
         public Task RecordActionAsync(
             string action,
@@ -414,7 +416,8 @@ public class BootstrapAppSeederTests : IDisposable
             string? clientIp = null,
             string? correlationId = null,
             object? before = null,
-            object? after = null)
+            object? after = null,
+            CancellationToken cancellationToken = default)
         {
             if (targetId == _failingTargetId)
             {
@@ -431,7 +434,8 @@ public class BootstrapAppSeederTests : IDisposable
                 clientIp,
                 correlationId,
                 before,
-                after);
+                after,
+                cancellationToken);
         }
     }
 
@@ -453,7 +457,8 @@ public class BootstrapAppSeederTests : IDisposable
             string? userAgent,
             string? failureReason = null,
             string? appId = null,
-            string? correlationId = null) =>
+            string? correlationId = null,
+            CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
         public Task RecordActionAsync(
@@ -466,7 +471,8 @@ public class BootstrapAppSeederTests : IDisposable
             string? clientIp = null,
             string? correlationId = null,
             object? before = null,
-            object? after = null)
+            object? after = null,
+            CancellationToken cancellationToken = default)
         {
             _cancellationSource.Cancel();
             return Task.CompletedTask;

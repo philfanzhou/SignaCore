@@ -102,7 +102,53 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
                         accountId.ToString(),
                         accountId,
                         null,
-                        $"WeChat identity bound for application {app.AppId}")));
+                        $"WeChat identity bound for application {app.AppId}",
+                        cancellationToken: TestContext.Current.CancellationToken)));
+        }
+
+        await using var verify = CreateContext();
+        Assert.Empty(await verify.UserLogins.AsNoTracking().ToListAsync(
+            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(await verify.AppWechatAccesses.AsNoTracking().ToListAsync(
+            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(await verify.AuditLogs.AsNoTracking().ToListAsync(
+            cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Bind_WhenCanceledAfterAuditStaging_RollsBackBindingAdmissionAndAudit()
+    {
+        var app = await SeedAppAsync(WechatLoginMode.BindRequired);
+        var accountId = await SeedAccountAsync();
+        using var cancellation = new CancellationTokenSource();
+
+        await using (var context = CreateContext())
+        {
+            var auditRepository = new CapturingAuditLogRepository(new AuditLogRepository(context));
+            var auditService = new AuditService(
+                new LoginHistoryRepository(context),
+                auditRepository);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                new WechatAdmissionService(context).BindAsync(
+                    app,
+                    accountId,
+                    OpenId,
+                    cancellation.Token,
+                    async _ =>
+                    {
+                        await auditService.RecordActionAsync(
+                            "wechat_bound",
+                            "Account",
+                            accountId.ToString(),
+                            accountId,
+                            null,
+                            $"WeChat identity bound for application {app.AppId}",
+                            cancellationToken: cancellation.Token);
+                        cancellation.Cancel();
+                    }));
+
+            Assert.Equal(cancellation.Token, auditRepository.ObservedCancellationToken);
         }
 
         await using var verify = CreateContext();
@@ -240,6 +286,54 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
         Assert.False(await new WechatAdmissionService(context).UnbindAsync(accountId, TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task Unbind_WhenCanceledAfterAuditStaging_RollsBackRemovalAndAudit()
+    {
+        var app = await SeedAppAsync(WechatLoginMode.AutoProvision);
+        Guid accountId;
+        await using (var context = CreateContext())
+        {
+            accountId = (await new WechatAdmissionService(context).ProvisionAsync(
+                app, OpenId, TestContext.Current.CancellationToken)).Account.Id;
+        }
+        using var cancellation = new CancellationTokenSource();
+
+        await using (var context = CreateContext())
+        {
+            var auditRepository = new CapturingAuditLogRepository(new AuditLogRepository(context));
+            var auditService = new AuditService(
+                new LoginHistoryRepository(context),
+                auditRepository);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                new WechatAdmissionService(context).UnbindAsync(
+                    accountId,
+                    cancellation.Token,
+                    async () =>
+                    {
+                        await auditService.RecordActionAsync(
+                            "wechat_unbound",
+                            "Account",
+                            accountId.ToString(),
+                            accountId,
+                            null,
+                            "WeChat identity unbound",
+                            cancellationToken: cancellation.Token);
+                        cancellation.Cancel();
+                    }));
+
+            Assert.Equal(cancellation.Token, auditRepository.ObservedCancellationToken);
+        }
+
+        await using var verify = CreateContext();
+        Assert.NotNull(await verify.UserLogins.AsNoTracking().SingleOrDefaultAsync(
+            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.NotNull(await verify.AppWechatAccesses.AsNoTracking().SingleOrDefaultAsync(
+            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(await verify.AuditLogs.AsNoTracking().ToListAsync(
+            cancellationToken: TestContext.Current.CancellationToken));
+    }
+
     private IdentityDbContext CreateContext()
     {
         var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
@@ -280,6 +374,40 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
         context.Accounts.Add(account);
         await context.SaveChangesAsync();
         return account.Id;
+    }
+
+    private sealed class CapturingAuditLogRepository(IAuditLogRepository inner) : IAuditLogRepository
+    {
+        public CancellationToken ObservedCancellationToken { get; private set; }
+
+        public Task AddAsync(AuditLogEntity auditLog, CancellationToken cancellationToken = default)
+        {
+            ObservedCancellationToken = cancellationToken;
+            return inner.AddAsync(auditLog, cancellationToken);
+        }
+
+        public Task<List<AuditLogEntity>> QueryAsync(
+            string? action,
+            string? targetType,
+            string? targetId,
+            Guid? actorId,
+            int pageSize,
+            int skip,
+            CancellationToken cancellationToken = default) =>
+            inner.QueryAsync(action, targetType, targetId, actorId, pageSize, skip, cancellationToken);
+
+        public Task<int> CountAsync(
+            string? action,
+            string? targetType,
+            string? targetId,
+            Guid? actorId,
+            CancellationToken cancellationToken = default) =>
+            inner.CountAsync(action, targetType, targetId, actorId, cancellationToken);
+
+        public Task<int> RemoveOlderThanAsync(
+            DateTimeOffset cutoff,
+            CancellationToken cancellationToken = default) =>
+            inner.RemoveOlderThanAsync(cutoff, cancellationToken);
     }
 
     public void Dispose()

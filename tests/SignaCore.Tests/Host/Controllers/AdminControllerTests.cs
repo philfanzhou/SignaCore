@@ -1253,9 +1253,9 @@ public class AdminControllerTests : IDisposable
         _auditServiceMock.Setup(a => a.RecordActionAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
             It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-            It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>()))
-            .Callback<string, string, string, Guid?, string?, string?, string?, string?, object?, object?>(
-                (_, _, _, _, _, _, _, _, before, after) => snapshots.Add((before, after)))
+            It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, string, Guid?, string?, string?, string?, string?, object?, object?, CancellationToken>(
+                (_, _, _, _, _, _, _, _, before, after, _) => snapshots.Add((before, after)))
             .Returns(Task.CompletedTask);
         return snapshots;
     }
@@ -1264,7 +1264,8 @@ public class AdminControllerTests : IDisposable
         _auditServiceMock.Verify(a => a.RecordActionAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
             It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-            It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>()), Times.Never);
+            It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
 
     /// <summary>
     /// Serializes a snapshot exactly the way <c>AuditService</c> does, so the assertions run against
