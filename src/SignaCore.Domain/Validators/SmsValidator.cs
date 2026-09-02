@@ -47,9 +47,26 @@ public class SmsValidator : IIdentityValidator
             return ValidationResult.Failure("SMS account is not authorized for this application");
         }
 
-        var verified = IsBypassAllowed(phone, request.Code) ||
-            await _otpService.VerifyAsync(request.App.Id, phone, request.Code);
-        if (!verified) return ValidationResult.Failure("Wrong or expired verification code");
+        OtpVerificationChange? otpChange = null;
+        if (!IsBypassAllowed(phone, request.Code))
+        {
+            var verification = await _otpService.VerifyAsync(
+                request.App.Id,
+                phone,
+                request.Code,
+                request.CancellationToken);
+            if (verification.IsVerified !=
+                (verification.Change?.Kind == OtpVerificationChangeKind.Consume))
+            {
+                throw new InvalidOperationException("The OTP verification decision is inconsistent.");
+            }
+            otpChange = verification.Change;
+            if (!verification.IsVerified)
+            {
+                return ValidationResult.Failure("Wrong or expired verification code")
+                    .WithOtpVerificationChange(otpChange);
+            }
+        }
 
         if (admission == null || !admission.Access.IsActive)
         {
@@ -58,16 +75,20 @@ public class SmsValidator : IIdentityValidator
             admission = await _admissionService.ProvisionAsync(
                 request.App, phone, SmsAccessApprovalSource.AutoProvision, null, request.CancellationToken);
             if (!admission.Access.IsActive)
-                return ValidationResult.Failure("SMS access has been revoked");
+                return ValidationResult.Failure("SMS access has been revoked")
+                    .WithOtpVerificationChange(otpChange);
             if (admission.AccountCreated) _authMetrics.RecordAccountCreation("auto_register_sms");
         }
 
-        if (!admission.Account.IsActive) return ValidationResult.Failure("Account is disabled");
+        if (!admission.Account.IsActive)
+            return ValidationResult.Failure("Account is disabled")
+                .WithOtpVerificationChange(otpChange);
         _logger.LogInformation(
-            "SMS validated: AppRegistrationId={AppRegistrationId}, Phone={Phone}",
+            "SMS validation passed and is pending token commit: AppRegistrationId={AppRegistrationId}, Phone={Phone}",
             request.App.Id, SensitiveDataMasker.MaskPhone(phone));
         return ValidationResult.Success(
-            admission.Account, IdentityConstants.AuthMethodSms, phone, smsUserLoginId: admission.Login.Id);
+                admission.Account, IdentityConstants.AuthMethodSms, phone, smsUserLoginId: admission.Login.Id)
+            .WithOtpVerificationChange(otpChange);
     }
 
     private bool IsBypassAllowed(string phone, string code)

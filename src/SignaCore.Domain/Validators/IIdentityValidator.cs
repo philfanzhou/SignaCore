@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using SignaCore.Database.Entity;
+using SignaCore.Domain.Services.Sms;
 
 namespace SignaCore.Domain.Validators;
 
@@ -103,6 +104,12 @@ public class ValidationResult
     /// </summary>
     public LoginAttemptChange? LoginAttemptChange { get; private set; }
 
+    /// <summary>
+    /// A conditional OTP state change discovered during SMS validation. Validation never persists
+    /// it; the Host applies it in the transaction that records the corresponding login result.
+    /// </summary>
+    public OtpVerificationChange? OtpVerificationChange { get; private set; }
+
     public static ValidationResult Success(
         AccountEntity account,
         string authMethod,
@@ -144,6 +151,12 @@ public class ValidationResult
     internal ValidationResult WithLoginAttemptChange(LoginAttemptChange? change)
     {
         LoginAttemptChange = change;
+        return this;
+    }
+
+    internal ValidationResult WithOtpVerificationChange(OtpVerificationChange? change)
+    {
+        OtpVerificationChange = change;
         return this;
     }
 }

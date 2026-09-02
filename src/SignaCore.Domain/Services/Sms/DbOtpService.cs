@@ -91,28 +91,52 @@ public class DbOtpService : IOtpService
         return code;
     }
 
-    public async Task<bool> VerifyAsync(Guid appRegistrationId, string phoneE164, string code)
+    public async Task<OtpVerificationResult> VerifyAsync(
+        Guid appRegistrationId,
+        string phoneE164,
+        string code,
+        CancellationToken cancellationToken = default)
     {
         var phone = MainlandChinaPhoneNumber.Normalize(phoneE164);
         var now = DateTimeOffset.UtcNow;
-        var entry = await _otpRepository.GetAsync(appRegistrationId, phone);
+        var entry = await _otpRepository.GetAsync(appRegistrationId, phone, cancellationToken);
         if (entry == null || entry.Status != OtpStatus.Sent || entry.ExpiresAt < now || entry.LockoutUntil > now)
-            return false;
+            return new OtpVerificationResult(false, null);
 
         var codeMac = ComputeMac(appRegistrationId, phone, code);
         if (CryptographicOperations.FixedTimeEquals(
-                Convert.FromHexString(entry.CodeMac), Convert.FromHexString(codeMac)) &&
-            await _otpRepository.TryConsumeAsync(appRegistrationId, phone, codeMac, now, _options.MaxAttempts))
+                Convert.FromHexString(entry.CodeMac), Convert.FromHexString(codeMac)))
         {
-            _logger.LogInformation("OTP verified: AppRegistrationId={AppRegistrationId}, Phone={Phone}", appRegistrationId, SensitiveDataMasker.MaskPhone(phone));
-            return true;
+            _logger.LogInformation(
+                "OTP matched and is pending conditional consumption: AppRegistrationId={AppRegistrationId}, Phone={Phone}",
+                appRegistrationId,
+                SensitiveDataMasker.MaskPhone(phone));
+            return new OtpVerificationResult(
+                true,
+                new OtpVerificationChange(
+                    OtpVerificationChangeKind.Consume,
+                    appRegistrationId,
+                    phone,
+                    codeMac,
+                    now,
+                    _options.MaxAttempts,
+                    now.AddSeconds(_options.LockoutSeconds)));
         }
 
-        await _otpRepository.IncrementFailedAttemptsAsync(
-            appRegistrationId, phone, entry.CodeMac, now, _options.MaxAttempts,
-            now.AddSeconds(_options.LockoutSeconds));
-        _logger.LogWarning("OTP verification failed: AppRegistrationId={AppRegistrationId}, Phone={Phone}", appRegistrationId, SensitiveDataMasker.MaskPhone(phone));
-        return false;
+        _logger.LogWarning(
+            "OTP verification failed and is pending conditional failure recording: AppRegistrationId={AppRegistrationId}, Phone={Phone}",
+            appRegistrationId,
+            SensitiveDataMasker.MaskPhone(phone));
+        return new OtpVerificationResult(
+            false,
+            new OtpVerificationChange(
+                OtpVerificationChangeKind.RecordFailure,
+                appRegistrationId,
+                phone,
+                entry.CodeMac,
+                now,
+                _options.MaxAttempts,
+                now.AddSeconds(_options.LockoutSeconds)));
     }
 
     public async Task InvalidateAsync(Guid appRegistrationId, string phoneE164)

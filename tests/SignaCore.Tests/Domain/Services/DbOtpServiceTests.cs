@@ -71,21 +71,41 @@ public class DbOtpServiceTests
     }
 
     [Fact]
-    public async Task Verify_ConsumesOnlyMatchingApplicationChallenge()
+    public async Task Verify_WithMatchingCode_ReturnsDeferredConsumptionWithoutWriting()
     {
         OtpEntity? stored = null;
-        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000"))
+        _repository.Setup(value => value.GetAsync(
+                _appId,
+                "+8613800138000",
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => stored);
         _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
             .Callback<OtpEntity, CancellationToken>((value, _) => stored = value)
             .Returns(Task.CompletedTask);
         var code = await _service.GenerateAndSendAsync(_appId, "+8613800138000", "test", TestContext.Current.CancellationToken);
-        _repository.Setup(value => value.TryConsumeAsync(
-            _appId, "+8613800138000", stored!.CodeMac, It.IsAny<DateTimeOffset>(), It.IsAny<int>())).ReturnsAsync(true);
+        var result = await _service.VerifyAsync(
+            _appId,
+            "13800138000",
+            code,
+            TestContext.Current.CancellationToken);
 
-        Assert.True(await _service.VerifyAsync(_appId, "13800138000", code));
+        Assert.True(result.IsVerified);
+        Assert.NotNull(result.Change);
+        Assert.Equal(OtpVerificationChangeKind.Consume, result.Change.Kind);
+        Assert.Equal(_appId, result.Change.AppRegistrationId);
+        Assert.Equal("+8613800138000", result.Change.Phone);
+        Assert.Equal(stored!.CodeMac, result.Change.ExpectedCodeMac);
+        _repository.Verify(value => value.GetAsync(
+            _appId,
+            "+8613800138000",
+            TestContext.Current.CancellationToken), Times.Once);
         _repository.Verify(value => value.TryConsumeAsync(
-            _appId, "+8613800138000", stored!.CodeMac, It.IsAny<DateTimeOffset>(), It.IsAny<int>()), Times.Once);
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -158,10 +178,13 @@ public class DbOtpServiceTests
     }
 
     [Fact]
-    public async Task Verify_WithWrongCode_IncrementsPersistentAttempts()
+    public async Task Verify_WithWrongCode_ReturnsDeferredFailureWithoutWriting()
     {
         OtpEntity? stored = null;
-        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000"))
+        _repository.Setup(value => value.GetAsync(
+                _appId,
+                "+8613800138000",
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => stored);
         _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
             .Callback<OtpEntity, CancellationToken>((value, _) => stored = value)
@@ -171,29 +194,31 @@ public class DbOtpServiceTests
             "+8613800138000",
             "test",
             TestContext.Current.CancellationToken);
-        _repository.Setup(value => value.IncrementFailedAttemptsAsync(
-                _appId,
-                "+8613800138000",
-                stored!.CodeMac,
-                It.IsAny<DateTimeOffset>(),
-                It.IsAny<int>(),
-                It.IsAny<DateTimeOffset>()))
-            .ReturnsAsync(1);
-
-        Assert.False(await _service.VerifyAsync(_appId, "+8613800138000", "000000"));
-        _repository.Verify(value => value.IncrementFailedAttemptsAsync(
+        var result = await _service.VerifyAsync(
             _appId,
             "+8613800138000",
-            stored!.CodeMac,
+            "000000",
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsVerified);
+        Assert.NotNull(result.Change);
+        Assert.Equal(OtpVerificationChangeKind.RecordFailure, result.Change.Kind);
+        Assert.Equal(stored!.CodeMac, result.Change.ExpectedCodeMac);
+        _repository.Verify(value => value.IncrementFailedAttemptsAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
             It.IsAny<DateTimeOffset>(),
             It.IsAny<int>(),
-            It.IsAny<DateTimeOffset>()), Times.Once);
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Never);
         _repository.Verify(value => value.TryConsumeAsync(
             It.IsAny<Guid>(),
             It.IsAny<string>(),
             It.IsAny<string>(),
             It.IsAny<DateTimeOffset>(),
-            It.IsAny<int>()), Times.Never);
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
@@ -206,7 +231,10 @@ public class DbOtpServiceTests
         bool locked)
     {
         var now = DateTimeOffset.UtcNow;
-        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000"))
+        _repository.Setup(value => value.GetAsync(
+                _appId,
+                "+8613800138000",
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(new OtpEntity
             {
                 AppRegistrationId = _appId,
@@ -216,20 +244,29 @@ public class DbOtpServiceTests
                 LockoutUntil = locked ? now.AddMinutes(1) : DateTimeOffset.UnixEpoch
             });
 
-        Assert.False(await _service.VerifyAsync(_appId, "+8613800138000", "123456"));
+        var result = await _service.VerifyAsync(
+            _appId,
+            "+8613800138000",
+            "123456",
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsVerified);
+        Assert.Null(result.Change);
         _repository.Verify(value => value.TryConsumeAsync(
             It.IsAny<Guid>(),
             It.IsAny<string>(),
             It.IsAny<string>(),
             It.IsAny<DateTimeOffset>(),
-            It.IsAny<int>()), Times.Never);
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Never);
         _repository.Verify(value => value.IncrementFailedAttemptsAsync(
             It.IsAny<Guid>(),
             It.IsAny<string>(),
             It.IsAny<string>(),
             It.IsAny<DateTimeOffset>(),
             It.IsAny<int>(),
-            It.IsAny<DateTimeOffset>()), Times.Never);
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
