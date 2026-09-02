@@ -18,6 +18,10 @@ Application-scoped SMS one-time-password state and rate limiting.
 
 - app_registration_id references app_registrations.
 - The schema enforces one current OTP state per application and phone according to provider migrations.
+- Token-endpoint verification is read-only until the Host applies its conditional mutation. A
+  successful consumption commits with the corresponding login result, account login metadata, and
+  refresh token; a failed-attempt or lockout update commits with its `login_failure` history row.
+  Losing a conditional update never returns a token or overwrites a newer challenge.
 
 ## Ownership
 

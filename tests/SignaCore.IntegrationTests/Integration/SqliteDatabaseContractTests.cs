@@ -369,6 +369,12 @@ public sealed class SqliteDatabaseContractTests
                 Assert.Equal("Cafe\u0301", credential.Username);
             }
 
+            await VerifyOtpAuditTransactionRollbackAsync(
+                optionsBuilder.Options,
+                appRegistrationId,
+                phone,
+                otpCode);
+
             var rotateResults = await Task.WhenAll(
                 TryRotateAsync(optionsBuilder.Options, refreshToken, accountId),
                 TryRotateAsync(optionsBuilder.Options, refreshToken, accountId));
@@ -489,5 +495,85 @@ public sealed class SqliteDatabaseContractTests
             code,
             DateTimeOffset.UtcNow,
             maxAttempts: 5);
+    }
+
+    private static async Task VerifyOtpAuditTransactionRollbackAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid appRegistrationId,
+        string phone,
+        string codeMac)
+    {
+        var observedAt = DateTimeOffset.UtcNow;
+        await using (var consumeContext = new IdentityDbContext(options))
+        {
+            var strategy = consumeContext.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await consumeContext.Database.BeginTransactionAsync(
+                    TestContext.Current.CancellationToken);
+                Assert.True(await new OtpRepository(consumeContext).TryConsumeAsync(
+                    appRegistrationId,
+                    phone,
+                    codeMac,
+                    observedAt,
+                    maxAttempts: 5,
+                    TestContext.Current.CancellationToken));
+                consumeContext.LoginHistories.Add(CreateOtpLoginHistory("login_success"));
+                await consumeContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+                await transaction.RollbackAsync(TestContext.Current.CancellationToken);
+            });
+        }
+
+        await AssertOtpAndAuditStateAsync(OtpStatus.Sent, 0, DateTimeOffset.UnixEpoch);
+
+        var lockoutUntil = observedAt.AddMinutes(5);
+        await using (var failureContext = new IdentityDbContext(options))
+        {
+            var strategy = failureContext.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await failureContext.Database.BeginTransactionAsync(
+                    TestContext.Current.CancellationToken);
+                Assert.Equal(1, await new OtpRepository(failureContext).IncrementFailedAttemptsAsync(
+                    appRegistrationId,
+                    phone,
+                    codeMac,
+                    observedAt,
+                    maxAttempts: 1,
+                    lockoutUntil,
+                    TestContext.Current.CancellationToken));
+                failureContext.LoginHistories.Add(CreateOtpLoginHistory("login_failure"));
+                await failureContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+                await transaction.RollbackAsync(TestContext.Current.CancellationToken);
+            });
+        }
+
+        await AssertOtpAndAuditStateAsync(OtpStatus.Sent, 0, DateTimeOffset.UnixEpoch);
+        return;
+
+        LoginHistoryEntity CreateOtpLoginHistory(string eventType) => new()
+        {
+            Id = Guid.NewGuid(),
+            Username = "database-contract-sms-user",
+            AuthMethod = "sms",
+            EventType = eventType,
+            AppId = "database-contract-app",
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        async Task AssertOtpAndAuditStateAsync(
+            OtpStatus expectedStatus,
+            int expectedAttempts,
+            DateTimeOffset expectedLockout)
+        {
+            await using var assertionContext = new IdentityDbContext(options);
+            var otp = await assertionContext.Otps.AsNoTracking()
+                .SingleAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(expectedStatus, otp.Status);
+            Assert.Equal(expectedAttempts, otp.Attempts);
+            Assert.Equal(expectedLockout, otp.LockoutUntil);
+            Assert.Empty(await assertionContext.LoginHistories.AsNoTracking()
+                .ToListAsync(TestContext.Current.CancellationToken));
+        }
     }
 }

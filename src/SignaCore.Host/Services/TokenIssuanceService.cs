@@ -8,6 +8,7 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Validators;
 
 namespace SignaCore.Host.Services;
@@ -36,6 +37,7 @@ public sealed class TokenIssuanceService
     private readonly IAccountLoginInfoService _accountLoginInfoService;
     private readonly IAccountRepository _accountRepository;
     private readonly ILoginAttemptRepository _loginAttemptRepository;
+    private readonly IOtpRepository _otpRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IdentityDbContext _dbContext;
     private readonly AdminIdentityOptions _adminIdentityOptions;
@@ -54,6 +56,7 @@ public sealed class TokenIssuanceService
         IAccountLoginInfoService accountLoginInfoService,
         IAccountRepository accountRepository,
         ILoginAttemptRepository loginAttemptRepository,
+        IOtpRepository otpRepository,
         IUnitOfWork unitOfWork,
         IdentityDbContext dbContext,
         AdminIdentityOptions adminIdentityOptions,
@@ -71,6 +74,7 @@ public sealed class TokenIssuanceService
         _accountLoginInfoService = accountLoginInfoService;
         _accountRepository = accountRepository;
         _loginAttemptRepository = loginAttemptRepository;
+        _otpRepository = otpRepository;
         _unitOfWork = unitOfWork;
         _dbContext = dbContext;
         _adminIdentityOptions = adminIdentityOptions;
@@ -96,7 +100,8 @@ public sealed class TokenIssuanceService
                 errorCode: OAuthErrorCodes.UnsupportedGrantType,
                 metricReason: "unsupported_grant_type",
                 responseMessage: "unsupported_grant_type",
-                auditFailureReason: $"unsupported_grant_type: {request.GrantType}");
+                auditFailureReason: $"unsupported_grant_type: {request.GrantType}",
+                cancellationToken: cancellationToken);
         }
 
         var validator = _validatorFactory.GetValidator(request.GrantType);
@@ -128,7 +133,9 @@ public sealed class TokenIssuanceService
                 auditFailureReason: validationResult.ErrorMessage,
                 // OTPs and provider authorization codes are credentials, never audit identities.
                 auditUsername: request.Username ?? request.Phone ?? "unknown",
-                loginAttemptChange: validationResult.LoginAttemptChange);
+                loginAttemptChange: validationResult.LoginAttemptChange,
+                otpVerificationChange: validationResult.OtpVerificationChange,
+                cancellationToken: cancellationToken);
         }
 
         // Capture these once at the start of the success branch. The non-null flow state supplied by
@@ -214,6 +221,58 @@ public sealed class TokenIssuanceService
                 return replacement;
             });
         }
+        else if (validationResult.OtpVerificationChange is { } otpVerificationChange)
+        {
+            if (otpVerificationChange.Kind != OtpVerificationChangeKind.Consume)
+            {
+                throw new InvalidOperationException(
+                    "A successful SMS validation must carry a conditional OTP consumption.");
+            }
+
+            var strategy = _dbContext.Database.CreateExecutionStrategy();
+            var commitResult = await strategy.ExecuteAsync(async () =>
+            {
+                _dbContext.ChangeTracker.Clear();
+                originalLoginState.Restore(account);
+                await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+                if (!await OtpVerificationChangeApplier.ApplyAsync(
+                        otpVerificationChange,
+                        _otpRepository,
+                        cancellationToken))
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    _dbContext.ChangeTracker.Clear();
+                    return new OtpLoginCommitResult(false, null);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                await StageLoginStateAsync();
+                var replacement = await StageRefreshTokenAsync();
+                await StageLoginAuditAsync();
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return new OtpLoginCommitResult(true, replacement);
+            });
+
+            if (!commitResult.Committed)
+            {
+                _logger.LogWarning(
+                    "SMS token issuance lost the conditional OTP consumption: AppId={AppId}",
+                    LogValueSanitizer.Sanitize(appId));
+                return await FailAsync(
+                    request,
+                    stopwatch,
+                    errorCode: OAuthErrorCodes.InvalidGrant,
+                    metricReason: "Wrong or expired verification code",
+                    responseMessage: "Wrong or expired verification code",
+                    auditFailureReason: "Wrong or expired verification code",
+                    auditUsername: request.Phone ?? "unknown",
+                    cancellationToken: cancellationToken);
+            }
+
+            newRefreshToken = commitResult.RefreshToken;
+        }
         else
         {
             await LoginAttemptChangeApplier.ApplyAsync(
@@ -238,7 +297,8 @@ public sealed class TokenIssuanceService
                 responseMessage: "invalid_grant",
                 auditFailureReason: "invalid_grant",
                 auditUsername: displayName ?? account.Id.ToString(),
-                accountId: account.Id);
+                accountId: account.Id,
+                cancellationToken: cancellationToken);
         }
 
         stopwatch.Stop();
@@ -272,7 +332,7 @@ public sealed class TokenIssuanceService
 
         Task StageLoginAuditAsync() => _auditService.RecordLoginAsync(
             account.Id, displayName ?? account.Id.ToString(), request.GrantType, "login_success",
-            request.ClientIp, request.UserAgent, null, appId, request.CorrelationId);
+            request.ClientIp, request.UserAgent, null, appId, request.CorrelationId, cancellationToken);
     }
 
     /// <summary>
@@ -297,16 +357,18 @@ public sealed class TokenIssuanceService
         string? auditFailureReason,
         string auditUsername = "unknown",
         Guid? accountId = null,
-        LoginAttemptChange? loginAttemptChange = null)
+        LoginAttemptChange? loginAttemptChange = null,
+        OtpVerificationChange? otpVerificationChange = null,
+        CancellationToken cancellationToken = default)
     {
         stopwatch.Stop();
         _authMetrics.RecordLoginFailure(request.GrantType, metricReason);
         _authMetrics.RecordLoginDuration(stopwatch.Elapsed.TotalMilliseconds, request.GrantType);
 
-        if (loginAttemptChange == null)
+        if (loginAttemptChange == null && otpVerificationChange == null)
         {
             await StageAuditAsync();
-            await _unitOfWork.SaveChangesAsync();
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
         else
         {
@@ -317,11 +379,19 @@ public sealed class TokenIssuanceService
             await strategy.ExecuteAsync(async () =>
             {
                 _dbContext.ChangeTracker.Clear();
-                await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+                await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+                if (otpVerificationChange != null)
+                {
+                    await OtpVerificationChangeApplier.ApplyAsync(
+                        otpVerificationChange,
+                        _otpRepository,
+                        cancellationToken);
+                }
                 var loginAttempt = await LoginAttemptChangeApplier.ApplyAsync(
                     loginAttemptChange,
                     _loginAttemptRepository);
-                if (request.GrantType == IdentityConstants.GrantTypePassword &&
+                if (loginAttemptChange != null &&
+                    request.GrantType == IdentityConstants.GrantTypePassword &&
                     loginAttempt?.LockoutUntil > DateTimeOffset.UtcNow)
                 {
                     _logger.LogWarning(
@@ -330,8 +400,8 @@ public sealed class TokenIssuanceService
                         loginAttempt.LockoutUntil);
                 }
                 await StageAuditAsync();
-                await _unitOfWork.SaveChangesAsync();
-                await transaction.CommitAsync();
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
             });
         }
 
@@ -339,8 +409,11 @@ public sealed class TokenIssuanceService
 
         Task StageAuditAsync() => _auditService.RecordLoginAsync(
             accountId, auditUsername, request.GrantType, "login_failure",
-            request.ClientIp, request.UserAgent, auditFailureReason, request.App.AppId, request.CorrelationId);
+            request.ClientIp, request.UserAgent, auditFailureReason, request.App.AppId, request.CorrelationId,
+            cancellationToken);
     }
+
+    private sealed record OtpLoginCommitResult(bool Committed, string? RefreshToken);
 
     private sealed record AccountLoginState(
         DateTimeOffset? LastLoginAt,

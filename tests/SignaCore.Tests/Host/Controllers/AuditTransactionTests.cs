@@ -1,6 +1,8 @@
 using System.Data.Common;
 using System.Net;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -177,6 +179,300 @@ public sealed class AuditTransactionTests
             It.IsAny<SmsProviderProfile>(),
             It.IsAny<SmsVerificationMessage>(),
             cancellation.Token), Times.Once);
+    }
+
+    [Fact]
+    public async Task SmsSuccess_WhenLoginHistoryInsertFails_RollsBackConsumptionAndLoginState()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var target = await SeedSmsLoginAsync(database.Context);
+        await FailLoginHistoryInsertAsync(database.Context);
+        var service = CreateSmsTokenIssuanceService(
+            database.Context,
+            CreateSmsValidator(database.Context));
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => service.IssueAsync(
+            CreateIssuanceRequest(
+                IdentityConstants.GrantTypeSms,
+                target.App,
+                phone: target.Phone,
+                code: target.Code),
+            TestContext.Current.CancellationToken));
+
+        database.Context.ChangeTracker.Clear();
+        var otp = await database.Context.Otps.AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken);
+        var account = await database.Context.Accounts.AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(OtpStatus.Sent, otp.Status);
+        Assert.Equal(0, account.TotalLoginCount);
+        Assert.Empty(await database.Context.RefreshTokens.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await database.Context.LoginHistories.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SmsFailure_WhenLoginHistoryInsertFails_RollsBackAttemptAndLockout()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var target = await SeedSmsLoginAsync(database.Context);
+        await FailLoginHistoryInsertAsync(database.Context);
+        var service = CreateSmsTokenIssuanceService(
+            database.Context,
+            CreateSmsValidator(database.Context));
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => service.IssueAsync(
+            CreateIssuanceRequest(
+                IdentityConstants.GrantTypeSms,
+                target.App,
+                phone: target.Phone,
+                code: "000000"),
+            TestContext.Current.CancellationToken));
+
+        database.Context.ChangeTracker.Clear();
+        var otp = await database.Context.Otps.AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0, otp.Attempts);
+        Assert.Equal(DateTimeOffset.UnixEpoch, otp.LockoutUntil);
+        Assert.Empty(await database.Context.LoginHistories.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SmsSuccess_CommitsConsumptionAuditLoginStateAndRefreshTokenTogether()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var target = await SeedSmsLoginAsync(database.Context);
+        var service = CreateSmsTokenIssuanceService(
+            database.Context,
+            CreateSmsValidator(database.Context));
+
+        var outcome = await service.IssueAsync(
+            CreateIssuanceRequest(
+                IdentityConstants.GrantTypeSms,
+                target.App,
+                phone: target.Phone,
+                code: target.Code),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(outcome.IsSuccess);
+        database.Context.ChangeTracker.Clear();
+        Assert.Equal(OtpStatus.Consumed, await database.Context.Otps.AsNoTracking()
+            .Select(otp => otp.Status)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(1, await database.Context.Accounts.AsNoTracking()
+            .Select(account => account.TotalLoginCount)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        Assert.Single(await database.Context.RefreshTokens.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+        var audit = await database.Context.LoginHistories.AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("login_success", audit.EventType);
+    }
+
+    [Fact]
+    public async Task SmsFailure_CommitsAttemptLockoutAndFailureAuditTogether()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var target = await SeedSmsLoginAsync(database.Context);
+        var service = CreateSmsTokenIssuanceService(
+            database.Context,
+            CreateSmsValidator(database.Context));
+
+        var outcome = await service.IssueAsync(
+            CreateIssuanceRequest(
+                IdentityConstants.GrantTypeSms,
+                target.App,
+                phone: target.Phone,
+                code: "000000"),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(outcome.IsSuccess);
+        database.Context.ChangeTracker.Clear();
+        var otp = await database.Context.Otps.AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, otp.Attempts);
+        Assert.True(otp.LockoutUntil > DateTimeOffset.UtcNow);
+        var audit = await database.Context.LoginHistories.AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("login_failure", audit.EventType);
+    }
+
+    [Fact]
+    public async Task SmsFailure_AfterCodeMatch_CommitsConsumptionWithFailureAudit()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var target = await SeedSmsLoginAsync(database.Context);
+        await database.Context.Accounts.ExecuteUpdateAsync(
+            setters => setters.SetProperty(account => account.IsActive, false),
+            TestContext.Current.CancellationToken);
+        var service = CreateSmsTokenIssuanceService(
+            database.Context,
+            CreateSmsValidator(database.Context));
+
+        var outcome = await service.IssueAsync(
+            CreateIssuanceRequest(
+                IdentityConstants.GrantTypeSms,
+                target.App,
+                phone: target.Phone,
+                code: target.Code),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(outcome.IsSuccess);
+        database.Context.ChangeTracker.Clear();
+        Assert.Equal(OtpStatus.Consumed, await database.Context.Otps.AsNoTracking()
+            .Select(otp => otp.Status)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        var audit = await database.Context.LoginHistories.AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("login_failure", audit.EventType);
+        Assert.Empty(await database.Context.RefreshTokens.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SmsSuccess_WhenRequestIsCanceledBeforeAudit_RollsBackConsumption()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var target = await SeedSmsLoginAsync(database.Context);
+        using var cancellation = new CancellationTokenSource();
+        var auditService = new CancelingLoginAuditService(
+            CreateAuditService(database.Context),
+            cancellation);
+        var service = CreateSmsTokenIssuanceService(
+            database.Context,
+            CreateSmsValidator(database.Context),
+            auditService);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.IssueAsync(
+            CreateIssuanceRequest(
+                IdentityConstants.GrantTypeSms,
+                target.App,
+                phone: target.Phone,
+                code: target.Code),
+            cancellation.Token));
+
+        database.Context.ChangeTracker.Clear();
+        Assert.Equal(OtpStatus.Sent, await database.Context.Otps.AsNoTracking()
+            .Select(otp => otp.Status)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await database.Context.LoginHistories.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SmsSuccess_WhenSigningFails_DoesNotConsumeOtp()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var target = await SeedSmsLoginAsync(database.Context);
+        var tokenService = new Mock<ITokenService>();
+        tokenService.Setup(service => service.GenerateJwtToken(
+                It.IsAny<List<Claim>>(),
+                It.IsAny<Microsoft.IdentityModel.Tokens.RsaSecurityKey>(),
+                It.IsAny<int>(),
+                It.IsAny<string?>()))
+            .Throws(new InvalidOperationException("Signing failed."));
+        var service = CreateSmsTokenIssuanceService(
+            database.Context,
+            CreateSmsValidator(database.Context),
+            tokenService: tokenService.Object);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.IssueAsync(
+            CreateIssuanceRequest(
+                IdentityConstants.GrantTypeSms,
+                target.App,
+                phone: target.Phone,
+                code: target.Code),
+            TestContext.Current.CancellationToken));
+
+        database.Context.ChangeTracker.Clear();
+        Assert.Equal(OtpStatus.Sent, await database.Context.Otps.AsNoTracking()
+            .Select(otp => otp.Status)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await database.Context.LoginHistories.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SmsSuccess_WhenAdmissionProvisionFails_DoesNotConsumeOtp()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var target = await SeedSmsLoginAsync(database.Context, includeAdmission: false);
+        target.App.SmsLoginMode = SmsLoginMode.AutoProvision;
+        var admission = new Mock<ISmsAdmissionService>();
+        admission.Setup(service => service.FindAsync(
+                target.App.Id,
+                target.Phone,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SmsAdmission?)null);
+        admission.Setup(service => service.ProvisionAsync(
+                target.App,
+                target.Phone,
+                SmsAccessApprovalSource.AutoProvision,
+                null,
+                It.IsAny<CancellationToken>(),
+                null))
+            .ThrowsAsync(new InvalidOperationException("Provisioning failed."));
+        var validator = CreateSmsValidator(database.Context, admission.Object);
+        var service = CreateSmsTokenIssuanceService(database.Context, validator);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.IssueAsync(
+            CreateIssuanceRequest(
+                IdentityConstants.GrantTypeSms,
+                target.App,
+                phone: target.Phone,
+                code: target.Code),
+            TestContext.Current.CancellationToken));
+
+        database.Context.ChangeTracker.Clear();
+        Assert.Equal(OtpStatus.Sent, await database.Context.Otps.AsNoTracking()
+            .Select(otp => otp.Status)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await database.Context.LoginHistories.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task SmsSuccess_WhenTwoRequestsUseSameCode_OnlyOneReturnsTokens()
+    {
+        await using var database = await SharedSqliteTestDatabase.CreateAsync();
+        SmsLoginTarget target;
+        await using (var seedContext = database.CreateContext())
+        {
+            target = await SeedSmsLoginAsync(seedContext);
+        }
+
+        await using var firstContext = database.CreateContext();
+        await using var secondContext = database.CreateContext();
+        var barrier = new AsyncBarrier(2);
+        var firstValidator = new CoordinatedIdentityValidator(
+            CreateSmsValidator(firstContext), barrier);
+        var secondValidator = new CoordinatedIdentityValidator(
+            CreateSmsValidator(secondContext), barrier);
+        var firstService = CreateSmsTokenIssuanceService(firstContext, firstValidator);
+        var secondService = CreateSmsTokenIssuanceService(secondContext, secondValidator);
+        var request = CreateIssuanceRequest(
+            IdentityConstants.GrantTypeSms,
+            target.App,
+            phone: target.Phone,
+            code: target.Code);
+
+        var outcomes = await Task.WhenAll(
+            firstService.IssueAsync(request, TestContext.Current.CancellationToken),
+            secondService.IssueAsync(request, TestContext.Current.CancellationToken));
+
+        Assert.Equal(1, outcomes.Count(outcome => outcome.IsSuccess));
+        await using var assertionContext = database.CreateContext();
+        Assert.Equal(OtpStatus.Consumed, await assertionContext.Otps.AsNoTracking()
+            .Select(otp => otp.Status)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        Assert.Single(await assertionContext.RefreshTokens.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+        var audits = await assertionContext.LoginHistories.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Single(audits, audit => audit.EventType == "login_success");
+        Assert.Single(audits, audit => audit.EventType == "login_failure");
     }
 
     [Theory]
@@ -904,47 +1200,238 @@ public sealed class AuditTransactionTests
             """,
             TestContext.Current.CancellationToken);
 
+    private static SmsOptions CreateSmsOptions() => new()
+    {
+        OtpHmacKey = Convert.ToBase64String(
+            Enumerable.Range(1, 32).Select(value => (byte)value).ToArray()),
+        MaxAttempts = 1,
+        LockoutSeconds = 300
+    };
+
+    private static SmsValidator CreateSmsValidator(
+        IdentityDbContext context,
+        ISmsAdmissionService? admissionService = null)
+    {
+        var options = CreateSmsOptions();
+        var otpService = new DbOtpService(
+            options,
+            NullLogger<DbOtpService>.Instance,
+            new OtpRepository(context),
+            new EfCoreUnitOfWork(context),
+            new SmsSenderResolver([], options));
+        return new SmsValidator(
+            otpService,
+            admissionService ?? new SmsAdmissionService(context),
+            NullLogger<SmsValidator>.Instance,
+            AuthTestDoubles.AuthMetrics(),
+            options);
+    }
+
+    private static async Task<SmsLoginTarget> SeedSmsLoginAsync(
+        IdentityDbContext context,
+        bool includeAdmission = true)
+    {
+        const string phone = "+8613800138000";
+        const string code = "123456";
+        var app = CreateApp("sms-token-app");
+        app.SmsLoginMode = SmsLoginMode.ManualApproval;
+        var account = CreateAccount();
+        var login = new UserLoginEntity
+        {
+            Id = Guid.NewGuid(),
+            AccountId = account.Id,
+            ProviderName = IdentityConstants.AuthMethodSms,
+            ProviderNameNormalized = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms),
+            ProviderUserId = phone
+        };
+        context.AppRegistrations.Add(app);
+        context.Accounts.Add(account);
+        context.UserLogins.Add(login);
+        if (includeAdmission)
+        {
+            context.AppSmsAccesses.Add(new AppSmsAccessEntity
+            {
+                Id = Guid.NewGuid(),
+                AppRegistrationId = app.Id,
+                UserLoginId = login.Id,
+                ApprovalSource = SmsAccessApprovalSource.Admin,
+                IsActive = true,
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        context.Otps.Add(new OtpEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = app.Id,
+            Phone = phone,
+            CodeMac = ComputeOtpMac(app.Id, phone, code, CreateSmsOptions()),
+            Status = OtpStatus.Sent,
+            ExpiresAt = now.AddMinutes(5),
+            LockoutUntil = DateTimeOffset.UnixEpoch,
+            HourWindowStartedAt = now,
+            DayWindowStartedAt = now,
+            Provider = "Test",
+            ProfileKey = "test",
+            CreatedAt = now
+        });
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        context.ChangeTracker.Clear();
+        return new SmsLoginTarget(app, account, phone, code);
+    }
+
+    private static string ComputeOtpMac(
+        Guid appRegistrationId,
+        string phone,
+        string code,
+        SmsOptions options)
+    {
+        using var hmac = new HMACSHA256(options.DecodeHmacKey());
+        return Convert.ToHexString(hmac.ComputeHash(
+            Encoding.UTF8.GetBytes($"{appRegistrationId:N}|{phone}|{code}")));
+    }
+
     private static TokenIssuanceRequest CreateIssuanceRequest(
         string grantType,
         AppRegistrationEntity? app = null,
         string? username = null,
-        string? password = null) => new(
-            grantType,
-            app ?? CreateApp("token-app"),
-            Username: username,
-            Password: password,
-            ClientIp: "192.0.2.30",
+        string? password = null,
+        string? phone = null,
+        string? code = null) => new(
+        grantType,
+        app ?? CreateApp("token-app"),
+        Username: username,
+        Password: password,
+        Phone: phone,
+        Code: code,
+        ClientIp: "192.0.2.30",
             UserAgent: "audit-transaction-test",
             CorrelationId: "correlation-148");
 
     private static TokenIssuanceService CreateTokenIssuanceService(
         IdentityDbContext context,
         IIdentityValidator validator,
-        ILoginAttemptRepository loginAttemptRepository)
+        ILoginAttemptRepository loginAttemptRepository,
+        IRefreshTokenService? refreshTokenService = null,
+        IAuditService? auditService = null,
+        ITokenService? tokenService = null)
     {
         var accountRepository = new AccountRepository(context);
         return new TokenIssuanceService(
             AuthTestDoubles.KeyManager().Object,
-            AuthTestDoubles.TokenService().Object,
+            tokenService ?? AuthTestDoubles.TokenService().Object,
             new JwtOptions
             {
                 Issuer = "https://issuer.example.test",
                 Audience = "audit-tests",
                 TokenExpirationHours = 1
             },
-            AuthTestDoubles.RefreshTokenService().Object,
+            refreshTokenService ?? AuthTestDoubles.RefreshTokenService().Object,
             new ClaimsResolver(NullLogger<ClaimsResolver>.Instance),
             new ValidatorFactory([validator], NullLogger<ValidatorFactory>.Instance),
             null,
             AuthTestDoubles.AuthMetrics(),
-            CreateAuditService(context),
+            auditService ?? CreateAuditService(context),
             new AccountLoginInfoService(accountRepository),
             accountRepository,
             loginAttemptRepository,
+            new OtpRepository(context),
             new EfCoreUnitOfWork(context),
             context,
             new AdminIdentityOptions { Username = "bootstrap-admin" },
             NullLogger<TokenIssuanceService>.Instance);
+    }
+
+    private static TokenIssuanceService CreateSmsTokenIssuanceService(
+        IdentityDbContext context,
+        IIdentityValidator validator,
+        IAuditService? auditService = null,
+        ITokenService? tokenService = null) =>
+        CreateTokenIssuanceService(
+            context,
+            validator,
+            new LoginAttemptRepository(context),
+            new RefreshTokenService(
+                new RefreshTokenRepository(context),
+                new RefreshTokenOptions { RefreshTokenExpirationDays = 7 }),
+            auditService,
+            tokenService);
+
+    private sealed record SmsLoginTarget(
+        AppRegistrationEntity App,
+        AccountEntity Account,
+        string Phone,
+        string Code);
+
+    private sealed class CoordinatedIdentityValidator(
+        IIdentityValidator inner,
+        AsyncBarrier barrier) : IIdentityValidator
+    {
+        public string GrantType => inner.GrantType;
+
+        public async Task<ValidationResult> ValidateAsync(ValidationRequest request)
+        {
+            var result = await inner.ValidateAsync(request);
+            await barrier.SignalAndWaitAsync(request.CancellationToken);
+            return result;
+        }
+    }
+
+    private sealed class CancelingLoginAuditService(
+        IAuditService inner,
+        CancellationTokenSource cancellation) : IAuditService
+    {
+        public Task RecordLoginAsync(
+            Guid? accountId,
+            string username,
+            string authMethod,
+            string eventType,
+            string? clientIp,
+            string? userAgent,
+            string? failureReason = null,
+            string? appId = null,
+            string? correlationId = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellation.Cancel();
+            return inner.RecordLoginAsync(
+                accountId,
+                username,
+                authMethod,
+                eventType,
+                clientIp,
+                userAgent,
+                failureReason,
+                appId,
+                correlationId,
+                cancellationToken);
+        }
+
+        public Task RecordActionAsync(
+            string action,
+            string targetType,
+            string targetId,
+            Guid? actorId,
+            string? actorName,
+            string? description,
+            string? clientIp = null,
+            string? correlationId = null,
+            object? before = null,
+            object? after = null,
+            CancellationToken cancellationToken = default) =>
+            inner.RecordActionAsync(
+                action,
+                targetType,
+                targetId,
+                actorId,
+                actorName,
+                description,
+                clientIp,
+                correlationId,
+                before,
+                after,
+                cancellationToken);
     }
 
     private static AppRegistrationEntity CreateApp(string appId) => new()

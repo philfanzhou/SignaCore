@@ -12,7 +12,37 @@ public interface IOtpService
         string phoneE164,
         string profileKey,
         CancellationToken cancellationToken = default);
-    Task<bool> VerifyAsync(Guid appRegistrationId, string phoneE164, string code);
-    Task InvalidateAsync(Guid appRegistrationId, string phoneE164);
 
+    /// <summary>
+    /// Verifies the supplied code without changing persistent OTP state. The caller must apply the
+    /// returned conditional change in the same transaction as the matching login audit record.
+    /// </summary>
+    Task<OtpVerificationResult> VerifyAsync(
+        Guid appRegistrationId,
+        string phoneE164,
+        string code,
+        CancellationToken cancellationToken = default);
+
+    Task InvalidateAsync(Guid appRegistrationId, string phoneE164);
 }
+
+public sealed record OtpVerificationResult(bool IsVerified, OtpVerificationChange? Change);
+
+public enum OtpVerificationChangeKind
+{
+    Consume,
+    RecordFailure
+}
+
+/// <summary>
+/// A conditional OTP mutation discovered during validation. The MAC remains process-local and must
+/// never be logged, audited, or returned to a client.
+/// </summary>
+public sealed record OtpVerificationChange(
+    OtpVerificationChangeKind Kind,
+    Guid AppRegistrationId,
+    string Phone,
+    string ExpectedCodeMac,
+    DateTimeOffset ObservedAt,
+    int MaxAttempts,
+    DateTimeOffset LockoutUntil);
