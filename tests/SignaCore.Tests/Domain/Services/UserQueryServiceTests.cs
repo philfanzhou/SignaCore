@@ -79,6 +79,17 @@ public class UserQueryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchUsersAsync_WithCanceledToken_ThrowsOperationCanceledException()
+    {
+        SeedAccount();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _service.SearchUsersAsync(null, null, 1, 20, cancellation.Token));
+    }
+
+    [Fact]
     public async Task SearchUsersAsync_UsernameFilter_MatchesCredentialUsername()
     {
         var account = SeedAccount();
@@ -217,5 +228,18 @@ public class UserQueryServiceTests : IDisposable
         var users = await _service.GetUsersByIdsAsync(new List<string> { a.Id.ToString(), a.Id.ToString().ToUpperInvariant() });
 
         Assert.Single(users);
+    }
+
+    [Fact]
+    public async Task GetUsersByIdsAsync_WithCanceledToken_ThrowsOperationCanceledException()
+    {
+        var account = SeedAccount();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _service.GetUsersByIdsAsync(
+                new List<string> { account.Id.ToString() },
+                cancellation.Token));
     }
 }

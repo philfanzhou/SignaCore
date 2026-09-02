@@ -16,7 +16,8 @@ public class GatewayValidationServiceTests
     private static Mock<IAppRegistrationRepository> CreateAppRegRepoMock(AppRegistrationEntity? app = null)
     {
         var mock = new Mock<IAppRegistrationRepository>();
-        mock.Setup(r => r.GetByAppIdAsync(It.IsAny<string>())).ReturnsAsync(app);
+        mock.Setup(r => r.GetByAppIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(app);
         return mock;
     }
 
@@ -46,6 +47,21 @@ public class GatewayValidationServiceTests
         Assert.True(result.IsSuccess);
         Assert.NotNull(result.App);
         Assert.Equal("testapp", result.App.AppId);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_PassesCancellationTokenToRepository()
+    {
+        var app = CreateActiveApp();
+        var repoMock = CreateAppRegRepoMock(app);
+        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+        using var cancellation = new CancellationTokenSource();
+
+        await service.ValidateAsync("testapp", "testsecret", cancellation.Token);
+
+        repoMock.Verify(
+            repository => repository.GetByAppIdAsync("testapp", cancellation.Token),
+            Times.Once);
     }
 
     [Fact]

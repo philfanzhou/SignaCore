@@ -39,7 +39,10 @@ public sealed class GatewayAppAuthenticationHandler : AuthenticationHandler<Auth
             return AuthenticateResult.Fail("Missing gateway credentials.");
         }
 
-        var validation = await _gatewayValidationService.ValidateAsync(appId, appSecret);
+        var validation = await _gatewayValidationService.ValidateAsync(
+            appId,
+            appSecret,
+            Context.RequestAborted);
         if (!validation.IsSuccess || validation.App is null)
         {
             Logger.LogWarning(
