@@ -86,37 +86,13 @@ public sealed class AuditTransactionTests
     }
 
     [Fact]
-    public async Task SmsCodeWithoutBusinessState_ExplicitlyPersistsEveryLoginHistoryField()
+    public async Task SmsCodeSuccess_CommitsSentStateAndEveryLoginHistoryFieldTogether()
     {
         await using var database = await SqliteTestDatabase.CreateAsync();
-        var otpService = new Mock<IOtpService>();
-        otpService.Setup(service => service.GenerateAndSendAsync(
-                It.IsAny<Guid>(), "+8613800138000", "primary", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(string.Empty);
-
-        var controller = new SmsCodeController(
-            otpService.Object,
-            new Mock<ISmsAdmissionService>().Object,
-            CreateAuditService(database.Context),
-            new EfCoreUnitOfWork(database.Context),
-            NullLogger<SmsCodeController>.Instance);
-        var app = new AppRegistrationEntity
-        {
-            Id = Guid.NewGuid(),
-            AppId = "sms-app",
-            AppName = "SMS app",
-            AppSecretHash = "not-used",
-            IsActive = true,
-            SmsLoginMode = SmsLoginMode.AutoProvision,
-            SmsProfileKey = "primary",
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-        var httpContext = new DefaultHttpContext();
-        httpContext.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.10");
-        httpContext.Request.Headers.UserAgent = "audit-test-agent";
-        httpContext.Items[IdentityHeaders.ValidatedApp] = app;
-        httpContext.Items[CorrelationIdMiddleware.HttpContextItemsKey] = "correlation-148";
-        controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
+        var app = CreateSmsApp();
+        database.Context.AppRegistrations.Add(app);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var (controller, sender) = CreateSmsController(database.Context, app);
 
         var action = await controller.RequestSmsCode(
             new SmsCodeRequest { Phone = "13800138000" },
@@ -124,6 +100,10 @@ public sealed class AuditTransactionTests
 
         Assert.True(Assert.IsType<SmsCodeResponse>(Assert.IsType<OkObjectResult>(action.Result).Value).Success);
         database.Context.ChangeTracker.Clear();
+        var otp = await database.Context.Otps.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(OtpStatus.Sent, otp.Status);
+        Assert.Equal("message-148", otp.ProviderMessageId);
+        Assert.NotNull(otp.SentAt);
         var entry = await database.Context.LoginHistories.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Null(entry.AccountId);
         Assert.Equal("+8613800138000", entry.Username);
@@ -134,6 +114,69 @@ public sealed class AuditTransactionTests
         Assert.Null(entry.FailureReason);
         Assert.Equal("sms-app", entry.AppId);
         Assert.Equal("correlation-148", entry.CorrelationId);
+        sender.Verify(value => value.SendAsync(
+            It.IsAny<SmsProviderProfile>(),
+            It.IsAny<SmsVerificationMessage>(),
+            TestContext.Current.CancellationToken), Times.Once);
+    }
+
+    [Fact]
+    public async Task SmsCode_WhenAuditInsertFails_RollsBackSentStateToPendingDelivery()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var app = CreateSmsApp();
+        database.Context.AppRegistrations.Add(app);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await FailLoginHistoryInsertAsync(database.Context);
+        var (controller, sender) = CreateSmsController(database.Context, app);
+
+        var action = await controller.RequestSmsCode(
+            new SmsCodeRequest { Phone = "13800138000" },
+            TestContext.Current.CancellationToken);
+
+        Assert.False(Assert.IsType<SmsCodeResponse>(
+            Assert.IsType<OkObjectResult>(action.Result).Value).Success);
+        database.Context.ChangeTracker.Clear();
+        var otp = await database.Context.Otps.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(OtpStatus.PendingDelivery, otp.Status);
+        Assert.Null(otp.ProviderMessageId);
+        Assert.Null(otp.SentAt);
+        Assert.False(await database.Context.LoginHistories.AnyAsync(
+            TestContext.Current.CancellationToken));
+        sender.Verify(value => value.SendAsync(
+            It.IsAny<SmsProviderProfile>(),
+            It.IsAny<SmsVerificationMessage>(),
+            TestContext.Current.CancellationToken), Times.Once);
+    }
+
+    [Fact]
+    public async Task SmsCode_WhenFinalCommitIsCanceled_LeavesPendingDeliveryWithoutAudit()
+    {
+        await using var database = await SqliteTestDatabase.CreateAsync();
+        var app = CreateSmsApp();
+        database.Context.AppRegistrations.Add(app);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        using var cancellation = new CancellationTokenSource();
+        var (controller, sender) = CreateSmsController(
+            database.Context,
+            app,
+            cancellation.Cancel);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => controller.RequestSmsCode(
+            new SmsCodeRequest { Phone = "13800138000" },
+            cancellation.Token));
+
+        database.Context.ChangeTracker.Clear();
+        var otp = await database.Context.Otps.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(OtpStatus.PendingDelivery, otp.Status);
+        Assert.Null(otp.ProviderMessageId);
+        Assert.Null(otp.SentAt);
+        Assert.False(await database.Context.LoginHistories.AnyAsync(
+            TestContext.Current.CancellationToken));
+        sender.Verify(value => value.SendAsync(
+            It.IsAny<SmsProviderProfile>(),
+            It.IsAny<SmsVerificationMessage>(),
+            cancellation.Token), Times.Once);
     }
 
     [Theory]
@@ -766,6 +809,59 @@ public sealed class AuditTransactionTests
 
     private static AuditService CreateAuditService(IdentityDbContext context) =>
         new(new LoginHistoryRepository(context), new AuditLogRepository(context));
+
+    private static AppRegistrationEntity CreateSmsApp()
+    {
+        var app = CreateApp("sms-app");
+        app.SmsLoginMode = SmsLoginMode.AutoProvision;
+        app.SmsProfileKey = "primary";
+        return app;
+    }
+
+    private static (SmsCodeController Controller, Mock<ISmsSender> Sender) CreateSmsController(
+        IdentityDbContext context,
+        AppRegistrationEntity app,
+        Action? onSend = null)
+    {
+        var options = new SmsOptions
+        {
+            OtpHmacKey = Convert.ToBase64String(
+                Enumerable.Range(1, 32).Select(value => (byte)value).ToArray()),
+            Profiles = new Dictionary<string, SmsProviderProfile>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["primary"] = new() { Provider = "Test" }
+            }
+        };
+        var sender = new Mock<ISmsSender>();
+        sender.SetupGet(value => value.Provider).Returns("Test");
+        sender.Setup(value => value.SendAsync(
+                It.IsAny<SmsProviderProfile>(),
+                It.IsAny<SmsVerificationMessage>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<SmsProviderProfile, SmsVerificationMessage, CancellationToken>(
+                (_, _, _) => onSend?.Invoke())
+            .ReturnsAsync(new SmsSendResult("Test", "message-148"));
+        var unitOfWork = new EfCoreUnitOfWork(context);
+        var otpService = new DbOtpService(
+            options,
+            NullLogger<DbOtpService>.Instance,
+            new OtpRepository(context),
+            unitOfWork,
+            new SmsSenderResolver([sender.Object], options));
+        var controller = new SmsCodeController(
+            otpService,
+            new Mock<ISmsAdmissionService>().Object,
+            CreateAuditService(context),
+            unitOfWork,
+            NullLogger<SmsCodeController>.Instance);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.10");
+        httpContext.Request.Headers.UserAgent = "audit-test-agent";
+        httpContext.Items[IdentityHeaders.ValidatedApp] = app;
+        httpContext.Items[CorrelationIdMiddleware.HttpContextItemsKey] = "correlation-148";
+        controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
+        return (controller, sender);
+    }
 
     private static IPasswordHasher CreatePasswordHasher() =>
         new BCryptPasswordHasher(new PasswordHasherOptions { WorkFactor = 4 });

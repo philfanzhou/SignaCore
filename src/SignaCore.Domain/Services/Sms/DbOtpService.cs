@@ -74,7 +74,6 @@ public class DbOtpService : IOtpService
             otp.Status = OtpStatus.Sent;
             otp.ProviderMessageId = result.MessageId;
             otp.SentAt = DateTimeOffset.UtcNow;
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
         catch (SmsDeliveryRejectedException exception)
         {
