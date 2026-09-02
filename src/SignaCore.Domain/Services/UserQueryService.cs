@@ -15,7 +15,11 @@ public class UserQueryService : IUserQueryService
     }
 
     public async Task<(List<UserListItemResponse> Users, int Total)> SearchUsersAsync(
-        string? username, string? phone, int page, int pageSize)
+        string? username,
+        string? phone,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
     {
         var searchTerm = string.IsNullOrWhiteSpace(username)
             ? null
@@ -53,13 +57,15 @@ public class UserQueryService : IUserQueryService
                      login.ProviderNameNormalized == smsProviderName &&
                      EF.Functions.Like(login.ProviderUserId, $"%{phoneTerm}%"))));
 
-        var total = await query.CountAsync();
-        var users = await ProjectUsersAsync(query, page, pageSize);
+        var total = await query.CountAsync(cancellationToken);
+        var users = await ProjectUsersAsync(query, page, pageSize, cancellationToken);
 
         return (users, total);
     }
 
-    public async Task<List<UserListItemResponse>> GetUsersByIdsAsync(List<string> userIds)
+    public async Task<List<UserListItemResponse>> GetUsersByIdsAsync(
+        List<string> userIds,
+        CancellationToken cancellationToken = default)
     {
         var orderedUserIds = userIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -81,7 +87,11 @@ public class UserQueryService : IUserQueryService
             .AsNoTracking()
             .Where(account => parsedUserIds.Contains(account.Id));
 
-        var users = await ProjectUsersAsync(query, page: 1, pageSize: parsedUserIds.Count);
+        var users = await ProjectUsersAsync(
+            query,
+            page: 1,
+            pageSize: parsedUserIds.Count,
+            cancellationToken);
         var userMap = users.ToDictionary(item => item.UserId, StringComparer.OrdinalIgnoreCase);
 
         var orderedUsers = orderedUserIds
@@ -95,20 +105,21 @@ public class UserQueryService : IUserQueryService
     private async Task<List<UserListItemResponse>> ProjectUsersAsync(
         IQueryable<Database.Entity.AccountEntity> query,
         int page,
-        int pageSize)
+        int pageSize,
+        CancellationToken cancellationToken)
     {
         var pagedAccounts = await query
             .OrderByDescending(account => account.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
         var accountIds = pagedAccounts.Select(a => a.Id).ToList();
 
         var credentials = await _dbContext.PasswordCredentials
             .AsNoTracking()
             .Where(c => accountIds.Contains(c.AccountId))
-            .ToDictionaryAsync(c => c.AccountId, c => c.Username);
+            .ToDictionaryAsync(c => c.AccountId, c => c.Username, cancellationToken);
 
         var phones = await _dbContext.UserLogins
             .AsNoTracking()
@@ -116,14 +127,14 @@ public class UserQueryService : IUserQueryService
                 accountIds.Contains(l.AccountId) &&
                 l.ProviderNameNormalized ==
                     IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms))
-            .ToDictionaryAsync(l => l.AccountId, l => l.ProviderUserId);
+            .ToDictionaryAsync(l => l.AccountId, l => l.ProviderUserId, cancellationToken);
 
         var ldapRows = await _dbContext.LdapCredentials
             .AsNoTracking()
             .Where(credential => accountIds.Contains(credential.AccountId))
             .OrderBy(credential => credential.CreatedAt)
             .Select(credential => new { credential.AccountId, credential.UserPrincipalName })
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         var ldapUsers = ldapRows
             .GroupBy(item => item.AccountId)
             .ToDictionary(group => group.Key, group => group.First().UserPrincipalName);

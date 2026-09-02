@@ -41,14 +41,17 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        var credentials = ReadBasicCredentials() ?? await ReadFormCredentialsAsync();
+        var credentials = ReadBasicCredentials() ?? await ReadFormCredentialsAsync(Context.RequestAborted);
         if (credentials == null)
         {
             return AuthenticateResult.Fail("Missing client credentials.");
         }
 
         var (clientId, clientSecret) = credentials.Value;
-        var validation = await _gatewayValidationService.ValidateAsync(clientId, clientSecret);
+        var validation = await _gatewayValidationService.ValidateAsync(
+            clientId,
+            clientSecret,
+            Context.RequestAborted);
         if (!validation.IsSuccess || validation.App is null)
         {
             Logger.LogWarning(
@@ -118,14 +121,15 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
             Uri.UnescapeDataString(decoded[(separator + 1)..]));
     }
 
-    private async Task<(string ClientId, string ClientSecret)?> ReadFormCredentialsAsync()
+    private async Task<(string ClientId, string ClientSecret)?> ReadFormCredentialsAsync(
+        CancellationToken cancellationToken)
     {
         if (!Request.HasFormContentType)
         {
             return null;
         }
 
-        var form = await Request.ReadFormAsync();
+        var form = await Request.ReadFormAsync(cancellationToken);
         var clientId = form["client_id"].ToString();
         var clientSecret = form["client_secret"].ToString();
         return string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret)

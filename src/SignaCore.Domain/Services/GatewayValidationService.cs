@@ -18,7 +18,10 @@ public class GatewayValidationService
         _logger = logger;
     }
 
-    public async Task<GatewayAuthResult> ValidateAsync(string? appId, string? appSecret)
+    public async Task<GatewayAuthResult> ValidateAsync(
+        string? appId,
+        string? appSecret,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(appId))
         {
@@ -30,7 +33,7 @@ public class GatewayValidationService
             return GatewayAuthResult.Failure("AppSecret is required");
         }
 
-        var app = await _appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await _appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null)
         {
             return GatewayAuthResult.Failure("AppId not registered");

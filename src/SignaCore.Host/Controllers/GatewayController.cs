@@ -36,9 +36,10 @@ public class GatewayController : ControllerBase
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
         [FromServices] IUserQueryService userQueryService,
-        [FromServices] GatewayValidationService gatewayValidationService)
+        [FromServices] GatewayValidationService gatewayValidationService,
+        CancellationToken cancellationToken = default)
     {
-        var authError = await ValidateGatewayRequestAsync(gatewayValidationService);
+        var authError = await ValidateGatewayRequestAsync(gatewayValidationService, cancellationToken);
         if (authError != null)
         {
             return authError;
@@ -46,7 +47,12 @@ public class GatewayController : ControllerBase
 
         var paging = PageRequest.Normalize(page, pageSize);
 
-        var (users, total) = await userQueryService.SearchUsersAsync(username, phone, paging.Page, paging.PageSize);
+        var (users, total) = await userQueryService.SearchUsersAsync(
+            username,
+            phone,
+            paging.Page,
+            paging.PageSize,
+            cancellationToken);
 
         return Ok(new PagedResponse<UserListItemResponse>(
             users,
@@ -59,9 +65,10 @@ public class GatewayController : ControllerBase
     public async Task<IActionResult> GetUsersByIds(
         [FromBody] List<string>? userIds,
         [FromServices] IUserQueryService userQueryService,
-        [FromServices] GatewayValidationService gatewayValidationService)
+        [FromServices] GatewayValidationService gatewayValidationService,
+        CancellationToken cancellationToken = default)
     {
-        var authError = await ValidateGatewayRequestAsync(gatewayValidationService);
+        var authError = await ValidateGatewayRequestAsync(gatewayValidationService, cancellationToken);
         if (authError != null)
         {
             return authError;
@@ -72,12 +79,14 @@ public class GatewayController : ControllerBase
             return Ok(new List<UserListItemResponse>());
         }
 
-        var orderedUsers = await userQueryService.GetUsersByIdsAsync(userIds);
+        var orderedUsers = await userQueryService.GetUsersByIdsAsync(userIds, cancellationToken);
 
         return Ok(orderedUsers);
     }
 
-    private async Task<IActionResult?> ValidateGatewayRequestAsync(GatewayValidationService gatewayValidationService)
+    private async Task<IActionResult?> ValidateGatewayRequestAsync(
+        GatewayValidationService gatewayValidationService,
+        CancellationToken cancellationToken)
     {
         if (!HttpContext.Request.IsHttps)
         {
@@ -100,7 +109,7 @@ public class GatewayController : ControllerBase
             return StatusCode(StatusCodes.Status401Unauthorized, new ErrorResponse("Missing gateway credentials."));
         }
 
-        var validation = await gatewayValidationService.ValidateAsync(appId, appSecret);
+        var validation = await gatewayValidationService.ValidateAsync(appId, appSecret, cancellationToken);
         if (!validation.IsSuccess)
         {
             return StatusCode(StatusCodes.Status401Unauthorized, new ErrorResponse(validation.ErrorMessage));

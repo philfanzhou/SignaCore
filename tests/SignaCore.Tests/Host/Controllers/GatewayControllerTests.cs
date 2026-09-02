@@ -71,7 +71,9 @@ public class GatewayControllerTests : IDisposable
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow
         };
-        _appRepoMock.Setup(r => r.GetByAppIdAsync(appId)).ReturnsAsync(app);
+        _appRepoMock
+            .Setup(r => r.GetByAppIdAsync(appId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(app);
     }
 
     private AccountEntity SeedAccount(string? nickname = null, string? remark = null, bool isActive = true)
@@ -167,6 +169,37 @@ public class GatewayControllerTests : IDisposable
         Assert.Equal(2, response.Items.Count);
         Assert.Equal(1, response.Page);
         Assert.Equal(20, response.PageSize);
+    }
+
+    [Fact]
+    public async Task SearchUsers_PassesActionTokenToFallbackValidationAndQuery()
+    {
+        SetGatewayHeaders("testapp", "testsecret");
+        RegisterValidApp();
+        using var cancellation = new CancellationTokenSource();
+        var queryService = new Mock<IUserQueryService>();
+        queryService
+            .Setup(service => service.SearchUsersAsync(
+                null,
+                null,
+                1,
+                20,
+                cancellation.Token))
+            .ReturnsAsync((new List<UserListItemResponse>(), 0));
+
+        await _controller.SearchUsers(
+            null,
+            null,
+            null,
+            null,
+            queryService.Object,
+            CreateValidationService(),
+            cancellation.Token);
+
+        _appRepoMock.Verify(
+            repository => repository.GetByAppIdAsync("testapp", cancellation.Token),
+            Times.Once);
+        queryService.VerifyAll();
     }
 
     [Fact]
@@ -335,6 +368,30 @@ public class GatewayControllerTests : IDisposable
         // Order should match input order
         Assert.Equal(acc2.Id.ToString(), list[0].UserId);
         Assert.Equal(acc1.Id.ToString(), list[1].UserId);
+    }
+
+    [Fact]
+    public async Task GetUsersByIds_PassesActionTokenToFallbackValidationAndQuery()
+    {
+        SetGatewayHeaders("testapp", "testsecret");
+        RegisterValidApp();
+        using var cancellation = new CancellationTokenSource();
+        var userIds = new List<string> { Guid.NewGuid().ToString() };
+        var queryService = new Mock<IUserQueryService>();
+        queryService
+            .Setup(service => service.GetUsersByIdsAsync(userIds, cancellation.Token))
+            .ReturnsAsync(new List<UserListItemResponse>());
+
+        await _controller.GetUsersByIds(
+            userIds,
+            queryService.Object,
+            CreateValidationService(),
+            cancellation.Token);
+
+        _appRepoMock.Verify(
+            repository => repository.GetByAppIdAsync("testapp", cancellation.Token),
+            Times.Once);
+        queryService.VerifyAll();
     }
 
     [Fact]
