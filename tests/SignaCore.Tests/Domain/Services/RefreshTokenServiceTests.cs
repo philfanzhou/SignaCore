@@ -141,6 +141,57 @@ public class RefreshTokenServiceTests
         _repoMock.Verify(r => r.AddAsync(It.IsAny<RefreshTokenEntity>()), Times.Never);
     }
 
+    [Theory]
+    [InlineData("password", false)]
+    [InlineData("sms", false)]
+    [InlineData("wechat_code", false)]
+    [InlineData("ldap", false)]
+    [InlineData("refresh_token", false)]
+    [InlineData("refresh_token", true)]
+    public async Task HandleRefreshToken_ForwardsCancellationAndPreservesOutcome(string grant, bool exchange)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var rotates = grant == "refresh_token" && !exchange;
+        _repoMock.Setup(repository => repository.TryRotateAsync(
+                It.IsAny<string>(), It.IsAny<RefreshTokenEntity>(), cancellation.Token)).ReturnsAsync(true);
+
+        var result = await _service.HandleRefreshTokenAsync(grant, "unused-source", CreateAccount(), "app-1",
+            exchangedFromAppId: exchange ? "source-app" : null, cancellationToken: cancellation.Token);
+
+        Assert.False(string.IsNullOrEmpty(result));
+        _repoMock.Verify(repository => repository.AddAsync(It.IsAny<RefreshTokenEntity>(), cancellation.Token),
+            rotates ? Times.Never() : Times.Once());
+        _repoMock.Verify(repository => repository.TryRotateAsync(
+            It.IsAny<string>(), It.IsAny<RefreshTokenEntity>(), cancellation.Token),
+            rotates ? Times.Once() : Times.Never());
+        _repoMock.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("password", false)]
+    [InlineData("sms", false)]
+    [InlineData("wechat_code", false)]
+    [InlineData("ldap", false)]
+    [InlineData("refresh_token", false)]
+    [InlineData("refresh_token", true)]
+    public async Task HandleRefreshToken_WhenStorageCancels_DoesNotReturnToken(string grant, bool exchange)
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        _repoMock.Setup(repository => repository.AddAsync(It.IsAny<RefreshTokenEntity>(), cancellation.Token))
+            .Returns(Task.FromCanceled(cancellation.Token));
+        _repoMock.Setup(repository => repository.TryRotateAsync(
+                It.IsAny<string>(), It.IsAny<RefreshTokenEntity>(), cancellation.Token))
+            .Returns(Task.FromCanceled<bool>(cancellation.Token));
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _service.HandleRefreshTokenAsync(grant, "unused-source", CreateAccount(), "app-1",
+                exchangedFromAppId: exchange ? "source-app" : null, cancellationToken: cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        Assert.Single(_repoMock.Invocations);
+    }
+
     [Fact]
     public async Task RevokeAsync_TokenFound_AtomicallyRevokes()
     {

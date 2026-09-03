@@ -191,6 +191,9 @@ public class TokenControllerTests : IDisposable
     }
 
     [Theory]
+    [InlineData("password", true, "refresh")]
+    [InlineData("sms", true, "refresh")]
+    [InlineData("ldap", true, "refresh")]
     [InlineData("password", true, "keys")]
     [InlineData("password", true, "attempt-read")]
     [InlineData("password", true, "attempt-remove")]
@@ -262,6 +265,43 @@ public class TokenControllerTests : IDisposable
             "admin", cancellation.Token), Times.Once);
     }
 
+    [Theory]
+    [InlineData("password", false)]
+    [InlineData("sms", false)]
+    [InlineData("wechat_code", false)]
+    [InlineData("ldap", false)]
+    [InlineData("refresh_token", false)]
+    [InlineData("refresh_token", true)]
+    public async Task GetToken_RefreshWriteObservesRequestCancellation(string grant, bool exchange)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var account = CreateTestAccount();
+        var validator = new Mock<IIdentityValidator>();
+        validator.SetupGet(value => value.GrantType).Returns(grant);
+        var validation = ValidationResult.Success(account, grant, "test-user");
+        if (exchange) validation = validation.AsCrossApplicationExchange("source-app");
+        validator.Setup(value => value.ValidateAsync(It.IsAny<ValidationRequest>())).ReturnsAsync(validation);
+        _refreshTokenServiceMock.Setup(service => service.HandleRefreshTokenAsync(
+                grant, It.IsAny<string?>(), account, It.IsAny<string?>(), It.IsAny<Guid?>(),
+                It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(invocation =>
+            {
+                var received = (CancellationToken)invocation.Arguments[^1];
+                Assert.Equal(cancellation.Token, received);
+                cancellation.Cancel();
+                received.ThrowIfCancellationRequested();
+            }));
+        var controller = CreateController([validator.Object]);
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => controller.GetToken(
+            new TokenRequest { GrantType = grant }, cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        Assert.Single(_refreshTokenServiceMock.Invocations);
+        _auditServiceMock.VerifyNoOtherCalls();
+        _unitOfWorkMock.VerifyNoOtherCalls();
+    }
+
     private static string[] ExpectedLoginCalls(string grant, bool succeeds)
     {
         if (!succeeds)
@@ -327,8 +367,9 @@ public class TokenControllerTests : IDisposable
             .Callback<AccountEntity, string?, string, CancellationToken>((_, _, _, ct) => Observe("login-state", ct))
             .Returns(Task.CompletedTask);
         _refreshTokenServiceMock.Setup(service => service.HandleRefreshTokenAsync(
-                grant, It.IsAny<string?>(), account, It.IsAny<string?>(), It.IsAny<Guid?>()))
-            .Callback(() => calls.Add("refresh")).ReturnsAsync("test-refresh");
+                grant, It.IsAny<string?>(), account, It.IsAny<string?>(), It.IsAny<Guid?>(),
+                It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(invocation => Observe("refresh", (CancellationToken)invocation.Arguments[^1]))).ReturnsAsync("test-refresh");
         _auditServiceMock.Setup(service => service.RecordLoginAsync(It.IsAny<Guid?>(), It.IsAny<string>(), grant,
                 It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))

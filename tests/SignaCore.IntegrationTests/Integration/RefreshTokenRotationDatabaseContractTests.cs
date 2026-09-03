@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
+using SignaCore.Domain.Services;
 using Xunit;
 
 namespace SignaCore.IntegrationTests.Integration;
@@ -84,6 +85,65 @@ public sealed class RefreshTokenRotationDatabaseContractTests
         Assert.Equal(1, interceptor.InjectedFailures);
         Assert.True(rotated);
         await AssertRotatedExactlyOnceAsync(database.BuildOptions());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefreshService_CancellationAtCommit_PreservesAtomicRotation(bool afterCommit)
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var database = new SqliteTestDatabase();
+        var accountId = await database.SeedAsync(database.BuildOptions(), TokenValue);
+        var interceptor = new CommitCancellationInterceptor(cancellation, afterCommit);
+        await using (var context = new IdentityDbContext(database.BuildOptions(interceptor)))
+        {
+            var service = new RefreshTokenService(new RefreshTokenRepository(context), new RefreshTokenOptions());
+            var operation = () => service.HandleRefreshTokenAsync(
+                IdentityConstants.GrantTypeRefreshToken, TokenValue, new AccountEntity { Id = accountId },
+                "rotation-contract-app", cancellationToken: cancellation.Token);
+            if (afterCommit)
+                Assert.False(string.IsNullOrEmpty(await operation()));
+            else
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(operation);
+        }
+
+        Assert.Equal(1, interceptor.CommitAttempts);
+        await using var verification = new IdentityDbContext(database.BuildOptions());
+        var tokens = await verification.RefreshTokens.AsNoTracking().ToListAsync();
+        Assert.Equal(afterCommit ? 2 : 1, tokens.Count);
+        Assert.Equal(afterCommit, tokens.Single(token =>
+            token.TokenValue == RefreshTokenDigest.Compute(TokenValue)).IsRevoked);
+        if (afterCommit)
+            Assert.Single(tokens, token => !token.IsRevoked);
+    }
+
+    private sealed class CommitCancellationInterceptor(CancellationTokenSource cancellation, bool afterCommit)
+        : DbTransactionInterceptor
+    {
+        public int CommitAttempts { get; private set; }
+
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
+            DbTransaction transaction, TransactionEventData eventData, InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(cancellation.Token, cancellationToken);
+            CommitAttempts++;
+            if (!afterCommit)
+            {
+                cancellation.Cancel();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            return ValueTask.FromResult(result);
+        }
+
+        public override Task TransactionCommittedAsync(
+            DbTransaction transaction, TransactionEndEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            cancellation.Cancel();
+            return Task.CompletedTask;
+        }
     }
 
     private const string TokenValue = "RotationRetrySourceToken";
