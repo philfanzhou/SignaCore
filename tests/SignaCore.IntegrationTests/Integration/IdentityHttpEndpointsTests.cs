@@ -4,11 +4,15 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.Tokens;
+using Moq;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.Domain.Keys;
 using SignaCore.Host;
 using SignaCore.Host.Startup;
 using Xunit;
@@ -48,8 +52,20 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         var response = await http.GetAsync(path, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        Assert.Contains("RSA", content);
-        Assert.Contains("keys", content);
+        using var document = JsonDocument.Parse(content);
+        var keys = document.RootElement.GetProperty("keys").EnumerateArray().ToArray();
+        Assert.NotEmpty(keys);
+        Assert.All(keys, key =>
+        {
+            Assert.Equal("RSA", key.GetProperty("kty").GetString());
+            Assert.Equal("sig", key.GetProperty("use").GetString());
+            Assert.Equal("RS256", key.GetProperty("alg").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(key.GetProperty("kid").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(key.GetProperty("n").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(key.GetProperty("e").GetString()));
+            Assert.Equal(new[] { "alg", "e", "kid", "kty", "n", "use" },
+                key.EnumerateObject().Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
+        });
     }
 
     /// <summary>
@@ -66,6 +82,77 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         var alias = await http.GetStringAsync(WellKnownEndpoints.JwksJson, TestContext.Current.CancellationToken);
 
         Assert.Equal(canonical, alias);
+    }
+
+    [Theory]
+    [InlineData(WellKnownEndpoints.Jwks)]
+    [InlineData(WellKnownEndpoints.JwksJson)]
+    public async Task JwksEndpoint_ClientCancellation_ReachesKeyReadWithoutReturningPartialResponse(string path)
+    {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var started = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observed = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<IReadOnlyList<RsaSecurityKey>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        IHttpContextAccessor? accessor = null;
+        var keys = new Mock<IKeyManager>();
+        keys.SetupGet(manager => manager.InitializationCompleted).Returns(Task.CompletedTask);
+        keys.Setup(manager => manager.GetValidKeysAsync(It.IsAny<CancellationToken>()))
+            .Returns(async (CancellationToken ct) =>
+            {
+                var context = Assert.IsAssignableFrom<HttpContext>(accessor!.HttpContext);
+                Assert.Equal(context.RequestAborted, ct);
+                Assert.False(context.Response.HasStarted);
+                started.TrySetResult(ct);
+                try
+                {
+                    return await release.Task.WaitAsync(ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    observed.TrySetResult(ct);
+                    throw;
+                }
+            });
+        using var factory = _fixture.WithTestServices(services =>
+        {
+            services.AddHttpContextAccessor();
+            services.AddSingleton<IKeyManager>(provider =>
+            {
+                accessor = provider.GetRequiredService<IHttpContextAccessor>();
+                return keys.Object;
+            });
+        });
+        // Exercise an actual connection abort; TestServer can still deliver the middleware's
+        // error response after its request token is cancelled.
+        factory.UseKestrel(0);
+        using var http = factory.CreateClient();
+        // The production listener binds all interfaces; a client needs a concrete loopback target.
+        http.BaseAddress = new UriBuilder(http.BaseAddress!) { Host = IPAddress.Loopback.ToString() }.Uri;
+        var response = http.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, cancellation.Token);
+        try
+        {
+            if (await Task.WhenAny(started.Task, response).WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken) == response)
+            {
+                using var unexpected = await response;
+                Assert.Fail($"JWKS completed before key read: HTTP {(int)unexpected.StatusCode}.");
+            }
+            var requestToken = await started.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            Assert.True(requestToken.CanBeCanceled);
+            Assert.False(response.IsCompleted);
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await response);
+            Assert.Equal(requestToken,
+                await observed.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+            Assert.True(requestToken.IsCancellationRequested);
+            keys.Verify(manager => manager.GetValidKeysAsync(requestToken), Times.Once);
+        }
+        finally
+        {
+            // Release the server even if a regression drops the token, so a failing test cannot
+            // leave its intentionally suspended key read alive during fixture disposal.
+            release.TrySetResult(Array.Empty<RsaSecurityKey>());
+        }
     }
 
     /// <summary>
@@ -657,6 +744,13 @@ public class IdentityServerFixture : IAsyncLifetime
         _factory.CreateClient();
         await SeedGatewayAppAsync(GatewayAppId, GatewayAppSecret);
     }
+
+    public WebApplicationFactory<Program> WithTestServices(Action<IServiceCollection> configure) =>
+        _factory!.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Endpoints:Http", "0");
+            builder.ConfigureTestServices(configure);
+        });
 
     public HttpClient CreateHttpClient()
     {

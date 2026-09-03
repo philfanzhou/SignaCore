@@ -410,9 +410,9 @@ app.MapGet("/.well-known/oauth-authorization-server", BuildDiscoveryDocument);
 // One handler, two routes. Discovery advertises WellKnownEndpoints.Jwks; the .json alias exists
 // because that is what operators and hand-configured validators try first, and a 404 from a key
 // endpoint reads as "no keys published". See WellKnownEndpoints for why the alias is kept.
-async Task<IResult> GetJwks(IKeyManager keys)
+async Task<IResult> GetJwks(IKeyManager keys, CancellationToken cancellationToken)
 {
-    var validKeys = await keys.GetValidKeysAsync();
+    var validKeys = await keys.GetValidKeysAsync(cancellationToken);
     var jwks = validKeys.Select(JwksMapper.ToJwk);
     return Results.Ok(new { keys = jwks });
 }
