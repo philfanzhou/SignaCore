@@ -90,7 +90,7 @@ public class SmsCodeController : ControllerBase
             _logger.LogInformation("SMS verification code sent: Phone={Phone}", maskedPhone);
 
             await _auditService.RecordLoginAsync(null, phone, IdentityConstants.GrantTypeSms, "sms_code_sent",
-                HttpContext.GetClientIp(), HttpContext.GetUserAgent(), null, appId, HttpContext.GetCorrelationId());
+                HttpContext.GetClientIp(), HttpContext.GetUserAgent(), null, appId, HttpContext.GetCorrelationId(), cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             return Ok(new SmsCodeResponse { Success = true, Message = "Verification code sent" });
