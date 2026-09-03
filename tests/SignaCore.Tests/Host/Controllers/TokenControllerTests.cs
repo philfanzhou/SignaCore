@@ -11,6 +11,7 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using SignaCore.Host.Controllers;
@@ -168,6 +169,174 @@ public class TokenControllerTests : IDisposable
         validatorMock.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
             .ReturnsAsync(ValidationResult.Failure(error));
         return validatorMock;
+    }
+
+    [Theory]
+    [InlineData("password", true)]
+    [InlineData("password", false)]
+    [InlineData("sms", true)]
+    [InlineData("sms", false)]
+    [InlineData("ldap", true)]
+    [InlineData("ldap", false)]
+    public async Task GetToken_LoginStatePaths_PropagateSameRequestToken(string grant, bool succeeds)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var calls = new List<string>();
+        var controller = CreateCancellationController(grant, succeeds, cancellation, calls);
+
+        var result = await controller.GetToken(new TokenRequest { GrantType = grant }, cancellation.Token);
+
+        Assert.Equal(succeeds, Assert.IsType<TokenResponse>(AuthTestDoubles.ExtractOk(result).Value).Success);
+        Assert.Equal(ExpectedLoginCalls(grant, succeeds), calls);
+    }
+
+    [Theory]
+    [InlineData("password", true, "keys")]
+    [InlineData("password", true, "attempt-read")]
+    [InlineData("password", true, "attempt-remove")]
+    [InlineData("password", true, "login-state")]
+    [InlineData("password", false, "attempt-failure")]
+    [InlineData("ldap", true, "keys")]
+    [InlineData("ldap", true, "attempt-read")]
+    [InlineData("ldap", true, "attempt-remove")]
+    [InlineData("ldap", true, "login-state")]
+    [InlineData("ldap", false, "attempt-failure")]
+    [InlineData("sms", true, "keys")]
+    [InlineData("sms", true, "login-state")]
+    [InlineData("sms", false, "otp-failure")]
+    public async Task GetToken_CancelledLoginStage_StopsLaterDependencies(
+        string grant, bool succeeds, string cancelAt)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var calls = new List<string>();
+        var controller = CreateCancellationController(grant, succeeds, cancellation, calls, cancelAt);
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            controller.GetToken(new TokenRequest { GrantType = grant }, cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        var expected = ExpectedLoginCalls(grant, succeeds);
+        Assert.Equal(expected.Take(Array.IndexOf(expected, cancelAt) + 1), calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BootstrapAdminRefresh_PropagatesLookupTokenAndStopsOnCancellation(bool cancel)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var account = CreateTestAccount();
+        _accountRepositoryMock.Setup(repository => repository.GetByPasswordCredentialUsernameAsync(
+                "admin", It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((_, ct) =>
+            {
+                Assert.Equal(cancellation.Token, ct);
+                if (cancel) cancellation.Cancel();
+                ct.ThrowIfCancellationRequested();
+            }).ReturnsAsync(account);
+        var controller = CreateController([CreateRefreshValidator(account).Object]);
+        var request = new TokenRequest { GrantType = IdentityConstants.GrantTypeRefreshToken };
+        BeginCaptureGeneratedClaims();
+
+        if (cancel)
+        {
+            var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                controller.GetToken(request, cancellation.Token));
+            Assert.Equal(cancellation.Token, exception.CancellationToken);
+            _keyManagerMock.Verify(manager => manager.RefreshKeysAsync(It.IsAny<CancellationToken>()), Times.Never);
+            _accountLoginInfoServiceMock.VerifyNoOtherCalls();
+            _unitOfWorkMock.VerifyNoOtherCalls();
+            _tokenServiceMock.VerifyNoOtherCalls();
+            _refreshTokenServiceMock.VerifyNoOtherCalls();
+        }
+        else
+        {
+            var result = await controller.GetToken(request, cancellation.Token);
+            Assert.True(Assert.IsType<TokenResponse>(AuthTestDoubles.ExtractOk(result).Value).Success);
+            Assert.Contains(AssertCapturedClaims(), claim => claim.Type == IdentityConstants.ClaimRole && claim.Value == "admin");
+            _keyManagerMock.Verify(manager => manager.RefreshKeysAsync(cancellation.Token), Times.Once);
+            _accountLoginInfoServiceMock.Verify(service => service.UpdateLoginInfoAsync(
+                account, It.IsAny<string?>(), "Refresh", cancellation.Token), Times.Once);
+        }
+        _accountRepositoryMock.Verify(repository => repository.GetByPasswordCredentialUsernameAsync(
+            "admin", cancellation.Token), Times.Once);
+    }
+
+    private static string[] ExpectedLoginCalls(string grant, bool succeeds)
+    {
+        if (!succeeds)
+            return ["validate", grant == "sms" ? "otp-failure" : "attempt-failure", "audit", "save"];
+        return grant == "sms"
+            ? ["validate", "keys", "sign", "otp-consume", "login-state", "refresh", "audit", "save"]
+            : ["validate", "keys", "sign", "attempt-read", "attempt-remove", "login-state", "refresh", "audit", "save"];
+    }
+
+    private TokenController CreateCancellationController(
+        string grant, bool succeeds, CancellationTokenSource cancellation, List<string> calls, string? cancelAt = null)
+    {
+        void Observe(string stage, CancellationToken ct)
+        {
+            Assert.Equal(cancellation.Token, ct);
+            calls.Add(stage);
+            if (stage == cancelAt) cancellation.Cancel();
+            ct.ThrowIfCancellationRequested();
+        }
+
+        var account = CreateTestAccount();
+        var attempt = new LoginAttemptEntity { Username = "test-user" };
+        var validation = succeeds
+            ? ValidationResult.Success(account, grant, "test-user")
+            : ValidationResult.Failure("Invalid credentials");
+        if (grant == "sms")
+        {
+            validation = validation.WithOtpVerificationChange(new OtpVerificationChange(
+                succeeds ? OtpVerificationChangeKind.Consume : OtpVerificationChangeKind.RecordFailure,
+                Guid.NewGuid(), "+12025550123", "test-mac", DateTimeOffset.UtcNow, 3, DateTimeOffset.UtcNow.AddMinutes(1)));
+        }
+        else
+        {
+            validation = validation.WithLoginAttemptChange(new LoginAttemptChange(
+                succeeds ? LoginAttemptChangeKind.Clear : LoginAttemptChangeKind.RecordFailure, attempt.Username));
+        }
+        var validator = new Mock<IIdentityValidator>();
+        validator.SetupGet(value => value.GrantType).Returns(grant);
+        validator.Setup(value => value.ValidateAsync(It.IsAny<ValidationRequest>()))
+            .Callback<ValidationRequest>(request => Observe("validate", request.CancellationToken)).ReturnsAsync(validation);
+        _keyManagerMock.Setup(manager => manager.RefreshKeysAsync(It.IsAny<CancellationToken>()))
+            .Callback<CancellationToken>(ct => Observe("keys", ct)).Returns(Task.CompletedTask);
+        _tokenServiceMock.Setup(service => service.GenerateJwtToken(
+                It.IsAny<List<Claim>>(), It.IsAny<RsaSecurityKey>(), It.IsAny<int>(), It.IsAny<string?>()))
+            .Callback(() => calls.Add("sign")).Returns("test-token");
+        _loginAttemptRepositoryMock.Setup(repository => repository.GetByUsernameAsync(attempt.Username, It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((_, ct) => Observe("attempt-read", ct)).ReturnsAsync(attempt);
+        _loginAttemptRepositoryMock.Setup(repository => repository.RemoveAsync(attempt, It.IsAny<CancellationToken>()))
+            .Callback<LoginAttemptEntity, CancellationToken>((_, ct) => Observe("attempt-remove", ct)).Returns(Task.CompletedTask);
+        _loginAttemptRepositoryMock.Setup(repository => repository.RecordFailureAsync(
+                attempt.Username, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback<string, DateTimeOffset, CancellationToken>((_, _, ct) => Observe("attempt-failure", ct)).ReturnsAsync(attempt);
+        _otpRepositoryMock.Setup(repository => repository.TryConsumeAsync(It.IsAny<Guid>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<DateTimeOffset>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(invocation => Observe("otp-consume", (CancellationToken)invocation.Arguments[^1])))
+            .ReturnsAsync(true);
+        _otpRepositoryMock.Setup(repository => repository.IncrementFailedAttemptsAsync(It.IsAny<Guid>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<DateTimeOffset>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(invocation => Observe("otp-failure", (CancellationToken)invocation.Arguments[^1])))
+            .ReturnsAsync(1);
+        _accountLoginInfoServiceMock.Setup(service => service.UpdateLoginInfoAsync(
+                account, It.IsAny<string?>(), grant, It.IsAny<CancellationToken>()))
+            .Callback<AccountEntity, string?, string, CancellationToken>((_, _, _, ct) => Observe("login-state", ct))
+            .Returns(Task.CompletedTask);
+        _refreshTokenServiceMock.Setup(service => service.HandleRefreshTokenAsync(
+                grant, It.IsAny<string?>(), account, It.IsAny<string?>(), It.IsAny<Guid?>()))
+            .Callback(() => calls.Add("refresh")).ReturnsAsync("test-refresh");
+        _auditServiceMock.Setup(service => service.RecordLoginAsync(It.IsAny<Guid?>(), It.IsAny<string>(), grant,
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(invocation => Observe("audit", (CancellationToken)invocation.Arguments[^1])))
+            .Returns(Task.CompletedTask);
+        _unitOfWorkMock.Setup(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Callback<CancellationToken>(ct => Observe("save", ct)).ReturnsAsync(1);
+        return CreateController([validator.Object]);
     }
 
     #region Core flow

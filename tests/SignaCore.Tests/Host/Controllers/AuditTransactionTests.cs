@@ -361,6 +361,120 @@ public sealed class AuditTransactionTests
             .ToListAsync(TestContext.Current.CancellationToken));
     }
 
+    [Theory]
+    [InlineData("password", true, false)]
+    [InlineData("password", false, false)]
+    [InlineData("ldap", true, false)]
+    [InlineData("ldap", false, false)]
+    [InlineData("sms", true, false)]
+    [InlineData("sms", false, false)]
+    [InlineData("password", true, true)]
+    [InlineData("password", false, true)]
+    [InlineData("ldap", true, true)]
+    [InlineData("ldap", false, true)]
+    [InlineData("sms", true, true)]
+    [InlineData("sms", false, true)]
+    public async Task TokenIssuance_CancellationAtCommit_PreservesOnlyCommittedLoginState(
+        string grant, bool succeeds, bool afterCommit)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var interceptor = new CancelAtCommitInterceptor(cancellation, afterCommit);
+        await using var database = await SqliteTestDatabase.CreateAsync(interceptor);
+        TokenIssuanceService service;
+        TokenIssuanceRequest request;
+        if (grant == "sms")
+        {
+            var target = await SeedSmsLoginAsync(database.Context);
+            service = CreateSmsTokenIssuanceService(database.Context, CreateSmsValidator(database.Context));
+            request = CreateIssuanceRequest(grant, target.App, phone: target.Phone,
+                code: succeeds ? target.Code : "000000");
+        }
+        else
+        {
+            var account = CreateAccount();
+            database.Context.Accounts.Add(account);
+            if (succeeds) database.Context.LoginAttempts.Add(CreateLoginAttempt("test-user"));
+            await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+            var result = (succeeds
+                    ? ValidationResult.Success(account, grant, "test-user")
+                    : ValidationResult.Failure("Invalid credentials"))
+                .WithLoginAttemptChange(new LoginAttemptChange(
+                    succeeds ? LoginAttemptChangeKind.Clear : LoginAttemptChangeKind.RecordFailure, "test-user"));
+            var validator = new Mock<IIdentityValidator>();
+            validator.SetupGet(value => value.GrantType).Returns(grant);
+            validator.Setup(value => value.ValidateAsync(It.IsAny<ValidationRequest>())).ReturnsAsync(result);
+            service = CreateTokenIssuanceService(database.Context, validator.Object, new LoginAttemptRepository(database.Context));
+            request = CreateIssuanceRequest(grant, username: "test-user");
+        }
+        interceptor.Armed = true;
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.IssueAsync(request, cancellation.Token));
+
+        Assert.True(interceptor.Observed);
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        database.Context.ChangeTracker.Clear();
+        var accountState = await database.Context.Accounts.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(afterCommit && succeeds ? 1 : 0, accountState.TotalLoginCount);
+        Assert.Equal(afterCommit && succeeds, accountState.LastLoginAt.HasValue);
+        Assert.Equal(afterCommit && succeeds ? "192.0.2.30" : null, accountState.LastLoginIp);
+        Assert.Equal(afterCommit && succeeds
+            ? grant == "sms" ? IdentityConstants.AuthMethodSms : grant
+            : null, accountState.LastLoginMethod);
+        var history = await database.Context.LoginHistories.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken);
+        if (afterCommit)
+            Assert.Equal(succeeds ? "login_success" : "login_failure", Assert.Single(history).EventType);
+        else
+            Assert.Empty(history);
+        var attempts = await database.Context.LoginAttempts.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken);
+        if (grant == "sms")
+        {
+            Assert.Empty(attempts);
+            var otp = await database.Context.Otps.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(afterCommit && succeeds ? OtpStatus.Consumed : OtpStatus.Sent, otp.Status);
+            Assert.Equal(afterCommit && !succeeds ? 1 : 0, otp.Attempts);
+            Assert.Equal(afterCommit && succeeds ? 1 : 0,
+                await database.Context.RefreshTokens.CountAsync(TestContext.Current.CancellationToken));
+        }
+        else if (succeeds != afterCommit)
+        {
+            Assert.Equal(1, Assert.Single(attempts).FailedAttempts);
+        }
+        else
+        {
+            Assert.Empty(attempts);
+        }
+    }
+
+    private sealed class CancelAtCommitInterceptor(
+        CancellationTokenSource cancellation, bool afterCommit) : DbTransactionInterceptor
+    {
+        public bool Armed { get; set; }
+        public bool Observed { get; private set; }
+
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
+            DbTransaction transaction, TransactionEventData eventData, InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Armed && !afterCommit) Cancel(cancellationToken);
+            return ValueTask.FromResult(result);
+        }
+
+        public override Task TransactionCommittedAsync(
+            DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
+        {
+            if (Armed && afterCommit) Cancel(cancellationToken);
+            return Task.CompletedTask;
+        }
+
+        private void Cancel(CancellationToken received)
+        {
+            Assert.Equal(cancellation.Token, received);
+            Observed = true;
+            cancellation.Cancel();
+            received.ThrowIfCancellationRequested();
+        }
+    }
+
     [Fact]
     public async Task SmsSuccess_WhenSigningFails_DoesNotConsumeOtp()
     {

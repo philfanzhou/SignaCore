@@ -12,12 +12,12 @@ public class AccountLoginInfoService : IAccountLoginInfoService
         _accountRepository = accountRepository;
     }
 
-    public async Task UpdateLoginInfoAsync(AccountEntity account, string? clientIp, string authMethod)
+    public async Task UpdateLoginInfoAsync(AccountEntity account, string? clientIp, string authMethod, CancellationToken cancellationToken = default)
     {
         account.LastLoginAt = DateTimeOffset.UtcNow;
         account.LastLoginIp = clientIp;
         account.LastLoginMethod = authMethod;
         account.TotalLoginCount++;
-        await _accountRepository.UpdateAsync(account);
+        await _accountRepository.UpdateAsync(account, cancellationToken);
     }
 }

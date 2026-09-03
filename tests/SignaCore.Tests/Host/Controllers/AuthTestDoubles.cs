@@ -28,7 +28,7 @@ internal static class AuthTestDoubles
     {
         var mock = new Mock<IKeyManager>();
         mock.Setup(k => k.GetCurrentKey()).Returns(new RsaSecurityKey(RSA.Create(2048)));
-        mock.Setup(k => k.RefreshKeysAsync()).Returns(Task.CompletedTask);
+        mock.Setup(k => k.RefreshKeysAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         mock.Setup(k => k.NeedsKeyRotationAsync()).ReturnsAsync(false);
         mock.Setup(k => k.InitializationCompleted).Returns(Task.CompletedTask);
         return mock;
@@ -77,7 +77,7 @@ internal static class AuthTestDoubles
     public static Mock<IAccountLoginInfoService> AccountLoginInfoService()
     {
         var mock = new Mock<IAccountLoginInfoService>();
-        mock.Setup(s => s.UpdateLoginInfoAsync(It.IsAny<AccountEntity>(), It.IsAny<string?>(), It.IsAny<string>()))
+        mock.Setup(s => s.UpdateLoginInfoAsync(It.IsAny<AccountEntity>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         return mock;
     }
