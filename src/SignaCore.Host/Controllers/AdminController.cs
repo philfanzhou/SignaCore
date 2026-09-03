@@ -263,11 +263,12 @@ public class AdminController : ControllerBase
         [FromQuery] string? phone,
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
-        [FromServices] IUserQueryService userQueryService)
+        [FromServices] IUserQueryService userQueryService,
+        CancellationToken cancellationToken = default)
     {
         var paging = PageRequest.Normalize(page, pageSize);
 
-        var (users, total) = await userQueryService.SearchUsersAsync(username, phone, paging.Page, paging.PageSize);
+        var (users, total) = await userQueryService.SearchUsersAsync(username, phone, paging.Page, paging.PageSize, cancellationToken);
 
         return Ok(new PagedResponse<UserListItemResponse>(users, total, paging.Page, paging.PageSize));
     }
@@ -281,7 +282,8 @@ public class AdminController : ControllerBase
         [FromServices] IAccountRepository accountRepository,
         [FromServices] IPasswordCredentialRepository passwordCredentialRepository,
         [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IAuditService auditService)
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
         {
@@ -293,7 +295,7 @@ public class AdminController : ControllerBase
             return BadRequest(new ErrorResponse(policyError));
         }
 
-        if (await passwordCredentialRepository.ExistsByUsernameAsync(request.Username))
+        if (await passwordCredentialRepository.ExistsByUsernameAsync(request.Username, cancellationToken))
         {
             return BadRequest(new ErrorResponse("Username already exists."));
         }
@@ -306,7 +308,7 @@ public class AdminController : ControllerBase
             Remark = request.Remark?.Trim(),
             Nickname = request.Nickname?.Trim()
         };
-        await accountRepository.AddAsync(account);
+        await accountRepository.AddAsync(account, cancellationToken);
 
         var credential = new PasswordCredentialEntity
         {
@@ -316,13 +318,14 @@ public class AdminController : ControllerBase
             PasswordHash = passwordHasher.HashPassword(request.Password),
             CreatedAt = DateTimeOffset.UtcNow
         };
-        await passwordCredentialRepository.AddAsync(credential);
+        await passwordCredentialRepository.AddAsync(credential, cancellationToken);
 
         var (actorId, actorName) = GetAdminIdentity();
         await auditService.RecordActionAsync("account_created", "Account", account.Id.ToString(),
             actorId, actorName, $"Admin created user: {credential.Username}", GetClientIp(),
-            after: new { account.Id, account.IsActive, account.Remark, Username = credential.Username });
-        await unitOfWork.SaveChangesAsync();
+            after: new { account.Id, account.IsActive, account.Remark, Username = credential.Username },
+            cancellationToken: cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
             "User created from Admin API: UserId={UserId}, Username={Username}",
@@ -346,14 +349,15 @@ public class AdminController : ControllerBase
         [FromServices] IAccountRepository accountRepository,
         [FromServices] IUserLoginRepository userLoginRepository,
         [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IAuditService auditService)
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Phone))
             return BadRequest(new ErrorResponse("Phone number is required."));
 
         if (!MainlandChinaPhoneNumber.TryNormalize(request.Phone, out var phone))
             return BadRequest(new ErrorResponse("A valid mainland China mobile number is required."));
-        var existingLogin = await userLoginRepository.GetBySmsPhoneAsync(phone);
+        var existingLogin = await userLoginRepository.GetBySmsPhoneAsync(phone, cancellationToken);
         if (existingLogin != null)
             return BadRequest(new ErrorResponse("Phone number already registered."));
 
@@ -365,7 +369,7 @@ public class AdminController : ControllerBase
             Remark = request.Remark?.Trim(),
             Nickname = request.Nickname?.Trim()
         };
-        await accountRepository.AddAsync(account);
+        await accountRepository.AddAsync(account, cancellationToken);
 
         var userLogin = new UserLoginEntity
         {
@@ -374,13 +378,14 @@ public class AdminController : ControllerBase
             ProviderName = IdentityConstants.AuthMethodSms,
             ProviderUserId = phone
         };
-        await userLoginRepository.AddAsync(userLogin);
+        await userLoginRepository.AddAsync(userLogin, cancellationToken);
 
         var (actorId, actorName) = GetAdminIdentity();
         await auditService.RecordActionAsync("account_created", "Account", account.Id.ToString(),
             actorId, actorName, "Admin created phone user", GetClientIp(),
-            after: new { account.Id, account.IsActive, Phone = phone });
-        await unitOfWork.SaveChangesAsync();
+            after: new { account.Id, account.IsActive, Phone = phone },
+            cancellationToken: cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
             "Phone user created from Admin API: AccountId={AccountId}, Phone={Phone}",
@@ -403,17 +408,18 @@ public class AdminController : ControllerBase
         Guid userId,
         [FromBody] AdminUpdateRemarkRequest request,
         [FromServices] IAccountRepository accountRepository,
-        [FromServices] IUnitOfWork unitOfWork)
+        [FromServices] IUnitOfWork unitOfWork,
+        CancellationToken cancellationToken = default)
     {
-        var account = await accountRepository.GetByIdAsync(userId);
+        var account = await accountRepository.GetByIdAsync(userId, cancellationToken);
         if (account == null)
         {
             return NotFound(new ErrorResponse("User not found."));
         }
 
         account.Remark = request.Remark?.Trim();
-        await accountRepository.UpdateAsync(account);
-        await unitOfWork.SaveChangesAsync();
+        await accountRepository.UpdateAsync(account, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new OperationResponse(true, "Remark updated."));
     }
@@ -424,17 +430,18 @@ public class AdminController : ControllerBase
         Guid userId,
         [FromBody] AdminUpdateNicknameRequest request,
         [FromServices] IAccountRepository accountRepository,
-        [FromServices] IUnitOfWork unitOfWork)
+        [FromServices] IUnitOfWork unitOfWork,
+        CancellationToken cancellationToken = default)
     {
-        var account = await accountRepository.GetByIdAsync(userId);
+        var account = await accountRepository.GetByIdAsync(userId, cancellationToken);
         if (account == null)
         {
             return NotFound(new ErrorResponse("User not found."));
         }
 
         account.Nickname = string.IsNullOrWhiteSpace(request.Nickname) ? null : request.Nickname.Trim();
-        await accountRepository.UpdateAsync(account);
-        await unitOfWork.SaveChangesAsync();
+        await accountRepository.UpdateAsync(account, cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new OperationResponse(true, "Nickname updated."));
     }
@@ -446,9 +453,10 @@ public class AdminController : ControllerBase
         [FromBody] AdminUpdateStatusRequest request,
         [FromServices] IAccountRepository accountRepository,
         [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IAuditService auditService)
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken = default)
     {
-        var account = await accountRepository.GetByIdAsync(userId);
+        var account = await accountRepository.GetByIdAsync(userId, cancellationToken);
         if (account == null)
         {
             return NotFound(new ErrorResponse("User not found."));
@@ -456,7 +464,7 @@ public class AdminController : ControllerBase
 
         var beforeStatus = account.IsActive;
         account.IsActive = request.IsActive;
-        await accountRepository.UpdateAsync(account);
+        await accountRepository.UpdateAsync(account, cancellationToken);
 
         var (actorId, actorName) = GetAdminIdentity();
         await auditService.RecordActionAsync(
@@ -466,8 +474,9 @@ public class AdminController : ControllerBase
             request.IsActive ? $"Admin enabled user: {userId}" : $"Admin disabled user: {userId}",
             GetClientIp(),
             before: new { IsActive = beforeStatus },
-            after: new { IsActive = request.IsActive });
-        await unitOfWork.SaveChangesAsync();
+            after: new { IsActive = request.IsActive },
+            cancellationToken: cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new OperationResponse(true, request.IsActive ? "User enabled." : "User disabled."));
     }
