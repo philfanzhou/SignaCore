@@ -3,7 +3,9 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -316,6 +318,167 @@ public class AdminControllerTests : IDisposable
     }
 
     #endregion
+
+    public static TheoryData<string, string?> UserCancellationCases
+    {
+        get
+        {
+            var cases = new TheoryData<string, string?>();
+            foreach (var action in new[] { "query", "password", "phone", "remark", "nickname", "status" })
+            {
+                cases.Add(action, null);
+                foreach (var stage in UserStages(action)) cases.Add(action, stage);
+            }
+            return cases;
+        }
+    }
+
+    private static string[] UserStages(string action) => action switch
+    {
+        "query" => ["query"],
+        "password" => ["exists", "account-add", "credential-add", "audit", "save"],
+        "phone" => ["phone-read", "account-add", "login-add", "audit", "save"],
+        "status" => ["account-read", "account-update", "audit", "save"],
+        _ => ["account-read", "account-update", "save"]
+    };
+
+    [Theory]
+    [MemberData(nameof(UserCancellationCases))]
+    public async Task UserActions_PropagateTokenAndStopAtCancelledDependency(string action, string? cancelAt)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var calls = new List<string>();
+        void Observe(string stage, CancellationToken token)
+        {
+            Assert.Equal(cancellation.Token, token);
+            calls.Add(stage);
+            if (stage == cancelAt) cancellation.Cancel();
+            token.ThrowIfCancellationRequested();
+        }
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true };
+        var noError = string.Empty;
+        _passwordPolicyMock.Setup(policy => policy.Validate(It.IsAny<string>(), out noError)).Returns(true);
+        _passwordHasherMock.Setup(hasher => hasher.HashPassword(It.IsAny<string>())).Returns("unused-test-hash");
+        var query = new Mock<IUserQueryService>();
+        query.Setup(service => service.SearchUsersAsync(null, null, 1, 20, It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(call => Observe("query", (CancellationToken)call.Arguments[^1])))
+            .ReturnsAsync((new List<UserListItemResponse>(), 0));
+        _passwordCredentialRepoMock.Setup(repository => repository.ExistsByUsernameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((_, ct) => Observe("exists", ct)).ReturnsAsync(false);
+        _accountRepoMock.Setup(repository => repository.AddAsync(It.IsAny<AccountEntity>(), It.IsAny<CancellationToken>()))
+            .Callback<AccountEntity, CancellationToken>((_, ct) => Observe("account-add", ct)).Returns(Task.CompletedTask);
+        _passwordCredentialRepoMock.Setup(repository => repository.AddAsync(It.IsAny<PasswordCredentialEntity>(), It.IsAny<CancellationToken>()))
+            .Callback<PasswordCredentialEntity, CancellationToken>((_, ct) => Observe("credential-add", ct)).Returns(Task.CompletedTask);
+        _userLoginRepoMock.Setup(repository => repository.GetBySmsPhoneAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((_, ct) => Observe("phone-read", ct)).ReturnsAsync((UserLoginEntity?)null);
+        _userLoginRepoMock.Setup(repository => repository.AddAsync(It.IsAny<UserLoginEntity>(), It.IsAny<CancellationToken>()))
+            .Callback<UserLoginEntity, CancellationToken>((_, ct) => Observe("login-add", ct)).Returns(Task.CompletedTask);
+        _accountRepoMock.Setup(repository => repository.GetByIdAsync(account.Id, It.IsAny<CancellationToken>()))
+            .Callback<Guid, CancellationToken>((_, ct) => Observe("account-read", ct)).ReturnsAsync(account);
+        _accountRepoMock.Setup(repository => repository.UpdateAsync(account, It.IsAny<CancellationToken>()))
+            .Callback<AccountEntity, CancellationToken>((_, ct) => Observe("account-update", ct)).Returns(Task.CompletedTask);
+        _auditServiceMock.Setup(service => service.RecordActionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<object?>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(call => Observe("audit", (CancellationToken)call.Arguments[^1])))
+            .Returns(Task.CompletedTask);
+        _unitOfWorkMock.Setup(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Callback<CancellationToken>(ct => Observe("save", ct)).ReturnsAsync(1);
+        var operation = () => InvokeUserAction(action, account.Id, _accountRepoMock.Object,
+            _passwordCredentialRepoMock.Object, _userLoginRepoMock.Object, _unitOfWorkMock.Object,
+            _auditServiceMock.Object, query.Object, cancellation.Token);
+
+        if (cancelAt is null)
+            Assert.IsType<OkObjectResult>(await operation());
+        else
+        {
+            var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(operation);
+            Assert.Equal(cancellation.Token, exception.CancellationToken);
+        }
+        var expected = UserStages(action);
+        Assert.Equal(cancelAt is null ? expected : expected.Take(Array.IndexOf(expected, cancelAt) + 1), calls);
+    }
+
+    private Task<IActionResult> InvokeUserAction(
+        string action, Guid accountId, IAccountRepository accounts, IPasswordCredentialRepository credentials,
+        IUserLoginRepository logins, IUnitOfWork unit, IAuditService audit, IUserQueryService query, CancellationToken ct) => action switch
+    {
+        "query" => _controller.GetUsers(null, null, 1, 20, query, ct),
+        "password" => _controller.CreateUser(new AdminCreateUserRequest("test-account", "unused-test-password", null, null, null),
+            _passwordPolicyMock.Object, _passwordHasherMock.Object, accounts, credentials, unit, audit, ct),
+        "phone" => _controller.CreatePhoneUser(new AdminCreatePhoneUserRequest("13800001234", null, null, null),
+            accounts, logins, unit, audit, ct),
+        "remark" => _controller.UpdateUserRemark(accountId, new AdminUpdateRemarkRequest("changed"), accounts, unit, ct),
+        "nickname" => _controller.UpdateUserNickname(accountId, new AdminUpdateNicknameRequest("changed"), accounts, unit, ct),
+        "status" => _controller.UpdateUserStatus(accountId, new AdminUpdateStatusRequest(false), accounts, unit, audit, ct),
+        _ => throw new ArgumentOutOfRangeException(nameof(action))
+    };
+
+    [Theory]
+    [InlineData("password")]
+    [InlineData("phone")]
+    [InlineData("remark")]
+    [InlineData("nickname")]
+    [InlineData("status")]
+    public async Task UserActions_CancelBeforeSave_PersistNeitherAccountChangesNorAudit(string action)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var interceptor = new CancelUserSaveInterceptor(cancellation);
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        var options = new DbContextOptionsBuilder<IdentityDbContext>()
+            .UseSqlite(connection).AddInterceptors(interceptor).Options;
+        await using var context = new IdentityDbContext(options);
+        await context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
+        var creates = action is "password" or "phone";
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true, Remark = "original", Nickname = "original" };
+        if (!creates)
+        {
+            context.Accounts.Add(account);
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        var noError = string.Empty;
+        _passwordPolicyMock.Setup(policy => policy.Validate(It.IsAny<string>(), out noError)).Returns(true);
+        _passwordHasherMock.Setup(hasher => hasher.HashPassword(It.IsAny<string>())).Returns("unused-test-hash");
+        interceptor.Armed = true;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => InvokeUserAction(action, account.Id,
+            new AccountRepository(context), new PasswordCredentialRepository(context), new UserLoginRepository(context),
+            new EfCoreUnitOfWork(context), new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            new UserQueryService(context), cancellation.Token));
+
+        Assert.True(interceptor.Observed);
+        await using var verify = new IdentityDbContext(options);
+        Assert.Equal(creates ? 0 : 1, await verify.Accounts.CountAsync(TestContext.Current.CancellationToken));
+        Assert.False(await verify.PasswordCredentials.AnyAsync(TestContext.Current.CancellationToken));
+        Assert.False(await verify.UserLogins.AnyAsync(TestContext.Current.CancellationToken));
+        Assert.False(await verify.AuditLogs.AnyAsync(TestContext.Current.CancellationToken));
+        if (!creates)
+        {
+            var persisted = await verify.Accounts.SingleAsync(TestContext.Current.CancellationToken);
+            Assert.True(persisted.IsActive);
+            Assert.Equal("original", persisted.Remark);
+            Assert.Equal("original", persisted.Nickname);
+        }
+    }
+
+    private sealed class CancelUserSaveInterceptor(CancellationTokenSource cancellation) : SaveChangesInterceptor
+    {
+        public bool Armed { get; set; }
+        public bool Observed { get; private set; }
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (Armed)
+            {
+                Observed = true;
+                Assert.Equal(cancellation.Token, cancellationToken);
+                cancellation.Cancel();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            return ValueTask.FromResult(result);
+        }
+    }
 
     #region GetUsers
 
