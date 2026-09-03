@@ -161,4 +161,53 @@ public class RefreshTokenServiceTests
 
         Assert.False(result);
     }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Revoke_ForwardsCancellationAndPreservesRepositoryResult(bool appScoped, bool revoked)
+    {
+        using var cancellation = new CancellationTokenSource();
+        _repoMock.Setup(repository => repository.TryRevokeAsync("unused-token", cancellation.Token))
+            .ReturnsAsync(revoked);
+        _repoMock.Setup(repository => repository.TryRevokeForAppAsync("unused-token", "app-1", cancellation.Token))
+            .ReturnsAsync(revoked);
+
+        var result = appScoped
+            ? await _service.RevokeForAppAsync("unused-token", "app-1", cancellation.Token)
+            : await _service.RevokeAsync("unused-token", cancellation.Token);
+
+        Assert.Equal(revoked, result);
+        _repoMock.Verify(repository => repository.TryRevokeAsync("unused-token", cancellation.Token),
+            appScoped ? Times.Never() : Times.Once());
+        _repoMock.Verify(repository => repository.TryRevokeForAppAsync("unused-token", "app-1", cancellation.Token),
+            appScoped ? Times.Once() : Times.Never());
+        _repoMock.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Revoke_WhenRepositoryObservesCancellation_PropagatesException(bool appScoped)
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        _repoMock.Setup(repository => repository.TryRevokeAsync("unused-token", cancellation.Token))
+            .Returns(Task.FromCanceled<bool>(cancellation.Token));
+        _repoMock.Setup(repository => repository.TryRevokeForAppAsync("unused-token", "app-1", cancellation.Token))
+            .Returns(Task.FromCanceled<bool>(cancellation.Token));
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => appScoped
+            ? _service.RevokeForAppAsync("unused-token", "app-1", cancellation.Token)
+            : _service.RevokeAsync("unused-token", cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        _repoMock.Verify(repository => repository.TryRevokeAsync("unused-token", cancellation.Token),
+            appScoped ? Times.Never() : Times.Once());
+        _repoMock.Verify(repository => repository.TryRevokeForAppAsync("unused-token", "app-1", cancellation.Token),
+            appScoped ? Times.Once() : Times.Never());
+        _repoMock.VerifyNoOtherCalls();
+    }
 }

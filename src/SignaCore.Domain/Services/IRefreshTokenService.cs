@@ -21,8 +21,11 @@ public interface IRefreshTokenService
         Guid? smsUserLoginId = null,
         Guid? wechatUserLoginId = null,
         string? exchangedFromAppId = null);
-    Task<bool> RevokeAsync(string token);
+    Task<bool> RevokeAsync(string token, CancellationToken cancellationToken = default);
 
     /// <summary>Revokes only if the token was issued to <paramref name="appId"/> (RFC 7009 §2.1).</summary>
-    Task<bool> RevokeForAppAsync(string token, string appId);
+    Task<bool> RevokeForAppAsync(
+        string token,
+        string appId,
+        CancellationToken cancellationToken = default);
 }
