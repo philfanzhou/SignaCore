@@ -498,7 +498,7 @@ public static class ServiceCollectionExtensions
                             return;
                         }
 
-                        await manager.RefreshKeysAsync();
+                        await manager.RefreshKeysAsync(context.HttpContext.RequestAborted);
                     }
                 };
                 options.TokenValidationParameters = new TokenValidationParameters
