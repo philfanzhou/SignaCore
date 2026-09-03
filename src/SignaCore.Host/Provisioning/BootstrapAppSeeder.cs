@@ -207,7 +207,8 @@ internal static class BootstrapAppSeeder
                 app.CallbackUrl,
                 CallbackExpiresAt = app.CallbackExpiresAt?.ToUnixTimeSeconds(),
                 app.IsActive
-            });
+            },
+            cancellationToken: cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(

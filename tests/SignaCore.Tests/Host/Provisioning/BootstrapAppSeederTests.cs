@@ -262,26 +262,44 @@ public class BootstrapAppSeederTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task CancellationBeforeCommit_IsPropagatedAndDoesNotPersistTheEntry()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AuditAndSave_ShareCancellationAndCommitBothOrNeither(bool cancel)
     {
         using var cancellationSource = new CancellationTokenSource();
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => SeedAsync(
+        var audit = new ObservingAuditService(_auditService, cancellationSource, cancel);
+        var operation = () => SeedAsync(
             """
             {
               "Apps": [
-                { "appId": "canceled-app", "appSecret": "unused-input", "appName": "Canceled App" }
+                { "appId": "cancellation-app", "appSecret": "unused-input", "appName": "Cancellation App" }
               ]
             }
             """,
-            new CancelingAuditService(cancellationSource),
-            cancellationSource.Token));
+            audit,
+            cancellationSource.Token);
 
+        if (cancel)
+        {
+            var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(operation);
+            Assert.Equal(cancellationSource.Token, exception.CancellationToken);
+        }
+        else
+            await operation();
+
+        Assert.Equal(cancellationSource.Token, audit.ObservedToken);
         Assert.Equal(cancellationSource.Token, _dbContext.LastSaveCancellationToken);
+        var batch = Assert.Single(_dbContext.SaveBatches);
+        Assert.Equal(1, batch.AddedApplications);
+        Assert.Equal(1, batch.AddedAudits);
         _dbContext.ChangeTracker.Clear();
-        Assert.Empty(await _dbContext.AppRegistrations.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(cancel ? 0 : 1, await _dbContext.AppRegistrations.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(cancel ? 0 : 1, await _dbContext.AuditLogs.CountAsync(TestContext.Current.CancellationToken));
+        var logs = string.Join("\n", _logger.Entries.Select(entry => entry.Message));
+        Assert.False(logs.Contains("unused-input", StringComparison.Ordinal));
+        foreach (var hash in _passwordHasher.GeneratedHashes)
+            Assert.False(logs.Contains(hash, StringComparison.Ordinal));
     }
 
     public void Dispose()
@@ -439,14 +457,10 @@ public class BootstrapAppSeederTests : IDisposable
         }
     }
 
-    private sealed class CancelingAuditService : IAuditService
+    private sealed class ObservingAuditService(
+        IAuditService inner, CancellationTokenSource cancellationSource, bool cancel) : IAuditService
     {
-        private readonly CancellationTokenSource _cancellationSource;
-
-        public CancelingAuditService(CancellationTokenSource cancellationSource)
-        {
-            _cancellationSource = cancellationSource;
-        }
+        public CancellationToken ObservedToken { get; private set; }
 
         public Task RecordLoginAsync(
             Guid? accountId,
@@ -461,7 +475,7 @@ public class BootstrapAppSeederTests : IDisposable
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
-        public Task RecordActionAsync(
+        public async Task RecordActionAsync(
             string action,
             string targetType,
             string targetId,
@@ -474,8 +488,10 @@ public class BootstrapAppSeederTests : IDisposable
             object? after = null,
             CancellationToken cancellationToken = default)
         {
-            _cancellationSource.Cancel();
-            return Task.CompletedTask;
+            ObservedToken = cancellationToken;
+            await inner.RecordActionAsync(action, targetType, targetId, actorId, actorName, description,
+                clientIp, correlationId, before, after, cancellationToken);
+            if (cancel) cancellationSource.Cancel();
         }
     }
 
