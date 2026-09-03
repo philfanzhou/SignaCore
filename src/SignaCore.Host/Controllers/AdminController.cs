@@ -43,7 +43,8 @@ public class AdminController : ControllerBase
         [FromServices] IAuditService auditService,
         [FromServices] ILoginAttemptRepository loginAttemptRepository,
         [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IdentityDbContext dbContext)
+        [FromServices] IdentityDbContext dbContext,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
         {
@@ -55,7 +56,8 @@ public class AdminController : ControllerBase
         {
             GrantType = IdentityConstants.GrantTypePassword,
             Username = request.Username.Trim(),
-            Password = request.Password
+            Password = request.Password,
+            CancellationToken = cancellationToken
         });
 
         // An extra result.Account == null check is unnecessary because MemberNotNullWhen on
@@ -72,7 +74,8 @@ public class AdminController : ControllerBase
                 loginAttemptRepository,
                 auditService,
                 unitOfWork,
-                dbContext);
+                dbContext,
+                cancellationToken);
             return StatusCode(StatusCodes.Status401Unauthorized, new { message = result.ErrorMessage });
         }
 
@@ -90,7 +93,8 @@ public class AdminController : ControllerBase
                 loginAttemptRepository,
                 auditService,
                 unitOfWork,
-                dbContext);
+                dbContext,
+                cancellationToken);
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only the bootstrap administrator can sign in to admin web." });
         }
 
@@ -112,7 +116,8 @@ public class AdminController : ControllerBase
             loginAttemptRepository,
             auditService,
             unitOfWork,
-            dbContext);
+            dbContext,
+            cancellationToken);
 
         await HttpContext.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
@@ -139,13 +144,15 @@ public class AdminController : ControllerBase
         ILoginAttemptRepository loginAttemptRepository,
         IAuditService auditService,
         IUnitOfWork unitOfWork,
-        IdentityDbContext dbContext)
+        IdentityDbContext dbContext,
+        CancellationToken cancellationToken)
     {
-        async Task StageAndSaveAsync()
+        async Task StageAndSaveAsync(CancellationToken operationCancellationToken)
         {
             var loginAttempt = await LoginAttemptChangeApplier.ApplyAsync(
                 validationResult.LoginAttemptChange,
-                loginAttemptRepository);
+                loginAttemptRepository,
+                operationCancellationToken);
             if (loginAttempt?.LockoutUntil > DateTimeOffset.UtcNow)
             {
                 _logger.LogWarning(
@@ -160,26 +167,27 @@ public class AdminController : ControllerBase
                 eventType,
                 GetClientIp(),
                 HttpContext.Request.Headers.UserAgent,
-                failureReason);
-            await unitOfWork.SaveChangesAsync();
+                failureReason,
+                cancellationToken: operationCancellationToken);
+            await unitOfWork.SaveChangesAsync(operationCancellationToken);
         }
 
         if (validationResult.LoginAttemptChange?.Kind != LoginAttemptChangeKind.RecordFailure)
         {
-            await StageAndSaveAsync();
+            await StageAndSaveAsync(cancellationToken);
             return;
         }
 
         // The failed-attempt repository performs an immediate atomic update. Enclose it and the
         // login-history insert in one retryable transaction, while cookie I/O remains outside.
         var strategy = dbContext.Database.CreateExecutionStrategy();
-        await strategy.ExecuteAsync(async () =>
+        await strategy.ExecuteAsync(async operationCancellationToken =>
         {
             dbContext.ChangeTracker.Clear();
-            await using var transaction = await dbContext.Database.BeginTransactionAsync();
-            await StageAndSaveAsync();
-            await transaction.CommitAsync();
-        });
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(operationCancellationToken);
+            await StageAndSaveAsync(operationCancellationToken);
+            await transaction.CommitAsync(operationCancellationToken);
+        }, cancellationToken);
     }
 
     /// <summary>
@@ -246,13 +254,14 @@ public class AdminController : ControllerBase
     [Authorize(Policy = "AdminSession")]
     public async Task<IActionResult> Logout(
         [FromServices] IAuditService auditService,
-        [FromServices] IUnitOfWork unitOfWork)
+        [FromServices] IUnitOfWork unitOfWork,
+        CancellationToken cancellationToken = default)
     {
         var (actorId, actorName) = GetAdminIdentity();
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         await auditService.RecordActionAsync("admin_logout", "Session", actorId?.ToString() ?? "unknown",
-            actorId, actorName, "Admin logged out", GetClientIp());
-        await unitOfWork.SaveChangesAsync();
+            actorId, actorName, "Admin logged out", GetClientIp(), cancellationToken: cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
         return Ok(new OperationResponse(true, "Logged out successfully."));
     }
 

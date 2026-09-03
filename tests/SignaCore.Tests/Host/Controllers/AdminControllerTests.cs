@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -318,6 +320,303 @@ public class AdminControllerTests : IDisposable
     }
 
     #endregion
+
+    public static TheoryData<string, string?> SessionCancellationCases
+    {
+        get
+        {
+            var cases = new TheoryData<string, string?>();
+            foreach (var flow in new[] { "success", "forbidden", "unknown", "failure", "logout" })
+            {
+                cases.Add(flow, null);
+                foreach (var stage in SessionStages(flow)) cases.Add(flow, stage);
+            }
+            return cases;
+        }
+    }
+
+    private static string[] SessionStages(string flow) => flow switch
+    {
+        "logout" => ["audit", "save"],
+        "unknown" => ["validate", "audit", "save"],
+        "failure" => ["validate", "record-failure", "audit", "save"],
+        _ => ["validate", "attempt-read", "attempt-remove", "audit", "save"]
+    };
+
+    [Theory]
+    [MemberData(nameof(SessionCancellationCases))]
+    public async Task SessionActions_PropagateTokenAndStopAtCancelledDependency(string flow, string? cancelAt)
+    {
+        using var cancellation = new CancellationTokenSource();
+        _controller.HttpContext.RequestAborted = cancellation.Token;
+        var calls = new List<string>();
+        void Observe(string stage, CancellationToken token)
+        {
+            Assert.Equal(_controller.HttpContext.RequestAborted, token);
+            calls.Add(stage);
+            if (stage == cancelAt) cancellation.Cancel();
+            token.ThrowIfCancellationRequested();
+        }
+
+        // The failed-login branch owns a real transaction even when its dependencies are mocked.
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var context = new IdentityDbContext(new DbContextOptionsBuilder<IdentityDbContext>()
+            .UseSqlite(connection).Options);
+        var account = new AccountEntity { Id = AdminId, IsActive = true };
+        var username = flow == "forbidden" ? "other-account" : AdminName;
+        var validation = flow is "failure" or "unknown"
+            ? ValidationResult.Failure("Invalid credentials")
+            : ValidationResult.Success(account, IdentityConstants.AuthMethodPassword, username);
+        if (flow != "unknown")
+            validation.WithLoginAttemptChange(new LoginAttemptChange(
+                flow == "failure" ? LoginAttemptChangeKind.RecordFailure : LoginAttemptChangeKind.Clear, username));
+        var attempt = new LoginAttemptEntity { Id = Guid.NewGuid(), Username = username, FailedAttempts = 1 };
+        _passwordValidatorMock.Setup(validator => validator.ValidateAsync(It.IsAny<ValidationRequest>()))
+            .Callback<ValidationRequest>(request => Observe("validate", request.CancellationToken))
+            .ReturnsAsync(validation);
+        _loginAttemptRepoMock.Setup(repository => repository.GetByUsernameAsync(username, It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((_, ct) => Observe("attempt-read", ct)).ReturnsAsync(attempt);
+        _loginAttemptRepoMock.Setup(repository => repository.RemoveAsync(attempt, It.IsAny<CancellationToken>()))
+            .Callback<LoginAttemptEntity, CancellationToken>((_, ct) => Observe("attempt-remove", ct))
+            .Returns(Task.CompletedTask);
+        _loginAttemptRepoMock.Setup(repository => repository.RecordFailureAsync(
+                username, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback<string, DateTimeOffset, CancellationToken>((_, _, ct) => Observe("record-failure", ct))
+            .ReturnsAsync(attempt);
+        _auditServiceMock.Setup(service => service.RecordLoginAsync(It.IsAny<Guid?>(), It.IsAny<string>(),
+                "admin_login", It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(call => Observe("audit", (CancellationToken)call.Arguments[^1])))
+            .Returns(Task.CompletedTask);
+        _auditServiceMock.Setup(service => service.RecordActionAsync("admin_logout", "Session", It.IsAny<string>(),
+                It.IsAny<Guid?>(), It.IsAny<string?>(), "Admin logged out", It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<object?>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(call => Observe("audit", (CancellationToken)call.Arguments[^1])))
+            .Returns(Task.CompletedTask);
+        _unitOfWorkMock.Setup(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Callback<CancellationToken>(ct => Observe("save", ct)).ReturnsAsync(1);
+
+        var operation = () => flow == "logout"
+            ? _controller.Logout(_auditServiceMock.Object, _unitOfWorkMock.Object, cancellation.Token)
+            : _controller.Login(new AdminLoginRequest(username, "unused-test-password", false),
+                CreateValidatorFactory(), CreateAdminIdentity(), _auditServiceMock.Object,
+                _loginAttemptRepoMock.Object, _unitOfWorkMock.Object, context, cancellation.Token);
+        if (cancelAt is null)
+        {
+            var response = Assert.IsAssignableFrom<ObjectResult>(await operation());
+            Assert.Equal(flow switch { "forbidden" => 403, "failure" or "unknown" => 401, _ => 200 }, response.StatusCode);
+        }
+        else
+        {
+            var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(operation);
+            Assert.Equal(cancellation.Token, exception.CancellationToken);
+        }
+        var expected = SessionStages(flow);
+        Assert.Equal(cancelAt is null ? expected : expected.Take(Array.IndexOf(expected, cancelAt) + 1), calls);
+        _authServiceMock.Verify(service => service.SignInAsync(It.IsAny<HttpContext>(), AdminScheme,
+            It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()),
+            flow == "success" && cancelAt is null ? Times.Once() : Times.Never());
+        _authServiceMock.Verify(service => service.SignOutAsync(It.IsAny<HttpContext>(), AdminScheme,
+            It.IsAny<AuthenticationProperties>()), flow == "logout" ? Times.Once() : Times.Never());
+    }
+
+    public static TheoryData<string, string> SessionCommitCases
+    {
+        get
+        {
+            var cases = new TheoryData<string, string>();
+            foreach (var flow in new[] { "success", "forbidden", "failure-existing", "failure-new", "logout" })
+            {
+                foreach (var boundary in new[] { "none", "before-save", "after-save" }) cases.Add(flow, boundary);
+                if (flow == "logout") continue;
+                cases.Add(flow, "before-commit");
+                cases.Add(flow, "after-commit");
+                if (!flow.StartsWith("failure", StringComparison.Ordinal)) continue;
+                cases.Add(flow, "retry");
+                cases.Add(flow, "cancel-retry");
+            }
+            return cases;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(SessionCommitCases))]
+    public async Task SessionActions_CancellationAndRetry_PreserveTheCommitBoundary(string flow, string boundary)
+    {
+        using var cancellation = new CancellationTokenSource();
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        var seedOptions = new DbContextOptionsBuilder<IdentityDbContext>().UseSqlite(connection).Options;
+        var username = flow == "forbidden" ? "other-account" : AdminName;
+        var hasAttempt = flow != "failure-new" && flow != "logout";
+        var fails = flow.StartsWith("failure", StringComparison.Ordinal);
+        await using (var seed = new IdentityDbContext(seedOptions))
+        {
+            await seed.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
+            seed.Accounts.Add(new AccountEntity { Id = AdminId, IsActive = true });
+            seed.PasswordCredentials.Add(new PasswordCredentialEntity
+            {
+                Id = Guid.NewGuid(), AccountId = AdminId, Username = username, PasswordHash = "unused-test-hash"
+            });
+            if (hasAttempt)
+                seed.LoginAttempts.Add(new LoginAttemptEntity
+                {
+                    Id = Guid.NewGuid(), Username = username, FailedAttempts = 1, LastAttemptAt = DateTimeOffset.UtcNow
+                });
+            await seed.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var transaction = new SessionTransactionInterceptor(cancellation, boundary);
+        var save = new SessionSaveInterceptor(cancellation, boundary);
+        var options = new DbContextOptionsBuilder<IdentityDbContext>()
+            .UseSqlite(connection, provider =>
+            {
+                if (boundary is "retry" or "cancel-retry")
+                    provider.ExecutionStrategy(dependencies => new SessionRetryStrategy(dependencies, cancellation.Token));
+            })
+            .AddInterceptors(transaction, save).Options;
+        await using var context = new IdentityDbContext(options);
+        var attempts = new LoginAttemptRepository(context);
+        _passwordHasherMock.Setup(hasher => hasher.VerifyPassword(It.IsAny<string>(), It.IsAny<string>())).Returns(!fails);
+        var validator = new PasswordValidator(new PasswordCredentialRepository(context), new AccountRepository(context),
+            attempts, _passwordHasherMock.Object, NullLogger<PasswordValidator>.Instance);
+        var factory = new ValidatorFactory([validator], NullLogger<ValidatorFactory>.Instance);
+        var audit = new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context));
+        var unit = new EfCoreUnitOfWork(context);
+        _controller.HttpContext.RequestAborted = cancellation.Token;
+        SetAdminUser();
+        _authServiceMock.Setup(service => service.SignInAsync(It.IsAny<HttpContext>(), AdminScheme,
+                It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()))
+            .Callback(() => Assert.Null(context.Database.CurrentTransaction)).Returns(Task.CompletedTask);
+        _authServiceMock.Setup(service => service.SignOutAsync(It.IsAny<HttpContext>(), AdminScheme,
+                It.IsAny<AuthenticationProperties>()))
+            .Callback(() => Assert.Null(context.Database.CurrentTransaction)).Returns(Task.CompletedTask);
+
+        var operation = () => flow == "logout"
+            ? _controller.Logout(audit, unit, cancellation.Token)
+            : _controller.Login(new AdminLoginRequest(username, "unused-test-password", false), factory,
+                CreateAdminIdentity(), audit, attempts, unit, context, cancellation.Token);
+        var cancelled = boundary is not ("none" or "retry");
+        if (cancelled)
+        {
+            var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(operation);
+            Assert.Equal(cancellation.Token, exception.CancellationToken);
+        }
+        else
+        {
+            var response = Assert.IsAssignableFrom<ObjectResult>(await operation());
+            Assert.Equal(flow == "forbidden" ? 403 : fails ? 401 : 200, response.StatusCode);
+        }
+
+        // SaveChanges is not the commit boundary inside the explicit failed-login transaction.
+        var committed = !cancelled || boundary == "after-commit" || boundary == "after-save" && !fails;
+        await using var verify = new IdentityDbContext(seedOptions);
+        var attemptState = await verify.LoginAttempts.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken);
+        var expectedAttempts = committed ? fails ? hasAttempt ? 2 : 1 : 0 : hasAttempt ? 1 : 0;
+        if (expectedAttempts == 0) Assert.Empty(attemptState);
+        else Assert.Equal(expectedAttempts, Assert.Single(attemptState).FailedAttempts);
+        var history = await verify.LoginHistories.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken);
+        if (committed && flow != "logout")
+        {
+            var entry = Assert.Single(history);
+            Assert.Equal(flow == "success" ? "login_success" : "login_failure", entry.EventType);
+            Assert.Equal("admin_login", entry.AuthMethod);
+            Assert.Equal(flow == "forbidden" ? "bootstrap_admin_required" : fails ? "Wrong username or password" : null,
+                entry.FailureReason);
+        }
+        else Assert.Empty(history);
+        var actions = await verify.AuditLogs.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken);
+        if (committed && flow == "logout") Assert.Equal("admin_logout", Assert.Single(actions).Action);
+        else Assert.Empty(actions);
+        Assert.True(save.Calls > 0);
+        if (boundary is "retry" or "cancel-retry")
+            Assert.Equal(cancelled ? 1 : 2, transaction.CommitAttempts);
+        _authServiceMock.Verify(service => service.SignInAsync(It.IsAny<HttpContext>(), AdminScheme,
+            It.IsAny<ClaimsPrincipal>(), It.IsAny<AuthenticationProperties>()),
+            flow == "success" && !cancelled ? Times.Once() : Times.Never());
+        _authServiceMock.Verify(service => service.SignOutAsync(It.IsAny<HttpContext>(), AdminScheme,
+            It.IsAny<AuthenticationProperties>()), flow == "logout" ? Times.Once() : Times.Never());
+    }
+
+    private sealed class SessionSaveInterceptor(CancellationTokenSource cancellation, string boundary) : SaveChangesInterceptor
+    {
+        public int Calls { get; private set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(cancellation.Token, cancellationToken);
+            Calls++;
+            if (boundary == "before-save") cancellation.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(result);
+        }
+
+        public override ValueTask<int> SavedChangesAsync(
+            SaveChangesCompletedEventData eventData, int result, CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(cancellation.Token, cancellationToken);
+            if (boundary == "after-save") cancellation.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class SessionTransactionInterceptor(CancellationTokenSource cancellation, string boundary) : DbTransactionInterceptor
+    {
+        public int CommitAttempts { get; private set; }
+
+        public override ValueTask<InterceptionResult<DbTransaction>> TransactionStartingAsync(
+            DbConnection connection, TransactionStartingEventData eventData, InterceptionResult<DbTransaction> result,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(cancellation.Token, cancellationToken);
+            return ValueTask.FromResult(result);
+        }
+
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
+            DbTransaction transaction, TransactionEventData eventData, InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(cancellation.Token, cancellationToken);
+            CommitAttempts++;
+            if (CommitAttempts == 1 && boundary is "retry" or "cancel-retry")
+            {
+                if (boundary == "cancel-retry") cancellation.Cancel();
+                throw new SessionTransientException();
+            }
+            if (boundary == "before-commit") cancellation.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(result);
+        }
+
+        public override Task TransactionCommittedAsync(
+            DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(cancellation.Token, cancellationToken);
+            if (boundary == "after-commit") cancellation.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class SessionTransientException : Exception;
+
+    private sealed class SessionRetryStrategy(ExecutionStrategyDependencies dependencies, CancellationToken expectedToken)
+        : ExecutionStrategy(dependencies, 3, TimeSpan.FromMilliseconds(1))
+    {
+        public override Task<TResult> ExecuteAsync<TState, TResult>(TState state,
+            Func<DbContext, TState, CancellationToken, Task<TResult>> operation,
+            Func<DbContext, TState, CancellationToken, Task<ExecutionResult<TResult>>>? verifySucceeded,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(expectedToken, cancellationToken);
+            return base.ExecuteAsync(state, operation, verifySucceeded, cancellationToken);
+        }
+
+        protected override bool ShouldRetryOn(Exception exception) => exception is SessionTransientException;
+    }
 
     public static TheoryData<string, string?> UserCancellationCases
     {
