@@ -49,7 +49,7 @@ public class RefreshTokenValidator : IIdentityValidator
             return ValidationResult.Failure("Refresh token cannot be empty", OAuthErrorCodes.InvalidRequest);
         }
 
-        var refreshToken = await _refreshTokenRepository.GetByTokenValueAsync(request.RefreshToken);
+        var refreshToken = await _refreshTokenRepository.GetByTokenValueAsync(request.RefreshToken, request.CancellationToken);
 
         if (refreshToken == null)
         {
@@ -75,7 +75,7 @@ public class RefreshTokenValidator : IIdentityValidator
             return exchange.Rejection;
         }
 
-        var account = await _accountRepository.GetByIdAsync(refreshToken.AccountId);
+        var account = await _accountRepository.GetByIdAsync(refreshToken.AccountId, request.CancellationToken);
         if (account == null || !account.IsActive)
         {
             _logger.LogWarning("Refresh token validation failed: account not found or disabled, AccountId={AccountId}", refreshToken.AccountId);
@@ -254,13 +254,13 @@ public class RefreshTokenValidator : IIdentityValidator
                 "LDAP login is disabled for this application", OAuthErrorCodes.UnauthorizedClient);
         }
 
-        var credential = await _ldapAccountService.GetCredentialAsync(credentialId);
+        var credential = await _ldapAccountService.GetCredentialAsync(credentialId, request.CancellationToken);
         if (credential == null)
         {
             return LdapAdmission.Rejected("LDAP access has been revoked");
         }
 
-        var access = await _ldapAccountService.GetAccessAsync(request.App.Id, credentialId);
+        var access = await _ldapAccountService.GetAccessAsync(request.App.Id, credentialId, request.CancellationToken);
         if (access == null && isCrossApplicationExchange &&
             request.App.LdapLoginMode == LdapLoginMode.AutoProvision)
         {
