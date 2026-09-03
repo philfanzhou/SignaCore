@@ -559,6 +559,122 @@ public class RefreshTokenValidatorTests
         wechatAdmission.VerifyNoOtherCalls();
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public async Task ValidateAsync_LdapRefresh_PropagatesTokenOnSuccessAndRejection(
+        bool crossApplication, bool admitted)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var calls = new List<string>();
+        var (validator, request) = CreateLdapCancellationFixture(cancellation, calls, crossApplication, admitted);
+
+        var result = await validator.ValidateAsync(request);
+
+        Assert.Equal(admitted, result.IsSuccess);
+        Assert.Equal(admitted && crossApplication, result.IsCrossApplicationExchange);
+        var expected = new List<string> { "token" };
+        if (crossApplication) expected.Add("trust");
+        expected.AddRange(["account", "credential", "access"]);
+        if (admitted)
+        {
+            if (crossApplication) expected.Add("grant");
+            expected.Add("directory");
+        }
+        else
+        {
+            Assert.Equal("LDAP access has been revoked", result.ErrorMessage);
+        }
+        Assert.Equal(expected, calls);
+    }
+
+    [Theory]
+    [InlineData("token")]
+    [InlineData("trust")]
+    [InlineData("account")]
+    [InlineData("credential")]
+    [InlineData("access")]
+    public async Task ValidateAsync_CancelledLdapRefreshRead_DoesNotReadFurtherOrGrantAdmission(string cancelAt)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var calls = new List<string>();
+        var (validator, request) = CreateLdapCancellationFixture(cancellation, calls, true, true, cancelAt);
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => validator.ValidateAsync(request));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        string[] expected = ["token", "trust", "account", "credential", "access"];
+        Assert.Equal(expected.Take(Array.IndexOf(expected, cancelAt) + 1), calls);
+    }
+
+    private static (RefreshTokenValidator Validator, ValidationRequest Request) CreateLdapCancellationFixture(
+        CancellationTokenSource cancellation,
+        List<string> calls,
+        bool crossApplication,
+        bool admitted,
+        string? cancelAt = null)
+    {
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true };
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(), AppId = "target-app", LdapLoginMode = LdapLoginMode.AutoProvision
+        };
+        var credential = new LdapCredentialEntity
+        {
+            Id = Guid.NewGuid(), AccountId = account.Id, DirectoryKey = "corp",
+            ObjectGuid = Guid.NewGuid(), UserPrincipalName = "alice@corp.example.test"
+        };
+        var token = new RefreshTokenEntity
+        {
+            AccountId = account.Id, TokenValue = "test-refresh", ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            AppId = crossApplication ? "source-app" : app.AppId, LdapCredentialId = credential.Id
+        };
+        var access = new AppLdapAccessEntity
+        {
+            AppRegistrationId = app.Id, LdapCredentialId = credential.Id,
+            IsActive = admitted, ApprovalSource = LdapAccessApprovalSource.ExchangeGranted
+        };
+        void Observe(string stage, CancellationToken received)
+        {
+            Assert.Equal(cancellation.Token, received);
+            calls.Add(stage);
+            if (stage == cancelAt) cancellation.Cancel();
+            received.ThrowIfCancellationRequested();
+        }
+
+        var tokens = new Mock<IRefreshTokenRepository>();
+        tokens.Setup(repository => repository.GetByTokenValueAsync(token.TokenValue, It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((_, ct) => Observe("token", ct)).ReturnsAsync(token);
+        var accounts = new Mock<IAccountRepository>();
+        accounts.Setup(repository => repository.GetByIdAsync(account.Id, It.IsAny<CancellationToken>()))
+            .Callback<Guid, CancellationToken>((_, ct) => Observe("account", ct)).ReturnsAsync(account);
+        var trusts = new Mock<IAppExchangeTrustRepository>();
+        trusts.Setup(repository => repository.IsTrustedSourceAsync(app.Id, token.AppId, It.IsAny<CancellationToken>()))
+            .Callback<Guid, string, CancellationToken>((_, _, ct) => Observe("trust", ct)).ReturnsAsync(true);
+        var ldapAccounts = new Mock<ILdapAccountService>();
+        ldapAccounts.Setup(service => service.GetCredentialAsync(credential.Id, It.IsAny<CancellationToken>()))
+            .Callback<Guid, CancellationToken>((_, ct) => Observe("credential", ct)).ReturnsAsync(credential);
+        ldapAccounts.Setup(service => service.GetAccessAsync(app.Id, credential.Id, It.IsAny<CancellationToken>()))
+            .Callback<Guid, Guid, CancellationToken>((_, _, ct) => Observe("access", ct))
+            .ReturnsAsync(crossApplication && admitted ? null : access);
+        ldapAccounts.Setup(service => service.GrantAccessAsync(
+                app.Id, credential.Id, LdapAccessApprovalSource.ExchangeGranted, It.IsAny<CancellationToken>()))
+            .Callback<Guid, Guid, LdapAccessApprovalSource, CancellationToken>((_, _, _, ct) => Observe("grant", ct))
+            .ReturnsAsync(access);
+        var directory = new Mock<ILdapDirectoryClient>();
+        directory.Setup(client => client.IsUserEnabledAsync("corp", credential.ObjectGuid, It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, CancellationToken>((_, _, ct) => Observe("directory", ct)).ReturnsAsync(true);
+        return (new RefreshTokenValidator(tokens.Object, accounts.Object, trusts.Object, ldapAccounts.Object,
+            directory.Object, new Mock<ISmsAdmissionService>().Object, new Mock<IWechatAdmissionService>().Object,
+            CreateLogger()), new ValidationRequest
+            {
+                GrantType = IdentityConstants.GrantTypeRefreshToken, RefreshToken = token.TokenValue,
+                AppId = app.AppId, App = app, CancellationToken = cancellation.Token
+            });
+    }
+
     [Fact]
     public void GrantType_ReturnsRefreshToken()
     {

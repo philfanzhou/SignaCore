@@ -6,10 +6,10 @@ namespace SignaCore.Domain.Services.Ldap;
 
 public interface ILdapAccountService
 {
-    Task<LdapCredentialEntity?> FindCredentialByLoginAsync(string directoryKey, string username);
-    Task<LdapCredentialEntity?> GetCredentialAsync(Guid credentialId);
-    Task<LdapCredentialEntity?> GetCredentialByObjectGuidAsync(string directoryKey, Guid objectGuid);
-    Task<AppLdapAccessEntity?> GetAccessAsync(Guid appRegistrationId, Guid credentialId);
+    Task<LdapCredentialEntity?> FindCredentialByLoginAsync(string directoryKey, string username, CancellationToken cancellationToken = default);
+    Task<LdapCredentialEntity?> GetCredentialAsync(Guid credentialId, CancellationToken cancellationToken = default);
+    Task<LdapCredentialEntity?> GetCredentialByObjectGuidAsync(string directoryKey, Guid objectGuid, CancellationToken cancellationToken = default);
+    Task<AppLdapAccessEntity?> GetAccessAsync(Guid appRegistrationId, Guid credentialId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Admits an existing LDAP credential for <paramref name="appRegistrationId"/> without a directory
@@ -51,31 +51,31 @@ public sealed class LdapAccountService : ILdapAccountService
         _dbContext = dbContext;
     }
 
-    public async Task<LdapCredentialEntity?> FindCredentialByLoginAsync(string directoryKey, string username)
+    public async Task<LdapCredentialEntity?> FindCredentialByLoginAsync(string directoryKey, string username, CancellationToken cancellationToken = default)
     {
         var normalizedDirectory = IdentityValueNormalizer.Normalize(directoryKey);
         var normalizedLogin = IdentityValueNormalizer.Normalize(StripDomainPrefix(username.Trim()));
         return await _dbContext.LdapCredentials.FirstOrDefaultAsync(credential =>
             credential.DirectoryKeyNormalized == normalizedDirectory &&
             (credential.UserPrincipalNameNormalized == normalizedLogin ||
-             credential.SamAccountNameNormalized == normalizedLogin));
+             credential.SamAccountNameNormalized == normalizedLogin), cancellationToken);
     }
 
-    public Task<LdapCredentialEntity?> GetCredentialAsync(Guid credentialId) =>
-        _dbContext.LdapCredentials.FirstOrDefaultAsync(credential => credential.Id == credentialId);
+    public Task<LdapCredentialEntity?> GetCredentialAsync(Guid credentialId, CancellationToken cancellationToken = default) =>
+        _dbContext.LdapCredentials.FirstOrDefaultAsync(credential => credential.Id == credentialId, cancellationToken);
 
-    public Task<LdapCredentialEntity?> GetCredentialByObjectGuidAsync(string directoryKey, Guid objectGuid)
+    public Task<LdapCredentialEntity?> GetCredentialByObjectGuidAsync(string directoryKey, Guid objectGuid, CancellationToken cancellationToken = default)
     {
         var normalizedDirectory = IdentityValueNormalizer.Normalize(directoryKey);
         return _dbContext.LdapCredentials.FirstOrDefaultAsync(credential =>
             credential.DirectoryKeyNormalized == normalizedDirectory &&
-            credential.ObjectGuid == objectGuid);
+            credential.ObjectGuid == objectGuid, cancellationToken);
     }
 
-    public Task<AppLdapAccessEntity?> GetAccessAsync(Guid appRegistrationId, Guid credentialId) =>
+    public Task<AppLdapAccessEntity?> GetAccessAsync(Guid appRegistrationId, Guid credentialId, CancellationToken cancellationToken = default) =>
         _dbContext.AppLdapAccesses.FirstOrDefaultAsync(access =>
             access.AppRegistrationId == appRegistrationId &&
-            access.LdapCredentialId == credentialId);
+            access.LdapCredentialId == credentialId, cancellationToken);
 
     public async Task<AppLdapAccessEntity?> GrantAccessAsync(
         Guid appRegistrationId,
@@ -87,7 +87,7 @@ public sealed class LdapAccountService : ILdapAccountService
             .AnyAsync(credential => credential.Id == credentialId, cancellationToken);
         if (!credentialExists) return null;
 
-        var access = await GetAccessAsync(appRegistrationId, credentialId);
+        var access = await GetAccessAsync(appRegistrationId, credentialId, cancellationToken);
         if (access != null) return access;
 
         access = new AppLdapAccessEntity

@@ -80,14 +80,14 @@ public sealed class LdapValidator : IIdentityValidator
         ValidationRequest request,
         LdapDirectoryOptions directory)
     {
-        var credential = await _accountService.FindCredentialByLoginAsync(directory.Key, request.Username!);
+        var credential = await _accountService.FindCredentialByLoginAsync(directory.Key, request.Username!, request.CancellationToken);
         if (credential == null)
         {
             _logger.LogWarning("LDAP login rejected before bind: identity is not registered for manual admission");
             return ValidationResult.Failure(InvalidCredentialsMessage);
         }
 
-        var access = await _accountService.GetAccessAsync(request.App!.Id, credential.Id);
+        var access = await _accountService.GetAccessAsync(request.App!.Id, credential.Id, request.CancellationToken);
         if (access is not { IsActive: true, ApprovalSource: LdapAccessApprovalSource.Admin })
         {
             _logger.LogWarning(
@@ -97,7 +97,7 @@ public sealed class LdapValidator : IIdentityValidator
             return ValidationResult.Failure(InvalidCredentialsMessage);
         }
 
-        var account = await _accountRepository.GetByIdAsync(credential.AccountId);
+        var account = await _accountRepository.GetByIdAsync(credential.AccountId, request.CancellationToken);
         if (account is not { IsActive: true })
         {
             return ValidationResult.Failure("Account is disabled");
@@ -134,16 +134,17 @@ public sealed class LdapValidator : IIdentityValidator
 
         var existingCredential = await _accountService.GetCredentialByObjectGuidAsync(
             identity.DirectoryKey,
-            identity.ObjectGuid);
+            identity.ObjectGuid,
+            request.CancellationToken);
         if (existingCredential != null)
         {
-            var existingAccount = await _accountRepository.GetByIdAsync(existingCredential.AccountId);
+            var existingAccount = await _accountRepository.GetByIdAsync(existingCredential.AccountId, request.CancellationToken);
             if (existingAccount is not { IsActive: true })
             {
                 return ValidationResult.Failure("Account is disabled");
             }
 
-            var existingAccess = await _accountService.GetAccessAsync(request.App!.Id, existingCredential.Id);
+            var existingAccess = await _accountService.GetAccessAsync(request.App!.Id, existingCredential.Id, request.CancellationToken);
             if (existingAccess is { IsActive: false })
             {
                 _logger.LogWarning(
@@ -204,7 +205,7 @@ public sealed class LdapValidator : IIdentityValidator
     {
         var keyPrefix = directoryKey.Length <= 20 ? directoryKey : directoryKey[..20];
         var attemptKey = $"ldap:{keyPrefix}:{objectGuid:N}";
-        var attempt = await _loginAttemptRepository.GetByUsernameAsync(attemptKey);
+        var attempt = await _loginAttemptRepository.GetByUsernameAsync(attemptKey, cancellationToken);
         if (attempt?.LockoutUntil > DateTimeOffset.UtcNow)
         {
             return new BindValidationResult("Account is temporarily locked", null);

@@ -605,7 +605,7 @@ public sealed class AuditTransactionTests
         var accountService = new Mock<ILdapAccountService>();
         accountService.Setup(service => service.GetCredentialByObjectGuidAsync(
                 directory.Key,
-                identity.ObjectGuid))
+                identity.ObjectGuid, It.IsAny<CancellationToken>()))
             .ReturnsAsync((LdapCredentialEntity?)null);
         await FailLoginHistoryInsertAsync(database.Context);
         var loginAttemptRepository = new LoginAttemptRepository(database.Context);
@@ -679,9 +679,9 @@ public sealed class AuditTransactionTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(LdapCredentialValidationResult.Success);
         var accountService = new Mock<ILdapAccountService>();
-        accountService.Setup(service => service.FindCredentialByLoginAsync(directory.Key, "alice"))
+        accountService.Setup(service => service.FindCredentialByLoginAsync(directory.Key, "alice", It.IsAny<CancellationToken>()))
             .ReturnsAsync(credential);
-        accountService.Setup(service => service.GetAccessAsync(app.Id, credential.Id))
+        accountService.Setup(service => service.GetAccessAsync(app.Id, credential.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(access);
         var loginAttemptRepository = new LoginAttemptRepository(database.Context);
         var validator = new LdapValidator(
