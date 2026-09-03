@@ -166,9 +166,9 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
         AppRegistrationEntity app,
         string openId,
         CancellationToken cancellationToken = default) =>
-        ExecuteWithRetryAsync(async () =>
+        ExecuteWithRetryAsync(async operationCancellationToken =>
         {
-            var login = await FindLoginAsync(openId, cancellationToken);
+            var login = await FindLoginAsync(openId, operationCancellationToken);
             AccountEntity account;
             var accountCreated = login == null;
             if (login == null)
@@ -180,11 +180,11 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
             }
             else
             {
-                account = await _dbContext.Accounts.SingleAsync(item => item.Id == login.AccountId, cancellationToken);
+                account = await _dbContext.Accounts.SingleAsync(item => item.Id == login.AccountId, operationCancellationToken);
             }
 
             var access = await EnsureAccessAsync(
-                app.Id, login.Id, WechatAccessApprovalSource.AutoProvision, cancellationToken);
+                app.Id, login.Id, WechatAccessApprovalSource.AutoProvision, operationCancellationToken);
             return new WechatAdmission(account, login, access, accountCreated);
         }, cancellationToken);
 
@@ -219,9 +219,9 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
             return new WechatBindResult(WechatBindOutcome.AccountUnavailable);
         }
 
-        return await ExecuteWithRetryAsync(async () =>
+        return await ExecuteWithRetryAsync(async operationCancellationToken =>
         {
-            var login = await FindLoginAsync(openId, cancellationToken);
+            var login = await FindLoginAsync(openId, operationCancellationToken);
             if (login != null && login.AccountId != accountId)
             {
                 // Lost a race against another bind between the pre-check and the transaction.
@@ -235,7 +235,7 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
             }
 
             var access = await EnsureAccessAsync(
-                app.Id, login.Id, WechatAccessApprovalSource.SelfBind, cancellationToken);
+                app.Id, login.Id, WechatAccessApprovalSource.SelfBind, operationCancellationToken);
             return access.IsActive
                 ? new WechatBindResult(WechatBindOutcome.Bound, login)
                 : new WechatBindResult(WechatBindOutcome.AccessRevoked, login);
@@ -328,28 +328,29 @@ public sealed class WechatAdmissionService : IWechatAdmissionService
     /// strategy can replay the delegate, so tracked state is cleared before every attempt.
     /// </summary>
     private async Task<T> ExecuteWithRetryAsync<T>(
-        Func<Task<T>> operation,
+        Func<CancellationToken, Task<T>> operation,
         CancellationToken cancellationToken,
         Func<T, Task>? beforeCommit = null)
     {
         for (var attempt = 0; attempt < 2; attempt++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var strategy = _dbContext.Database.CreateExecutionStrategy();
-                return await strategy.ExecuteAsync(async () =>
+                return await strategy.ExecuteAsync(async operationCancellationToken =>
                 {
                     _dbContext.ChangeTracker.Clear();
-                    await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-                    var result = await operation();
+                    await using var transaction = await _dbContext.Database.BeginTransactionAsync(operationCancellationToken);
+                    var result = await operation(operationCancellationToken);
                     if (beforeCommit is not null)
                     {
                         await beforeCommit(result);
                     }
-                    await _dbContext.SaveChangesAsync(cancellationToken);
-                    await transaction.CommitAsync(cancellationToken);
+                    await _dbContext.SaveChangesAsync(operationCancellationToken);
+                    await transaction.CommitAsync(operationCancellationToken);
                     return result;
-                });
+                }, cancellationToken);
             }
             catch (DbUpdateException) when (attempt == 0)
             {

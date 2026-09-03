@@ -129,20 +129,21 @@ public sealed class LdapAccountService : ILdapAccountService
     {
         for (var attempt = 0; attempt < 2; attempt++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var strategy = _dbContext.Database.CreateExecutionStrategy();
-                return await strategy.ExecuteAsync(async () =>
+                return await strategy.ExecuteAsync(async operationCancellationToken =>
                 {
                     // The execution strategy can replay this whole delegate after a
                     // transient commit failure. Clear entities left Added/Modified by
                     // the previous attempt, then rebuild state from durable keys.
                     _dbContext.ChangeTracker.Clear();
-                    await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+                    await using var transaction = await _dbContext.Database.BeginTransactionAsync(operationCancellationToken);
                     var normalizedDirectory = IdentityValueNormalizer.Normalize(identity.DirectoryKey);
                     var credential = await _dbContext.LdapCredentials.FirstOrDefaultAsync(item =>
                         item.DirectoryKeyNormalized == normalizedDirectory &&
-                        item.ObjectGuid == identity.ObjectGuid, cancellationToken);
+                        item.ObjectGuid == identity.ObjectGuid, operationCancellationToken);
 
                     var accountCreated = credential == null;
                     AccountEntity account;
@@ -171,7 +172,7 @@ public sealed class LdapAccountService : ILdapAccountService
                     {
                         account = await _dbContext.Accounts.SingleAsync(
                             item => item.Id == credential.AccountId,
-                            cancellationToken);
+                            operationCancellationToken);
                         // This is an explicit administrator action, not background
                         // synchronization. Re-approving the same objectGUID is the
                         // supported way to refresh renamed UPN/sAMAccountName aliases.
@@ -184,7 +185,7 @@ public sealed class LdapAccountService : ILdapAccountService
 
                     var access = await _dbContext.AppLdapAccesses.FirstOrDefaultAsync(item =>
                         item.AppRegistrationId == app.Id &&
-                        item.LdapCredentialId == credential.Id, cancellationToken);
+                        item.LdapCredentialId == credential.Id, operationCancellationToken);
                     var accessCreated = access == null;
                     if (access == null)
                     {
@@ -213,10 +214,10 @@ public sealed class LdapAccountService : ILdapAccountService
                     {
                         await beforeCommit(result);
                     }
-                    await _dbContext.SaveChangesAsync(cancellationToken);
-                    await transaction.CommitAsync(cancellationToken);
+                    await _dbContext.SaveChangesAsync(operationCancellationToken);
+                    await transaction.CommitAsync(operationCancellationToken);
                     return result;
-                });
+                }, cancellationToken);
             }
             catch (DbUpdateException) when (attempt == 0)
             {
