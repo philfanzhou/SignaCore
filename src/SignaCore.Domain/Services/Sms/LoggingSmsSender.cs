@@ -15,6 +15,7 @@ public class LoggingSmsSender : ISmsSender
         SmsVerificationMessage message,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var maskedCode = new string('*', message.Code.Length);
         _logger.LogInformation(
             "[SMS-DEV] Phone={Phone}, Code={MaskedCode} - SMS sent (logging only in development)",

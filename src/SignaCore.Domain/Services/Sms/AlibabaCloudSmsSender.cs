@@ -24,6 +24,8 @@ public sealed class AlibabaCloudSmsSender : ISmsSender
                 AccessKeySecret = value.AccessKeySecret,
                 Endpoint = "dysmsapi.aliyuncs.com"
             }));
+        // The SDK does not accept cancellation. Await its result to observe delivery;
+        // its existing 5-second connect / 10-second read timeouts bound the wait, with no retries.
         var response = await client.SendSmsWithOptionsAsync(new SendSmsRequest
         {
             PhoneNumbers = message.PhoneE164[3..],

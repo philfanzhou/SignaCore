@@ -23,6 +23,40 @@ public class SmsSenderTests
         Assert.DoesNotContain("13800138000", entry);
     }
 
+    [Theory]
+    [InlineData(SmsProviderNames.Logging)]
+    [InlineData(SmsProviderNames.AlibabaCloud)]
+    [InlineData(SmsProviderNames.TencentCloud)]
+    public async Task SendAsync_AlreadyCancelled_DoesNotCreateClientReadMessageOrLog(string provider)
+    {
+        var logger = new TestLogger<LoggingSmsSender>();
+        ISmsSender sender = provider switch
+        {
+            SmsProviderNames.Logging => new LoggingSmsSender(logger),
+            SmsProviderNames.AlibabaCloud => new AlibabaCloudSmsSender(),
+            SmsProviderNames.TencentCloud => new TencentCloudSmsSender(),
+            _ => throw new ArgumentOutOfRangeException(nameof(provider))
+        };
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var profile = new SmsProviderProfile { Provider = provider };
+
+        // No message or credentials are supplied: cancellation must precede accessing either.
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            sender.SendAsync(profile, null!, cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        Assert.Empty(logger.LogEntries);
+        if (provider != SmsProviderNames.Logging)
+        {
+            var field = sender.GetType().GetField("_clients",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            Assert.NotNull(field);
+            var clients = Assert.IsAssignableFrom<System.Collections.IEnumerable>(field.GetValue(sender));
+            Assert.Empty(clients.Cast<object>());
+        }
+    }
+
     private sealed class TestLogger<T> : ILogger<T>
     {
         public List<string> LogEntries { get; } = [];

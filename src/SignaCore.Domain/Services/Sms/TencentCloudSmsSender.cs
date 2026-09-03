@@ -24,6 +24,8 @@ public sealed class TencentCloudSmsSender : ISmsSender
             {
                 HttpProfile = new HttpProfile { Endpoint = "sms.tencentcloudapi.com", Timeout = 10 }
             }));
+        // The SDK does not accept cancellation. Await its result to observe delivery;
+        // the existing 10-second HTTP timeout bounds this non-cancellable interval.
         var response = await client.SendSms(new SendSmsRequest
         {
             PhoneNumberSet = [message.PhoneE164],
