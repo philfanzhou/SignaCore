@@ -20,7 +20,8 @@ public interface IRefreshTokenService
         Guid? ldapCredentialId = null,
         Guid? smsUserLoginId = null,
         Guid? wechatUserLoginId = null,
-        string? exchangedFromAppId = null);
+        string? exchangedFromAppId = null,
+        CancellationToken cancellationToken = default);
     Task<bool> RevokeAsync(string token, CancellationToken cancellationToken = default);
 
     /// <summary>Revokes only if the token was issued to <paramref name="appId"/> (RFC 7009 §2.1).</summary>

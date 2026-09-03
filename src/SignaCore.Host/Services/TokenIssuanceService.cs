@@ -200,26 +200,26 @@ public sealed class TokenIssuanceService
         if (requiresRotation)
         {
             var strategy = _dbContext.Database.CreateExecutionStrategy();
-            newRefreshToken = await strategy.ExecuteAsync(async () =>
+            newRefreshToken = await strategy.ExecuteAsync(async operationCancellationToken =>
             {
                 _dbContext.ChangeTracker.Clear();
                 originalLoginState.Restore(account);
-                await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+                await using var transaction = await _dbContext.Database.BeginTransactionAsync(operationCancellationToken);
 
-                await StageLoginStateAsync();
-                var replacement = await StageRefreshTokenAsync();
+                await StageLoginStateAsync(operationCancellationToken);
+                var replacement = await StageRefreshTokenAsync(operationCancellationToken);
                 if (replacement is null)
                 {
-                    await transaction.RollbackAsync(cancellationToken);
+                    await transaction.RollbackAsync(operationCancellationToken);
                     _dbContext.ChangeTracker.Clear();
                     return null;
                 }
 
-                await StageLoginAuditAsync();
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
+                await StageLoginAuditAsync(operationCancellationToken);
+                await _unitOfWork.SaveChangesAsync(operationCancellationToken);
+                await transaction.CommitAsync(operationCancellationToken);
                 return replacement;
-            });
+            }, cancellationToken);
         }
         else if (validationResult.OtpVerificationChange is { } otpVerificationChange)
         {
@@ -230,30 +230,30 @@ public sealed class TokenIssuanceService
             }
 
             var strategy = _dbContext.Database.CreateExecutionStrategy();
-            var commitResult = await strategy.ExecuteAsync(async () =>
+            var commitResult = await strategy.ExecuteAsync(async operationCancellationToken =>
             {
                 _dbContext.ChangeTracker.Clear();
                 originalLoginState.Restore(account);
-                await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+                await using var transaction = await _dbContext.Database.BeginTransactionAsync(operationCancellationToken);
 
                 if (!await OtpVerificationChangeApplier.ApplyAsync(
                         otpVerificationChange,
                         _otpRepository,
-                        cancellationToken))
+                        operationCancellationToken))
                 {
-                    await transaction.RollbackAsync(cancellationToken);
+                    await transaction.RollbackAsync(operationCancellationToken);
                     _dbContext.ChangeTracker.Clear();
                     return new OtpLoginCommitResult(false, null);
                 }
 
-                cancellationToken.ThrowIfCancellationRequested();
-                await StageLoginStateAsync();
-                var replacement = await StageRefreshTokenAsync();
-                await StageLoginAuditAsync();
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
+                operationCancellationToken.ThrowIfCancellationRequested();
+                await StageLoginStateAsync(operationCancellationToken);
+                var replacement = await StageRefreshTokenAsync(operationCancellationToken);
+                await StageLoginAuditAsync(operationCancellationToken);
+                await _unitOfWork.SaveChangesAsync(operationCancellationToken);
+                await transaction.CommitAsync(operationCancellationToken);
                 return new OtpLoginCommitResult(true, replacement);
-            });
+            }, cancellationToken);
 
             if (!commitResult.Committed)
             {
@@ -279,9 +279,9 @@ public sealed class TokenIssuanceService
                 validationResult.LoginAttemptChange,
                 _loginAttemptRepository,
                 cancellationToken);
-            await StageLoginStateAsync();
-            newRefreshToken = await StageRefreshTokenAsync();
-            await StageLoginAuditAsync();
+            await StageLoginStateAsync(cancellationToken);
+            newRefreshToken = await StageRefreshTokenAsync(cancellationToken);
+            await StageLoginAuditAsync(cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
@@ -323,17 +323,17 @@ public sealed class TokenIssuanceService
             roles,
             permissions);
 
-        Task StageLoginStateAsync() => _accountLoginInfoService.UpdateLoginInfoAsync(
-            account, request.ClientIp, validationResult.AuthMethod ?? request.GrantType, cancellationToken);
+        Task StageLoginStateAsync(CancellationToken stageCancellationToken) => _accountLoginInfoService.UpdateLoginInfoAsync(
+            account, request.ClientIp, validationResult.AuthMethod ?? request.GrantType, stageCancellationToken);
 
-        Task<string?> StageRefreshTokenAsync() => _refreshTokenService.HandleRefreshTokenAsync(
+        Task<string?> StageRefreshTokenAsync(CancellationToken stageCancellationToken) => _refreshTokenService.HandleRefreshTokenAsync(
             request.GrantType, request.RefreshToken, account, appId,
             validationResult.LdapCredentialId, validationResult.SmsUserLoginId,
-            validationResult.WechatUserLoginId, validationResult.SourceAppId);
+            validationResult.WechatUserLoginId, validationResult.SourceAppId, stageCancellationToken);
 
-        Task StageLoginAuditAsync() => _auditService.RecordLoginAsync(
+        Task StageLoginAuditAsync(CancellationToken stageCancellationToken) => _auditService.RecordLoginAsync(
             account.Id, displayName ?? account.Id.ToString(), request.GrantType, "login_success",
-            request.ClientIp, request.UserAgent, null, appId, request.CorrelationId, cancellationToken);
+            request.ClientIp, request.UserAgent, null, appId, request.CorrelationId, stageCancellationToken);
     }
 
     /// <summary>
@@ -368,7 +368,7 @@ public sealed class TokenIssuanceService
 
         if (loginAttemptChange == null && otpVerificationChange == null)
         {
-            await StageAuditAsync();
+            await StageAuditAsync(cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
         else
@@ -377,21 +377,21 @@ public sealed class TokenIssuanceService
             // first row), so the Host owns a short explicit transaction that also includes the
             // login-history insert. External validation and token work stay outside this boundary.
             var strategy = _dbContext.Database.CreateExecutionStrategy();
-            await strategy.ExecuteAsync(async () =>
+            await strategy.ExecuteAsync(async operationCancellationToken =>
             {
                 _dbContext.ChangeTracker.Clear();
-                await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+                await using var transaction = await _dbContext.Database.BeginTransactionAsync(operationCancellationToken);
                 if (otpVerificationChange != null)
                 {
                     await OtpVerificationChangeApplier.ApplyAsync(
                         otpVerificationChange,
                         _otpRepository,
-                        cancellationToken);
+                        operationCancellationToken);
                 }
                 var loginAttempt = await LoginAttemptChangeApplier.ApplyAsync(
                     loginAttemptChange,
                     _loginAttemptRepository,
-                    cancellationToken);
+                    operationCancellationToken);
                 if (loginAttemptChange != null &&
                     request.GrantType == IdentityConstants.GrantTypePassword &&
                     loginAttempt?.LockoutUntil > DateTimeOffset.UtcNow)
@@ -401,18 +401,18 @@ public sealed class TokenIssuanceService
                         LogValueSanitizer.Sanitize(loginAttemptChange.Username),
                         loginAttempt.LockoutUntil);
                 }
-                await StageAuditAsync();
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
-            });
+                await StageAuditAsync(operationCancellationToken);
+                await _unitOfWork.SaveChangesAsync(operationCancellationToken);
+                await transaction.CommitAsync(operationCancellationToken);
+            }, cancellationToken);
         }
 
         return TokenIssuanceOutcome.Failure(errorCode, responseMessage);
 
-        Task StageAuditAsync() => _auditService.RecordLoginAsync(
+        Task StageAuditAsync(CancellationToken stageCancellationToken) => _auditService.RecordLoginAsync(
             accountId, auditUsername, request.GrantType, "login_failure",
             request.ClientIp, request.UserAgent, auditFailureReason, request.App.AppId, request.CorrelationId,
-            cancellationToken);
+            stageCancellationToken);
     }
 
     private sealed record OtpLoginCommitResult(bool Committed, string? RefreshToken);

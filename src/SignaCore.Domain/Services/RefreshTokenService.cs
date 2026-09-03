@@ -26,13 +26,15 @@ public class RefreshTokenService : IRefreshTokenService
         Guid? ldapCredentialId = null,
         Guid? smsUserLoginId = null,
         Guid? wechatUserLoginId = null,
-        string? exchangedFromAppId = null)
+        string? exchangedFromAppId = null,
+        CancellationToken cancellationToken = default)
     {
         if (grantType is IdentityConstants.GrantTypePassword or IdentityConstants.GrantTypeSms or
             IdentityConstants.GrantTypeWechat or IdentityConstants.GrantTypeLdap)
         {
             return await GenerateRefreshTokenAsync(
-                account, RequireAppId(appId), ldapCredentialId, smsUserLoginId, wechatUserLoginId);
+                account, RequireAppId(appId), ldapCredentialId, smsUserLoginId, wechatUserLoginId,
+                cancellationToken: cancellationToken);
         }
 
         if (grantType == IdentityConstants.GrantTypeRefreshToken && !string.IsNullOrEmpty(existingRefreshToken))
@@ -45,12 +47,12 @@ public class RefreshTokenService : IRefreshTokenService
             {
                 return await GenerateRefreshTokenAsync(
                     account, RequireAppId(appId), ldapCredentialId, smsUserLoginId, wechatUserLoginId,
-                    exchangedFromAppId);
+                    exchangedFromAppId, cancellationToken);
             }
 
             var (rawToken, replacement) = CreateRefreshToken(
                 account, RequireAppId(appId), ldapCredentialId, smsUserLoginId, wechatUserLoginId);
-            return await _refreshTokenRepository.TryRotateAsync(existingRefreshToken, replacement)
+            return await _refreshTokenRepository.TryRotateAsync(existingRefreshToken, replacement, cancellationToken)
                 ? rawToken
                 : null;
         }
@@ -82,11 +84,12 @@ public class RefreshTokenService : IRefreshTokenService
         Guid? ldapCredentialId,
         Guid? smsUserLoginId,
         Guid? wechatUserLoginId,
-        string? sourceAppId = null)
+        string? sourceAppId = null,
+        CancellationToken cancellationToken = default)
     {
         var (rawToken, refreshToken) = CreateRefreshToken(
             account, appId, ldapCredentialId, smsUserLoginId, wechatUserLoginId, sourceAppId);
-        await _refreshTokenRepository.AddAsync(refreshToken);
+        await _refreshTokenRepository.AddAsync(refreshToken, cancellationToken);
         return rawToken;
     }
 
