@@ -27,16 +27,24 @@ public class ExceptionHandlingMiddleware
         {
             await _next(context);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            _logger.LogDebug("Request aborted by the client.");
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unhandled exception: Type={ExceptionType}, Message={Message}",
-                ex.GetType().Name, ex.Message);
+            _logger.LogError("Unhandled exception: Type={ExceptionType}", ex.GetType().Name);
             await WriteProblemDetailsAsync(context, ex);
         }
     }
 
     private static async Task WriteProblemDetailsAsync(HttpContext context, Exception ex)
     {
+        if (context.Response.HasStarted)
+        {
+            return;
+        }
+
         // Do not expose raw exception messages to clients — they may contain
         // internal field names, database details, or stack-like information.
         // The correlation is via server-side logs (see CorrelationIdMiddleware).
