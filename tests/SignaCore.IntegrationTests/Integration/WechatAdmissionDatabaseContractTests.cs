@@ -1,9 +1,14 @@
+using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Ldap;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.WeChat;
 using Xunit;
 
@@ -334,12 +339,110 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
             cancellationToken: TestContext.Current.CancellationToken));
     }
 
-    private IdentityDbContext CreateContext()
+    public static TheoryData<string, string, bool> CancellationCases => new(
+        from flow in new[] { "wechat", "bind", "sms", "ldap" }
+        from failure in new[] { "cancel", "transient", "conflict" }
+        from cancel in new[] { false, true }
+        where failure != "cancel" || cancel
+        select (flow, failure, cancel));
+
+    [Theory]
+    [MemberData(nameof(CancellationCases))]
+    public async Task Admission_CommitFailure_RetriesOnlyWhileCallerIsActive(
+        string flow, string failure, bool cancel)
+    {
+        var app = await SeedAppAsync(WechatLoginMode.AutoProvision);
+        var accountId = flow == "bind" ? await SeedAccountAsync() : Guid.Empty;
+        using var cancellation = new CancellationTokenSource();
+        var interceptor = new AdmissionCommitInterceptor(cancellation, failure, cancel);
+        await using (var context = CreateContext(interceptor, cancellation.Token))
+        {
+            var operation = () => flow switch
+            {
+                "wechat" => (Task)new WechatAdmissionService(context).ProvisionAsync(app, OpenId, cancellation.Token),
+                "bind" => new WechatAdmissionService(context).BindAsync(app, accountId, OpenId, cancellation.Token),
+                "sms" => new SmsAdmissionService(context).ProvisionAsync(
+                    app, "+8613800138000", SmsAccessApprovalSource.AutoProvision, null, cancellation.Token),
+                "ldap" => new LdapAccountService(context).ProvisionAsync(
+                    new LdapDirectoryIdentity("test", Guid.NewGuid(), "account@example.test", "account", true),
+                    app, LdapAccessApprovalSource.AutoProvision, null, cancellation.Token),
+                _ => throw new ArgumentOutOfRangeException(nameof(flow))
+            };
+            if (cancel)
+            {
+                var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(operation);
+                Assert.Equal(cancellation.Token, exception.CancellationToken);
+            }
+            else
+                await operation();
+        }
+
+        Assert.Equal(cancel ? 1 : 2, interceptor.CommitAttempts);
+        await using var verify = CreateContext();
+        Assert.Equal(cancel ? flow == "bind" ? 1 : 0 : 1,
+            await verify.Accounts.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(!cancel && flow != "ldap" ? 1 : 0,
+            await verify.UserLogins.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(!cancel && flow is "wechat" or "bind" ? 1 : 0,
+            await verify.AppWechatAccesses.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(!cancel && flow == "sms" ? 1 : 0,
+            await verify.AppSmsAccesses.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(!cancel && flow == "ldap" ? 1 : 0,
+            await verify.LdapCredentials.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(!cancel && flow == "ldap" ? 1 : 0,
+            await verify.AppLdapAccesses.CountAsync(TestContext.Current.CancellationToken));
+    }
+
+    private sealed class AdmissionCommitInterceptor(
+        CancellationTokenSource cancellation, string failure, bool cancel) : DbTransactionInterceptor
+    {
+        public int CommitAttempts { get; private set; }
+
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
+            DbTransaction transaction, TransactionEventData eventData, InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(cancellation.Token, cancellationToken);
+            if (++CommitAttempts != 1) return ValueTask.FromResult(result);
+            if (cancel) cancellation.Cancel();
+            if (failure == "transient") throw new AdmissionTransientException();
+            if (failure == "conflict") throw new DbUpdateException("Injected concurrent update.");
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class AdmissionTransientException : Exception;
+
+    private sealed class AdmissionRetryStrategy(
+        ExecutionStrategyDependencies dependencies, CancellationToken expectedToken)
+        : ExecutionStrategy(dependencies, 3, TimeSpan.FromMilliseconds(1))
+    {
+        public override Task<TResult> ExecuteAsync<TState, TResult>(
+            TState state, Func<DbContext, TState, CancellationToken, Task<TResult>> operation,
+            Func<DbContext, TState, CancellationToken, Task<ExecutionResult<TResult>>>? verifySucceeded,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(expectedToken, cancellationToken);
+            return base.ExecuteAsync(state, operation, verifySucceeded, cancellationToken);
+        }
+
+        protected override bool ShouldRetryOn(Exception exception) => exception is AdmissionTransientException;
+    }
+
+    private IdentityDbContext CreateContext(
+        IInterceptor? interceptor = null, CancellationToken expectedToken = default)
     {
         var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
         optionsBuilder.UseSqlite(
             $"Data Source={_databasePath};Default Timeout=30",
-            providerOptions => providerOptions.MigrationsAssembly("SignaCore.Database.Migrations.Sqlite"));
+            providerOptions =>
+            {
+                providerOptions.MigrationsAssembly("SignaCore.Database.Migrations.Sqlite");
+                if (interceptor is not null)
+                    providerOptions.ExecutionStrategy(dependencies => new AdmissionRetryStrategy(dependencies, expectedToken));
+            });
+        if (interceptor is not null) optionsBuilder.AddInterceptors(interceptor);
         return new IdentityDbContext(optionsBuilder.Options);
     }
 

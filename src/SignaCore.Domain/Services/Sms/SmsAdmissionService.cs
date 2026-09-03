@@ -87,16 +87,17 @@ public sealed class SmsAdmissionService : ISmsAdmissionService
         var phone = MainlandChinaPhoneNumber.Normalize(phoneE164);
         for (var attempt = 0; attempt < 2; attempt++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var strategy = _dbContext.Database.CreateExecutionStrategy();
-                return await strategy.ExecuteAsync(async () =>
+                return await strategy.ExecuteAsync(async operationCancellationToken =>
                 {
                     _dbContext.ChangeTracker.Clear();
-                    await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+                    await using var transaction = await _dbContext.Database.BeginTransactionAsync(operationCancellationToken);
                     var provider = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms);
                     var login = await _dbContext.UserLogins.FirstOrDefaultAsync(item =>
-                        item.ProviderNameNormalized == provider && item.ProviderUserId == phone, cancellationToken);
+                        item.ProviderNameNormalized == provider && item.ProviderUserId == phone, operationCancellationToken);
                     AccountEntity account;
                     var accountCreated = login == null;
                     if (login == null)
@@ -114,11 +115,11 @@ public sealed class SmsAdmissionService : ISmsAdmissionService
                     }
                     else
                     {
-                        account = await _dbContext.Accounts.SingleAsync(item => item.Id == login.AccountId, cancellationToken);
+                        account = await _dbContext.Accounts.SingleAsync(item => item.Id == login.AccountId, operationCancellationToken);
                     }
 
                     var access = await _dbContext.AppSmsAccesses.FirstOrDefaultAsync(item =>
-                        item.AppRegistrationId == app.Id && item.UserLoginId == login.Id, cancellationToken);
+                        item.AppRegistrationId == app.Id && item.UserLoginId == login.Id, operationCancellationToken);
                     if (access == null)
                     {
                         access = new AppSmsAccessEntity
@@ -145,10 +146,10 @@ public sealed class SmsAdmissionService : ISmsAdmissionService
                     {
                         await beforeCommit(result);
                     }
-                    await _dbContext.SaveChangesAsync(cancellationToken);
-                    await transaction.CommitAsync(cancellationToken);
+                    await _dbContext.SaveChangesAsync(operationCancellationToken);
+                    await transaction.CommitAsync(operationCancellationToken);
                     return result;
-                });
+                }, cancellationToken);
             }
             catch (DbUpdateException) when (attempt == 0)
             {
