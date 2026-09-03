@@ -1,3 +1,6 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using SignaCore.Database;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SignaCore.Database.Entity;
@@ -298,6 +301,83 @@ public class DbOtpServiceTests
         await _service.InvalidateAsync(_appId, "+8613800138000");
 
         _unitOfWork.Verify(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Invalidate_ForwardsTokenAndOnlySavesExistingChallenge(bool exists)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var entry = exists ? new OtpEntity { Status = OtpStatus.Sent } : null;
+        _repository.Setup(repository => repository.GetAsync(_appId, "+8613800138000", cancellation.Token))
+            .ReturnsAsync(entry);
+
+        await _service.InvalidateAsync(_appId, "13800138000", cancellation.Token);
+
+        _repository.Verify(repository => repository.GetAsync(_appId, "+8613800138000", cancellation.Token), Times.Once);
+        _repository.VerifyNoOtherCalls();
+        _unitOfWork.Verify(unit => unit.SaveChangesAsync(cancellation.Token), exists ? Times.Once() : Times.Never());
+        _unitOfWork.VerifyNoOtherCalls();
+        if (exists) Assert.Equal(OtpStatus.Consumed, entry!.Status);
+    }
+
+    [Fact]
+    public async Task Invalidate_CancelledRead_DoesNotSave()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        _repository.Setup(repository => repository.GetAsync(_appId, "+8613800138000", cancellation.Token))
+            .Returns(Task.FromCanceled<OtpEntity?>(cancellation.Token));
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _service.InvalidateAsync(_appId, "13800138000", cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        _unitOfWork.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Invalidate_CancelBeforeSave_DoesNotConsumePersistedOtp()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        var databaseOptions = new DbContextOptionsBuilder<IdentityDbContext>().UseSqlite(connection).Options;
+        await using var context = new IdentityDbContext(databaseOptions);
+        await context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
+        context.AppRegistrations.Add(new AppRegistrationEntity
+        {
+            Id = _appId, AppId = "otp-cancellation-app", AppName = "OTP cancellation app",
+            AppSecretHash = "unused-test-hash", IsActive = true
+        });
+        context.Otps.Add(new OtpEntity
+        {
+            Id = Guid.NewGuid(), AppRegistrationId = _appId, Phone = "+8613800138000",
+            Status = OtpStatus.Sent, Attempts = 2, Version = 3
+        });
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        _unitOfWork.Setup(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken ct) =>
+            {
+                Assert.Equal(cancellation.Token, ct);
+                cancellation.Cancel();
+                return context.SaveChangesAsync(ct);
+            });
+        var options = new SmsOptions { OtpHmacKey = Convert.ToBase64String(new byte[32]) };
+        var service = new DbOtpService(options, NullLogger<DbOtpService>.Instance, new OtpRepository(context),
+            _unitOfWork.Object, new SmsSenderResolver([], options));
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            service.InvalidateAsync(_appId, "13800138000", cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        await using var verify = new IdentityDbContext(databaseOptions);
+        var persisted = await verify.Otps.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(OtpStatus.Sent, persisted.Status);
+        Assert.Equal(2, persisted.Attempts);
+        Assert.Equal(3, persisted.Version);
+        _unitOfWork.Verify(unit => unit.SaveChangesAsync(cancellation.Token), Times.Once);
     }
 
     [Theory]

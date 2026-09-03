@@ -23,7 +23,8 @@ public interface IOtpService
         string code,
         CancellationToken cancellationToken = default);
 
-    Task InvalidateAsync(Guid appRegistrationId, string phoneE164);
+    Task InvalidateAsync(
+        Guid appRegistrationId, string phoneE164, CancellationToken cancellationToken = default);
 }
 
 public sealed record OtpVerificationResult(bool IsVerified, OtpVerificationChange? Change);

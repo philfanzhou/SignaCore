@@ -139,12 +139,13 @@ public class DbOtpService : IOtpService
                 now.AddSeconds(_options.LockoutSeconds)));
     }
 
-    public async Task InvalidateAsync(Guid appRegistrationId, string phoneE164)
+    public async Task InvalidateAsync(
+        Guid appRegistrationId, string phoneE164, CancellationToken cancellationToken = default)
     {
-        var entry = await _otpRepository.GetAsync(appRegistrationId, MainlandChinaPhoneNumber.Normalize(phoneE164));
+        var entry = await _otpRepository.GetAsync(appRegistrationId, MainlandChinaPhoneNumber.Normalize(phoneE164), cancellationToken);
         if (entry == null) return;
         entry.Status = OtpStatus.Consumed;
-        await _unitOfWork.SaveChangesAsync();
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
     private string ComputeMac(Guid appRegistrationId, string phone, string code)
