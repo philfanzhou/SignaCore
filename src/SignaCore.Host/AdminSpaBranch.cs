@@ -24,10 +24,10 @@ internal static class AdminSpaBranch
                         var filePath = Path.Combine(wwwroot ?? string.Empty, "index.html");
                         if (File.Exists(filePath))
                         {
-                            var content = await File.ReadAllTextAsync(filePath);
+                            var content = await File.ReadAllTextAsync(filePath, context.RequestAborted);
                             content = AdminSpaTitleInjector.Inject(content, appTitle);
                             context.Response.ContentType = "text/html; charset=utf-8";
-                            await context.Response.WriteAsync(content);
+                            await context.Response.WriteAsync(content, context.RequestAborted);
                             return;
                         }
                     }
