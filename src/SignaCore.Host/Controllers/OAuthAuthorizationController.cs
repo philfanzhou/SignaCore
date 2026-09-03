@@ -208,7 +208,8 @@ public sealed class OAuthAuthorizationController : ControllerBase
             actorName: null,
             description: outcome,
             clientIp: HttpContext.GetClientIp(),
-            correlationId: HttpContext.GetCorrelationId());
+            correlationId: HttpContext.GetCorrelationId(),
+            cancellationToken: cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
