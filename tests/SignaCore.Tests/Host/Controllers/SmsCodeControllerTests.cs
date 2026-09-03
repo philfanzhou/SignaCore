@@ -74,10 +74,14 @@ public class SmsCodeControllerTests
         var ok = AuthTestDoubles.ExtractOk(actionResult);
         var response = Assert.IsType<SmsCodeResponse>(ok.Value!);
         Assert.True(response.Success);
+        _admissionServiceMock.Verify(service => service.FindAsync(
+            It.IsAny<Guid>(), "+8613800138000", cancellation.Token), Times.Once);
+        _otpServiceMock.Verify(service => service.GenerateAndSendAsync(
+            It.IsAny<Guid>(), "+8613800138000", "test", cancellation.Token), Times.Once);
         _auditServiceMock.Verify(a => a.RecordLoginAsync(
             null, "+8613800138000", "sms", "sms_code_sent",
             It.IsAny<string?>(), It.IsAny<string?>(), null,
-            It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
+            It.IsAny<string?>(), It.IsAny<string?>(), cancellation.Token), Times.Once);
         _unitOfWorkMock.Verify(
             unitOfWork => unitOfWork.SaveChangesAsync(cancellation.Token),
             Times.Once);
@@ -105,7 +109,7 @@ public class SmsCodeControllerTests
         _auditServiceMock.Verify(a => a.RecordLoginAsync(
             null, "+8613800138000", "sms", "sms_code_sent",
             It.IsAny<string?>(), It.IsAny<string?>(), null,
-            It.IsAny<string?>(), It.IsAny<string?>()), Times.Once);
+            It.IsAny<string?>(), It.IsAny<string?>(), cancellation.Token), Times.Once);
         _unitOfWorkMock.Verify(
             unitOfWork => unitOfWork.SaveChangesAsync(cancellation.Token),
             Times.Once);
@@ -152,5 +156,35 @@ public class SmsCodeControllerTests
         var response = Assert.IsType<SmsCodeResponse>(ok.Value!);
         Assert.False(response.Success);
         Assert.Equal("Failed to send verification code", response.Message);
+    }
+
+    [Fact]
+    public async Task RequestSmsCode_WhenAuditObservesCancellation_DoesNotCommitOrReturnSuccess()
+    {
+        using var cancellation = new CancellationTokenSource();
+        _otpServiceMock.Setup(service => service.GenerateAndSendAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), "test", cancellation.Token))
+            .Callback(cancellation.Cancel)
+            .ReturnsAsync("unused-code");
+        _auditServiceMock.Setup(service => service.RecordLoginAsync(
+                null, It.IsAny<string>(), "sms", "sms_code_sent",
+                It.IsAny<string?>(), It.IsAny<string?>(), null, "test-app",
+                It.IsAny<string?>(), cancellation.Token))
+            .Returns(() => Task.FromCanceled(cancellation.Token));
+        var controller = CreateController();
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => controller.RequestSmsCode(
+            new SmsCodeRequest { Phone = "13800138000" }, cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        _admissionServiceMock.Verify(service => service.FindAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), cancellation.Token), Times.Once);
+        _otpServiceMock.Verify(service => service.GenerateAndSendAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), "test", cancellation.Token), Times.Once);
+        _auditServiceMock.Verify(service => service.RecordLoginAsync(
+            null, It.IsAny<string>(), "sms", "sms_code_sent",
+            It.IsAny<string?>(), It.IsAny<string?>(), null, "test-app",
+            It.IsAny<string?>(), cancellation.Token), Times.Once);
+        _unitOfWorkMock.VerifyNoOtherCalls();
     }
 }

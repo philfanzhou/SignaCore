@@ -38,13 +38,13 @@ public class DbOtpService : IOtpService
     {
         var phone = MainlandChinaPhoneNumber.Normalize(phoneE164);
         var now = DateTimeOffset.UtcNow;
-        var existing = await _otpRepository.GetAsync(appRegistrationId, phone);
+        var existing = await _otpRepository.GetAsync(appRegistrationId, phone, cancellationToken);
         EnforceSendLimits(existing, now);
 
         var (sender, profile) = _senderResolver.Resolve(profileKey);
         var code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
         var otp = existing ?? new OtpEntity { Id = Guid.NewGuid(), AppRegistrationId = appRegistrationId, Phone = phone };
-        if (existing == null) await _otpRepository.AddAsync(otp);
+        if (existing == null) await _otpRepository.AddAsync(otp, cancellationToken);
 
         UpdateSendWindows(otp, now);
         otp.CodeMac = ComputeMac(appRegistrationId, phone, code);

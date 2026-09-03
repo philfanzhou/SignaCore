@@ -42,8 +42,8 @@ public class DbOtpServiceTests
     {
         OtpEntity? stored = null;
         var events = new List<string>();
-        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000")).ReturnsAsync((OtpEntity?)null);
-        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
+        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000", TestContext.Current.CancellationToken)).ReturnsAsync((OtpEntity?)null);
+        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>(), TestContext.Current.CancellationToken))
             .Callback<OtpEntity, CancellationToken>((value, _) => stored = value)
             .Returns(Task.CompletedTask);
         _unitOfWork.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
@@ -79,7 +79,7 @@ public class DbOtpServiceTests
                 "+8613800138000",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => stored);
-        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
+        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>(), TestContext.Current.CancellationToken))
             .Callback<OtpEntity, CancellationToken>((value, _) => stored = value)
             .Returns(Task.CompletedTask);
         var code = await _service.GenerateAndSendAsync(_appId, "+8613800138000", "test", TestContext.Current.CancellationToken);
@@ -98,7 +98,7 @@ public class DbOtpServiceTests
         _repository.Verify(value => value.GetAsync(
             _appId,
             "+8613800138000",
-            TestContext.Current.CancellationToken), Times.Once);
+            TestContext.Current.CancellationToken), Times.Exactly(2));
         _repository.Verify(value => value.TryConsumeAsync(
             It.IsAny<Guid>(),
             It.IsAny<string>(),
@@ -111,7 +111,7 @@ public class DbOtpServiceTests
     [Fact]
     public async Task Generate_EnforcesPersistentCooldown()
     {
-        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000")).ReturnsAsync(new OtpEntity
+        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000", TestContext.Current.CancellationToken)).ReturnsAsync(new OtpEntity
         {
             AppRegistrationId = _appId,
             Phone = "+8613800138000",
@@ -128,9 +128,9 @@ public class DbOtpServiceTests
     [Fact]
     public async Task Generate_WhenChallengeCreationConflicts_DoesNotSend()
     {
-        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000"))
+        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000", TestContext.Current.CancellationToken))
             .ReturnsAsync((OtpEntity?)null);
-        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>())).Returns(Task.CompletedTask);
+        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>(), TestContext.Current.CancellationToken)).Returns(Task.CompletedTask);
         _unitOfWork.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Microsoft.EntityFrameworkCore.DbUpdateException());
 
@@ -153,9 +153,9 @@ public class DbOtpServiceTests
     public async Task Generate_WhenProviderRejects_MarksDeliveryFailedAndReturnsSafeError()
     {
         OtpEntity? stored = null;
-        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000"))
+        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000", TestContext.Current.CancellationToken))
             .ReturnsAsync((OtpEntity?)null);
-        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
+        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>(), TestContext.Current.CancellationToken))
             .Callback<OtpEntity, CancellationToken>((value, _) => stored = value)
             .Returns(Task.CompletedTask);
         _sender.Setup(value => value.SendAsync(
@@ -173,8 +173,15 @@ public class DbOtpServiceTests
         Assert.Equal(OtpStatus.DeliveryFailed, stored.Status);
         Assert.DoesNotContain("provider-internal-detail", exception.Message, StringComparison.Ordinal);
         _unitOfWork.Verify(
-            value => value.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            value => value.SaveChangesAsync(TestContext.Current.CancellationToken),
             Times.Exactly(2));
+        _repository.Verify(value => value.GetAsync(
+            _appId, "+8613800138000", TestContext.Current.CancellationToken), Times.Once);
+        _repository.Verify(value => value.AddAsync(
+            It.IsAny<OtpEntity>(), TestContext.Current.CancellationToken), Times.Once);
+        _sender.Verify(value => value.SendAsync(
+            It.IsAny<SmsProviderProfile>(), It.IsAny<SmsVerificationMessage>(),
+            TestContext.Current.CancellationToken), Times.Once);
     }
 
     [Fact]
@@ -186,7 +193,7 @@ public class DbOtpServiceTests
                 "+8613800138000",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => stored);
-        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>()))
+        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>(), TestContext.Current.CancellationToken))
             .Callback<OtpEntity, CancellationToken>((value, _) => stored = value)
             .Returns(Task.CompletedTask);
         await _service.GenerateAndSendAsync(
@@ -299,7 +306,7 @@ public class DbOtpServiceTests
     public async Task Generate_EnforcesPersistentHourAndDayLimits(bool hourlyLimit)
     {
         var now = DateTimeOffset.UtcNow;
-        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000"))
+        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000", TestContext.Current.CancellationToken))
             .ReturnsAsync(new OtpEntity
             {
                 AppRegistrationId = _appId,
@@ -322,5 +329,70 @@ public class DbOtpServiceTests
         Assert.Contains(hourlyLimit ? "Hourly" : "Daily", exception.Message, StringComparison.Ordinal);
         _sender.Verify(value => value.SendAsync(
             It.IsAny<SmsProviderProfile>(), It.IsAny<SmsVerificationMessage>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Generate_ForwardsCancellationThroughNewAndExistingChallenges(bool hasExisting)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var existing = hasExisting ? new OtpEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = _appId,
+            Phone = "+8613800138000",
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-10)
+        } : null;
+        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000", cancellation.Token))
+            .ReturnsAsync(existing);
+        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>(), cancellation.Token))
+            .Returns(Task.CompletedTask);
+
+        await _service.GenerateAndSendAsync(_appId, "13800138000", "test", cancellation.Token);
+
+        _repository.Verify(value => value.GetAsync(_appId, "+8613800138000", cancellation.Token), Times.Once);
+        _repository.Verify(value => value.AddAsync(It.IsAny<OtpEntity>(), cancellation.Token),
+            hasExisting ? Times.Never() : Times.Once());
+        _repository.VerifyNoOtherCalls();
+        _unitOfWork.Verify(value => value.SaveChangesAsync(cancellation.Token), Times.Once);
+        _unitOfWork.VerifyNoOtherCalls();
+        _sender.Verify(value => value.SendAsync(
+            It.IsAny<SmsProviderProfile>(), It.IsAny<SmsVerificationMessage>(), cancellation.Token), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("read")]
+    [InlineData("add")]
+    [InlineData("save")]
+    public async Task Generate_WhenDatabaseObservesCancellation_DoesNotSend(string boundary)
+    {
+        using var cancellation = new CancellationTokenSource();
+        _repository.Setup(value => value.GetAsync(_appId, "+8613800138000", cancellation.Token))
+            .Returns(() => boundary == "read" ? CancelAsync<OtpEntity?>() : Task.FromResult<OtpEntity?>(null));
+        _repository.Setup(value => value.AddAsync(It.IsAny<OtpEntity>(), cancellation.Token))
+            .Returns(() => boundary == "add" ? CancelAsync<int>() : Task.CompletedTask);
+        _unitOfWork.Setup(value => value.SaveChangesAsync(cancellation.Token))
+            .Returns(() => CancelAsync<int>());
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _service.GenerateAndSendAsync(_appId, "13800138000", "test", cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        _repository.Verify(value => value.GetAsync(_appId, "+8613800138000", cancellation.Token), Times.Once);
+        _repository.Verify(value => value.AddAsync(It.IsAny<OtpEntity>(), cancellation.Token),
+            boundary == "read" ? Times.Never() : Times.Once());
+        _repository.VerifyNoOtherCalls();
+        _unitOfWork.Verify(value => value.SaveChangesAsync(cancellation.Token),
+            boundary == "save" ? Times.Once() : Times.Never());
+        _unitOfWork.VerifyNoOtherCalls();
+        _sender.Verify(value => value.SendAsync(
+            It.IsAny<SmsProviderProfile>(), It.IsAny<SmsVerificationMessage>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        Task<T> CancelAsync<T>()
+        {
+            cancellation.Cancel();
+            return Task.FromCanceled<T>(cancellation.Token);
+        }
     }
 }
