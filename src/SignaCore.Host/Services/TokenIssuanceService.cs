@@ -171,11 +171,11 @@ public sealed class TokenIssuanceService
             }
         }
 
-        await InjectBootstrapAdminRoleAsync(request, account, claims);
+        await InjectBootstrapAdminRoleAsync(request, account, claims, cancellationToken);
 
         // The signing key is database-backed and may have been rotated by another replica. Refresh
         // before signing so this instance never continues minting tokens with a stale private key.
-        await _keyManager.RefreshKeysAsync();
+        await _keyManager.RefreshKeysAsync(cancellationToken);
         var rsaKey = _keyManager.GetCurrentKey();
         var audience = JwtTokenService.ResolveAudience(request.App, _jwtOptions);
         var accessToken = _tokenService.GenerateJwtToken(
@@ -277,7 +277,8 @@ public sealed class TokenIssuanceService
         {
             await LoginAttemptChangeApplier.ApplyAsync(
                 validationResult.LoginAttemptChange,
-                _loginAttemptRepository);
+                _loginAttemptRepository,
+                cancellationToken);
             await StageLoginStateAsync();
             newRefreshToken = await StageRefreshTokenAsync();
             await StageLoginAuditAsync();
@@ -323,7 +324,7 @@ public sealed class TokenIssuanceService
             permissions);
 
         Task StageLoginStateAsync() => _accountLoginInfoService.UpdateLoginInfoAsync(
-            account, request.ClientIp, validationResult.AuthMethod ?? request.GrantType);
+            account, request.ClientIp, validationResult.AuthMethod ?? request.GrantType, cancellationToken);
 
         Task<string?> StageRefreshTokenAsync() => _refreshTokenService.HandleRefreshTokenAsync(
             request.GrantType, request.RefreshToken, account, appId,
@@ -389,7 +390,8 @@ public sealed class TokenIssuanceService
                 }
                 var loginAttempt = await LoginAttemptChangeApplier.ApplyAsync(
                     loginAttemptChange,
-                    _loginAttemptRepository);
+                    _loginAttemptRepository,
+                    cancellationToken);
                 if (loginAttemptChange != null &&
                     request.GrantType == IdentityConstants.GrantTypePassword &&
                     loginAttempt?.LockoutUntil > DateTimeOffset.UtcNow)
@@ -451,7 +453,8 @@ public sealed class TokenIssuanceService
     private async Task InjectBootstrapAdminRoleAsync(
         TokenIssuanceRequest request,
         AccountEntity authenticatedAccount,
-        List<Claim> claims)
+        List<Claim> claims,
+        CancellationToken cancellationToken)
     {
         var bootstrapUsername = _adminIdentityOptions.Username;
         if (string.IsNullOrWhiteSpace(bootstrapUsername))
@@ -474,7 +477,7 @@ public sealed class TokenIssuanceService
         {
             var bootstrapAccount =
                 await _accountRepository.GetByPasswordCredentialUsernameAsync(
-                    bootstrapUsername.Trim());
+                    bootstrapUsername.Trim(), cancellationToken);
 
             isBootstrapAdmin =
                 bootstrapAccount != null

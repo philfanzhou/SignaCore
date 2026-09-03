@@ -8,7 +8,8 @@ internal static class LoginAttemptChangeApplier
 {
     public static async Task<LoginAttemptEntity?> ApplyAsync(
         LoginAttemptChange? change,
-        ILoginAttemptRepository repository)
+        ILoginAttemptRepository repository,
+        CancellationToken cancellationToken = default)
     {
         if (change == null)
         {
@@ -17,13 +18,13 @@ internal static class LoginAttemptChangeApplier
 
         if (change.Kind == LoginAttemptChangeKind.RecordFailure)
         {
-            return await repository.RecordFailureAsync(change.Username, DateTimeOffset.UtcNow);
+            return await repository.RecordFailureAsync(change.Username, DateTimeOffset.UtcNow, cancellationToken);
         }
 
-        var attempt = await repository.GetByUsernameAsync(change.Username);
+        var attempt = await repository.GetByUsernameAsync(change.Username, cancellationToken);
         if (attempt != null)
         {
-            await repository.RemoveAsync(attempt);
+            await repository.RemoveAsync(attempt, cancellationToken);
         }
 
         return null;
