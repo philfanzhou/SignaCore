@@ -229,4 +229,120 @@ public class PasswordValidatorTests
             It.IsAny<LoginAttemptEntity>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    [Theory]
+    [InlineData("success")]
+    [InlineData("clear-failures")]
+    [InlineData("locked")]
+    [InlineData("missing-credential")]
+    [InlineData("missing-account")]
+    [InlineData("inactive-account")]
+    [InlineData("wrong-password")]
+    public async Task ValidateAsync_ForwardsRequestCancellationThroughEachBranch(string scenario)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = scenario != "inactive-account" };
+        var credential = new PasswordCredentialEntity
+        {
+            AccountId = account.Id,
+            Username = "testuser",
+            PasswordHash = "unused-by-mock"
+        };
+        var attempts = new Mock<ILoginAttemptRepository>(MockBehavior.Strict);
+        var passwords = new Mock<IPasswordCredentialRepository>(MockBehavior.Strict);
+        var accounts = new Mock<IAccountRepository>(MockBehavior.Strict);
+        var hasher = new Mock<IPasswordHasher>(MockBehavior.Strict);
+        attempts.Setup(repository => repository.GetByUsernameAsync("testuser", cancellation.Token))
+            .ReturnsAsync(scenario is "locked" or "clear-failures" ? new LoginAttemptEntity
+            {
+                FailedAttempts = 1,
+                LockoutUntil = scenario == "locked" ? DateTimeOffset.UtcNow.AddMinutes(10) : null
+            } : null);
+        passwords.Setup(repository => repository.GetByUsernameAsync("testuser", cancellation.Token))
+            .ReturnsAsync(scenario == "missing-credential" ? null : credential);
+        accounts.Setup(repository => repository.GetByIdAsync(account.Id, cancellation.Token))
+            .ReturnsAsync(scenario == "missing-account" ? null : account);
+        hasher.Setup(service => service.VerifyPassword("input", credential.PasswordHash))
+            .Returns(scenario != "wrong-password");
+        var validator = new PasswordValidator(
+            passwords.Object, accounts.Object, attempts.Object, hasher.Object, CreateLogger());
+
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            Username = "testuser",
+            Password = "input",
+            CancellationToken = cancellation.Token
+        });
+
+        Assert.Equal(scenario is "success" or "clear-failures", result.IsSuccess);
+        Assert.Equal(scenario switch
+        {
+            "clear-failures" => LoginAttemptChangeKind.Clear,
+            "wrong-password" => LoginAttemptChangeKind.RecordFailure,
+            _ => (LoginAttemptChangeKind?)null
+        }, result.LoginAttemptChange?.Kind);
+        attempts.Verify(repository => repository.GetByUsernameAsync("testuser", cancellation.Token), Times.Once);
+        passwords.Verify(repository => repository.GetByUsernameAsync("testuser", cancellation.Token),
+            scenario == "locked" ? Times.Never() : Times.Once());
+        accounts.Verify(repository => repository.GetByIdAsync(account.Id, cancellation.Token),
+            scenario is "locked" or "missing-credential" ? Times.Never() : Times.Once());
+        hasher.Verify(service => service.VerifyPassword("input", credential.PasswordHash),
+            scenario is "success" or "clear-failures" or "wrong-password" ? Times.Once() : Times.Never());
+        attempts.VerifyNoOtherCalls();
+        passwords.VerifyNoOtherCalls();
+        accounts.VerifyNoOtherCalls();
+        hasher.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("login-attempt")]
+    [InlineData("credential")]
+    [InlineData("account")]
+    public async Task ValidateAsync_WhenReadObservesCancellation_StopsBeforeSubsequentWork(string boundary)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var accountId = Guid.NewGuid();
+        var attempts = new Mock<ILoginAttemptRepository>(MockBehavior.Strict);
+        var passwords = new Mock<IPasswordCredentialRepository>(MockBehavior.Strict);
+        var accounts = new Mock<IAccountRepository>(MockBehavior.Strict);
+        var hasher = new Mock<IPasswordHasher>(MockBehavior.Strict);
+        attempts.Setup(repository => repository.GetByUsernameAsync("testuser", cancellation.Token))
+            .Returns(() => ReadAsync<LoginAttemptEntity>("login-attempt", null));
+        passwords.Setup(repository => repository.GetByUsernameAsync("testuser", cancellation.Token))
+            .Returns(() => ReadAsync("credential", new PasswordCredentialEntity { AccountId = accountId }));
+        accounts.Setup(repository => repository.GetByIdAsync(accountId, cancellation.Token))
+            .Returns(() => ReadAsync("account", new AccountEntity { Id = accountId, IsActive = true }));
+        var validator = new PasswordValidator(
+            passwords.Object, accounts.Object, attempts.Object, hasher.Object, CreateLogger());
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => validator.ValidateAsync(
+            new ValidationRequest
+            {
+                Username = "testuser",
+                Password = "input",
+                CancellationToken = cancellation.Token
+            }));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        attempts.Verify(repository => repository.GetByUsernameAsync("testuser", cancellation.Token), Times.Once);
+        passwords.Verify(repository => repository.GetByUsernameAsync("testuser", cancellation.Token),
+            boundary == "login-attempt" ? Times.Never() : Times.Once());
+        accounts.Verify(repository => repository.GetByIdAsync(accountId, cancellation.Token),
+            boundary == "account" ? Times.Once() : Times.Never());
+        attempts.VerifyNoOtherCalls();
+        passwords.VerifyNoOtherCalls();
+        accounts.VerifyNoOtherCalls();
+        hasher.VerifyNoOtherCalls();
+
+        Task<T?> ReadAsync<T>(string currentBoundary, T? result) where T : class
+        {
+            if (boundary == currentBoundary)
+            {
+                cancellation.Cancel();
+                return Task.FromCanceled<T?>(cancellation.Token);
+            }
+
+            return Task.FromResult(result);
+        }
+    }
 }

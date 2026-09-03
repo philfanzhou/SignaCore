@@ -38,7 +38,7 @@ public class PasswordValidator : IIdentityValidator
             return ValidationResult.Failure("Username or password cannot be empty", OAuthErrorCodes.InvalidRequest);
         }
 
-        var loginAttempt = await _loginAttemptRepository.GetByUsernameAsync(request.Username);
+        var loginAttempt = await _loginAttemptRepository.GetByUsernameAsync(request.Username, request.CancellationToken);
         if (loginAttempt?.LockoutUntil != null && loginAttempt.LockoutUntil > DateTimeOffset.UtcNow)
         {
             _logger.LogWarning(
@@ -48,7 +48,7 @@ public class PasswordValidator : IIdentityValidator
                 $"Account is locked. Try again after {loginAttempt.LockoutUntil:HH:mm:ss} UTC.");
         }
 
-        var credential = await _passwordCredentialRepository.GetByUsernameAsync(request.Username);
+        var credential = await _passwordCredentialRepository.GetByUsernameAsync(request.Username, request.CancellationToken);
 
         if (credential == null)
         {
@@ -57,7 +57,7 @@ public class PasswordValidator : IIdentityValidator
             return ValidationResult.Failure("Wrong username or password");
         }
 
-        var account = await _accountRepository.GetByIdAsync(credential.AccountId);
+        var account = await _accountRepository.GetByIdAsync(credential.AccountId, request.CancellationToken);
         if (account == null || !account.IsActive)
         {
             _logger.LogWarning("Password validation failed: account not found or disabled, Username={Username}",
