@@ -109,7 +109,7 @@ public sealed class OAuthTokenController : ControllerBase
     [HttpPost("revoke")]
     [Consumes("application/x-www-form-urlencoded")]
     [Authorize(Policy = OAuthClientAuthenticationDefaults.Policy)]
-    public async Task<IActionResult> Revoke()
+    public async Task<IActionResult> Revoke(CancellationToken cancellationToken)
     {
         var app = HttpContext.GetValidatedApp()
             ?? throw new InvalidOperationException("OAuth client authentication did not provide a validated application.");
@@ -131,7 +131,7 @@ public sealed class OAuthTokenController : ControllerBase
         // RFC 7009 §2.1: revoke only tokens issued to this client. Possessing another client's token
         // is not enough to terminate its session. A mismatch still returns 200 so the response cannot
         // become an oracle for whether a token exists or who owns it.
-        await _refreshTokenService.RevokeForAppAsync(token, app.AppId);
+        await _refreshTokenService.RevokeForAppAsync(token, app.AppId, cancellationToken);
         return Ok();
     }
 

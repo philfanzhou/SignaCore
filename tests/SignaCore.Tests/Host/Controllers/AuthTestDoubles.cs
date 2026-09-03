@@ -52,7 +52,7 @@ internal static class AuthTestDoubles
                 It.IsAny<string?>(),
                 It.IsAny<Guid?>()))
             .ReturnsAsync("refresh");
-        mock.Setup(s => s.RevokeAsync(It.IsAny<string>())).ReturnsAsync(true);
+        mock.Setup(s => s.RevokeAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
         return mock;
     }
 

@@ -63,14 +63,17 @@ public class RefreshTokenService : IRefreshTokenService
             ? appId
             : throw new InvalidOperationException("A validated AppId is required to issue or rotate refresh tokens.");
 
-    public async Task<bool> RevokeAsync(string token)
+    public async Task<bool> RevokeAsync(string token, CancellationToken cancellationToken = default)
     {
-        return await _refreshTokenRepository.TryRevokeAsync(token);
+        return await _refreshTokenRepository.TryRevokeAsync(token, cancellationToken);
     }
 
-    public async Task<bool> RevokeForAppAsync(string token, string appId)
+    public async Task<bool> RevokeForAppAsync(
+        string token,
+        string appId,
+        CancellationToken cancellationToken = default)
     {
-        return await _refreshTokenRepository.TryRevokeForAppAsync(token, appId);
+        return await _refreshTokenRepository.TryRevokeForAppAsync(token, appId, cancellationToken);
     }
 
     private async Task<string> GenerateRefreshTokenAsync(

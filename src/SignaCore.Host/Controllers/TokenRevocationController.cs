@@ -28,7 +28,8 @@ public class TokenRevocationController : ControllerBase
     [HttpPost("revoke")]
     [AllowAnonymous]
     public async Task<ActionResult<RevokeResponse>> RevokeRefreshToken(
-        [FromBody] RevokeRequest request)
+        [FromBody] RevokeRequest request,
+        CancellationToken cancellationToken)
     {
         var clientIp = HttpContext.GetClientIp();
         var correlationId = HttpContext.GetCorrelationId();
@@ -40,7 +41,7 @@ public class TokenRevocationController : ControllerBase
             return Ok(new RevokeResponse { Success = false });
         }
 
-        var success = await _refreshTokenService.RevokeAsync(request.RefreshToken);
+        var success = await _refreshTokenService.RevokeAsync(request.RefreshToken, cancellationToken);
         _logger.LogInformation("Refresh token revoked: Success={Success}, ClientIp={ClientIp}, CorrelationId={CorrelationId}",
             success, LogValueSanitizer.Sanitize(clientIp), LogValueSanitizer.Sanitize(correlationId));
         return Ok(new RevokeResponse { Success = success });
