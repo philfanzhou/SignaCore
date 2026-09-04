@@ -14,7 +14,10 @@ Authentication events and administrative changes are recorded with correlation a
 
 ## Security requirements
 
-Audit failures are logged without failing the business request; snapshots must exclude credentials, tokens, and key material.
+Audit persistence follows the operation-specific commit boundary documented in
+[current audit commit evidence](../../../development/ErrorHandling.md#current-audit-commit-evidence):
+when audit rows share a transaction with business state, they succeed or roll back together.
+Snapshots must exclude credentials, tokens, and key material.
 
 All logs and errors must redact passwords, application secrets, refresh tokens, OTP values, authorization headers, and private key material.
 
