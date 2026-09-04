@@ -89,7 +89,10 @@ public class AdminOidcClientTests : IDisposable
     {
         await SeedAsync();
 
-        var result = await _controller.GetApps(_dbContext, TestJwtOptions);
+        var result = await _controller.GetApps(
+            _dbContext,
+            TestJwtOptions,
+            TestContext.Current.CancellationToken);
 
         var item = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<AdminAppListItemResponse>>(
             Assert.IsType<OkObjectResult>(result).Value));
@@ -122,7 +125,10 @@ public class AdminOidcClientTests : IDisposable
             app.RedirectUris.Single(uri => uri.Kind == RedirectUriKind.Redirect).CanonicalUri);
         Assert.DoesNotContain(app.RedirectUris, uri => uri.CanonicalUri == CallbackUrl);
 
-        var result = await _controller.GetApps(_dbContext, TestJwtOptions);
+        var result = await _controller.GetApps(
+            _dbContext,
+            TestJwtOptions,
+            TestContext.Current.CancellationToken);
         var item = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<AdminAppListItemResponse>>(
             Assert.IsType<OkObjectResult>(result).Value));
         Assert.Equal(CallbackUrl, item.CallbackUrl);
@@ -148,7 +154,10 @@ public class AdminOidcClientTests : IDisposable
         await EnableCodeFlowAsync("https://bff.example.test/callback");
         var app = await LoadAsync();
 
-        var listResult = await _controller.GetApps(_dbContext, TestJwtOptions);
+        var listResult = await _controller.GetApps(
+            _dbContext,
+            TestJwtOptions,
+            TestContext.Current.CancellationToken);
         var oidcResult = await _controller.GetOidcConfiguration(
             AppId,
             _repository,
