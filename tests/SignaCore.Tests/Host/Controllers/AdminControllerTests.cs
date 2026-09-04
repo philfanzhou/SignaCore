@@ -1283,7 +1283,10 @@ public class AdminControllerTests : IDisposable
         _dbContext.AppRegistrations.AddRange(older, newer);
         await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await _controller.GetApps(_dbContext, TestJwtOptions);
+        var result = await _controller.GetApps(
+            _dbContext,
+            TestJwtOptions,
+            TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var list = Assert.IsAssignableFrom<IReadOnlyList<AdminAppListItemResponse>>(ok.Value);
@@ -1295,7 +1298,10 @@ public class AdminControllerTests : IDisposable
     [Fact]
     public async Task GetApps_WhenNoApps_ReturnsEmptyList()
     {
-        var result = await _controller.GetApps(_dbContext, TestJwtOptions);
+        var result = await _controller.GetApps(
+            _dbContext,
+            TestJwtOptions,
+            TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var list = Assert.IsAssignableFrom<IReadOnlyList<AdminAppListItemResponse>>(ok.Value);
@@ -1316,12 +1322,27 @@ public class AdminControllerTests : IDisposable
         _dbContext.AppRegistrations.Add(app);
         await _dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await _controller.GetApps(_dbContext, TestJwtOptions);
+        var result = await _controller.GetApps(
+            _dbContext,
+            TestJwtOptions,
+            TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var list = Assert.IsAssignableFrom<IReadOnlyList<AdminAppListItemResponse>>(ok.Value);
         Assert.Equal(string.Empty, list[0].CallbackUrl);
         Assert.Null(list[0].CallbackExpiresAt);
+    }
+
+    [Fact]
+    public async Task GetApps_WhenRequestIsCanceled_PropagatesCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _controller.GetApps(_dbContext, TestJwtOptions, cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
     }
 
     #endregion
@@ -1344,22 +1365,44 @@ public class AdminControllerTests : IDisposable
     public async Task CreateApp_WithValidName_CreatesApp()
     {
         SetAdminUser();
-        _appRegRepoMock.Setup(r => r.AddAsync(It.IsAny<AppRegistrationEntity>())).Returns(Task.CompletedTask).Verifiable();
+        using var cancellation = new CancellationTokenSource();
+        var validationObserved = false;
+        var validator = new CallbackUrlValidator(
+            allowedDomains: null,
+            allowPrivateAddresses: false,
+            requireHttps: false,
+            (host, token) =>
+            {
+                Assert.Equal("public.example", host);
+                Assert.Equal(cancellation.Token, token);
+                validationObserved = true;
+                return Task.FromResult<IPAddress[]?>([IPAddress.Parse("8.8.8.8")]);
+            });
+        _appRegRepoMock
+            .Setup(r => r.AddAsync(It.IsAny<AppRegistrationEntity>(), cancellation.Token))
+            .Returns(Task.CompletedTask);
 
         var result = await _controller.CreateApp(
-            new AdminCreateAppRequest("MyApp", "https://cb.example.com", 3600),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
-            TestContext.Current.CancellationToken);
+            new AdminCreateAppRequest("MyApp", "https://public.example/callback", 3600),
+            _appRegRepoMock.Object, validator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            cancellation.Token);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateAppResponse>(ok.Value);
         Assert.Equal("MyApp", response.AppName);
-        Assert.Equal("https://cb.example.com", response.CallbackUrl);
+        Assert.Equal("https://public.example/callback", response.CallbackUrl);
         Assert.NotNull(response.CallbackExpiresAt);
         Assert.False(string.IsNullOrEmpty(response.AppId));
         Assert.False(string.IsNullOrEmpty(response.AppSecret));
-        _appRegRepoMock.Verify();
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        Assert.True(validationObserved);
+        _appRegRepoMock.Verify(
+            r => r.AddAsync(It.IsAny<AppRegistrationEntity>(), cancellation.Token),
+            Times.Once);
+        _auditServiceMock.Verify(a => a.RecordActionAsync(
+            "app_created", "AppRegistration", response.AppId,
+            AdminId, AdminName, "Admin created app: MyApp", It.IsAny<string?>(),
+            It.IsAny<string?>(), null, It.IsAny<object?>(), cancellation.Token), Times.Once);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(cancellation.Token), Times.Once);
     }
 
     [Fact]
@@ -1383,7 +1426,9 @@ public class AdminControllerTests : IDisposable
             "Invalid callback URL",
             Assert.IsType<ErrorResponse>(badRequest.Value).Message);
         _appRegRepoMock.Verify(
-            repository => repository.AddAsync(It.IsAny<AppRegistrationEntity>()),
+            repository => repository.AddAsync(
+                It.IsAny<AppRegistrationEntity>(),
+                TestContext.Current.CancellationToken),
             Times.Never);
         _unitOfWorkMock.Verify(
             unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()),
@@ -1394,7 +1439,9 @@ public class AdminControllerTests : IDisposable
     public async Task CreateApp_WithNeverExpireTtl_SetsNullExpiry()
     {
         SetAdminUser();
-        _appRegRepoMock.Setup(r => r.AddAsync(It.IsAny<AppRegistrationEntity>()))
+        _appRegRepoMock.Setup(r => r.AddAsync(
+                It.IsAny<AppRegistrationEntity>(),
+                TestContext.Current.CancellationToken))
             .Callback<AppRegistrationEntity, CancellationToken>(
                 (app, _) => Assert.Null(app.CallbackExpiresAt))
             .Returns(Task.CompletedTask);
@@ -1413,7 +1460,9 @@ public class AdminControllerTests : IDisposable
     public async Task CreateApp_WithEmptyCallbackUrl_SetsNullCallback()
     {
         SetAdminUser();
-        _appRegRepoMock.Setup(r => r.AddAsync(It.IsAny<AppRegistrationEntity>()))
+        _appRegRepoMock.Setup(r => r.AddAsync(
+                It.IsAny<AppRegistrationEntity>(),
+                TestContext.Current.CancellationToken))
             .Callback<AppRegistrationEntity, CancellationToken>((app, _) =>
             {
                 Assert.Null(app.CallbackUrl);
@@ -1437,7 +1486,9 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         var before = DateTimeOffset.UtcNow;
-        _appRegRepoMock.Setup(r => r.AddAsync(It.IsAny<AppRegistrationEntity>()))
+        _appRegRepoMock.Setup(r => r.AddAsync(
+                It.IsAny<AppRegistrationEntity>(),
+                TestContext.Current.CancellationToken))
             .Callback<AppRegistrationEntity, CancellationToken>((app, _) =>
             {
                 Assert.NotNull(app.CallbackExpiresAt);
@@ -1458,7 +1509,9 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         AppRegistrationEntity? created = null;
-        _appRegRepoMock.Setup(r => r.AddAsync(It.IsAny<AppRegistrationEntity>()))
+        _appRegRepoMock.Setup(r => r.AddAsync(
+                It.IsAny<AppRegistrationEntity>(),
+                TestContext.Current.CancellationToken))
             .Callback<AppRegistrationEntity, CancellationToken>((app, _) => created = app)
             .Returns(Task.CompletedTask);
         var snapshots = CaptureSnapshots();
@@ -1473,7 +1526,8 @@ public class AdminControllerTests : IDisposable
         _auditServiceMock.Verify(a => a.RecordActionAsync(
             "app_created", "AppRegistration", response.AppId,
             AdminId, AdminName, "Admin created app: MyApp", It.IsAny<string?>(),
-            It.IsAny<string?>(), null, It.IsAny<object?>()), Times.Once);
+            It.IsAny<string?>(), null, It.IsAny<object?>(),
+            TestContext.Current.CancellationToken), Times.Once);
 
         // A creation has no before state; the after snapshot carries exactly the fields an operator
         // reads the registration back by.
@@ -1524,7 +1578,9 @@ public class AdminControllerTests : IDisposable
     public async Task UpdateCallback_WhenAppNotFound_ReturnsNotFound()
     {
         SetAdminUser();
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("missing")).ReturnsAsync((AppRegistrationEntity?)null);
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("missing", TestContext.Current.CancellationToken))
+            .ReturnsAsync((AppRegistrationEntity?)null);
 
         var result = await _controller.UpdateCallback("missing",
             new AdminUpdateCallbackRequest("https://cb", 3600, true),
@@ -1547,7 +1603,9 @@ public class AdminControllerTests : IDisposable
             CallbackExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
             IsActive = false
         };
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken))
+            .ReturnsAsync(app);
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("", 0, true),
@@ -1566,18 +1624,43 @@ public class AdminControllerTests : IDisposable
     public async Task UpdateCallback_WithCallbackUrl_SetsCallback()
     {
         SetAdminUser();
+        using var cancellation = new CancellationTokenSource();
+        var validationObserved = false;
+        var validator = new CallbackUrlValidator(
+            allowedDomains: null,
+            allowPrivateAddresses: false,
+            requireHttps: false,
+            (host, token) =>
+            {
+                Assert.Equal("public.example", host);
+                Assert.Equal(cancellation.Token, token);
+                validationObserved = true;
+                return Task.FromResult<IPAddress[]?>([IPAddress.Parse("8.8.8.8")]);
+            });
         var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "a", AppName = "A", IsActive = true };
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("a", cancellation.Token))
+            .ReturnsAsync(app);
 
         var result = await _controller.UpdateCallback("a",
-            new AdminUpdateCallbackRequest("https://new", 7200, false),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
-            TestContext.Current.CancellationToken);
+            new AdminUpdateCallbackRequest("https://public.example/callback", 7200, false),
+            _appRegRepoMock.Object, validator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            cancellation.Token);
 
         Assert.IsType<OkObjectResult>(result);
-        Assert.Equal("https://new", app.CallbackUrl);
+        Assert.Equal("https://public.example/callback", app.CallbackUrl);
         Assert.NotNull(app.CallbackExpiresAt);
         Assert.False(app.IsActive);
+        Assert.True(validationObserved);
+        _appRegRepoMock.Verify(
+            r => r.GetByAppIdAsync("a", cancellation.Token),
+            Times.Once);
+        _auditServiceMock.Verify(a => a.RecordActionAsync(
+            "app_callback_updated", "AppRegistration", "a",
+            AdminId, AdminName, "Admin updated callback configuration for app: A",
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>(),
+            cancellation.Token), Times.Once);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(cancellation.Token), Times.Once);
     }
 
     [Fact]
@@ -1592,7 +1675,9 @@ public class AdminControllerTests : IDisposable
             CallbackUrl = "https://old.example.com/claims",
             IsActive = true
         };
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken))
+            .ReturnsAsync(app);
 
         var result = await _controller.UpdateCallback(
             "a",
@@ -1616,7 +1701,9 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "a", AppName = "A" };
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken))
+            .ReturnsAsync(app);
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://cb", IdentityConstants.CallbackTtlNeverExpire, true),
@@ -1641,7 +1728,9 @@ public class AdminControllerTests : IDisposable
             CallbackExpiresAt = DateTimeOffset.FromUnixTimeSeconds(1_700_000_000),
             IsActive = true
         };
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken))
+            .ReturnsAsync(app);
         var snapshots = CaptureSnapshots();
 
         var result = await _controller.UpdateCallback("a",
@@ -1653,7 +1742,8 @@ public class AdminControllerTests : IDisposable
         _auditServiceMock.Verify(a => a.RecordActionAsync(
             "app_callback_updated", "AppRegistration", "a",
             AdminId, AdminName, "Admin updated callback configuration for app: MyApp",
-            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>()),
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>(),
+            TestContext.Current.CancellationToken),
             Times.Once);
 
         // The deactivation has to be readable from the two snapshots alone.
@@ -1673,7 +1763,9 @@ public class AdminControllerTests : IDisposable
     public async Task UpdateCallback_WhenAppNotFound_RecordsNoAudit()
     {
         SetAdminUser();
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("missing")).ReturnsAsync((AppRegistrationEntity?)null);
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("missing", TestContext.Current.CancellationToken))
+            .ReturnsAsync((AppRegistrationEntity?)null);
 
         await _controller.UpdateCallback("missing",
             new AdminUpdateCallbackRequest("https://cb", 3600, true),
@@ -1695,7 +1787,9 @@ public class AdminControllerTests : IDisposable
             CallbackUrl = "https://old.example.com/claims",
             IsActive = true
         };
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken))
+            .ReturnsAsync(app);
 
         await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("ftp://cb.example.com/claims", 7200, false),
@@ -1762,9 +1856,16 @@ public class AdminControllerTests : IDisposable
     public async Task DeleteApp_WhenAppNotFound_ReturnsNotFound()
     {
         SetAdminUser();
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("missing")).ReturnsAsync((AppRegistrationEntity?)null);
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("missing", TestContext.Current.CancellationToken))
+            .ReturnsAsync((AppRegistrationEntity?)null);
 
-        var result = await _controller.DeleteApp("missing", _appRegRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
+        var result = await _controller.DeleteApp(
+            "missing",
+            _appRegRepoMock.Object,
+            _unitOfWorkMock.Object,
+            _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         Assert.IsType<NotFoundObjectResult>(result);
     }
@@ -1773,20 +1874,27 @@ public class AdminControllerTests : IDisposable
     public async Task DeleteApp_WithExistingApp_DeletesAndRecordsAudit()
     {
         SetAdminUser();
+        using var cancellation = new CancellationTokenSource();
         var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "a", AppName = "MyApp" };
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
-        _appRegRepoMock.Setup(r => r.DeleteAsync(app)).Returns(Task.CompletedTask).Verifiable();
+        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a", cancellation.Token)).ReturnsAsync(app);
+        _appRegRepoMock.Setup(r => r.DeleteAsync(app, cancellation.Token)).Returns(Task.CompletedTask);
 
-        var result = await _controller.DeleteApp("a", _appRegRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
+        var result = await _controller.DeleteApp(
+            "a",
+            _appRegRepoMock.Object,
+            _unitOfWorkMock.Object,
+            _auditServiceMock.Object,
+            cancellation.Token);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
-        _appRegRepoMock.Verify();
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _appRegRepoMock.Verify(r => r.GetByAppIdAsync("a", cancellation.Token), Times.Once);
+        _appRegRepoMock.Verify(r => r.DeleteAsync(app, cancellation.Token), Times.Once);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(cancellation.Token), Times.Once);
         _auditServiceMock.Verify(a => a.RecordActionAsync(
             "app_deleted", "AppRegistration", "a",
             AdminId, AdminName, "Admin deleted app: MyApp", It.IsAny<string?>(),
-            It.IsAny<string?>(), null, null), Times.Once);
+            It.IsAny<string?>(), null, null, cancellation.Token), Times.Once);
     }
 
     #endregion
@@ -1862,9 +1970,16 @@ public class AdminControllerTests : IDisposable
     public async Task ResetAppSecret_WhenAppNotFound_ReturnsNotFound()
     {
         SetAdminUser();
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("missing")).ReturnsAsync((AppRegistrationEntity?)null);
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("missing", TestContext.Current.CancellationToken))
+            .ReturnsAsync((AppRegistrationEntity?)null);
 
-        var result = await _controller.ResetAppSecret("missing", _appRegRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
+        var result = await _controller.ResetAppSecret(
+            "missing",
+            _appRegRepoMock.Object,
+            _unitOfWorkMock.Object,
+            _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         Assert.IsType<NotFoundObjectResult>(result);
     }
@@ -1873,6 +1988,7 @@ public class AdminControllerTests : IDisposable
     public async Task ResetAppSecret_WithExistingApp_GeneratesNewSecretAndRecordsAudit()
     {
         SetAdminUser();
+        using var cancellation = new CancellationTokenSource();
         var app = new AppRegistrationEntity
         {
             Id = Guid.NewGuid(),
@@ -1881,19 +1997,25 @@ public class AdminControllerTests : IDisposable
             AppSecretHash = "oldhash",
             CallbackUrl = "https://cb"
         };
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a", cancellation.Token)).ReturnsAsync(app);
 
-        var result = await _controller.ResetAppSecret("a", _appRegRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
+        var result = await _controller.ResetAppSecret(
+            "a",
+            _appRegRepoMock.Object,
+            _unitOfWorkMock.Object,
+            _auditServiceMock.Object,
+            cancellation.Token);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateAppResponse>(ok.Value);
         Assert.False(string.IsNullOrEmpty(response.AppSecret));
         Assert.NotEqual("oldhash", app.AppSecretHash);
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _appRegRepoMock.Verify(r => r.GetByAppIdAsync("a", cancellation.Token), Times.Once);
+        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(cancellation.Token), Times.Once);
         _auditServiceMock.Verify(a => a.RecordActionAsync(
             "app_secret_reset", "AppRegistration", "a",
             AdminId, AdminName, "Admin reset app secret: MyApp", It.IsAny<string?>(),
-            It.IsAny<string?>(), null, null), Times.Once);
+            It.IsAny<string?>(), null, null, cancellation.Token), Times.Once);
     }
 
     #endregion

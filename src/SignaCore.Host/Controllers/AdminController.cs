@@ -494,12 +494,13 @@ public class AdminController : ControllerBase
     [Authorize(Policy = "AdminSession")]
     public async Task<IActionResult> GetApps(
         [FromServices] IdentityDbContext dbContext,
-        [FromServices] JwtOptions jwtOptions)
+        [FromServices] JwtOptions jwtOptions,
+        CancellationToken cancellationToken = default)
     {
         var allApps = await dbContext.AppRegistrations
             .AsNoTracking()
             .Include(app => app.RedirectUris)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
         var items = allApps
             .OrderByDescending(app => app.CreatedAt)
@@ -579,7 +580,7 @@ public class AdminController : ControllerBase
             CreatedAt = DateTimeOffset.UtcNow
         };
 
-        await appRegistrationRepository.AddAsync(app);
+        await appRegistrationRepository.AddAsync(app, cancellationToken);
 
         // The application did not exist before, so there is no before snapshot. The generated
         // secret and its hash stay out of the record: only the fields an operator needs to read the
@@ -595,7 +596,8 @@ public class AdminController : ControllerBase
                 app.CallbackUrl,
                 CallbackExpiresAt = app.CallbackExpiresAt?.ToUnixTimeSeconds(),
                 app.IsActive
-            });
+            },
+            cancellationToken: cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new AdminCreateAppResponse(
@@ -617,7 +619,7 @@ public class AdminController : ControllerBase
         [FromServices] IAuditService auditService,
         CancellationToken cancellationToken = default)
     {
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null)
         {
             return NotFound(new ErrorResponse("App not found."));
@@ -667,7 +669,8 @@ public class AdminController : ControllerBase
                 app.CallbackUrl,
                 CallbackExpiresAt = app.CallbackExpiresAt?.ToUnixTimeSeconds(),
                 app.IsActive
-            });
+            },
+            cancellationToken: cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new OperationResponse(true, "Callback configuration updated."));
@@ -679,20 +682,22 @@ public class AdminController : ControllerBase
         string appId,
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
         [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IAuditService auditService)
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken = default)
     {
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null)
         {
             return NotFound(new ErrorResponse("App not found."));
         }
 
-        await appRegistrationRepository.DeleteAsync(app);
+        await appRegistrationRepository.DeleteAsync(app, cancellationToken);
 
         var (actorId, actorName) = GetAdminIdentity();
         await auditService.RecordActionAsync("app_deleted", "AppRegistration", appId,
-            actorId, actorName, $"Admin deleted app: {app.AppName}", GetClientIp());
-        await unitOfWork.SaveChangesAsync();
+            actorId, actorName, $"Admin deleted app: {app.AppName}", GetClientIp(),
+            cancellationToken: cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new OperationResponse(true, "App deleted."));
     }
@@ -1584,9 +1589,10 @@ public class AdminController : ControllerBase
         string appId,
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
         [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IAuditService auditService)
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken = default)
     {
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null)
         {
             return NotFound(new ErrorResponse("App not found."));
@@ -1597,8 +1603,9 @@ public class AdminController : ControllerBase
 
         var (actorId, actorName) = GetAdminIdentity();
         await auditService.RecordActionAsync("app_secret_reset", "AppRegistration", appId,
-            actorId, actorName, $"Admin reset app secret: {app.AppName}", GetClientIp());
-        await unitOfWork.SaveChangesAsync();
+            actorId, actorName, $"Admin reset app secret: {app.AppName}", GetClientIp(),
+            cancellationToken: cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new AdminCreateAppResponse(
             app.AppId,
