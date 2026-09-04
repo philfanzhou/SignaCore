@@ -4,7 +4,7 @@
 
 # Build the administrative frontend. Official images come from the AWS public mirror, for the same
 # reason: it serves the same images, needs no credentials, and is not metered per client address.
-FROM public.ecr.aws/docker/library/node:26-alpine AS frontend-build
+FROM public.ecr.aws/docker/library/node:24-alpine AS frontend-build
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 ENV npm_config_registry=${NPM_REGISTRY}
 WORKDIR /app
