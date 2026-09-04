@@ -32,7 +32,7 @@ updates:
       interval: weekly
     # Production builds use an even-numbered Node LTS line.
     ignore:
-      - dependency-name: "node"
+      - dependency-name: "docker/library/node"
         update-types:
           - version-update:semver-major
 
