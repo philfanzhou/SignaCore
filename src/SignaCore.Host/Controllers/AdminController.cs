@@ -839,9 +839,10 @@ public class AdminController : ControllerBase
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
         [FromServices] WechatOptions wechatOptions,
         [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IAuditService auditService)
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
     {
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null) return NotFound(new ErrorResponse("App not found."));
         if (!Enum.TryParse<WechatLoginMode>(request.Mode, true, out var mode) || !Enum.IsDefined(mode))
             return BadRequest(new ErrorResponse("Invalid WeChat login mode."));
@@ -855,8 +856,9 @@ public class AdminController : ControllerBase
         await auditService.RecordActionAsync(
             "app_wechat_policy_updated", "AppRegistration", appId, actorId, actorName,
             $"WeChat login mode changed to {mode}", GetClientIp(), before: before,
-            after: new { Mode = mode.ToString() });
-        await unitOfWork.SaveChangesAsync();
+            after: new { Mode = mode.ToString() },
+            cancellationToken: cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
         return Ok(new OperationResponse(true, "WeChat login policy updated."));
     }
 
@@ -1277,10 +1279,13 @@ public class AdminController : ControllerBase
 
     [HttpGet("apps/{appId}/wechat-users")]
     [Authorize(Policy = "AdminSession")]
-    public async Task<IActionResult> GetWechatUsers(string appId, [FromServices] IdentityDbContext dbContext)
+    public async Task<IActionResult> GetWechatUsers(
+        string appId,
+        [FromServices] IdentityDbContext dbContext,
+        CancellationToken cancellationToken)
     {
         var app = await dbContext.AppRegistrations.AsNoTracking().FirstOrDefaultAsync(
-            item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId));
+            item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId), cancellationToken);
         if (app == null) return NotFound(new ErrorResponse("App not found."));
 
         var provider = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodWechat);
@@ -1289,7 +1294,7 @@ public class AdminController : ControllerBase
             .Join(dbContext.UserLogins.AsNoTracking().Where(login => login.ProviderNameNormalized == provider),
                 access => access.UserLoginId, login => login.Id, (access, login) => new { access, login })
             .OrderByDescending(item => item.access.CreatedAt)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
         // Mask in memory because SensitiveDataMasker cannot be translated to SQL.
         var users = rows.Select(item => new AdminWechatUserResponse(
@@ -1327,7 +1332,8 @@ public class AdminController : ControllerBase
         await auditService.RecordActionAsync(
             "app_wechat_user_restored", "AppRegistration", appId, actorId, actorName,
             "Administrator restored a WeChat identity for the application", GetClientIp(),
-            after: new { LoginId = loginId, IsActive = true });
+            after: new { LoginId = loginId, IsActive = true },
+            cancellationToken: cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         return Ok(new OperationResponse(true, "WeChat application access restored."));
     }
@@ -1370,9 +1376,10 @@ public class AdminController : ControllerBase
         [FromBody] AdminUpdateLdapPolicyRequest request,
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
         [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IAuditService auditService)
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
     {
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null)
         {
             return NotFound(new ErrorResponse("App not found."));
@@ -1397,8 +1404,9 @@ public class AdminController : ControllerBase
             $"LDAP login mode changed from {before} to {mode}",
             GetClientIp(),
             before: new { Mode = before.ToString() },
-            after: new { Mode = mode.ToString() });
-        await unitOfWork.SaveChangesAsync();
+            after: new { Mode = mode.ToString() },
+            cancellationToken: cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new OperationResponse(true, "LDAP login policy updated."));
     }
@@ -1407,10 +1415,13 @@ public class AdminController : ControllerBase
     [Authorize(Policy = "AdminSession")]
     public async Task<IActionResult> GetLdapUsers(
         string appId,
-        [FromServices] IdentityDbContext dbContext)
+        [FromServices] IdentityDbContext dbContext,
+        CancellationToken cancellationToken)
     {
         var app = await dbContext.AppRegistrations.AsNoTracking()
-            .FirstOrDefaultAsync(item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId));
+            .FirstOrDefaultAsync(
+                item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId),
+                cancellationToken);
         if (app == null)
         {
             return NotFound(new ErrorResponse("App not found."));
@@ -1432,7 +1443,7 @@ public class AdminController : ControllerBase
                 item.access.ApprovalSource.ToString(),
                 item.access.IsActive,
                 item.access.CreatedAt.ToUnixTimeSeconds()))
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
         return Ok((IReadOnlyList<AdminLdapUserResponse>)users);
     }
@@ -1468,7 +1479,7 @@ public class AdminController : ControllerBase
             return BadRequest(new ErrorResponse("Directory key and username are required."));
         }
 
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null)
         {
             return NotFound(new ErrorResponse("App not found."));
@@ -1522,7 +1533,8 @@ public class AdminController : ControllerBase
                     AccountId = provisioned.Account.Id,
                     CredentialId = provisioned.Credential.Id,
                     identity.DirectoryKey
-                }));
+                },
+                cancellationToken: cancellationToken));
 
         return Ok(new AdminLdapUserResponse(
             result.Credential.Id.ToString(),
