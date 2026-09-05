@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SignaCore.Database;
@@ -937,14 +939,16 @@ public sealed class AuditTransactionTests
         await using var database = await SqliteTestDatabase.CreateAsync(interceptor);
         var targets = await SeedRevocationTargetsAsync(database.Context);
 
+        var auditService = CreateTokenAssertingAuditService(database.Context);
         var result = await CreateAdminController().RevokeSmsUser(
             targets.App.AppId,
             targets.UserLoginId,
             database.Context,
-            CreateAuditService(database.Context),
+            auditService,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(1, auditService.ActionCalls);
         Assert.True(interceptor.Fired);
 
         database.Context.ChangeTracker.Clear();
@@ -969,12 +973,15 @@ public sealed class AuditTransactionTests
         var targets = await SeedRevocationTargetsAsync(database.Context);
         await FailAuditLogInsertAsync(database.Context);
 
+        var audit = CreateTokenAssertingAuditService(database.Context);
         await Assert.ThrowsAsync<DbUpdateException>(() => CreateAdminController().RevokeSmsUser(
             targets.App.AppId,
             targets.UserLoginId,
             database.Context,
-            CreateAuditService(database.Context),
+            audit,
             TestContext.Current.CancellationToken));
+
+        Assert.Equal(1, audit.ActionCalls);
 
         await AssertRevocationRolledBackAsync(database.Context, targets.ActiveSmsTokenId);
         Assert.True(await database.Context.AppSmsAccesses
@@ -989,12 +996,15 @@ public sealed class AuditTransactionTests
         var targets = await SeedRevocationTargetsAsync(database.Context);
         await FailAuditLogInsertAsync(database.Context);
 
+        var audit = CreateTokenAssertingAuditService(database.Context);
         await Assert.ThrowsAsync<DbUpdateException>(() => CreateAdminController().RevokeWechatUser(
             targets.App.AppId,
             targets.UserLoginId,
             database.Context,
-            CreateAuditService(database.Context),
+            audit,
             TestContext.Current.CancellationToken));
+
+        Assert.Equal(1, audit.ActionCalls);
 
         await AssertRevocationRolledBackAsync(database.Context, targets.ActiveWechatTokenId);
         Assert.True(await database.Context.AppWechatAccesses
@@ -1009,18 +1019,109 @@ public sealed class AuditTransactionTests
         var targets = await SeedRevocationTargetsAsync(database.Context);
         await FailAuditLogInsertAsync(database.Context);
 
+        var audit = CreateTokenAssertingAuditService(database.Context);
         await Assert.ThrowsAsync<DbUpdateException>(() => CreateAdminController().RevokeLdapUser(
             targets.App.AppId,
             targets.LdapCredentialId,
             database.Context,
-            CreateAuditService(database.Context),
+            audit,
             TestContext.Current.CancellationToken));
+
+        Assert.Equal(1, audit.ActionCalls);
 
         await AssertRevocationRolledBackAsync(database.Context, targets.ActiveLdapTokenId);
         Assert.True(await database.Context.AppLdapAccesses
             .Select(access => access.IsActive)
             .SingleAsync(TestContext.Current.CancellationToken));
     }
+
+
+    public static TheoryData<string> AppAccessRevocationProviders() => new("sms", "wechat", "ldap");
+
+    /// <summary>
+    /// The revocation helper runs its transaction through the EF execution strategy, so the retry
+    /// loop, every statement inside the delegate and the staged audit write have to observe the
+    /// request token instead of the default one.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AppAccessRevocationProviders))]
+    public async Task RevokeAppAccess_PassesTheRequestTokenToTheExecutionStrategyAndTheAudit(string provider)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var observedTokens = new List<CancellationToken>();
+        await using var database = await SqliteTestDatabase.CreateAsync(
+            configureProvider: options => options.ExecutionStrategy(
+                dependencies => new RecordingExecutionStrategy(dependencies, observedTokens)));
+        var targets = await SeedRevocationTargetsAsync(database.Context);
+        var audit = CreateTokenAssertingAuditService(database.Context, cancellation.Token);
+        observedTokens.Clear();
+
+        var result = await InvokeRevocationAsync(
+            provider, database.Context, audit, targets, cancellation.Token);
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(1, audit.ActionCalls);
+        Assert.NotEmpty(observedTokens);
+        Assert.All(observedTokens, token => Assert.Equal(cancellation.Token, token));
+        database.Context.ChangeTracker.Clear();
+        var audited = await database.Context.AuditLogs.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal($"app_{provider}_user_revoked", audited.Action);
+    }
+
+    /// <summary>
+    /// A retry decision taken after the caller gave up must end the request. With the execution
+    /// strategy overload that takes no token, the loop would replay the whole revoking transaction
+    /// once the request was already canceled.
+    /// </summary>
+    [Fact]
+    public async Task RevokeAppAccess_WhenCanceledBeforeARetry_StopsInsteadOfReplayingTheTransaction()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var interceptor = new CancelAndFailFirstCommitInterceptor(cancellation);
+        await using var database = await SqliteTestDatabase.CreateAsync(
+            interceptor,
+            options => options.ExecutionStrategy(
+                dependencies => new RetryOnRevocationFailureExecutionStrategy(dependencies)));
+        var targets = await SeedRevocationTargetsAsync(database.Context);
+        interceptor.Armed = true;
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            CreateAdminController().RevokeSmsUser(
+                targets.App.AppId,
+                targets.UserLoginId,
+                database.Context,
+                CreateTokenAssertingAuditService(database.Context, cancellation.Token),
+                cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        Assert.Equal(1, interceptor.CommitAttempts);
+        Assert.Equal(1, interceptor.TransactionsStarted);
+        database.Context.ChangeTracker.Clear();
+        Assert.True(await database.Context.AppSmsAccesses
+            .Select(access => access.IsActive)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        await AssertRevocationRolledBackAsync(database.Context, targets.ActiveSmsTokenId);
+    }
+
+    private static Task<IActionResult> InvokeRevocationAsync(
+        string provider,
+        IdentityDbContext context,
+        IAuditService auditService,
+        RevocationTargets targets,
+        CancellationToken cancellationToken) => provider switch
+        {
+            "sms" => CreateAdminController().RevokeSmsUser(
+                targets.App.AppId, targets.UserLoginId, context, auditService, cancellationToken),
+            "wechat" => CreateAdminController().RevokeWechatUser(
+                targets.App.AppId, targets.UserLoginId, context, auditService, cancellationToken),
+            "ldap" => CreateAdminController().RevokeLdapUser(
+                targets.App.AppId, targets.LdapCredentialId, context, auditService, cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unknown revocation provider.")
+        };
+
+    private static TokenAssertingAuditService CreateTokenAssertingAuditService(
+        IdentityDbContext context, CancellationToken? expectedToken = null) =>
+        new(CreateAuditService(context), expectedToken ?? TestContext.Current.CancellationToken);
 
     private static async Task AssertRevocationRolledBackAsync(IdentityDbContext context, Guid tokenId)
     {
@@ -1135,6 +1236,125 @@ public sealed class AuditTransactionTests
         CreatedAt = DateTimeOffset.UtcNow,
         IsRevoked = false
     };
+
+    /// <summary>
+    /// Fails the test when an audit write observes anything other than the token the caller passed
+    /// in, so a revocation path falling back to the default token cannot pass unnoticed.
+    /// </summary>
+    private sealed class TokenAssertingAuditService(IAuditService inner, CancellationToken expectedToken)
+        : IAuditService
+    {
+        public int ActionCalls { get; private set; }
+
+        public Task RecordLoginAsync(
+            Guid? accountId,
+            string username,
+            string authMethod,
+            string eventType,
+            string? clientIp,
+            string? userAgent,
+            string? failureReason = null,
+            string? appId = null,
+            string? correlationId = null,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(expectedToken, cancellationToken);
+            return inner.RecordLoginAsync(
+                accountId, username, authMethod, eventType, clientIp, userAgent, failureReason, appId,
+                correlationId, cancellationToken);
+        }
+
+        public Task RecordActionAsync(
+            string action,
+            string targetType,
+            string targetId,
+            Guid? actorId,
+            string? actorName,
+            string? description,
+            string? clientIp = null,
+            string? correlationId = null,
+            object? before = null,
+            object? after = null,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(expectedToken, cancellationToken);
+            ActionCalls++;
+            return inner.RecordActionAsync(
+                action, targetType, targetId, actorId, actorName, description, clientIp, correlationId,
+                before, after, cancellationToken);
+        }
+    }
+
+    /// <summary>Records the token every execution-strategy run observes, retrying nothing.</summary>
+    private sealed class RecordingExecutionStrategy(
+        ExecutionStrategyDependencies dependencies, List<CancellationToken> observedTokens)
+        : ExecutionStrategy(dependencies, 3, TimeSpan.FromMilliseconds(1))
+    {
+        public override Task<TResult> ExecuteAsync<TState, TResult>(
+            TState state,
+            Func<DbContext, TState, CancellationToken, Task<TResult>> operation,
+            Func<DbContext, TState, CancellationToken, Task<ExecutionResult<TResult>>>? verifySucceeded,
+            CancellationToken cancellationToken = default)
+        {
+            observedTokens.Add(cancellationToken);
+            return base.ExecuteAsync(state, operation, verifySucceeded, cancellationToken);
+        }
+
+        protected override bool ShouldRetryOn(Exception exception) => false;
+    }
+
+    private sealed class RetryOnRevocationFailureExecutionStrategy(ExecutionStrategyDependencies dependencies)
+        : ExecutionStrategy(dependencies, 3, TimeSpan.FromMilliseconds(1))
+    {
+        protected override bool ShouldRetryOn(Exception exception) => exception is TransientRevocationException;
+    }
+
+    private sealed class TransientRevocationException : Exception;
+
+    /// <summary>
+    /// Cancels the request and fails the first commit transiently, so the execution strategy reaches
+    /// its retry decision with cancellation already requested.
+    /// </summary>
+    private sealed class CancelAndFailFirstCommitInterceptor(CancellationTokenSource cancellation)
+        : DbTransactionInterceptor
+    {
+        // Schema creation and seeding commit on this connection too; only the request under test
+        // may be observed.
+        public bool Armed { get; set; }
+
+        public int CommitAttempts { get; private set; }
+
+        public int TransactionsStarted { get; private set; }
+
+        public override ValueTask<InterceptionResult<DbTransaction>> TransactionStartingAsync(
+            DbConnection connection,
+            TransactionStartingEventData eventData,
+            InterceptionResult<DbTransaction> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Armed)
+            {
+                Assert.Equal(cancellation.Token, cancellationToken);
+                TransactionsStarted++;
+            }
+
+            return ValueTask.FromResult(result);
+        }
+
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
+            DbTransaction transaction,
+            TransactionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Armed) return ValueTask.FromResult(result);
+            Assert.Equal(cancellation.Token, cancellationToken);
+            CommitAttempts++;
+            if (CommitAttempts > 1) return ValueTask.FromResult(result);
+            cancellation.Cancel();
+            throw new TransientRevocationException();
+        }
+    }
 
     private sealed record RevocationTargets(
         AppRegistrationEntity App,
@@ -1663,11 +1883,14 @@ public sealed class AuditTransactionTests
 
         public IdentityDbContext Context { get; }
 
-        public static async Task<SqliteTestDatabase> CreateAsync(IInterceptor? interceptor = null)
+        public static async Task<SqliteTestDatabase> CreateAsync(
+            IInterceptor? interceptor = null,
+            Action<SqliteDbContextOptionsBuilder>? configureProvider = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync(TestContext.Current.CancellationToken);
-            var builder = new DbContextOptionsBuilder<IdentityDbContext>().UseSqlite(connection);
+            var builder = new DbContextOptionsBuilder<IdentityDbContext>()
+                .UseSqlite(connection, provider => configureProvider?.Invoke(provider));
             if (interceptor != null) builder.AddInterceptors(interceptor);
             var context = new IdentityDbContext(builder.Options);
             await context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);

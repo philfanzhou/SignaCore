@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
@@ -98,6 +100,219 @@ public sealed class AdminAppCancellationDatabaseContractTests
             .AnyAsync(TestContext.Current.CancellationToken));
     }
 
+    public static TheoryData<string, string> AppAccessRevocationCases()
+    {
+        var cases = new TheoryData<string, string>();
+        foreach (var provider in new[] { "sms", "wechat", "ldap" })
+        {
+            cases.Add(provider, "before-commit");
+            cases.Add(provider, "after-commit");
+        }
+
+        return cases;
+    }
+
+    /// <summary>
+    /// The access flag, the conditional refresh-token revocation and the audit entry share one
+    /// transaction: cancellation observed before the commit leaves none of them behind and returns
+    /// no success payload, while cancellation observed after the commit leaves all of them
+    /// authoritative.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AppAccessRevocationCases))]
+    public async Task RevokeAppAccess_CancellationPreservesTheCommitBoundary(string provider, string boundary)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var interceptor = boundary == "after-commit" ? new CancelAfterCommitInterceptor(cancellation) : null;
+        await using var database = await MigratedSqliteTestDatabase.CreateAsync(interceptor);
+        var targets = await SeedRevocationTargetsAsync(database.Context);
+        IAuditService auditService = boundary == "before-commit"
+            ? new CancelingActionAuditService(CreateAuditService(database.Context), cancellation)
+            : CreateAuditService(database.Context);
+        if (interceptor != null) interceptor.Armed = true;
+        IActionResult? response = null;
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            response = await InvokeRevocationAsync(
+                provider, database.Context, auditService, targets, cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+        Assert.Null(response);
+        var committed = boundary == "after-commit";
+        database.Context.ChangeTracker.Clear();
+        Assert.Equal(!committed, await ReadAccessIsActiveAsync(provider, database.Context));
+        Assert.Equal(committed, await database.Context.RefreshTokens
+            .AsNoTracking()
+            .Where(token => token.Id == RevokedTokenId(provider, targets))
+            .Select(token => token.IsRevoked)
+            .SingleAsync(TestContext.Current.CancellationToken));
+        var audits = await database.Context.AuditLogs
+            .AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken);
+        if (committed) Assert.Equal($"app_{provider}_user_revoked", Assert.Single(audits).Action);
+        else Assert.Empty(audits);
+    }
+
+    private static Task<IActionResult> InvokeRevocationAsync(
+        string provider,
+        IdentityDbContext context,
+        IAuditService auditService,
+        RevocationTargets targets,
+        CancellationToken cancellationToken) => provider switch
+        {
+            "sms" => CreateController().RevokeSmsUser(
+                targets.AppId, targets.UserLoginId, context, auditService, cancellationToken),
+            "wechat" => CreateController().RevokeWechatUser(
+                targets.AppId, targets.UserLoginId, context, auditService, cancellationToken),
+            "ldap" => CreateController().RevokeLdapUser(
+                targets.AppId, targets.LdapCredentialId, context, auditService, cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unknown revocation provider.")
+        };
+
+    private static Task<bool> ReadAccessIsActiveAsync(string provider, IdentityDbContext context) => provider switch
+    {
+        "sms" => context.AppSmsAccesses.AsNoTracking()
+            .Select(access => access.IsActive).SingleAsync(TestContext.Current.CancellationToken),
+        "wechat" => context.AppWechatAccesses.AsNoTracking()
+            .Select(access => access.IsActive).SingleAsync(TestContext.Current.CancellationToken),
+        "ldap" => context.AppLdapAccesses.AsNoTracking()
+            .Select(access => access.IsActive).SingleAsync(TestContext.Current.CancellationToken),
+        _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unknown revocation provider.")
+    };
+
+    private static Guid RevokedTokenId(string provider, RevocationTargets targets) => provider switch
+    {
+        "sms" => targets.SmsTokenId,
+        "wechat" => targets.WechatTokenId,
+        "ldap" => targets.LdapTokenId,
+        _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unknown revocation provider.")
+    };
+
+    private static async Task<RevocationTargets> SeedRevocationTargetsAsync(IdentityDbContext context)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true, CreatedAt = now };
+        const string appId = "revoke-cancellation-app";
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = appId,
+            AppIdNormalized = IdentityValueNormalizer.Normalize(appId),
+            AppName = appId,
+            AppSecretHash = "unused-test-hash",
+            IsActive = true,
+            CreatedAt = now
+        };
+        var userLogin = new UserLoginEntity
+        {
+            Id = Guid.NewGuid(),
+            AccountId = account.Id,
+            ProviderName = "Sms",
+            ProviderNameNormalized = "sms",
+            ProviderUserId = "+8613800000000"
+        };
+        var ldapCredential = new LdapCredentialEntity
+        {
+            Id = Guid.NewGuid(),
+            AccountId = account.Id,
+            DirectoryKey = "corp",
+            DirectoryKeyNormalized = "corp",
+            ObjectGuid = Guid.NewGuid(),
+            UserPrincipalName = "member@corp.example",
+            UserPrincipalNameNormalized = "member@corp.example",
+            SamAccountName = "member",
+            SamAccountNameNormalized = "member",
+            CreatedAt = now
+        };
+        var smsToken = CreateRefreshToken(account.Id, appId, "sms-active");
+        smsToken.SmsUserLoginId = userLogin.Id;
+        var wechatToken = CreateRefreshToken(account.Id, appId, "wechat-active");
+        wechatToken.WechatUserLoginId = userLogin.Id;
+        var ldapToken = CreateRefreshToken(account.Id, appId, "ldap-active");
+        ldapToken.LdapCredentialId = ldapCredential.Id;
+
+        context.Accounts.Add(account);
+        context.AppRegistrations.Add(app);
+        context.UserLogins.Add(userLogin);
+        context.LdapCredentials.Add(ldapCredential);
+        context.AppSmsAccesses.Add(new AppSmsAccessEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = app.Id,
+            UserLoginId = userLogin.Id,
+            ApprovalSource = SmsAccessApprovalSource.Admin,
+            IsActive = true,
+            CreatedAt = now
+        });
+        context.AppWechatAccesses.Add(new AppWechatAccessEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = app.Id,
+            UserLoginId = userLogin.Id,
+            ApprovalSource = WechatAccessApprovalSource.SelfBind,
+            IsActive = true,
+            CreatedAt = now
+        });
+        context.AppLdapAccesses.Add(new AppLdapAccessEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = app.Id,
+            LdapCredentialId = ldapCredential.Id,
+            ApprovalSource = LdapAccessApprovalSource.Admin,
+            IsActive = true,
+            CreatedAt = now
+        });
+        context.RefreshTokens.AddRange(smsToken, wechatToken, ldapToken);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        context.ChangeTracker.Clear();
+
+        return new RevocationTargets(
+            appId, userLogin.Id, ldapCredential.Id, smsToken.Id, wechatToken.Id, ldapToken.Id);
+    }
+
+    private static RefreshTokenEntity CreateRefreshToken(Guid accountId, string appId, string tokenValue) => new()
+    {
+        Id = Guid.NewGuid(),
+        AccountId = accountId,
+        AppId = appId,
+        TokenValue = tokenValue,
+        ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+        CreatedAt = DateTimeOffset.UtcNow,
+        IsRevoked = false
+    };
+
+    private sealed record RevocationTargets(
+        string AppId,
+        Guid UserLoginId,
+        Guid LdapCredentialId,
+        Guid SmsTokenId,
+        Guid WechatTokenId,
+        Guid LdapTokenId);
+
+    /// <summary>
+    /// Observes cancellation only once the revoking transaction is already committed, which is the
+    /// boundary after which the revocation stays authoritative.
+    /// </summary>
+    private sealed class CancelAfterCommitInterceptor(CancellationTokenSource cancellation)
+        : DbTransactionInterceptor
+    {
+        // Migrations and seeding commit on this connection too; only the request under test may be
+        // observed.
+        public bool Armed { get; set; }
+
+        public override Task TransactionCommittedAsync(
+            DbTransaction transaction,
+            TransactionEndEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Armed) return Task.CompletedTask;
+            Assert.Equal(cancellation.Token, cancellationToken);
+            cancellation.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+    }
+
     private static AdminController CreateController()
     {
         var controller = new AdminController(NullLogger<AdminController>.Instance);
@@ -186,16 +401,17 @@ public sealed class AdminAppCancellationDatabaseContractTests
 
         public IdentityDbContext Context { get; }
 
-        public static async Task<MigratedSqliteTestDatabase> CreateAsync()
+        public static async Task<MigratedSqliteTestDatabase> CreateAsync(IInterceptor? interceptor = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync(TestContext.Current.CancellationToken);
-            var options = new DbContextOptionsBuilder<IdentityDbContext>()
+            var builder = new DbContextOptionsBuilder<IdentityDbContext>()
                 .UseSqlite(
                     connection,
                     providerOptions => providerOptions.MigrationsAssembly(
-                        "SignaCore.Database.Migrations.Sqlite"))
-                .Options;
+                        "SignaCore.Database.Migrations.Sqlite"));
+            if (interceptor != null) builder.AddInterceptors(interceptor);
+            var options = builder.Options;
             var context = new IdentityDbContext(options);
             await context.Database.MigrateAsync(TestContext.Current.CancellationToken);
             return new MigratedSqliteTestDatabase(connection, context);
