@@ -1085,13 +1085,14 @@ public class AdminController : ControllerBase
             return BadRequest(new ErrorResponse(exception.Message));
         }
 
-        await appRegistrationRepository.AddRedirectUrisAsync(change.AddedRegistrations);
-        await appRegistrationRepository.RemoveRedirectUrisAsync(change.RemovedRegistrations);
+        await appRegistrationRepository.AddRedirectUrisAsync(change.AddedRegistrations, cancellationToken);
+        await appRegistrationRepository.RemoveRedirectUrisAsync(change.RemovedRegistrations, cancellationToken);
 
         var (actorId, actorName) = GetAdminIdentity();
         await auditService.RecordActionAsync(
             auditAction, "AppRegistration", app.AppId, actorId, actorName,
-            successMessage, GetClientIp(), before: before, after: Snapshot(app));
+            successMessage, GetClientIp(), before: before, after: Snapshot(app),
+            cancellationToken: cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(Describe(app));
@@ -1172,7 +1173,7 @@ public class AdminController : ControllerBase
         [FromServices] IAppExchangeTrustRepository exchangeTrustRepository,
         CancellationToken cancellationToken)
     {
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null) return NotFound(new ErrorResponse("App not found."));
 
         var trusts = await exchangeTrustRepository.ListSourcesAsync(app.Id, cancellationToken);
@@ -1206,10 +1207,11 @@ public class AdminController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.SourceAppId))
             return BadRequest(new ErrorResponse("A source AppId is required."));
 
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null) return NotFound(new ErrorResponse("App not found."));
 
-        var sourceApp = await appRegistrationRepository.GetByAppIdAsync(request.SourceAppId.Trim());
+        var sourceApp = await appRegistrationRepository.GetByAppIdAsync(
+            request.SourceAppId.Trim(), cancellationToken);
         if (sourceApp == null) return NotFound(new ErrorResponse("Source app not found."));
         if (sourceApp.Id == app.Id)
             return BadRequest(new ErrorResponse("An application cannot trust itself."));
@@ -1219,7 +1221,8 @@ public class AdminController : ControllerBase
         await auditService.RecordActionAsync(
             "app_exchange_trust_added", "AppRegistration", appId, actorId, actorName,
             $"Application now accepts refresh tokens issued to {sourceApp.AppId}", GetClientIp(),
-            after: new { SourceAppId = sourceApp.AppId });
+            after: new { SourceAppId = sourceApp.AppId },
+            cancellationToken: cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return Ok(new AdminExchangeTrustResponse(
             trust.SourceAppId, trust.SourceAppName, trust.SourceIsActive,
@@ -1243,10 +1246,10 @@ public class AdminController : ControllerBase
         [FromServices] IdentityDbContext dbContext,
         CancellationToken cancellationToken)
     {
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null) return NotFound(new ErrorResponse("App not found."));
 
-        var sourceApp = await appRegistrationRepository.GetByAppIdAsync(sourceAppId);
+        var sourceApp = await appRegistrationRepository.GetByAppIdAsync(sourceAppId, cancellationToken);
         if (sourceApp == null) return NotFound(new ErrorResponse("Source app not found."));
 
         if (!await exchangeTrustRepository.RemoveAsync(app.Id, sourceApp.Id, cancellationToken))
@@ -1256,7 +1259,8 @@ public class AdminController : ControllerBase
         await auditService.RecordActionAsync(
             "app_exchange_trust_removed", "AppRegistration", appId, actorId, actorName,
             $"Application no longer accepts refresh tokens issued to {sourceApp.AppId}", GetClientIp(),
-            before: new { SourceAppId = sourceApp.AppId });
+            before: new { SourceAppId = sourceApp.AppId },
+            cancellationToken: cancellationToken);
         try
         {
             await unitOfWork.SaveChangesAsync(cancellationToken);
