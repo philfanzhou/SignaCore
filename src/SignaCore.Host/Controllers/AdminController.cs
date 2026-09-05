@@ -719,9 +719,10 @@ public class AdminController : ControllerBase
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
         [FromServices] SmsOptions options,
         [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IAuditService auditService)
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
     {
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null) return NotFound(new ErrorResponse("App not found."));
         if (!Enum.TryParse<SmsLoginMode>(request.Mode, true, out var mode) || !Enum.IsDefined(mode))
             return BadRequest(new ErrorResponse("Invalid SMS login mode."));
@@ -741,17 +742,21 @@ public class AdminController : ControllerBase
         await auditService.RecordActionAsync(
             "app_sms_policy_updated", "AppRegistration", appId, actorId, actorName,
             $"SMS login mode changed to {mode}", GetClientIp(), before: before,
-            after: new { Mode = mode.ToString(), SmsProfileKey = profileKey });
-        await unitOfWork.SaveChangesAsync();
+            after: new { Mode = mode.ToString(), SmsProfileKey = profileKey },
+            cancellationToken: cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
         return Ok(new OperationResponse(true, "SMS login policy updated."));
     }
 
     [HttpGet("apps/{appId}/sms-users")]
     [Authorize(Policy = "AdminSession")]
-    public async Task<IActionResult> GetSmsUsers(string appId, [FromServices] IdentityDbContext dbContext)
+    public async Task<IActionResult> GetSmsUsers(
+        string appId,
+        [FromServices] IdentityDbContext dbContext,
+        CancellationToken cancellationToken)
     {
         var app = await dbContext.AppRegistrations.AsNoTracking().FirstOrDefaultAsync(
-            item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId));
+            item => item.AppIdNormalized == IdentityValueNormalizer.Normalize(appId), cancellationToken);
         if (app == null) return NotFound(new ErrorResponse("App not found."));
 
         var provider = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms);
@@ -764,7 +769,7 @@ public class AdminController : ControllerBase
                 item.login.Id.ToString(), item.login.AccountId.ToString(), item.login.ProviderUserId,
                 item.access.ApprovalSource.ToString(), item.access.IsActive,
                 item.access.CreatedAt.ToUnixTimeSeconds()))
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
         return Ok((IReadOnlyList<AdminSmsUserResponse>)users);
     }
 
@@ -780,7 +785,7 @@ public class AdminController : ControllerBase
     {
         if (!MainlandChinaPhoneNumber.TryNormalize(request.Phone, out var phone))
             return BadRequest(new ErrorResponse("A valid mainland China mobile number is required."));
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null) return NotFound(new ErrorResponse("App not found."));
 
         var (actorId, actorName) = GetAdminIdentity();
@@ -793,7 +798,8 @@ public class AdminController : ControllerBase
             result => auditService.RecordActionAsync(
                 "app_sms_user_approved", "AppRegistration", appId, actorId, actorName,
                 "Administrator approved an SMS identity for the application", GetClientIp(),
-                after: new { result.Account.Id, LoginId = result.Login.Id }));
+                after: new { result.Account.Id, LoginId = result.Login.Id },
+                cancellationToken: cancellationToken));
         return Ok(new AdminSmsUserResponse(
             admission.Login.Id.ToString(), admission.Account.Id.ToString(), admission.Login.ProviderUserId,
             admission.Access.ApprovalSource.ToString(), admission.Access.IsActive,
@@ -877,9 +883,10 @@ public class AdminController : ControllerBase
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
         [FromServices] JwtOptions jwtOptions,
         [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IAuditService auditService)
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
     {
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId);
+        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null) return NotFound(new ErrorResponse("App not found."));
         if (!Enum.TryParse<AudienceMode>(request.Mode, true, out var mode) || !Enum.IsDefined(mode))
             return BadRequest(new ErrorResponse("Invalid audience mode."));
@@ -892,8 +899,9 @@ public class AdminController : ControllerBase
         await auditService.RecordActionAsync(
             "app_audience_mode_updated", "AppRegistration", appId, actorId, actorName,
             $"Access-token audience mode changed to {mode}", GetClientIp(), before: before,
-            after: new { Mode = mode.ToString(), Audience = audience });
-        await unitOfWork.SaveChangesAsync();
+            after: new { Mode = mode.ToString(), Audience = audience },
+            cancellationToken: cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
         return Ok(new OperationResponse(true, $"Access tokens for this application now carry aud={audience}."));
     }
 
