@@ -2028,7 +2028,8 @@ public class AdminControllerTests : IDisposable
         SetAdminUser();
         var result = await _controller.RevokeRefreshToken(
             new AdminRevokeRefreshTokenRequest(""),
-            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
     }
@@ -2037,11 +2038,12 @@ public class AdminControllerTests : IDisposable
     public async Task RevokeRefreshToken_WhenTokenNotFound_ReturnsBadRequest()
     {
         SetAdminUser();
-        _refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync(It.IsAny<string>())).ReturnsAsync((RefreshTokenEntity?)null);
+        _refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync(It.IsAny<string>(), TestContext.Current.CancellationToken)).ReturnsAsync((RefreshTokenEntity?)null);
 
         var result = await _controller.RevokeRefreshToken(
             new AdminRevokeRefreshTokenRequest("sometoken"),
-            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Contains("not found", Assert.IsType<ErrorResponse>(bad.Value).Message);
@@ -2053,11 +2055,12 @@ public class AdminControllerTests : IDisposable
         SetAdminUser();
         var accountId = Guid.NewGuid();
         var token = new RefreshTokenEntity { Id = Guid.NewGuid(), AccountId = accountId, TokenValue = "tok", IsRevoked = false };
-        _refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync("tok")).ReturnsAsync(token);
+        _refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync("tok", TestContext.Current.CancellationToken)).ReturnsAsync(token);
 
         var result = await _controller.RevokeRefreshToken(
             new AdminRevokeRefreshTokenRequest("tok"),
-            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
@@ -2066,21 +2069,22 @@ public class AdminControllerTests : IDisposable
         _auditServiceMock.Verify(a => a.RecordActionAsync(
             "refresh_token_revoked", "RefreshToken", accountId.ToString(),
             AdminId, AdminName, It.IsAny<string>(), It.IsAny<string?>(),
-            It.IsAny<string?>(), null, null), Times.Once);
+            It.IsAny<string?>(), null, null, TestContext.Current.CancellationToken), Times.Once);
     }
 
     [Fact]
     public async Task RevokeRefreshToken_WithWhitespaceToken_TrimsBeforeLookup()
     {
         SetAdminUser();
-        _refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync("trimmed")).ReturnsAsync((RefreshTokenEntity?)null);
+        _refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync("trimmed", TestContext.Current.CancellationToken)).ReturnsAsync((RefreshTokenEntity?)null);
 
         var result = await _controller.RevokeRefreshToken(
             new AdminRevokeRefreshTokenRequest("  trimmed  "),
-            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
-        _refreshTokenRepoMock.Verify(r => r.GetByTokenValueAsync("trimmed"), Times.Once);
+        _refreshTokenRepoMock.Verify(r => r.GetByTokenValueAsync("trimmed", TestContext.Current.CancellationToken), Times.Once);
     }
 
     #endregion
@@ -2107,9 +2111,9 @@ public class AdminControllerTests : IDisposable
                 CreatedAt = new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero)
             }
         };
-        _loginHistoryRepoMock.Setup(r => r.GetByAccountIdAsync(userId, 20, 0)).ReturnsAsync(histories);
+        _loginHistoryRepoMock.Setup(r => r.GetByAccountIdAsync(userId, 20, 0, TestContext.Current.CancellationToken)).ReturnsAsync(histories);
 
-        var result = await _controller.GetUserLoginHistory(userId, null, null, _loginHistoryRepoMock.Object);
+        var result = await _controller.GetUserLoginHistory(userId, null, null, _loginHistoryRepoMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<PagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
@@ -2127,14 +2131,14 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         var userId = Guid.NewGuid();
-        _loginHistoryRepoMock.Setup(r => r.CountByAccountIdAsync(userId)).ReturnsAsync(137);
-        _loginHistoryRepoMock.Setup(r => r.GetByAccountIdAsync(userId, 20, 0))
+        _loginHistoryRepoMock.Setup(r => r.CountByAccountIdAsync(userId, TestContext.Current.CancellationToken)).ReturnsAsync(137);
+        _loginHistoryRepoMock.Setup(r => r.GetByAccountIdAsync(userId, 20, 0, TestContext.Current.CancellationToken))
             .ReturnsAsync(new List<LoginHistoryEntity>
             {
                 new() { Id = Guid.NewGuid(), AccountId = userId, AuthMethod = "Password", EventType = "login_success" }
             });
 
-        var result = await _controller.GetUserLoginHistory(userId, null, null, _loginHistoryRepoMock.Object);
+        var result = await _controller.GetUserLoginHistory(userId, null, null, _loginHistoryRepoMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<PagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
@@ -2149,9 +2153,9 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         var userId = Guid.NewGuid();
-        _loginHistoryRepoMock.Setup(r => r.GetByAccountIdAsync(userId, 10, 20)).ReturnsAsync(new List<LoginHistoryEntity>());
+        _loginHistoryRepoMock.Setup(r => r.GetByAccountIdAsync(userId, 10, 20, TestContext.Current.CancellationToken)).ReturnsAsync(new List<LoginHistoryEntity>());
 
-        var result = await _controller.GetUserLoginHistory(userId, 3, 10, _loginHistoryRepoMock.Object);
+        var result = await _controller.GetUserLoginHistory(userId, 3, 10, _loginHistoryRepoMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<PagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
@@ -2164,9 +2168,9 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         var userId = Guid.NewGuid();
-        _loginHistoryRepoMock.Setup(r => r.GetByAccountIdAsync(userId, 20, 0)).ReturnsAsync(new List<LoginHistoryEntity>());
+        _loginHistoryRepoMock.Setup(r => r.GetByAccountIdAsync(userId, 20, 0, TestContext.Current.CancellationToken)).ReturnsAsync(new List<LoginHistoryEntity>());
 
-        var result = await _controller.GetUserLoginHistory(userId, 0, 20, _loginHistoryRepoMock.Object);
+        var result = await _controller.GetUserLoginHistory(userId, 0, 20, _loginHistoryRepoMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<PagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
@@ -2178,9 +2182,9 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         var userId = Guid.NewGuid();
-        _loginHistoryRepoMock.Setup(r => r.GetByAccountIdAsync(userId, 100, 0)).ReturnsAsync(new List<LoginHistoryEntity>());
+        _loginHistoryRepoMock.Setup(r => r.GetByAccountIdAsync(userId, 100, 0, TestContext.Current.CancellationToken)).ReturnsAsync(new List<LoginHistoryEntity>());
 
-        var result = await _controller.GetUserLoginHistory(userId, 1, 500, _loginHistoryRepoMock.Object);
+        var result = await _controller.GetUserLoginHistory(userId, 1, 500, _loginHistoryRepoMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<PagedResponse<AdminLoginHistoryItemResponse>>(ok.Value);
@@ -2205,9 +2209,9 @@ public class AdminControllerTests : IDisposable
                 CreatedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
             }
         };
-        _auditLogRepoMock.Setup(r => r.QueryAsync(null, null, null, null, 20, 0)).ReturnsAsync(logs);
+        _auditLogRepoMock.Setup(r => r.QueryAsync(null, null, null, null, 20, 0, TestContext.Current.CancellationToken)).ReturnsAsync(logs);
 
-        var result = await _controller.GetAuditLogs(null, null, null, null, null, null, _auditLogRepoMock.Object);
+        var result = await _controller.GetAuditLogs(null, null, null, null, null, null, _auditLogRepoMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
@@ -2225,14 +2229,14 @@ public class AdminControllerTests : IDisposable
     public async Task GetAuditLogs_TotalComesFromRepositoryCount_NotPageSize()
     {
         SetAdminUser();
-        _auditLogRepoMock.Setup(r => r.CountAsync(null, null, null, null)).ReturnsAsync(84);
-        _auditLogRepoMock.Setup(r => r.QueryAsync(null, null, null, null, 20, 0))
+        _auditLogRepoMock.Setup(r => r.CountAsync(null, null, null, null, TestContext.Current.CancellationToken)).ReturnsAsync(84);
+        _auditLogRepoMock.Setup(r => r.QueryAsync(null, null, null, null, 20, 0, TestContext.Current.CancellationToken))
             .ReturnsAsync(new List<AuditLogEntity>
             {
                 new() { Id = Guid.NewGuid(), Action = "account_created", TargetType = "Account", TargetId = "abc" }
             });
 
-        var result = await _controller.GetAuditLogs(null, null, null, null, null, null, _auditLogRepoMock.Object);
+        var result = await _controller.GetAuditLogs(null, null, null, null, null, null, _auditLogRepoMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
@@ -2247,13 +2251,13 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         var actorId = Guid.NewGuid();
-        _auditLogRepoMock.Setup(r => r.CountAsync("login", "Session", "target1", actorId)).ReturnsAsync(3);
-        _auditLogRepoMock.Setup(r => r.QueryAsync("login", "Session", "target1", actorId, 10, 10))
+        _auditLogRepoMock.Setup(r => r.CountAsync("login", "Session", "target1", actorId, TestContext.Current.CancellationToken)).ReturnsAsync(3);
+        _auditLogRepoMock.Setup(r => r.QueryAsync("login", "Session", "target1", actorId, 10, 10, TestContext.Current.CancellationToken))
             .ReturnsAsync(new List<AuditLogEntity>());
 
-        await _controller.GetAuditLogs("login", "Session", "target1", actorId, 2, 10, _auditLogRepoMock.Object);
+        await _controller.GetAuditLogs("login", "Session", "target1", actorId, 2, 10, _auditLogRepoMock.Object, TestContext.Current.CancellationToken);
 
-        _auditLogRepoMock.Verify(r => r.CountAsync("login", "Session", "target1", actorId), Times.Once);
+        _auditLogRepoMock.Verify(r => r.CountAsync("login", "Session", "target1", actorId, TestContext.Current.CancellationToken), Times.Once);
     }
 
     [Fact]
@@ -2261,26 +2265,27 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         var actorId = Guid.NewGuid();
-        _auditLogRepoMock.Setup(r => r.QueryAsync("login", "Session", "target1", actorId, 10, 10))
+        _auditLogRepoMock.Setup(r => r.QueryAsync("login", "Session", "target1", actorId, 10, 10, TestContext.Current.CancellationToken))
             .ReturnsAsync(new List<AuditLogEntity>());
 
-        var result = await _controller.GetAuditLogs("login", "Session", "target1", actorId, 2, 10, _auditLogRepoMock.Object);
+        var result = await _controller.GetAuditLogs("login", "Session", "target1", actorId, 2, 10, _auditLogRepoMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
         Assert.Equal(2, response.Page);
         Assert.Equal(10, response.PageSize);
-        _auditLogRepoMock.Verify(r => r.QueryAsync("login", "Session", "target1", actorId, 10, 10), Times.Once);
+        _auditLogRepoMock.Verify(r => r.QueryAsync("login", "Session", "target1", actorId, 10, 10, TestContext.Current.CancellationToken), Times.Once);
     }
 
     [Fact]
     public async Task GetAuditLogs_WithInvalidPaging_DefaultsToValidValues()
     {
         SetAdminUser();
-        _auditLogRepoMock.Setup(r => r.QueryAsync(null, null, null, null, It.IsAny<int>(), It.IsAny<int>()))
+        _auditLogRepoMock.Setup(r => r.QueryAsync(
+                null, null, null, null, It.IsAny<int>(), It.IsAny<int>(), TestContext.Current.CancellationToken))
             .ReturnsAsync(new List<AuditLogEntity>());
 
-        var result = await _controller.GetAuditLogs(null, null, null, null, -1, 0, _auditLogRepoMock.Object);
+        var result = await _controller.GetAuditLogs(null, null, null, null, -1, 0, _auditLogRepoMock.Object, TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);

@@ -1621,14 +1621,16 @@ public class AdminController : ControllerBase
         [FromBody] AdminRevokeRefreshTokenRequest request,
         [FromServices] IRefreshTokenRepository refreshTokenRepository,
         [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IAuditService auditService)
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.RefreshToken))
         {
             return BadRequest(new ErrorResponse("Refresh token cannot be empty."));
         }
 
-        var refreshToken = await refreshTokenRepository.GetByTokenValueAsync(request.RefreshToken.Trim());
+        var refreshToken = await refreshTokenRepository.GetByTokenValueAsync(
+            request.RefreshToken.Trim(), cancellationToken);
         if (refreshToken == null)
         {
             return BadRequest(new ErrorResponse("Refresh token not found."));
@@ -1638,8 +1640,9 @@ public class AdminController : ControllerBase
 
         var (actorId, actorName) = GetAdminIdentity();
         await auditService.RecordActionAsync("refresh_token_revoked", "RefreshToken", refreshToken.AccountId.ToString(),
-            actorId, actorName, "Admin revoked refresh token", GetClientIp());
-        await unitOfWork.SaveChangesAsync();
+            actorId, actorName, "Admin revoked refresh token", GetClientIp(),
+            cancellationToken: cancellationToken);
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new OperationResponse(true, "Refresh token revoked."));
     }
@@ -1650,12 +1653,14 @@ public class AdminController : ControllerBase
         Guid userId,
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
-        [FromServices] ILoginHistoryRepository loginHistoryRepository)
+        [FromServices] ILoginHistoryRepository loginHistoryRepository,
+        CancellationToken cancellationToken)
     {
         var paging = PageRequest.Normalize(page, pageSize);
 
-        var total = await loginHistoryRepository.CountByAccountIdAsync(userId);
-        var histories = await loginHistoryRepository.GetByAccountIdAsync(userId, paging.PageSize, paging.Skip);
+        var total = await loginHistoryRepository.CountByAccountIdAsync(userId, cancellationToken);
+        var histories = await loginHistoryRepository.GetByAccountIdAsync(
+            userId, paging.PageSize, paging.Skip, cancellationToken);
 
         var items = histories.Select(h => new AdminLoginHistoryItemResponse(
             h.AuthMethod,
@@ -1678,12 +1683,15 @@ public class AdminController : ControllerBase
         [FromQuery] Guid? actorId,
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
-        [FromServices] IAuditLogRepository auditLogRepository)
+        [FromServices] IAuditLogRepository auditLogRepository,
+        CancellationToken cancellationToken)
     {
         var paging = PageRequest.Normalize(page, pageSize);
 
-        var total = await auditLogRepository.CountAsync(action, targetType, targetId, actorId);
-        var logs = await auditLogRepository.QueryAsync(action, targetType, targetId, actorId, paging.PageSize, paging.Skip);
+        var total = await auditLogRepository.CountAsync(
+            action, targetType, targetId, actorId, cancellationToken);
+        var logs = await auditLogRepository.QueryAsync(
+            action, targetType, targetId, actorId, paging.PageSize, paging.Skip, cancellationToken);
 
         var items = logs.Select(l => new AdminAuditLogItemResponse(
             l.Action,
