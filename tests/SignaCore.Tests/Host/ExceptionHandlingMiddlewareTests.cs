@@ -119,15 +119,40 @@ public class ExceptionHandlingMiddlewareTests
         await middleware.InvokeAsync(context);
 
         var clientCancellation = aborted && failure is OperationCanceledException;
-        var entry = Assert.Single(logger.Entries);
-        Assert.Equal(clientCancellation ? LogLevel.Debug : LogLevel.Error, entry.Level);
-        Assert.Null(entry.Exception);
-        Assert.DoesNotContain(privateMarker, entry.Message);
+        // The ProblemDetails write observes RequestAborted, so a request the client already gave up
+        // on keeps its decided status code but receives no body, logged as the same client-gone case.
+        var writeAborted = aborted && !clientCancellation && !started;
+        if (writeAborted)
+        {
+            Assert.Collection(
+                logger.Entries,
+                first => Assert.Equal(LogLevel.Error, first.Level),
+                second => Assert.Equal(LogLevel.Debug, second.Level));
+        }
+        else
+        {
+            var entry = Assert.Single(logger.Entries);
+            Assert.Equal(clientCancellation ? LogLevel.Debug : LogLevel.Error, entry.Level);
+        }
+
+        Assert.All(logger.Entries, entry =>
+        {
+            Assert.Null(entry.Exception);
+            Assert.DoesNotContain(privateMarker, entry.Message);
+        });
         if (started || clientCancellation)
         {
             Assert.Equal(StatusCodes.Status202Accepted, context.Response.StatusCode);
             Assert.Equal(0, body.Length);
             Assert.Null(context.Response.ContentType);
+        }
+        else if (writeAborted)
+        {
+            Assert.Equal(
+                kind switch { "argument" => 400, "invalid-operation" => 409, _ => 500 },
+                context.Response.StatusCode);
+            Assert.Equal("application/json", context.Response.ContentType);
+            Assert.Equal(0, body.Length);
         }
         else
         {
@@ -144,6 +169,95 @@ public class ExceptionHandlingMiddlewareTests
             Assert.Equal(status == 500 ? "An internal error occurred." :
                 "The request could not be processed. See server logs for details.",
                 json.RootElement.GetProperty("Detail").GetString());
+        }
+    }
+
+    /// <summary>
+    /// The ProblemDetails body is written with the request token, so a client that is already gone
+    /// does not keep the write pending.
+    /// </summary>
+    [Fact]
+    public async Task InvokeAsync_WritesTheProblemDetailsBodyWithRequestAborted()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var context = new DefaultHttpContext { RequestAborted = cancellation.Token };
+        using var body = new TokenRecordingStream();
+        context.Response.Body = body;
+        var logger = new RecordingLogger();
+        var middleware = new ExceptionHandlingMiddleware(_ => throw new ArgumentException("private-marker"), logger);
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        Assert.Equal("application/json", context.Response.ContentType);
+        Assert.NotEmpty(body.ObservedTokens);
+        Assert.All(body.ObservedTokens, token => Assert.Equal(cancellation.Token, token));
+        using var json = JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(body.ToArray()));
+        Assert.Equal(400, json.RootElement.GetProperty("Status").GetInt32());
+    }
+
+    /// <summary>
+    /// An abort observed while writing is the same client-gone case #197 already classifies as
+    /// Debug: the status code stays decided, nothing is rethrown, and no second Error appears.
+    /// </summary>
+    [Fact]
+    public async Task InvokeAsync_WhenTheClientDisconnectsDuringTheWrite_LogsDebugWithoutANewError()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var context = new DefaultHttpContext { RequestAborted = cancellation.Token };
+        using var body = new AbortingResponseStream(cancellation);
+        context.Response.Body = body;
+        var logger = new RecordingLogger();
+        var middleware = new ExceptionHandlingMiddleware(_ => throw new Exception("private-marker"), logger);
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
+        Assert.Equal(cancellation.Token, body.ObservedToken);
+        Assert.Collection(
+            logger.Entries,
+            first => Assert.Equal(LogLevel.Error, first.Level),
+            second => Assert.Equal(LogLevel.Debug, second.Level));
+        Assert.All(logger.Entries, entry => Assert.DoesNotContain("private-marker", entry.Message));
+    }
+
+    private sealed class TokenRecordingStream : MemoryStream
+    {
+        public List<CancellationToken> ObservedTokens { get; } = [];
+
+        public override Task WriteAsync(
+            byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            ObservedTokens.Add(cancellationToken);
+            return base.WriteAsync(buffer, offset, count, cancellationToken);
+        }
+
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            ObservedTokens.Add(cancellationToken);
+            return base.WriteAsync(buffer, cancellationToken);
+        }
+    }
+
+    /// <summary>Fails the write the way an aborted connection does, once the client is gone.</summary>
+    private sealed class AbortingResponseStream(CancellationTokenSource cancellation) : MemoryStream
+    {
+        public CancellationToken ObservedToken { get; private set; }
+
+        public override Task WriteAsync(
+            byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            Abort(cancellationToken);
+
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            new(Abort(cancellationToken));
+
+        private Task Abort(CancellationToken cancellationToken)
+        {
+            ObservedToken = cancellationToken;
+            cancellation.Cancel();
+            throw new OperationCanceledException(cancellationToken);
         }
     }
 

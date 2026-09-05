@@ -374,7 +374,8 @@ app.Use(async (context, next) =>
                 "JWKS rate limit exceeded: ClientIp={ClientIp}, Limit=60/60s",
                 context.Connection.RemoteIpAddress);
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            await context.Response.WriteAsync("Too many requests to JWKS endpoint. Please try again later.");
+            await context.Response.WriteAsync(
+                "Too many requests to JWKS endpoint. Please try again later.", context.RequestAborted);
             return;
         }
         try

@@ -306,12 +306,13 @@ public static class ServiceCollectionExtensions
                         Window = TimeSpan.FromSeconds(60)
                     });
             });
-            options.OnRejected = async (context, _) =>
+            options.OnRejected = async (context, cancellationToken) =>
             {
                 context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
                 context.HttpContext.Response.ContentType = "application/json";
                 await context.HttpContext.Response.WriteAsync(
-                    """{"status":429,"title":"Too Many Requests","detail":"Rate limit exceeded. Please try again later."}""");
+                    """{"status":429,"title":"Too Many Requests","detail":"Rate limit exceeded. Please try again later."}""",
+                    cancellationToken);
             };
         });
 
