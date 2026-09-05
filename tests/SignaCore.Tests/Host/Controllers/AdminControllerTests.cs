@@ -1917,11 +1917,12 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "a", AppName = "MyApp" };
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken)).ReturnsAsync(app);
 
         var result = await _controller.UpdateSmsPolicy(
             "a", new AdminUpdateSmsPolicyRequest("AutoProvision", null),
-            _appRegRepoMock.Object, CreateSmsOptions(), _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _appRegRepoMock.Object, CreateSmsOptions(), _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
@@ -1934,11 +1935,12 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "a", AppName = "MyApp" };
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken)).ReturnsAsync(app);
 
         var result = await _controller.UpdateSmsPolicy(
             "a", new AdminUpdateSmsPolicyRequest("AutoProvision", "typo"),
-            _appRegRepoMock.Object, CreateSmsOptions("primary"), _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _appRegRepoMock.Object, CreateSmsOptions("primary"), _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
         Assert.Equal(SmsLoginMode.Disabled, app.SmsLoginMode);
@@ -1950,11 +1952,12 @@ public class AdminControllerTests : IDisposable
     {
         SetAdminUser();
         var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "a", AppName = "MyApp" };
-        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a")).ReturnsAsync(app);
+        _appRegRepoMock.Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken)).ReturnsAsync(app);
 
         var result = await _controller.UpdateSmsPolicy(
             "a", new AdminUpdateSmsPolicyRequest("ManualApproval", " primary "),
-            _appRegRepoMock.Object, CreateSmsOptions("primary"), _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _appRegRepoMock.Object, CreateSmsOptions("primary"), _unitOfWorkMock.Object, _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Equal(SmsLoginMode.ManualApproval, app.SmsLoginMode);
