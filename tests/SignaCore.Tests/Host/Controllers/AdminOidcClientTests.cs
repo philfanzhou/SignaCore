@@ -201,7 +201,7 @@ public class AdminOidcClientTests : IDisposable
             audit => audit.RecordActionAsync(
                 "app_oidc_policy_updated", "AppRegistration", AppId, AdminId, "admin",
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                It.IsAny<object?>(), It.IsAny<object?>()),
+                It.IsAny<object?>(), It.IsAny<object?>(), TestContext.Current.CancellationToken),
             Times.Once);
     }
 
