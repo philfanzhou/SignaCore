@@ -67,6 +67,7 @@ public sealed class GatewayAppAuthenticationHandler : AuthenticationHandler<Auth
     protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
     {
         Response.StatusCode = StatusCodes.Status401Unauthorized;
-        await Response.WriteAsJsonAsync(new ErrorResponse("Invalid or missing gateway credentials."));
+        await Response.WriteAsJsonAsync(
+            new ErrorResponse("Invalid or missing gateway credentials."), Context.RequestAborted);
     }
 }

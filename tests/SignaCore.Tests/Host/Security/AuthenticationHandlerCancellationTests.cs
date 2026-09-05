@@ -96,6 +96,84 @@ public class AuthenticationHandlerCancellationTests
             Times.Never);
     }
 
+    /// <summary>
+    /// The unchanged challenge contract: 401, the scheme's own headers, and the same body fields.
+    /// </summary>
+    [Theory]
+    [InlineData("gateway")]
+    [InlineData("oauth")]
+    public async Task Challenge_WritesTheUnchangedUnauthorizedBody(string scheme)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var context = new DefaultHttpContext { RequestAborted = cancellation.Token };
+        using var body = new MemoryStream();
+        context.Response.Body = body;
+        var handler = await CreateChallengeHandlerAsync(scheme, context);
+
+        await handler.ChallengeAsync(new AuthenticationProperties());
+
+        Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+        var content = Encoding.UTF8.GetString(body.ToArray());
+        if (scheme == "gateway")
+        {
+            Assert.Empty(context.Response.Headers.WWWAuthenticate.ToString());
+            Assert.Contains("Invalid or missing gateway credentials.", content, StringComparison.Ordinal);
+        }
+        else
+        {
+            // RFC 6749 §5.2 requires the challenge header on an invalid_client 401.
+            Assert.Equal(
+                $"Basic realm=\"{OAuthClientAuthenticationDefaults.Realm}\", charset=\"UTF-8\"",
+                context.Response.Headers.WWWAuthenticate.ToString());
+            Assert.Contains("invalid_client", content, StringComparison.Ordinal);
+            Assert.Contains("Client authentication failed.", content, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// The challenge body is written with <c>Context.RequestAborted</c>, so a client that already
+    /// disconnected aborts the write and the abort propagates under ASP.NET Core's existing
+    /// handling instead of the response completing as if it had been delivered. Writing without a
+    /// token takes the framework's swallow-the-abort path, which is what this pins.
+    /// </summary>
+    [Theory]
+    [InlineData("gateway")]
+    [InlineData("oauth")]
+    public async Task Challenge_WhenTheClientIsGone_AbortsTheWriteInsteadOfCompleting(string scheme)
+    {
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var context = new DefaultHttpContext { RequestAborted = cancellation.Token };
+        using var body = new MemoryStream();
+        context.Response.Body = body;
+        var handler = await CreateChallengeHandlerAsync(scheme, context);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            handler.ChallengeAsync(new AuthenticationProperties()));
+
+        // The status code and headers were decided before the write; only the body is missing.
+        Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+        Assert.Equal(0, body.Length);
+    }
+
+    private static async Task<IAuthenticationHandler> CreateChallengeHandlerAsync(
+        string scheme, HttpContext context)
+    {
+        var (service, _) = CreateValidationService();
+        IAuthenticationHandler handler = scheme == "gateway"
+            ? new GatewayAppAuthenticationHandler(
+                CreateOptionsMonitor(), NullLoggerFactory.Instance, UrlEncoder.Default, service)
+            : new OAuthClientAuthenticationHandler(
+                CreateOptionsMonitor(), NullLoggerFactory.Instance, UrlEncoder.Default, service);
+        await InitializeAsync(
+            handler,
+            context,
+            scheme == "gateway"
+                ? GatewayAppAuthenticationDefaults.Scheme
+                : OAuthClientAuthenticationDefaults.Scheme);
+        return handler;
+    }
+
     private static async Task InitializeAsync(
         IAuthenticationHandler handler,
         HttpContext context,

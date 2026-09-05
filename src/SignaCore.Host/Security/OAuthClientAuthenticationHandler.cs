@@ -82,11 +82,13 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
     {
         Response.StatusCode = StatusCodes.Status401Unauthorized;
         Response.Headers.WWWAuthenticate = $"Basic realm=\"{OAuthClientAuthenticationDefaults.Realm}\", charset=\"UTF-8\"";
-        await Response.WriteAsJsonAsync(new Dictionary<string, string>
-        {
-            ["error"] = Domain.Validators.OAuthErrorCodes.InvalidClient,
-            ["error_description"] = "Client authentication failed."
-        });
+        await Response.WriteAsJsonAsync(
+            new Dictionary<string, string>
+            {
+                ["error"] = Domain.Validators.OAuthErrorCodes.InvalidClient,
+                ["error_description"] = "Client authentication failed."
+            },
+            Context.RequestAborted);
     }
 
     private (string ClientId, string ClientSecret)? ReadBasicCredentials()

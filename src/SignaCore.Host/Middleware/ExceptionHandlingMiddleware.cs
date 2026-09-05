@@ -38,7 +38,7 @@ public class ExceptionHandlingMiddleware
         }
     }
 
-    private static async Task WriteProblemDetailsAsync(HttpContext context, Exception ex)
+    private async Task WriteProblemDetailsAsync(HttpContext context, Exception ex)
     {
         if (context.Response.HasStarted)
         {
@@ -68,7 +68,17 @@ public class ExceptionHandlingMiddleware
             Title = title,
             Detail = detail
         };
-        await JsonSerializer.SerializeAsync(context.Response.Body, body);
+        try
+        {
+            await JsonSerializer.SerializeAsync(context.Response.Body, body, cancellationToken: context.RequestAborted);
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // The client is gone: the status code and headers were already decided, and an
+            // unfinished body is not a new failure. Classify it the same way as an aborted request
+            // reaching this middleware.
+            _logger.LogDebug("Request aborted by the client while writing the error response.");
+        }
     }
 
     private sealed class ProblemDetailsPayload
