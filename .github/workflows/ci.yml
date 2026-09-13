@@ -265,8 +265,13 @@ jobs:
           set -euo pipefail
 
           # The plaintext setup code is printed exactly once, to stdout, and is never stored.
+          # It is a 32-character Base64URL value on its own line, two lines after the
+          # "one-time setup code:" prompt; anchoring on that context avoids matching
+          # unrelated token-shaped strings elsewhere in the container log.
           SETUP_CODE="$(docker logs signacore-smoke-app 2>&1 \
-            | grep -Eo '[A-Z0-9]{5}(-[A-Z0-9]{5}){5}' | head -1)"
+            | grep -A 2 -F 'one-time setup code:' \
+            | grep -Eo '^[[:space:]]*[A-Za-z0-9_-]{32}[[:space:]]*$' \
+            | head -1 | tr -d '[:space:]' || true)"
           [ -n "$SETUP_CODE" ] || { echo 'no setup code found in the container log'; exit 1; }
           echo "::add-mask::$SETUP_CODE"
 
