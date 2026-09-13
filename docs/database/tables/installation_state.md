@@ -1,35 +1,20 @@
-# installation_state
+# installation_state (removed)
 
-Singleton row recording whether this database has been initialized.
+`installation_state` was SignaCore's legacy singleton installation-state table. It was replaced by
+the shared ServiceMantle `service_installations` table and is **dropped by the
+`DropInstallationState` forward migration** (ServiceMantle issue #128).
 
-## Columns
+Historical notes, kept for operators reading older databases:
 
-- id (integer, primary key, fixed value 1) — enforced by a check constraint
-- status (`Pending` or `Completed`)
-- installation_id (UUID, not null)
-- setup_code_hash (string, nullable) — one-way hash of the one-time setup code
-- setup_code_expires_at (timestamp, nullable)
-- completed_at (timestamp, nullable)
-- configuration_version (integer, not null)
+- The table held one row (`id = 1`) with `status` (`Pending`/`Completed`), `installation_id`,
+  `setup_code_hash`, `setup_code_expires_at`, `completed_at`, and `configuration_version`.
+- The `AddServiceInstallations` migration (ServiceMantle issue #70) ran a fail-closed adoption
+  backfill into `service_installations` before the table was dropped: any database with a completed
+  row or business data adopted a `Completed` installation row, so an upgraded database is never
+  classified as `PendingSetup` and never re-exposes anonymous setup.
+- Legacy pending setup-code hashes were deliberately not migrated; a not-yet-completed install gets
+  a fresh setup code on its first start after the switch (the same semantics as
+  `--rotate-setup-code`).
 
-## Relationships and invariants
-
-- First-run status is never inferred from missing configuration keys. Deleting rows from
-  `system_settings` in a previously initialized database must not reopen anonymous setup and allow
-  account takeover, so the `Completed` marker is durable and is never reset automatically.
-- A database with no row here but with existing accounts, applications, keys, or other business data
-  is an upgrade of a pre-change deployment. It takes the protected legacy import path, never Setup
-  Mode.
-- Only the hash and expiry of the setup code are stored. The plaintext is printed once to standard
-  output and never persisted or logged.
-- `setup_code_hash` and `setup_code_expires_at` are cleared in the same transaction that sets
-  `status` to `Completed`, so a consumed code cannot be replayed.
-- Setup completion locks this row and re-checks `status` inside a serializable transaction, so only
-  one concurrent request or instance can complete an installation.
-- `configuration_version` increments with every activated settings snapshot and is reported in
-  startup diagnostics, so all instances can be confirmed to run the same configuration.
-
-## Ownership
-
-SignaCore owns all writes to this table. Editing it by hand can either lock an operator out of a
-working deployment or expose unauthenticated setup on one that already owns accounts.
+The runtime authority, its invariants, and its ownership rules are documented in
+[service_installations](./service_installations.md).

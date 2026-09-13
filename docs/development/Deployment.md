@@ -188,9 +188,10 @@ silently rotate or replace signing keys.
 2. Create the bootstrap file using the currently deployed connection string and the value the
    deployment previously supplied as `RSA_MASTER_KEY`. The key derivation is unchanged, so stored
    signing keys remain decryptable.
-3. Leave the existing legacy environment variables in place for one start. Migrations add
-   `system_settings` and `installation_state`, and because business data already exists SignaCore runs
-   the protected legacy import instead of exposing `/setup`.
+3. Leave the existing legacy environment variables in place for one start. Migrations bring the
+   schema up to date and adopt the database into the shared `service_installations` installation
+   state, and because business data already exists SignaCore runs the protected legacy import instead
+   of exposing `/setup`.
 4. Confirm startup reported a completed import, then remove the legacy variables from the launcher and
    redeploy. Anything still supplied is logged as an ignored legacy override.
 5. Change settings from then on through the administration pages, followed by a coordinated rolling

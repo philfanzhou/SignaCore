@@ -91,10 +91,9 @@ public sealed class ServerDatabaseContractTests
                     ({credentialId}, {accountId}, {"LegacyUser"}, {"hash"}, {DateTimeOffset.UtcNow});
                 """, cancellationToken: TestContext.Current.CancellationToken);
 
-            await SchemaMigrator.MigrateAsync(
+            await new SignaCore.Host.Migration.SignaCoreMigrationExecutor(
                 context,
-                databaseOptions,
-                TestContext.Current.CancellationToken);
+                databaseOptions).ExecuteAsync(TestContext.Current.CancellationToken);
 
             var credential = await context.PasswordCredentials
                 .AsNoTracking()

@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SignaCore.Database;
-using SignaCore.Database.Entity;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Http;
@@ -58,10 +57,14 @@ public sealed class AdminSettingsController : ControllerBase
             .AsNoTracking()
             .ToDictionaryAsync(setting => setting.Key, StringComparer.OrdinalIgnoreCase, cancellationToken);
 
-        var state = await _db.InstallationStates
-            .AsNoTracking()
-            .FirstOrDefaultAsync(row => row.Id == InstallationStateEntity.SingletonId, cancellationToken);
-        var storedVersion = state?.ConfigurationVersion ?? _runtimeState.ConfigurationVersion;
+        var storedVersion = await SystemSettingsStore.ReadConfigurationVersionAsync(
+            _db, cancellationToken);
+        if (storedVersion == 0)
+        {
+            // No settings row exists (only reachable on a database that fails startup anyway);
+            // report the running version rather than a phantom restart-pending state.
+            storedVersion = _runtimeState.ConfigurationVersion;
+        }
 
         var snapshot = await _settingsStore.LoadAsync(_db, storedVersion, cancellationToken);
 
@@ -169,13 +172,18 @@ public sealed class AdminSettingsController : ControllerBase
                 IsolationLevel.Serializable,
                 cancellationToken);
 
-            var state = await InstallationStateLock.LoadLockedAsync(_db, _databaseOptions, cancellationToken);
-            if (state is null)
+            // The installation row lock serializes every configuration-version writer; the version
+            // itself is derived from the stored settings rows.
+            var installation = await InstallationStateLock.LoadLockedAsync(
+                _db, _databaseOptions, cancellationToken);
+            if (installation is null)
             {
                 return SettingsUpdateOutcome.Failed("Installation state is missing.", isConflict: true);
             }
 
-            var current = await _settingsStore.LoadAsync(_db, state.ConfigurationVersion, cancellationToken);
+            var currentVersion = await SystemSettingsStore.ReadConfigurationVersionAsync(
+                _db, cancellationToken);
+            var current = await _settingsStore.LoadAsync(_db, currentVersion, cancellationToken);
 
             // Merge onto the full current snapshot: a settings change is still validated as one
             // snapshot, so a value that only becomes invalid in combination with an untouched one is
@@ -202,7 +210,7 @@ public sealed class AdminSettingsController : ControllerBase
 
             if (pendingKeys.Count == 0)
             {
-                return SettingsUpdateOutcome.Unchanged(state.ConfigurationVersion);
+                return SettingsUpdateOutcome.Unchanged(currentVersion);
             }
 
             var errors = SettingsSnapshotValidator.Validate(proposed, _environment.IsDevelopment());
@@ -211,7 +219,7 @@ public sealed class AdminSettingsController : ControllerBase
                 return SettingsUpdateOutcome.Failed(string.Join(" ", errors), isConflict: false);
             }
 
-            var nextVersion = state.ConfigurationVersion + 1;
+            var nextVersion = currentVersion + 1;
             await _settingsStore.WriteAsync(
                 _db,
                 proposed.Where(pair => pendingKeys.Contains(pair.Key, StringComparer.OrdinalIgnoreCase))
@@ -219,9 +227,6 @@ public sealed class AdminSettingsController : ControllerBase
                 nextVersion,
                 User.Identity?.Name,
                 cancellationToken);
-
-            state.ConfigurationVersion = nextVersion;
-            _db.InstallationStates.Update(state);
 
             var actorId = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
                 ? id

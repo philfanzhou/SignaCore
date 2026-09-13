@@ -162,20 +162,23 @@ public sealed class ServiceMantleInstallationAdoptionTests
 
     private static async Task SeedAsync(IdentityDbContext context, AdoptionScenario scenario)
     {
+        // The legacy installation_state entity and mapping are gone from the runtime model (the
+        // forward drop migration retires the table), so the pre-upgrade singleton row is seeded the
+        // way the historical schema actually received it: raw SQL against the still-present table.
         switch (scenario)
         {
             case AdoptionScenario.CompletedInstallationState:
-                context.InstallationStates.Add(CompletedState());
+                await SeedLegacyInstallationStateAsync(context, completed: true);
                 break;
             case AdoptionScenario.BusinessDataWithoutInstallationState:
                 context.Accounts.Add(NewAccount());
                 break;
             case AdoptionScenario.PendingWithBusinessData:
-                context.InstallationStates.Add(PendingState());
+                await SeedLegacyInstallationStateAsync(context, completed: false);
                 context.Accounts.Add(NewAccount());
                 break;
             case AdoptionScenario.PendingWithoutBusinessData:
-                context.InstallationStates.Add(PendingState());
+                await SeedLegacyInstallationStateAsync(context, completed: false);
                 break;
             case AdoptionScenario.FreshEmptyDatabase:
                 return;
@@ -186,24 +189,33 @@ public sealed class ServiceMantleInstallationAdoptionTests
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
 
-    private static InstallationStateEntity CompletedState() => new()
+    private static async Task SeedLegacyInstallationStateAsync(
+        IdentityDbContext context,
+        bool completed)
     {
-        Id = InstallationStateEntity.SingletonId,
-        Status = InstallationStatus.Completed,
-        InstallationId = Guid.NewGuid(),
-        CompletedAt = DateTimeOffset.UtcNow,
-        ConfigurationVersion = 1
-    };
+        var installationId = Guid.NewGuid();
+        var completedAt = DateTimeOffset.UtcNow;
+        var expiresAt = DateTimeOffset.UtcNow.AddHours(1);
 
-    private static InstallationStateEntity PendingState() => new()
-    {
-        Id = InstallationStateEntity.SingletonId,
-        Status = InstallationStatus.Pending,
-        InstallationId = Guid.NewGuid(),
-        SetupCodeHash = "legacy-setup-code-hash",
-        SetupCodeExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
-        ConfigurationVersion = 0
-    };
+        if (context.Database.IsSqlite())
+        {
+            // The historical SQLite mapping stored instants as Unix microseconds; raw SQL bypasses
+            // the (now removed) EF value converter, so convert explicitly.
+            static long ToUnixMicroseconds(DateTimeOffset value) =>
+                (value.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / 10;
+
+            await context.Database.ExecuteSqlAsync($"""
+                INSERT INTO installation_state (id, status, installation_id, setup_code_hash, setup_code_expires_at, completed_at, configuration_version)
+                VALUES (1, {(completed ? 1 : 0)}, {installationId}, {(completed ? (string?)null : "legacy-setup-code-hash")}, {(completed ? (long?)null : ToUnixMicroseconds(expiresAt))}, {(completed ? ToUnixMicroseconds(completedAt) : (long?)null)}, {(completed ? 1 : 0)});
+                """, TestContext.Current.CancellationToken);
+            return;
+        }
+
+        await context.Database.ExecuteSqlAsync($"""
+            INSERT INTO installation_state (id, status, installation_id, setup_code_hash, setup_code_expires_at, completed_at, configuration_version)
+            VALUES (1, {(completed ? 1 : 0)}, {installationId}, {(completed ? (string?)null : "legacy-setup-code-hash")}, {(completed ? (DateTimeOffset?)null : expiresAt)}, {(completed ? completedAt : (DateTimeOffset?)null)}, {(completed ? 1 : 0)});
+            """, TestContext.Current.CancellationToken);
+    }
 
     private static AccountEntity NewAccount() => new()
     {

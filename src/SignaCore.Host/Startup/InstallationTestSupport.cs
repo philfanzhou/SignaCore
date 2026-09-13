@@ -1,10 +1,13 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Installation;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Configuration;
+using SignaCore.Host.Installation;
 
 namespace SignaCore.Host.Startup;
 
@@ -56,7 +59,7 @@ internal static class InstallationTestSupport
         optionsBuilder.UseIdentityDatabase(database);
         await using var db = new IdentityDbContext(optionsBuilder.Options);
 
-        await DatabaseProvisioner.EnsureDatabaseExistsAsync(database, cancellationToken);
+        await StartupDatabase.EnsureDatabaseExistsAsync(database, cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
 
         var values = SystemSettingsCatalog.BuildDefaults();
@@ -98,13 +101,13 @@ internal static class InstallationTestSupport
             CreatedAt = now
         });
 
-        db.InstallationStates.Add(new InstallationStateEntity
+        db.ServiceInstallations.Add(new ServiceInstallationEntity
         {
-            Id = InstallationStateEntity.SingletonId,
+            ServiceId = InstallationStores.ServiceIdValue,
             Status = InstallationStatus.Completed,
-            InstallationId = Guid.NewGuid(),
-            CompletedAt = now,
-            ConfigurationVersion = 1
+            CreatedAtUtc = now.UtcDateTime,
+            CompletedAtUtc = now.UtcDateTime,
+            Version = 1
         });
 
         await db.SaveChangesAsync(cancellationToken);

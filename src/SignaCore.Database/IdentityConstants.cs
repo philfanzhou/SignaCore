@@ -85,7 +85,6 @@ public static class IdentityConstants
     public const int MaxEncryptionSaltLength = 256;
     public const int MaxSettingKeyLength = 200;
     public const int MaxSettingValueTypeLength = 32;
-    public const int MaxSetupCodeHashLength = 128;
 
     public const int DefaultCallbackTtlSeconds = 3600;
 

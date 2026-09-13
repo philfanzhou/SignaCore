@@ -5,6 +5,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
+using ServiceMantle;
+using ServiceMantle.Installation;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Host.Bootstrap;
@@ -437,14 +439,20 @@ public sealed class SqliteStartupMigrationGateTests
             Assert.NotNull(result.PlaintextSetupCode);
             Assert.Null(result.Snapshot);
 
-            Assert.True(TableExists(databasePath, "installation_state"));
-            Assert.Equal(1, Scalar(databasePath, "SELECT COUNT(*) FROM installation_state"));
-            var storedHash = await StoredSetupCodeHashAsync(databasePath);
-            Assert.Equal(SetupCode.Hash(result.PlaintextSetupCode!), storedHash);
-
-            // A fresh empty install adopts no service_installations row (issue #70 semantics).
+            // The legacy installation_state table is dropped by the forward migration; the pending
+            // installation and its hashed setup code live in service_installations.
+            Assert.False(TableExists(databasePath, "installation_state"));
             Assert.True(TableExists(databasePath, "service_installations"));
-            Assert.Equal(0, Scalar(databasePath, "SELECT COUNT(*) FROM service_installations"));
+            Assert.Equal(1, Scalar(databasePath, "SELECT COUNT(*) FROM service_installations"));
+            var storedDigest = await StoredSetupCodeDigestAsync(databasePath);
+            Assert.NotNull(storedDigest);
+            Assert.True(
+                ServiceMantle.Installation.SetupCode.TryParse(result.PlaintextSetupCode, out var setupCode) &&
+                setupCode is not null &&
+                SetupCodeDigest.Compute(setupCode).Value == storedDigest,
+                "The stored service_installations digest must be the ServiceMantle digest of the issued plaintext.");
+            var storedStatus = Convert.ToInt32(await StoredColumnAsync(databasePath, "service_installations", "status"));
+            Assert.Equal((int)ServiceMantle.Installation.InstallationStatus.PendingSetup, storedStatus);
         }
         finally
         {
@@ -535,10 +543,53 @@ public sealed class SqliteStartupMigrationGateTests
             Assert.Null(result.PlaintextSetupCode);
             Assert.NotNull(result.Snapshot);
             Assert.Equal("http://localhost", result.Snapshot!.Values[SystemSettingKeys.PublicBaseUrl]);
+
+            // The business data made the backfill adopt a completed service_installations row; the
+            // import filled system_settings and left the shared row completed. The legacy
+            // installation_state table is gone.
+            Assert.False(TableExists(databasePath, "installation_state"));
             Assert.Equal(
-                InstallationStatus.Completed,
-                (InstallationStatus)Convert.ToInt32(
-                    await StoredColumnAsync(databasePath, "installation_state", "status")));
+                (int)ServiceMantle.Installation.InstallationStatus.Completed,
+                Convert.ToInt32(
+                    await StoredColumnAsync(databasePath, "service_installations", "status")));
+        }
+        finally
+        {
+            Cleanup(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Bootstrap_PendingInstallationWithoutIssuedCode_IssuesCodeOnNextBoot()
+    {
+        var databasePath = NewDatabasePath();
+        try
+        {
+            var options = TestDatabaseOptions(databasePath);
+
+            // First boot creates the pending installation and issues its code.
+            var first = await BootstrapPhase.RunAsync(
+                NewBootstrap(options), EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance);
+            Assert.Equal(InstallationPhase.PendingSetup, first.Phase);
+            Assert.NotNull(first.PlaintextSetupCode);
+
+            // Simulate the recovery window between creating the pending row and saving its first
+            // code: the row survives with no issued material.
+            ExecuteSql(
+                databasePath,
+                "UPDATE service_installations SET setup_code_generation = 0, setup_code_digest = NULL, setup_code_issued_at_utc = NULL, setup_code_expires_at_utc = NULL");
+
+            var second = await BootstrapPhase.RunAsync(
+                NewBootstrap(options), EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance);
+            Assert.Equal(InstallationPhase.PendingSetup, second.Phase);
+            Assert.NotNull(second.PlaintextSetupCode);
+            Assert.NotEqual(first.PlaintextSetupCode, second.PlaintextSetupCode);
+
+            var storedDigest = await StoredSetupCodeDigestAsync(databasePath);
+            Assert.True(
+                ServiceMantle.Installation.SetupCode.TryParse(second.PlaintextSetupCode, out var setupCode) &&
+                setupCode is not null &&
+                SetupCodeDigest.Compute(setupCode).Value == storedDigest);
         }
         finally
         {
@@ -566,8 +617,8 @@ public sealed class SqliteStartupMigrationGateTests
                 databasePath,
                 "INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES ('99990101000000_NotInThisBuild', '10.0.12')");
 
-            var setupCodeHashBeforeFailure = await StoredColumnAsync(databasePath, "installation_state", "setup_code_hash");
-            Assert.Null(setupCodeHashBeforeFailure);
+            var storedDigestBeforeFailure = await StoredSetupCodeDigestAsync(databasePath);
+            Assert.Null(storedDigestBeforeFailure);
 
             var exception = await Assert.ThrowsAsync<StartupMigrationException>(() => BootstrapPhase.RunAsync(
                 NewBootstrap(options), EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance));
@@ -575,12 +626,12 @@ public sealed class SqliteStartupMigrationGateTests
 
             // A completed installation is not rolled back and no new setup code is issued.
             Assert.Equal(
-                InstallationStatus.Completed,
-                (InstallationStatus)Convert.ToInt32(
-                    await StoredColumnAsync(databasePath, "installation_state", "status")));
+                (int)ServiceMantle.Installation.InstallationStatus.Completed,
+                Convert.ToInt32(
+                    await StoredColumnAsync(databasePath, "service_installations", "status")));
             Assert.Equal(
-                setupCodeHashBeforeFailure,
-                await StoredColumnAsync(databasePath, "installation_state", "setup_code_hash"));
+                storedDigestBeforeFailure,
+                await StoredSetupCodeDigestAsync(databasePath));
         }
         finally
         {
@@ -620,10 +671,10 @@ public sealed class SqliteStartupMigrationGateTests
                 NewBootstrap(options), EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance));
             Assert.Equal(WellKnownMigrationErrorCodes.ExecutionFailed, exception.ErrorCode);
 
-            // The failure never reached installation resolution: the prefix schema already owns
-            // the (empty) installation_state table, and no row or setup code was generated.
-            Assert.True(TableExists(databasePath, "installation_state"));
-            Assert.Equal(0, Scalar(databasePath, "SELECT COUNT(*) FROM installation_state"));
+            // The failure never reached installation resolution: no service_installations row or
+            // setup code was generated anywhere.
+            Assert.True(TableExists(databasePath, "service_installations"));
+            Assert.Equal(0, Scalar(databasePath, "SELECT COUNT(*) FROM service_installations"));
 
             // A safe retry after the operator removes the conflicting object resumes the existing
             // migration behavior; no history, installation row, or database deletion is involved.
@@ -632,7 +683,9 @@ public sealed class SqliteStartupMigrationGateTests
                 NewBootstrap(options), EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance);
             Assert.Equal(InstallationPhase.PendingSetup, result.Phase);
             Assert.NotNull(result.PlaintextSetupCode);
-            Assert.True(TableExists(databasePath, "installation_state"));
+            Assert.Equal(
+                1,
+                Scalar(databasePath, "SELECT COUNT(*) FROM service_installations"));
         }
         finally
         {
@@ -666,7 +719,7 @@ public sealed class SqliteStartupMigrationGateTests
                 Assert.Equal(cts.Token, exception.CancellationToken);
 
                 // Installation resolution never started: no state row exists anywhere.
-                Assert.False(TableExists(databasePath, "installation_state"));
+                Assert.False(TableExists(databasePath, "service_installations"));
             }
             finally
             {
@@ -711,7 +764,7 @@ public sealed class SqliteStartupMigrationGateTests
                     executor,
                     cts.Token));
             Assert.Equal(cts.Token, exception.CancellationToken);
-            Assert.False(TableExists(databasePath, "installation_state"));
+            Assert.False(TableExists(databasePath, "service_installations"));
         }
         finally
         {
@@ -751,8 +804,8 @@ public sealed class SqliteStartupMigrationGateTests
         return value is DBNull ? null : value;
     }
 
-    private static async Task<string?> StoredSetupCodeHashAsync(string databasePath) =>
-        (string?)await StoredColumnAsync(databasePath, "installation_state", "setup_code_hash");
+    private static async Task<string?> StoredSetupCodeDigestAsync(string databasePath) =>
+        (string?)await StoredColumnAsync(databasePath, "service_installations", "setup_code_digest");
 
     private static (DelegateMigrationExecutor Executor, TaskCompletionSource Entered) CancellingExecutor(
         Stage stage,

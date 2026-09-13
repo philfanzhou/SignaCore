@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Installation;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using ServiceMantle.Migration;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
@@ -17,7 +19,8 @@ internal sealed record BootstrapPhaseResult(
     IConfigurationProtector ConfigurationProtector,
     SystemSettingsStore SettingsStore,
     SystemSettingsSnapshot? Snapshot,
-    string? PlaintextSetupCode);
+    string? PlaintextSetupCode,
+    DateTimeOffset? SetupCodeExpiresAt);
 
 /// <summary>
 /// Everything that must happen before the application phase can be composed: open the business
@@ -64,13 +67,14 @@ internal static class BootstrapPhase
 
         await using var db = CreateDbContext(bootstrap.Database);
 
-        await DatabaseProvisioner.EnsureDatabaseExistsAsync(bootstrap.Database, cancellationToken);
-        await using (await DatabaseProvisioner.AcquireMigrationLockAsync(bootstrap.Database, cancellationToken))
+        await StartupDatabase.EnsureDatabaseExistsAsync(bootstrap.Database, cancellationToken);
+        await using (await StartupDatabase.AcquireInitializationLockAsync(bootstrap.Database, cancellationToken))
         {
-            // The shared migration orchestration runs inside SignaCore's own outer lock: for
-            // PostgreSQL it acquires the service-scoped shared migration lock, runs the limited
-            // observation, executes the full SchemaMigrator workflow at most once, and re-inspects
-            // before returning; SQLite serializes on the process-local single-instance turn.
+            // The shared migration orchestration runs inside SignaCore's own outer initialization
+            // lock: for PostgreSQL it acquires the service-scoped shared migration lock, runs the
+            // limited observation, executes the full SignaCore migration workflow at most once, and
+            // re-inspects before returning; SQLite serializes on the process-local single-instance
+            // turn.
             if (migrationExecutor is null)
             {
                 await StartupMigrationGate.RunAsync(db, bootstrap.Database, logger, cancellationToken);
@@ -85,64 +89,68 @@ internal static class BootstrapPhase
             // original-token cancellation takes precedence over entering installation resolution.
             cancellationToken.ThrowIfCancellationRequested();
 
-            var (phase, state, plaintextSetupCode) =
-                await InstallationStateResolver.ResolveAsync(db, cancellationToken);
+            var resolution = await InstallationStateResolver.ResolveAsync(db, cancellationToken);
 
-            if (phase == InstallationPhase.LegacyImportRequired)
+            if (resolution.Phase == InstallationPhase.LegacyImportRequired)
             {
                 logger.LogWarning(
-                    "No installation state found in a database that already contains business data. " +
+                    "A database that already contains business data has no imported configuration. " +
                     "Running the protected legacy configuration import; first-run setup stays closed.");
-                state = await LegacyConfigurationImporter.ImportAsync(
+                await LegacyConfigurationImporter.ImportAsync(
                     db,
                     configuration,
                     settingsStore,
                     logger,
                     environment.IsDevelopment(),
                     cancellationToken);
-                phase = InstallationPhase.Completed;
+                resolution = new InstallationResolution(
+                    InstallationPhase.Completed, ConfigurationVersion: 1, SetupCode: null);
             }
 
+            // The durable installation identity is the service id; this Guid is only a stable
+            // per-boot reference for the setup status surface.
             var runtimeState = new InstallationRuntimeState(
-                phase,
-                state.InstallationId,
-                state.ConfigurationVersion);
+                resolution.Phase,
+                Guid.NewGuid(),
+                resolution.ConfigurationVersion);
 
-            if (phase != InstallationPhase.Completed)
+            if (resolution.Phase != InstallationPhase.Completed)
             {
                 return new BootstrapPhaseResult(
                     bootstrap,
-                    phase,
+                    resolution.Phase,
                     runtimeState,
                     masterKeyProvider,
                     protector,
                     settingsStore,
                     Snapshot: null,
-                    plaintextSetupCode);
+                    resolution.SetupCode?.Plaintext,
+                    resolution.SetupCode?.ExpiresAtUtc);
             }
 
-            var snapshot = await settingsStore.LoadAsync(db, state.ConfigurationVersion, cancellationToken);
+            var snapshot = await settingsStore.LoadAsync(db, resolution.ConfigurationVersion, cancellationToken);
 
             // Fail closed. A completed installation is never rolled back to Pending because settings
             // are missing: that would reopen anonymous setup against a database that owns accounts.
             SettingsSnapshotValidator.ThrowIfInvalid(snapshot.Values, environment.IsDevelopment());
 
             logger.LogInformation(
-                "Loaded configuration snapshot: InstallationId={InstallationId}, " +
+                "Loaded configuration snapshot: ServiceId={ServiceId}, " +
                 "ConfigurationVersion={Version}, SettingCount={SettingCount}",
-                state.InstallationId,
-                state.ConfigurationVersion,
+                InstallationStores.ServiceIdValue,
+                resolution.ConfigurationVersion,
                 snapshot.Values.Count);
 
             return new BootstrapPhaseResult(
                 bootstrap,
-                phase,
+                resolution.Phase,
                 runtimeState,
                 masterKeyProvider,
                 protector,
                 settingsStore,
                 snapshot,
-                PlaintextSetupCode: null);
+                PlaintextSetupCode: null,
+                SetupCodeExpiresAt: null);
         }
     }
 
@@ -169,15 +177,17 @@ internal static class BootstrapPhase
 
         await using var db = CreateDbContext(bootstrap.Database);
 
-        await using var migrationLock =
-            await DatabaseProvisioner.AcquireMigrationLockAsync(bootstrap.Database, cancellationToken);
+        await using var initializationLock =
+            await StartupDatabase.AcquireInitializationLockAsync(bootstrap.Database, cancellationToken);
 
-        Database.Entity.InstallationStateEntity? state;
+        ServiceInstallationEntity? installation;
         try
         {
-            state = await db.InstallationStates.FirstOrDefaultAsync(
-                row => row.Id == Database.Entity.InstallationStateEntity.SingletonId,
-                cancellationToken);
+            installation = await db.ServiceInstallations
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    row => row.ServiceId == InstallationStores.ServiceIdValue,
+                    cancellationToken);
         }
         catch (Exception exception)
         {
@@ -189,26 +199,39 @@ internal static class BootstrapPhase
             return 1;
         }
 
-        if (state is null)
+        if (installation is null)
         {
             Console.Error.WriteLine(
                 "No installation state exists yet. Start SignaCore once so it can initialize the database.");
             return 1;
         }
 
-        if (state.Status == Database.Entity.InstallationStatus.Completed)
+        if (installation.Status == InstallationStatus.Completed)
         {
             Console.Error.WriteLine(
                 "Installation is already completed. The setup code cannot be reissued.");
             return 1;
         }
 
-        var code = SetupCode.Generate();
-        state.SetupCodeHash = SetupCode.Hash(code);
-        state.SetupCodeExpiresAt = DateTimeOffset.UtcNow.Add(SetupCode.DefaultLifetime);
-        await db.SaveChangesAsync(cancellationToken);
+        var setupCodeStore = InstallationStores.CreateSetupCodeStore(db);
+        var issued = await setupCodeStore.RotateAsync(InstallationStores.ServiceId, cancellationToken);
+        if (!issued.IsIssued && issued.ErrorCode == WellKnownSetupCodeErrorCodes.NotCreated)
+        {
+            // A pending row whose code was never issued (the recovery window after row creation)
+            // has nothing to rotate; create the first code instead.
+            issued = await setupCodeStore.CreateAsync(InstallationStores.ServiceId, cancellationToken);
+        }
 
-        StartupBanner.WriteSetupCode(code, state.SetupCodeExpiresAt.Value);
+        if (!issued.IsIssued)
+        {
+            Console.Error.WriteLine(
+                $"The setup code could not be reissued ({issued.ErrorCode}).");
+            return 1;
+        }
+
+        StartupBanner.WriteSetupCode(
+            issued.SetupCode!.Reveal(),
+            new DateTimeOffset(issued.ExpiresAtUtc!.Value));
         return 0;
     }
 

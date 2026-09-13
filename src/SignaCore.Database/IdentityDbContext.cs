@@ -33,14 +33,11 @@ public class IdentityDbContext : DbContext, IServiceDbContext
     public DbSet<AppWechatAccessEntity> AppWechatAccesses => Set<AppWechatAccessEntity>();
     public DbSet<AppExchangeTrustEntity> AppExchangeTrusts => Set<AppExchangeTrustEntity>();
     public DbSet<SystemSettingEntity> SystemSettings => Set<SystemSettingEntity>();
-    public DbSet<InstallationStateEntity> InstallationStates => Set<InstallationStateEntity>();
     public DbSet<DataProtectionKeyEntity> DataProtectionKeys => Set<DataProtectionKeyEntity>();
 
-    // ServiceMantle shared installation state (service_installations). Added by issue #70 as a
-    // purely additive slice: SignaCore's own `installation_state` singleton stays the sole runtime
-    // authority for anonymous-setup protection, and nothing reads this table until the startup phase
-    // orchestration is wired in a later task. The consumer owns this mapping, its migrations, and
-    // every save/transaction boundary.
+    // ServiceMantle shared installation state (service_installations): the runtime authority for
+    // installation status and the one-time setup code. The consumer owns this mapping, its
+    // migrations, and every save/transaction boundary.
     public DbSet<ServiceInstallationEntity> ServiceInstallations => Set<ServiceInstallationEntity>();
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -399,23 +396,6 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.Property(e => e.Version).HasColumnName("version");
             ConfigureInstant(entity.Property(e => e.UpdatedAt).HasColumnName("updated_at"));
             entity.Property(e => e.UpdatedBy).HasColumnName("updated_by").HasMaxLength(IdentityConstants.MaxUsernameLength);
-        });
-
-        modelBuilder.Entity<InstallationStateEntity>(entity =>
-        {
-            entity.ToTable(
-                "installation_state",
-                table => table.HasCheckConstraint(
-                    "CK_installation_state_singleton",
-                    "id = 1"));
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedNever();
-            entity.Property(e => e.Status).HasColumnName("status");
-            entity.Property(e => e.InstallationId).HasColumnName("installation_id");
-            entity.Property(e => e.SetupCodeHash).HasColumnName("setup_code_hash").HasMaxLength(IdentityConstants.MaxSetupCodeHashLength);
-            ConfigureInstant(entity.Property(e => e.SetupCodeExpiresAt).HasColumnName("setup_code_expires_at"));
-            ConfigureInstant(entity.Property(e => e.CompletedAt).HasColumnName("completed_at"));
-            entity.Property(e => e.ConfigurationVersion).HasColumnName("configuration_version");
         });
 
         // ServiceMantle shared installation mapping (service_installations). Applied last so it never

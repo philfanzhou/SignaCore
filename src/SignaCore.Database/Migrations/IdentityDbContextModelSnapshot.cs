@@ -521,45 +521,6 @@ namespace SignaCore.Database.Migrations
                     b.ToTable("data_protection_keys", (string)null);
                 });
 
-            modelBuilder.Entity("SignaCore.Database.Entity.InstallationStateEntity", b =>
-                {
-                    b.Property<int>("Id")
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("completed_at");
-
-                    b.Property<int>("ConfigurationVersion")
-                        .HasColumnType("integer")
-                        .HasColumnName("configuration_version");
-
-                    b.Property<Guid>("InstallationId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("installation_id");
-
-                    b.Property<DateTimeOffset?>("SetupCodeExpiresAt")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("setup_code_expires_at");
-
-                    b.Property<string>("SetupCodeHash")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("setup_code_hash");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer")
-                        .HasColumnName("status");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("installation_state", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_installation_state_singleton", "id = 1");
-                        });
-                });
-
             modelBuilder.Entity("SignaCore.Database.Entity.LdapCredentialEntity", b =>
                 {
                     b.Property<Guid>("Id")

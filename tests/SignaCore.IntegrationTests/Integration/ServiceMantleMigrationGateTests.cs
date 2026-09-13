@@ -57,9 +57,6 @@ public sealed class ServiceMantleMigrationGateTests
         Assert.Equal(context.Database.GetMigrations().Count(), applied.Count());
         Assert.Equal(
             1,
-            await context.InstallationStates.AsNoTracking().CountAsync(TestContext.Current.CancellationToken));
-        Assert.Equal(
-            0,
             await context.ServiceInstallations.AsNoTracking().CountAsync(TestContext.Current.CancellationToken));
     }
 
@@ -205,7 +202,7 @@ public sealed class ServiceMantleMigrationGateTests
         Assert.Equal(context.Database.GetMigrations().Count(), applied.Count());
         Assert.Equal(
             1,
-            await context.InstallationStates.AsNoTracking().CountAsync(TestContext.Current.CancellationToken));
+            await context.ServiceInstallations.AsNoTracking().CountAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -218,10 +215,10 @@ public sealed class ServiceMantleMigrationGateTests
         // what is under test is the wait behind the retained outer lock, not migration itself.
         await MigrateToAsync(database, null);
 
-        // Retain SignaCore's original outer lock alone (the shape every pre-gate binary and the
-        // setup-code rotation command still produce).
+        // Retain SignaCore's original outer initialization lock alone (the shape every pre-gate
+        // binary and the setup-code rotation command still produce).
         var outerLock =
-            await SignaCore.Host.DatabaseProvisioner.AcquireMigrationLockAsync(
+            await SignaCore.Host.Startup.StartupDatabase.AcquireInitializationLockAsync(
                 database,
                 TestContext.Current.CancellationToken);
 

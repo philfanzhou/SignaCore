@@ -23,6 +23,22 @@ internal sealed class SystemSettingsStore
     }
 
     /// <summary>
+    /// The current configuration version, derived from the highest version stamped on any stored
+    /// setting. Every version publisher (first-run setup, legacy import, settings changes) writes at
+    /// least one row stamped with the new version under the installation writer lock, so the maximum
+    /// is the single global counter the retired <c>installation_state.configuration_version</c>
+    /// column used to hold.
+    /// </summary>
+    public static async Task<int> ReadConfigurationVersionAsync(
+        IdentityDbContext db,
+        CancellationToken cancellationToken = default)
+    {
+        return await db.SystemSettings
+            .AsNoTracking()
+            .MaxAsync(setting => (int?)setting.Version, cancellationToken) ?? 0;
+    }
+
+    /// <summary>
     /// Loads every stored setting, decrypts secrets, and expands JSON settings into configuration
     /// keys. Throws when any single row cannot be materialised: an activated snapshot is all-or-nothing.
     /// </summary>

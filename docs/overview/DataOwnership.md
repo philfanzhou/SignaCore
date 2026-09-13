@@ -12,7 +12,7 @@ SignaCore exclusively owns identity credentials, login bindings, application sec
 | JWT authorization claims | Issuer plus application callback | Signed token |
 | Audit and login history | SignaCore | Administrative API |
 | Global application settings | SignaCore (`system_settings`) | Administrative API; secret values never returned |
-| Installation state and setup-code state | SignaCore (`installation_state`) | Never exposed |
+| Installation state and setup-code state | SignaCore (`service_installations`) | Never exposed |
 | Database connection and external root key | Deployment (writable protected bootstrap file) | Never stored in the database; local edits require coordinated distribution |
 | Image, container, host port, mounts, restart policy | Launcher / orchestrator | Not application configuration |
 

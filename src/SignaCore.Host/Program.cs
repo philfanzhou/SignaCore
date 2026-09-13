@@ -169,7 +169,8 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
     {
         StartupBanner.WriteSetupCode(
             bootstrapResult.PlaintextSetupCode,
-            DateTimeOffset.UtcNow.Add(SetupCode.DefaultLifetime));
+            bootstrapResult.SetupCodeExpiresAt
+                ?? DateTimeOffset.UtcNow.Add(ServiceMantle.Installation.SetupCodeLifetime.MaximumValue));
     }
 
     StartupBanner.WriteSetupModeNotice();

@@ -190,7 +190,7 @@ public sealed class SqliteMigrationObservationTests
     }
 
     [Fact]
-    public async Task Execute_RunsFullSchemaMigrator_AndLeavesBorrowedContextUsable()
+    public async Task Execute_RunsTheFullSignaCoreMigrationWorkflow_AndLeavesBorrowedContextUsable()
     {
         var databasePath = NewDatabasePath();
         var (executor, db) = CreateExecutor(databasePath);

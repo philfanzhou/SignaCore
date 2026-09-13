@@ -245,8 +245,7 @@ internal sealed class BootstrapConfigurationService
         BootstrapTargetKind.PendingInstallation =>
             $"{inspection.Endpoint} holds a SignaCore installation that has not completed first-run setup.",
         BootstrapTargetKind.CompletedInstallation =>
-            $"{inspection.Endpoint} holds a completed SignaCore installation " +
-            $"({inspection.InstallationId}).",
+            $"{inspection.Endpoint} holds a completed SignaCore installation.",
         BootstrapTargetKind.LegacyData =>
             $"{inspection.Endpoint} holds SignaCore data from before database-backed configuration. " +
             "Startup will run the protected legacy import.",
