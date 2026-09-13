@@ -43,6 +43,10 @@ internal static class SetupModeHost
 
         services.RegisterPasswordHashingDefaults();
         services.AddScoped<InstallationSetupService>();
+        // The per-attempt contributor factory the setup service orchestrates through the shared
+        // ServiceMantle setup orchestration; request-scoped so every attempt shares the request
+        // scope's IdentityDbContext.
+        services.AddScoped<InitialAdministratorSetupContributorFactory>();
 
         services.AddHealthChecks()
             .AddDbContextCheck<IdentityDbContext>(

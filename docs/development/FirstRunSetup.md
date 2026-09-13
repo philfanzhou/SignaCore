@@ -122,17 +122,59 @@ The administrator plaintext password is used only to create its password hash. I
 `POST /api/setup/complete` performs the following in one serializable transaction:
 
 1. re-read and lock the singleton installation row;
-2. confirm the status is still `Pending` and validate the setup code;
-3. validate the public base URL and administrator password policy;
+2. confirm the status is still `Pending` and validate the setup code read-only;
+3. run the shared ServiceMantle setup orchestration over the initial-administrator contributor:
+   its read-only validation re-checks the password policy and the normalized-username uniqueness,
+   and its registration stages the administrator account and the password hash without saving;
 4. insert the complete default global-settings snapshot;
-5. create the initial administrator and password hash;
-6. write a setup-completed audit event without sensitive values;
-7. change the status to `Completed`, increment the configuration version, and invalidate the setup
-   code;
-8. commit.
+5. stage the setup-completed audit event — expressed with the shared audit model
+   (`installation.completed` on the `service:signacore` target, operator source `setup_code`
+   carrying the created account id) and projected onto the existing `audit_logs` row, where the
+   actor links to the account created in step 3;
+6. re-verify and stage consumption of the code together with the `Completed` status, the
+   completion timestamp, and the version increment;
+7. save once, commit once;
+8. once the transaction has been released and its cleanup settled, observe caller cancellation one
+   last time before reporting the result.
+
+The staging order is pinned by the shared orchestrator: it refuses to run on a context that
+already carries pending changes, so the code consumption cannot silently move ahead of the
+contributor's staging. The orchestrator, its contributor, and the audit projection are created
+fresh for every execution-strategy attempt, so a retried PostgreSQL attempt never reuses a
+previous attempt's identifiers or tracked entities.
 
 Only one concurrent request can succeed. Others receive a completed/conflict result without changing
 data, and every instance that observes completion leaves Setup Mode.
+
+### Failure and cancellation boundaries
+
+- A malformed request shape is refused before any transaction is opened.
+- A wrong or expired code is answered from the read-only validation and never consumed; if the
+  final consumption re-check refuses (for example the code expired after validation), everything
+  staged in between is discarded by the rollback and nothing is committed.
+- A username whose normalized form already owns a credential is refused with a fixed message; the
+  existing rows and the code are untouched, and a unique-constraint violation is never surfaced to
+  the caller.
+- Any other staging failure — hashing, settings protection, the audit projection, or the single
+  save — rolls the transaction back and reports one fixed, detail-free exception through the
+  generic error handling. The installation stays `Pending` and its code is preserved.
+- Caller cancellation is observed only once the transaction and its cleanup have settled. Wherever
+  it is observed, setup answers with a single fixed message, the original cancellation token, and
+  no inner exception. Cancellation observed before the commit rolls everything back; cancellation
+  observed after the commit keeps every committed fact and the installation is `Completed` for
+  later requests even though the caller receives no success response. An internal cancellation
+  that is not the caller's is treated as an ordinary failure, not as a caller cancellation.
+
+### The installation audit projection
+
+The setup-completed event is the only audit write in the transaction, and its projection is
+closed: the legacy action stays `installation.setup.completed` with target `Installation` /
+`signacore`, the actor id is the account this transaction created, and the actor name is the
+validated administrator username — product identity data the existing row keeps. The description
+is the fixed completion note with the numeric configuration version and no longer includes the
+public base URL; earlier rows keep whatever they recorded and are not rewritten. Before/after
+snapshots, metadata, and correlation identifiers remain empty, and no password, setup code, root
+key, or settings value is passed into the event, the description, logs, or the response.
 
 ## Transition to the normal host
 
