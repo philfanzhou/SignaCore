@@ -11,6 +11,7 @@ using ServiceMantle.Installation;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.Database.Repositories;
 using SignaCore.Domain.Keys;
 using SignaCore.Host;
 using SignaCore.Host.Configuration;
@@ -271,6 +272,24 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
 
         var audit = await db.AuditLogs.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("installation.setup.completed", audit.Action);
+        // The audit row is the closed projection of the shared installation event: it links to the
+        // account this same transaction created and to the installation target.
+        Assert.Equal("Installation", audit.TargetType);
+        Assert.Equal("signacore", audit.TargetId);
+        Assert.Equal(credential.AccountId, audit.ActorId);
+        Assert.Equal(AdminUsername, audit.ActorName);
+        Assert.Contains("ConfigurationVersion=1", audit.Description, StringComparison.Ordinal);
+        Assert.Null(audit.BeforeSnapshot);
+        Assert.Null(audit.AfterSnapshot);
+        var viaRepository = await new AuditLogRepository(db).QueryAsync(
+            "installation.setup.completed",
+            "Installation",
+            "signacore",
+            credential.AccountId,
+            pageSize: 10,
+            skip: 0,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Single(viaRepository);
     }
 
     /// <summary>
