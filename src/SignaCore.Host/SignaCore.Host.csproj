@@ -24,6 +24,7 @@
     <PackageReference Include="ServiceMantle" />
     <PackageReference Include="ServiceMantle.AspNetCore" />
     <PackageReference Include="ServiceMantle.Database.PostgreSql" />
+    <PackageReference Include="ServiceMantle.Persistence.EntityFrameworkCore" />
     <PackageReference Include="Serilog.Enrichers.Environment" />
     <PackageReference Include="Serilog.Enrichers.Thread" />
     <PackageReference Include="Serilog.Settings.Configuration" />

@@ -9,7 +9,7 @@
 
 ## History
 
-The migration series creates the identity schema, adds login/audit records, normalizes identity values, enforces one OTP state per scope, binds refresh tokens to applications, enables application-scoped LDAP/SMS access, adds OTP optimistic concurrency, enables application-scoped WeChat access, adds the per-application access-token audience mode, adds `system_settings` and `installation_state` so the business database becomes the configuration authority, adds `app_exchange_trusts` plus `refresh_tokens.source_app_id` for cross-application refresh grants, and adds the shared ServiceMantle `service_installations` table with a fail-closed adoption backfill (ServiceMantle issue #70; additive only, not yet read at runtime).
+The migration series creates the identity schema, adds login/audit records, normalizes identity values, enforces one OTP state per scope, binds refresh tokens to applications, enables application-scoped LDAP/SMS access, adds OTP optimistic concurrency, enables application-scoped WeChat access, adds the per-application access-token audience mode, adds `system_settings` and `installation_state` so the business database becomes the configuration authority, adds `app_exchange_trusts` plus `refresh_tokens.source_app_id` for cross-application refresh grants, adds the shared ServiceMantle `service_installations` table with a fail-closed adoption backfill (ServiceMantle issue #70), and finally drops `installation_state` now that `service_installations` is the runtime installation authority (ServiceMantle issue #128). Applied history is immutable: earlier migration files are never edited or deleted.
 
 ## Creating a migration
 
@@ -48,7 +48,7 @@ At startup, `BootstrapPhase` runs the shared ServiceMantle migration orchestrati
 
 The observation only reads the migration schema the connection actually uses (its history table plus that schema's object catalog); the history table and EF's own lock table are not application objects, and any other table or view counts even when empty. Read-only observation never creates the SQLite file, the history table, or any data.
 
-The executor's `ExecuteAsync` still runs the existing `SchemaMigrator` workflow, so the PostgreSQL expand/backfill/contract phases, normalized-value collision checks, and OTP uniqueness checks are unchanged.
+The executor's `ExecuteAsync` owns the full SignaCore migration workflow (formerly `SchemaMigrator`), so the PostgreSQL expand/backfill/contract phases, normalized-value collision checks, and OTP uniqueness checks are unchanged.
 
 Locking:
 

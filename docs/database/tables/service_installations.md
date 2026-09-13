@@ -4,10 +4,11 @@ Shared ServiceMantle installation-state table, mapped into the SignaCore model b
 `AddServiceMantleInstallation()` and keyed by service identifier. One row per service; SignaCore uses
 the single service id `signacore`.
 
-> Added by ServiceMantle issue #70 as a purely additive slice. Nothing reads this table at runtime
-> yet: `installation_state` remains the sole runtime authority for anonymous-setup protection. This
-> table is activated by a later startup-phase task. Until then it is written only by the adoption
-> backfill in the `AddServiceInstallations` migration.
+> The **runtime authority** for installation status and the one-time setup code since ServiceMantle
+> issue #128 switched SignaCore off its legacy `installation_state` table (dropped by the
+> `DropInstallationState` forward migration). Reads and writes flow through the ServiceMantle
+> installation/setup stores (`IServiceInstallationStore`, `IServiceSetupCodeStore`) under
+> SignaCore-owned locks and transactions.
 
 ## Columns
 
@@ -31,18 +32,30 @@ SignaCore `DateTimeOffset`/Unix-microsecond convention used elsewhere.
 - The ServiceMantle store enforces these invariants on read: `version >= 1`, `created_at_utc` is not
   the default value, `PendingSetup` carries no `completed_at_utc`, and `Completed` requires
   `completed_at_utc >= created_at_utc`.
-- Adoption backfill (fail-closed): the migration inserts a single `Completed` row for `signacore`
-  whenever the database is anything other than a brand-new empty install — that is, when
-  `installation_state.status = Completed` or any business data exists. A Pending singleton with no
-  business data, and a brand-new empty database, stay empty so anonymous setup remains open for a
-  not-yet-completed install. This guarantees that once a later task reads this table, an upgraded
-  database is never classified as `PendingSetup` and never re-exposes anonymous setup.
-- The legacy `installation_state.setup_code_hash` is not carried over: a `Completed` row holds no
-  setup-code material, and the legacy hash format is not migratable.
+- Adoption backfill (fail-closed): the historical `AddServiceInstallations` migration inserted a
+  single `Completed` row for `signacore` whenever the database was anything other than a brand-new
+  empty install — that is, when the legacy `installation_state.status` was `Completed` or any
+  business data existed. A Pending singleton with no business data, and a brand-new empty database,
+  stayed empty so anonymous setup remains open for a not-yet-completed install.
+- The legacy `installation_state.setup_code_hash` was not carried over: a `Completed` row holds no
+  setup-code material, and the legacy hash format was not migratable.
+- Startup resolution: a missing row with business data, or a backfill-adopted `Completed` row with
+  an empty `system_settings` table and business data, is an upgrade of a pre-change deployment — it
+  takes the protected legacy import, never anonymous setup. A genuinely completed installation
+  always wrote its full settings snapshot transactionally.
+- Setup completion, settings changes, and the rotate command serialize on this row (`FOR UPDATE` on
+  PostgreSQL); `setup_code_digest` and `setup_code_expires_at_utc` are cleared in the same
+  transaction that sets `status` to `Completed`, so a consumed code cannot be replayed.
+- The configuration version reported in startup diagnostics and the admin settings API is derived
+  from `MAX(system_settings.version)`; every version publisher writes at least one settings row
+  stamped with the new version under this row's writer lock.
+- Setup codes keep SignaCore's documented 24-hour validity (the shared store's maximum lifetime);
+  only the `sha256-v1:` digest is stored, never the plaintext.
 
 ## Ownership
 
 SignaCore owns this table's migrations and every save/transaction boundary, per the ServiceMantle
 persistence contract. The ServiceMantle packages never generate or run migrations and never commit a
-SignaCore work unit. Today the only writer is the adoption migration; once activated, writes flow
-through the ServiceMantle installation/setup stores under a SignaCore-owned transaction.
+SignaCore work unit. Writers are the adoption migration (historical), the startup resolver (pending
+creation and code issuance), setup completion, the legacy import, the settings API, and the
+setup-code rotation command.

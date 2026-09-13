@@ -6,11 +6,15 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using ServiceMantle;
+using ServiceMantle.Installation;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Keys;
 using SignaCore.Host;
 using SignaCore.Host.Configuration;
+using SignaCore.Host.Installation;
 using SignaCore.Host.Startup;
 using Xunit;
 
@@ -71,12 +75,14 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         using var _ = await StartSetupModeHostAsync();
 
         await using var db = OpenDatabase();
-        var state = await db.InstallationStates.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var installation = await db.ServiceInstallations.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(InstallationStatus.Pending, state.Status);
-        Assert.False(string.IsNullOrWhiteSpace(state.SetupCodeHash));
-        Assert.NotNull(state.SetupCodeExpiresAt);
-        Assert.Null(state.CompletedAt);
+        Assert.Equal(InstallationStatus.PendingSetup, installation.Status);
+        Assert.NotNull(installation.SetupCodeDigest);
+        // The shared store persists only the versioned digest, never the plaintext.
+        Assert.StartsWith("sha256-v1:", installation.SetupCodeDigest, StringComparison.Ordinal);
+        Assert.NotNull(installation.SetupCodeExpiresAtUtc);
+        Assert.Null(installation.CompletedAtUtc);
     }
 
     [Theory]
@@ -155,7 +161,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
 
         await using var db = OpenDatabase();
-        Assert.Equal(InstallationStatus.Pending, (await db.InstallationStates.SingleAsync(
+        Assert.Equal(InstallationStatus.PendingSetup, (await db.ServiceInstallations.SingleAsync(
             cancellationToken: TestContext.Current.CancellationToken)).Status);
         Assert.False(await db.Accounts.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.False(await db.SystemSettings.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -244,13 +250,15 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         await using var db = OpenDatabase();
-        var state = await db.InstallationStates.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal(InstallationStatus.Completed, state.Status);
-        Assert.Equal(1, state.ConfigurationVersion);
-        Assert.NotNull(state.CompletedAt);
+        var installation = await db.ServiceInstallations.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(InstallationStatus.Completed, installation.Status);
+        Assert.NotNull(installation.CompletedAtUtc);
         // The one-time code is invalidated in the same transaction that completes installation.
-        Assert.Null(state.SetupCodeHash);
-        Assert.Null(state.SetupCodeExpiresAt);
+        Assert.Null(installation.SetupCodeDigest);
+        Assert.Null(installation.SetupCodeExpiresAtUtc);
+        // The completion published configuration version 1.
+        Assert.Equal(1, await db.SystemSettings.MaxAsync(
+            setting => (int?)setting.Version, cancellationToken: TestContext.Current.CancellationToken));
 
         var credential = await db.PasswordCredentials.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(AdminUsername, credential.Username);
@@ -320,7 +328,9 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
 
         await using var db = OpenDatabase();
         Assert.Equal(1, await db.PasswordCredentials.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Equal(1, (await db.InstallationStates.SingleAsync(cancellationToken: TestContext.Current.CancellationToken)).ConfigurationVersion);
+        // The completion published configuration version 1: every stored settings row carries it.
+        Assert.Equal(1, await db.SystemSettings.MaxAsync(
+            setting => (int?)setting.Version, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     /// <summary>
@@ -377,9 +387,9 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             .GetProperty("status").GetString());
 
         await using var db = OpenDatabase();
-        var state = await db.InstallationStates.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal(InstallationStatus.Completed, state.Status);
-        Assert.Null(state.SetupCodeHash);
+        var installation = await db.ServiceInstallations.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(InstallationStatus.Completed, installation.Status);
+        Assert.Null(installation.SetupCodeDigest);
 
         // Import creates no administrator: the deployment already has its own accounts.
         Assert.Equal(1, await db.PasswordCredentials.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -418,7 +428,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Contains(SystemSettingKeys.JwtAudience, Flatten(exception), StringComparison.Ordinal);
 
         await using var verifyDb = OpenDatabase();
-        Assert.Equal(InstallationStatus.Completed, (await verifyDb.InstallationStates.SingleAsync(
+        Assert.Equal(InstallationStatus.Completed, (await verifyDb.ServiceInstallations.SingleAsync(
             cancellationToken: TestContext.Current.CancellationToken)).Status);
     }
 
@@ -543,20 +553,28 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// The plaintext code is printed to stdout once and never stored, so a test cannot read it back.
-    /// Rotating writes a known code the same way the operator command does.
+    /// The plaintext code is printed to stdout once and never stored, so a test cannot read it
+    /// back. Rotating uses the shared store the same way the operator command does, and returns the
+    /// newly issued plaintext.
     /// </summary>
     private async Task<string> RotateSetupCodeAsync(DateTimeOffset? expiresAt = null)
     {
-        const string code = "TESTA-TESTB-TESTC-TESTD";
-
         await using var db = OpenDatabase();
-        var state = await db.InstallationStates.SingleAsync();
-        state.SetupCodeHash = SignaCore.Host.Installation.SetupCode.Hash(code);
-        state.SetupCodeExpiresAt = expiresAt ?? DateTimeOffset.UtcNow.AddHours(1);
-        await db.SaveChangesAsync();
+        var setupCodeStore = new EfCoreServiceSetupCodeStore<IdentityDbContext>(
+            db,
+            lifetime: SetupCodeLifetime.Create(TimeSpan.FromHours(1)));
+        var issued = await setupCodeStore.RotateAsync(
+            InstallationStores.ServiceId, TestContext.Current.CancellationToken);
+        Assert.True(issued.IsIssued, $"Rotation failed: {issued.ErrorCode}");
 
-        return code;
+        if (expiresAt is not null)
+        {
+            var installation = await db.ServiceInstallations.SingleAsync();
+            installation.SetupCodeExpiresAtUtc = expiresAt.Value.UtcDateTime;
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        return issued.SetupCode!.Reveal();
     }
 
     private async Task SeedPreChangeDeploymentAsync()
@@ -564,7 +582,8 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         await using var db = OpenDatabase();
         await db.Database.MigrateAsync();
 
-        // Migrations create installation_state; a pre-change database has the table but no row.
+        // Migrations applied to an empty database create no installation row (the backfill has
+        // nothing to adopt); adding business data afterwards reproduces a pre-change deployment.
         var accountId = Guid.NewGuid();
         db.Accounts.Add(new AccountEntity
         {

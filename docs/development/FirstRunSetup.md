@@ -115,7 +115,7 @@ SMS, WeChat, LDAP, Loki, OpenTelemetry, callback allowlists, and application reg
 part of first-run setup. They are configured from authenticated administration pages later.
 
 The administrator plaintext password is used only to create its password hash. It is never stored in
-`system_settings`, `installation_state`, logs, audit payloads, or the bootstrap file.
+`system_settings`, `service_installations`, logs, audit payloads, or the bootstrap file.
 
 ## Completion is atomic
 
@@ -157,9 +157,10 @@ An upgrade must not expose first-run setup against an existing identity database
 1. Create the bootstrap file with the currently deployed database connection and root secret. Use the
    same value the deployment previously supplied as `RSA_MASTER_KEY`; the derivation is unchanged, so
    stored signing keys remain decryptable.
-2. Start SignaCore. Migrations add `system_settings` and `installation_state`.
-3. Because meaningful business data exists and no installation state does, SignaCore enters the
-   protected legacy import path rather than Setup Mode.
+2. Start SignaCore. Migrations bring the schema up to date; the business data means no installation
+   row is left unadopted.
+3. Because meaningful business data exists without an imported configuration snapshot, SignaCore
+   enters the protected legacy import path rather than Setup Mode.
 4. The current effective legacy configuration is read from appsettings and environment variables,
    validated, and stored transactionally, with secrets encrypted. The pre-change key
    `AdminBootstrap:Username` is imported as `Admin:Username`.

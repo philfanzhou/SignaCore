@@ -1,61 +1,126 @@
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle;
+using ServiceMantle.Installation;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
-using SignaCore.Database.Entity;
+using SignaCore.Host.Configuration;
 
 namespace SignaCore.Host.Installation;
 
 /// <summary>
-/// Decides which startup path a database takes. Runs under the provider migration lock so two
-/// instances starting against the same brand-new database cannot both create a pending installation.
+/// A setup code the bootstrap phase just issued, with its plaintext (available exactly once) and
+/// its expiry.
+/// </summary>
+internal sealed record IssuedSetupCode(string Plaintext, DateTimeOffset ExpiresAtUtc);
+
+/// <summary>
+/// What the bootstrap phase concluded about the installation and the configuration version the
+/// running snapshot is loaded at.
+/// </summary>
+internal sealed record InstallationResolution(
+    InstallationPhase Phase,
+    int ConfigurationVersion,
+    IssuedSetupCode? SetupCode);
+
+/// <summary>
+/// Decides which startup path a database takes, reading the shared ServiceMantle installation
+/// state (<c>service_installations</c>). Runs under the startup initialization lock so two
+/// instances starting against the same brand-new database cannot both create a pending
+/// installation.
+/// <para>
+/// A database whose installation row is missing but that already owns business data, or whose
+/// completed row was adopted by the <c>AddServiceInstallations</c> backfill while
+/// <c>system_settings</c> is still empty, is an upgrade of a pre-change deployment: it takes the
+/// protected legacy import, never anonymous setup.
+/// </para>
 /// </summary>
 internal static class InstallationStateResolver
 {
-    public static async Task<(InstallationPhase Phase, InstallationStateEntity State, string? PlaintextSetupCode)>
-        ResolveAsync(IdentityDbContext db, CancellationToken cancellationToken = default)
+    public static async Task<InstallationResolution> ResolveAsync(
+        IdentityDbContext db,
+        CancellationToken cancellationToken = default)
     {
-        var state = await db.InstallationStates
-            .FirstOrDefaultAsync(row => row.Id == InstallationStateEntity.SingletonId, cancellationToken);
+        var serviceId = InstallationStores.ServiceId;
+        var installationStore = InstallationStores.CreateInstallationStore(db);
+        var state = await installationStore.FindAsync(serviceId, cancellationToken);
 
-        if (state is not null)
+        if (state is null)
         {
+            // No installation row. Anything meaningful already in the database means this is an
+            // upgrade of a pre-change deployment, not a fresh install — anonymous setup must stay
+            // closed.
+            if (await HasBusinessDataAsync(db, cancellationToken))
+            {
+                return new InstallationResolution(InstallationPhase.LegacyImportRequired, 0, null);
+            }
+
             db.ChangeTracker.Clear();
-            return state.Status == InstallationStatus.Completed
-                ? (InstallationPhase.Completed, state, null)
-                : (InstallationPhase.PendingSetup, state, null);
+            await installationStore.CreatePendingAsync(serviceId, cancellationToken);
+            var setupCode = await IssueInitialSetupCodeAsync(db, serviceId, cancellationToken);
+            return new InstallationResolution(InstallationPhase.PendingSetup, 0, setupCode);
         }
 
-        // No state row. Anything meaningful already in the database means this is an upgrade of a
-        // pre-change deployment, not a fresh install — anonymous setup must stay closed.
-        if (await HasBusinessDataAsync(db, cancellationToken))
+        if (state.IsCompleted)
         {
-            return (
-                InstallationPhase.LegacyImportRequired,
-                new InstallationStateEntity
-                {
-                    Id = InstallationStateEntity.SingletonId,
-                    Status = InstallationStatus.Pending,
-                    InstallationId = Guid.NewGuid(),
-                    ConfigurationVersion = 0
-                },
-                null);
+            // A completed row adopted by the backfill with no stored settings is a real legacy
+            // upgrade that still has to run the import; a genuinely completed installation always
+            // wrote its full snapshot transactionally.
+            if (!await db.SystemSettings.AnyAsync(cancellationToken) &&
+                await HasBusinessDataAsync(db, cancellationToken))
+            {
+                return new InstallationResolution(InstallationPhase.LegacyImportRequired, 0, null);
+            }
+
+            var configurationVersion = await SystemSettingsStore.ReadConfigurationVersionAsync(
+                db, cancellationToken);
+            return new InstallationResolution(
+                InstallationPhase.Completed, configurationVersion, null);
         }
 
-        var setupCode = SetupCode.Generate();
-        var pending = new InstallationStateEntity
+        // Pending: the plaintext exists only in the issuance that created it. A restart does not
+        // reissue a code. The single CreateAsync call distinguishes every case by itself: a row
+        // whose code was never issued (the recovery window between creating the pending row and
+        // saving its first code) gets one now, an already-issued code is left untouched
+        // (setup_code.already_exists), and anything corrupt stays fail-closed without a code.
+        var setupCodeStore = InstallationStores.CreateSetupCodeStore(db);
+        var issued = await setupCodeStore.CreateAsync(serviceId, cancellationToken);
+        if (issued.IsIssued)
         {
-            Id = InstallationStateEntity.SingletonId,
-            Status = InstallationStatus.Pending,
-            InstallationId = Guid.NewGuid(),
-            SetupCodeHash = SetupCode.Hash(setupCode),
-            SetupCodeExpiresAt = DateTimeOffset.UtcNow.Add(SetupCode.DefaultLifetime),
-            ConfigurationVersion = 0
-        };
+            return new InstallationResolution(
+                InstallationPhase.PendingSetup,
+                0,
+                new IssuedSetupCode(
+                    issued.SetupCode!.Reveal(),
+                    new DateTimeOffset(issued.ExpiresAtUtc!.Value)));
+        }
 
-        db.InstallationStates.Add(pending);
-        await db.SaveChangesAsync(cancellationToken);
-        db.ChangeTracker.Clear();
+        return new InstallationResolution(InstallationPhase.PendingSetup, 0, null);
+    }
 
-        return (InstallationPhase.PendingSetup, pending, setupCode);
+    private static async Task<IssuedSetupCode?> IssueInitialSetupCodeAsync(
+        IdentityDbContext db,
+        ServiceId serviceId,
+        CancellationToken cancellationToken)
+    {
+        var setupCodeStore = InstallationStores.CreateSetupCodeStore(db);
+        var issued = await setupCodeStore.CreateAsync(serviceId, cancellationToken);
+        if (issued.ErrorCode == WellKnownSetupCodeErrorCodes.AlreadyExists)
+        {
+            // Another writer won the race for this fresh database and already issued a code; this
+            // boot simply has no plaintext to print.
+            return null;
+        }
+
+        if (!issued.IsIssued)
+        {
+            throw new ServiceInstallationStoreException(
+                "installation.storage_error",
+                $"The pending installation was created but its setup code could not be issued ({issued.ErrorCode}).");
+        }
+
+        return new IssuedSetupCode(
+            issued.SetupCode!.Reveal(),
+            new DateTimeOffset(issued.ExpiresAtUtc!.Value));
     }
 
     /// <summary>

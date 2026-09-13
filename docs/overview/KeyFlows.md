@@ -29,7 +29,7 @@ bootstrap file absent -> minimal live/not-ready host -> protected /bootstrap wor
     -> validate database + key -> atomic mode-0600 file write -> controlled restart
 
 writable protected bootstrap file -> derive root key -> connect business database
-    -> migration lock -> apply migrations -> read installation_state
+    -> initialization lock -> migration gate -> apply migrations -> read service_installations
     -> Pending: Setup Mode          (only /setup, /api/setup/*, /health/*)
     -> Completed: load and validate the system_settings snapshot -> normal host
 ```

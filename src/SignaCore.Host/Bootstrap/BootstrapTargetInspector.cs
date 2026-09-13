@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using ServiceMantle.Installation;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Keys;
@@ -100,20 +102,35 @@ internal static class BootstrapTargetInspector
         await using var db = new IdentityDbContext(optionsBuilder.Options);
 
         var state = await TryLoadInstallationStateAsync(db, cancellationToken);
-        var kind = state is not null
-            ? state.Status == InstallationStatus.Completed
-                ? BootstrapTargetKind.CompletedInstallation
-                : BootstrapTargetKind.PendingInstallation
-            : await HasAnyBusinessDataAsync(db, cancellationToken)
+        BootstrapTargetKind kind;
+        if (state is null)
+        {
+            kind = await HasAnyBusinessDataAsync(db, cancellationToken)
                 ? BootstrapTargetKind.LegacyData
                 : BootstrapTargetKind.Empty;
+        }
+        else if (state.Status == InstallationStatus.Completed &&
+                 await IsAdoptedWithoutImportAsync(db, cancellationToken))
+        {
+            // Completed by the AddServiceInstallations backfill, but the legacy import has not run:
+            // startup still has to import configuration before this is a working installation.
+            kind = BootstrapTargetKind.LegacyData;
+        }
+        else
+        {
+            kind = state.Status == InstallationStatus.Completed
+                ? BootstrapTargetKind.CompletedInstallation
+                : BootstrapTargetKind.PendingInstallation;
+        }
 
         var compatibility = await EvaluateKeyCompatibilityAsync(db, candidateRootSecret, cancellationToken);
 
         return new BootstrapTargetInspection(
             kind,
             compatibility,
-            state?.InstallationId,
+            // The durable installation identity is the service id; there is no per-installation
+            // Guid to report anymore.
+            InstallationId: null,
             endpoint,
             FailureReason: null);
     }
@@ -220,20 +237,41 @@ internal static class BootstrapTargetInspector
         }
     }
 
-    private static async Task<InstallationStateEntity?> TryLoadInstallationStateAsync(
+    private static async Task<ServiceInstallationEntity?> TryLoadInstallationStateAsync(
         IdentityDbContext db,
         CancellationToken cancellationToken)
     {
         try
         {
-            return await db.InstallationStates
+            return await db.ServiceInstallations
                 .AsNoTracking()
-                .FirstOrDefaultAsync(row => row.Id == InstallationStateEntity.SingletonId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    row => row.ServiceId == InstallationStores.ServiceIdValue,
+                    cancellationToken);
         }
         catch (DbException)
         {
             // The table does not exist: either an empty database or a schema predating it.
             return null;
+        }
+    }
+
+    /// <summary>
+    /// A completed installation whose settings snapshot was never written is a backfill-adopted
+    /// legacy database, not a working install.
+    /// </summary>
+    private static async Task<bool> IsAdoptedWithoutImportAsync(
+        IdentityDbContext db,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return !await db.SystemSettings.AnyAsync(cancellationToken) &&
+                await HasAnyBusinessDataAsync(db, cancellationToken);
+        }
+        catch (DbException)
+        {
+            return false;
         }
     }
 

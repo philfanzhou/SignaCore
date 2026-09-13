@@ -3,11 +3,28 @@ using Microsoft.Data.Sqlite;
 using Npgsql;
 using SignaCore.Database;
 
-namespace SignaCore.Host;
+namespace SignaCore.Host.Startup;
 
-internal static class DatabaseProvisioner
+/// <summary>
+/// Startup-owned database preparation that stays outside the shared ServiceMantle migration
+/// orchestration: creating the named database before anything connects to it, and the outer
+/// initialization advisory lock that serializes whole-bootstrap-phase work across instances.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The lock keeps its historical key so a fleet that still runs pre-gate binaries (and the setup
+/// code rotation command) serializes against this process exactly as before. It covers the shared
+/// migration gate, installation resolution, the legacy configuration import, and the settings
+/// snapshot load; the shared migration lock inside the gate only covers migration itself.
+/// </para>
+/// <para>
+/// SQLite has no server-side advisory lock: startup relies on the process-local single-instance
+/// turn of the shared migration orchestration plus SQLite's own file-level writer serialization.
+/// </para>
+/// </remarks>
+internal static class StartupDatabase
 {
-    private const long PostgreSqlMigrationLockId = 5860957687944148308;
+    private const long PostgreSqlInitializationLockId = 5860957687944148308;
 
     public static async Task EnsureDatabaseExistsAsync(
         DatabaseOptions options,
@@ -28,7 +45,7 @@ internal static class DatabaseProvisioner
         }
     }
 
-    public static async Task<IAsyncDisposable> AcquireMigrationLockAsync(
+    public static async Task<IAsyncDisposable> AcquireInitializationLockAsync(
         DatabaseOptions options,
         CancellationToken cancellationToken = default)
     {
@@ -40,16 +57,16 @@ internal static class DatabaseProvisioner
                 await connection.OpenAsync(cancellationToken);
                 await using var command = connection.CreateCommand();
                 command.CommandText = "SELECT pg_advisory_lock(@lock_id)";
-                command.Parameters.AddWithValue("@lock_id", PostgreSqlMigrationLockId);
+                command.Parameters.AddWithValue("@lock_id", PostgreSqlInitializationLockId);
                 await command.ExecuteScalarAsync(cancellationToken);
-                return new DatabaseMigrationLock(
+                return new DatabaseInitializationLock(
                     connection,
                     "SELECT pg_advisory_unlock(@lock_id)",
                     command =>
                     {
                         var parameter = command.CreateParameter();
                         parameter.ParameterName = "@lock_id";
-                        parameter.Value = PostgreSqlMigrationLockId;
+                        parameter.Value = PostgreSqlInitializationLockId;
                         command.Parameters.Add(parameter);
                     });
             }
@@ -115,13 +132,13 @@ internal static class DatabaseProvisioner
         }
     }
 
-    private sealed class DatabaseMigrationLock : IAsyncDisposable
+    private sealed class DatabaseInitializationLock : IAsyncDisposable
     {
         private readonly DbConnection _connection;
         private readonly string _releaseSql;
         private readonly Action<DbCommand> _configureReleaseCommand;
 
-        public DatabaseMigrationLock(
+        public DatabaseInitializationLock(
             DbConnection connection,
             string releaseSql,
             Action<DbCommand> configureReleaseCommand)

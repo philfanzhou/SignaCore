@@ -1,5 +1,6 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Installation;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Services;
@@ -37,7 +38,7 @@ internal sealed record SetupResult(SetupOutcome Outcome, string? Error = null);
 /// create the initial administrator, audit, and flip the installation to <c>Completed</c>.
 /// <para>
 /// The administrator plaintext password is used only to produce its hash. It is never written to
-/// <c>system_settings</c>, <c>installation_state</c>, logs, audit payloads, or the bootstrap file.
+/// <c>system_settings</c>, <c>service_installations</c>, logs, audit payloads, or the bootstrap file.
 /// </para>
 /// </summary>
 internal sealed class InstallationSetupService
@@ -155,14 +156,32 @@ internal sealed class InstallationSetupService
             return new SetupResult(SetupOutcome.AlreadyCompleted);
         }
 
-        var now = DateTimeOffset.UtcNow;
-        if (state.SetupCodeExpiresAt is null || state.SetupCodeExpiresAt <= now ||
-            !SetupCode.Verify(request.SetupCodeValue, state.SetupCodeHash))
+        // The shared store validates the candidate (format, expiry, digest) and stages the
+        // completed status, the completion timestamp, the code clearing, and the version increment
+        // into this transaction's unit of work; nothing is saved before the single SaveChanges
+        // below.
+        var setupCodeStore = InstallationStores.CreateSetupCodeStore(_db);
+        var consumption = await setupCodeStore.StageConsumeAsync(
+            InstallationStores.ServiceId,
+            request.SetupCodeValue,
+            cancellationToken);
+        if (!consumption.IsStaged)
         {
-            return new SetupResult(SetupOutcome.InvalidSetupCode);
+            return consumption.ErrorCode switch
+            {
+                WellKnownSetupCodeErrorCodes.InstallationNotFound => new SetupResult(
+                    SetupOutcome.InvalidRequest,
+                    "Installation state is missing. Restart the service to reinitialize it."),
+                WellKnownSetupCodeErrorCodes.InstallationCompleted =>
+                    new SetupResult(SetupOutcome.AlreadyCompleted),
+                _ => new SetupResult(SetupOutcome.InvalidSetupCode)
+            };
         }
 
-        var configurationVersion = state.ConfigurationVersion + 1;
+        var configurationVersion =
+            await SystemSettingsStore.ReadConfigurationVersionAsync(_db, cancellationToken) + 1;
+
+        var now = DateTimeOffset.UtcNow;
 
         await _settingsStore.WriteAsync(_db, values, configurationVersion, username, cancellationToken);
 
@@ -188,7 +207,7 @@ internal sealed class InstallationSetupService
             Id = Guid.NewGuid(),
             Action = "installation.setup.completed",
             TargetType = "Installation",
-            TargetId = state.InstallationId.ToString(),
+            TargetId = InstallationStores.ServiceIdValue,
             ActorId = account.Id,
             ActorName = username,
             // Deliberately no before/after snapshots: they would carry setting values, and some of
@@ -200,19 +219,12 @@ internal sealed class InstallationSetupService
             CreatedAt = now
         });
 
-        state.Status = InstallationStatus.Completed;
-        state.CompletedAt = now;
-        state.ConfigurationVersion = configurationVersion;
-        state.SetupCodeHash = null;
-        state.SetupCodeExpiresAt = null;
-        _db.InstallationStates.Update(state);
-
         await _db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
         _logger.LogInformation(
-            "First-run setup completed: InstallationId={InstallationId}, ConfigurationVersion={Version}",
-            state.InstallationId,
+            "First-run setup completed: ServiceId={ServiceId}, ConfigurationVersion={Version}",
+            InstallationStores.ServiceIdValue,
             configurationVersion);
 
         return new SetupResult(SetupOutcome.Completed);

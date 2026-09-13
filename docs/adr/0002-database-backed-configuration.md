@@ -22,7 +22,9 @@ configuration service, which adds a second system to operate and back up.
 ## Decision
 
 Store global application configuration in the existing business database, in `system_settings`.
-Record installation completion in a singleton `installation_state` row.
+Record installation completion in the shared `service_installations` table (historically a singleton
+`installation_state` row; the table was dropped after the switch to the ServiceMantle installation
+mapping).
 
 Keep exactly two things outside it, because they are required to open and decrypt that database:
 

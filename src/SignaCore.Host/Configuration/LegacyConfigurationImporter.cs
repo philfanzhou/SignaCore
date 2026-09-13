@@ -1,7 +1,10 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Installation;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.Host.Installation;
 
 namespace SignaCore.Host.Configuration;
 
@@ -10,13 +13,14 @@ namespace SignaCore.Host.Configuration;
 /// <para>
 /// The current effective legacy configuration — appsettings, environment variables, and whatever the
 /// launcher injected — is read, validated, and stored transactionally. Installation is marked
-/// <c>Completed</c> only after the imported snapshot is valid; an incomplete import fails closed with
-/// the list of missing keys, creates no administrator, and does not open <c>/setup</c>.
+/// <c>Completed</c> in the shared <c>service_installations</c> state only after the imported snapshot
+/// is valid; an incomplete import fails closed with the list of missing keys, creates no
+/// administrator, and does not open <c>/setup</c>.
 /// </para>
 /// </summary>
 internal static class LegacyConfigurationImporter
 {
-    public static async Task<InstallationStateEntity> ImportAsync(
+    public static async Task ImportAsync(
         IdentityDbContext db,
         IConfiguration configuration,
         SystemSettingsStore settingsStore,
@@ -81,10 +85,10 @@ internal static class LegacyConfigurationImporter
         // The explicit transaction has to run inside CreateExecutionStrategy(): PostgreSQL enables
         // EnableRetryOnFailure(), and a retrying strategy refuses to execute commands
         // inside a caller-opened transaction. Everything the lambda tracks is built inside it, and it
-        // starts from a cleared change tracker, so a retried attempt cannot insert the state row or
-        // the audit entry twice.
+        // starts from a cleared change tracker, so a retried attempt cannot insert the installation
+        // row or the audit entry twice.
         var strategy = db.Database.CreateExecutionStrategy();
-        var state = await strategy.ExecuteAsync(async () =>
+        await strategy.ExecuteAsync(async () =>
         {
             db.ChangeTracker.Clear();
 
@@ -95,24 +99,33 @@ internal static class LegacyConfigurationImporter
             await settingsStore.WriteAsync(db, values, configurationVersion, "legacy-import", cancellationToken);
 
             var now = DateTimeOffset.UtcNow;
-            var installationState = new InstallationStateEntity
+
+            // A real legacy upgrade already had its completed row adopted by the
+            // AddServiceInstallations backfill; only a database whose row is missing entirely
+            // (for example after manual deletion) needs one inserted here.
+            var existingInstallation = await db.ServiceInstallations
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    row => row.ServiceId == InstallationStores.ServiceIdValue,
+                    cancellationToken);
+            if (existingInstallation is null)
             {
-                Id = InstallationStateEntity.SingletonId,
-                Status = InstallationStatus.Completed,
-                InstallationId = Guid.NewGuid(),
-                SetupCodeHash = null,
-                SetupCodeExpiresAt = null,
-                CompletedAt = now,
-                ConfigurationVersion = configurationVersion
-            };
-            db.InstallationStates.Add(installationState);
+                db.ServiceInstallations.Add(new ServiceInstallationEntity
+                {
+                    ServiceId = InstallationStores.ServiceIdValue,
+                    Status = InstallationStatus.Completed,
+                    CreatedAtUtc = now.UtcDateTime,
+                    CompletedAtUtc = now.UtcDateTime,
+                    Version = 1
+                });
+            }
 
             db.AuditLogs.Add(new AuditLogEntity
             {
                 Id = Guid.NewGuid(),
                 Action = "installation.legacy_import.completed",
                 TargetType = "Installation",
-                TargetId = installationState.InstallationId.ToString(),
+                TargetId = InstallationStores.ServiceIdValue,
                 ActorName = "legacy-import",
                 Description =
                     $"Imported {imported.Count} legacy settings into system_settings. " +
@@ -122,19 +135,16 @@ internal static class LegacyConfigurationImporter
 
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            return installationState;
         });
 
         db.ChangeTracker.Clear();
 
         logger.LogInformation(
-            "Legacy configuration import completed: InstallationId={InstallationId}, " +
+            "Legacy configuration import completed: ServiceId={ServiceId}, " +
             "ImportedKeyCount={ImportedKeyCount}, ConfigurationVersion={Version}",
-            state.InstallationId,
+            InstallationStores.ServiceIdValue,
             imported.Count,
             configurationVersion);
-
-        return state;
     }
 
     private static bool IsExplicitlyTrue(IReadOnlyDictionary<string, string> values, string key) =>
