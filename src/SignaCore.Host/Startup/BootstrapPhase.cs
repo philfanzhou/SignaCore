@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Migration;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
+using SignaCore.Host.Migration;
 
 namespace SignaCore.Host.Startup;
 
@@ -28,11 +30,24 @@ internal sealed record BootstrapPhaseResult(
 /// </summary>
 internal static class BootstrapPhase
 {
-    public static async Task<BootstrapPhaseResult> RunAsync(
+    public static Task<BootstrapPhaseResult> RunAsync(
         BootstrapConfiguration bootstrap,
         IConfiguration configuration,
         IHostEnvironment environment,
         ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken = default)
+        => RunAsync(bootstrap, configuration, environment, loggerFactory, migrationExecutor: null, cancellationToken);
+
+    /// <summary>
+    /// Composition seam with an injectable migration executor for gate-level startup tests; the
+    /// production entry always resolves the real SignaCore executor.
+    /// </summary>
+    internal static async Task<BootstrapPhaseResult> RunAsync(
+        BootstrapConfiguration bootstrap,
+        IConfiguration configuration,
+        IHostEnvironment environment,
+        ILoggerFactory loggerFactory,
+        IDatabaseMigrationExecutor? migrationExecutor,
         CancellationToken cancellationToken = default)
     {
         var logger = loggerFactory.CreateLogger(typeof(BootstrapPhase).FullName!);
@@ -52,13 +67,23 @@ internal static class BootstrapPhase
         await DatabaseProvisioner.EnsureDatabaseExistsAsync(bootstrap.Database, cancellationToken);
         await using (await DatabaseProvisioner.AcquireMigrationLockAsync(bootstrap.Database, cancellationToken))
         {
-            var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
-            if (pending.Count > 0)
+            // The shared migration orchestration runs inside SignaCore's own outer lock: for
+            // PostgreSQL it acquires the service-scoped shared migration lock, runs the limited
+            // observation, executes the full SchemaMigrator workflow at most once, and re-inspects
+            // before returning; SQLite serializes on the process-local single-instance turn.
+            if (migrationExecutor is null)
             {
-                logger.LogInformation("Applying {Count} pending migrations...", pending.Count);
+                await StartupMigrationGate.RunAsync(db, bootstrap.Database, logger, cancellationToken);
+            }
+            else
+            {
+                await StartupMigrationGate.RunAsync(
+                    db, bootstrap.Database, logger, migrationExecutor, cancellationToken);
             }
 
-            await SchemaMigrator.MigrateAsync(db, bootstrap.Database, cancellationToken);
+            // Completion checkpoint after the migration gate and its owned cleanup have settled:
+            // original-token cancellation takes precedence over entering installation resolution.
+            cancellationToken.ThrowIfCancellationRequested();
 
             var (phase, state, plaintextSetupCode) =
                 await InstallationStateResolver.ResolveAsync(db, cancellationToken);
