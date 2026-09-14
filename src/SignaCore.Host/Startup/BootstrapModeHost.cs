@@ -17,13 +17,16 @@ namespace SignaCore.Host.Startup;
 /// </summary>
 internal static class BootstrapModeHost
 {
-    public static void ConfigureServices(WebApplicationBuilder builder, BootstrapCodeAuthority codeAuthority)
+    public static void ConfigureServices(
+        WebApplicationBuilder builder,
+        BootstrapCodeAuthority codeAuthority,
+        string bootstrapFilePath)
     {
         var services = builder.Services;
 
-        // The correlation middleware is the only ServiceMantle capability activated in this phase;
-        // its lazily registered Bootstrap store is never resolved by this host.
-        services.AddSignaCoreServiceMantle();
+        // The correlation middleware and the shared bootstrap file store are the ServiceMantle
+        // capabilities activated in this phase; the bootstrap editor writes through that store.
+        services.AddSignaCoreServiceMantle(bootstrapFilePath);
         services.AddSingleton(codeAuthority);
         services.AddSingleton<BootstrapConfigurationService>();
 

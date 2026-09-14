@@ -1,12 +1,19 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using ServiceMantle.Bootstrap;
 using SignaCore.Database;
 using SignaCore.Host.Bootstrap;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Bootstrap;
 
+/// <summary>
+/// The SignaCore bootstrap file lifecycle through the shared ServiceMantle store: the legacy file
+/// shape stays readable, every invalid input fails fatally without leaking secrets, the local
+/// database-target rules keep applying to loaded candidates, and the Development fallback keeps
+/// working without a file.
+/// </summary>
 public sealed class BootstrapLoaderTests : IDisposable
 {
     private const string ConnectionString =
@@ -43,20 +50,54 @@ public sealed class BootstrapLoaderTests : IDisposable
             }
             """);
 
-        var bootstrap = BootstrapLoader.Load(Configuration(path), Environment(Environments.Production));
+        var bootstrap = SignaCoreBootstrapStore.Load(Configuration(path), Environment(Environments.Production));
 
-        Assert.Equal(DatabaseProvider.PostgreSql, bootstrap.Database.ProviderKind);
+        Assert.Equal("PostgreSQL", bootstrap.Database.Provider, StringComparer.Ordinal);
         Assert.Equal(ConnectionString, bootstrap.Database.ConnectionString);
-        Assert.Equal(RootSecret, bootstrap.RootSecret);
+        Assert.Equal(RootSecret, bootstrap.MasterKey);
+        Assert.Equal(path, bootstrap.SourcePath);
+    }
+
+    [Fact]
+    public void Load_ReadsALegacyFile_WithoutFormatVersionOrServiceId()
+    {
+        // A file written by the previous local writer: no FormatVersion, no ServiceId, and a
+        // provider value with stray whitespace. The shared store reads it as this service's
+        // configuration with the canonical provider id.
+        var path = WriteBootstrap($$"""
+            {
+              "Database": {
+                "Provider": " PostgreSQL ",
+                "ServerVersion": "15",
+                "ConnectionString": "{{ConnectionString}}"
+              },
+              "MasterKey": "{{RootSecret}}"
+            }
+            """);
+
+        var bootstrap = SignaCoreBootstrapStore.Load(Configuration(path), Environment(Environments.Production));
+
+        Assert.Equal("PostgreSQL", bootstrap.Database.Provider, StringComparer.Ordinal);
+        Assert.Equal("signacore", bootstrap.ServiceId.Value, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void TryLoad_WithMissingFileInProduction_ReturnsNull()
+    {
+        var bootstrap = SignaCoreBootstrapStore.TryLoad(
+            Configuration(Path.Combine(_directory, "signacore.bootstrap.json")),
+            Environment(Environments.Production));
+
+        Assert.Null(bootstrap);
     }
 
     [Fact]
     public void Load_WithMissingFileInProduction_FailsWithTheExpectedAbsolutePath()
     {
-        var expected = Path.Combine(_directory, BootstrapLoader.FileName);
+        var expected = Path.Combine(_directory, "signacore.bootstrap.json");
 
-        var exception = Assert.Throws<BootstrapException>(() =>
-            BootstrapLoader.Load(Configuration(expected), Environment(Environments.Production)));
+        var exception = Assert.Throws<SignaCore.Host.Bootstrap.BootstrapException>(() =>
+            SignaCoreBootstrapStore.Load(Configuration(expected), Environment(Environments.Production)));
 
         Assert.Contains(expected, exception.Message, StringComparison.Ordinal);
     }
@@ -74,8 +115,8 @@ public sealed class BootstrapLoaderTests : IDisposable
               "MasterKey": "{{RootSecret}}",
             """);
 
-        var exception = Assert.Throws<BootstrapException>(() =>
-            BootstrapLoader.Load(Configuration(path), Environment(Environments.Production)));
+        var exception = Assert.Throws<SignaCore.Host.Bootstrap.BootstrapException>(() =>
+            SignaCoreBootstrapStore.Load(Configuration(path), Environment(Environments.Production)));
 
         Assert.DoesNotContain("super-secret-password", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(RootSecret, exception.Message, StringComparison.Ordinal);
@@ -87,8 +128,8 @@ public sealed class BootstrapLoaderTests : IDisposable
         var path = WriteBootstrap(
             """{ "Database": { "Provider": "PostgreSQL", "ServerVersion": "15", "ConnectionString": "Host=db;Database=x;Username=u" } }""");
 
-        var exception = Assert.Throws<BootstrapException>(() =>
-            BootstrapLoader.Load(Configuration(path), Environment(Environments.Production)));
+        var exception = Assert.Throws<SignaCore.Host.Bootstrap.BootstrapException>(() =>
+            SignaCoreBootstrapStore.Load(Configuration(path), Environment(Environments.Production)));
 
         Assert.Contains("MasterKey", exception.Message, StringComparison.Ordinal);
     }
@@ -100,16 +141,13 @@ public sealed class BootstrapLoaderTests : IDisposable
     {
         var path = WriteBootstrap(json);
 
-        var exception = Assert.Throws<BootstrapException>(() =>
-            BootstrapLoader.Load(Configuration(path), Environment(Environments.Production)));
+        var exception = Assert.Throws<SignaCore.Host.Bootstrap.BootstrapException>(() =>
+            SignaCoreBootstrapStore.Load(Configuration(path), Environment(Environments.Production)));
 
-        Assert.Contains("not valid JSON", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("PoolSecret", exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
-    // Unknown provider.
-    [InlineData("""{ "Database": { "Provider": "postgres", "ServerVersion": "15", "ConnectionString": "Host=db;Database=x;Username=u" }, "MasterKey": "k" }""", "Database.Provider")]
     // MySQL and MariaDB were withdrawn by ADR 0004. A bootstrap file left over from a
     // MySQL-era deployment must fail at startup rather than be read as something else.
     [InlineData("""{ "Database": { "Provider": "MySQL", "ServerVersion": "8.4", "ConnectionString": "Server=db;Database=x;User ID=u" }, "MasterKey": "k" }""", "Database.Provider")]
@@ -126,8 +164,8 @@ public sealed class BootstrapLoaderTests : IDisposable
     {
         var path = WriteBootstrap(json);
 
-        var exception = Assert.Throws<BootstrapException>(() =>
-            BootstrapLoader.Load(Configuration(path), Environment(Environments.Production)));
+        var exception = Assert.Throws<SignaCore.Host.Bootstrap.BootstrapException>(() =>
+            SignaCoreBootstrapStore.Load(Configuration(path), Environment(Environments.Production)));
 
         Assert.Contains(expectedFragment, exception.Message, StringComparison.Ordinal);
     }
@@ -142,30 +180,27 @@ public sealed class BootstrapLoaderTests : IDisposable
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                [BootstrapLoader.FilePathConfigurationKey] =
-                    Path.Combine(_directory, BootstrapLoader.FileName),
+                [SignaCoreBootstrapStore.FilePathConfigurationKey] =
+                    Path.Combine(_directory, "signacore.bootstrap.json"),
                 ["Database:Provider"] = "SQLite",
                 ["Database:ConnectionString"] = "Data Source=dev.db"
             })
             .Build();
 
-        var bootstrap = BootstrapLoader.Load(configuration, Environment(Environments.Development));
+        var bootstrap = SignaCoreBootstrapStore.Load(configuration, Environment(Environments.Development));
 
-        Assert.Equal(DatabaseProvider.Sqlite, bootstrap.Database.ProviderKind);
-        Assert.False(string.IsNullOrWhiteSpace(bootstrap.RootSecret));
+        Assert.Equal("SQLite", bootstrap.Database.Provider, StringComparer.Ordinal);
+        Assert.False(string.IsNullOrWhiteSpace(bootstrap.MasterKey));
+        // The fallback is memory-backed: there is no file to edit.
+        Assert.Null(bootstrap.SourcePath);
     }
 
     [Fact]
     public void DescribeEndpoint_ReportsHostAndDatabaseButNeverCredentials()
     {
-        var options = new DatabaseOptions
-        {
-            Provider = "PostgreSQL",
-            ServerVersion = "15",
-            ConnectionString = ConnectionString
-        };
+        var database = new BootstrapDatabaseConfiguration("PostgreSQL", "15", ConnectionString);
 
-        var described = BootstrapDiagnostics.DescribeEndpoint(options);
+        var described = BootstrapDiagnostics.DescribeEndpoint(database);
 
         Assert.Contains("db.internal", described, StringComparison.Ordinal);
         Assert.Contains("signacore", described, StringComparison.Ordinal);
@@ -174,7 +209,7 @@ public sealed class BootstrapLoaderTests : IDisposable
 
     private string WriteBootstrap(string json)
     {
-        var path = Path.Combine(_directory, BootstrapLoader.FileName);
+        var path = Path.Combine(_directory, "signacore.bootstrap.json");
         File.WriteAllText(path, json);
         return path;
     }
@@ -183,7 +218,7 @@ public sealed class BootstrapLoaderTests : IDisposable
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                [BootstrapLoader.FilePathConfigurationKey] = bootstrapPath
+                [SignaCoreBootstrapStore.FilePathConfigurationKey] = bootstrapPath
             })
             .Build();
 

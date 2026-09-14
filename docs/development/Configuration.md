@@ -32,6 +32,8 @@ The canonical and complete schema is:
 
 ```json
 {
+  "FormatVersion": 1,
+  "ServiceId": "signacore",
   "Database": {
     "Provider": "PostgreSQL",
     "ServerVersion": "15",
@@ -43,11 +45,17 @@ The canonical and complete schema is:
 
 Rules:
 
-- no fields other than `Database.Provider`, `Database.ServerVersion`,
-  `Database.ConnectionString`, and inline `MasterKey` are accepted;
+- no fields other than `FormatVersion`, `ServiceId`, `Database.Provider`,
+  `Database.ServerVersion`, `Database.ConnectionString`, and inline `MasterKey` are accepted;
+- the file lifecycle (locate, parse, atomic create/replace, private permissions) is owned by the
+  shared ServiceMantle bootstrap file store. `FormatVersion` is the store's format marker (always
+  `1` when SignaCore writes) and `ServiceId` binds the file to this service (`signacore`); files
+  written before those fields existed are still read, and the canonical form is restored on the
+  next replacement. A `Database.ServerVersion` of `null` is omitted rather than written;
 - the whole file is a secret and must be readable and writable only by the SignaCore runtime
-  identity (`chmod 600` on Unix-like hosts);
-- writes use a flushed temporary file in the same directory followed by atomic replacement;
+  identity (`chmod 600` on Unix-like hosts; directories the store creates are `chmod 700`);
+- creation never overwrites an existing file; writes use a flushed temporary file in the same
+  directory followed by an atomic publish (hard link for creation, `File.Replace` for updates);
 - the directory must live on persistent storage and be backed up with the business database.
 
 Neither value is ever logged. Startup diagnostics report the provider and the database host only.

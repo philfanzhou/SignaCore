@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Bootstrap;
 using ServiceMantle.Installation;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using ServiceMantle.Migration;
@@ -57,18 +58,19 @@ internal static class BootstrapPhase
 
         logger.LogInformation(
             "Bootstrap loaded from {Origin}: Provider={Provider}, Database={Database}",
-            bootstrap.Origin,
+            bootstrap.SourcePath ?? "the Development appsettings fallback",
             bootstrap.Database.Provider,
-            bootstrap.DatabaseEndpointForDiagnostics);
+            BootstrapDiagnostics.DescribeEndpoint(bootstrap.Database));
 
-        var masterKeyProvider = new BootstrapMasterKeyProvider(bootstrap.RootSecret);
+        var masterKeyProvider = new BootstrapMasterKeyProvider(bootstrap.MasterKey);
         var protector = new AesGcmConfigurationProtector(masterKeyProvider);
         var settingsStore = new SystemSettingsStore(protector);
+        var databaseOptions = SignaCoreBootstrapStore.ToDatabaseOptions(bootstrap.Database);
 
-        await using var db = CreateDbContext(bootstrap.Database);
+        await using var db = CreateDbContext(databaseOptions);
 
-        await StartupDatabase.EnsureDatabaseExistsAsync(bootstrap.Database, cancellationToken);
-        await using (await StartupDatabase.AcquireInitializationLockAsync(bootstrap.Database, cancellationToken))
+        await StartupDatabase.EnsureDatabaseExistsAsync(databaseOptions, cancellationToken);
+        await using (await StartupDatabase.AcquireInitializationLockAsync(databaseOptions, cancellationToken))
         {
             // The shared migration orchestration runs inside SignaCore's own outer initialization
             // lock: for PostgreSQL it acquires the service-scoped shared migration lock, runs the
@@ -77,12 +79,12 @@ internal static class BootstrapPhase
             // turn.
             if (migrationExecutor is null)
             {
-                await StartupMigrationGate.RunAsync(db, bootstrap.Database, logger, cancellationToken);
+                await StartupMigrationGate.RunAsync(db, databaseOptions, logger, cancellationToken);
             }
             else
             {
                 await StartupMigrationGate.RunAsync(
-                    db, bootstrap.Database, logger, migrationExecutor, cancellationToken);
+                    db, databaseOptions, logger, migrationExecutor, cancellationToken);
             }
 
             // Completion checkpoint after the migration gate and its owned cleanup have settled:
@@ -167,18 +169,19 @@ internal static class BootstrapPhase
         BootstrapConfiguration bootstrap;
         try
         {
-            bootstrap = BootstrapLoader.Load(configuration, environment);
+            bootstrap = SignaCoreBootstrapStore.Load(configuration, environment);
         }
-        catch (BootstrapException exception)
+        catch (SignaCore.Host.Bootstrap.BootstrapException exception)
         {
             Console.Error.WriteLine(exception.Message);
             return 1;
         }
 
-        await using var db = CreateDbContext(bootstrap.Database);
+        var databaseOptions = SignaCoreBootstrapStore.ToDatabaseOptions(bootstrap.Database);
+        await using var db = CreateDbContext(databaseOptions);
 
         await using var initializationLock =
-            await StartupDatabase.AcquireInitializationLockAsync(bootstrap.Database, cancellationToken);
+            await StartupDatabase.AcquireInitializationLockAsync(databaseOptions, cancellationToken);
 
         ServiceInstallationEntity? installation;
         try

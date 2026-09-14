@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Npgsql;
+using ServiceMantle.Bootstrap;
 using SignaCore.Database;
 
 namespace SignaCore.Host.Bootstrap;
@@ -11,25 +12,39 @@ namespace SignaCore.Host.Bootstrap;
 /// </summary>
 internal static class BootstrapDiagnostics
 {
+    /// <summary>Describes a locally bound database target (the bootstrap editor request path).</summary>
     public static string DescribeEndpoint(DatabaseOptions options)
     {
         try
         {
-            switch (options.ProviderKind)
+            return DescribeEndpoint(new BootstrapDatabaseConfiguration(
+                options.Provider,
+                options.ServerVersion,
+                options.ConnectionString));
+        }
+        catch (Exception)
+        {
+            return "unparsable";
+        }
+    }
+
+    public static string DescribeEndpoint(BootstrapDatabaseConfiguration database)
+    {
+        try
+        {
+            if (string.Equals(database.Provider, "PostgreSQL", StringComparison.OrdinalIgnoreCase))
             {
-                case DatabaseProvider.PostgreSql:
-                {
-                    var builder = new NpgsqlConnectionStringBuilder(options.ConnectionString);
-                    return $"{builder.Host}:{builder.Port}/{builder.Database}";
-                }
-                case DatabaseProvider.Sqlite:
-                {
-                    var builder = new SqliteConnectionStringBuilder(options.ConnectionString);
-                    return Path.GetFileName(builder.DataSource);
-                }
-                default:
-                    return "unknown";
+                var builder = new NpgsqlConnectionStringBuilder(database.ConnectionString);
+                return $"{builder.Host}:{builder.Port}/{builder.Database}";
             }
+
+            if (string.Equals(database.Provider, "SQLite", StringComparison.OrdinalIgnoreCase))
+            {
+                var builder = new SqliteConnectionStringBuilder(database.ConnectionString);
+                return Path.GetFileName(builder.DataSource);
+            }
+
+            return "unknown";
         }
         catch (Exception)
         {
