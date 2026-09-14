@@ -1,4 +1,8 @@
+using ServiceMantle.Bootstrap;
+using ServiceMantle.Database.PostgreSql;
+using ServiceMantle.Database.Sqlite;
 using SignaCore.Database;
+using SignaCore.Host.Installation;
 using SignaCore.Host.Models;
 
 namespace SignaCore.Host.Bootstrap;
@@ -33,24 +37,27 @@ internal sealed record BootstrapOperationResult(
 /// <para>
 /// Every path here validates before it writes: the provider and connection details have to bind, the
 /// target has to be reachable, and a target that already holds protected data has to be readable
-/// with the key being stored. Only then is the file replaced atomically. A rejected request never
-/// touches the file, so an operator can experiment against a live installation without risking it.
+/// with the key being stored. Only then is the file written through the shared ServiceMantle
+/// bootstrap store: creation never overwrites an existing file and replacement is atomic. A
+/// rejected request never touches the file, so an operator can experiment against a live
+/// installation without risking it.
 /// </para>
 /// </summary>
 internal sealed class BootstrapConfigurationService
 {
+    private readonly BootstrapFileStore _store;
     private readonly ILogger<BootstrapConfigurationService> _logger;
 
     public BootstrapConfigurationService(
-        IConfiguration configuration,
+        BootstrapFileStore store,
         ILogger<BootstrapConfigurationService> logger)
     {
-        FilePath = BootstrapLoader.ResolveFilePath(configuration);
+        _store = store;
         _logger = logger;
     }
 
     /// <summary>Where this instance reads and writes its bootstrap file.</summary>
-    public string FilePath { get; }
+    public string FilePath => _store.FilePath;
 
     /// <summary>
     /// Classifies a candidate database without writing anything, so the operator sees what they are
@@ -158,10 +165,10 @@ internal sealed class BootstrapConfigurationService
         }
 
         var masterKey = isNewInstallation
-            ? MasterKeyFactory.Generate()
+            ? GenerateMasterKey()
             : suppliedKey!;
 
-        return Write(database, masterKey, inspection);
+        return await WriteAsync(database, masterKey, inspection, create: true, cancellationToken);
     }
 
     /// <summary>
@@ -202,29 +209,54 @@ internal sealed class BootstrapConfigurationService
                 inspection);
         }
 
-        return Write(database, masterKey, inspection);
+        return await WriteAsync(database, masterKey, inspection, create: false, cancellationToken);
     }
 
-    private BootstrapOperationResult Write(
+    private async Task<BootstrapOperationResult> WriteAsync(
         DatabaseOptions database,
         string masterKey,
-        BootstrapTargetInspection inspection)
+        BootstrapTargetInspection inspection,
+        bool create,
+        CancellationToken cancellationToken)
     {
+        var configuration = new BootstrapConfiguration(
+            InstallationStores.ServiceId,
+            new BootstrapDatabaseConfiguration(database.Provider, database.ServerVersion, database.ConnectionString),
+            masterKey);
+
         try
         {
-            BootstrapFileWriter.Write(FilePath, database, masterKey);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (create)
+            {
+                _store.Create(configuration);
+            }
+            else
+            {
+                _store.Replace(configuration);
+            }
         }
-        catch (BootstrapException exception)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            _logger.LogError(exception, "The bootstrap file could not be written.");
-            return new BootstrapOperationResult(BootstrapOutcome.WriteFailed, exception.Message, inspection);
+            throw;
+        }
+        catch (ServiceMantle.Bootstrap.BootstrapException exception)
+        {
+            // Only the closed failure kind decides what happened; the message stays in the log.
+            _logger.LogError(
+                "The bootstrap file could not be written: FailureKind={FailureKind}",
+                exception.FailureKind);
+            return new BootstrapOperationResult(
+                BootstrapOutcome.WriteFailed,
+                DescribeWriteFailure(exception),
+                inspection);
         }
 
         // Provider and endpoint only. The connection string and the key never reach the log.
         _logger.LogInformation(
             "Bootstrap configuration written to {FilePath}: Provider={Provider}, Database={Endpoint}, " +
             "Target={Target}",
-            FilePath,
+            _store.FilePath,
             database.Provider,
             inspection.Endpoint,
             inspection.Kind);
@@ -234,6 +266,37 @@ internal sealed class BootstrapConfigurationService
             "Bootstrap configuration saved. SignaCore is restarting to load it.",
             inspection);
     }
+
+    /// <summary>
+    /// The product outcome text for each closed failure kind. Creation that finds the target
+    /// already present and replacement of a missing target are both "the file could not be
+    /// written"; everything unproven is reported as an unavailable write the same way.
+    /// </summary>
+    private static string DescribeWriteFailure(ServiceMantle.Bootstrap.BootstrapException exception) =>
+        exception.FailureKind switch
+        {
+            BootstrapFileFailureKind.TargetAlreadyExists =>
+                "A bootstrap file already exists at the configured location and is never overwritten. " +
+                "Restart SignaCore to load it; replace its database target from the admin console.",
+            BootstrapFileFailureKind.TargetMissing =>
+                "The bootstrap file does not exist, so there is nothing to replace. Create it first " +
+                "from Bootstrap Configuration Mode.",
+            _ =>
+                "The bootstrap file could not be written. Mount the configuration directory " +
+                "read-write and make sure it is owned by the SignaCore runtime identity."
+        };
+
+    /// <summary>
+    /// Generates the external root key for a new installation. Operators do not invent this value;
+    /// it is the root of trust for every stored RSA signing private key and every encrypted system
+    /// setting, so its entropy is not a place to accept a passphrase. Base64url without padding
+    /// survives being copied through shells, YAML, and environment files.
+    /// </summary>
+    private static string GenerateMasterKey() =>
+        Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
 
     private static string DescribeTarget(BootstrapTargetInspection inspection) => inspection.Kind switch
     {

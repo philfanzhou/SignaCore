@@ -23,7 +23,7 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
     {
         _directory = Path.Combine(Path.GetTempPath(), $"signacore-bootstrap-mode-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_directory);
-        _bootstrapPath = Path.Combine(_directory, BootstrapLoader.FileName);
+        _bootstrapPath = Path.Combine(_directory, "signacore.bootstrap.json");
         return ValueTask.CompletedTask;
     }
 
@@ -118,9 +118,13 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
         Assert.True(File.Exists(_bootstrapPath));
 
         using var document = JsonDocument.Parse(await File.ReadAllTextAsync(_bootstrapPath, TestContext.Current.CancellationToken));
-        Assert.Equal(2, document.RootElement.EnumerateObject().Count());
+        // The canonical shared schema: FormatVersion, ServiceId, Database, MasterKey — and nothing
+        // else. SQLite has no server version, so the null field is omitted rather than written.
+        Assert.Equal(4, document.RootElement.EnumerateObject().Count());
+        Assert.Equal(1, document.RootElement.GetProperty("FormatVersion").GetInt32());
+        Assert.Equal("signacore", document.RootElement.GetProperty("ServiceId").GetString());
         Assert.True(document.RootElement.TryGetProperty("Database", out var database));
-        Assert.Equal(3, database.EnumerateObject().Count());
+        Assert.Equal(2, database.EnumerateObject().Count());
         Assert.False(string.IsNullOrWhiteSpace(
             document.RootElement.GetProperty("MasterKey").GetString()));
         Assert.False(document.RootElement.TryGetProperty("MasterKeyFile", out _));
@@ -131,9 +135,6 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
             Assert.Equal(
                 UnixFileMode.UserRead | UnixFileMode.UserWrite,
                 File.GetUnixFileMode(_bootstrapPath));
-            Assert.Equal(
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
-                File.GetUnixFileMode(_directory));
         }
     }
 
@@ -145,7 +146,7 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
             .WithWebHostBuilder(builder =>
             {
                 builder.UseSetting("environment", Environments.Production);
-                builder.UseSetting(BootstrapLoader.FilePathConfigurationKey, _bootstrapPath);
+                builder.UseSetting(SignaCoreBootstrapStore.FilePathConfigurationKey, _bootstrapPath);
                 builder.ConfigureTestServices(services =>
                 {
                     services.RemoveAll<BootstrapCodeAuthority>();

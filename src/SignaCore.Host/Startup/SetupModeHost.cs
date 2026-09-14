@@ -4,6 +4,7 @@ using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
+using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.HealthChecks;
@@ -30,16 +31,19 @@ internal static class SetupModeHost
     {
         var services = builder.Services;
 
-        // The correlation middleware is the only ServiceMantle capability activated in this phase.
-        services.AddSignaCoreServiceMantle();
-        services.AddSingleton(bootstrap.Bootstrap.Database);
+        // The correlation middleware and the shared bootstrap file store are the ServiceMantle
+        // capabilities activated in this phase; the store path stays aligned with the other hosts.
+        services.AddSignaCoreServiceMantle(
+            SignaCoreBootstrapStore.ResolveFilePath(builder.Configuration));
+        var databaseOptions = SignaCoreBootstrapStore.ToDatabaseOptions(bootstrap.Bootstrap.Database);
+        services.AddSingleton(databaseOptions);
         services.AddSingleton(bootstrap.RuntimeState);
         services.AddSingleton(bootstrap.MasterKeyProvider);
         services.AddSingleton(bootstrap.ConfigurationProtector);
         services.AddSingleton(bootstrap.SettingsStore);
 
         services.AddDbContext<IdentityDbContext>(options =>
-            options.UseIdentityDatabase(bootstrap.Bootstrap.Database));
+            options.UseIdentityDatabase(databaseOptions));
 
         services.RegisterPasswordHashingDefaults();
         services.AddScoped<InstallationSetupService>();

@@ -1,11 +1,12 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Bootstrap;
 using ServiceMantle.Installation;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
+using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
 
@@ -16,9 +17,10 @@ namespace SignaCore.Host.Startup;
 /// <para>
 /// Production hosts read the bootstrap from its fixed path and reach a completed installation only
 /// through first-run setup. Integration tests need a database that is already installed before the
-/// host starts, so this writes an equivalent bootstrap file and performs the same migration,
-/// settings-seeding, and administrator-creation steps the real path performs — through the real
-/// components, so a test host never diverges from a production host.
+/// host starts, so this writes an equivalent bootstrap file through the same shared store the
+/// production write path uses and performs the same migration, settings-seeding, and
+/// administrator-creation steps the real path performs — through the real components, so a test
+/// host never diverges from a production host.
 /// </para>
 /// </summary>
 internal static class InstallationTestSupport
@@ -36,24 +38,7 @@ internal static class InstallationTestSupport
         IReadOnlyDictionary<string, string>? settingOverrides = null,
         CancellationToken cancellationToken = default)
     {
-        Directory.CreateDirectory(bootstrapDirectory);
-        var bootstrapFilePath = Path.Combine(bootstrapDirectory, BootstrapLoaderFileName);
-
-        await File.WriteAllTextAsync(
-            bootstrapFilePath,
-            JsonSerializer.Serialize(
-                new
-                {
-                    Database = new
-                    {
-                        database.Provider,
-                        database.ServerVersion,
-                        database.ConnectionString
-                    },
-                    MasterKey = rootSecret
-                },
-                new JsonSerializerOptions { WriteIndented = true }),
-            cancellationToken);
+        var bootstrapFilePath = WriteBootstrapFile(bootstrapDirectory, database, rootSecret);
 
         var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
         optionsBuilder.UseIdentityDatabase(database);
@@ -119,33 +104,41 @@ internal static class InstallationTestSupport
     /// Writes only the bootstrap file, leaving the database uninitialized so the host enters
     /// Setup Mode.
     /// </summary>
-    public static async Task<string> PrepareUninstalledBootstrapAsync(
+    public static Task<string> PrepareUninstalledBootstrapAsync(
         string bootstrapDirectory,
         DatabaseOptions database,
         string rootSecret,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(WriteBootstrapFile(bootstrapDirectory, database, rootSecret));
+
+    /// <summary>
+    /// Writes the canonical bootstrap file through the shared store — the same write path the
+    /// bootstrap editor uses — so test hosts always read what production writes. The store refuses
+    /// to overwrite an existing file, and this helper owns the whole directory, so a stale file
+    /// from an earlier preparation is removed first.
+    /// </summary>
+    private static string WriteBootstrapFile(
+        string bootstrapDirectory,
+        DatabaseOptions database,
+        string rootSecret)
     {
         Directory.CreateDirectory(bootstrapDirectory);
-        var bootstrapFilePath = Path.Combine(bootstrapDirectory, BootstrapLoaderFileName);
+        var bootstrapFilePath = Path.Combine(
+            bootstrapDirectory,
+            $"{ServiceMantleComposition.ServiceIdentifier}.bootstrap.json");
+        if (File.Exists(bootstrapFilePath))
+        {
+            File.Delete(bootstrapFilePath);
+        }
 
-        await File.WriteAllTextAsync(
-            bootstrapFilePath,
-            JsonSerializer.Serialize(
-                new
-                {
-                    Database = new
-                    {
-                        database.Provider,
-                        database.ServerVersion,
-                        database.ConnectionString
-                    },
-                    MasterKey = rootSecret
-                },
-                new JsonSerializerOptions { WriteIndented = true }),
-            cancellationToken);
-
+        var store = new BootstrapFileStore(
+            InstallationStores.ServiceId,
+            SignaCoreBootstrapStore.CreateProviderRegistry(),
+            bootstrapFilePath);
+        store.Create(new BootstrapConfiguration(
+            InstallationStores.ServiceId,
+            new BootstrapDatabaseConfiguration(database.Provider, database.ServerVersion, database.ConnectionString),
+            rootSecret));
         return bootstrapFilePath;
     }
-
-    private const string BootstrapLoaderFileName = Bootstrap.BootstrapLoader.FileName;
 }

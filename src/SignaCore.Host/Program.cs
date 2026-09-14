@@ -5,6 +5,7 @@ using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host;
+using ServiceMantle.Bootstrap;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.HealthChecks;
@@ -53,11 +54,13 @@ void ConfigureKestrel(WebApplicationBuilder target)
 // ---- Bootstrap file ----
 // A missing bootstrap file is not a failure: the operator has not configured this deployment yet.
 // A malformed one is, because ignoring a bootstrap someone did write is indistinguishable from
-// silently pointing the service at the wrong database.
+// silently pointing the service at the wrong database. The path is resolved once so the banner,
+// the pre-composition store, and the DI-registered store all agree.
+var bootstrapFilePath = SignaCoreBootstrapStore.ResolveFilePath(builder.Configuration);
 BootstrapConfiguration? bootstrap;
 try
 {
-    bootstrap = BootstrapLoader.TryLoad(builder.Configuration, builder.Environment);
+    bootstrap = SignaCoreBootstrapStore.TryLoad(builder.Configuration, builder.Environment);
 }
 catch (Exception exception)
 {
@@ -74,13 +77,13 @@ if (bootstrap is null)
     var codeAuthority = BootstrapCodeAuthority.Create(out var bootstrapCode);
     StartupBanner.WriteBootstrapCode(
         bootstrapCode,
-        BootstrapLoader.ResolveFilePath(builder.Configuration),
+        bootstrapFilePath,
         codeAuthority.ExpiresAt);
     StartupBanner.WriteBootstrapModeNotice();
 
     builder.Host.UseAgentSerilog("SignaCore");
     ConfigureKestrel(builder);
-    BootstrapModeHost.ConfigureServices(builder, codeAuthority);
+    BootstrapModeHost.ConfigureServices(builder, codeAuthority, bootstrapFilePath);
 
     var bootstrapApp = builder.Build();
     BootstrapModeHost.ConfigurePipeline(bootstrapApp, httpPort);
@@ -195,13 +198,13 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
 builder.Services.AddConsulDiscoveryIfEnabled(builder.Configuration);
 
 // ---- ServiceMantle host identity (Correlation ID middleware) ----
-builder.Services.AddSignaCoreServiceMantle();
+builder.Services.AddSignaCoreServiceMantle(bootstrapFilePath);
 
 // ---- Infrastructure (DI, Auth, CORS, Rate Limiting, OpenTelemetry) ----
 var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(
     builder.Configuration,
     builder.Environment,
-    bootstrapResult.Bootstrap.Database,
+    SignaCoreBootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database),
     bootstrapResult.MasterKeyProvider);
 
 builder.Services.AddSingleton(bootstrapResult.RuntimeState);
@@ -209,7 +212,7 @@ builder.Services.AddSingleton(bootstrapResult.SettingsStore);
 
 // ---- Shared ServiceMantle setting stack (parallel to the legacy system_settings path) ----
 builder.Services.AddSignaCoreSharedSettings(
-    bootstrapResult.Bootstrap.Database,
+    SignaCoreBootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database),
     builder.Environment.IsDevelopment());
 
 // The authenticated bootstrap editor needs the root secret verbatim so a database change can keep
@@ -224,7 +227,7 @@ app.Logger.LogInformation("Service endpoints configured: HTTP={HttpPort}", httpP
 app.Logger.LogInformation(
     "Database: {Provider} at {Endpoint}",
     dbProvider,
-    bootstrapResult.Bootstrap.DatabaseEndpointForDiagnostics);
+    BootstrapDiagnostics.DescribeEndpoint(bootstrapResult.Bootstrap.Database));
 app.Logger.LogInformation(
     "Installation: Id={InstallationId}, ConfigurationVersion={ConfigurationVersion}",
     bootstrapResult.RuntimeState.InstallationId,

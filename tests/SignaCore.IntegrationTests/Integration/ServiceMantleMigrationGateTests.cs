@@ -5,6 +5,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
+using ServiceMantle;
+using ServiceMantle.Bootstrap;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Host.Bootstrap;
@@ -424,8 +426,10 @@ public sealed class ServiceMantleMigrationGateTests
         return new IdentityDbContext(optionsBuilder.Options);
     }
 
-    private static BootstrapConfiguration NewBootstrap(DatabaseOptions database) =>
-        new(database, "root-secret-for-tests-only", "tests");
+    private static BootstrapConfiguration NewBootstrap(DatabaseOptions database) => new(
+        ServiceId.Parse("signacore"),
+        new BootstrapDatabaseConfiguration(database.Provider, database.ServerVersion, database.ConnectionString),
+        "root-secret-for-tests-only");
 
     private static DatabaseOptions ContainerDatabaseOptions(PostgreSqlContainer container) => new()
     {

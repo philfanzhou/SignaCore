@@ -6,6 +6,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using ServiceMantle;
+using ServiceMantle.Bootstrap;
 using ServiceMantle.Installation;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
@@ -478,11 +479,11 @@ public sealed class SqliteStartupMigrationGateTests
 
             // Running the phase again on the already-current database must skip the executor and
             // still resolve the installation state and load the snapshot.
-            var bootstrap = BootstrapLoader.Load(
+            var bootstrap = SignaCoreBootstrapStore.Load(
                 new ConfigurationBuilder()
                     .AddInMemoryCollection(new Dictionary<string, string?>
                     {
-                        [BootstrapLoader.FilePathConfigurationKey] = bootstrapFilePath
+                        [SignaCoreBootstrapStore.FilePathConfigurationKey] = bootstrapFilePath
                     })
                     .Build(),
                 StubEnvironment());
@@ -786,8 +787,10 @@ public sealed class SqliteStartupMigrationGateTests
         return StartupMigrationGate.RunAsync(db, options, NullLogger.Instance, executor, cancellationToken);
     }
 
-    private static BootstrapConfiguration NewBootstrap(DatabaseOptions options) =>
-        new(options, "root-secret-for-tests-only", "tests");
+    private static BootstrapConfiguration NewBootstrap(DatabaseOptions options) => new(
+        ServiceId.Parse("signacore"),
+        new BootstrapDatabaseConfiguration(options.Provider, options.ServerVersion, options.ConnectionString),
+        "root-secret-for-tests-only");
 
     private static IConfiguration EmptyConfiguration() =>
         new ConfigurationBuilder().AddInMemoryCollection().Build();

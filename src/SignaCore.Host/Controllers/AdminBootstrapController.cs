@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using SignaCore.Database;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
+using ServiceMantle.Bootstrap;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Http;
 using SignaCore.Host.Models;
@@ -59,12 +60,12 @@ public sealed class AdminBootstrapController : ControllerBase
         {
             Provider = _bootstrap.Database.Provider,
             ServerVersion = _bootstrap.Database.ServerVersion,
-            Endpoint = _bootstrap.DatabaseEndpointForDiagnostics,
+            Endpoint = BootstrapDiagnostics.DescribeEndpoint(_bootstrap.Database),
             FilePath = _service.FilePath,
             // The key is never read back out of the file by any API; the console only learns it is set.
             MasterKeyConfigured = true,
             Editable = IsFileBacked(),
-            SingleInstanceOnly = _bootstrap.Database.ProviderKind == DatabaseProvider.Sqlite,
+            SingleInstanceOnly = string.Equals(_bootstrap.Database.Provider, "SQLite", StringComparison.OrdinalIgnoreCase),
             ScopeNotice = ScopeNotice,
             SupportedProviders = BootstrapProviderCatalog.Descriptors
         });
@@ -86,7 +87,7 @@ public sealed class AdminBootstrapController : ControllerBase
         }
 
         var candidateKey = string.IsNullOrWhiteSpace(request.MasterKey)
-            ? _bootstrap.RootSecret
+            ? _bootstrap.MasterKey
             : request.MasterKey.Trim();
 
         var result = await _service.TestAsync(request.Database, candidateKey, cancellationToken);
@@ -128,7 +129,7 @@ public sealed class AdminBootstrapController : ControllerBase
         // transactional data operation and not a configuration edit.
         var replacementKey = string.IsNullOrWhiteSpace(request.MasterKey) ? null : request.MasterKey.Trim();
         if (replacementKey is not null &&
-            !string.Equals(replacementKey, _bootstrap.RootSecret, StringComparison.Ordinal))
+            !string.Equals(replacementKey, _bootstrap.MasterKey, StringComparison.Ordinal))
         {
             var candidate = await _service.TestAsync(request.Database, replacementKey, cancellationToken);
             if (candidate.Outcome == BootstrapOutcome.InvalidRequest)
@@ -148,7 +149,7 @@ public sealed class AdminBootstrapController : ControllerBase
 
         var result = await _service.ReplaceDatabaseAsync(
             request.Database,
-            _bootstrap.RootSecret,
+            _bootstrap.MasterKey,
             replacementKey,
             cancellationToken);
 
@@ -195,28 +196,10 @@ public sealed class AdminBootstrapController : ControllerBase
 
     /// <summary>
     /// True when this process actually loaded the file it would be writing. A Development fallback
-    /// host runs from appsettings, so writing the file would silently disagree with what it runs.
+    /// host runs from appsettings (its configuration is memory-backed, so SourcePath is null), and
+    /// writing the file would silently disagree with what it runs.
     /// </summary>
-    private bool IsFileBacked()
-    {
-        if (_bootstrap is null || _service is null)
-        {
-            return false;
-        }
-
-        try
-        {
-            return string.Equals(
-                Path.GetFullPath(_bootstrap.Origin),
-                Path.GetFullPath(_service.FilePath),
-                StringComparison.OrdinalIgnoreCase);
-        }
-        catch (ArgumentException)
-        {
-            // The fallback origin is a description, not a path.
-            return false;
-        }
-    }
+    private bool IsFileBacked() => _bootstrap is not null && _bootstrap.SourcePath is not null;
 
     private void ScheduleRestart()
     {
