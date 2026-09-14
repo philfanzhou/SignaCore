@@ -23,6 +23,7 @@ using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Http;
+using SignaCore.Host.Services;
 using SignaCore.Host.Models;
 using SignaCore.Host.Services;
 using Xunit;
@@ -856,10 +857,12 @@ public sealed class AuditTransactionTests
             new AdminLoginRequest("admin", "wrong-value", false),
             new ValidatorFactory([validator], NullLogger<ValidatorFactory>.Instance),
             new AdminIdentityOptions { Username = "admin" },
-            CreateAuditService(database.Context),
-            loginAttemptRepository,
-            new EfCoreUnitOfWork(database.Context),
-            database.Context));
+            new AdminLoginStateRecorder(
+                loginAttemptRepository,
+                CreateAuditService(database.Context),
+                new EfCoreUnitOfWork(database.Context),
+                database.Context,
+                NullLogger<AdminLoginStateRecorder>.Instance)));
 
         database.Context.ChangeTracker.Clear();
         Assert.Equal(1, (await database.Context.LoginAttempts

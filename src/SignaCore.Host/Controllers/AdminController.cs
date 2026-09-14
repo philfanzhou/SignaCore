@@ -40,10 +40,7 @@ public class AdminController : ControllerBase
         [FromBody] AdminLoginRequest request,
         [FromServices] ValidatorFactory validatorFactory,
         [FromServices] AdminIdentityOptions adminIdentity,
-        [FromServices] IAuditService auditService,
-        [FromServices] ILoginAttemptRepository loginAttemptRepository,
-        [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IdentityDbContext dbContext,
+        [FromServices] AdminLoginStateRecorder loginStateRecorder,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
@@ -65,16 +62,14 @@ public class AdminController : ControllerBase
         // so the success branch cannot lack one.
         if (!result.IsSuccess)
         {
-            await CommitAdminLoginStateAsync(
+            await loginStateRecorder.CommitAsync(
                 result,
                 null,
                 request.Username.Trim(),
                 "login_failure",
                 result.ErrorMessage,
-                loginAttemptRepository,
-                auditService,
-                unitOfWork,
-                dbContext,
+                GetClientIp(),
+                HttpContext.Request.Headers.UserAgent,
                 cancellationToken);
             return StatusCode(StatusCodes.Status401Unauthorized, new { message = result.ErrorMessage });
         }
@@ -84,16 +79,14 @@ public class AdminController : ControllerBase
         if (string.IsNullOrWhiteSpace(configuredAdmin)
             || !string.Equals(username, configuredAdmin, StringComparison.OrdinalIgnoreCase))
         {
-            await CommitAdminLoginStateAsync(
+            await loginStateRecorder.CommitAsync(
                 result,
                 result.Account.Id,
                 username,
                 "login_failure",
                 "bootstrap_admin_required",
-                loginAttemptRepository,
-                auditService,
-                unitOfWork,
-                dbContext,
+                GetClientIp(),
+                HttpContext.Request.Headers.UserAgent,
                 cancellationToken);
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only the bootstrap administrator can sign in to admin web." });
         }
@@ -107,16 +100,14 @@ public class AdminController : ControllerBase
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         var principal = new ClaimsPrincipal(identity);
 
-        await CommitAdminLoginStateAsync(
+        await loginStateRecorder.CommitAsync(
             result,
             result.Account.Id,
             username,
             "login_success",
             null,
-            loginAttemptRepository,
-            auditService,
-            unitOfWork,
-            dbContext,
+            GetClientIp(),
+            HttpContext.Request.Headers.UserAgent,
             cancellationToken);
 
         await HttpContext.SignInAsync(
@@ -133,61 +124,6 @@ public class AdminController : ControllerBase
             result.Account.Id.ToString(),
             username,
             true));
-    }
-
-    private async Task CommitAdminLoginStateAsync(
-        ValidationResult validationResult,
-        Guid? accountId,
-        string username,
-        string eventType,
-        string? failureReason,
-        ILoginAttemptRepository loginAttemptRepository,
-        IAuditService auditService,
-        IUnitOfWork unitOfWork,
-        IdentityDbContext dbContext,
-        CancellationToken cancellationToken)
-    {
-        async Task StageAndSaveAsync(CancellationToken operationCancellationToken)
-        {
-            var loginAttempt = await LoginAttemptChangeApplier.ApplyAsync(
-                validationResult.LoginAttemptChange,
-                loginAttemptRepository,
-                operationCancellationToken);
-            if (loginAttempt?.LockoutUntil > DateTimeOffset.UtcNow)
-            {
-                _logger.LogWarning(
-                    "Account locked due to too many failed attempts, Username={Username}, LockoutUntil={LockoutUntil}",
-                    LogValueSanitizer.Sanitize(loginAttempt.Username),
-                    loginAttempt.LockoutUntil);
-            }
-            await auditService.RecordLoginAsync(
-                accountId,
-                username,
-                "admin_login",
-                eventType,
-                GetClientIp(),
-                HttpContext.Request.Headers.UserAgent,
-                failureReason,
-                cancellationToken: operationCancellationToken);
-            await unitOfWork.SaveChangesAsync(operationCancellationToken);
-        }
-
-        if (validationResult.LoginAttemptChange?.Kind != LoginAttemptChangeKind.RecordFailure)
-        {
-            await StageAndSaveAsync(cancellationToken);
-            return;
-        }
-
-        // The failed-attempt repository performs an immediate atomic update. Enclose it and the
-        // login-history insert in one retryable transaction, while cookie I/O remains outside.
-        var strategy = dbContext.Database.CreateExecutionStrategy();
-        await strategy.ExecuteAsync(async operationCancellationToken =>
-        {
-            dbContext.ChangeTracker.Clear();
-            await using var transaction = await dbContext.Database.BeginTransactionAsync(operationCancellationToken);
-            await StageAndSaveAsync(operationCancellationToken);
-            await transaction.CommitAsync(operationCancellationToken);
-        }, cancellationToken);
     }
 
     /// <summary>

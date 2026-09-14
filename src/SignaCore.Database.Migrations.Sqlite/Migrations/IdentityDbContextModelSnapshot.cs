@@ -17,6 +17,28 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
 
+            modelBuilder.Entity("ServiceMantle.Persistence.EntityFrameworkCore.DataProtectionKeyEntity", b =>
+                {
+                    b.Property<string>("ServiceId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("service_id");
+
+                    b.Property<string>("KeyId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("key_id");
+
+                    b.Property<string>("EncryptedXml")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("encrypted_xml");
+
+                    b.HasKey("ServiceId", "KeyId");
+
+                    b.ToTable("service_data_protection_keys", (string)null);
+                });
+
             modelBuilder.Entity("ServiceMantle.Persistence.EntityFrameworkCore.ManagementAuditLogEntity", b =>
                 {
                     b.Property<string>("Id")

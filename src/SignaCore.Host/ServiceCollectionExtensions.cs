@@ -79,9 +79,10 @@ public static class ServiceCollectionExtensions
             {
                 options.UseIdentityDatabase(databaseOptions);
             },
-            // The shared ServiceMantle setting store consumes the singleton
-            // IDbContextFactory<IdentityDbContext>, so the options must be singleton to avoid a
-            // captive dependency. The configuration itself is fixed at composition time.
+            // The shared ServiceMantle setting store and the Data Protection repository both
+            // consume the singleton IDbContextFactory<IdentityDbContext>, so the options must be
+            // singleton to avoid a captive dependency. The configuration itself is fixed at
+            // composition time.
             optionsLifetime: ServiceLifetime.Singleton);
 
         // ---- RSA Key Manager ----
@@ -92,17 +93,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IConfigurationProtector, AesGcmConfigurationProtector>();
         services.AddSingleton<IKeyManager, KeyManager>();
 
-        // Administrative cookies must survive process restarts and be readable by every replica.
-        // The custom repository encrypts the XML before persisting it in the shared database.
+        // The legacy key-store types stay registered until the legacy admin console is removed.
+        // They are no longer wired into Data Protection: the shared ServiceMantle key ring
+        // (service_data_protection_keys, persisted through AddSignaCoreManagementSession) is the
+        // active ring for both the legacy and the management cookie, under the application name
+        // ServiceMantle.Management:signacore. The one-time consequence — cookies signed under the
+        // previous SignaCore.Admin ring stop validating — is declared in the #102 switch notes.
         services.AddSingleton<IXmlRepository, DatabaseDataProtectionKeyRepository>();
         services.AddSingleton<ConfigurationXmlEncryptor>();
-        services.AddDataProtection().SetApplicationName("SignaCore.Admin");
-        services.AddOptions<Microsoft.AspNetCore.DataProtection.KeyManagement.KeyManagementOptions>()
-            .Configure<IXmlRepository, ConfigurationXmlEncryptor>((options, repository, encryptor) =>
-            {
-                options.XmlRepository = repository;
-                options.XmlEncryptor = encryptor;
-            });
 
         // ---- JWT Options ----
         var jwtOptions = services.RegisterSingleton(new JwtOptions
@@ -229,6 +227,9 @@ public static class ServiceCollectionExtensions
 
         // ---- Gateway Validation Service ----
         services.AddScoped<GatewayValidationService>();
+
+        // ---- Shared admin login state commit path (legacy console + management session) ----
+        services.AddScoped<AdminLoginStateRecorder>();
 
         // ---- User Query Service ----
         services.AddScoped<IUserQueryService, UserQueryService>();
@@ -553,6 +554,10 @@ public static class ServiceCollectionExtensions
             })
             .AddPolicy("AdminSession", policy =>
             {
+                // Pinned to the legacy cookie scheme: AddManagementCookieAuthentication claims the
+                // five default schemes for the management scheme, so the legacy admin console
+                // (qz_admin_session) must name its scheme explicitly until #133 removes it.
+                policy.AddAuthenticationSchemes(CookieAuthenticationDefaults.AuthenticationScheme);
                 policy.RequireAuthenticatedUser();
                 policy.RequireClaim("admin_access", "true");
             })
