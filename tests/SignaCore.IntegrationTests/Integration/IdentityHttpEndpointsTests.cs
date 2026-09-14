@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -611,6 +612,27 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("Healthy", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// The shared ServiceMantle health capability is registered but deliberately never mapped, so
+    /// the health route table keeps exactly the three ASP.NET Core health-check endpoints. Mapping
+    /// the shared endpoints as well would duplicate these very routes and make the host ambiguous.
+    /// </summary>
+    [Fact]
+    public void HealthRouteTable_WithTheSharedRegistration_KeepsExactlyTheThreeMappedRoutes()
+    {
+        using var factory = _fixture.WithTestServices(_ => { });
+
+        var healthRoutes = factory.Services.GetServices<EndpointDataSource>()
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText)
+            .Where(text => text is not null && text.StartsWith("/health", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(text => text, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(["/health", "/health/live", "/health/ready"], healthRoutes);
     }
 
     [Fact]
