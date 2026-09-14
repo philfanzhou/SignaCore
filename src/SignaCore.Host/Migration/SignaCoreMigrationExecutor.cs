@@ -163,12 +163,14 @@ internal sealed class SignaCoreMigrationExecutor : IDatabaseMigrationExecutor
     }
 
     /// <summary>
-    /// 把 expand 迁移新增的 *_normalized 列从 NULL 填成非空值。
-    /// expand 迁移只加列不回填，而实体把这些列映射为非空 string，
-    /// 存量行会在下面的 ToListAsync 上抛 "Column '...' is null"，
-    /// 导致回填代码被它自己要回填的 NULL 卡死（空库无行，所以只在有数据的库上暴露）。
-    /// 这里写入的值随后会被 C# 侧用 IdentityValueNormalizer 重算覆盖，
-    /// 唯一性校验也始终基于源列重算，因此本步骤只需保证列非空。
+    /// Fills the *_normalized columns added by the expand migration from NULL to non-null values.
+    /// The expand migration only adds the columns without backfilling them, while the entities map
+    /// these columns as non-nullable strings, so pre-existing rows would throw "Column '...' is null"
+    /// on the ToListAsync calls below, leaving the backfill code stuck on the very NULLs it is meant
+    /// to backfill (an empty database has no rows, so this only surfaces on databases with data).
+    /// The values written here are later recomputed and overwritten on the C# side with
+    /// IdentityValueNormalizer, and uniqueness validation is always recomputed from the source
+    /// columns, so this step only needs to guarantee the columns are non-null.
     /// </summary>
     private static async Task SeedNormalizedColumnsAsync(
         IdentityDbContext dbContext,
