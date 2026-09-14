@@ -6,7 +6,10 @@ using ServiceMantle.Database.PostgreSql;
 using ServiceMantle.Database.Sqlite;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
+using SignaCore.Domain.Keys;
 using SignaCore.Host.Configuration;
+using SignaCore.Host.HealthChecks;
+using SignaCore.Host.Http;
 using SignaCore.Host.Installation;
 
 namespace SignaCore.Host;
@@ -36,7 +39,8 @@ internal static class ServiceMantleComposition
     /// the same <paramref name="bootstrapFilePath"/> — resolved from the
     /// <c>Bootstrap:FilePath</c> override — so the DI store and the pre-composition store agree.
     /// </summary>
-    internal static void AddSignaCoreServiceMantle(
+    /// <returns>The builder the normal host extends with its own shared capabilities.</returns>
+    internal static ServiceMantleBuilder AddSignaCoreServiceMantle(
         this IServiceCollection services,
         string? bootstrapFilePath = null)
     {
@@ -46,6 +50,33 @@ internal static class ServiceMantleComposition
             bootstrapFilePath);
         builder.AddBootstrapDatabaseProvider<PostgreSqlBootstrapDatabaseProvider>();
         builder.AddBootstrapDatabaseProvider<SqliteBootstrapDatabaseProvider>();
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the shared ServiceMantle capabilities only the normal host owns: the fixed health
+    /// endpoint capability, the signing-key readiness contributor, and the product-specific
+    /// sensitive request Header set.
+    /// </summary>
+    /// <remarks>
+    /// This is a parallel addition that maps no route: the <c>/health/live</c>,
+    /// <c>/health/ready</c>, and <c>/health</c> endpoints stay owned by
+    /// <see cref="SigningKeysHealthCheck"/> and the ASP.NET Core health-check stack, so the
+    /// contributor stays dormant until the endpoint switch replaces them. The startup validators the
+    /// registrations add still run, which is what proves the contributor and the Header set are
+    /// wired correctly. The Bootstrap and Setup hosts deliberately do not call this: neither
+    /// registers <see cref="IKeyManager"/> nor serves an <c>X-Admin-AppSecret</c>
+    /// endpoint, and the readiness validator resolves every contributor when the host starts.
+    /// </remarks>
+    internal static ServiceMantleBuilder AddSignaCoreSharedHttpCapabilities(
+        this ServiceMantleBuilder builder)
+    {
+        builder.AddServiceMantleHealthEndpoints();
+        builder.AddServiceReadinessContributor<SigningKeyReadinessContributor>();
+        // The gateway application secret is a SignaCore contract, so it is registered through the
+        // shared extension point rather than hardcoded in the shared library's built-in set.
+        builder.AddSensitiveHeaders(options => options.DeniedHeaderNames = [IdentityHeaders.AppSecret]);
+        return builder;
     }
 
     /// <summary>

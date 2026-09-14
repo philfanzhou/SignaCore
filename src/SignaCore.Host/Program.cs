@@ -197,8 +197,13 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
 // ---- Consul Service Discovery (optional) ----
 builder.Services.AddConsulDiscoveryIfEnabled(builder.Configuration);
 
-// ---- ServiceMantle host identity (Correlation ID middleware) ----
-builder.Services.AddSignaCoreServiceMantle(bootstrapFilePath);
+// ---- ServiceMantle host identity, readiness and sensitive Headers ----
+// The shared health capability, the signing-key readiness contributor and the product sensitive
+// Header set are registered here only: neither the Bootstrap nor the Setup host resolves
+// IKeyManager or serves an X-Admin-AppSecret endpoint. No route is mapped, so /health/live,
+// /health/ready and /health keep their current owners and responses.
+builder.Services.AddSignaCoreServiceMantle(bootstrapFilePath)
+    .AddSignaCoreSharedHttpCapabilities();
 
 // ---- Infrastructure (DI, Auth, CORS, Rate Limiting, OpenTelemetry) ----
 var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(
