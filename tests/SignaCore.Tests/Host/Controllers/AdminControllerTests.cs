@@ -23,6 +23,7 @@ using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Models;
+using SignaCore.Host.Services;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Controllers;
@@ -123,6 +124,18 @@ public class AdminControllerTests : IDisposable
         return new ValidatorFactory(new[] { _passwordValidatorMock.Object }, NullLogger<ValidatorFactory>.Instance);
     }
 
+    private AdminLoginStateRecorder CreateLoginStateRecorder(
+        ILoginAttemptRepository? attempts = null,
+        IAuditService? audit = null,
+        IUnitOfWork? unit = null,
+        IdentityDbContext? context = null) =>
+        new AdminLoginStateRecorder(
+            attempts ?? _loginAttemptRepoMock.Object,
+            audit ?? _auditServiceMock.Object,
+            unit ?? _unitOfWorkMock.Object,
+            context ?? _dbContext,
+            NullLogger<AdminLoginStateRecorder>.Instance);
+
     #region Login
 
     [Fact]
@@ -130,8 +143,7 @@ public class AdminControllerTests : IDisposable
     {
         var result = await _controller.Login(
             new AdminLoginRequest("", "pwd", false),
-            CreateValidatorFactory(), CreateAdminIdentity(), _auditServiceMock.Object,
-            _loginAttemptRepoMock.Object, _unitOfWorkMock.Object, _dbContext);
+            CreateValidatorFactory(), CreateAdminIdentity(), CreateLoginStateRecorder());
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         Assert.IsType<ErrorResponse>(bad.Value);
@@ -143,8 +155,7 @@ public class AdminControllerTests : IDisposable
     {
         var result = await _controller.Login(
             new AdminLoginRequest("user", "", false),
-            CreateValidatorFactory(), CreateAdminIdentity(), _auditServiceMock.Object,
-            _loginAttemptRepoMock.Object, _unitOfWorkMock.Object, _dbContext);
+            CreateValidatorFactory(), CreateAdminIdentity(), CreateLoginStateRecorder());
 
         Assert.IsType<BadRequestObjectResult>(result);
         _passwordValidatorMock.Verify(v => v.ValidateAsync(It.IsAny<ValidationRequest>()), Times.Never);
@@ -155,8 +166,7 @@ public class AdminControllerTests : IDisposable
     {
         var result = await _controller.Login(
             new AdminLoginRequest("   ", "   ", false),
-            CreateValidatorFactory(), CreateAdminIdentity(), _auditServiceMock.Object,
-            _loginAttemptRepoMock.Object, _unitOfWorkMock.Object, _dbContext);
+            CreateValidatorFactory(), CreateAdminIdentity(), CreateLoginStateRecorder());
 
         Assert.IsType<BadRequestObjectResult>(result);
     }
@@ -169,8 +179,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.Login(
             new AdminLoginRequest("user", "pwd", false),
-            CreateValidatorFactory(), CreateAdminIdentity(), _auditServiceMock.Object,
-            _loginAttemptRepoMock.Object, _unitOfWorkMock.Object, _dbContext);
+            CreateValidatorFactory(), CreateAdminIdentity(), CreateLoginStateRecorder());
 
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status401Unauthorized, status.StatusCode);
@@ -192,8 +201,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.Login(
             new AdminLoginRequest("nonadmin", "pwd", false),
-            CreateValidatorFactory(), CreateAdminIdentity(), _auditServiceMock.Object,
-            _loginAttemptRepoMock.Object, _unitOfWorkMock.Object, _dbContext);
+            CreateValidatorFactory(), CreateAdminIdentity(), CreateLoginStateRecorder());
 
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status403Forbidden, status.StatusCode);
@@ -214,8 +222,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.Login(
             new AdminLoginRequest(AdminName, "pwd", true),
-            CreateValidatorFactory(), CreateAdminIdentity(), _auditServiceMock.Object,
-            _loginAttemptRepoMock.Object, _unitOfWorkMock.Object, _dbContext);
+            CreateValidatorFactory(), CreateAdminIdentity(), CreateLoginStateRecorder());
 
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status403Forbidden, status.StatusCode);
@@ -235,8 +242,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.Login(
             new AdminLoginRequest(AdminName, "pwd", false),
-            CreateValidatorFactory(), CreateAdminIdentity(), _auditServiceMock.Object,
-            _loginAttemptRepoMock.Object, _unitOfWorkMock.Object, _dbContext);
+            CreateValidatorFactory(), CreateAdminIdentity(), CreateLoginStateRecorder());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminSessionResponse>(ok.Value);
@@ -255,8 +261,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.Login(
             new AdminLoginRequest(AdminName, "pwd", false),
-            CreateValidatorFactory(), CreateAdminIdentity(), _auditServiceMock.Object,
-            _loginAttemptRepoMock.Object, _unitOfWorkMock.Object, _dbContext);
+            CreateValidatorFactory(), CreateAdminIdentity(), CreateLoginStateRecorder());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminSessionResponse>(ok.Value);
@@ -400,8 +405,8 @@ public class AdminControllerTests : IDisposable
         var operation = () => flow == "logout"
             ? _controller.Logout(_auditServiceMock.Object, _unitOfWorkMock.Object, cancellation.Token)
             : _controller.Login(new AdminLoginRequest(username, "unused-test-password", false),
-                CreateValidatorFactory(), CreateAdminIdentity(), _auditServiceMock.Object,
-                _loginAttemptRepoMock.Object, _unitOfWorkMock.Object, context, cancellation.Token);
+                CreateValidatorFactory(), CreateAdminIdentity(),
+                CreateLoginStateRecorder(context: context), cancellation.Token);
         if (cancelAt is null)
         {
             var response = Assert.IsAssignableFrom<ObjectResult>(await operation());
@@ -496,7 +501,8 @@ public class AdminControllerTests : IDisposable
         var operation = () => flow == "logout"
             ? _controller.Logout(audit, unit, cancellation.Token)
             : _controller.Login(new AdminLoginRequest(username, "unused-test-password", false), factory,
-                CreateAdminIdentity(), audit, attempts, unit, context, cancellation.Token);
+                CreateAdminIdentity(), CreateLoginStateRecorder(attempts, audit, unit, context),
+                cancellation.Token);
         var cancelled = boundary is not ("none" or "retry");
         if (cancelled)
         {

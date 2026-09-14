@@ -23,7 +23,7 @@ namespace SignaCore.Host;
 public static class AdminSpaRouting
 {
     private static readonly string[] NonSpaPrefixes =
-        ["/api", "/oauth2", "/.well-known", "/health", "/metrics"];
+        ["/api", "/oauth2", "/.well-known", "/health", "/metrics", "/management"];
 
     public static bool ShouldServeSpa(HttpContext context, int httpPort)
     {
@@ -38,7 +38,27 @@ public static class AdminSpaRouting
             return false;
         }
 
-        var path = context.Request.Path;
-        return !NonSpaPrefixes.Any(prefix => path.StartsWithSegments(prefix));
+        return IsSpaPath(context.Request.Path);
     }
+
+    /// <summary>
+    /// Decides whether the normal host's SPA fallback endpoint should serve the console for a
+    /// request. The fallback is itself a mapped endpoint (<c>{**path}</c>), reached only after
+    /// routing found no more specific match, so the <see cref="GetEndpoint"/> guard that
+    /// <see cref="ShouldServeSpa"/> applies would always reject it; only the port and the non-SPA
+    /// prefix guards remain. A declined request is answered 404 so API-shaped and management paths
+    /// keep their own contract instead of rendering the console.
+    /// </summary>
+    public static bool ShouldServeSpaFallback(HttpContext context, int httpPort)
+    {
+        if (context.Connection.LocalPort != httpPort)
+        {
+            return false;
+        }
+
+        return IsSpaPath(context.Request.Path);
+    }
+
+    private static bool IsSpaPath(PathString path) =>
+        !NonSpaPrefixes.Any(prefix => path.StartsWithSegments(prefix));
 }

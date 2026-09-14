@@ -22,10 +22,11 @@ namespace SignaCore.Host;
 /// (locate, read, create, replace) belongs to the shared store, with the PostgreSQL and SQLite
 /// bootstrap providers registered so the store resolves both. The Correlation ID middleware
 /// remains the only ServiceMantle HTTP capability activated in the Bootstrap and Setup hosts; the
-/// normal host composes more. The installation state, the business database, authentication, and
-/// Serilog remain owned by SignaCore. The ServiceMantle request log scope adds its own
-/// ServiceName, ServiceVersion, and InstanceId fields; the existing global Serilog enrichment is
-/// intentionally left unchanged.
+/// normal host composes the full ServiceMantle pipeline (<c>UseServiceMantlePipeline</c>) with the
+/// shared management session capabilities. The installation state, the business database,
+/// authentication, and Serilog remain owned by SignaCore. The ServiceMantle request log scope adds
+/// its own ServiceName, ServiceVersion, and InstanceId fields; the existing global Serilog
+/// enrichment is intentionally left unchanged.
 /// </remarks>
 internal static class ServiceMantleComposition
 {
@@ -55,8 +56,8 @@ internal static class ServiceMantleComposition
 
     /// <summary>
     /// Registers the shared ServiceMantle capabilities only the normal host owns: the fixed health
-    /// endpoint capability, the signing-key readiness contributor, and the product-specific
-    /// sensitive request Header set.
+    /// endpoint capability, the signing-key readiness contributor, the product-specific sensitive
+    /// request Header set, the security response headers, and the shared rate-limit policies.
     /// </summary>
     /// <remarks>
     /// This is a parallel addition that maps no route: the <c>/health/live</c>,
@@ -64,9 +65,13 @@ internal static class ServiceMantleComposition
     /// <see cref="SigningKeysHealthCheck"/> and the ASP.NET Core health-check stack, so the
     /// contributor stays dormant until the endpoint switch replaces them. The startup validators the
     /// registrations add still run, which is what proves the contributor and the Header set are
-    /// wired correctly. The Bootstrap and Setup hosts deliberately do not call this: neither
-    /// registers <see cref="IKeyManager"/> nor serves an <c>X-Admin-AppSecret</c>
-    /// endpoint, and the readiness validator resolves every contributor when the host starts.
+    /// wired correctly. This must run before <c>AddIdentityInfrastructure</c>: the host composes its
+    /// own rate limiter afterwards, and the host's rejection contract — the JSON body locked by
+    /// <c>HostRejectionWriteCancellationTests</c> — stays the effective one for every policy,
+    /// including the ServiceMantle-named policies the session entries reference. The Bootstrap and
+    /// Setup hosts deliberately do not call this: neither registers <see cref="IKeyManager"/> nor
+    /// serves an <c>X-Admin-AppSecret</c> endpoint, and the readiness validator resolves every
+    /// contributor when the host starts.
     /// </remarks>
     internal static ServiceMantleBuilder AddSignaCoreSharedHttpCapabilities(
         this ServiceMantleBuilder builder)
@@ -76,6 +81,11 @@ internal static class ServiceMantleComposition
         // The gateway application secret is a SignaCore contract, so it is registered through the
         // shared extension point rather than hardcoded in the shared library's built-in set.
         builder.AddSensitiveHeaders(options => options.DeniedHeaderNames = [IdentityHeaders.AppSecret]);
+        // The composed pipeline and the management session entries require the security response
+        // headers and the shared rate-limit policies; both stay ahead of the host's own rate limiter
+        // so its locked rejection contract keeps serving every named policy.
+        builder.AddSecurityResponseHeaders();
+        builder.AddRateLimiting();
         return builder;
     }
 
