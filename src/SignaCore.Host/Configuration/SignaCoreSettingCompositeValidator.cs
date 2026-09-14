@@ -1,0 +1,219 @@
+using System.Globalization;
+using System.Text.Json;
+using Microsoft.Extensions.Configuration;
+using ServiceMantle.Configuration;
+using SignaCore.Database.Entity;
+using SignaCore.Domain.Services.Ldap;
+using SignaCore.Domain.Services.Sms;
+using SignaCore.Domain.Services.WeChat;
+
+namespace SignaCore.Host.Configuration;
+
+/// <summary>
+/// Carries every cross-key rule of the legacy <see cref="SettingsSnapshotValidator"/> onto the
+/// shared setting contract: the public base URL rules, the issuer equality, the non-blank keys, and
+/// the runtime option binders (SMS, LDAP, WeChat, reverse-proxy IPs).
+/// </summary>
+/// <remarks>
+/// The validator reconstructs the legacy-keyed snapshot from the candidate values — missing
+/// sensitive (or defensively missing) keys take the legacy default, exactly what the legacy
+/// validator saw — and then applies the same rule logic and the same option binders, so equivalent
+/// inputs keep equivalent outcomes. Errors are closed, key-scoped codes; they never contain values.
+/// The <c>isDevelopment</c> flag is fixed at composition time and, as before, only affects the
+/// development-only SMS logging profile.
+/// </remarks>
+internal sealed class SignaCoreSettingCompositeValidator(bool isDevelopment)
+    : IServiceSettingCompositeValidator
+{
+    internal const string RequiredCode = "signacore.setting.required";
+    internal const string BaseUrlInvalidCode = "signacore.setting.base_url_invalid";
+    internal const string HttpsRequiredCode = "signacore.setting.https_required";
+    internal const string IssuerMismatchCode = "signacore.setting.issuer_mismatch";
+    internal const string RuntimeInvalidCode = "signacore.setting.runtime_invalid";
+
+    private static string PublicBaseUrl => SharedSettingKeys.NormalizedByLegacyKey[SystemSettingKeys.PublicBaseUrl];
+    private static string JwtIssuerKey => SharedSettingKeys.NormalizedByLegacyKey[SystemSettingKeys.JwtIssuer];
+
+    public IEnumerable<ServiceSettingValidationError> Validate(ServiceSettingValidationContext context)
+    {
+        var legacy = BuildLegacySnapshot(context);
+        var errors = new List<ServiceSettingValidationError>();
+
+        ValidatePublicBaseUrl(legacy, errors);
+        RequireNonBlank(legacy, SystemSettingKeys.JwtAudience, errors);
+        RequireNonBlank(legacy, SystemSettingKeys.AdminUsername, errors);
+        ValidateRuntimeOptions(legacy, errors);
+
+        return errors;
+    }
+
+    /// <summary>
+    /// Rebuilds the legacy-keyed snapshot. Values present in the candidate are rendered in the
+    /// legacy wire format; values absent (allowed only for sensitive keys and keys whose empty
+    /// default was not migrated) fall back to the legacy default, which is exactly the value the
+    /// legacy validator would have seen.
+    /// </summary>
+    private static Dictionary<string, string> BuildLegacySnapshot(ServiceSettingValidationContext context)
+    {
+        var snapshot = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var definition in SystemSettingsCatalog.Definitions)
+        {
+            var normalizedKey = SharedSettingKeys.NormalizedByLegacyKey[definition.Key];
+            if (context.TryGetValue(normalizedKey, out var value) && value.HasValue)
+            {
+                snapshot[definition.Key] = definition.ValueType switch
+                {
+                    SettingValueTypes.String => value.GetString(),
+                    SettingValueTypes.Number => value.GetNumber().ToString("G29", CultureInfo.InvariantCulture),
+                    SettingValueTypes.Boolean => value.GetBoolean() ? "true" : "false",
+                    SettingValueTypes.Json => JsonSerializer.Serialize(value.GetJson()),
+                    _ => throw new InvalidOperationException(
+                        $"Unsupported legacy value type: {definition.ValueType}")
+                };
+            }
+            else
+            {
+                snapshot[definition.Key] = definition.DefaultValue ?? string.Empty;
+            }
+        }
+
+        return snapshot;
+    }
+
+    private static void ValidatePublicBaseUrl(
+        IReadOnlyDictionary<string, string> values,
+        List<ServiceSettingValidationError> errors)
+    {
+        if (!values.TryGetValue(SystemSettingKeys.PublicBaseUrl, out var publicBaseUrl) ||
+            string.IsNullOrWhiteSpace(publicBaseUrl))
+        {
+            errors.Add(new ServiceSettingValidationError(PublicBaseUrl, RequiredCode));
+            return;
+        }
+
+        if (!SettingsSnapshotValidator.TryNormalizeBaseUrl(publicBaseUrl, out var normalized, out _))
+        {
+            errors.Add(new ServiceSettingValidationError(PublicBaseUrl, BaseUrlInvalidCode));
+            return;
+        }
+
+        var allowNonHttps = values.TryGetValue(SystemSettingKeys.SecurityAllowNonHttpsIssuer, out var raw)
+            && bool.TryParse(raw, out var parsed)
+            && parsed;
+
+        // Deliberately unconditional, exactly as in the legacy validator: plain HTTP is either
+        // explicitly accepted by the operator or it is not; the environment name is not a
+        // substitute for that decision.
+        if (!allowNonHttps && !normalized.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add(new ServiceSettingValidationError(PublicBaseUrl, HttpsRequiredCode));
+        }
+
+        if (!values.TryGetValue(SystemSettingKeys.JwtIssuer, out var issuer) ||
+            string.IsNullOrWhiteSpace(issuer))
+        {
+            errors.Add(new ServiceSettingValidationError(JwtIssuerKey, RequiredCode));
+            return;
+        }
+
+        // Every conforming OAuth/OIDC client compares the `iss` claim with the URL it fetched
+        // discovery from, so the two cannot be allowed to drift apart.
+        if (!string.Equals(issuer.Trim().TrimEnd('/'), normalized, StringComparison.Ordinal))
+        {
+            errors.Add(new ServiceSettingValidationError(JwtIssuerKey, IssuerMismatchCode));
+        }
+    }
+
+    private static void RequireNonBlank(
+        IReadOnlyDictionary<string, string> values,
+        string legacyKey,
+        List<ServiceSettingValidationError> errors)
+    {
+        if (values.TryGetValue(legacyKey, out var value) && string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add(new ServiceSettingValidationError(
+                SharedSettingKeys.NormalizedByLegacyKey[legacyKey],
+                RequiredCode));
+        }
+    }
+
+    /// <summary>
+    /// The same option binders and validators the host itself composes with; a syntactically valid
+    /// document can still be a configuration the next process start would reject.
+    /// </summary>
+    private void ValidateRuntimeOptions(
+        IReadOnlyDictionary<string, string> values,
+        List<ServiceSettingValidationError> errors)
+    {
+        var entries = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var definition in SystemSettingsCatalog.Definitions)
+            {
+                var value = values[definition.Key];
+                if (definition.ValueType == SettingValueTypes.Json)
+                {
+                    JsonSettingFlattener.Flatten(definition.Key, value, entries);
+                }
+                else
+                {
+                    entries[definition.Key] = value;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Per-key JSON validity is already enforced by the definition constraints.
+            return;
+        }
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(entries)
+            .Build();
+
+        CaptureValidationError(() =>
+        {
+            var options = configuration.GetSection(SmsOptions.SectionName).Get<SmsOptions>() ?? new SmsOptions();
+            options.Validate(isDevelopment);
+        }, errors);
+
+        CaptureValidationError(() =>
+        {
+            var options = configuration.GetSection(LdapOptions.SectionName).Get<LdapOptions>() ?? new LdapOptions();
+            options.Validate();
+        }, errors);
+
+        CaptureValidationError(() =>
+        {
+            var options = configuration.GetSection(WechatOptions.SectionName).Get<WechatOptions>() ?? new WechatOptions();
+            options.Validate();
+        }, errors);
+
+        foreach (var proxy in configuration
+                     .GetSection(SystemSettingKeys.ReverseProxyKnownProxies)
+                     .Get<string[]>() ?? [])
+        {
+            if (!System.Net.IPAddress.TryParse(proxy, out _))
+            {
+                errors.Add(new ServiceSettingValidationError(
+                    SharedSettingKeys.NormalizedByLegacyKey[SystemSettingKeys.ReverseProxyKnownProxies],
+                    RuntimeInvalidCode));
+            }
+        }
+    }
+
+    private static void CaptureValidationError(
+        Action validate,
+        List<ServiceSettingValidationError> errors)
+    {
+        try
+        {
+            validate();
+        }
+        catch (InvalidOperationException)
+        {
+            // The binder message is not surfaced: the error code is closed and carries no values.
+            errors.Add(new ServiceSettingValidationError(null, RuntimeInvalidCode));
+        }
+    }
+}

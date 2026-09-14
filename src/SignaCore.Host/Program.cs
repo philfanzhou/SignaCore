@@ -207,6 +207,11 @@ var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(
 builder.Services.AddSingleton(bootstrapResult.RuntimeState);
 builder.Services.AddSingleton(bootstrapResult.SettingsStore);
 
+// ---- Shared ServiceMantle setting stack (parallel to the legacy system_settings path) ----
+builder.Services.AddSignaCoreSharedSettings(
+    bootstrapResult.Bootstrap.Database,
+    builder.Environment.IsDevelopment());
+
 // The authenticated bootstrap editor needs the root secret verbatim so a database change can keep
 // the current key without asking the operator to retype it. It is registered as the internal
 // bootstrap record rather than as a bare string so nothing else can resolve it by accident.
