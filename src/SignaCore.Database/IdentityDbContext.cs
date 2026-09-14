@@ -404,6 +404,19 @@ public class IdentityDbContext : DbContext, IServiceDbContext
         // the SignaCore DateTimeOffset/Unix-microseconds convention; this is intentional and isolated
         // to the service_installations table.
         modelBuilder.AddServiceMantleInstallation();
+
+        // Shared setting stack: the single-aggregate service_settings row and the shared
+        // service_audit_logs table. Both follow the library's provider-default DateTime storage.
+        // The audit dialect mirrors the ConfigureInstant provider branch: the migrations of both
+        // providers map the same model with their own dialect.
+        modelBuilder.AddServiceMantleSettings();
+        modelBuilder.AddServiceMantleManagementAudit(
+            string.Equals(
+                Database.ProviderName,
+                "Microsoft.EntityFrameworkCore.Sqlite",
+                StringComparison.Ordinal)
+                ? ManagementAuditDatabaseDialect.Sqlite
+                : ManagementAuditDatabaseDialect.PostgreSql);
     }
 
     private void ConfigureInstant(PropertyBuilder property)

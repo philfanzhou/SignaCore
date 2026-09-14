@@ -74,10 +74,15 @@ public static class ServiceCollectionExtensions
         // ---- Database ----
         services.AddSingleton(databaseOptions);
 
-        services.AddDbContext<IdentityDbContext>(options =>
-        {
-            options.UseIdentityDatabase(databaseOptions);
-        });
+        services.AddDbContext<IdentityDbContext>(
+            options =>
+            {
+                options.UseIdentityDatabase(databaseOptions);
+            },
+            // The shared ServiceMantle setting store consumes the singleton
+            // IDbContextFactory<IdentityDbContext>, so the options must be singleton to avoid a
+            // captive dependency. The configuration itself is fixed at composition time.
+            optionsLifetime: ServiceLifetime.Singleton);
 
         // ---- RSA Key Manager ----
         // Where the master key comes from and how private keys are encrypted are two separate
