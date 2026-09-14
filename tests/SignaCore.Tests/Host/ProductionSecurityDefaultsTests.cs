@@ -8,9 +8,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using ServiceMantle.AspNetCore.Management;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Host;
+using SignaCore.Host.Management;
 using SignaCore.Tests.Domain.Keys;
 using Xunit;
 
@@ -22,27 +24,31 @@ public class ProductionSecurityDefaultsTests
     [Fact]
     public void AdminCookie_InProduction_IsAlwaysSecure()
     {
-        using var provider = BuildServices(Environments.Production);
+        using var provider = BuildManagementSessionServices();
 
         var options = provider
             .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
-            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+            .Get(ManagementSessionDefaults.AuthenticationScheme);
 
+        // The management cookie the admin console now rides is secure in every environment, with
+        // no Development downgrade and never the cross-site-null relaxation.
         Assert.Equal(CookieSecurePolicy.Always, options.Cookie.SecurePolicy);
         Assert.True(options.Cookie.HttpOnly);
-        Assert.Equal(SameSiteMode.Lax, options.Cookie.SameSite);
+        Assert.NotEqual(SameSiteMode.None, options.Cookie.SameSite);
+        Assert.Equal(ManagementSessionDefaults.CookieName, options.Cookie.Name);
     }
 
     [Fact]
-    public void AdminCookie_InDevelopment_FollowsRequestScheme()
+    public void AdminCookie_KeepsTheLegacyTwelveHourSlidingLifetime()
     {
-        using var provider = BuildServices(Environments.Development);
+        using var provider = BuildManagementSessionServices();
 
         var options = provider
             .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
-            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
+            .Get(ManagementSessionDefaults.AuthenticationScheme);
 
-        Assert.Equal(CookieSecurePolicy.SameAsRequest, options.Cookie.SecurePolicy);
+        Assert.Equal(TimeSpan.FromHours(12), options.ExpireTimeSpan);
+        Assert.True(options.SlidingExpiration);
     }
 
     [Fact]
@@ -176,6 +182,25 @@ public class ProductionSecurityDefaultsTests
                 ConnectionString = "Host=localhost;Database=identity;Username=postgres;Password=test"
             },
             new BootstrapMasterKeyProvider("production-security-defaults-tests-root-secret"));
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// The normal host's management-session composition, exactly as Program.cs wires it: the
+    /// management cookie the admin console rides is registered by AddSignaCoreManagementSession,
+    /// not by AddIdentityInfrastructure.
+    /// </summary>
+    private static ServiceProvider BuildManagementSessionServices()
+    {
+        var databaseOptions = new DatabaseOptions
+        {
+            Provider = "PostgreSQL",
+            ServerVersion = "15",
+            ConnectionString = "Host=localhost;Database=identity;Username=postgres;Password=test"
+        };
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSignaCoreServiceMantle().AddSignaCoreManagementSession(databaseOptions);
         return services.BuildServiceProvider();
     }
 

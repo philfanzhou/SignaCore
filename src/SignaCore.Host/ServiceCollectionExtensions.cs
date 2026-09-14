@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.Repositories;
@@ -9,6 +8,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+using ServiceMantle.AspNetCore.Management;
+using ServiceMantle.Management;
 using SignaCore.Database;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
@@ -420,43 +421,10 @@ public static class ServiceCollectionExtensions
             }
         });
 
-        services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-            .AddCookie(options =>
-            {
-                options.Cookie.Name = "qz_admin_session";
-                options.Cookie.HttpOnly = true;
-                options.Cookie.SameSite = SameSiteMode.Lax;
-                options.Cookie.SecurePolicy = environment.IsDevelopment()
-                    ? CookieSecurePolicy.SameAsRequest
-                    : CookieSecurePolicy.Always;
-                options.SlidingExpiration = true;
-                options.ExpireTimeSpan = TimeSpan.FromHours(12);
-                options.Events = new CookieAuthenticationEvents
-                {
-                    OnRedirectToLogin = context =>
-                    {
-                        if (context.Request.Path.StartsWithSegments("/api/admin"))
-                        {
-                            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                            return Task.CompletedTask;
-                        }
-
-                        context.Response.Redirect(context.RedirectUri);
-                        return Task.CompletedTask;
-                    },
-                    OnRedirectToAccessDenied = context =>
-                    {
-                        if (context.Request.Path.StartsWithSegments("/api/admin"))
-                        {
-                            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                            return Task.CompletedTask;
-                        }
-
-                        context.Response.Redirect(context.RedirectUri);
-                        return Task.CompletedTask;
-                    }
-                };
-            })
+        // The default schemes belong to the shared ServiceMantle management cookie, registered by
+        // AddSignaCoreManagementSession after this method (see Program.cs); this call contributes
+        // only the non-interactive schemes below.
+        services.AddAuthentication()
             .AddScheme<AuthenticationSchemeOptions, GatewayAppAuthenticationHandler>(
                 GatewayAppAuthenticationDefaults.Scheme,
                 _ => { })
@@ -554,18 +522,18 @@ public static class ServiceCollectionExtensions
             })
             .AddPolicy("AdminSession", policy =>
             {
-                // Pinned to the legacy cookie scheme: AddManagementCookieAuthentication claims the
-                // five default schemes for the management scheme, so the legacy admin console
-                // (qz_admin_session) must name its scheme explicitly until #133 removes it.
-                policy.AddAuthenticationSchemes(CookieAuthenticationDefaults.AuthenticationScheme);
+                // The admin console rides the shared ServiceMantle management cookie: the fixed
+                // management scheme plus the shared requirement that the principal resolves to one
+                // legitimate operator holding the Admin permission.
+                policy.AddAuthenticationSchemes(ManagementSessionDefaults.AuthenticationScheme);
                 policy.RequireAuthenticatedUser();
-                policy.RequireClaim("admin_access", "true");
+                policy.AddRequirements(new ManagementPermissionRequirement(ManagementPermission.Admin));
             })
             .AddPolicy(GatewayAppAuthenticationDefaults.OpsPolicy, policy =>
             {
-                policy.AddAuthenticationSchemes(CookieAuthenticationDefaults.AuthenticationScheme);
+                policy.AddAuthenticationSchemes(ManagementSessionDefaults.AuthenticationScheme);
                 policy.RequireAuthenticatedUser();
-                policy.RequireClaim("admin_access", "true");
+                policy.AddRequirements(new ManagementPermissionRequirement(ManagementPermission.Admin));
             })
             .AddPolicy("UserProfile", policy =>
             {

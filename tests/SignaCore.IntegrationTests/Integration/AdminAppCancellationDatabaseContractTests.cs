@@ -8,13 +8,17 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using ServiceMantle.Audit;
+using ServiceMantle.Management;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Controllers;
+using SignaCore.Host.Management;
 using SignaCore.Host.Models;
 using Xunit;
 
@@ -315,15 +319,21 @@ public sealed class AdminAppCancellationDatabaseContractTests
 
     private static AdminController CreateController()
     {
-        var controller = new AdminController(NullLogger<AdminController>.Instance);
+        var services = new ServiceCollection();
+        services.AddSingleton<ManagementOperatorReader>();
+        services.AddSingleton<IManagementClaimsParser, ManagementClaimsParser>();
+        services.AddSingleton<IManagementCurrentOperatorResolver, ManagementCurrentOperatorResolver>();
+        var controller = new AdminController(
+            NullLogger<AdminController>.Instance,
+            services.BuildServiceProvider());
         var httpContext = new DefaultHttpContext
         {
             Connection = { RemoteIpAddress = IPAddress.Parse("192.0.2.25") },
-            User = new ClaimsPrincipal(new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
-                new Claim(ClaimTypes.Name, "admin")
-            ], "Test"))
+            User = ManagementIdentity.Create(
+                WellKnownManagementAuditOperatorSources.InteractiveAdmin,
+                Guid.NewGuid().ToString(),
+                [ManagementPermission.Admin],
+                "admin").ToClaimsPrincipal()
         };
         controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
         return controller;

@@ -57,14 +57,23 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
 
     private async Task<HttpClient> CreateAdminClientAsync(WebApplicationFactory<Program> factory)
     {
-        var http = factory.CreateClient();
-        var login = await http.PostAsJsonAsync("/api/admin/session/login", new
+        // The management cookie is Secure in every environment, so the client addresses the
+        // in-memory TestServer over https to let the cookie container replay it.
+        var http = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
-            username = "replacement_admin",
-            password = "ReplacementAdmin123!",
-            rememberMe = false
-        }, cancellationToken: TestContext.Current.CancellationToken);
-        Assert.True(login.IsSuccessStatusCode, $"admin login failed: {login.StatusCode}");
+            BaseAddress = new Uri("https://localhost")
+        });
+        using var login = new HttpRequestMessage(HttpMethod.Post, "/management/v1/session/login")
+        {
+            Content = JsonContent.Create(new
+            {
+                username = "replacement_admin",
+                password = "ReplacementAdmin123!"
+            })
+        };
+        login.Headers.TryAddWithoutValidation("X-ServiceMantle-Request", "1");
+        var loginResponse = await http.SendAsync(login, TestContext.Current.CancellationToken);
+        Assert.True(loginResponse.IsSuccessStatusCode, $"admin login failed: {loginResponse.StatusCode}");
         return http;
     }
 

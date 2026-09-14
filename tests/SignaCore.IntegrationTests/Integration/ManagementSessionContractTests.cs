@@ -120,6 +120,16 @@ public sealed class ManagementSessionContractTests : IClassFixture<IdentityServe
         Assert.Contains("httponly", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("path=/", setCookie, StringComparison.OrdinalIgnoreCase);
+
+        // The shared entry writes the same login history the legacy console login wrote.
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var history = await db.LoginHistories.AsNoTracking()
+            .Where(entry => entry.AuthMethod == "admin_login" && entry.EventType == "login_success")
+            .OrderByDescending(entry => entry.CreatedAt)
+            .FirstAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(IdentityServerFixture.AdminUsername, history.Username);
+        Assert.Null(history.FailureReason);
     }
 
     [Fact]
@@ -341,6 +351,17 @@ public sealed class ManagementSessionContractTests : IClassFixture<IdentityServe
             deletionValues,
             value => value.StartsWith($"{CookieName}=;", StringComparison.Ordinal)
                      || value.Contains($"{CookieName}=; expires=", StringComparison.Ordinal));
+
+        // A client without the cookie is back to unauthenticated on the admin session entry, and
+        // the shared logout writes no admin_logout audit row.
+        using var loggedOut = factory.CreateClient();
+        using var me = await loggedOut.GetAsync("/api/admin/session/me", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, me.StatusCode);
+
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        Assert.False(await db.AuditLogs.AsNoTracking()
+            .AnyAsync(entry => entry.Action == "admin_logout", TestContext.Current.CancellationToken));
     }
 
     [Fact]

@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SignaCore.Database;
@@ -7,6 +6,7 @@ using SignaCore.Domain.Services;
 using ServiceMantle.Bootstrap;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Http;
+using SignaCore.Host.Management;
 using SignaCore.Host.Models;
 
 namespace SignaCore.Host.Controllers;
@@ -31,11 +31,13 @@ public sealed class AdminBootstrapController : ControllerBase
 
     private readonly BootstrapConfiguration? _bootstrap;
     private readonly BootstrapConfigurationService? _service;
+    private readonly ManagementOperatorReader _operatorReader;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<AdminBootstrapController> _logger;
 
-    // The bootstrap types are internal, so they are resolved from the request scope rather than
-    // declared as constructor parameters — MVC activates controllers through a public constructor.
+    // The bootstrap types and the operator reader are internal, so they are resolved from the
+    // request scope rather than declared as constructor parameters — MVC activates controllers
+    // through a public constructor.
     public AdminBootstrapController(
         IServiceProvider services,
         IHostApplicationLifetime lifetime,
@@ -43,6 +45,7 @@ public sealed class AdminBootstrapController : ControllerBase
     {
         _bootstrap = services.GetService<BootstrapConfiguration>();
         _service = services.GetService<BootstrapConfigurationService>();
+        _operatorReader = services.GetRequiredService<ManagementOperatorReader>();
         _lifetime = lifetime;
         _logger = logger;
     }
@@ -171,7 +174,7 @@ public sealed class AdminBootstrapController : ControllerBase
                 return BadRequest(new ErrorResponse(result.Message));
         }
 
-        var actorId = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : (Guid?)null;
+        var (actorId, actorName) = _operatorReader.Read(User);
         // Provider and endpoint only. Recording the connection string here would put the database
         // password into the audit trail.
         await auditService.RecordActionAsync(
@@ -179,7 +182,7 @@ public sealed class AdminBootstrapController : ControllerBase
             "Bootstrap",
             _service.FilePath,
             actorId,
-            User.Identity?.Name,
+            actorName,
             $"Bootstrap database target changed to {result.Inspection?.Endpoint} " +
             $"({request.Database.Provider}) on this instance.",
             HttpContext.GetClientIp());

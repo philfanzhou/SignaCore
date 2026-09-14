@@ -22,13 +22,13 @@ The authenticated shell contains user, application, token, callback/policy, logi
 
 ## Authentication
 
-The admin login endpoint establishes the administrative session expected by the API client. The client centralizes unauthorized handling, returns to the login view on expiry, and never persists plaintext credentials or application secrets. Newly created or reset application secrets are displayed once in a dedicated secret modal.
+Login and logout go through the shared ServiceMantle management session (`/management/v1/session/login` and `/management/v1/session/logout`, both sent with the `X-ServiceMantle-Request` header); the session itself is read from `/api/admin/session/me`. The session cookie is non-persistent. The client centralizes unauthorized handling, returns to the login view on expiry, and never persists plaintext credentials or application secrets. Newly created or reset application secrets are displayed once in a dedicated secret modal.
 
 ## API areas
 
 | Area | Representative routes |
 | --- | --- |
-| Session | `/api/admin/session/login`, `/me`, `/logout` |
+| Session | `/management/v1/session/login`, `/api/admin/session/me`, `/management/v1/session/logout` |
 | Users | `/api/admin/users`, phone creation, remark/nickname/status updates |
 | Applications | `/api/admin/apps`, callback, SMS/LDAP policies, secret reset |
 | Security | token revocation, login history, and audit logs |

@@ -182,9 +182,14 @@ class AdminApiClient {
     })
   }
 
-  async login(payload: { username: string; password: string; rememberMe: boolean }) {
-    const response = await this.client.post<AdminSession>('/api/admin/session/login', payload)
-    return response.data
+  /**
+   * 管理会话登录走共享 ServiceMantle 入口：成功返回 204 空 body，会话内容随后由
+   * getCurrentSession 读取。X-ServiceMantle-Request 是共享入口的固定防跨站请求头。
+   */
+  async login(payload: { username: string; password: string }) {
+    await this.client.post('/management/v1/session/login', payload, {
+      headers: { 'X-ServiceMantle-Request': '1' },
+    })
   }
 
   async getCurrentSession() {
@@ -193,7 +198,9 @@ class AdminApiClient {
   }
 
   async logout() {
-    await this.client.post('/api/admin/session/logout')
+    await this.client.post('/management/v1/session/logout', undefined, {
+      headers: { 'X-ServiceMantle-Request': '1' },
+    })
   }
 
   async getUsers(params: { username?: string; phone?: string; page?: number; pageSize?: number }) {

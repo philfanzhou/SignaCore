@@ -61,21 +61,7 @@ public class AdminOidcClientTests : IDisposable
         _repository = new AppRegistrationRepository(_dbContext);
         _unitOfWork = new EfCoreUnitOfWork(_dbContext);
 
-        _controller = new AdminController(NullLogger<AdminController>.Instance)
-        {
-            ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext
-                {
-                    User = new ClaimsPrincipal(new ClaimsIdentity(
-                        [
-                            new Claim(ClaimTypes.NameIdentifier, AdminId.ToString()),
-                            new Claim(ClaimTypes.Name, "admin")
-                        ],
-                        "Cookies"))
-                }
-            }
-        };
+        _controller = AuthTestDoubles.CreateAdminController(AdminId);
     }
 
     // ---- Reading ----

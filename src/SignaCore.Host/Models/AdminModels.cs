@@ -3,8 +3,6 @@ namespace SignaCore.Host.Models;
 // Requests and responses used only by the admin console (/api/admin/*). See ApiModels.cs for
 // common responses shared by all three API surfaces.
 
-public sealed record AdminLoginRequest(string Username, string Password, bool RememberMe);
-
 public sealed record AdminSessionResponse(
     string AccountId,
     string Username,

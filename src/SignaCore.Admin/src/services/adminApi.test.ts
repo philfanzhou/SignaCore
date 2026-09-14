@@ -36,6 +36,39 @@ describe('AdminApiClient', () => {
     })
   })
 
+  it('logs in through the shared management entry with the fixed request header', async () => {
+    mocks.http.post.mockResolvedValue({ status: 204, data: '' })
+
+    await createAdminApiClient().login({ username: 'admin', password: 'secret-value' })
+
+    expect(mocks.http.post).toHaveBeenCalledWith('/management/v1/session/login', {
+      username: 'admin',
+      password: 'secret-value',
+    }, {
+      headers: { 'X-ServiceMantle-Request': '1' },
+    })
+  })
+
+  it('reads the current session from the admin session endpoint', async () => {
+    const payload = { accountId: 'account-1', username: 'admin', isAuthenticated: true }
+    mocks.http.get.mockResolvedValue({ data: payload })
+
+    const result = await createAdminApiClient().getCurrentSession()
+
+    expect(mocks.http.get).toHaveBeenCalledWith('/api/admin/session/me')
+    expect(result).toBe(payload)
+  })
+
+  it('logs out through the shared management entry with the fixed request header', async () => {
+    mocks.http.post.mockResolvedValue({ status: 204, data: '' })
+
+    await createAdminApiClient().logout()
+
+    expect(mocks.http.post).toHaveBeenCalledWith('/management/v1/session/logout', undefined, {
+      headers: { 'X-ServiceMantle-Request': '1' },
+    })
+  })
+
   it('reads settings from the authenticated settings endpoint', async () => {
     const payload = {
       configurationVersion: 2,
