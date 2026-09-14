@@ -1,6 +1,6 @@
 ---
 name: 任务
-about: 一个可独立合并的改动。范围、边界和验收标准必须明确，否则不能标记 ready。
+about: 一个可独立合并的改动。
 title: ''
 labels: 'type: task'
 assignees: ''
@@ -8,9 +8,6 @@ assignees: ''
 
 <!--
 正文和标题用中文。标题建议使用：[模块] 简明动作。
-不要手工添加 status: ready，完成代码、契约和邻近债务盘点后再添加。
-一个 task issue 对应一个 PR；若包含第二个独立契约、migration 或 endpoint 组，请拆分。
-若同时覆盖三个或以上公共 protocol surface、三个或以上有状态 artifact，或耦合多个事务/migration/敏感数据流/capability activation 领域，默认拆为 type: feature / size: XL tracker 与有原生依赖关系的 tasks。
 -->
 
 ## 背景与目标
@@ -28,7 +25,7 @@ assignees: ''
 
 复杂协议或状态任务填写；不适用时写“不适用”及理由。
 
-- 权威语义模型位置：不得让多份解释性 prose 各自定义同一状态规则。
+- 权威语义模型位置：
 - 事件 × artifact × 结果：区分 missing、expired、revoked、consumed、replay 等状态。
 - Artifact × 持久化关联：每个承诺的副作用都能定位数据并说明事务执行点。
 - Endpoint × 外部输入：名称、编码、长度、规范化、比较、过期、错误和敏感级别。
@@ -40,7 +37,6 @@ assignees: ''
 
 - 要改什么。
 - **明确排除什么**：尤其是“不改变现有 token 兼容性”“不修改表名”“不重构 X”“不暴露 secret”等限制。
-- 本节在 review 时有约束力；无法追溯到验收标准的越界改动必须拆为独立 issue。
 
 ## 明确不包含与不保证
 
@@ -62,23 +58,16 @@ assignees: ''
 
 ## 已知邻近问题（本次不修）
 
-排期前完整阅读将要改动的实现、测试和契约，把发现的既有缺陷各自开成 issue，在这里列出来：
+把发现的既有缺陷各自开成 issue，在这里列出来：
 
 - #NNN 一句话说明
 - 若确认没有，写“无”。
-
-留空表示尚未完成邻近债务盘点，issue 不能标记 `status: ready`。
 
 ## 依赖
 
 - GitHub 原生 Blocked by：#NNN，或“无”
 - GitHub 原生 Blocks：#NNN，或“无”
 
-只有前置 issue 全部关闭、依赖关系与标签一致，且适用的“语义闭合材料”已经完成后，才能添加 `status: ready`。
-
 ## 交付约束
 
-- 一个 PR 只关闭本 task issue；不得吸收邻近债务。
-- Feature/XL tracker 不直接接收实现 PR；先拆成可独立验证的 task issues。
-- 实现以及适用的失败、取消、安全、认证、migration 和并发测试在同一个 PR 中交付。
 - 公开行为或用法变化时同步英文 README、docs、API 文档和迁移说明。
