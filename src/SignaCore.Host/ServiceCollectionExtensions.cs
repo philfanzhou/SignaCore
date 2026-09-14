@@ -1,7 +1,5 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -93,15 +91,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPrivateKeyProtector, AesGcmPrivateKeyProtector>();
         services.AddSingleton<IConfigurationProtector, AesGcmConfigurationProtector>();
         services.AddSingleton<IKeyManager, KeyManager>();
-
-        // The legacy key-store types stay registered until the legacy admin console is removed.
-        // They are no longer wired into Data Protection: the shared ServiceMantle key ring
-        // (service_data_protection_keys, persisted through AddSignaCoreManagementSession) is the
-        // active ring for both the legacy and the management cookie, under the application name
-        // ServiceMantle.Management:signacore. The one-time consequence — cookies signed under the
-        // previous SignaCore.Admin ring stop validating — is declared in the #102 switch notes.
-        services.AddSingleton<IXmlRepository, DatabaseDataProtectionKeyRepository>();
-        services.AddSingleton<ConfigurationXmlEncryptor>();
 
         // ---- JWT Options ----
         var jwtOptions = services.RegisterSingleton(new JwtOptions

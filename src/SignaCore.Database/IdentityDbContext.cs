@@ -33,7 +33,6 @@ public class IdentityDbContext : DbContext, IServiceDbContext
     public DbSet<AppWechatAccessEntity> AppWechatAccesses => Set<AppWechatAccessEntity>();
     public DbSet<AppExchangeTrustEntity> AppExchangeTrusts => Set<AppExchangeTrustEntity>();
     public DbSet<SystemSettingEntity> SystemSettings => Set<SystemSettingEntity>();
-    public DbSet<DataProtectionKeyEntity> DataProtectionKeys => Set<DataProtectionKeyEntity>();
 
     // ServiceMantle shared installation state (service_installations): the runtime authority for
     // installation status and the one-time setup code. The consumer owns this mapping, its
@@ -290,18 +289,6 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.HasIndex(e => e.KeyId).IsUnique();
         });
 
-        modelBuilder.Entity<DataProtectionKeyEntity>(entity =>
-        {
-            entity.ToTable("data_protection_keys");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id");
-            entity.Property(e => e.FriendlyName)
-                .HasColumnName("friendly_name")
-                .HasMaxLength(256);
-            entity.Property(e => e.ProtectedXml).HasColumnName("protected_xml");
-            entity.HasIndex(e => e.FriendlyName).IsUnique();
-        });
-
         modelBuilder.Entity<OtpEntity>(entity =>
         {
             entity.ToTable("otps");
@@ -405,10 +392,10 @@ public class IdentityDbContext : DbContext, IServiceDbContext
         // to the service_installations table.
         modelBuilder.AddServiceMantleInstallation();
 
-        // ServiceMantle shared Data Protection key ring (service_data_protection_keys): the active
-        // ring for both the management cookie and the legacy admin cookie. Keys are stored as
-        // service-bound encrypted envelopes; the legacy data_protection_keys table stays untouched
-        // until the legacy key-store removal task (ServiceMantle issue #491) lands.
+        // ServiceMantle shared Data Protection key ring (service_data_protection_keys): the only
+        // key store, shared by every cookie the host issues. Keys are stored as service-bound
+        // encrypted envelopes; the legacy data_protection_keys table was removed with its
+        // forward drop migration.
         modelBuilder.AddServiceMantleDataProtectionKeys();
 
         // Shared setting stack: the single-aggregate service_settings row and the shared
