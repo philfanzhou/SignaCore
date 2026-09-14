@@ -18,9 +18,9 @@ namespace SignaCore.Tests.Host;
 
 /// <summary>
 /// Pins the normal host's shared ServiceMantle registration boundary: the health capability, the
-/// signing-key contributor and the product sensitive Header set start cleanly without a snapshot
-/// source or a mapped endpoint, stay out of the Bootstrap and Setup hosts, and fail closed when the
-/// registration itself is invalid.
+/// signing-key contributor, the product sensitive Header set, the security response headers and the
+/// shared rate-limit policies start cleanly without a snapshot source or a mapped endpoint, stay out
+/// of the Bootstrap and Setup hosts, and fail closed when the registration itself is invalid.
 /// </summary>
 public sealed class ServiceMantleSharedHttpCapabilitiesTests
 {
@@ -42,7 +42,10 @@ public sealed class ServiceMantleSharedHttpCapabilitiesTests
         Assert.Equal(SigningKeyReadinessContributor.SigningKeyOrder, contributor.Order);
         Assert.NotNull(provider.GetService<SensitiveHeaderRegistry>());
         Assert.NotNull(provider.GetService<RequestHeaderDiagnosticProjector>());
-        Assert.Equal(3, provider.GetServices<IHostedService>().Count());
+        // Startup validators registered as hosted services. #102 adds the shared rate-limiting
+        // validator (the security response headers register none) on top of the set the normal host
+        // already started with; every one of them passes because StartValidatorsAsync did not throw.
+        Assert.Equal(4, provider.GetServices<IHostedService>().Count());
     }
 
     /// <summary>

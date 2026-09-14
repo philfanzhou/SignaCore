@@ -10,6 +10,7 @@ using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.HealthChecks;
 using SignaCore.Host.Installation;
+using SignaCore.Host.Management;
 using SignaCore.Host.Middleware;
 using SignaCore.Host.Provisioning;
 using SignaCore.Host.Security;
@@ -197,13 +198,16 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
 // ---- Consul Service Discovery (optional) ----
 builder.Services.AddConsulDiscoveryIfEnabled(builder.Configuration);
 
-// ---- ServiceMantle host identity, readiness and sensitive Headers ----
-// The shared health capability, the signing-key readiness contributor and the product sensitive
-// Header set are registered here only: neither the Bootstrap nor the Setup host resolves
-// IKeyManager or serves an X-Admin-AppSecret endpoint. No route is mapped, so /health/live,
-// /health/ready and /health keep their current owners and responses.
-builder.Services.AddSignaCoreServiceMantle(bootstrapFilePath)
-    .AddSignaCoreSharedHttpCapabilities();
+// ---- ServiceMantle host identity, readiness, sensitive Headers and shared HTTP capabilities ----
+// The shared health capability, the signing-key readiness contributor, the product sensitive
+// Header set, the security response headers and the shared rate-limit policies are registered here
+// only: neither the Bootstrap nor the Setup host resolves IKeyManager or serves an
+// X-Admin-AppSecret endpoint. No health route is mapped, so /health/live, /health/ready and
+// /health keep their current owners and responses. The shared capabilities are registered before
+// the host composes its own rate limiter below so its locked rejection contract — the JSON body
+// HostRejectionWriteCancellationTests pins — keeps serving every named policy.
+var mantle = builder.Services.AddSignaCoreServiceMantle(bootstrapFilePath);
+mantle.AddSignaCoreSharedHttpCapabilities();
 
 // ---- Infrastructure (DI, Auth, CORS, Rate Limiting, OpenTelemetry) ----
 var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(
@@ -211,6 +215,10 @@ var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(
     builder.Environment,
     SignaCoreBootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database),
     bootstrapResult.MasterKeyProvider);
+
+// ---- Shared ServiceMantle management session (fixed cookie scheme, phase gate, session entries) ----
+mantle.AddSignaCoreManagementSession(
+    SignaCoreBootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database));
 
 builder.Services.AddSingleton(bootstrapResult.RuntimeState);
 builder.Services.AddSingleton(bootstrapResult.SettingsStore);
@@ -315,22 +323,16 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Identity Service API v1"));
 }
 app.UseForwardedHeaders();
-app.UseServiceMantleCorrelationId();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseCors("AdminWeb");
-// Rate limiting must run before authentication/authorization. Both gateway schemes perform a
-// database lookup (and valid AppIds additionally verify a BCrypt secret), so rejected credentials
-// must not be able to bypass the limiter by short-circuiting in authorization.
-app.UseRateLimiter();
-app.UseAuthentication();
-
-// ---- Sensitive Header Redaction Middleware ----
-// Moves X-Admin-AppSecret out of the request headers before authorization so
-// downstream logging cannot expose it. GatewayApp authentication reads the
-// value through HttpContextExtensions, which prefers the protected Items copy.
+// Redaction moves ahead of the composed pipeline: it ran between authentication and authorization
+// before, and the gateway schemes still authenticate on demand deeper in the pipeline through
+// HttpContextExtensions, which prefers the protected Items copy.
 app.UseMiddleware<SensitiveHeaderRedactionMiddleware>();
-
-app.UseAuthorization();
+// The composed ServiceMantle pipeline replaces the individually inserted correlation-id,
+// rate-limiting, authentication, and authorization middleware. It must be called exactly once and
+// must not be mixed with the individual ServiceMantle entry points.
+app.UseServiceMantlePipeline();
 
 // ---- Health ----
 app.MapHealthChecks(HealthEndpoints.Live, new()
@@ -440,11 +442,16 @@ app.MapGet(WellKnownEndpoints.JwksJson, GetJwks);
 
 app.MapControllers();
 
+// ---- Shared ServiceMantle management session (login / current session / logout) ----
+app.MapSignaCoreManagementSession();
+
 // ---- Prometheus Metrics Endpoint ----
 app.MapPrometheusScrapingEndpoint();
 
 // ---- Static files & SPA for Admin Web (HTTP port only) ----
-AdminSpaBranch.Map(app, httpPort);
+// The normal host composes the ServiceMantle pipeline, whose phase gate 404s endpoint-less requests,
+// so the SPA is served by a mapped GET/HEAD fallback endpoint rather than a post-pipeline branch.
+AdminSpaBranch.MapNormalHostSpaFallback(app, httpPort);
 
 await app.RunAsync();
 return 0;

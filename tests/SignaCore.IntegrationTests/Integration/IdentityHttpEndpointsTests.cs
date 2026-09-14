@@ -294,6 +294,11 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
             .GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>()
             .Endpoints
             .OfType<Microsoft.AspNetCore.Routing.RouteEndpoint>()
+            // The normal host serves the SPA from a catch-all fallback endpoint ({**path}). Its
+            // normalized pattern would otherwise look like a route the SPA diverts, so the guard
+            // skips it: routing already runs a fallback only when no more specific endpoint
+            // matched, so it cannot swallow a registered route.
+            .Where(endpoint => endpoint.Order != int.MaxValue)
             .Select(endpoint => endpoint.RoutePattern.RawText)
             .Where(template => !string.IsNullOrWhiteSpace(template))
             .Select(template => "/" + template!.TrimStart('/'))

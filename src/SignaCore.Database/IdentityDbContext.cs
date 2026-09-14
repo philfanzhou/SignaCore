@@ -405,6 +405,12 @@ public class IdentityDbContext : DbContext, IServiceDbContext
         // to the service_installations table.
         modelBuilder.AddServiceMantleInstallation();
 
+        // ServiceMantle shared Data Protection key ring (service_data_protection_keys): the active
+        // ring for both the management cookie and the legacy admin cookie. Keys are stored as
+        // service-bound encrypted envelopes; the legacy data_protection_keys table stays untouched
+        // until #133 removes it.
+        modelBuilder.AddServiceMantleDataProtectionKeys();
+
         // Shared setting stack: the single-aggregate service_settings row and the shared
         // service_audit_logs table. Both follow the library's provider-default DateTime storage.
         // The audit dialect mirrors the ConfigureInstant provider branch: the migrations of both
