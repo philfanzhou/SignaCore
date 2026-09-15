@@ -64,11 +64,6 @@ import { I } from '../utils/icons'
           </div>
         </div>
 
-        <label class="check-line">
-          <input v-model="loginForm.rememberMe" type="checkbox" :disabled="loggingIn">
-          <span>7天内免登录</span>
-        </label>
-
         <button class="btn btn-block" style="margin-top: 16px" :disabled="loggingIn" @click="handleLogin">
           <svg v-if="loggingIn" class="spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
             <path d="M21 12a9 9 0 1 1-6.219-8.56" />

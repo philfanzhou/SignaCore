@@ -32,7 +32,10 @@ internal static class ManagementSessionComposition
         this ServiceMantleBuilder builder,
         DatabaseOptions databaseOptions)
     {
-        builder.AddManagementCookieAuthentication();
+        // The shared default lifetime is 8h; SignaCore keeps the legacy non-persistent admin
+        // session length of 12 sliding hours, so operators see no lifetime change in the switch.
+        builder.AddManagementCookieAuthentication(options =>
+            options.ExpireTimeSpan = TimeSpan.FromHours(12));
         builder.AddServiceMantleManagementApiV1();
         builder.AddServiceMantleManagementEntries();
 
@@ -49,6 +52,7 @@ internal static class ManagementSessionComposition
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddScoped<ManagementCredentialAccessor>();
         builder.Services.AddScoped<IManagementIdentityProvider, SignaCoreManagementIdentityProvider>();
+        builder.Services.AddSingleton<ManagementOperatorReader>();
         builder.Services.AddScoped<IServiceHealthSnapshotSource, InstallationHealthSnapshotSource>();
 
         return builder;

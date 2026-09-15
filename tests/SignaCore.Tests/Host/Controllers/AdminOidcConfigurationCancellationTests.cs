@@ -313,17 +313,8 @@ public sealed class AdminOidcConfigurationCancellationTests
 
     private static AdminController CreateController()
     {
-        var controller = new AdminController(NullLogger<AdminController>.Instance);
-        var httpContext = new DefaultHttpContext
-        {
-            Connection = { RemoteIpAddress = IPAddress.Parse("192.0.2.40") },
-            User = new ClaimsPrincipal(new ClaimsIdentity(
-            [
-                new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
-                new Claim(ClaimTypes.Name, "admin")
-            ], "Test"))
-        };
-        controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
+        var controller = AuthTestDoubles.CreateAdminController();
+        controller.HttpContext.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.40");
         return controller;
     }
 

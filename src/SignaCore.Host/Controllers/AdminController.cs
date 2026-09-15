@@ -1,12 +1,8 @@
 using System.Linq.Expressions;
-using System.Security.Claims;
 using System.Security.Cryptography;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -18,6 +14,7 @@ using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.WeChat;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Http;
+using SignaCore.Host.Management;
 using SignaCore.Host.Models;
 using SignaCore.Host.Services;
 
@@ -28,102 +25,14 @@ namespace SignaCore.Host.Controllers;
 public class AdminController : ControllerBase
 {
     private readonly ILogger<AdminController> _logger;
+    private readonly ManagementOperatorReader _operatorReader;
 
-    public AdminController(ILogger<AdminController> logger)
+    // The operator reader is an internal type, so it comes from the request scope rather than from
+    // a declared constructor parameter — MVC activates controllers through a public constructor.
+    public AdminController(ILogger<AdminController> logger, IServiceProvider services)
     {
         _logger = logger;
-    }
-
-    [HttpPost("session/login")]
-    [AllowAnonymous]
-    public async Task<IActionResult> Login(
-        [FromBody] AdminLoginRequest request,
-        [FromServices] ValidatorFactory validatorFactory,
-        [FromServices] AdminIdentityOptions adminIdentity,
-        [FromServices] AdminLoginStateRecorder loginStateRecorder,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
-        {
-            return BadRequest(new ErrorResponse("Username and password cannot be empty."));
-        }
-
-        var validator = validatorFactory.GetValidator(IdentityConstants.GrantTypePassword);
-        var result = await validator.ValidateAsync(new ValidationRequest
-        {
-            GrantType = IdentityConstants.GrantTypePassword,
-            Username = request.Username.Trim(),
-            Password = request.Password,
-            CancellationToken = cancellationToken
-        });
-
-        // An extra result.Account == null check is unnecessary because MemberNotNullWhen on
-        // ValidationResult carries the invariant: Success(account, ...) takes a non-null account,
-        // so the success branch cannot lack one.
-        if (!result.IsSuccess)
-        {
-            await loginStateRecorder.CommitAsync(
-                result,
-                null,
-                request.Username.Trim(),
-                "login_failure",
-                result.ErrorMessage,
-                GetClientIp(),
-                HttpContext.Request.Headers.UserAgent,
-                cancellationToken);
-            return StatusCode(StatusCodes.Status401Unauthorized, new { message = result.ErrorMessage });
-        }
-
-        var username = result.DisplayName ?? request.Username.Trim();
-        var configuredAdmin = adminIdentity.Username.Trim();
-        if (string.IsNullOrWhiteSpace(configuredAdmin)
-            || !string.Equals(username, configuredAdmin, StringComparison.OrdinalIgnoreCase))
-        {
-            await loginStateRecorder.CommitAsync(
-                result,
-                result.Account.Id,
-                username,
-                "login_failure",
-                "bootstrap_admin_required",
-                GetClientIp(),
-                HttpContext.Request.Headers.UserAgent,
-                cancellationToken);
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only the bootstrap administrator can sign in to admin web." });
-        }
-
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, result.Account.Id.ToString()),
-            new(ClaimTypes.Name, username),
-            new("admin_access", "true")
-        };
-        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-        var principal = new ClaimsPrincipal(identity);
-
-        await loginStateRecorder.CommitAsync(
-            result,
-            result.Account.Id,
-            username,
-            "login_success",
-            null,
-            GetClientIp(),
-            HttpContext.Request.Headers.UserAgent,
-            cancellationToken);
-
-        await HttpContext.SignInAsync(
-            CookieAuthenticationDefaults.AuthenticationScheme,
-            principal,
-            new AuthenticationProperties
-            {
-                IsPersistent = request.RememberMe,
-                AllowRefresh = true,
-                ExpiresUtc = DateTimeOffset.UtcNow.AddHours(request.RememberMe ? 7 * 24 : 12)
-            });
-
-        return Ok(new AdminSessionResponse(
-            result.Account.Id.ToString(),
-            username,
-            true));
+        _operatorReader = services.GetRequiredService<ManagementOperatorReader>();
     }
 
     /// <summary>
@@ -178,27 +87,11 @@ public class AdminController : ControllerBase
     [Authorize(Policy = "AdminSession")]
     public IActionResult GetCurrentSession()
     {
-        var accountId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
-        var username = User.Identity?.Name ?? string.Empty;
-        return Ok(new AdminSessionResponse(
-            accountId,
-            username,
-            true));
-    }
-
-    [HttpPost("session/logout")]
-    [Authorize(Policy = "AdminSession")]
-    public async Task<IActionResult> Logout(
-        [FromServices] IAuditService auditService,
-        [FromServices] IUnitOfWork unitOfWork,
-        CancellationToken cancellationToken = default)
-    {
         var (actorId, actorName) = GetAdminIdentity();
-        await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-        await auditService.RecordActionAsync("admin_logout", "Session", actorId?.ToString() ?? "unknown",
-            actorId, actorName, "Admin logged out", GetClientIp(), cancellationToken: cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
-        return Ok(new OperationResponse(true, "Logged out successfully."));
+        return Ok(new AdminSessionResponse(
+            actorId?.ToString() ?? string.Empty,
+            actorName ?? string.Empty,
+            true));
     }
 
     [HttpGet("users")]
@@ -1670,13 +1563,12 @@ public class AdminController : ControllerBase
         return Ok(new PagedResponse<AdminAuditLogItemResponse>(items, total, paging.Page, paging.PageSize));
     }
 
-    private (Guid? ActorId, string? ActorName) GetAdminIdentity()
-    {
-        var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        var nameClaim = User.Identity?.Name;
-        var actorId = Guid.TryParse(idClaim, out var id) ? id : (Guid?)null;
-        return (actorId, nameClaim);
-    }
+    /// <summary>
+    /// The audit actor of the current request, resolved through the single SignaCore operator read
+    /// point on top of the shared management session. A principal that does not resolve yields no
+    /// actor; authorization keeps such principals away from these endpoints.
+    /// </summary>
+    private (Guid? ActorId, string? ActorName) GetAdminIdentity() => _operatorReader.Read(User);
 
     private string? GetClientIp() => HttpContext.GetClientIp();
 }

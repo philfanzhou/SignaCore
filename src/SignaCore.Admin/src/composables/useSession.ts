@@ -17,7 +17,6 @@ const session = ref<AdminSession | null>(null)
 const loginForm = reactive({
   username: '',
   password: '',
-  rememberMe: true,
 })
 
 function isUnauthorized(error: unknown) {
@@ -56,6 +55,20 @@ async function restoreSession() {
   }
 }
 
+/** 共享登录入口的固定拒绝文案：401 不区分密码错误与无管理权限，避免泄露账号状态。 */
+function loginErrorMessage(error: unknown) {
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status
+    if (status === 401) {
+      return '用户名或密码错误，或该账号没有管理后台权限。'
+    }
+    if (status === 429 || status === 503) {
+      return '登录暂时不可用，请稍后重试。'
+    }
+  }
+  return getErrorMessage(error)
+}
+
 async function handleLogin() {
   if (!loginForm.username || !loginForm.password) {
     ElMessage.warning('请输入用户名和密码')
@@ -67,7 +80,6 @@ async function handleLogin() {
     await adminClient.login({
       username: loginForm.username,
       password: loginForm.password,
-      rememberMe: loginForm.rememberMe,
     })
     session.value = await adminClient.getCurrentSession()
     isAuthenticated.value = true
@@ -76,7 +88,7 @@ async function handleLogin() {
     ElMessage.success('登录成功')
     await loadAllDomains()
   } catch (error) {
-    ElMessage.error(`登录失败: ${getErrorMessage(error)}`)
+    ElMessage.error(`登录失败: ${loginErrorMessage(error)}`)
   } finally {
     loggingIn.value = false
   }
@@ -110,4 +122,4 @@ export function useSession() {
 }
 
 /* 模块级导出，供域 composable 直接引用（单向依赖：域 → session） */
-export { appTitle, isAuthenticated, checkingSession, loggingIn, session, loginForm, isUnauthorized, handleApiError, resetAdminState, restoreSession, handleLogin, handleLogout }
+export { appTitle, isAuthenticated, checkingSession, loggingIn, session, loginForm, isUnauthorized, handleApiError, resetAdminState, restoreSession, handleLogin, handleLogout, loginErrorMessage }

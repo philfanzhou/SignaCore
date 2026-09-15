@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using ServiceMantle.Audit;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -23,7 +24,7 @@ using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Http;
-using SignaCore.Host.Services;
+using SignaCore.Host.Management;
 using SignaCore.Host.Models;
 using SignaCore.Host.Services;
 using Xunit;
@@ -853,8 +854,13 @@ public sealed class AuditTransactionTests
             passwordHasher,
             NullLogger<PasswordValidator>.Instance);
 
-        await Assert.ThrowsAsync<DbUpdateException>(() => CreateAdminController().Login(
-            new AdminLoginRequest("admin", "wrong-value", false),
+        // The shared management login adapter runs the same recorder the legacy admin login ran,
+        // so the transactional rollback of the failed-login path keeps its proof through the
+        // identity provider.
+        var credentials = new ManagementCredentialAccessor();
+        credentials.Set("admin", "wrong-value");
+        var provider = new SignaCoreManagementIdentityProvider(
+            credentials,
             new ValidatorFactory([validator], NullLogger<ValidatorFactory>.Instance),
             new AdminIdentityOptions { Username = "admin" },
             new AdminLoginStateRecorder(
@@ -862,7 +868,12 @@ public sealed class AuditTransactionTests
                 CreateAuditService(database.Context),
                 new EfCoreUnitOfWork(database.Context),
                 database.Context,
-                NullLogger<AdminLoginStateRecorder>.Instance)));
+                NullLogger<AdminLoginStateRecorder>.Instance),
+            new HttpContextAccessor { HttpContext = new DefaultHttpContext() },
+            NullLogger<SignaCoreManagementIdentityProvider>.Instance);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() =>
+            provider.GetIdentityAsync(TestContext.Current.CancellationToken).AsTask());
 
         database.Context.ChangeTracker.Clear();
         Assert.Equal(1, (await database.Context.LoginAttempts
@@ -1428,15 +1439,8 @@ public sealed class AuditTransactionTests
 
     private static AdminController CreateAdminController()
     {
-        var controller = new AdminController(NullLogger<AdminController>.Instance);
-        var httpContext = new DefaultHttpContext();
-        httpContext.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.20");
-        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
-        [
-            new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
-            new Claim(ClaimTypes.Name, "admin")
-        ], "Test"));
-        controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
+        var controller = AuthTestDoubles.CreateAdminController();
+        controller.HttpContext.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.20");
         return controller;
     }
 

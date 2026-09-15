@@ -457,6 +457,42 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
+    /// The admin session entry keeps its response shape and reports the account that actually
+    /// signed in through the shared management login.
+    /// </summary>
+    [Fact]
+    public async Task AdminSessionApi_WithAManagementCookie_ReturnsTheLoginAccount()
+    {
+        using var admin = await _fixture.CreateAdminHttpClientAsync();
+
+        var response = await admin.GetAsync("/api/admin/session/me", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal((await _fixture.GetAdminAccountIdAsync()).ToString(), body.GetProperty("accountId").GetString());
+        Assert.Equal(IdentityServerFixture.AdminUsername, body.GetProperty("username").GetString());
+        Assert.True(body.GetProperty("isAuthenticated").GetBoolean());
+    }
+
+    /// <summary>
+    /// A forged legacy <c>qz_admin_session</c> cookie no longer authenticates anywhere: the admin
+    /// API sees the closed management unauthenticated response, exactly as with no cookie at all.
+    /// </summary>
+    [Fact]
+    public async Task AdminApi_WithAForgedLegacyCookie_IsUnauthorized()
+    {
+        using var client = _fixture.CreateHttpClient();
+        client.DefaultRequestHeaders.TryAddWithoutValidation(
+            "Cookie", "qz_admin_session=forged-legacy-ticket");
+
+        var response = await client.GetAsync("/api/admin/settings", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("management.session.", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A settings change is validated as a whole snapshot, so a value that only becomes invalid in
     /// combination with an untouched one is refused rather than committed.
     /// </summary>
@@ -529,6 +565,10 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
             .FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Contains("Sms:OtpHmacKey", audit.Description ?? string.Empty, StringComparison.Ordinal);
         Assert.DoesNotContain("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", audit.Description ?? string.Empty, StringComparison.Ordinal);
+        // The audit actor is the operator the shared management session resolved — the login
+        // account, not a cookie-specific claim shape.
+        Assert.Equal(await _fixture.GetAdminAccountIdAsync(), audit.ActorId);
+        Assert.Equal(IdentityServerFixture.AdminUsername, audit.ActorName);
     }
 
     /// <summary>
@@ -779,6 +819,13 @@ public class IdentityServerFixture : IAsyncLifetime
             builder.ConfigureTestServices(configure);
         });
 
+    /// <summary>
+    /// The login-derived hosts created for admin clients. Each carries its own Setup rate-limit
+    /// partition state, so logins stay isolated without relaxing the production limit; they are
+    /// disposed with the fixture.
+    /// </summary>
+    private readonly List<WebApplicationFactory<Program>> _sessionHosts = [];
+
     public HttpClient CreateHttpClient()
     {
         return _factory!.CreateClient();
@@ -803,15 +850,38 @@ public class IdentityServerFixture : IAsyncLifetime
 
     public async Task<HttpClient> CreateAdminHttpClientAsync()
     {
-        var http = CreateHttpClient();
-        var loginResponse = await http.PostAsJsonAsync("/api/admin/session/login", new
+        // A derived host carries its own Setup rate-limit partition, so the shared login does not
+        // consume the fixture host's window; the database file stays shared. The management cookie
+        // is Secure in every environment, so the client addresses the in-memory TestServer over
+        // https — otherwise the cookie container refuses to replay it.
+        var factory = WithTestServices(_ => { });
+        _sessionHosts.Add(factory);
+        var http = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
-            username = AdminUsername,
-            password = AdminPassword,
-            rememberMe = false
+            BaseAddress = new Uri("https://localhost")
         });
+        using var login = new HttpRequestMessage(HttpMethod.Post, "/management/v1/session/login")
+        {
+            Content = JsonContent.Create(new
+            {
+                username = AdminUsername,
+                password = AdminPassword
+            })
+        };
+        login.Headers.TryAddWithoutValidation("X-ServiceMantle-Request", "1");
+        var loginResponse = await http.SendAsync(login);
         loginResponse.EnsureSuccessStatusCode();
         return http;
+    }
+
+    /// <summary>The account id of the seeded bootstrap administrator.</summary>
+    public async Task<Guid> GetAdminAccountIdAsync()
+    {
+        using var scope = _factory!.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var credential = await db.PasswordCredentials.AsNoTracking()
+            .SingleAsync(item => item.Username == AdminUsername, TestContext.Current.CancellationToken);
+        return credential.AccountId;
     }
 
     public IServiceProvider Services => _factory!.Services;
@@ -876,6 +946,11 @@ public class IdentityServerFixture : IAsyncLifetime
 
     public ValueTask DisposeAsync()
     {
+        foreach (var host in _sessionHosts)
+        {
+            host.Dispose();
+        }
+
         _factory?.Dispose();
         SqliteConnection.ClearAllPools();
         if (_databasePath != null && File.Exists(_databasePath))

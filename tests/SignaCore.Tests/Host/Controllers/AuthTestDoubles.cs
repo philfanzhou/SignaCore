@@ -3,16 +3,21 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
+using ServiceMantle.Audit;
+using ServiceMantle.Management;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
 using SignaCore.Host;
+using SignaCore.Host.Controllers;
+using SignaCore.Host.Management;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Controllers;
@@ -100,6 +105,31 @@ internal static class AuthTestDoubles
     /// </summary>
     public static AdminIdentityOptions AdminIdentity(string username = "admin") =>
         new() { Username = username };
+
+    /// <summary>
+    /// An AdminController wired the way the production pipeline wires it: the internal operator
+    /// reader is resolved from RequestServices, backed by the shared ServiceMantle claims parser
+    /// and resolver, and the principal is a legitimate management operator.
+    /// </summary>
+    public static AdminController CreateAdminController(Guid? operatorId = null, string? operatorName = "admin")
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<ManagementOperatorReader>();
+        services.AddSingleton<IManagementClaimsParser, ManagementClaimsParser>();
+        services.AddSingleton<IManagementCurrentOperatorResolver, ManagementCurrentOperatorResolver>();
+        var controller = new AdminController(
+            NullLogger<AdminController>.Instance,
+            services.BuildServiceProvider());
+        var httpContext = new DefaultHttpContext();
+        httpContext.Connection.RemoteIpAddress = IPAddress.Parse("127.0.0.1");
+        httpContext.User = ManagementIdentity.Create(
+            WellKnownManagementAuditOperatorSources.InteractiveAdmin,
+            (operatorId ?? Guid.NewGuid()).ToString(),
+            [ManagementPermission.Admin],
+            operatorName).ToClaimsPrincipal();
+        controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
+        return controller;
+    }
 
     /// <summary>
     /// Gives the controller an HttpContext with a fixed remote IP and a correlation slot established

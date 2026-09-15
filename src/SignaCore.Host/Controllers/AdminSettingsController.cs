@@ -1,5 +1,4 @@
 using System.Data;
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -8,6 +7,7 @@ using SignaCore.Domain.Services;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Http;
 using SignaCore.Host.Installation;
+using SignaCore.Host.Management;
 using SignaCore.Host.Models;
 
 namespace SignaCore.Host.Controllers;
@@ -31,10 +31,11 @@ public sealed class AdminSettingsController : ControllerBase
     private readonly ILogger<AdminSettingsController> _logger;
     private readonly SystemSettingsStore _settingsStore;
     private readonly InstallationRuntimeState _runtimeState;
+    private readonly ManagementOperatorReader _operatorReader;
 
-    // The settings store and the installation runtime state are internal types, so they come from
-    // the request scope rather than from declared constructor parameters — MVC activates controllers
-    // through a public constructor.
+    // The settings store, the installation runtime state, and the operator reader are internal
+    // types, so they come from the request scope rather than from declared constructor parameters —
+    // MVC activates controllers through a public constructor.
     public AdminSettingsController(
         IdentityDbContext db,
         DatabaseOptions databaseOptions,
@@ -46,6 +47,7 @@ public sealed class AdminSettingsController : ControllerBase
         _databaseOptions = databaseOptions;
         _settingsStore = services.GetRequiredService<SystemSettingsStore>();
         _runtimeState = services.GetRequiredService<InstallationRuntimeState>();
+        _operatorReader = services.GetRequiredService<ManagementOperatorReader>();
         _environment = environment;
         _logger = logger;
     }
@@ -220,17 +222,15 @@ public sealed class AdminSettingsController : ControllerBase
             }
 
             var nextVersion = currentVersion + 1;
+            var (actorId, actorName) = _operatorReader.Read(User);
             await _settingsStore.WriteAsync(
                 _db,
                 proposed.Where(pair => pendingKeys.Contains(pair.Key, StringComparer.OrdinalIgnoreCase))
                     .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase),
                 nextVersion,
-                User.Identity?.Name,
+                actorName,
                 cancellationToken);
 
-            var actorId = Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
-                ? id
-                : (Guid?)null;
             // Keys only. Recording old or new values here would put secrets into the audit trail.
             // AuditService resolves the same scoped IdentityDbContext as this controller, so this
             // row is part of the transaction and the single SaveChanges below.
@@ -239,7 +239,7 @@ public sealed class AdminSettingsController : ControllerBase
                 "Settings",
                 nextVersion.ToString(),
                 actorId,
-                User.Identity?.Name,
+                actorName,
                 $"Updated {pendingKeys.Count} settings: {string.Join(", ", pendingKeys)}",
                 HttpContext.GetClientIp());
             await _db.SaveChangesAsync(cancellationToken);
