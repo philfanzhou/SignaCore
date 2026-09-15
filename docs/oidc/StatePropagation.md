@@ -55,9 +55,9 @@ proved replay as defined by the canonical model.
 ## Compatibility and activation
 
 These rules do not add token introspection or remote access-token revocation. They do not change
-current grants, admin cookies, `/api/profile/*`, application settings, migration history, or runtime
-routes. Refresh-family event results remain exclusively owned by the later refresh-family document
-and implementation tasks.
+current grants, the shared ServiceMantle management cookie (`PS-18`), `/api/profile/*`, application
+settings, migration history, or runtime routes. Refresh-family event results remain exclusively
+owned by the later refresh-family document and implementation tasks.
 
 Session persistence and cross-endpoint propagation activate through #67 and #69 (`AC-09`). UserInfo
 and prepared logout activate independently through #55/#96 and #68 (`AC-08`, `AC-10`). Documentation

@@ -15,11 +15,11 @@ account and the Password credential that proved it, records `auth_time`, activit
 expiry, and carries optional revocation facts. The cookie contains none of those facts and never
 becomes a self-contained session ticket.
 
-The identity scheme remains isolated from the current `qz_admin_session` exactly as described in
-[Identity Login](./IdentityLogin.md). Administration cannot create, slide, or revoke an identity
-session, except through the future explicit session-administration operation in `EV-15`. OIDC
-identity endpoints never accept the admin cookie, and the existing admin logout route remains
-unchanged.
+The identity scheme remains isolated from the shared ServiceMantle management session exactly as
+`PS-18` requires and [Identity Login](./IdentityLogin.md) explains. Administration cannot create,
+slide, or revoke an identity session, except through the future explicit session-administration
+operation in `EV-15`. OIDC identity endpoints never accept the management cookie, and management
+logout remains owned by the ServiceMantle management-session contract.
 
 ## Lifetime and activity
 
@@ -94,7 +94,7 @@ expected transitions here. They additionally prove exact-boundary expiry, the on
 write threshold, absolute-expiry capping, application max-age isolation, cross-scheme cookie
 rejection, provider lock order, and cleanup referential integrity.
 
-This design changes no current cookie, admin session, profile API, grant, migration, or runtime
-route. Storage/lifecycle and state propagation activate only through #67 and #69 (`AC-09`), whose
-#95 storage slice precedes the authorization-code table required by `AC-03`. This document itself
-changes no Discovery metadata (`AC-14`).
+This design changes no current cookie, shared management session (`PS-18`), profile API, grant,
+migration, or runtime route. Storage/lifecycle and state propagation activate only through #67 and
+#69 (`AC-09`), whose #95 storage slice precedes the authorization-code table required by `AC-03`.
+This document itself changes no Discovery metadata (`AC-14`).

@@ -61,10 +61,10 @@ unconsumed and fail their live-session check. A missing, unusable, or mismatchin
 same externally successful shape, preventing a session-state oracle.
 
 After a successful commit, SignaCore deletes any presented identity cookie using the exact
-`PS-18` attributes. It does not touch `qz_admin_session`. If a verified post-logout URI exists, the
-response redirects to that exact stored URI and appends the stored state byte-for-byte using safe
-URI construction. Otherwise it returns the same local success page/status for both paths. No
-redirect is released before commit.
+`PS-18` attributes. It does not touch the shared ServiceMantle management cookie (`PS-18`). If a
+verified post-logout URI exists, the response redirects to that exact stored URI and appends the
+stored state byte-for-byte using safe URI construction. Otherwise it returns the same local success
+page/status for both paths. No redirect is released before commit.
 
 The operation is idempotent at the durable session-state level, not by replaying a consumed handle.
 A second use of one handle is local 400. A new valid prepared request for an already revoked matching
@@ -96,6 +96,7 @@ and result categories.
 
 Tests directly execute `SC-05`, `SC-06`, `SC-15`, `SC-18`, and `SC-20`, plus double completion,
 expired-boundary, cookie mismatch, corrupt binding, redirect encoding, and response-header cases.
-The current admin logout route and cookies remain unchanged. Runtime activation belongs to #68 and
-publishes no standard logout metadata (`AC-10`); this document itself changes no route or Discovery
-response (`AC-14`).
+The shared ServiceMantle management session, including its logout route, remains owned by the
+ServiceMantle management-session contract and is unchanged by this design (`PS-18`). Runtime
+activation belongs to #68 and publishes no standard logout metadata (`AC-10`); this document itself
+changes no route or Discovery response (`AC-14`).
