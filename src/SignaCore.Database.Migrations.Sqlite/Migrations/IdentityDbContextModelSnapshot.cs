@@ -668,32 +668,6 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                     b.ToTable("audit_logs", (string)null);
                 });
 
-            modelBuilder.Entity("SignaCore.Database.Entity.DataProtectionKeyEntity", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
-                        .HasColumnName("id");
-
-                    b.Property<string>("FriendlyName")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT")
-                        .HasColumnName("friendly_name");
-
-                    b.Property<string>("ProtectedXml")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasColumnName("protected_xml");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FriendlyName")
-                        .IsUnique();
-
-                    b.ToTable("data_protection_keys", (string)null);
-                });
-
             modelBuilder.Entity("SignaCore.Database.Entity.LdapCredentialEntity", b =>
                 {
                     b.Property<Guid>("Id")

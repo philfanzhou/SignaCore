@@ -7,9 +7,9 @@ using Xunit;
 namespace SignaCore.Tests.Integration;
 
 /// <summary>
-/// The one remaining legacy-console observation after the session switch: the legacy
-/// <c>data_protection_keys</c> store receives nothing new, because the shared ServiceMantle key
-/// ring is the active ring. The table's removal is tracked separately.
+/// The one remaining legacy-console observation after the session switch: the forward drop
+/// migration removed the legacy <c>data_protection_keys</c> table — the shared ServiceMantle key
+/// ring is the only key store.
 /// </summary>
 public sealed class LegacyAdminConsoleCoexistenceTests : IClassFixture<IdentityServerFixture>
 {
@@ -21,20 +21,25 @@ public sealed class LegacyAdminConsoleCoexistenceTests : IClassFixture<IdentityS
     }
 
     [Fact]
-    public async Task TheLegacyKeyStore_IsNoLongerWrittenByTheSharedRing()
+    public async Task TheLegacyKeyStore_IsDroppedByMigration()
     {
         using var client = await _fixture.CreateAdminHttpClientAsync();
 
+        // The forward drop migration removed the legacy data_protection_keys table; the shared
+        // ServiceMantle ring is the only key store and holds the ring's rows.
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-        // The switch moved the active ring to the shared ServiceMantle table; the legacy table
-        // keeps whatever was written before the switch and receives nothing new.
-        var legacyKeys = await db.DataProtectionKeys.AsNoTracking()
-            .CountAsync(TestContext.Current.CancellationToken);
+        var legacyTableExists = await db.Database.SqlQuery<int>(
+                $"""
+                SELECT COUNT(*) AS Value FROM sqlite_master
+                WHERE type = 'table' AND name = 'data_protection_keys'
+                """)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0, legacyTableExists.Single());
+
         var sharedKeys = await db.Database.SqlQuery<int>(
                 $"SELECT COUNT(*) AS Value FROM service_data_protection_keys")
             .ToListAsync(TestContext.Current.CancellationToken);
         Assert.True(sharedKeys.Single() > 0);
-        Assert.Equal(0, legacyKeys);
     }
 }
