@@ -85,6 +85,6 @@ this document stops at the fact that two distinct codes are created.
 code-creation path. Neither task advertises the endpoint before the complete flow reaches activation
 row `AC-07`.
 
-Current `/oauth2/token`, `/oauth2/revoke`, `/api/auth/*`, claims callbacks, administration routes,
-Discovery documents, and management cookie remain unchanged. This document does not register a
-route or enable an application.
+Current `/oauth2/token`, `/oauth2/revoke`, `/api/auth/*`, claims callbacks, management routes,
+Discovery documents, and the shared ServiceMantle management cookie (`PS-18`) remain unchanged.
+This document does not register a route or enable an application.

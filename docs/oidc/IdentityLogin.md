@@ -9,9 +9,11 @@ Only the Password credential establishes this browser identity in the first phas
 
 ## Isolation from administration
 
-Canonical `PS-18` and `PS-19` own the identity and antiforgery cookie contracts. The current
-`qz_admin_session` retains its existing scheme, claims, cookie options, Data Protection application,
-routes, and `AdminSession` authorization policy.
+Canonical `PS-18` and `PS-19` own the identity and antiforgery cookie contracts, including every
+isolation rule between the identity cookie and the shared ServiceMantle management session (scheme
+`ServiceMantle.ManagementCookie`, cookie `__Host-ServiceMantle.Management`). The management
+session's issuance, logout, lifetime, and CSRF rules are owned by the ServiceMantle
+management-session contract and are not restated here.
 
 The target identity path uses a different authentication scheme, cookie name, Data Protection
 purpose, authority record, and authorization policy. Its protected principal carries only the opaque
@@ -19,9 +21,15 @@ session identifier needed to load `PS-04`; account, credential, authentication t
 and revocation authority remain in the database. Possessing either cookie never satisfies the other
 policy. Creating, sliding, deleting, or revoking one never changes the other.
 
-Both schemes can use the deployment's shared encrypted Data Protection key ring without sharing a
-purpose. That allows another SignaCore instance to unprotect the identity cookie while keeping
-identity and administration cryptographically and authoritatively distinct.
+Because the shared package points every default authentication scheme at the management scheme,
+`PS-18` requires each identity authentication, challenge, forbid, sign-in, sign-out, and identity
+authorization policy to name the identity scheme explicitly; an identity path that omits the scheme
+would issue or delete a management cookie. `PS-18` also fixes the isolation mechanism: both cookies
+share the fixed ServiceMantle Data Protection application discriminator and the shared encrypted
+key-ring store, so the identity scheme must not register a second application name and is separated
+only by its own Data Protection purpose. That shared key ring still allows another SignaCore
+instance to unprotect the identity cookie while keeping identity and administration cryptographically
+and authoritatively distinct.
 
 ## Login inputs
 
@@ -99,7 +107,8 @@ boundaries above.
 
 ## Compatibility
 
-This target document changes no current cookie, principal, Password grant, lockout row, admin API,
-Data Protection key material, or browser asset. SMS, LDAP, and WeChat remain token-endpoint grants
-with no identity-login UI. Runtime work is divided among #64–#66 and #94; documentation completion
-activates no route or Discovery metadata (`AC-02`, `AC-05`, `AC-14`).
+This target document changes no current cookie, principal, Password grant, lockout row, shared
+management session or management API (`PS-18`), Data Protection key material, or browser asset.
+SMS, LDAP, and WeChat remain token-endpoint grants with no identity-login UI. Runtime work is
+divided among #64–#66 and #94; documentation completion activates no route or Discovery metadata
+(`AC-02`, `AC-05`, `AC-14`).

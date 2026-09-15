@@ -35,9 +35,10 @@ single-instance rate-policy task. It is not a distributed OIDC limiter and does 
 SignaCore #71. ServiceMantle [#155](https://github.com/philfanzhou/ServiceMantle/issues/155) is a
 multi-instance SignaCore acceptance task, not a reusable test harness.
 
-SignaCore currently owns working local host composition, database-backed Data Protection keys,
-logging, telemetry, metrics export, redaction, and rate limiting. The open ServiceMantle integration
-epic [#25](https://github.com/philfanzhou/ServiceMantle/issues/25) may replace generic plumbing only
+SignaCore currently owns working local host composition, logging, telemetry, metrics export,
+redaction, and rate limiting; its Data Protection key ring is persisted through the shared
+ServiceMantle EF Core key store. The open ServiceMantle integration epic
+[#25](https://github.com/philfanzhou/ServiceMantle/issues/25) may replace generic plumbing only
 after behavior is characterized and adopted through an explicit SignaCore task. This design neither
 duplicates a generic component already adopted nor deletes current behavior in anticipation of an
 open dependency.
