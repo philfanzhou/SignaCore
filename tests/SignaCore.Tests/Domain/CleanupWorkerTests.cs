@@ -20,7 +20,8 @@ public class CleanupWorkerTests
         Mock<ILoginAttemptRepository>? loginAttemptRepoMock = null,
         Mock<ILoginHistoryRepository>? loginHistoryRepoMock = null,
         Mock<IAuditLogRepository>? auditLogRepoMock = null,
-        Mock<IAuthorizationRequestStore>? authorizationRequestStoreMock = null)
+        Mock<IAuthorizationRequestStore>? authorizationRequestStoreMock = null,
+        Mock<IIdentitySessionStore>? identitySessionStoreMock = null)
     {
         var serviceProviderMock = new Mock<IServiceProvider>();
 
@@ -45,6 +46,9 @@ public class CleanupWorkerTests
         serviceProviderMock
             .Setup(sp => sp.GetService(typeof(IAuthorizationRequestStore)))
             .Returns((authorizationRequestStoreMock ?? new Mock<IAuthorizationRequestStore>()).Object);
+        serviceProviderMock
+            .Setup(sp => sp.GetService(typeof(IIdentitySessionStore)))
+            .Returns((identitySessionStoreMock ?? new Mock<IIdentitySessionStore>()).Object);
 
         return serviceProviderMock;
     }
@@ -439,5 +443,132 @@ public class CleanupWorkerTests
         });
 
         Assert.Null(exception);
+    }
+
+    [Fact]
+    public async Task CleanupExpiredDataAsync_RemovesExpiredIdentitySessions()
+    {
+        var identitySessionStoreMock = new Mock<IIdentitySessionStore>();
+        identitySessionStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(7);
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            identitySessionStoreMock: identitySessionStoreMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var keyManagerMock = new Mock<IKeyManager>();
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var worker = new CleanupWorker(
+            serviceProviderMock.Object,
+            keyManagerMock.Object,
+            NullLogger<CleanupWorker>.Instance);
+
+        await RunWorkerUntilAsync(
+            worker,
+            () => identitySessionStoreMock.Invocations.Count > 0);
+
+        identitySessionStoreMock.Verify(
+            s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenIdentitySessionCleanupObservesStoppingCancellation_ExitsWithoutStartingLaterWork()
+    {
+        using var stoppingSource = new CancellationTokenSource();
+        var identitySessionStoreMock = new Mock<IIdentitySessionStore>();
+        identitySessionStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), stoppingSource.Token))
+            .Returns<DateTimeOffset, CancellationToken>((_, token) =>
+            {
+                stoppingSource.Cancel();
+                return Task.FromCanceled<int>(token);
+            });
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+        var serviceProviderMock = CreateMockServiceProvider(
+            appRegRepoMock: appRegRepoMock,
+            identitySessionStoreMock: identitySessionStoreMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var worker = new TestableCleanupWorker(
+            serviceProviderMock.Object,
+            Mock.Of<IKeyManager>(),
+            NullLogger<CleanupWorker>.Instance);
+
+        await worker.RunAsync(stoppingSource.Token);
+
+        identitySessionStoreMock.Verify(
+            s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), stoppingSource.Token),
+            Times.Once);
+        appRegRepoMock.Verify(
+            r => r.DeactivateExpiredCallbacksAsync(
+                It.IsAny<DateTimeOffset>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task IdentitySessionCleanup_LogsOnlyTheDeletedCount()
+    {
+        var logMessages = new List<string>();
+        var identitySessionStoreMock = new Mock<IIdentitySessionStore>();
+        identitySessionStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(7);
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            identitySessionStoreMock: identitySessionStoreMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var keyManagerMock = new Mock<IKeyManager>();
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var worker = new CleanupWorker(
+            serviceProviderMock.Object,
+            keyManagerMock.Object,
+            new ListLogger<CleanupWorker>(logMessages));
+
+        await RunWorkerUntilAsync(
+            worker,
+            () =>
+            {
+                lock (logMessages)
+                {
+                    return logMessages.Exists(message =>
+                        message.Contains("expired identity sessions", StringComparison.Ordinal));
+                }
+            });
+
+        // DF-06: the cleanup log names the count and nothing else — no session id and no other
+        // row value.
+        string message;
+        lock (logMessages)
+        {
+            message = Assert.Single(
+                logMessages,
+                candidate => candidate.Contains("expired identity sessions", StringComparison.Ordinal));
+        }
+
+        Assert.Equal("Deleted 7 expired identity sessions", message);
+    }
+
+    private sealed class ListLogger<T>(List<string> messages) : ILogger<T>
+    {
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            lock (messages)
+            {
+                messages.Add(formatter(state, exception));
+            }
+        }
     }
 }

@@ -58,6 +58,7 @@ public class CleanupWorker : BackgroundService
         var loginHistoryRepo = scope.ServiceProvider.GetRequiredService<ILoginHistoryRepository>();
         var auditLogRepo = scope.ServiceProvider.GetRequiredService<IAuditLogRepository>();
         var authorizationRequestStore = scope.ServiceProvider.GetRequiredService<IAuthorizationRequestStore>();
+        var identitySessionStore = scope.ServiceProvider.GetRequiredService<IIdentitySessionStore>();
         var otpRepo = scope.ServiceProvider.GetService<IOtpRepository>();
 
         var deletedTokens = await refreshTokenRepo.RemoveExpiredAndRevokedAsync(cancellationToken);
@@ -75,6 +76,17 @@ public class CleanupWorker : BackgroundService
             _logger.LogInformation(
                 "Deleted {Count} expired authorization request continuations",
                 deletedAuthorizationRequests);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var deletedIdentitySessions = await identitySessionStore.CleanupExpiredAsync(
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        if (deletedIdentitySessions > 0)
+        {
+            _logger.LogInformation(
+                "Deleted {Count} expired identity sessions",
+                deletedIdentitySessions);
         }
 
         cancellationToken.ThrowIfCancellationRequested();

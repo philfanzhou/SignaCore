@@ -215,9 +215,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ILoginHistoryRepository, LoginHistoryRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IAuthorizationRequestRepository, AuthorizationRequestRepository>();
+        services.AddScoped<IIdentitySessionRepository, IdentitySessionRepository>();
         services.AddScoped<IAuditService, AuditService>();
         services.AddScoped<IOidcAuthorizationRequestValidator, OidcAuthorizationRequestValidator>();
         services.AddScoped<IAuthorizationRequestStore, AuthorizationRequestStore>();
+        services.AddScoped<IIdentitySessionStore, IdentitySessionStore>();
         services.AddScoped<IUnitOfWork, EfCoreUnitOfWork>();
 
         // ---- Gateway Validation Service ----
