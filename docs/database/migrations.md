@@ -35,7 +35,7 @@ The host provisions the database where supported and applies the selected provid
 
 ## Startup migration gate
 
-At startup, `BootstrapPhase` runs the shared ServiceMantle migration orchestration (`DatabaseMigrationOrchestrator`) through an internal executor before any installation-state resolution, legacy configuration import, or snapshot loading happens. The orchestration applies a limited, read-only observation to the target and only allows migration to proceed from an `Empty` or `PendingMigration` state:
+At startup, `InstallationStartup` runs the shared ServiceMantle migration orchestration (`DatabaseMigrationOrchestrator`) through an internal executor before any installation-state resolution, legacy configuration import, or snapshot loading happens. The orchestration applies a limited, read-only observation to the target and only allows migration to proceed from an `Empty` or `PendingMigration` state:
 
 | Observed history and objects | Outcome |
 | --- | --- |

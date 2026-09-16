@@ -27,7 +27,7 @@ internal sealed class InstallationHealthSnapshotSource(IdentityDbContext db) : I
 
         // A missing row in the normal host means the installation authority was lost; that is a
         // not-ready observation, not a crash.
-        if (state is null || !state.IsCompleted)
+        if (SharedInstallationPhase.Resolve(state) != ServiceStartupPhase.Completed)
         {
             return new ServiceHealthSnapshot(
                 ServiceStartupPhase.PendingSetup,

@@ -43,6 +43,7 @@ internal static class InstallationStateResolver
         var serviceId = InstallationStores.ServiceId;
         var installationStore = InstallationStores.CreateInstallationStore(db);
         var state = await installationStore.FindAsync(serviceId, cancellationToken);
+        var sharedPhase = SharedInstallationPhase.Resolve(state);
 
         if (state is null)
         {
@@ -60,7 +61,7 @@ internal static class InstallationStateResolver
             return new InstallationResolution(InstallationPhase.PendingSetup, 0, setupCode);
         }
 
-        if (state.IsCompleted)
+        if (sharedPhase == ServiceStartupPhase.Completed)
         {
             // A completed row adopted by the backfill with no stored settings is a real legacy
             // upgrade that still has to run the import; a genuinely completed installation always
