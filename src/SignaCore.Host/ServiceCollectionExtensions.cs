@@ -226,6 +226,9 @@ public static class ServiceCollectionExtensions
         // ---- Shared admin login state commit path (legacy console + management session) ----
         services.AddScoped<AdminLoginStateRecorder>();
 
+        // ---- Browser OIDC login failure commit path (canonical EV-17) ----
+        services.AddScoped<OidcLoginFailureRecorder>();
+
         // ---- User Query Service ----
         services.AddScoped<IUserQueryService, UserQueryService>();
 
@@ -419,6 +422,12 @@ public static class ServiceCollectionExtensions
         // scheme registration: the framework post-configuration only fills a format still unset.
         services.AddSingleton<IPostConfigureOptions<CookieAuthenticationOptions>,
             IdentitySessionCookiePostConfigureOptions>();
+
+        // The login form antiforgery pair (canonical PS-19) is SignaCore-owned and
+        // principal-independent: it rides the same fixed ServiceMantle discriminator and shared
+        // encrypted key ring with its own purpose, and ASP.NET Core's IAntiforgery — whose tokens
+        // bind to the default-populated HttpContext.User — is deliberately never registered.
+        services.AddSingleton<ILoginAntiforgeryService, LoginAntiforgeryService>();
 
         // The default schemes belong to the shared ServiceMantle management cookie, registered by
         // AddSignaCoreManagementSession after this method (see Program.cs); this call contributes
