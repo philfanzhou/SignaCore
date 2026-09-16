@@ -544,6 +544,7 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
     [InlineData(true)]
     public async Task AcceptedCommitCancellation_IsBounded(bool afterCommit)
     {
+        await SeedAsync();
         using var cancellation = new CancellationTokenSource();
         var gate = new ContinuationCommitGate();
         using var factory = CreateHostWithDbInterceptor(
@@ -696,6 +697,7 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
     [Fact]
     public async Task AcceptedPath_LeaksNoProtocolValuesIntoLogsOrStorage()
     {
+        await SeedAsync();
         var capture = new CapturingLoggerProvider();
         using var factory = _fixture.WithTestServices(services =>
         {
