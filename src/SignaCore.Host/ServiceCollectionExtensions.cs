@@ -1,8 +1,11 @@
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -410,6 +413,11 @@ public static class ServiceCollectionExtensions
             }
         });
 
+        // The identity cookie payload format is pinned to the explicit identity purpose before the
+        // scheme registration: the framework post-configuration only fills a format still unset.
+        services.AddSingleton<IPostConfigureOptions<CookieAuthenticationOptions>,
+            IdentitySessionCookiePostConfigureOptions>();
+
         // The default schemes belong to the shared ServiceMantle management cookie, registered by
         // AddSignaCoreManagementSession after this method (see Program.cs); this call contributes
         // only the non-interactive schemes below.
@@ -420,6 +428,20 @@ public static class ServiceCollectionExtensions
             .AddScheme<AuthenticationSchemeOptions, OAuthClientAuthenticationHandler>(
                 OAuthClientAuthenticationDefaults.Scheme,
                 _ => { })
+            // The isolated identity cookie scheme (canonical PS-18): a host-only secure carrier for
+            // the opaque identity-session id. It deliberately sets no Data Protection application
+            // name — the fixed ServiceMantle discriminator and the shared encrypted key ring stay
+            // in effect — and is separated from the management cookie solely by its own purpose.
+            .AddCookie(IdentitySessionDefaults.AuthenticationScheme, options =>
+            {
+                options.Cookie.Name = IdentitySessionDefaults.CookieName;
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                options.Cookie.SameSite = SameSiteMode.Lax;
+                options.Cookie.Path = "/";
+                options.Cookie.Domain = null;
+                options.Cookie.IsEssential = true;
+            })
             .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
             {
                 options.Events = new JwtBearerEvents
@@ -498,6 +520,7 @@ public static class ServiceCollectionExtensions
                     }
                 };
             });
+        services.AddSingleton<IAuthorizationHandler, IdentitySessionHandler>();
         services.AddAuthorizationBuilder()
             .AddPolicy(GatewayAppAuthenticationDefaults.Policy, policy =>
             {
@@ -517,6 +540,16 @@ public static class ServiceCollectionExtensions
                 policy.AddAuthenticationSchemes(ManagementSessionDefaults.AuthenticationScheme);
                 policy.RequireAuthenticatedUser();
                 policy.AddRequirements(new ManagementPermissionRequirement(ManagementPermission.Admin));
+            })
+            .AddPolicy(IdentitySessionDefaults.Policy, policy =>
+            {
+                // The identity path rides only the isolated identity cookie scheme (canonical
+                // PS-18): the explicit scheme plus the session-id requirement keep the
+                // default-populated management user out of every identity authorization decision,
+                // and the identity principal never resolves to a management operator.
+                policy.AddAuthenticationSchemes(IdentitySessionDefaults.AuthenticationScheme);
+                policy.RequireAuthenticatedUser();
+                policy.AddRequirements(new IdentitySessionRequirement());
             })
             .AddPolicy(GatewayAppAuthenticationDefaults.OpsPolicy, policy =>
             {
