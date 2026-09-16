@@ -14,12 +14,18 @@ Administrators create, inspect, update, and deactivate local, phone, and LDAP-ba
 
 ## Security requirements
 
-The six user-management actions use the `AdminSession` authorization policy. It requires an
-authenticated principal with `admin_access=true` and uses the default `Cookies` authentication
-scheme (`qz_admin_session`). A successful bootstrap-administrator login at
-`POST /api/admin/session/login` creates that principal with `ClaimTypes.NameIdentifier`,
-`ClaimTypes.Name`, and `admin_access=true`. A JWT or an `admin` role alone does not satisfy this
-policy. Credentials and secrets must never be returned.
+The six user-management actions use the `AdminSession` authorization policy. It rides the fixed
+shared management scheme `ServiceMantle.ManagementCookie`
+(`ManagementSessionDefaults.AuthenticationScheme`), requires an authenticated user, and requires
+the principal to resolve to exactly one legitimate management operator holding the `Admin`
+permission (`ManagementPermissionRequirement`). Operator login is the shared ServiceMantle
+management-session entry `POST /management/v1/session/login`, which sets the fixed cookie
+`__Host-ServiceMantle.Management`; session issuance, lifetime, logout, and CSRF rules are owned by
+the [ServiceMantle management-session contract](https://github.com/philfanzhou/ServiceMantle/blob/main/docs/contracts/management-session.md)
+and are not restated here. The shared `AddManagementCookieAuthentication` capability also sets
+every default authentication scheme to the management scheme. A JWT or an `admin` role alone does
+not satisfy this policy, and a principal carrying only the legacy name claims resolves to no
+operator and is rejected. Credentials and secrets must never be returned.
 
 This describes current administration behavior. The separate browser identity scheme is a future
 OIDC capability; its authoritative boundary is documented in
@@ -31,17 +37,35 @@ All logs and errors must redact passwords, application secrets, refresh tokens, 
 ### Current implementation and test evidence
 
 - [ServiceCollectionExtensions](../../../../src/SignaCore.Host/ServiceCollectionExtensions.cs)
-  registers the default cookie scheme and the `AdminSession` policy.
-- [AdminController](../../../../src/SignaCore.Host/Controllers/AdminController.cs) creates the login
-  principal and applies the policy to `GetUsers`, `CreateUser`, `CreatePhoneUser`,
-  `UpdateUserRemark`, `UpdateUserNickname`, and `UpdateUserStatus`.
+  registers the `AdminSession` policy on the fixed management scheme with the authenticated-user
+  and Admin-permission requirements. The default schemes and the cookie itself come from the
+  shared package, composed in
+  [ManagementSessionComposition](../../../../src/SignaCore.Host/Management/ManagementSessionComposition.cs)
+  via `AddManagementCookieAuthentication`; the same file owns the login adapter that invokes
+  [SignaCoreManagementIdentityProvider](../../../../src/SignaCore.Host/Management/SignaCoreManagementIdentityProvider.cs).
+- [AdminController](../../../../src/SignaCore.Host/Controllers/AdminController.cs) applies the
+  policy to `GetUsers`, `CreateUser`, `CreatePhoneUser`, `UpdateUserRemark`, `UpdateUserNickname`,
+  and `UpdateUserStatus`, and projects the resolved management operator in `GetCurrentSession`.
+  It no longer has login or logout actions.
+- [AdminSessionPolicyTests](../../../../tests/SignaCore.Tests/Host/Management/AdminSessionPolicyTests.cs)
+  are direct policy tests against the composed host services:
+  `AManagementOperatorWithAdminPermission_IsAuthorized`,
+  `AnAuthenticatedPrincipalWithOnlyLegacyNameClaims_IsRejected`, and
+  `BothPolicies_RideTheFixedManagementScheme`. They evaluate the authorization policy itself, not
+  the HTTP pipeline.
+- [ManagementSessionContractTests](../../../../tests/SignaCore.IntegrationTests/Integration/ManagementSessionContractTests.cs)
+  are the HTTP-layer evidence for the session contract, including
+  `Login_WithBootstrapAdmin_Returns204AndSetsTheFixedManagementCookie` and
+  `Login_WithNonBootstrapAccount_Returns401AndRecordsTheBootstrapReason`.
 - [AdminControllerTests](../../../../tests/SignaCore.Tests/Host/Controllers/AdminControllerTests.cs)
-  covers bootstrap-administrator login, rejection of other accounts, and user-management actions.
-  These direct controller tests do not execute authentication middleware.
+  covers the user-management actions and the session projection as direct controller tests. These
+  do not execute authentication middleware.
 - [IdentityHttpEndpointsTests](../../../../tests/SignaCore.IntegrationTests/Integration/IdentityHttpEndpointsTests.cs)
-  uses `CreateAdminHttpClientAsync` to sign in through the real HTTP login endpoint and retain the
-  cookie. `SettingsApi_RequiresAnAdminSessionAndNeverReturnsSecretValues` verifies anonymous 401
-  and authenticated 200 on a management endpoint using the same policy; it is supporting session
+  uses `CreateAdminHttpClientAsync` to sign in through the shared management-session entry
+  `POST /management/v1/session/login` (with the `X-ServiceMantle-Request` header, addressed over
+  `https://localhost` because the management cookie is always `Secure`) and to retain the cookie.
+  `SettingsApi_RequiresAnAdminSessionAndNeverReturnsSecretValues` verifies anonymous 401 and
+  authenticated 200 on a management endpoint using the same policy; it is supporting session
   evidence, not an HTTP authorization matrix for the six user-management actions.
 
 ## Data
