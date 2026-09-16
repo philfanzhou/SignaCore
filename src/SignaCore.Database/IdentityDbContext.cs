@@ -618,6 +618,82 @@ public class IdentityDbContext : DbContext, IServiceDbContext
                 StringComparison.Ordinal)
                 ? ManagementAuditDatabaseDialect.Sqlite
                 : ManagementAuditDatabaseDialect.PostgreSql);
+
+        ConfigurePostgreSqlLegacyTextColumns(modelBuilder);
+    }
+
+    /// <summary>
+    /// The 37 PostgreSQL columns the early migrations created as <c>TEXT</c> with a
+    /// <c>maxLength</c> the runtime never enforced. The model now states the physical fact
+    /// (<c>text</c>) for exactly these columns — the <c>HasMaxLength</c> metadata above stays
+    /// untouched — so the snapshot and every future generated <c>AlterColumn</c> stop disagreeing
+    /// with real databases. SQLite is unaffected: its model, snapshot, and history keep the same
+    /// shape. New columns must never be added here; the current model creates them as
+    /// <c>varchar(N)</c> and they are born consistent.
+    /// </summary>
+    private static readonly (Type Entity, string Property)[] PostgreSqlLegacyTextColumns =
+    [
+        (typeof(AccountEntity), nameof(AccountEntity.LastLoginIp)),
+        (typeof(AccountEntity), nameof(AccountEntity.LastLoginMethod)),
+        (typeof(AccountEntity), nameof(AccountEntity.Nickname)),
+        (typeof(AccountEntity), nameof(AccountEntity.Remark)),
+        (typeof(AppRegistrationEntity), nameof(AppRegistrationEntity.AppId)),
+        (typeof(AppRegistrationEntity), nameof(AppRegistrationEntity.AppName)),
+        (typeof(AppRegistrationEntity), nameof(AppRegistrationEntity.AppSecretHash)),
+        (typeof(AppRegistrationEntity), nameof(AppRegistrationEntity.CallbackUrl)),
+        (typeof(AuditLogEntity), nameof(AuditLogEntity.Action)),
+        (typeof(AuditLogEntity), nameof(AuditLogEntity.ActorName)),
+        (typeof(AuditLogEntity), nameof(AuditLogEntity.AfterSnapshot)),
+        (typeof(AuditLogEntity), nameof(AuditLogEntity.BeforeSnapshot)),
+        (typeof(AuditLogEntity), nameof(AuditLogEntity.ClientIp)),
+        (typeof(AuditLogEntity), nameof(AuditLogEntity.CorrelationId)),
+        (typeof(AuditLogEntity), nameof(AuditLogEntity.Description)),
+        (typeof(AuditLogEntity), nameof(AuditLogEntity.TargetId)),
+        (typeof(AuditLogEntity), nameof(AuditLogEntity.TargetType)),
+        (typeof(LoginAttemptEntity), nameof(LoginAttemptEntity.Username)),
+        (typeof(LoginHistoryEntity), nameof(LoginHistoryEntity.AppId)),
+        (typeof(LoginHistoryEntity), nameof(LoginHistoryEntity.AuthMethod)),
+        (typeof(LoginHistoryEntity), nameof(LoginHistoryEntity.ClientIp)),
+        (typeof(LoginHistoryEntity), nameof(LoginHistoryEntity.CorrelationId)),
+        (typeof(LoginHistoryEntity), nameof(LoginHistoryEntity.EventType)),
+        (typeof(LoginHistoryEntity), nameof(LoginHistoryEntity.FailureReason)),
+        (typeof(LoginHistoryEntity), nameof(LoginHistoryEntity.UserAgent)),
+        (typeof(LoginHistoryEntity), nameof(LoginHistoryEntity.Username)),
+        (typeof(OtpEntity), nameof(OtpEntity.Phone)),
+        (typeof(PasswordCredentialEntity), nameof(PasswordCredentialEntity.PasswordHash)),
+        (typeof(PasswordCredentialEntity), nameof(PasswordCredentialEntity.Username)),
+        (typeof(RefreshTokenEntity), nameof(RefreshTokenEntity.TokenValue)),
+        (typeof(SecurityKeyEntity), nameof(SecurityKeyEntity.EncryptedPrivateKeyParams)),
+        (typeof(SecurityKeyEntity), nameof(SecurityKeyEntity.EncryptionSalt)),
+        (typeof(SecurityKeyEntity), nameof(SecurityKeyEntity.KeyId)),
+        (typeof(SecurityKeyEntity), nameof(SecurityKeyEntity.PublicKeyExponent)),
+        (typeof(SecurityKeyEntity), nameof(SecurityKeyEntity.PublicKeyModulus)),
+        (typeof(UserLoginEntity), nameof(UserLoginEntity.ProviderName)),
+        (typeof(UserLoginEntity), nameof(UserLoginEntity.ProviderUserId))
+    ];
+
+    /// <summary>
+    /// Aligns the PostgreSQL model's column types with the physical schema the early migrations
+    /// created. Mirrors the <see cref="ConfigureInstant"/> provider branch: SQLite returns
+    /// unchanged, and the <c>text</c> type is a metadata statement only — no runtime SQL,
+    /// parameter typing, read, or write behavior changes on either provider.
+    /// </summary>
+    private void ConfigurePostgreSqlLegacyTextColumns(ModelBuilder modelBuilder)
+    {
+        if (string.Equals(
+                Database.ProviderName,
+                "Microsoft.EntityFrameworkCore.Sqlite",
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        foreach (var (entity, property) in PostgreSqlLegacyTextColumns)
+        {
+            modelBuilder.Entity(entity)
+                .Property(property)
+                .HasColumnType("text");
+        }
     }
 
     private void ConfigureInstant(PropertyBuilder property)

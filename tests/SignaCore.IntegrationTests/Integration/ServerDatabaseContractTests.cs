@@ -1,7 +1,10 @@
 using DotNet.Testcontainers.Containers;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
@@ -2400,6 +2403,276 @@ public sealed class ServerDatabaseContractTests
             .SingleAsync(app => app.Id == appId, TestContext.Current.CancellationToken);
         context.AppRegistrations.Remove(app);
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// The #269 column-type contract: after migrating to the latest version, every mapped column's
+    /// physical <c>format_type</c> equals the model's <c>GetColumnType</c> (with
+    /// <c>timestamptz</c>/<c>timestamp with time zone</c> normalized), no real column is missing,
+    /// and the mapped set is non-empty — so the snapshot and the physical schema can no longer
+    /// disagree.
+    /// </summary>
+    [Fact]
+    public async Task PostgreSqlModelColumnTypes_MatchThePhysicalSchema()
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL column type contract.");
+
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var databaseOptions = CreateDatabaseOptions(
+                "PostgreSQL",
+                container.GetConnectionString());
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            await using (var migration = new IdentityDbContext(options))
+            {
+                await migration.Database.MigrateAsync(TestContext.Current.CancellationToken);
+            }
+
+            await using var context = new IdentityDbContext(options);
+            await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+            await using var command = context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = """
+                SELECT table_name, column_name, format_type(atttypid, atttypmod)
+                FROM information_schema.columns
+                JOIN pg_attribute ON attrelid = to_regclass('public.' || table_name)
+                    AND attname = column_name
+                WHERE table_schema = 'public'
+                ORDER BY table_name, column_name
+                """;
+            var physical = new Dictionary<string, string>(StringComparer.Ordinal);
+            await using (var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken))
+            {
+                while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+                {
+                    physical[$"{reader.GetString(0)}.{reader.GetString(1)}"] = reader.GetString(2);
+                }
+            }
+
+            var mismatches = new List<string>();
+            var mapped = 0;
+            foreach (var entityType in context.Model.GetEntityTypes())
+            {
+                var tableName = entityType.GetTableName()!;
+                foreach (var property in entityType.GetProperties())
+                {
+                    var columnName = property.GetColumnName(
+                        StoreObjectIdentifier.Table(tableName, entityType.GetSchema()));
+                    if (columnName is null)
+                    {
+                        continue;
+                    }
+
+                    mapped++;
+                    var key = $"{tableName}.{columnName}";
+                    if (!physical.TryGetValue(key, out var physicalType))
+                    {
+                        mismatches.Add($"{key}: missing in the database");
+                        continue;
+                    }
+
+                    var modelType = property.GetColumnType()!;
+                    if (Normalize(modelType) != Normalize(physicalType))
+                    {
+                        mismatches.Add($"{key}: model={modelType}, database={physicalType}");
+                    }
+                }
+            }
+
+            Assert.True(mapped > 0, "The comparison must cover a non-empty mapped column set.");
+            Assert.Empty(mismatches);
+
+            static string Normalize(string columnType) => columnType switch
+            {
+                "timestamp with time zone" => "timestamptz",
+                _ => columnType
+            };
+        }
+    }
+
+    /// <summary>
+    /// The #269 in-place upgrade: from the pre-alignment history with overlong rows already
+    /// stored, the alignment migration succeeds, changes no byte, and the empty <c>Down</c> runs
+    /// cleanly and also changes neither bytes nor the physical <c>text</c> type.
+    /// </summary>
+    [Fact]
+    public async Task PostgreSqlLegacyTextAlignment_UpgradesInPlaceWithOverlongData()
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL text alignment upgrade.");
+
+        const string preAlignmentMigration = "20260916103405_AddIdentitySessions";
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var databaseOptions = CreateDatabaseOptions(
+                "PostgreSQL",
+                container.GetConnectionString());
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            await using (var context = new IdentityDbContext(options))
+            {
+                var migrator = context.GetService<IMigrator>();
+                await migrator.MigrateAsync(preAlignmentMigration, TestContext.Current.CancellationToken);
+
+                var userAgent = new string('U', 600) + "-upgrade-tail";
+                var description = new string('D', 1500) + "-upgrade-tail";
+                var remark = new string('R', 800) + "-upgrade-tail";
+                var accountId = Guid.NewGuid();
+                await context.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO accounts (id, is_active, created_at, total_login_count, remark)
+                    VALUES ({accountId}, TRUE, {DateTimeOffset.UtcNow}, 0, {remark});
+
+                    INSERT INTO login_histories
+                        (id, username, auth_method, event_type, failure_reason, user_agent,
+                         app_id, created_at)
+                    VALUES
+                        ({Guid.NewGuid()}, {"overlong-upgrade-user"}, {"oidc_login"}, {"login_failure"},
+                         {"Wrong username or password"}, {userAgent}, {"upgrade-app"},
+                         {DateTimeOffset.UtcNow});
+
+                    INSERT INTO audit_logs
+                        (id, action, target_type, target_id, description, created_at)
+                    VALUES
+                        ({Guid.NewGuid()}, {"login.failed"}, {"LoginHistory"}, {"overlong-upgrade-target"},
+                         {description}, {DateTimeOffset.UtcNow});
+                    """, cancellationToken: TestContext.Current.CancellationToken);
+
+                await migrator.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+                var accountRemark = await context.Database.SqlQuery<string>(
+                    $"SELECT remark AS \"Value\" FROM accounts WHERE id = {accountId}")
+                    .SingleAsync(TestContext.Current.CancellationToken);
+                var historyAgent = await context.Database.SqlQuery<string>(
+                    $"SELECT user_agent AS \"Value\" FROM login_histories WHERE username = {"overlong-upgrade-user"}")
+                    .SingleAsync(TestContext.Current.CancellationToken);
+                var auditDescription = await context.Database.SqlQuery<string>(
+                    $"SELECT description AS \"Value\" FROM audit_logs WHERE action = {"login.failed"}")
+                    .SingleAsync(TestContext.Current.CancellationToken);
+                Assert.Equal(remark, accountRemark);
+                Assert.Equal(userAgent, historyAgent);
+                Assert.Equal(description, auditDescription);
+
+                // The column is physically text before and after: the alignment is a metadata
+                // statement about the model, not a schema change.
+                await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+                await using (var typeCommand = context.Database.GetDbConnection().CreateCommand())
+                {
+                    typeCommand.CommandText =
+                        "SELECT format_type(atttypid, atttypmod) FROM pg_attribute "
+                        + "WHERE attrelid = 'public.accounts'::regclass AND attname = 'remark'";
+                    Assert.Equal(
+                        "text",
+                        (string)(await typeCommand.ExecuteScalarAsync(TestContext.Current.CancellationToken))!);
+                }
+
+                // The empty Down runs cleanly and changes neither bytes nor types.
+                await migrator.MigrateAsync(preAlignmentMigration, TestContext.Current.CancellationToken);
+                await migrator.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
+                Assert.Equal(
+                    remark,
+                    await context.Database.SqlQuery<string>(
+                        $"SELECT remark AS \"Value\" FROM accounts WHERE id = {accountId}")
+                        .SingleAsync(TestContext.Current.CancellationToken));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The PostgreSQL half of the #269 overlong-input regression: six failed logins carrying a
+    /// 600-character User-Agent commit their shared failure unit — the counter climbs to its
+    /// threshold with the lockout written, and every history row keeps the complete value.
+    /// </summary>
+    [Fact]
+    public async Task PostgreSqlLoginFailureUnit_WithAnOverlongUserAgent_CommitsFully()
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL overlong user-agent regression.");
+
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var databaseOptions = CreateDatabaseOptions(
+                "PostgreSQL",
+                container.GetConnectionString());
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            await using (var migration = new IdentityDbContext(options))
+            {
+                await migration.Database.MigrateAsync(TestContext.Current.CancellationToken);
+            }
+
+            await using var context = new IdentityDbContext(options);
+            var recorder = new SignaCore.Host.Services.OidcLoginFailureRecorder(
+                new LoginAttemptRepository(context),
+                new AuditService(
+                    new LoginHistoryRepository(context),
+                    new AuditLogRepository(context)),
+                new EfCoreUnitOfWork(context),
+                context,
+                NullLogger<SignaCore.Host.Services.OidcLoginFailureRecorder>.Instance);
+            var userAgent = new string('U', 600) + "-pg-tail";
+
+            for (var attempt = 0; attempt < 6; attempt++)
+            {
+                await recorder.RecordFailureAsync(
+                    new LoginAttemptChange(LoginAttemptChangeKind.RecordFailure, "overlong-ua-pg-user"),
+                    "overlong-ua-pg-user",
+                    "Wrong username or password",
+                    "overlong-ua-app",
+                    clientIp: "203.0.113.9",
+                    userAgent: userAgent,
+                    correlationId: "overlong-ua-correlation",
+                    cancellationToken: TestContext.Current.CancellationToken);
+            }
+
+            // The recorder path has no validator gate, so all six failures count; the lockout was
+            // written when the fifth failure reached the threshold.
+            var attemptRow = await context.LoginAttempts.AsNoTracking()
+                .SingleAsync(
+                    row => row.UsernameNormalized == "OVERLONG-UA-PG-USER",
+                    TestContext.Current.CancellationToken);
+            Assert.Equal(6, attemptRow.FailedAttempts);
+            Assert.NotNull(attemptRow.LockoutUntil);
+
+            var histories = await context.LoginHistories.AsNoTracking()
+                .Where(row => row.Username == "overlong-ua-pg-user")
+                .ToListAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(6, histories.Count);
+            Assert.All(histories, row => Assert.Equal(userAgent, row.UserAgent));
+        }
     }
 
     private static IdentitySessionEntity CreateIdentitySession(

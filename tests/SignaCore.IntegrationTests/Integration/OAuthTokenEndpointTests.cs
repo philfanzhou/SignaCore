@@ -4,6 +4,8 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Services;
@@ -121,6 +123,52 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("invalid_grant", body.GetProperty("error").GetString());
         Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("error_description").GetString()));
+    }
+
+    /// <summary>
+    /// A 600-character User-Agent — longer than the legacy model bound — must neither roll back the
+    /// failure counter nor truncate the history row: the sixth failure still answers 400, the
+    /// counter sits at its threshold with the lockout written, and every history row keeps the full
+    /// value. The SQLite half of the #269 overlong-input regression.
+    /// </summary>
+    [Fact]
+    public async Task Token_PasswordFailuresWithAnOverlongUserAgent_StillCountAndAudit()
+    {
+        const string username = "overlong-ua-user";
+        const string password = "Overlong-Ua-123!";
+        await OAuthLoginTestSupport.SeedUserAsync(_fixture.Services, username, password);
+        using var http = CreateClientWithBasicAuth();
+        var userAgent = new string('U', 600) + "-canary-tail";
+
+        for (var attempt = 0; attempt < 6; attempt++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/oauth2/token")
+            {
+                Content = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["grant_type"] = IdentityConstants.GrantTypePassword,
+                    ["username"] = username,
+                    ["password"] = "definitely-not-the-password"
+                })
+            };
+            request.Headers.TryAddWithoutValidation("User-Agent", userAgent);
+            using var response = await http.SendAsync(request, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        using var scope = _fixture.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var normalized = IdentityValueNormalizer.Normalize(username);
+        var attemptRow = await dbContext.LoginAttempts.AsNoTracking()
+            .SingleAsync(row => row.UsernameNormalized == normalized, TestContext.Current.CancellationToken);
+        Assert.Equal(IdentityConstants.MaxFailedLoginAttempts, attemptRow.FailedAttempts);
+        Assert.NotNull(attemptRow.LockoutUntil);
+
+        var histories = await dbContext.LoginHistories.AsNoTracking()
+            .Where(row => row.Username == username)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(6, histories.Count);
+        Assert.All(histories, row => Assert.Equal(userAgent, row.UserAgent));
     }
 
     [Fact]
