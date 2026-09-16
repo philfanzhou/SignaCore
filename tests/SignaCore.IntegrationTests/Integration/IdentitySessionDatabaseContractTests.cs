@@ -225,7 +225,7 @@ public sealed class IdentitySessionDatabaseContractTests
         var options = await database.InitializeAsync();
         var (accountId, credentialId) = await SeedAccountWithCredentialAsync(options);
         var (_, otherCredentialId) = await SeedAccountWithCredentialAsync(options, "session-contract-other");
-        var now = DateTimeOffset.UtcNow;
+        var now = Microsecond(DateTimeOffset.UtcNow);
 
         await using (var context = new IdentityDbContext(options))
         {
@@ -284,7 +284,7 @@ public sealed class IdentitySessionDatabaseContractTests
         await using var database = new SqliteSessionDatabase();
         var options = await database.InitializeAsync();
         var (accountId, credentialId) = await SeedAccountWithCredentialAsync(options);
-        var authTime = DateTimeOffset.UtcNow.AddHours(-1);
+        var authTime = Microsecond(DateTimeOffset.UtcNow.AddHours(-1));
         var idle = authTime.AddMinutes(IdentityConstants.IdentitySessionIdleTimeoutMinutes);
         var absolute = authTime.AddSeconds(IdentityConstants.MaxIdentitySessionAgeSeconds);
 
@@ -351,7 +351,7 @@ public sealed class IdentitySessionDatabaseContractTests
         await using var database = new SqliteSessionDatabase();
         var options = await database.InitializeAsync();
         var (accountId, credentialId) = await SeedAccountWithCredentialAsync(options);
-        var authTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var authTime = Microsecond(DateTimeOffset.UtcNow.AddMinutes(-5));
 
         Guid staleId;
         await using (var context = new IdentityDbContext(options))
@@ -467,7 +467,7 @@ public sealed class IdentitySessionDatabaseContractTests
         await using var database = new SqliteSessionDatabase();
         var options = await database.InitializeAsync();
         var (accountId, credentialId) = await SeedAccountWithCredentialAsync(options);
-        var authTime = DateTimeOffset.UtcNow.AddHours(-1);
+        var authTime = Microsecond(DateTimeOffset.UtcNow.AddHours(-1));
 
         Guid sessionId;
         await using (var context = new IdentityDbContext(options))
@@ -489,7 +489,7 @@ public sealed class IdentitySessionDatabaseContractTests
         {
             var store = CreateStore(context);
             var cancellationToken = TestContext.Current.CancellationToken;
-            var firstInstant = DateTimeOffset.UtcNow;
+            var firstInstant = Microsecond(DateTimeOffset.UtcNow);
             var secondInstant = firstInstant.AddMinutes(1);
 
             Assert.Equal(
@@ -544,7 +544,7 @@ public sealed class IdentitySessionDatabaseContractTests
         await using var database = new SqliteSessionDatabase();
         var options = await database.InitializeAsync();
         var (accountId, credentialId) = await SeedAccountWithCredentialAsync(options);
-        var authTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var authTime = Microsecond(DateTimeOffset.UtcNow.AddMinutes(-5));
 
         Guid staleId;
         Guid revokeId;
@@ -557,7 +557,7 @@ public sealed class IdentitySessionDatabaseContractTests
                 accountId, credentialId, authTime, TestContext.Current.CancellationToken)).Id;
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = Microsecond(DateTimeOffset.UtcNow);
         var before = await DumpTablesAsync(options);
 
         // Rollback: the created row vanishes, the touch and the revocation leave no trace.
@@ -627,7 +627,7 @@ public sealed class IdentitySessionDatabaseContractTests
         await using var database = new SqliteSessionDatabase();
         var options = await database.InitializeAsync();
         var (accountId, credentialId) = await SeedAccountWithCredentialAsync(options);
-        var authTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var authTime = Microsecond(DateTimeOffset.UtcNow.AddMinutes(-5));
 
         Guid staleId;
         Guid revokeTargetId;
@@ -644,7 +644,7 @@ public sealed class IdentitySessionDatabaseContractTests
         {
             var store = CreateStore(context);
             var cancellationToken = TestContext.Current.CancellationToken;
-            var firstNow = DateTimeOffset.UtcNow;
+            var firstNow = Microsecond(DateTimeOffset.UtcNow);
             var secondNow = firstNow.AddMilliseconds(50);
 
             // (a) Two activity updates inside the same minute window: exactly one writes.
@@ -681,7 +681,7 @@ public sealed class IdentitySessionDatabaseContractTests
         await using var database = new SqliteSessionDatabase();
         var optionsA = await database.InitializeAsync();
         var (accountId, credentialId) = await SeedAccountWithCredentialAsync(optionsA);
-        var authTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var authTime = Microsecond(DateTimeOffset.UtcNow.AddMinutes(-5));
 
         Guid sessionId;
         await using (var contextA = new IdentityDbContext(optionsA))
@@ -692,7 +692,7 @@ public sealed class IdentitySessionDatabaseContractTests
 
         // Instance B builds its own options over the same database and recovers the session.
         var optionsB = database.BuildOptions();
-        var now = DateTimeOffset.UtcNow;
+        var now = Microsecond(DateTimeOffset.UtcNow);
         await using (var contextB = new IdentityDbContext(optionsB))
         {
             var storeB = CreateStore(contextB);
@@ -744,8 +744,8 @@ public sealed class IdentitySessionDatabaseContractTests
         await using var database = new SqliteSessionDatabase();
         var options = await database.InitializeAsync();
         var (accountId, credentialId) = await SeedAccountWithCredentialAsync(options);
-        var authTime = DateTimeOffset.UtcNow.AddMinutes(-5);
-        var now = DateTimeOffset.UtcNow;
+        var authTime = Microsecond(DateTimeOffset.UtcNow.AddMinutes(-5));
+        var now = Microsecond(DateTimeOffset.UtcNow);
 
         Guid sessionId = Guid.Empty;
         if (operation is "touch" or "revoke")
@@ -852,7 +852,7 @@ public sealed class IdentitySessionDatabaseContractTests
         await using var database = new SqliteSessionDatabase();
         var plainOptions = await database.InitializeAsync();
         var (accountId, credentialId) = await SeedAccountWithCredentialAsync(plainOptions);
-        var authTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var authTime = Microsecond(DateTimeOffset.UtcNow.AddMinutes(-5));
 
         // Creation: one injected INSERT failure, one committed row.
         var insertInterceptor = new TransientFailureInterceptor(
@@ -908,7 +908,7 @@ public sealed class IdentitySessionDatabaseContractTests
         await using var database = new SqliteSessionDatabase();
         var options = await database.InitializeAsync();
         var (accountId, credentialId) = await SeedAccountWithCredentialAsync(options);
-        var now = DateTimeOffset.UtcNow;
+        var now = Microsecond(DateTimeOffset.UtcNow);
         var cutoff = now.AddHours(-IdentityConstants.IdentitySessionRetentionHours);
 
         // Deleted: idle-expired beyond the window.
@@ -969,7 +969,7 @@ public sealed class IdentitySessionDatabaseContractTests
         var options = await database.InitializeAsync();
         var (accountId, credentialId) = await SeedAccountWithCredentialAsync(options);
         var (_, otherCredentialId) = await SeedAccountWithCredentialAsync(options, "session-contract-other");
-        var now = DateTimeOffset.UtcNow;
+        var now = Microsecond(DateTimeOffset.UtcNow);
         var exceptions = new List<Exception>();
         var sessionIds = new List<Guid>();
 
@@ -1013,6 +1013,15 @@ public sealed class IdentitySessionDatabaseContractTests
 
     // ---- Helpers ----
 
+    /// <summary>
+    /// The SQLite mapping stores instants as Unix microseconds, so every test instant that is
+    /// later compared against a stored value is truncated to that grid first; a 100-nanosecond
+    /// clock (Linux CI) would otherwise make the exact-equality assertions platform-dependent.
+    /// Derived instants (AddMinutes etc.) keep the truncation.
+    /// </summary>
+    private static DateTimeOffset Microsecond(DateTimeOffset value) =>
+        new(value.UtcTicks / 10 * 10, TimeSpan.Zero);
+
     private static IdentitySessionStore CreateStore(IdentityDbContext context) => new(
         new IdentitySessionRepository(context),
         new EfCoreUnitOfWork(context));
@@ -1047,7 +1056,7 @@ public sealed class IdentitySessionDatabaseContractTests
         Guid credentialId,
         DateTimeOffset? authTime = null)
     {
-        var now = authTime ?? DateTimeOffset.UtcNow;
+        var now = Microsecond(authTime ?? DateTimeOffset.UtcNow);
         return new IdentitySessionEntity
         {
             Id = Guid.NewGuid(),
