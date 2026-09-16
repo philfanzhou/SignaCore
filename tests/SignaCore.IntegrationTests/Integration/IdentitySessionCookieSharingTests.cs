@@ -21,7 +21,8 @@ namespace SignaCore.Tests.Integration;
 /// The identity cookie across instances (canonical PS-18): two hosts over one ServiceMantle key
 /// ring read the same cookie, the cookie cannot reach the AdminSession API, an instance with its
 /// own key ring rejects it, and the identity and management payloads never unprotect under each
-/// other's purpose. No login route or Discovery capability is activated by this slice (AC-02).
+/// other's purpose. The identity state stays internal: a handleless login GET is a local error
+/// and no Discovery capability is activated (AC-02).
 /// </summary>
 public sealed class IdentitySessionCookieSharingTests : IAsyncLifetime
 {
@@ -223,14 +224,16 @@ public sealed class IdentitySessionCookieSharingTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TheSliceActivatesNoLoginRouteOrDiscoveryCapability()
+    public async Task AHandlelessLoginGetIsALocalErrorAndDiscoveryStaysInactive()
     {
         using var instance = CreateInstance(_sharedBootstrapFilePath!);
         using var client = instance.CreateClient();
 
-        // AC-02: this slice only lets internal flow tests establish isolated identity state.
+        // The login route exists but a GET without a login_handle shares the single local 400 of
+        // EV-03; AC-02 stays at effect None, so Discovery advertises no interactive capability.
         using var login = await client.GetAsync("/oauth2/login", TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.NotFound, login.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, login.StatusCode);
+        Assert.Null(login.Headers.Location);
 
         using var discovery = await client.GetAsync(
             "/.well-known/openid-configuration", TestContext.Current.CancellationToken);
