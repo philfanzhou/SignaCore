@@ -33,6 +33,7 @@ public class IdentityDbContext : DbContext, IServiceDbContext
     public DbSet<AppWechatAccessEntity> AppWechatAccesses => Set<AppWechatAccessEntity>();
     public DbSet<AppExchangeTrustEntity> AppExchangeTrusts => Set<AppExchangeTrustEntity>();
     public DbSet<AuthorizationRequestEntity> AuthorizationRequests => Set<AuthorizationRequestEntity>();
+    public DbSet<IdentitySessionEntity> IdentitySessions => Set<IdentitySessionEntity>();
     public DbSet<SystemSettingEntity> SystemSettings => Set<SystemSettingEntity>();
 
     // ServiceMantle shared installation state (service_installations): the runtime authority for
@@ -315,6 +316,50 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.HasOne<AppRegistrationEntity>()
                 .WithMany()
                 .HasForeignKey(e => e.AppRegistrationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<IdentitySessionEntity>(entity =>
+        {
+            entity.ToTable(
+                "identity_sessions",
+                // The revocation fact is one pair: a reason without a time, or a time without a
+                // reason, is not a revocation. The check enforces the pairing on both providers;
+                // the closed value set itself stays a domain rule so later canonical events can
+                // add reasons without a schema change.
+                table => table.HasCheckConstraint(
+                    "CK_identity_sessions_revocation_pair",
+                    "(revoked_at IS NULL AND revocation_reason IS NULL) "
+                    + "OR (revoked_at IS NOT NULL AND revocation_reason IS NOT NULL)"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.AccountId).HasColumnName("account_id");
+            entity.Property(e => e.PasswordCredentialId).HasColumnName("password_credential_id");
+            entity.Property(e => e.AuthMethod)
+                .HasColumnName("auth_method")
+                .HasMaxLength(IdentityConstants.MaxAuthMethodLength)
+                .IsRequired();
+            ConfigureInstant(entity.Property(e => e.AuthTime).HasColumnName("auth_time"));
+            ConfigureInstant(entity.Property(e => e.LastSeenAt).HasColumnName("last_seen_at"));
+            ConfigureInstant(entity.Property(e => e.IdleExpiresAt).HasColumnName("idle_expires_at"));
+            ConfigureInstant(entity.Property(e => e.AbsoluteExpiresAt).HasColumnName("absolute_expires_at"));
+            ConfigureInstant(entity.Property(e => e.RevokedAt).HasColumnName("revoked_at"));
+            entity.Property(e => e.RevocationReason)
+                .HasColumnName("revocation_reason")
+                .HasMaxLength(IdentityConstants.MaxIdentitySessionRevocationReasonLength);
+            entity.HasIndex(e => e.AccountId);
+            entity.HasIndex(e => e.PasswordCredentialId);
+            // PS-23: both identity references are restrictive and non-nullable, created together
+            // with this table, so a live session can never name an account or credential the
+            // schema cannot resolve. Deleting a referenced account or password credential fails;
+            // cleanup deletes rows only by retention and never nulls a reference.
+            entity.HasOne<AccountEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<PasswordCredentialEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.PasswordCredentialId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

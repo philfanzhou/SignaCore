@@ -742,6 +742,64 @@ namespace SignaCore.Database.Migrations
                     b.ToTable("authorization_requests", (string)null);
                 });
 
+            modelBuilder.Entity("SignaCore.Database.Entity.IdentitySessionEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("AbsoluteExpiresAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("absolute_expires_at");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("account_id");
+
+                    b.Property<string>("AuthMethod")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("auth_method");
+
+                    b.Property<DateTimeOffset>("AuthTime")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("auth_time");
+
+                    b.Property<DateTimeOffset>("IdleExpiresAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("idle_expires_at");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("last_seen_at");
+
+                    b.Property<Guid>("PasswordCredentialId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("password_credential_id");
+
+                    b.Property<string>("RevocationReason")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("revocation_reason");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("revoked_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("PasswordCredentialId");
+
+                    b.ToTable("identity_sessions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_identity_sessions_revocation_pair", "(revoked_at IS NULL AND revocation_reason IS NULL) OR (revoked_at IS NOT NULL AND revocation_reason IS NOT NULL)");
+                        });
+                });
+
             modelBuilder.Entity("SignaCore.Database.Entity.LdapCredentialEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1338,6 +1396,21 @@ namespace SignaCore.Database.Migrations
                     b.HasOne("SignaCore.Database.Entity.AppRegistrationEntity", null)
                         .WithMany()
                         .HasForeignKey("AppRegistrationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SignaCore.Database.Entity.IdentitySessionEntity", b =>
+                {
+                    b.HasOne("SignaCore.Database.Entity.AccountEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SignaCore.Database.Entity.PasswordCredentialEntity", null)
+                        .WithMany()
+                        .HasForeignKey("PasswordCredentialId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

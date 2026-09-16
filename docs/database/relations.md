@@ -8,6 +8,7 @@ accounts
   +-- ldap_credentials --< app_ldap_accesses >-- app_registrations
   +-- refresh_tokens (also bound to app_id and optional login source)
   +-- login_histories
+  +-- identity_sessions (browser identity authority; also restrictively references password_credentials)
 
 app_registrations
   +-- otps
@@ -30,3 +31,9 @@ The `authorization_requests` foreign key to `app_registrations` is restrictive a
 either direction: deleting an application with live continuation rows fails, and cleanup removes
 rows only by retention. Nothing references `authorization_requests`, and the stored redirect URI is
 a value snapshot rather than a foreign key to `app_redirect_uris`.
+
+The `identity_sessions` foreign keys to `accounts` and `password_credentials` are both restrictive
+and never cascade: deleting a referenced account or credential while session rows exist fails, and
+cleanup removes rows only by retention. Nothing references `identity_sessions` yet; the future
+authorization-code, refresh-family, and logout tables own their own restrictive session references
+and must keep the session cleanup from deleting still-referenced rows.

@@ -1,5 +1,6 @@
 using DotNet.Testcontainers.Containers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using SignaCore.Database;
@@ -357,6 +358,692 @@ public sealed class ServerDatabaseContractTests
                 await Assert.ThrowsAsync<DbUpdateException>(() =>
                     assertionContext.SaveChangesAsync(TestContext.Current.CancellationToken));
             }
+        }
+    }
+
+    /// <summary>
+    /// <c>PS-04</c>/<c>PS-23</c> on the real PostgreSQL matrix: the exact fresh schema shape
+    /// (columns, lengths, indexes, restrictive references, the revocation-pair check), the
+    /// additive upgrade from <c>AddAuthorizationRequests</c> with a symmetric <c>Down</c>, and the
+    /// database-enforced references in both directions.
+    /// </summary>
+    [Fact]
+    public async Task PostgreSqlIdentitySessions_SchemaUpgradeDownAndRestrictiveReferences()
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL identity session contract.");
+
+        const string preSessionMigration = "20260916073310_AddAuthorizationRequests";
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var databaseOptions = CreateDatabaseOptions(
+                "PostgreSQL",
+                container.GetConnectionString());
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            var accountId = Guid.NewGuid();
+            var credentialId = Guid.NewGuid();
+            var appId = Guid.NewGuid();
+            var tokenId = Guid.NewGuid();
+            var createdAt = DateTimeOffset.UtcNow;
+            var expiresAt = createdAt.AddHours(1);
+            var tokenDigest = RefreshTokenDigest.Compute("session-upgrade-token");
+            var handle = "session-upgrade-handle-0123456789abcdefghijk";
+
+            // ---- Additive upgrade from the immediately preceding migration, symmetric Down ----
+            await using (var context = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var migrator = context.GetService<IMigrator>();
+                await migrator.MigrateAsync(preSessionMigration, cancellationToken);
+
+                context.Accounts.Add(new AccountEntity
+                {
+                    Id = accountId, IsActive = true, CreatedAt = createdAt
+                });
+                context.PasswordCredentials.Add(new PasswordCredentialEntity
+                {
+                    Id = credentialId, AccountId = accountId, Username = "session-upgrade-user",
+                    PasswordHash = "hash", CreatedAt = createdAt
+                });
+                context.AppRegistrations.Add(new AppRegistrationEntity
+                {
+                    Id = appId, AppId = "session-upgrade-app", AppSecretHash = "hash",
+                    AppName = "Session Upgrade", IsActive = true, CreatedAt = createdAt
+                });
+                context.RefreshTokens.Add(new RefreshTokenEntity
+                {
+                    Id = tokenId, AccountId = accountId, TokenValue = tokenDigest,
+                    CreatedAt = createdAt, ExpiresAt = expiresAt, AppId = "session-upgrade-app"
+                });
+                context.AuthorizationRequests.Add(new AuthorizationRequestEntity
+                {
+                    Id = Guid.NewGuid(),
+                    HandleDigest = LoginHandleDigest.Compute(handle),
+                    AppRegistrationId = appId,
+                    RedirectUri = "https://client.example.test/callback",
+                    Scope = "openid",
+                    State = "session-upgrade-state",
+                    Nonce = "session-upgrade-nonce",
+                    CodeChallenge = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+                    CreatedAt = createdAt,
+                    ExpiresAt = createdAt.AddMinutes(IdentityConstants.LoginHandleLifetimeMinutes)
+                });
+                await context.SaveChangesAsync(cancellationToken);
+
+                var accountsBefore = await GetPostgreSqlColumnsAsync(context, "accounts");
+                var credentialsBefore = await GetPostgreSqlColumnsAsync(context, "password_credentials");
+                var appsBefore = await GetPostgreSqlColumnsAsync(context, "app_registrations");
+                var tokensBefore = await GetPostgreSqlColumnsAsync(context, "refresh_tokens");
+                var continuationsBefore = await GetPostgreSqlColumnsAsync(context, "authorization_requests");
+                Assert.False(await PostgreSqlTableExistsAsync(context, "identity_sessions"));
+
+                await migrator.MigrateAsync(cancellationToken: cancellationToken);
+
+                Assert.True(await PostgreSqlTableExistsAsync(context, "identity_sessions"));
+                Assert.Empty(await context.IdentitySessions.AsNoTracking().ToListAsync(cancellationToken));
+                Assert.True(accountsBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "accounts")));
+                Assert.True(credentialsBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "password_credentials")));
+                Assert.True(appsBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "app_registrations")));
+                Assert.True(tokensBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "refresh_tokens")));
+                Assert.True(continuationsBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "authorization_requests")));
+                await AssertSeedUnchangedAsync(context);
+
+                context.ChangeTracker.Clear();
+                await migrator.MigrateAsync(preSessionMigration, cancellationToken);
+                Assert.False(await PostgreSqlTableExistsAsync(context, "identity_sessions"));
+                Assert.True(accountsBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "accounts")));
+                Assert.True(credentialsBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "password_credentials")));
+                Assert.True(appsBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "app_registrations")));
+                Assert.True(tokensBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "refresh_tokens")));
+                Assert.True(continuationsBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "authorization_requests")));
+                await AssertSeedUnchangedAsync(context);
+
+                await migrator.MigrateAsync(cancellationToken: cancellationToken);
+                Assert.True(await PostgreSqlTableExistsAsync(context, "identity_sessions"));
+
+                async Task AssertSeedUnchangedAsync(IdentityDbContext assertionContext)
+                {
+                    var account = await assertionContext.Accounts.AsNoTracking()
+                        .SingleAsync(row => row.Id == accountId, cancellationToken);
+                    Assert.True(account.IsActive);
+                    Assert.Equal(createdAt.UtcTicks / 10, account.CreatedAt.UtcTicks / 10);
+
+                    var credential = await assertionContext.PasswordCredentials.AsNoTracking()
+                        .SingleAsync(row => row.Id == credentialId, cancellationToken);
+                    Assert.Equal("session-upgrade-user", credential.Username);
+                    Assert.Equal("hash", credential.PasswordHash);
+                    Assert.Equal(createdAt.UtcTicks / 10, credential.CreatedAt.UtcTicks / 10);
+
+                    var application = await assertionContext.AppRegistrations.AsNoTracking()
+                        .SingleAsync(row => row.Id == appId, cancellationToken);
+                    Assert.Equal("session-upgrade-app", application.AppId);
+                    Assert.Equal("hash", application.AppSecretHash);
+                    Assert.True(application.IsActive);
+                    Assert.Equal(createdAt.UtcTicks / 10, application.CreatedAt.UtcTicks / 10);
+
+                    var token = await assertionContext.RefreshTokens.AsNoTracking()
+                        .SingleAsync(row => row.Id == tokenId, cancellationToken);
+                    Assert.Equal(tokenDigest, token.TokenValue);
+                    Assert.False(token.IsRevoked);
+                    Assert.Equal(createdAt.UtcTicks / 10, token.CreatedAt.UtcTicks / 10);
+                    Assert.Equal(expiresAt.UtcTicks / 10, token.ExpiresAt.UtcTicks / 10);
+
+                    var continuation = await assertionContext.AuthorizationRequests.AsNoTracking()
+                        .SingleAsync(
+                            row => row.HandleDigest == LoginHandleDigest.Compute(handle),
+                            cancellationToken);
+                    Assert.Equal(appId, continuation.AppRegistrationId);
+                    Assert.Null(continuation.ConsumedAt);
+                    Assert.Equal(createdAt.UtcTicks / 10, continuation.CreatedAt.UtcTicks / 10);
+                }
+            }
+
+            // ---- Exact fresh schema shape ----
+            await using (var context = new IdentityDbContext(options))
+            {
+                var columnDetails = await GetPostgreSqlColumnDetailsAsync(context, "identity_sessions");
+                Assert.Equal(
+                    new Dictionary<string, (string IsNullable, int? MaxLength)>(StringComparer.Ordinal)
+                    {
+                        ["id"] = ("NO", null),
+                        ["account_id"] = ("NO", null),
+                        ["password_credential_id"] = ("NO", null),
+                        ["auth_method"] = ("NO", 50),
+                        ["auth_time"] = ("NO", null),
+                        ["last_seen_at"] = ("NO", null),
+                        ["idle_expires_at"] = ("NO", null),
+                        ["absolute_expires_at"] = ("NO", null),
+                        ["revoked_at"] = ("YES", null),
+                        ["revocation_reason"] = ("YES", 32)
+                    },
+                    columnDetails);
+
+                var indexDefinitions = await GetPostgreSqlIndexDefinitionsAsync(
+                    context, "identity_sessions");
+                Assert.Contains(indexDefinitions, definition =>
+                    definition.Contains("account_id", StringComparison.Ordinal));
+                Assert.Contains(indexDefinitions, definition =>
+                    definition.Contains("password_credential_id", StringComparison.Ordinal));
+
+                var foreignKeys = await GetPostgreSqlForeignKeysAsync(context, "identity_sessions");
+                Assert.Equal(2, foreignKeys.Count);
+                Assert.Contains(foreignKeys, key =>
+                    key.ReferencedTable == "accounts" && key.DeleteAction == 'r');
+                Assert.Contains(foreignKeys, key =>
+                    key.ReferencedTable == "password_credentials" && key.DeleteAction == 'r');
+
+                Assert.Contains(
+                    "CK_identity_sessions_revocation_pair",
+                    await GetPostgreSqlCheckConstraintsAsync(context, "identity_sessions"));
+            }
+
+            // ---- The references and the revocation pairing are enforced by the database ----
+            await using (var context = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var refAccountId = Guid.NewGuid();
+                var refCredentialId = Guid.NewGuid();
+                context.Accounts.Add(new AccountEntity
+                {
+                    Id = refAccountId, IsActive = true, CreatedAt = DateTimeOffset.UtcNow
+                });
+                context.PasswordCredentials.Add(new PasswordCredentialEntity
+                {
+                    Id = refCredentialId, AccountId = refAccountId, Username = "session-contract-user",
+                    PasswordHash = "hash", CreatedAt = DateTimeOffset.UtcNow
+                });
+                await context.SaveChangesAsync(cancellationToken);
+
+                // Half of the revocation pair fails the check constraint.
+                context.IdentitySessions.Add(CreateIdentitySession(refAccountId, refCredentialId, session =>
+                    session.RevokedAt = DateTimeOffset.UtcNow));
+                await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync(cancellationToken));
+                context.ChangeTracker.Clear();
+
+                context.IdentitySessions.Add(CreateIdentitySession(refAccountId, refCredentialId, session =>
+                    session.RevocationReason = "logout"));
+                await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync(cancellationToken));
+                context.ChangeTracker.Clear();
+
+                // Orphan references fail in both directions.
+                context.IdentitySessions.Add(CreateIdentitySession(Guid.NewGuid(), refCredentialId));
+                await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync(cancellationToken));
+                context.ChangeTracker.Clear();
+
+                context.IdentitySessions.Add(CreateIdentitySession(refAccountId, Guid.NewGuid()));
+                await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync(cancellationToken));
+                context.ChangeTracker.Clear();
+
+                // A valid session; deleting either referenced row now fails without cascading.
+                context.IdentitySessions.Add(CreateIdentitySession(refAccountId, refCredentialId));
+                await context.SaveChangesAsync(cancellationToken);
+
+                context.ChangeTracker.Clear();
+                var account = await context.Accounts
+                    .SingleAsync(row => row.Id == refAccountId, cancellationToken);
+                context.Accounts.Remove(account);
+                await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync(cancellationToken));
+                context.ChangeTracker.Clear();
+
+                var credential = await context.PasswordCredentials
+                    .SingleAsync(row => row.Id == refCredentialId, cancellationToken);
+                context.PasswordCredentials.Remove(credential);
+                await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync(cancellationToken));
+                context.ChangeTracker.Clear();
+
+                Assert.Single(await context.IdentitySessions
+                    .AsNoTracking()
+                    .ToListAsync(cancellationToken));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The real two-instance concurrency matrix of <c>PS-04</c>: exactly one concurrent activity
+    /// slide wins inside one minute window, exactly one concurrent revocation wins and its facts
+    /// persist, a held row lock blocks a second locker and an activity update until its
+    /// transaction ends, and a capped slide can never invert the idle &lt;= absolute invariant.
+    /// </summary>
+    [Fact]
+    public async Task PostgreSqlIdentitySessions_ConcurrentActivityRevocationAndLocking()
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL identity session concurrency matrix.");
+
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var databaseOptions = CreateDatabaseOptions(
+                "PostgreSQL",
+                container.GetConnectionString());
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            await using (var migration = new IdentityDbContext(options))
+            {
+                await migration.Database.MigrateAsync(TestContext.Current.CancellationToken);
+            }
+
+            var (accountId, credentialId) = await SeedSessionAccountAsync(options);
+            var cancellationToken = TestContext.Current.CancellationToken;
+            var authTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+
+            // (a) Two activity updates race on one stale session: exactly one Touched, one
+            // NotStale, and the stored last_seen_at is the winner's instant.
+            var staleId = await CreateSessionAsync(options, accountId, credentialId, authTime);
+            var firstNow = DateTimeOffset.UtcNow;
+            var secondNow = firstNow.AddMilliseconds(50);
+            var touchResults = await Task.WhenAll(
+                TouchSessionAsync(options, staleId, firstNow),
+                TouchSessionAsync(options, staleId, secondNow));
+            Assert.Equal(
+                1,
+                touchResults.Count(result => result == IdentitySessionActivityResult.Touched));
+            Assert.Equal(
+                1,
+                touchResults.Count(result => result == IdentitySessionActivityResult.NotStale));
+            var touchedRow = await GetSessionRowAsync(options, staleId);
+            var winningTouch = touchResults[0] == IdentitySessionActivityResult.Touched
+                ? firstNow
+                : secondNow;
+            Assert.Equal(
+                winningTouch.UtcTicks / 10,
+                touchedRow.LastSeenAt.UtcTicks / 10);
+
+            // (b) Two revocations with different reasons race: exactly one Revoked, and the
+            // stored time and reason are the winner's.
+            var revokeId = await CreateSessionAsync(options, accountId, credentialId, authTime);
+            var revokeResults = await Task.WhenAll(
+                RevokeSessionAsync(
+                    options, revokeId, IdentitySessionRevocationReason.Logout, firstNow),
+                RevokeSessionAsync(
+                    options, revokeId, IdentitySessionRevocationReason.CodeReplay, secondNow));
+            Assert.Equal(
+                1,
+                revokeResults.Count(result => result == IdentitySessionRevocationResult.Revoked));
+            Assert.Equal(
+                1,
+                revokeResults.Count(result => result == IdentitySessionRevocationResult.AlreadyRevoked));
+            var revokedRow = await GetSessionRowAsync(options, revokeId);
+            var winningRevocation = revokeResults[0] == IdentitySessionRevocationResult.Revoked
+                ? (firstNow, "logout")
+                : (secondNow, "code_replay");
+            Assert.Equal(
+                winningRevocation.Item1.UtcTicks / 10,
+                revokedRow.RevokedAt!.Value.UtcTicks / 10);
+            Assert.Equal(winningRevocation.Item2, revokedRow.RevocationReason);
+
+            // (c) Transaction A locks the row and revokes inside its transaction without
+            // committing: B's activity update and B's lock both block until A ends.
+            var lockedId = await CreateSessionAsync(options, accountId, credentialId, authTime);
+            var rowBeforeLock = await GetSessionRowAsync(options, lockedId);
+            var revokeInstant = DateTimeOffset.UtcNow;
+            var holderReady = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseHolder = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var holderTask = Task.Run(async () =>
+            {
+                await using var holderContext = new IdentityDbContext(options);
+                var holderStore = new IdentitySessionStore(
+                    new IdentitySessionRepository(holderContext),
+                    new EfCoreUnitOfWork(holderContext));
+                var strategy = holderContext.Database.CreateExecutionStrategy();
+                await strategy.ExecuteAsync(async operationToken =>
+                {
+                    await using var transaction = await holderContext.Database
+                        .BeginTransactionAsync(operationToken);
+                    var locked = await holderStore.LockAsync(lockedId, operationToken);
+                    Assert.NotNull(locked);
+                    Assert.Equal(
+                        IdentitySessionRevocationResult.Revoked,
+                        await holderStore.RevokeAsync(
+                            lockedId,
+                            IdentitySessionRevocationReason.Logout,
+                            revokeInstant,
+                            operationToken));
+                    holderReady.SetResult();
+                    await releaseHolder.Task.WaitAsync(TimeSpan.FromSeconds(60), operationToken);
+                    await transaction.CommitAsync(operationToken);
+                }, cancellationToken);
+            }, CancellationToken.None);
+
+            await holderReady.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+
+            var blockedTouch = TouchSessionAsync(
+                options, lockedId, DateTimeOffset.UtcNow.AddMilliseconds(1));
+            var blockedLock = LockSessionInTransactionAsync(options, lockedId);
+            await Assert.ThrowsAsync<TimeoutException>(() =>
+                blockedTouch.WaitAsync(TimeSpan.FromMilliseconds(500)));
+            await Assert.ThrowsAsync<TimeoutException>(() =>
+                blockedLock.WaitAsync(TimeSpan.FromMilliseconds(500)));
+
+            releaseHolder.SetResult();
+            await holderTask.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+
+            // After A committed, B's update sees the revocation without writing, and B's lock
+            // returns the revoked row.
+            Assert.Equal(
+                IdentitySessionActivityResult.Unavailable,
+                await blockedTouch.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken));
+            var afterBlockedTouch = await GetSessionRowAsync(options, lockedId);
+            Assert.Equal(
+                rowBeforeLock.IdleExpiresAt.UtcTicks / 10,
+                afterBlockedTouch.IdleExpiresAt.UtcTicks / 10);
+            Assert.Equal(
+                revokeInstant.UtcTicks / 10,
+                afterBlockedTouch.RevokedAt!.Value.UtcTicks / 10);
+            var lockResult = await blockedLock.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+            Assert.NotNull(lockResult);
+            Assert.Equal(
+                revokeInstant.UtcTicks / 10,
+                lockResult!.RevokedAt!.Value.UtcTicks / 10);
+
+            // (d) Two slides race near the absolute deadline: the cap holds whichever wins.
+            var nearAbsoluteId = await InsertSessionAsync(
+                options, accountId, credentialId, session =>
+                {
+                    var baseline = DateTimeOffset.UtcNow;
+                    session.AuthTime = baseline.AddMinutes(-2);
+                    session.LastSeenAt = baseline.AddMinutes(-2);
+                    session.IdleExpiresAt = baseline.AddMinutes(5);
+                    session.AbsoluteExpiresAt = baseline.AddMinutes(10);
+                });
+            var nearFirst = DateTimeOffset.UtcNow;
+            var nearSecond = nearFirst.AddMilliseconds(50);
+            await Task.WhenAll(
+                TouchSessionAsync(options, nearAbsoluteId, nearFirst),
+                TouchSessionAsync(options, nearAbsoluteId, nearSecond));
+            var cappedRow = await GetSessionRowAsync(options, nearAbsoluteId);
+            Assert.True(cappedRow.IdleExpiresAt <= cappedRow.AbsoluteExpiresAt);
+            Assert.Equal(
+                cappedRow.AbsoluteExpiresAt.UtcTicks / 10,
+                cappedRow.IdleExpiresAt.UtcTicks / 10);
+        }
+    }
+
+    /// <summary>
+    /// One injected PostgreSQL serialization failure inside the revocation unit is replayed as a
+    /// whole by the retrying execution strategy: the outcome stays a single <c>Revoked</c> with
+    /// exactly one stored fact.
+    /// </summary>
+    [Fact]
+    public async Task PostgreSqlIdentitySessions_TransientSerializationFailureReplaysTheRevocationOnce()
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL identity session replay matrix.");
+
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var databaseOptions = CreateDatabaseOptions(
+                "PostgreSQL",
+                container.GetConnectionString());
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            await using (var migration = new IdentityDbContext(options))
+            {
+                await migration.Database.MigrateAsync(TestContext.Current.CancellationToken);
+            }
+
+            var (accountId, credentialId) = await SeedSessionAccountAsync(options);
+            var sessionId = await CreateSessionAsync(
+                options, accountId, credentialId, DateTimeOffset.UtcNow.AddMinutes(-5));
+
+            var interceptor = new TransientSessionUpdateFailureInterceptor();
+            var interceptedBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            interceptedBuilder.UseIdentityDatabase(databaseOptions);
+            interceptedBuilder.AddInterceptors(interceptor);
+            await using var context = new IdentityDbContext(interceptedBuilder.Options);
+            var store = new IdentitySessionStore(
+                new IdentitySessionRepository(context),
+                new EfCoreUnitOfWork(context));
+
+            var revokeInstant = DateTimeOffset.UtcNow;
+            Assert.Equal(
+                IdentitySessionRevocationResult.Revoked,
+                await store.RevokeAsync(
+                    sessionId,
+                    IdentitySessionRevocationReason.Logout,
+                    revokeInstant,
+                    TestContext.Current.CancellationToken));
+
+            Assert.True(interceptor.ThrewOnce);
+            var row = await GetSessionRowAsync(options, sessionId);
+            Assert.Equal(revokeInstant.UtcTicks / 10, row.RevokedAt!.Value.UtcTicks / 10);
+            Assert.Equal("logout", row.RevocationReason);
+
+            Assert.Equal(
+                IdentitySessionRevocationResult.AlreadyRevoked,
+                await store.RevokeAsync(
+                    sessionId,
+                    IdentitySessionRevocationReason.CodeReplay,
+                    DateTimeOffset.UtcNow,
+                    TestContext.Current.CancellationToken));
+        }
+    }
+
+    private static IdentitySessionEntity CreateIdentitySession(
+        Guid accountId,
+        Guid credentialId,
+        Action<IdentitySessionEntity>? mutate = null)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var session = new IdentitySessionEntity
+        {
+            Id = Guid.NewGuid(),
+            AccountId = accountId,
+            PasswordCredentialId = credentialId,
+            AuthMethod = IdentityConstants.AuthMethodPassword,
+            AuthTime = now,
+            LastSeenAt = now,
+            IdleExpiresAt = now.AddMinutes(IdentityConstants.IdentitySessionIdleTimeoutMinutes),
+            AbsoluteExpiresAt = now.AddSeconds(IdentityConstants.MaxIdentitySessionAgeSeconds)
+        };
+        mutate?.Invoke(session);
+        return session;
+    }
+
+    private static async Task<(Guid AccountId, Guid CredentialId)> SeedSessionAccountAsync(
+        DbContextOptions<IdentityDbContext> options)
+    {
+        await using var context = new IdentityDbContext(options);
+        var accountId = Guid.NewGuid();
+        var credentialId = Guid.NewGuid();
+        context.Accounts.Add(new AccountEntity
+        {
+            Id = accountId, IsActive = true, CreatedAt = DateTimeOffset.UtcNow
+        });
+        context.PasswordCredentials.Add(new PasswordCredentialEntity
+        {
+            Id = credentialId, AccountId = accountId, Username = "session-contract-user",
+            PasswordHash = "hash", CreatedAt = DateTimeOffset.UtcNow
+        });
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return (accountId, credentialId);
+    }
+
+    private static async Task<Guid> CreateSessionAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid accountId,
+        Guid credentialId,
+        DateTimeOffset authTime)
+    {
+        await using var context = new IdentityDbContext(options);
+        var store = new IdentitySessionStore(
+            new IdentitySessionRepository(context),
+            new EfCoreUnitOfWork(context));
+        var session = await store.CreateAsync(
+            accountId, credentialId, authTime, TestContext.Current.CancellationToken);
+        return session.Id;
+    }
+
+    private static async Task<Guid> InsertSessionAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid accountId,
+        Guid credentialId,
+        Action<IdentitySessionEntity>? mutate = null)
+    {
+        var session = CreateIdentitySession(accountId, credentialId, mutate);
+        await using var context = new IdentityDbContext(options);
+        context.IdentitySessions.Add(session);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return session.Id;
+    }
+
+    private static async Task<IdentitySessionEntity> GetSessionRowAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid sessionId)
+    {
+        await using var context = new IdentityDbContext(options);
+        return await context.IdentitySessions.AsNoTracking()
+            .SingleAsync(row => row.Id == sessionId, TestContext.Current.CancellationToken);
+    }
+
+    private static async Task<IdentitySessionActivityResult> TouchSessionAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid sessionId,
+        DateTimeOffset now)
+    {
+        await using var context = new IdentityDbContext(options);
+        var store = new IdentitySessionStore(
+            new IdentitySessionRepository(context),
+            new EfCoreUnitOfWork(context));
+        return await store.TouchActivityAsync(sessionId, now, TestContext.Current.CancellationToken);
+    }
+
+    private static async Task<IdentitySessionRevocationResult> RevokeSessionAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid sessionId,
+        IdentitySessionRevocationReason reason,
+        DateTimeOffset now)
+    {
+        await using var context = new IdentityDbContext(options);
+        var store = new IdentitySessionStore(
+            new IdentitySessionRepository(context),
+            new EfCoreUnitOfWork(context));
+        return await store.RevokeAsync(sessionId, reason, now, TestContext.Current.CancellationToken);
+    }
+
+    private static async Task<IdentitySessionEntity?> LockSessionInTransactionAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid sessionId)
+    {
+        await using var context = new IdentityDbContext(options);
+        var store = new IdentitySessionStore(
+            new IdentitySessionRepository(context),
+            new EfCoreUnitOfWork(context));
+        var strategy = context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async operationToken =>
+        {
+            await using var transaction = await context.Database.BeginTransactionAsync(operationToken);
+            var locked = await store.LockAsync(sessionId, operationToken);
+            await transaction.CommitAsync(operationToken);
+            return locked;
+        }, TestContext.Current.CancellationToken);
+    }
+
+    private static async Task<HashSet<string>> GetPostgreSqlCheckConstraintsAsync(
+        IdentityDbContext context,
+        string tableName)
+    {
+        await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT con.conname FROM pg_constraint con WHERE con.conrelid = to_regclass('public.' || @name) AND con.contype = 'c'";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "name";
+        parameter.Value = tableName;
+        command.Parameters.Add(parameter);
+        await using var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// Throws one PostgreSQL serialization failure (SQLSTATE 40001, transient under the default
+    /// <c>EnableRetryOnFailure</c> configuration) on the first identity-session UPDATE so the
+    /// retrying execution strategy replays the whole revocation unit.
+    /// </summary>
+    private sealed class TransientSessionUpdateFailureInterceptor : DbCommandInterceptor
+    {
+        private bool _thrown;
+
+        public bool ThrewOnce => _thrown;
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            System.Data.Common.DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfArmed(command);
+            return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        public override ValueTask<InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfArmed(command);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        private void ThrowIfArmed(System.Data.Common.DbCommand command)
+        {
+            // Npgsql renders runtime DML with unquoted lowercase identifiers, so the match is on
+            // the statement shape rather than on a quoted fragment.
+            if (_thrown
+                || !command.CommandText.StartsWith("UPDATE", StringComparison.OrdinalIgnoreCase)
+                || !command.CommandText.Contains(
+                    "identity_sessions", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _thrown = true;
+            throw new Npgsql.PostgresException(
+                "synthetic serialization failure",
+                "ERROR",
+                "ERROR",
+                "40001");
         }
     }
 
