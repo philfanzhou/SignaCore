@@ -184,6 +184,257 @@ public sealed class SqliteDatabaseContractTests
     }
 
     [Fact]
+    public async Task AuthorizationRequestsMigration_FreshDatabaseMatchesContinuationContract()
+    {
+        var databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"signacore-continuation-fresh-{Guid.NewGuid():N}.db");
+        var options = CreateSqliteOptions(databasePath);
+
+        try
+        {
+            await using var context = new IdentityDbContext(options);
+            await context.Database.MigrateAsync(TestContext.Current.CancellationToken);
+
+            // PS-03 column set and nullability, exactly.
+            var columns = await ReadPragmaAsync(context, "PRAGMA table_info(authorization_requests)");
+            Assert.Equal(
+                new[]
+                {
+                    ("id", true),
+                    ("handle_digest", true),
+                    ("app_registration_id", true),
+                    ("redirect_uri", true),
+                    ("scope", true),
+                    ("state", true),
+                    ("nonce", true),
+                    ("code_challenge", true),
+                    ("created_at", true),
+                    ("expires_at", true),
+                    ("consumed_at", false)
+                },
+                columns.Select(row => (row[1], row[3] == "1")).ToArray());
+
+            // The digest carries a single-column unique index.
+            var indexNames = await ReadPragmaAsync(context, "PRAGMA index_list(authorization_requests)");
+            var uniqueDigestIndexes = new List<string>();
+            foreach (var index in indexNames.Where(row => row[2] == "1"))
+            {
+                var indexColumns = await ReadPragmaAsync(context, $"PRAGMA index_info(\"{index[1]}\")");
+                if (indexColumns.Count == 1 && indexColumns[0][2] == "handle_digest")
+                {
+                    uniqueDigestIndexes.Add(index[1]);
+                }
+            }
+
+            Assert.Single(uniqueDigestIndexes);
+
+            // PS-23: one non-null restrictive reference to app_registrations; nothing cascades.
+            var foreignKeys = await ReadPragmaAsync(context, "PRAGMA foreign_key_list(authorization_requests)");
+            var reference = Assert.Single(foreignKeys);
+            Assert.Equal("app_registrations", reference[2]);
+            Assert.Equal("app_registration_id", reference[3]);
+            Assert.Equal("id", reference[4]);
+            Assert.Equal("RESTRICT", reference[6], ignoreCase: true);
+
+            // The restrictive reference is enforced in both directions: an orphan row fails, and
+            // deleting an application with a continuation row fails without cascading.
+            var appId = Guid.NewGuid();
+            context.AppRegistrations.Add(new AppRegistrationEntity
+            {
+                Id = appId,
+                AppId = "continuation-contract-app",
+                AppSecretHash = "hash",
+                AppName = "Continuation Contract",
+                IsActive = true,
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+            context.AuthorizationRequests.Add(
+                CreateAuthorizationRequest(Guid.NewGuid(), "orphan-handle-0123456789abcdefghijklmnopqrstu"));
+            await Assert.ThrowsAsync<DbUpdateException>(() =>
+                context.SaveChangesAsync(TestContext.Current.CancellationToken));
+            context.ChangeTracker.Clear();
+
+            context.AuthorizationRequests.Add(
+                CreateAuthorizationRequest(appId, "live-handle-0123456789abcdefghijklmnopqrstu"));
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+            // The database enforces the restriction: clear the tracker so the failure is SQLite's
+            // RESTRICT enforcement rather than EF's client-side cascade check.
+            context.ChangeTracker.Clear();
+            var application = await context.AppRegistrations
+                .SingleAsync(app => app.Id == appId, TestContext.Current.CancellationToken);
+            context.AppRegistrations.Remove(application);
+            await Assert.ThrowsAsync<DbUpdateException>(() =>
+                context.SaveChangesAsync(TestContext.Current.CancellationToken));
+            context.ChangeTracker.Clear();
+
+            Assert.Single(await context.AuthorizationRequests
+                .AsNoTracking()
+                .ToListAsync(TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (File.Exists(databasePath)) File.Delete(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task AuthorizationRequestsMigration_UpgradeFromDropLegacyDataProtectionKeysIsAdditiveAndDownIsSymmetric()
+    {
+        const string preContinuationMigration = "20260914171840_DropLegacyDataProtectionKeys";
+        var databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"signacore-continuation-upgrade-{Guid.NewGuid():N}.db");
+        var options = CreateSqliteOptions(databasePath);
+        var accountId = Guid.NewGuid();
+        var appId = Guid.NewGuid();
+        var tokenId = Guid.NewGuid();
+        var createdAt = DateTimeOffset.UtcNow;
+        var expiresAt = createdAt.AddHours(1);
+        var tokenDigest = RefreshTokenDigest.Compute("continuation-upgrade-token");
+
+        try
+        {
+            await using var context = new IdentityDbContext(options);
+            var migrator = context.Database.GetService<IMigrator>();
+            await migrator.MigrateAsync(preContinuationMigration, TestContext.Current.CancellationToken);
+
+            context.Accounts.Add(new AccountEntity
+            {
+                Id = accountId,
+                IsActive = true,
+                CreatedAt = createdAt
+            });
+            context.AppRegistrations.Add(new AppRegistrationEntity
+            {
+                Id = appId,
+                AppId = "continuation-upgrade-app",
+                AppSecretHash = "hash",
+                AppName = "Continuation Upgrade",
+                IsActive = true,
+                CreatedAt = createdAt
+            });
+            context.RefreshTokens.Add(new RefreshTokenEntity
+            {
+                Id = tokenId,
+                AccountId = accountId,
+                TokenValue = tokenDigest,
+                CreatedAt = createdAt,
+                ExpiresAt = expiresAt,
+                AppId = "continuation-upgrade-app"
+            });
+            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+            var refreshColumnsBefore = await GetSqliteColumnsAsync(context, "refresh_tokens");
+            var appColumnsBefore = await GetSqliteColumnsAsync(context, "app_registrations");
+            Assert.False(await SqliteTableExistsAsync(context, "authorization_requests"));
+
+            await migrator.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+            // Purely additive: the new table exists and is empty, existing tables keep their shape.
+            Assert.True(await SqliteTableExistsAsync(context, "authorization_requests"));
+            Assert.Empty(await context.AuthorizationRequests
+                .AsNoTracking()
+                .ToListAsync(TestContext.Current.CancellationToken));
+            Assert.True(refreshColumnsBefore.SetEquals(await GetSqliteColumnsAsync(context, "refresh_tokens")));
+            Assert.True(appColumnsBefore.SetEquals(await GetSqliteColumnsAsync(context, "app_registrations")));
+
+            await AssertSeedUnchangedAsync(context, accountId, appId, tokenId, createdAt, expiresAt, tokenDigest);
+
+            // Down removes exactly the new schema and leaves every existing row untouched.
+            context.ChangeTracker.Clear();
+            await migrator.MigrateAsync(preContinuationMigration, TestContext.Current.CancellationToken);
+            Assert.False(await SqliteTableExistsAsync(context, "authorization_requests"));
+            Assert.True(refreshColumnsBefore.SetEquals(await GetSqliteColumnsAsync(context, "refresh_tokens")));
+            Assert.True(appColumnsBefore.SetEquals(await GetSqliteColumnsAsync(context, "app_registrations")));
+            await AssertSeedUnchangedAsync(context, accountId, appId, tokenId, createdAt, expiresAt, tokenDigest);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (File.Exists(databasePath)) File.Delete(databasePath);
+        }
+    }
+
+    private static async Task AssertSeedUnchangedAsync(
+        IdentityDbContext context,
+        Guid accountId,
+        Guid appId,
+        Guid tokenId,
+        DateTimeOffset createdAt,
+        DateTimeOffset expiresAt,
+        string tokenDigest)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var account = await context.Accounts.AsNoTracking()
+            .SingleAsync(item => item.Id == accountId, cancellationToken);
+        Assert.True(account.IsActive);
+        Assert.Equal(createdAt.UtcTicks / 10, account.CreatedAt.UtcTicks / 10);
+
+        var application = await context.AppRegistrations.AsNoTracking()
+            .SingleAsync(item => item.Id == appId, cancellationToken);
+        Assert.Equal("continuation-upgrade-app", application.AppId);
+        Assert.Equal("CONTINUATION-UPGRADE-APP", application.AppIdNormalized);
+        Assert.Equal("hash", application.AppSecretHash);
+        Assert.True(application.IsActive);
+        Assert.Equal(createdAt.UtcTicks / 10, application.CreatedAt.UtcTicks / 10);
+
+        var token = await context.RefreshTokens.AsNoTracking()
+            .SingleAsync(item => item.Id == tokenId, cancellationToken);
+        Assert.Equal(tokenDigest, token.TokenValue);
+        Assert.False(token.IsRevoked);
+        Assert.Equal(createdAt.UtcTicks / 10, token.CreatedAt.UtcTicks / 10);
+        Assert.Equal(expiresAt.UtcTicks / 10, token.ExpiresAt.UtcTicks / 10);
+        Assert.Null(token.SourceAppId);
+    }
+
+    private static AuthorizationRequestEntity CreateAuthorizationRequest(
+        Guid appRegistrationId,
+        string plaintextHandle) => new()
+    {
+        Id = Guid.NewGuid(),
+        HandleDigest = LoginHandleDigest.Compute(plaintextHandle),
+        AppRegistrationId = appRegistrationId,
+        RedirectUri = "https://client.example.com/callback",
+        Scope = "openid",
+        State = "sqlite-contract-state-value",
+        Nonce = "sqlite-contract-nonce-value",
+        CodeChallenge = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+        CreatedAt = DateTimeOffset.UtcNow,
+        ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(
+            IdentityConstants.LoginHandleLifetimeMinutes)
+    };
+
+    private static async Task<List<string[]>> ReadPragmaAsync(
+        IdentityDbContext context,
+        string pragma)
+    {
+        await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = pragma;
+        await using var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken);
+        var rows = new List<string[]>();
+        while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+        {
+            var row = new string[reader.FieldCount];
+            for (var ordinal = 0; ordinal < reader.FieldCount; ordinal++)
+            {
+                row[ordinal] = reader.IsDBNull(ordinal)
+                    ? string.Empty
+                    : Convert.ToString(reader.GetValue(ordinal), System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+            }
+
+            rows.Add(row);
+        }
+
+        return rows;
+    }
+
+    [Fact]
     public async Task SmsMigration_DropsLegacyEphemeralOtpRowsBeforeAddingAppForeignKey()
     {
         var databasePath = Path.Combine(Path.GetTempPath(), $"signacore-sms-migration-{Guid.NewGuid():N}.db");

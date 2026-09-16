@@ -32,6 +32,7 @@ public class IdentityDbContext : DbContext, IServiceDbContext
     public DbSet<AppSmsAccessEntity> AppSmsAccesses => Set<AppSmsAccessEntity>();
     public DbSet<AppWechatAccessEntity> AppWechatAccesses => Set<AppWechatAccessEntity>();
     public DbSet<AppExchangeTrustEntity> AppExchangeTrusts => Set<AppExchangeTrustEntity>();
+    public DbSet<AuthorizationRequestEntity> AuthorizationRequests => Set<AuthorizationRequestEntity>();
     public DbSet<SystemSettingEntity> SystemSettings => Set<SystemSettingEntity>();
 
     // ServiceMantle shared installation state (service_installations): the runtime authority for
@@ -271,6 +272,50 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             // edges pointing at it from both directions.
             entity.HasOne<AppRegistrationEntity>().WithMany().HasForeignKey(e => e.AppRegistrationId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<AppRegistrationEntity>().WithMany().HasForeignKey(e => e.SourceAppRegistrationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AuthorizationRequestEntity>(entity =>
+        {
+            entity.ToTable("authorization_requests");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.HandleDigest)
+                .HasColumnName("handle_digest")
+                .HasMaxLength(LoginHandleDigest.EncodedLength)
+                .IsRequired();
+            entity.Property(e => e.AppRegistrationId).HasColumnName("app_registration_id");
+            entity.Property(e => e.RedirectUri)
+                .HasColumnName("redirect_uri")
+                .HasMaxLength(IdentityConstants.MaxOidcCanonicalRedirectUriLength)
+                .IsRequired();
+            entity.Property(e => e.Scope)
+                .HasColumnName("scope")
+                .HasMaxLength(IdentityConstants.MaxOidcAllowedScopesLength)
+                .IsRequired();
+            entity.Property(e => e.State)
+                .HasColumnName("state")
+                .HasMaxLength(IdentityConstants.MaxOidcOpaqueValueLength)
+                .IsRequired();
+            entity.Property(e => e.Nonce)
+                .HasColumnName("nonce")
+                .HasMaxLength(IdentityConstants.MaxOidcOpaqueValueLength)
+                .IsRequired();
+            entity.Property(e => e.CodeChallenge)
+                .HasColumnName("code_challenge")
+                .HasMaxLength(IdentityConstants.MaxOidcCodeChallengeLength)
+                .IsRequired();
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            ConfigureInstant(entity.Property(e => e.ExpiresAt).HasColumnName("expires_at"));
+            ConfigureInstant(entity.Property(e => e.ConsumedAt).HasColumnName("consumed_at"));
+            entity.HasIndex(e => e.HandleDigest).IsUnique();
+            // PS-23: the client reference is restrictive and non-nullable, created together with this
+            // table, so a stored continuation can never name a client the schema cannot resolve.
+            // Deleting an application with live continuation rows fails; cleanup deletes rows by
+            // retention and never nulls this reference.
+            entity.HasOne<AppRegistrationEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.AppRegistrationId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<SecurityKeyEntity>(entity =>

@@ -82,6 +82,35 @@ public sealed class RepositoryCancellationTests
     }
 
     [Fact]
+    public async Task AuthorizationRequestRepository_PreCanceledAdd_DoesNotStageRequest()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var repository = new AuthorizationRequestRepository(database.Context);
+        var request = new AuthorizationRequestEntity
+        {
+            Id = Guid.NewGuid(),
+            HandleDigest = LoginHandleDigest.Compute(
+                "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+            AppRegistrationId = Guid.NewGuid(),
+            RedirectUri = "https://client.example.com/callback",
+            Scope = "openid",
+            State = "cancellation-test-state-value",
+            Nonce = "cancellation-test-nonce-value",
+            CodeChallenge = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+            CreatedAt = DateTimeOffset.UtcNow,
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(
+                IdentityConstants.LoginHandleLifetimeMinutes)
+        };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            async () => await repository.AddAsync(request, CanceledToken));
+
+        Assert.Empty(database.Context.AuthorizationRequests.Local);
+        Assert.Empty(await database.Context.AuthorizationRequests.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task LoginAttemptRepository_PreCanceledFailure_DoesNotCreateAttempt()
     {
         await using var database = await TestDatabase.CreateAsync();

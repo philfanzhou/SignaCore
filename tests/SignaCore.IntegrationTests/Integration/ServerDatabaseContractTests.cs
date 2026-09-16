@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
+using SignaCore.Domain.Models;
+using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using Testcontainers.PostgreSql;
@@ -148,6 +150,258 @@ public sealed class ServerDatabaseContractTests
             Assert.Empty(await context.AppRedirectUris.AsNoTracking().ToListAsync(
                 TestContext.Current.CancellationToken));
         }
+    }
+
+    /// <summary>
+    /// <c>PS-03</c>/<c>PS-23</c> on the real PostgreSQL matrix: the exact fresh schema shape, the
+    /// additive upgrade from <c>DropLegacyDataProtectionKeys</c> with a symmetric <c>Down</c>, the
+    /// restrictive non-cascading client reference, and the atomic one-time consumption across two
+    /// independent connections (<c>EV-01</c> primitive, <c>AC-02</c> storage half).
+    /// </summary>
+    [Fact]
+    public async Task PostgreSqlAuthorizationRequests_SchemaUpgradeDownAndConcurrentConsumption()
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL continuation contract.");
+
+        const string preContinuationMigration = "20260914171835_DropLegacyDataProtectionKeys";
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var databaseOptions = CreateDatabaseOptions(
+                "PostgreSQL",
+                container.GetConnectionString());
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            var accountId = Guid.NewGuid();
+            var appId = Guid.NewGuid();
+            var tokenId = Guid.NewGuid();
+            var createdAt = DateTimeOffset.UtcNow;
+            var expiresAt = createdAt.AddHours(1);
+            var tokenDigest = RefreshTokenDigest.Compute("continuation-upgrade-token");
+
+            // ---- Additive upgrade from the immediately preceding migration, symmetric Down ----
+            await using (var context = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var migrator = context.GetService<IMigrator>();
+                await migrator.MigrateAsync(preContinuationMigration, cancellationToken);
+
+                context.Accounts.Add(new AccountEntity
+                {
+                    Id = accountId,
+                    IsActive = true,
+                    CreatedAt = createdAt
+                });
+                context.AppRegistrations.Add(new AppRegistrationEntity
+                {
+                    Id = appId,
+                    AppId = "continuation-upgrade-app",
+                    AppSecretHash = "hash",
+                    AppName = "Continuation Upgrade",
+                    IsActive = true,
+                    CreatedAt = createdAt
+                });
+                context.RefreshTokens.Add(new RefreshTokenEntity
+                {
+                    Id = tokenId,
+                    AccountId = accountId,
+                    TokenValue = tokenDigest,
+                    CreatedAt = createdAt,
+                    ExpiresAt = expiresAt,
+                    AppId = "continuation-upgrade-app"
+                });
+                await context.SaveChangesAsync(cancellationToken);
+
+                var refreshColumnsBefore = await GetPostgreSqlColumnsAsync(context, "refresh_tokens");
+                var appColumnsBefore = await GetPostgreSqlColumnsAsync(context, "app_registrations");
+                Assert.False(await PostgreSqlTableExistsAsync(context, "authorization_requests"));
+
+                await migrator.MigrateAsync(cancellationToken: cancellationToken);
+
+                Assert.True(await PostgreSqlTableExistsAsync(context, "authorization_requests"));
+                Assert.Empty(await context.AuthorizationRequests
+                    .AsNoTracking()
+                    .ToListAsync(cancellationToken));
+                Assert.True(refreshColumnsBefore.SetEquals(
+                    await GetPostgreSqlColumnsAsync(context, "refresh_tokens")));
+                Assert.True(appColumnsBefore.SetEquals(
+                    await GetPostgreSqlColumnsAsync(context, "app_registrations")));
+                await AssertSeedUnchangedAsync(
+                    context, accountId, appId, tokenId, createdAt, expiresAt, tokenDigest);
+
+                context.ChangeTracker.Clear();
+                await migrator.MigrateAsync(preContinuationMigration, cancellationToken);
+                Assert.False(await PostgreSqlTableExistsAsync(context, "authorization_requests"));
+                Assert.True(refreshColumnsBefore.SetEquals(
+                    await GetPostgreSqlColumnsAsync(context, "refresh_tokens")));
+                Assert.True(appColumnsBefore.SetEquals(
+                    await GetPostgreSqlColumnsAsync(context, "app_registrations")));
+                await AssertSeedUnchangedAsync(
+                    context, accountId, appId, tokenId, createdAt, expiresAt, tokenDigest);
+
+                await migrator.MigrateAsync(cancellationToken: cancellationToken);
+            }
+
+            // ---- Exact fresh schema shape ----
+            await using (var context = new IdentityDbContext(options))
+            {
+                var columnDetails = await GetPostgreSqlColumnDetailsAsync(
+                    context, "authorization_requests");
+                Assert.Equal(
+                    new Dictionary<string, (string IsNullable, int? MaxLength)>(StringComparer.Ordinal)
+                    {
+                        ["id"] = ("NO", null),
+                        ["handle_digest"] = ("NO", 71),
+                        ["app_registration_id"] = ("NO", null),
+                        ["redirect_uri"] = ("NO", 501),
+                        ["scope"] = ("NO", 32),
+                        ["state"] = ("NO", 128),
+                        ["nonce"] = ("NO", 128),
+                        ["code_challenge"] = ("NO", 43),
+                        ["created_at"] = ("NO", null),
+                        ["expires_at"] = ("NO", null),
+                        ["consumed_at"] = ("YES", null)
+                    },
+                    columnDetails);
+
+                var indexDefinitions = await GetPostgreSqlIndexDefinitionsAsync(
+                    context, "authorization_requests");
+                Assert.Contains(indexDefinitions, definition =>
+                    definition.Contains("UNIQUE", StringComparison.Ordinal)
+                    && definition.Contains("handle_digest", StringComparison.Ordinal));
+
+                var foreignKeys = await GetPostgreSqlForeignKeysAsync(
+                    context, "authorization_requests");
+                var reference = Assert.Single(foreignKeys);
+                Assert.Equal("app_registrations", reference.ReferencedTable);
+                // 'r' = RESTRICT in pg_constraint.confdeltype; never 'c' (cascade).
+                Assert.Equal('r', reference.DeleteAction);
+
+                // The restrictive reference is enforced: an orphan row fails.
+                context.AuthorizationRequests.Add(new AuthorizationRequestEntity
+                {
+                    Id = Guid.NewGuid(),
+                    HandleDigest = LoginHandleDigest.Compute(
+                        "orphan-handle-0123456789abcdefghijklmnopqrstu"),
+                    AppRegistrationId = Guid.NewGuid(),
+                    RedirectUri = "https://client.example.com/callback",
+                    Scope = "openid",
+                    State = "server-contract-state-value",
+                    Nonce = "server-contract-nonce-value",
+                    CodeChallenge = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(
+                        IdentityConstants.LoginHandleLifetimeMinutes)
+                });
+                await Assert.ThrowsAsync<DbUpdateException>(() =>
+                    context.SaveChangesAsync(TestContext.Current.CancellationToken));
+                context.ChangeTracker.Clear();
+            }
+
+            // ---- Two independent connections consume concurrently: exactly one commits ----
+            string handle;
+            await using (var creationContext = new IdentityDbContext(options))
+            {
+                var store = new AuthorizationRequestStore(
+                    new AuthorizationRequestRepository(creationContext),
+                    new EfCoreUnitOfWork(creationContext));
+                var creation = await store.CreateAsync(
+                    new OidcAuthorizationValidationResult.Accepted(
+                        "continuation-upgrade-app",
+                        appId,
+                        "https://client.example.com/callback?tenant=one",
+                        "openid profile",
+                        "ServerCanaryState_0123456789abcdef",
+                        "ServerCanaryNonce_0123456789abcdef",
+                        "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+                    DateTimeOffset.UtcNow,
+                    TestContext.Current.CancellationToken);
+                handle = creation.LoginHandle;
+            }
+
+            var consumeResults = await Task.WhenAll(
+                ConsumeContinuationAsync(options, handle),
+                ConsumeContinuationAsync(options, handle));
+            Assert.Equal(1, consumeResults.Count(result => result));
+
+            await using (var assertionContext = new IdentityDbContext(options))
+            {
+                var rows = await assertionContext.AuthorizationRequests
+                    .AsNoTracking()
+                    .Where(row => row.HandleDigest == LoginHandleDigest.Compute(handle))
+                    .ToListAsync(TestContext.Current.CancellationToken);
+                var row = Assert.Single(rows);
+                Assert.NotNull(row.ConsumedAt);
+
+                var store = new AuthorizationRequestStore(
+                    new AuthorizationRequestRepository(assertionContext),
+                    new EfCoreUnitOfWork(assertionContext));
+                Assert.False(await store.TryConsumeAsync(
+                    handle, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken));
+
+                // Deleting the application while a continuation row exists fails; no cascade.
+                var application = await assertionContext.AppRegistrations
+                    .SingleAsync(app => app.Id == appId, TestContext.Current.CancellationToken);
+                assertionContext.AppRegistrations.Remove(application);
+                await Assert.ThrowsAsync<DbUpdateException>(() =>
+                    assertionContext.SaveChangesAsync(TestContext.Current.CancellationToken));
+            }
+        }
+    }
+
+    private static async Task<bool> ConsumeContinuationAsync(
+        DbContextOptions<IdentityDbContext> options,
+        string handle)
+    {
+        await using var context = new IdentityDbContext(options);
+        var store = new AuthorizationRequestStore(
+            new AuthorizationRequestRepository(context),
+            new EfCoreUnitOfWork(context));
+        return await store.TryConsumeAsync(
+            handle, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
+    }
+
+    private static async Task AssertSeedUnchangedAsync(
+        IdentityDbContext context,
+        Guid accountId,
+        Guid appId,
+        Guid tokenId,
+        DateTimeOffset createdAt,
+        DateTimeOffset expiresAt,
+        string tokenDigest)
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var account = await context.Accounts.AsNoTracking()
+            .SingleAsync(item => item.Id == accountId, cancellationToken);
+        Assert.True(account.IsActive);
+        Assert.Equal(createdAt.UtcTicks / 10, account.CreatedAt.UtcTicks / 10);
+
+        var application = await context.AppRegistrations.AsNoTracking()
+            .SingleAsync(item => item.Id == appId, cancellationToken);
+        Assert.Equal("continuation-upgrade-app", application.AppId);
+        Assert.Equal("CONTINUATION-UPGRADE-APP", application.AppIdNormalized);
+        Assert.Equal("hash", application.AppSecretHash);
+        Assert.True(application.IsActive);
+        Assert.Equal(createdAt.UtcTicks / 10, application.CreatedAt.UtcTicks / 10);
+
+        var token = await context.RefreshTokens.AsNoTracking()
+            .SingleAsync(item => item.Id == tokenId, cancellationToken);
+        Assert.Equal(tokenDigest, token.TokenValue);
+        Assert.False(token.IsRevoked);
+        Assert.Equal(createdAt.UtcTicks / 10, token.CreatedAt.UtcTicks / 10);
+        Assert.Equal(expiresAt.UtcTicks / 10, token.ExpiresAt.UtcTicks / 10);
+        Assert.Null(token.SourceAppId);
     }
 
     private static IContainer CreateContainer(string provider)
@@ -511,6 +765,75 @@ public sealed class ServerDatabaseContractTests
         }
 
         return columns;
+    }
+
+    private static async Task<Dictionary<string, (string IsNullable, int? MaxLength)>>
+        GetPostgreSqlColumnDetailsAsync(
+            IdentityDbContext context,
+            string tableName)
+    {
+        await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT column_name, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_schema = 'public' AND table_name = @name ORDER BY column_name";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "name";
+        parameter.Value = tableName;
+        command.Parameters.Add(parameter);
+        await using var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken);
+        var details = new Dictionary<string, (string IsNullable, int? MaxLength)>(StringComparer.Ordinal);
+        while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+        {
+            details[reader.GetString(0)] = (
+                reader.GetString(1),
+                reader.IsDBNull(2) ? null : Convert.ToInt32(reader.GetValue(2)));
+        }
+
+        return details;
+    }
+
+    private static async Task<List<string>> GetPostgreSqlIndexDefinitionsAsync(
+        IdentityDbContext context,
+        string tableName)
+    {
+        await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = @name";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "name";
+        parameter.Value = tableName;
+        command.Parameters.Add(parameter);
+        await using var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken);
+        var definitions = new List<string>();
+        while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+        {
+            definitions.Add(reader.GetString(0));
+        }
+
+        return definitions;
+    }
+
+    private static async Task<List<(char DeleteAction, string ReferencedTable)>>
+        GetPostgreSqlForeignKeysAsync(
+            IdentityDbContext context,
+            string tableName)
+    {
+        await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT con.confdeltype, con.confrelid::regclass::text FROM pg_constraint con WHERE con.conrelid = to_regclass('public.' || @name) AND con.contype = 'f'";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "name";
+        parameter.Value = tableName;
+        command.Parameters.Add(parameter);
+        await using var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken);
+        var foreignKeys = new List<(char DeleteAction, string ReferencedTable)>();
+        while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+        {
+            foreignKeys.Add((
+                Convert.ToChar(reader.GetValue(0)),
+                reader.GetString(1)));
+        }
+
+        return foreignKeys;
     }
 
     private static async Task<bool> TryConsumeOtpAsync(
