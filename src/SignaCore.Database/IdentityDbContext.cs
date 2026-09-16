@@ -34,6 +34,7 @@ public class IdentityDbContext : DbContext, IServiceDbContext
     public DbSet<AppExchangeTrustEntity> AppExchangeTrusts => Set<AppExchangeTrustEntity>();
     public DbSet<AuthorizationRequestEntity> AuthorizationRequests => Set<AuthorizationRequestEntity>();
     public DbSet<IdentitySessionEntity> IdentitySessions => Set<IdentitySessionEntity>();
+    public DbSet<AuthorizationCodeEntity> AuthorizationCodes => Set<AuthorizationCodeEntity>();
     public DbSet<SystemSettingEntity> SystemSettings => Set<SystemSettingEntity>();
 
     // ServiceMantle shared installation state (service_installations): the runtime authority for
@@ -360,6 +361,68 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.HasOne<PasswordCredentialEntity>()
                 .WithMany()
                 .HasForeignKey(e => e.PasswordCredentialId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AuthorizationCodeEntity>(entity =>
+        {
+            entity.ToTable(
+                "authorization_codes",
+                // PS-05: the interactive refresh family link (#97/#98) may only appear on a
+                // consumed row — it is written together with the first redemption (EV-21). The
+                // check enforces the pairing on both providers.
+                table => table.HasCheckConstraint(
+                    "CK_authorization_codes_family_requires_consumption",
+                    "refresh_family_id IS NULL OR consumed_at IS NOT NULL"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.CodeDigest)
+                .HasColumnName("code_digest")
+                .HasMaxLength(AuthorizationCodeDigest.EncodedLength)
+                .IsRequired();
+            entity.Property(e => e.AppRegistrationId).HasColumnName("app_registration_id");
+            entity.Property(e => e.AccountId).HasColumnName("account_id");
+            entity.Property(e => e.IdentitySessionId).HasColumnName("identity_session_id");
+            entity.Property(e => e.RedirectUri)
+                .HasColumnName("redirect_uri")
+                .HasMaxLength(IdentityConstants.MaxOidcCanonicalRedirectUriLength)
+                .IsRequired();
+            entity.Property(e => e.Scope)
+                .HasColumnName("scope")
+                .HasMaxLength(IdentityConstants.MaxOidcAllowedScopesLength)
+                .IsRequired();
+            entity.Property(e => e.Nonce)
+                .HasColumnName("nonce")
+                .HasMaxLength(IdentityConstants.MaxOidcOpaqueValueLength)
+                .IsRequired();
+            entity.Property(e => e.CodeChallenge)
+                .HasColumnName("code_challenge")
+                .HasMaxLength(IdentityConstants.MaxOidcCodeChallengeLength)
+                .IsRequired();
+            ConfigureInstant(entity.Property(e => e.AuthTime).HasColumnName("auth_time"));
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            ConfigureInstant(entity.Property(e => e.ExpiresAt).HasColumnName("expires_at"));
+            ConfigureInstant(entity.Property(e => e.ConsumedAt).HasColumnName("consumed_at"));
+            // PS-23's single reserved exception: no reference and no index on the family link in
+            // this slice; #97 adds the reference after the backfill and #98 writes the values.
+            entity.Property(e => e.RefreshFamilyId).HasColumnName("refresh_family_id");
+            entity.HasIndex(e => e.CodeDigest).IsUnique();
+            entity.HasIndex(e => e.IdentitySessionId);
+            // PS-23: all three references are restrictive and non-nullable, created together with
+            // this table, so a stored code can never name a client, account, or session the
+            // schema cannot resolve. Deleting a referenced row fails; cleanup deletes code rows by
+            // retention and never nulls a reference.
+            entity.HasOne<AppRegistrationEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.AppRegistrationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AccountEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<IdentitySessionEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.IdentitySessionId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

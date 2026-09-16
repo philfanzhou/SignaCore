@@ -21,7 +21,8 @@ public class CleanupWorkerTests
         Mock<ILoginHistoryRepository>? loginHistoryRepoMock = null,
         Mock<IAuditLogRepository>? auditLogRepoMock = null,
         Mock<IAuthorizationRequestStore>? authorizationRequestStoreMock = null,
-        Mock<IIdentitySessionStore>? identitySessionStoreMock = null)
+        Mock<IIdentitySessionStore>? identitySessionStoreMock = null,
+        Mock<IAuthorizationCodeStore>? authorizationCodeStoreMock = null)
     {
         var serviceProviderMock = new Mock<IServiceProvider>();
 
@@ -49,6 +50,9 @@ public class CleanupWorkerTests
         serviceProviderMock
             .Setup(sp => sp.GetService(typeof(IIdentitySessionStore)))
             .Returns((identitySessionStoreMock ?? new Mock<IIdentitySessionStore>()).Object);
+        serviceProviderMock
+            .Setup(sp => sp.GetService(typeof(IAuthorizationCodeStore)))
+            .Returns((authorizationCodeStoreMock ?? new Mock<IAuthorizationCodeStore>()).Object);
 
         return serviceProviderMock;
     }
@@ -549,6 +553,149 @@ public class CleanupWorkerTests
         }
 
         Assert.Equal("Deleted 7 expired identity sessions", message);
+    }
+
+    [Fact]
+    public async Task CleanupExpiredDataAsync_RemovesExpiredAuthorizationCodes()
+    {
+        var authorizationCodeStoreMock = new Mock<IAuthorizationCodeStore>();
+        authorizationCodeStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(3);
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            authorizationCodeStoreMock: authorizationCodeStoreMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var keyManagerMock = new Mock<IKeyManager>();
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var worker = new CleanupWorker(
+            serviceProviderMock.Object,
+            keyManagerMock.Object,
+            NullLogger<CleanupWorker>.Instance);
+
+        await RunWorkerUntilAsync(
+            worker,
+            () => authorizationCodeStoreMock.Invocations.Count > 0);
+
+        authorizationCodeStoreMock.Verify(
+            s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task AuthorizationCodeCleanup_RunsBeforeTheIdentitySessionSegment()
+    {
+        // PS-23: within one round the authorization-code segment must complete before the session
+        // segment, so a code past its retention is deleted before the session cleanup re-checks
+        // its reference predicate.
+        var segmentOrder = new List<string>();
+        var authorizationCodeStoreMock = new Mock<IAuthorizationCodeStore>();
+        authorizationCodeStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1)
+            .Callback(() => segmentOrder.Add("authorization-codes"));
+        var identitySessionStoreMock = new Mock<IIdentitySessionStore>();
+        identitySessionStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1)
+            .Callback(() => segmentOrder.Add("identity-sessions"));
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            identitySessionStoreMock: identitySessionStoreMock,
+            authorizationCodeStoreMock: authorizationCodeStoreMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var keyManagerMock = new Mock<IKeyManager>();
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var worker = new CleanupWorker(
+            serviceProviderMock.Object,
+            keyManagerMock.Object,
+            NullLogger<CleanupWorker>.Instance);
+
+        await RunWorkerUntilAsync(
+            worker,
+            () => segmentOrder.Contains("identity-sessions"));
+
+        Assert.Equal(
+            new[] { "authorization-codes", "identity-sessions" },
+            segmentOrder.Where(segment => segment is "authorization-codes" or "identity-sessions").ToArray());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenAuthorizationCodeCleanupObservesStoppingCancellation_ExitsWithoutStartingLaterWork()
+    {
+        using var stoppingSource = new CancellationTokenSource();
+        var authorizationCodeStoreMock = new Mock<IAuthorizationCodeStore>();
+        authorizationCodeStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), stoppingSource.Token))
+            .Returns<DateTimeOffset, CancellationToken>((_, token) =>
+            {
+                stoppingSource.Cancel();
+                return Task.FromCanceled<int>(token);
+            });
+        var identitySessionStoreMock = new Mock<IIdentitySessionStore>();
+        var serviceProviderMock = CreateMockServiceProvider(
+            identitySessionStoreMock: identitySessionStoreMock,
+            authorizationCodeStoreMock: authorizationCodeStoreMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var worker = new TestableCleanupWorker(
+            serviceProviderMock.Object,
+            Mock.Of<IKeyManager>(),
+            NullLogger<CleanupWorker>.Instance);
+
+        await worker.RunAsync(stoppingSource.Token);
+
+        authorizationCodeStoreMock.Verify(
+            s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), stoppingSource.Token),
+            Times.Once);
+        identitySessionStoreMock.Verify(
+            s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task AuthorizationCodeCleanup_LogsOnlyTheDeletedCount()
+    {
+        var logMessages = new List<string>();
+        var authorizationCodeStoreMock = new Mock<IAuthorizationCodeStore>();
+        authorizationCodeStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(5);
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            authorizationCodeStoreMock: authorizationCodeStoreMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var keyManagerMock = new Mock<IKeyManager>();
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var worker = new CleanupWorker(
+            serviceProviderMock.Object,
+            keyManagerMock.Object,
+            new ListLogger<CleanupWorker>(logMessages));
+
+        await RunWorkerUntilAsync(
+            worker,
+            () =>
+            {
+                lock (logMessages)
+                {
+                    return logMessages.Exists(message =>
+                        message.Contains("expired authorization codes", StringComparison.Ordinal));
+                }
+            });
+
+        // DF-03: the cleanup log names the count and nothing else — no code, no digest, and no
+        // other row value.
+        string message;
+        lock (logMessages)
+        {
+            message = Assert.Single(
+                logMessages,
+                candidate => candidate.Contains("expired authorization codes", StringComparison.Ordinal));
+        }
+
+        Assert.Equal("Deleted 5 expired authorization codes", message);
     }
 
     private sealed class ListLogger<T>(List<string> messages) : ILogger<T>
