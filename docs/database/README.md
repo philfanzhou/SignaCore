@@ -11,6 +11,7 @@ SignaCore uses one EF Core model with provider-specific migrations for PostgreSQ
 | [app_registrations](./tables/app_registrations.md) | Registered client applications and their authentication policies. |
 | [app_redirect_uris](./tables/app_redirect_uris.md) | Canonical interactive OIDC redirect and post-logout registrations. |
 | [audit_logs](./tables/audit_logs.md) | Administrative and security-relevant change records. |
+| [authorization_requests](./tables/authorization_requests.md) | Shared OIDC login continuations resolved by one-time handle digest. |
 | [installation_state](./tables/installation_state.md) | Removed legacy first-run/installation marker; dropped by the `DropInstallationState` migration. |
 | [login_attempts](./tables/login_attempts.md) | Password-login failure counts and lockout state by normalized username. |
 | [login_histories](./tables/login_histories.md) | Successful and failed authentication event history. |

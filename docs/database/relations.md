@@ -12,6 +12,7 @@ accounts
 app_registrations
   +-- otps
   +-- app_redirect_uris (interactive redirect and post-logout registrations)
+  +-- authorization_requests (login continuations; restrictive reference, no cascade)
   +-- claims callback and login-policy settings
   +-- disabled-by-default interactive OIDC policy
   +-- app_exchange_trusts >-- app_registrations (directed: target accepts source's refresh tokens)
@@ -24,3 +25,8 @@ Foreign keys are used where lifecycle ownership is explicit. Some external or hi
 The `app_redirect_uris` foreign key cascades on application deletion. Its unique index covers
 application, redirect kind, and the stored canonical URI. Claims callbacks remain columns on
 `app_registrations` and do not participate in this relationship.
+
+The `authorization_requests` foreign key to `app_registrations` is restrictive and never cascades in
+either direction: deleting an application with live continuation rows fails, and cleanup removes
+rows only by retention. Nothing references `authorization_requests`, and the stored redirect URI is
+a value snapshot rather than a foreign key to `app_redirect_uris`.

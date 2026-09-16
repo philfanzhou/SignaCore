@@ -673,6 +673,75 @@ namespace SignaCore.Database.Migrations
                     b.ToTable("audit_logs", (string)null);
                 });
 
+            modelBuilder.Entity("SignaCore.Database.Entity.AuthorizationRequestEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("app_registration_id");
+
+                    b.Property<string>("CodeChallenge")
+                        .IsRequired()
+                        .HasMaxLength(43)
+                        .HasColumnType("character varying(43)")
+                        .HasColumnName("code_challenge");
+
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("consumed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("HandleDigest")
+                        .IsRequired()
+                        .HasMaxLength(71)
+                        .HasColumnType("character varying(71)")
+                        .HasColumnName("handle_digest");
+
+                    b.Property<string>("Nonce")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("nonce");
+
+                    b.Property<string>("RedirectUri")
+                        .IsRequired()
+                        .HasMaxLength(501)
+                        .HasColumnType("character varying(501)")
+                        .HasColumnName("redirect_uri");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("scope");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("state");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppRegistrationId");
+
+                    b.HasIndex("HandleDigest")
+                        .IsUnique();
+
+                    b.ToTable("authorization_requests", (string)null);
+                });
+
             modelBuilder.Entity("SignaCore.Database.Entity.LdapCredentialEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1261,6 +1330,15 @@ namespace SignaCore.Database.Migrations
                         .WithMany()
                         .HasForeignKey("UserLoginId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SignaCore.Database.Entity.AuthorizationRequestEntity", b =>
+                {
+                    b.HasOne("SignaCore.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AppRegistrationId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SignaCore.Domain.Keys;
+using SignaCore.Domain.Services;
 using SignaCore.Database;
 using SignaCore.Database.Repositories;
 
@@ -56,12 +57,24 @@ public class CleanupWorker : BackgroundService
         var loginAttemptRepo = scope.ServiceProvider.GetRequiredService<ILoginAttemptRepository>();
         var loginHistoryRepo = scope.ServiceProvider.GetRequiredService<ILoginHistoryRepository>();
         var auditLogRepo = scope.ServiceProvider.GetRequiredService<IAuditLogRepository>();
+        var authorizationRequestStore = scope.ServiceProvider.GetRequiredService<IAuthorizationRequestStore>();
         var otpRepo = scope.ServiceProvider.GetService<IOtpRepository>();
 
         var deletedTokens = await refreshTokenRepo.RemoveExpiredAndRevokedAsync(cancellationToken);
         if (deletedTokens > 0)
         {
             _logger.LogInformation("Deleted {Count} expired/revoked refresh tokens", deletedTokens);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var deletedAuthorizationRequests = await authorizationRequestStore.CleanupExpiredAsync(
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        if (deletedAuthorizationRequests > 0)
+        {
+            _logger.LogInformation(
+                "Deleted {Count} expired authorization request continuations",
+                deletedAuthorizationRequests);
         }
 
         cancellationToken.ThrowIfCancellationRequested();

@@ -71,6 +71,11 @@ public static class IdentityConstants
     public const int MaxOidcCanonicalRedirectUriLength = MaxOidcRedirectUriLength + 1;
     public const int MaxOidcRedirectUrisPerKind = 10;
     public const int MaxOidcAllowedScopesLength = 32;
+    public const int MaxOidcOpaqueValueLength = 128;
+    public const int MaxOidcCodeChallengeLength = 43;
+    public const int LoginHandleLength = 43;
+    public const int LoginHandleLifetimeMinutes = 10;
+    public const int AuthorizationRequestRetentionHours = 24;
     public const int MaxIdentitySessionAgeSeconds = 12 * 60 * 60;
     public const int MaxRemarkLength = 500;
     public const int MaxNicknameLength = 100;

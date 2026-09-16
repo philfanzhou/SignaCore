@@ -6,6 +6,7 @@ using SignaCore.Database;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
+using SignaCore.Domain.Services;
 using Xunit;
 
 namespace SignaCore.Tests.Domain;
@@ -18,7 +19,8 @@ public class CleanupWorkerTests
         Mock<ISecurityKeyRepository>? securityKeyRepoMock = null,
         Mock<ILoginAttemptRepository>? loginAttemptRepoMock = null,
         Mock<ILoginHistoryRepository>? loginHistoryRepoMock = null,
-        Mock<IAuditLogRepository>? auditLogRepoMock = null)
+        Mock<IAuditLogRepository>? auditLogRepoMock = null,
+        Mock<IAuthorizationRequestStore>? authorizationRequestStoreMock = null)
     {
         var serviceProviderMock = new Mock<IServiceProvider>();
 
@@ -40,6 +42,9 @@ public class CleanupWorkerTests
         serviceProviderMock
             .Setup(sp => sp.GetService(typeof(IAuditLogRepository)))
             .Returns((auditLogRepoMock ?? new Mock<IAuditLogRepository>()).Object);
+        serviceProviderMock
+            .Setup(sp => sp.GetService(typeof(IAuthorizationRequestStore)))
+            .Returns((authorizationRequestStoreMock ?? new Mock<IAuthorizationRequestStore>()).Object);
 
         return serviceProviderMock;
     }
@@ -226,6 +231,50 @@ public class CleanupWorkerTests
 
         loginAttemptRepoMock.Verify(r => r.RemoveExpiredAsync(
             It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task CleanupExpiredDataAsync_RemovesExpiredAuthorizationRequests()
+    {
+        var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
+        refreshTokenRepoMock.Setup(r => r.RemoveExpiredAndRevokedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
+
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).ReturnsAsync(0);
+
+        var securityKeyRepoMock = new Mock<ISecurityKeyRepository>();
+        securityKeyRepoMock.Setup(r => r.RemoveExpiredInactiveAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var loginAttemptRepoMock = new Mock<ILoginAttemptRepository>();
+        loginAttemptRepoMock.Setup(r => r.RemoveExpiredAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        var authorizationRequestStoreMock = new Mock<IAuthorizationRequestStore>();
+        authorizationRequestStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(4);
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            refreshTokenRepoMock,
+            appRegRepoMock,
+            securityKeyRepoMock,
+            loginAttemptRepoMock,
+            authorizationRequestStoreMock: authorizationRequestStoreMock);
+        var scopeFactoryMock = CreateMockScopeFactory(serviceProviderMock);
+        var keyManagerMock = new Mock<IKeyManager>();
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
+
+        await RunWorkerUntilAsync(
+            worker,
+            () => authorizationRequestStoreMock.Invocations.Count > 0);
+
+        authorizationRequestStoreMock.Verify(
+            s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
     }
 
     [Fact]
