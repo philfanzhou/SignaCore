@@ -16,6 +16,9 @@ public class PasswordValidatorTests
 
     private static ILogger<PasswordValidator> CreateLogger() => NullLogger<PasswordValidator>.Instance;
 
+    // Work factor 4 keeps the per-test BCrypt work near-instant while still producing a real hash.
+    private static PasswordDecoyHash CreateDecoy() => new(new PasswordHasherOptions { WorkFactor = 4 });
+
     private static Mock<ILoginAttemptRepository> CreateLoginAttemptRepoMock()
     {
         var mock = new Mock<ILoginAttemptRepository>();
@@ -39,6 +42,7 @@ public class PasswordValidatorTests
             accountRepoMock.Object,
             CreateLoginAttemptRepoMock().Object,
             CreatePasswordHasher(),
+            CreateDecoy(),
             CreateLogger());
 
         var result = await validator.ValidateAsync(new ValidationRequest { GrantType = "password", Username = "testuser", Password = "password" });
@@ -66,6 +70,7 @@ public class PasswordValidatorTests
             accountRepoMock.Object,
             loginAttemptRepository.Object,
             CreatePasswordHasher(),
+            CreateDecoy(),
             CreateLogger());
 
         var result = await validator.ValidateAsync(new ValidationRequest { GrantType = "password", Username = "testuser", Password = "wrongpassword" });
@@ -92,6 +97,7 @@ public class PasswordValidatorTests
             accountRepoMock.Object,
             CreateLoginAttemptRepoMock().Object,
             CreatePasswordHasher(),
+            CreateDecoy(),
             CreateLogger());
 
         var result = await validator.ValidateAsync(new ValidationRequest { GrantType = "password", Username = "nonexistent", Password = "password" });
@@ -105,17 +111,20 @@ public class PasswordValidatorTests
     {
         var passwordRepoMock = new Mock<IPasswordCredentialRepository>();
         var accountRepoMock = new Mock<IAccountRepository>();
+        var hasherMock = new Mock<IPasswordHasher>(MockBehavior.Strict);
         var validator = new PasswordValidator(
             passwordRepoMock.Object,
             accountRepoMock.Object,
             CreateLoginAttemptRepoMock().Object,
-            CreatePasswordHasher(),
+            hasherMock.Object,
+            CreateDecoy(),
             CreateLogger());
 
         var result = await validator.ValidateAsync(new ValidationRequest { GrantType = "password", Username = "", Password = "" });
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Username or password cannot be empty", result.ErrorMessage);
+        hasherMock.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -134,6 +143,7 @@ public class PasswordValidatorTests
             accountRepoMock.Object,
             CreateLoginAttemptRepoMock().Object,
             CreatePasswordHasher(),
+            CreateDecoy(),
             CreateLogger());
 
         var result = await validator.ValidateAsync(new ValidationRequest { GrantType = "password", Username = "inactiveuser", Password = "password" });
@@ -168,6 +178,7 @@ public class PasswordValidatorTests
             accountRepoMock.Object,
             loginAttemptRepoMock.Object,
             CreatePasswordHasher(),
+            CreateDecoy(),
             CreateLogger());
 
         var result = await validator.ValidateAsync(new ValidationRequest { GrantType = "password", Username = "lockeduser", Password = "password" });
@@ -213,6 +224,7 @@ public class PasswordValidatorTests
             accountRepository.Object,
             loginAttemptRepository.Object,
             CreatePasswordHasher(),
+            CreateDecoy(),
             CreateLogger());
 
         var result = await validator.ValidateAsync(new ValidationRequest
@@ -252,6 +264,7 @@ public class PasswordValidatorTests
         var passwords = new Mock<IPasswordCredentialRepository>(MockBehavior.Strict);
         var accounts = new Mock<IAccountRepository>(MockBehavior.Strict);
         var hasher = new Mock<IPasswordHasher>(MockBehavior.Strict);
+        var decoy = CreateDecoy();
         attempts.Setup(repository => repository.GetByUsernameAsync("testuser", cancellation.Token))
             .ReturnsAsync(scenario is "locked" or "clear-failures" ? new LoginAttemptEntity
             {
@@ -264,8 +277,10 @@ public class PasswordValidatorTests
             .ReturnsAsync(scenario == "missing-account" ? null : account);
         hasher.Setup(service => service.VerifyPassword("input", credential.PasswordHash))
             .Returns(scenario != "wrong-password");
+        hasher.Setup(service => service.VerifyPassword("input", decoy.Value))
+            .Returns(false);
         var validator = new PasswordValidator(
-            passwords.Object, accounts.Object, attempts.Object, hasher.Object, CreateLogger());
+            passwords.Object, accounts.Object, attempts.Object, hasher.Object, decoy, CreateLogger());
 
         var result = await validator.ValidateAsync(new ValidationRequest
         {
@@ -286,12 +301,170 @@ public class PasswordValidatorTests
             scenario == "locked" ? Times.Never() : Times.Once());
         accounts.Verify(repository => repository.GetByIdAsync(account.Id, cancellation.Token),
             scenario is "locked" or "missing-credential" ? Times.Never() : Times.Once());
+        // Exactly one BCrypt verification per non-empty request: against the stored hash for the
+        // credential paths and against the decoy hash for the four early-return paths.
         hasher.Verify(service => service.VerifyPassword("input", credential.PasswordHash),
             scenario is "success" or "clear-failures" or "wrong-password" ? Times.Once() : Times.Never());
+        hasher.Verify(service => service.VerifyPassword("input", decoy.Value),
+            scenario is "locked" or "missing-credential" or "missing-account" or "inactive-account"
+                ? Times.Once()
+                : Times.Never());
         attempts.VerifyNoOtherCalls();
         passwords.VerifyNoOtherCalls();
         accounts.VerifyNoOtherCalls();
         hasher.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("locked")]
+    [InlineData("missing-credential")]
+    [InlineData("missing-account")]
+    [InlineData("inactive-account")]
+    public async Task ValidateAsync_WhenTheDecoyVerificationSucceeds_TheFailureOutcomeIsUnchanged(string scenario)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = scenario != "inactive-account" };
+        var credential = new PasswordCredentialEntity
+        {
+            AccountId = account.Id,
+            Username = "testuser",
+            PasswordHash = "unused-by-mock"
+        };
+        var attempts = new Mock<ILoginAttemptRepository>(MockBehavior.Strict);
+        var passwords = new Mock<IPasswordCredentialRepository>(MockBehavior.Strict);
+        var accounts = new Mock<IAccountRepository>(MockBehavior.Strict);
+        var hasher = new Mock<IPasswordHasher>(MockBehavior.Strict);
+        var decoy = CreateDecoy();
+        attempts.Setup(repository => repository.GetByUsernameAsync("testuser", cancellation.Token))
+            .ReturnsAsync(scenario == "locked"
+                ? new LoginAttemptEntity
+                {
+                    FailedAttempts = 5,
+                    LockoutUntil = DateTimeOffset.UtcNow.AddMinutes(10)
+                }
+                : null);
+        passwords.Setup(repository => repository.GetByUsernameAsync("testuser", cancellation.Token))
+            .ReturnsAsync(scenario == "missing-credential" ? null : credential);
+        accounts.Setup(repository => repository.GetByIdAsync(account.Id, cancellation.Token))
+            .ReturnsAsync(scenario == "missing-account" ? null : account);
+        // The decoy verification "succeeds": the result must still be discarded, so the failure,
+        // its message, and the absence of any login-attempt change are all unchanged.
+        hasher.Setup(service => service.VerifyPassword("input", decoy.Value))
+            .Returns(true);
+        var validator = new PasswordValidator(
+            passwords.Object, accounts.Object, attempts.Object, hasher.Object, decoy, CreateLogger());
+
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            Username = "testuser",
+            Password = "input",
+            CancellationToken = cancellation.Token
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Null(result.LoginAttemptChange);
+        Assert.Equal(scenario switch
+        {
+            "locked" => result.ErrorMessage,
+            "missing-credential" => "Wrong username or password",
+            _ => "Account is disabled"
+        }, result.ErrorMessage);
+        if (scenario == "locked")
+        {
+            Assert.Contains("locked", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        }
+
+        hasher.Verify(service => service.VerifyPassword("input", decoy.Value), Times.Once);
+        hasher.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ValidateAsync_EarlyFailures_LogNeitherThePasswordNorTheDecoyValue()
+    {
+        const string canaryPassword = "Canary-Decoy-Pw-0123456789!";
+        var logger = new RecordingLogger();
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = false };
+        var credential = new PasswordCredentialEntity
+        {
+            AccountId = account.Id,
+            Username = "canary-user",
+            PasswordHash = "unused"
+        };
+        var attempts = new Mock<ILoginAttemptRepository>();
+        var passwords = new Mock<IPasswordCredentialRepository>();
+        var accounts = new Mock<IAccountRepository>();
+        var hasher = new Mock<IPasswordHasher>();
+        var decoy = CreateDecoy();
+        attempts.Setup(repository => repository.GetByUsernameAsync("canary-user", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LoginAttemptEntity
+            {
+                FailedAttempts = 5,
+                LockoutUntil = DateTimeOffset.UtcNow.AddMinutes(10)
+            });
+        passwords.Setup(repository => repository.GetByUsernameAsync("canary-user", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(credential);
+        accounts.Setup(repository => repository.GetByIdAsync(account.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(account);
+        hasher.Setup(service => service.VerifyPassword(canaryPassword, decoy.Value)).Returns(false);
+        hasher.Setup(service => service.VerifyPassword(canaryPassword, credential.PasswordHash)).Returns(false);
+        var validator = new PasswordValidator(
+            passwords.Object, accounts.Object, attempts.Object, hasher.Object, decoy, logger);
+
+        // Walk the locked, missing-credential, missing-account, and inactive-account shapes.
+        await validator.ValidateAsync(new ValidationRequest
+        {
+            Username = "canary-user", Password = canaryPassword
+        });
+        passwords.Setup(repository => repository.GetByUsernameAsync("canary-user", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PasswordCredentialEntity?)null);
+        await validator.ValidateAsync(new ValidationRequest
+        {
+            Username = "canary-user", Password = canaryPassword
+        });
+        passwords.Setup(repository => repository.GetByUsernameAsync("canary-user", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(credential);
+        accounts.Setup(repository => repository.GetByIdAsync(account.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AccountEntity?)null);
+        await validator.ValidateAsync(new ValidationRequest
+        {
+            Username = "canary-user", Password = canaryPassword
+        });
+        accounts.Setup(repository => repository.GetByIdAsync(account.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(account);
+        await validator.ValidateAsync(new ValidationRequest
+        {
+            Username = "canary-user", Password = canaryPassword
+        });
+
+        Assert.NotEmpty(logger.Entries);
+        foreach (var entry in logger.Entries)
+        {
+            Assert.DoesNotContain(canaryPassword, entry, StringComparison.Ordinal);
+            Assert.DoesNotContain(decoy.Value, entry, StringComparison.Ordinal);
+        }
+    }
+
+    private sealed class RecordingLogger : ILogger<PasswordValidator>
+    {
+        private readonly object _lock = new();
+        public List<string> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            lock (_lock)
+            {
+                Entries.Add(formatter(state, exception));
+            }
+        }
     }
 
     [Theory]
@@ -313,7 +486,7 @@ public class PasswordValidatorTests
         accounts.Setup(repository => repository.GetByIdAsync(accountId, cancellation.Token))
             .Returns(() => ReadAsync("account", new AccountEntity { Id = accountId, IsActive = true }));
         var validator = new PasswordValidator(
-            passwords.Object, accounts.Object, attempts.Object, hasher.Object, CreateLogger());
+            passwords.Object, accounts.Object, attempts.Object, hasher.Object, CreateDecoy(), CreateLogger());
 
         var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => validator.ValidateAsync(
             new ValidationRequest

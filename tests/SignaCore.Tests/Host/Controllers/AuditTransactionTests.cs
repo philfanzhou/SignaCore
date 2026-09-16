@@ -619,6 +619,7 @@ public sealed class AuditTransactionTests
             new AccountRepository(database.Context),
             loginAttemptRepository,
             passwordHasher,
+            new PasswordDecoyHash(new PasswordHasherOptions { WorkFactor = 4 }),
             NullLogger<PasswordValidator>.Instance);
         var service = CreateTokenIssuanceService(
             database.Context,
@@ -669,6 +670,7 @@ public sealed class AuditTransactionTests
             new AccountRepository(database.Context),
             loginAttemptRepository,
             passwordHasher,
+            new PasswordDecoyHash(new PasswordHasherOptions { WorkFactor = 4 }),
             NullLogger<PasswordValidator>.Instance);
         var service = CreateTokenIssuanceService(
             database.Context,
@@ -852,6 +854,7 @@ public sealed class AuditTransactionTests
             new AccountRepository(database.Context),
             loginAttemptRepository,
             passwordHasher,
+            new PasswordDecoyHash(new PasswordHasherOptions { WorkFactor = 4 }),
             NullLogger<PasswordValidator>.Instance);
 
         // The shared management login adapter runs the same recorder the legacy admin login ran,

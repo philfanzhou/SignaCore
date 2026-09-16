@@ -12,6 +12,7 @@ public class PasswordValidator : IIdentityValidator
     private readonly IAccountRepository _accountRepository;
     private readonly ILoginAttemptRepository _loginAttemptRepository;
     private readonly IPasswordHasher _passwordHasher;
+    private readonly PasswordDecoyHash _decoyHash;
     private readonly ILogger<PasswordValidator> _logger;
 
     public PasswordValidator(
@@ -19,12 +20,14 @@ public class PasswordValidator : IIdentityValidator
         IAccountRepository accountRepository,
         ILoginAttemptRepository loginAttemptRepository,
         IPasswordHasher passwordHasher,
+        PasswordDecoyHash decoyHash,
         ILogger<PasswordValidator> logger)
     {
         _passwordCredentialRepository = passwordCredentialRepository;
         _accountRepository = accountRepository;
         _loginAttemptRepository = loginAttemptRepository;
         _passwordHasher = passwordHasher;
+        _decoyHash = decoyHash;
         _logger = logger;
     }
 
@@ -41,6 +44,10 @@ public class PasswordValidator : IIdentityValidator
         var loginAttempt = await _loginAttemptRepository.GetByUsernameAsync(request.Username, request.CancellationToken);
         if (loginAttempt?.LockoutUntil != null && loginAttempt.LockoutUntil > DateTimeOffset.UtcNow)
         {
+            // The decoy verification keeps the locked-out branch on the same BCrypt workload as the
+            // wrong-password branch, so the failure timing does not reveal the account state. Its
+            // result is deliberately discarded: the lockout decision was already made.
+            _ = _passwordHasher.VerifyPassword(request.Password, _decoyHash.Value);
             _logger.LogWarning(
                 "Password validation failed: account is locked out, Username={Username}, LockoutUntil={LockoutUntil}",
                 LogValueSanitizer.Sanitize(request.Username), loginAttempt.LockoutUntil);
@@ -52,6 +59,7 @@ public class PasswordValidator : IIdentityValidator
 
         if (credential == null)
         {
+            _ = _passwordHasher.VerifyPassword(request.Password, _decoyHash.Value);
             _logger.LogWarning("Password validation failed: username not found, Username={Username}",
                 LogValueSanitizer.Sanitize(request.Username));
             return ValidationResult.Failure("Wrong username or password");
@@ -60,6 +68,7 @@ public class PasswordValidator : IIdentityValidator
         var account = await _accountRepository.GetByIdAsync(credential.AccountId, request.CancellationToken);
         if (account == null || !account.IsActive)
         {
+            _ = _passwordHasher.VerifyPassword(request.Password, _decoyHash.Value);
             _logger.LogWarning("Password validation failed: account not found or disabled, Username={Username}",
                 LogValueSanitizer.Sanitize(request.Username));
             return ValidationResult.Failure("Account is disabled");

@@ -67,6 +67,7 @@ public sealed class SignaCoreManagementIdentityProviderTests : IAsyncDisposable
             new AccountRepository(_context),
             new LoginAttemptRepository(_context),
             hasher,
+            new PasswordDecoyHash(new PasswordHasherOptions { WorkFactor = 4 }),
             NullLogger<PasswordValidator>.Instance);
 
         var accessor = new HttpContextAccessor { HttpContext = new DefaultHttpContext() };
