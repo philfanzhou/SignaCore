@@ -124,7 +124,24 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
                 fields: CancelFields(new LoginSession(handle, cookieValue, tabToken)),
                 cookieHeader: $"{CookieName}={cookieValue}");
             using var cancelResponse = await client.SendAsync(cancel, TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.NotImplemented, cancelResponse.StatusCode);
+            // The stored canary snapshot does not revalidate (the client never registered the
+            // stored redirect URI), so the cancel exit answers locally without consuming.
+            Assert.Equal(HttpStatusCode.BadRequest, cancelResponse.StatusCode);
+        }
+
+        // Both tab tokens pair with the single cookie on a revalidatable continuation as well:
+        // each tab's cancel reaches the access_denied redirect.
+        using var legalClient = _fixture.CreateNonRedirectingHttpClient();
+        var legalFirst = await BeginLegalLoginAsync(_fixture.Services, legalClient);
+        var legalSecond = await BeginLegalLoginAsync(_fixture.Services, legalClient);
+        foreach (var legalSession in new[] { legalFirst, legalSecond })
+        {
+            using var legalCancel = CreateLoginPost(
+                fields: CancelFields(legalSession),
+                cookieHeader: CookieHeaderFor(legalSession));
+            using var legalResponse = await legalClient.SendAsync(
+                legalCancel, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Found, legalResponse.StatusCode);
         }
     }
 
@@ -198,8 +215,8 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
     [InlineData("application/x-www-form-urlencoded; charset=UTF-8")]
     public async Task AnExplicitUtf8Charset_IsAdmitted(string contentType)
     {
-        using var client = _fixture.CreateHttpClient();
-        var session = await BeginLoginAsync(_fixture.Services, client);
+        using var client = _fixture.CreateNonRedirectingHttpClient();
+        var session = await BeginLegalLoginAsync(_fixture.Services, client);
 
         using var request = CreateLoginPost(
             fields: CancelFields(session),
@@ -207,7 +224,9 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
             cookieHeader: CookieHeaderFor(session));
         using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.NotImplemented, response.StatusCode);
+        // The admitted charset lets the submission reach the cancel exit, which answers with the
+        // access_denied redirect for this legally seeded continuation.
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
     }
 
     // ---- Acceptance 4: antiforgery failures (SC-19 first half) ----
@@ -317,7 +336,7 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
     // ---- Acceptance 7: the cancel exit never reads the credential fields ----
 
     [Fact]
-    public async Task Cancel_ReturnsTheFixed501WithoutReadingCredentialsOrWritingAnything()
+    public async Task Cancel_NeverReadsCredentialsAndWritesNothingForANonRevalidatableSnapshot()
     {
         var counter = new CountingPasswordValidator();
         using var factory = _fixture.CreateHostWithCountingValidator(counter);
@@ -354,16 +373,19 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
 
             using var request = CreateLoginPost(fields: fields, cookieHeader: CookieHeaderFor(session));
             using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.NotImplemented, response.StatusCode);
+            // This stored canary snapshot does not revalidate (the client never registered the
+            // stored redirect URI), so the cancel exit is a local error — and the credential
+            // fields never mattered on the way there.
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             AssertLoginSecurityHeaders(response);
             Assert.Null(GetSetCookieHeader(response, CookieName));
             bodies.Add(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         }
 
         Assert.All(bodies, body => Assert.Equal(bodies[0], body));
-        Assert.Contains("Login is not available", bodies[0], StringComparison.Ordinal);
+        Assert.Contains("Invalid login request", bodies[0], StringComparison.Ordinal);
         Assert.Equal(0, counter.Calls);
-        // The continuation stays unconsumed and nothing at all was written (EV-02 belongs to #94).
+        // The continuation stays unconsumed and nothing at all was written.
         Assert.Equal(before, await DumpLoginTablesAsync(factory.Services));
     }
 

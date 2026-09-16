@@ -265,16 +265,17 @@ public sealed class OAuthLoginCredentialTests : IClassFixture<IdentityServerFixt
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("Login is not available", body, StringComparison.Ordinal);
 
-        // The cancel exit and the passing-credential exit answer with the same fixed page.
+        // The cancel exit on this canary continuation revalidates to a local error (the client
+        // never registered the stored redirect URI) and writes nothing; the passing-credential
+        // exit keeps the fixed 501.
         using var cancelRequest = CreateLoginPost(
             fields: CancelFields(cancelSession),
             cookieHeader: CookieHeaderFor(cancelSession),
             correlationId: FixedCorrelationId);
         using var cancelResponse = await client.SendAsync(cancelRequest, TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.NotImplemented, cancelResponse.StatusCode);
-        Assert.Equal(
-            body,
-            await cancelResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(HttpStatusCode.BadRequest, cancelResponse.StatusCode);
+        AssertLoginSecurityHeaders(cancelResponse);
+        Assert.Null(cancelResponse.Headers.Location);
 
         // Zero writes: the prior failure count survives (no Clear), no success audit exists, and
         // the continuation stays unconsumed for the orchestration slice.
