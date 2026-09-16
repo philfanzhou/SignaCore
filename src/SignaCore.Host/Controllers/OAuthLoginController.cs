@@ -222,11 +222,10 @@ public sealed class OAuthLoginController : ControllerBase
             return RejectLocally(ReasonBodyStructure);
         }
 
-        if (Request.ContentLength > MaxRequestBodyBytes)
-        {
-            return RejectLocally(ReasonBodyStructure);
-        }
-
+        // The size bound is enforced on the bytes actually read, never on the client-declared
+        // Content-Length header: ReadBoundedBodyAsync stops at one byte past the limit, and the
+        // length check below rejects on the real byte count. A lying or absent Content-Length
+        // therefore cannot smuggle an oversized body past the bound.
         var body = await ReadBoundedBodyAsync(MaxRequestBodyBytes + 1, cancellationToken);
         if (body.Length > MaxRequestBodyBytes
             || !TryParseStrictForm(body, out var fields))
