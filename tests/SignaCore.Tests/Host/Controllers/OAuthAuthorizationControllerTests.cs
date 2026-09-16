@@ -91,8 +91,16 @@ public class OAuthAuthorizationControllerTests
         var audit = new Mock<IAuditService>();
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
+        var store = new Mock<IAuthorizationRequestStore>();
+        store.Setup(value => value.CreateAsync(
+                It.IsAny<OidcAuthorizationValidationResult.Accepted>(),
+                It.IsAny<DateTimeOffset>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AuthorizationRequestCreation(
+                Guid.NewGuid(), "unit-test-handle-0123456789abcdefg"));
         var controller = new OAuthAuthorizationController(
             validator.Object,
+            store.Object,
             audit.Object,
             unitOfWork.Object,
             AuthTestDoubles.AuthMetrics(),
@@ -102,9 +110,18 @@ public class OAuthAuthorizationControllerTests
         var result = await controller.Authorize(TestContext.Current.CancellationToken);
 
         if (accepted)
-            Assert.Equal(StatusCodes.Status501NotImplemented, Assert.IsType<ContentResult>(result).StatusCode);
+        {
+            // The accepted path redirects to the login page with the handle as its only field;
+            // the continuation store owns the single save, so the controller's unit of work never
+            // commits on this branch.
+            var redirect = Assert.IsType<RedirectResult>(result);
+            Assert.StartsWith("/oauth2/login?login_handle=", redirect.Url, StringComparison.Ordinal);
+        }
         else
+        {
             Assert.IsType<RedirectResult>(result);
+        }
+
         audit.Verify(service => service.RecordActionAsync(
             "oidc.authorize.validated",
             "OidcAuthorizationRequest",
@@ -119,9 +136,22 @@ public class OAuthAuthorizationControllerTests
             TestContext.Current.CancellationToken), Times.Once);
         validator.Verify(service => service.ValidateAsync(
             It.IsAny<OidcAuthorizationParameters>(), TestContext.Current.CancellationToken), Times.Once);
-        unitOfWork.Verify(
-            value => value.SaveChangesAsync(TestContext.Current.CancellationToken),
-            Times.Once);
+        if (accepted)
+        {
+            store.Verify(value => value.CreateAsync(
+                It.IsAny<OidcAuthorizationValidationResult.Accepted>(),
+                It.IsAny<DateTimeOffset>(),
+                TestContext.Current.CancellationToken), Times.Once);
+            unitOfWork.Verify(
+                value => value.SaveChangesAsync(It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+        else
+        {
+            unitOfWork.Verify(
+                value => value.SaveChangesAsync(TestContext.Current.CancellationToken),
+                Times.Once);
+        }
     }
 
     [Theory]
@@ -149,8 +179,9 @@ public class OAuthAuthorizationControllerTests
             });
         var audit = new AuditService(new Mock<ILoginHistoryRepository>().Object, repository.Object);
         var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
+        var store = new Mock<IAuthorizationRequestStore>(MockBehavior.Strict);
         var controller = new OAuthAuthorizationController(
-            validator.Object, audit, unitOfWork.Object, AuthTestDoubles.AuthMetrics(),
+            validator.Object, store.Object, audit, unitOfWork.Object, AuthTestDoubles.AuthMetrics(),
             new JwtOptions { Issuer = "https://issuer.example" },
             NullLogger<OAuthAuthorizationController>.Instance).WithHttpContext();
 
@@ -188,6 +219,7 @@ public class OAuthAuthorizationControllerTests
 
         var controller = new OAuthAuthorizationController(
             validator.Object,
+            new Mock<IAuthorizationRequestStore>().Object,
             new Mock<IAuditService>().Object,
             new Mock<IUnitOfWork>().Object,
             AuthTestDoubles.AuthMetrics(),

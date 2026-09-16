@@ -13,10 +13,12 @@ namespace SignaCore.Host.Controllers;
 /// <summary>
 /// Browser entry point of the confidential-BFF Authorization Code flow.
 /// <para>
-/// This slice validates the request and routes errors; it issues no authorization code and no
-/// success redirect, and it establishes no identity session. The route deliberately stays out of
-/// both Discovery documents until the whole flow is complete, so no conforming client is led into
-/// an unfinished flow.
+/// This slice validates the request, routes errors, and persists the validated request as a login
+/// continuation: a fully valid request leaves with a one-time <c>login_handle</c> that opens the
+/// browser login form. It issues no authorization code, establishes no identity session, and reads
+/// no identity cookie — every valid request goes to the login continuation. The route deliberately
+/// stays out of both Discovery documents until the whole flow is complete, so no conforming client
+/// is led into an unfinished flow.
 /// </para>
 /// <para>
 /// Every parameter here is attacker-controlled. The two questions the endpoint answers are kept
@@ -41,18 +43,6 @@ public sealed class OAuthAuthorizationController : ControllerBase
         + "<p>The authorization request could not be processed. Return to the application that "
         + "sent you here and start again.</p></body></html>";
 
-    /// <summary>
-    /// A request that passes every protocol check still cannot proceed: the identity session,
-    /// login continuation, and code issuance belong to the orchestration slice. Answering locally
-    /// keeps that gap from looking like a protocol error the client should react to.
-    /// </summary>
-    private const string NotImplementedPage =
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-        + "<title>Authorization is not available</title></head><body>"
-        + "<h1>Authorization is not available</h1>"
-        + "<p>This authorization server cannot complete an interactive authorization request "
-        + "yet.</p></body></html>";
-
     private const string HtmlContentType = "text/html; charset=utf-8";
 
     private const string AuditAction = "oidc.authorize.validated";
@@ -60,6 +50,7 @@ public sealed class OAuthAuthorizationController : ControllerBase
     private const string AcceptedOutcome = "accepted";
 
     private readonly IOidcAuthorizationRequestValidator _validator;
+    private readonly IAuthorizationRequestStore _authorizationRequestStore;
     private readonly IAuditService _auditService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly AuthMetrics _metrics;
@@ -68,6 +59,7 @@ public sealed class OAuthAuthorizationController : ControllerBase
 
     public OAuthAuthorizationController(
         IOidcAuthorizationRequestValidator validator,
+        IAuthorizationRequestStore authorizationRequestStore,
         IAuditService auditService,
         IUnitOfWork unitOfWork,
         AuthMetrics metrics,
@@ -75,6 +67,7 @@ public sealed class OAuthAuthorizationController : ControllerBase
         ILogger<OAuthAuthorizationController> logger)
     {
         _validator = validator;
+        _authorizationRequestStore = authorizationRequestStore;
         _auditService = auditService;
         _unitOfWork = unitOfWork;
         _metrics = metrics;
@@ -119,10 +112,17 @@ public sealed class OAuthAuthorizationController : ControllerBase
 
             case OidcAuthorizationValidationResult.Accepted accepted:
                 _metrics.RecordOidcAuthorizeOutcome(AcceptedOutcome, accepted.ClientId);
-                await RecordAuditAsync(accepted.ApplicationId, AcceptedOutcome, cancellationToken);
-                return WithStatus(
-                    Content(NotImplementedPage, HtmlContentType, Encoding.UTF8),
-                    StatusCodes.Status501NotImplemented);
+                // The accepted audit row is only staged here; the continuation store's single
+                // SaveChanges commits the continuation row and the audit row as one unit, so a
+                // failure between them cannot leave half of the outcome behind.
+                await StageAuditAsync(accepted.ApplicationId, AcceptedOutcome, cancellationToken);
+                var now = DateTimeOffset.UtcNow;
+                var creation = await _authorizationRequestStore.CreateAsync(
+                    accepted, now, cancellationToken);
+                // A same-origin relative location only: no scheme or host is taken from the
+                // request, and the handle is the sole query field the login page receives.
+                return Redirect(
+                    $"{Request.PathBase}/oauth2/login?login_handle={Uri.EscapeDataString(creation.LoginHandle)}");
 
             default:
                 throw new InvalidOperationException(
@@ -194,10 +194,12 @@ public sealed class OAuthAuthorizationController : ControllerBase
     /// <summary>
     /// Records the outcome for a resolved application. The target is the application record id and
     /// the description is a closed-set outcome name; no state, nonce, challenge, scope, or raw URI
-    /// is written. Audit persistence is not part of a transaction here — this endpoint commits no
-    /// state of its own, so this helper explicitly commits the staged row before returning.
+    /// is written. The staged row is committed by whichever single <c>SaveChanges</c> owns the
+    /// endpoint's write unit: the redirect-rejection path commits it immediately, while the
+    /// accepted path leaves the commit to the continuation store's single save so the continuation
+    /// row and the audit row commit atomically.
     /// </summary>
-    private async Task RecordAuditAsync(Guid applicationId, string outcome, CancellationToken cancellationToken)
+    private async Task StageAuditAsync(Guid applicationId, string outcome, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         await _auditService.RecordActionAsync(
@@ -210,6 +212,11 @@ public sealed class OAuthAuthorizationController : ControllerBase
             clientIp: HttpContext.GetClientIp(),
             correlationId: HttpContext.GetCorrelationId(),
             cancellationToken: cancellationToken);
+    }
+
+    private async Task RecordAuditAsync(Guid applicationId, string outcome, CancellationToken cancellationToken)
+    {
+        await StageAuditAsync(applicationId, outcome, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 

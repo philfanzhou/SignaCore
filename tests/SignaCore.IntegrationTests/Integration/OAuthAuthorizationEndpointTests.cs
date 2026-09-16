@@ -1,12 +1,24 @@
+using System.Data.Common;
+using System.IO;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Web;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Validators;
+using SignaCore.Host;
+using SignaCore.Host.Security;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;
@@ -208,9 +220,8 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
     {
         var response = await GetAsync(Valid().With("ui_locales", "en-US").With("display", "page"));
 
-        Assert.Equal(HttpStatusCode.NotImplemented, response.StatusCode);
-        AssertBrowserSecurityHeaders(response);
-        Assert.Null(response.Headers.Location);
+        var handle = await AssertLoginRedirectAsync(response);
+        Assert.NotEqual(string.Empty, handle);
     }
 
     [Fact]
@@ -279,13 +290,57 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
     }
 
     [Fact]
-    public async Task ValidRequest_IsAnsweredLocallyBecauseTheFlowIsNotActivated()
+    public async Task ValidRequest_PersistsTheContinuationAndRedirectsToTheLoginPage()
     {
+        using var scope = _fixture.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var application = await dbContext.AppRegistrations.AsNoTracking()
+            .SingleAsync(app => app.AppId == InteractiveAppId, TestContext.Current.CancellationToken);
+        var acceptedBefore = await dbContext.AuditLogs.AsNoTracking()
+            .LongCountAsync(
+                log => log.Action == "oidc.authorize.validated"
+                    && log.Description == "accepted"
+                    && log.TargetId == application.Id.ToString("D"),
+                TestContext.Current.CancellationToken);
+
         var response = await GetAsync(Valid());
 
-        Assert.Equal(HttpStatusCode.NotImplemented, response.StatusCode);
-        Assert.Null(response.Headers.Location);
-        AssertBrowserSecurityHeaders(response);
+        var handle = await AssertLoginRedirectAsync(response);
+
+        // The handle opens the login form on the same host, and exactly one continuation row with
+        // the validated snapshot plus exactly one accepted audit row exist.
+        using (var http = _fixture.CreateNonRedirectingHttpClient())
+        {
+            using var loginPage = await http.GetAsync(
+                "/oauth2/login?login_handle=" + Uri.EscapeDataString(handle),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, loginPage.StatusCode);
+        }
+
+        scope.Dispose();
+        using var verifyScope = _fixture.Services.CreateScope();
+        var verifyContext = verifyScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var digest = LoginHandleDigest.Compute(handle);
+        var continuation = await verifyContext.AuthorizationRequests.AsNoTracking()
+            .SingleAsync(row => row.HandleDigest == digest, TestContext.Current.CancellationToken);
+        Assert.Equal(application.Id, continuation.AppRegistrationId);
+        Assert.Equal(RegisteredUri, continuation.RedirectUri);
+        Assert.Equal("openid profile", continuation.Scope);
+        Assert.Equal(CanaryState, continuation.State);
+        Assert.Equal(CanaryNonce, continuation.Nonce);
+        Assert.Equal(CanaryChallenge, continuation.CodeChallenge);
+        Assert.Equal(
+            IdentityConstants.LoginHandleLifetimeMinutes,
+            (continuation.ExpiresAt - continuation.CreatedAt).TotalMinutes);
+        Assert.Null(continuation.ConsumedAt);
+
+        var acceptedAfter = await verifyContext.AuditLogs.AsNoTracking()
+            .LongCountAsync(
+                log => log.Action == "oidc.authorize.validated"
+                    && log.Description == "accepted"
+                    && log.TargetId == application.Id.ToString("D"),
+                TestContext.Current.CancellationToken);
+        Assert.Equal(acceptedBefore + 1, acceptedAfter);
     }
 
     [Fact]
@@ -342,7 +397,7 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
         foreach (var record in records)
         {
             var serialized = string.Join(
-                '',
+                ' ',
                 record.Action,
                 record.TargetType,
                 record.TargetId,
@@ -358,6 +413,591 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
             Assert.DoesNotContain("attacker.test", serialized, StringComparison.Ordinal);
             Assert.DoesNotContain("secret=leak", serialized, StringComparison.Ordinal);
             Assert.DoesNotContain(RegisteredUri, serialized, StringComparison.Ordinal);
+        }
+    }
+
+    // ---- Accepted: the login continuation redirect ----
+
+    /// <summary>
+    /// The accepted redirect carries exactly one query field — the 43-character handle — on a
+    /// same-origin relative location, and none of the submitted protocol values travel in it.
+    /// </summary>
+    [Fact]
+    public async Task AcceptedRedirect_LocationCarriesOnlyTheHandle()
+    {
+        var response = await GetAsync(Valid());
+
+        var handle = await AssertLoginRedirectAsync(response);
+        var location = response.Headers.Location!.ToString();
+        Assert.StartsWith("/oauth2/login?login_handle=", location, StringComparison.Ordinal);
+        Assert.DoesNotContain("http", location, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(CanaryState, location, StringComparison.Ordinal);
+        Assert.DoesNotContain(CanaryNonce, location, StringComparison.Ordinal);
+        Assert.DoesNotContain(CanaryChallenge, location, StringComparison.Ordinal);
+        Assert.DoesNotContain("openid", location, StringComparison.Ordinal);
+        Assert.DoesNotContain(RegisteredUri, location, StringComparison.Ordinal);
+
+        // The handle is the only stored reference to the request and the database holds only its
+        // digest: the plaintext never persists.
+        using var scope = _fixture.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var rows = await dbContext.AuthorizationRequests.AsNoTracking()
+            .Where(row => row.HandleDigest == LoginHandleDigest.Compute(handle))
+            .ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Single(rows);
+    }
+
+    /// <summary>A host mounted under a reverse-proxy path prefix keeps the prefix in the location.</summary>
+    [Fact]
+    public async Task AcceptedRedirect_UnderAPathBaseKeepsThePrefix()
+    {
+        await SeedAsync();
+        using var factory = _fixture.WithTestServices(services =>
+            services.AddSingleton<IStartupFilter>(new PathBaseStartupFilter("/signacore")));
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        using var response = await http.GetAsync(
+            "/signacore/oauth2/authorize" + Valid().Build(), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        Assert.StartsWith(
+            "/signacore/oauth2/login?login_handle=",
+            response.Headers.Location!.ToString(),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>No rejection path — local or redirected — writes a continuation row.</summary>
+    [Fact]
+    public async Task Rejections_LeaveTheContinuationTableUnchanged()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var before = await dbContext.AuthorizationRequests
+            .AsNoTracking()
+            .CountAsync(TestContext.Current.CancellationToken);
+
+        await GetAsync(Valid().With("client_id", "no-such-client"));
+        await GetAsync(Valid().With("redirect_uri", "https://attacker.test/callback"));
+        await GetAsync(Valid().With("scope", "openid unknown_scope"));
+        await GetAsync(Valid().With("response_type", "token"));
+
+        var after = await dbContext.AuthorizationRequests
+            .AsNoTracking()
+            .CountAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(before, after);
+    }
+
+    /// <summary>
+    /// When the single save that commits the continuation and its audit row fails, the endpoint
+    /// answers with the existing 500 JSON body, sets no Location, and persists neither row.
+    /// </summary>
+    [Fact]
+    public async Task AcceptedWriteFailure_IsAtomic()
+    {
+        await SeedAsync();
+        var interceptor = new ContinuationInsertFailureInterceptor();
+        using var factory = CreateHostWithDbInterceptor(interceptor);
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        (int Continuations, int AcceptedAudits) Count()
+        {
+            using var scope = _fixture.Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var continuations = dbContext.AuthorizationRequests.AsNoTracking()
+                .CountAsync(TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+            var audits = dbContext.AuditLogs.AsNoTracking()
+                .CountAsync(
+                    log => log.Action == "oidc.authorize.validated" && log.Description == "accepted",
+                    TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+            return (continuations, audits);
+        }
+
+        var before = Count();
+
+        using var response = await http.GetAsync(
+            "/oauth2/authorize" + Valid().Build(), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Null(response.Headers.Location);
+        Assert.Equal(1, interceptor.InjectedFailures);
+        Assert.Null(response.Headers.Location);
+        Assert.Equal(1, interceptor.InjectedFailures);
+
+        var after = Count();
+        Assert.Equal(before.Continuations, after.Continuations);
+        Assert.Equal(before.AcceptedAudits, after.AcceptedAudits);
+    }
+
+    /// <summary>
+    /// Cancellation at the commit boundary of the accepted write unit (<c>EV-18</c>/<c>SC-20</c>):
+    /// before the commit nothing persists, after the commit the continuation and its audit row
+    /// stay authoritative.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AcceptedCommitCancellation_IsBounded(bool afterCommit)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var gate = new ContinuationCommitGate();
+        using var factory = CreateHostWithDbInterceptor(
+            new ArmOnContinuationInsertInterceptor(gate),
+            new ContinuationCommitCancellationInterceptor(gate, cancellation, afterCommit));
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        (int Continuations, int AcceptedAudits) Count()
+        {
+            using var scope = _fixture.Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var continuations = dbContext.AuthorizationRequests.AsNoTracking()
+                .CountAsync(TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+            var audits = dbContext.AuditLogs.AsNoTracking()
+                .CountAsync(
+                    log => log.Action == "oidc.authorize.validated" && log.Description == "accepted",
+                    TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+            return (continuations, audits);
+        }
+
+        var before = Count();
+
+        if (afterCommit)
+        {
+            using var response = await http.GetAsync(
+                "/oauth2/authorize" + Valid().Build(), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+            Assert.NotNull(response.Headers.Location);
+        }
+        else
+        {
+            using var response = await http.GetAsync(
+                "/oauth2/authorize" + Valid().Build(), TestContext.Current.CancellationToken);
+            Assert.NotEqual(HttpStatusCode.Found, response.StatusCode);
+            Assert.Null(response.Headers.Location);
+        }
+
+        Assert.Equal(1, gate.CommitAttempts);
+
+        var after = Count();
+        if (afterCommit)
+        {
+            Assert.Equal(before.Continuations + 1, after.Continuations);
+            Assert.Equal(before.AcceptedAudits + 1, after.AcceptedAudits);
+        }
+        else
+        {
+            Assert.Equal(before.Continuations, after.Continuations);
+            Assert.Equal(before.AcceptedAudits, after.AcceptedAudits);
+        }
+    }
+
+    /// <summary>
+    /// Two concurrent valid requests from one browser create two independent continuations —
+    /// separate handles, separate rows — and both handles open the login form.
+    /// </summary>
+    [Fact]
+    public async Task ConcurrentValidRequests_CreateIndependentContinuations()
+    {
+        await SeedAsync();
+        using var http = _fixture.CreateNonRedirectingHttpClient();
+
+        var first = http.GetAsync("/oauth2/authorize" + Valid().Build(), TestContext.Current.CancellationToken);
+        var second = http.GetAsync("/oauth2/authorize" + Valid().Build(), TestContext.Current.CancellationToken);
+        var responses = await Task.WhenAll(first, second);
+
+        var handles = new List<string>();
+        foreach (var response in responses)
+        {
+            handles.Add(await AssertLoginRedirectAsync(response));
+        }
+
+        Assert.NotEqual(handles[0], handles[1]);
+
+        using var scope = _fixture.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        foreach (var handle in handles)
+        {
+            Assert.Equal(1, await dbContext.AuthorizationRequests.AsNoTracking()
+                .CountAsync(
+                    row => row.HandleDigest == LoginHandleDigest.Compute(handle),
+                    TestContext.Current.CancellationToken));
+            using var loginPage = await http.GetAsync(
+                "/oauth2/login?login_handle=" + Uri.EscapeDataString(handle),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, loginPage.StatusCode);
+        }
+    }
+
+    /// <summary>
+    /// This slice reads no cookie: with a valid identity cookie (<c>PS-18</c>) and a management
+    /// cookie present, the accepted outcome is unchanged and the identity sessions are neither
+    /// written nor slid.
+    /// </summary>
+    [Fact]
+    public async Task AcceptedRedirect_IgnoresIdentityAndManagementCookies()
+    {
+        await SeedAsync();
+        var identityCookie = await IssueIdentityCookieAsync();
+        var managementCookie = await LoginManagementCookieAsync();
+
+        using var scope = _fixture.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var sessionsBefore = await dbContext.IdentitySessions.AsNoTracking()
+            .CountAsync(TestContext.Current.CancellationToken);
+
+        using var http = _fixture.CreateNonRedirectingHttpClient();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get, "/oauth2/authorize" + Valid().Build());
+        request.Headers.TryAddWithoutValidation(
+            "Cookie", $"{identityCookie}; {managementCookie}");
+
+        using var response = await http.SendAsync(request, TestContext.Current.CancellationToken);
+
+        await AssertLoginRedirectAsync(response);
+
+        Assert.Equal(
+            sessionsBefore,
+            await dbContext.IdentitySessions.AsNoTracking()
+                .CountAsync(TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>Any instance recovers the continuation: host B renders the login form for A's handle.</summary>
+    [Fact]
+    public async Task AnotherHost_ResolvesTheHandleThroughTheSharedDatabase()
+    {
+        var response = await GetAsync(Valid());
+        var handle = await AssertLoginRedirectAsync(response);
+
+        using var factory = _fixture.WithTestServices(_ => { });
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        using var loginPage = await http.GetAsync(
+            "/oauth2/login?login_handle=" + Uri.EscapeDataString(handle),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, loginPage.StatusCode);
+    }
+
+    /// <summary>
+    /// Under the default log configuration, the accepted path leaves none of the submitted
+    /// protocol values and no handle plaintext in the SignaCore logs or in any durable store; the
+    /// database holds only the handle digest.
+    /// </summary>
+    [Fact]
+    public async Task AcceptedPath_LeaksNoProtocolValuesIntoLogsOrStorage()
+    {
+        var capture = new CapturingLoggerProvider();
+        using var factory = _fixture.WithTestServices(services =>
+        {
+            services.RemoveAll<ILoggerFactory>();
+            services.AddSingleton<ILoggerFactory>(_ => LoggerFactory.Create(logging =>
+            {
+                logging.AddProvider(capture);
+                logging.SetMinimumLevel(LogLevel.Information);
+                logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+                logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
+            }));
+        });
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        using var response = await http.GetAsync(
+            "/oauth2/authorize" + Valid().Build(), TestContext.Current.CancellationToken);
+        var handle = await AssertLoginRedirectAsync(response);
+
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var continuation = await dbContext.AuthorizationRequests.AsNoTracking()
+                .SingleAsync(
+                    row => row.HandleDigest == LoginHandleDigest.Compute(handle),
+                    TestContext.Current.CancellationToken);
+            Assert.Equal(CanaryState, continuation.State);
+            Assert.Equal(CanaryNonce, continuation.Nonce);
+            Assert.Equal(CanaryChallenge, continuation.CodeChallenge);
+        }
+
+        var messages = capture.Messages;
+        foreach (var message in messages)
+        {
+            Assert.DoesNotContain(handle, message, StringComparison.Ordinal);
+            Assert.DoesNotContain(CanaryState, message, StringComparison.Ordinal);
+            Assert.DoesNotContain(CanaryNonce, message, StringComparison.Ordinal);
+            Assert.DoesNotContain(CanaryChallenge, message, StringComparison.Ordinal);
+            Assert.DoesNotContain("openid", message, StringComparison.Ordinal);
+        }
+    }
+
+    private async Task<string> IssueIdentityCookieAsync()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var context = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
+        context.Request.Scheme = "https";
+        context.Request.Host = new HostString("localhost");
+        await context.SignInAsync(
+            IdentitySessionDefaults.AuthenticationScheme,
+            IdentitySessionPrincipal.Create(Guid.NewGuid()));
+
+        var setCookie = Assert.Single(context.Response.Headers["Set-Cookie"].ToArray());
+        return setCookie.Split(';')[0];
+    }
+
+    private async Task<string> LoginManagementCookieAsync()
+    {
+        using var factory = _fixture.WithTestServices(_ => { });
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost")
+        });
+        using var login = new HttpRequestMessage(
+            HttpMethod.Post, "/management/v1/session/login")
+        {
+            Content = JsonContent.Create(new
+            {
+                username = IdentityServerFixture.AdminUsername,
+                password = IdentityServerFixture.AdminPassword
+            })
+        };
+        login.Headers.TryAddWithoutValidation("X-ServiceMantle-Request", "1");
+        using var loginResponse = await http.SendAsync(login, TestContext.Current.CancellationToken);
+        loginResponse.EnsureSuccessStatusCode();
+
+        var setCookie = loginResponse.Headers.GetValues("Set-Cookie")
+            .Single(value => value.StartsWith("__Host-ServiceMantle.Management=", StringComparison.Ordinal));
+        return setCookie.Split(';')[0];
+    }
+
+    /// <summary>
+    /// Asserts the wire shape of the accepted result: a 302 whose location is a same-origin
+    /// relative login URL carrying exactly one query field — the 43-character
+    /// <c>[A-Za-z0-9_-]</c> handle — plus the browser security headers. Returns the handle.
+    /// </summary>
+    private static async Task<string> AssertLoginRedirectAsync(HttpResponseMessage response)
+    {
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        AssertBrowserSecurityHeaders(response);
+
+        var location = response.Headers.Location!.ToString();
+        Assert.StartsWith("/oauth2/login?login_handle=", location, StringComparison.Ordinal);
+        var query = HttpUtility.ParseQueryString(location[(location.IndexOf('?') + 1)..]);
+        Assert.Single(query.AllKeys, key => key == "login_handle");
+        var handle = query["login_handle"]!;
+        Assert.Equal(IdentityConstants.LoginHandleLength, handle.Length);
+        Assert.All(handle, character =>
+            Assert.True(char.IsAsciiLetterOrDigit(character) || character is '-' or '_'));
+        await Task.CompletedTask;
+        return handle;
+    }
+
+    private WebApplicationFactory<Program> CreateHostWithDbInterceptor(
+        params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors) =>
+        _fixture.WithTestServices(services =>
+        {
+            // EF Core aggregates DbContextOptions from every registered configuration, so the
+            // interceptor joins the host's own configuration instead of replacing it.
+            services.ConfigureDbContext<IdentityDbContext>(
+                optionsBuilder => optionsBuilder.AddInterceptors(interceptors));
+        });
+
+    private sealed class PathBaseStartupFilter(string pathBase) : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) =>
+            app =>
+            {
+                app.UsePathBase(pathBase);
+                next(app);
+            };
+    }
+
+    /// <summary>
+    /// Fails the one statement that persists the continuation, so the audit row staged in the same
+    /// save rolls back with it.
+    /// </summary>
+    private sealed class ContinuationInsertFailureInterceptor : DbCommandInterceptor
+    {
+        public int InjectedFailures { get; private set; }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfShouldFail(command);
+            return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        public override ValueTask<InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfShouldFail(command);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        private void ThrowIfShouldFail(DbCommand command)
+        {
+            // Only the continuation INSERT matches: the startup cleanup also references the table
+            // in its DELETE, and it must not consume the injected failure.
+            if (InjectedFailures >= 1
+                || !command.CommandText.Contains(
+                    "INSERT INTO \"authorization_requests\"", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            InjectedFailures++;
+            throw new IOException("Injected continuation write failure.");
+        }
+    }
+
+    /// <summary>
+    /// Marks the transaction commit that follows the continuation insert as the write unit's
+    /// commit boundary.
+    /// </summary>
+    private sealed class ContinuationCommitGate
+    {
+        public bool Armed;
+        public int CommitAttempts;
+    }
+
+    /// <summary>Arms the shared gate when the continuation INSERT runs.</summary>
+    private sealed class ArmOnContinuationInsertInterceptor(ContinuationCommitGate gate)
+        : DbCommandInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            ArmIfContinuationInsert(command);
+            return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        public override ValueTask<InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ArmIfContinuationInsert(command);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+
+        private void ArmIfContinuationInsert(DbCommand command)
+        {
+            if (!gate.Armed
+                && command.CommandText.Contains(
+                    "authorization_requests", StringComparison.OrdinalIgnoreCase)
+                && command.CommandText.Contains(
+                    "INSERT", StringComparison.OrdinalIgnoreCase))
+            {
+                gate.Armed = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cancels at the armed transaction commit: before the commit the whole unit rolls back,
+    /// after the commit the rows stay authoritative.
+    /// </summary>
+    private sealed class ContinuationCommitCancellationInterceptor(
+        ContinuationCommitGate gate,
+        CancellationTokenSource cancellation,
+        bool afterCommit) : DbTransactionInterceptor
+    {
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
+            DbTransaction transaction,
+            TransactionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!gate.Armed)
+            {
+                return ValueTask.FromResult(result);
+            }
+
+            gate.CommitAttempts++;
+            if (!afterCommit)
+            {
+                cancellation.Cancel();
+                throw new OperationCanceledException(
+                    "The continuation write was cancelled before its commit.", cancellation.Token);
+            }
+
+            return ValueTask.FromResult(result);
+        }
+
+        public override Task TransactionCommittedAsync(
+            DbTransaction transaction,
+            TransactionEndEventData eventData,
+            CancellationToken cancellationToken = default)
+        {
+            if (gate.Armed)
+            {
+                cancellation.Cancel();
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class CapturingLoggerProvider : ILoggerProvider
+    {
+        private readonly object _lock = new();
+        private readonly List<string> _messages = [];
+
+        public IReadOnlyList<string> Messages
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _messages.ToArray();
+                }
+            }
+        }
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(this);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class CapturingLogger(CapturingLoggerProvider owner) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state)
+                where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter)
+            {
+                lock (owner._lock)
+                {
+                    owner._messages.Add(formatter(state, exception));
+                }
+            }
         }
     }
 
