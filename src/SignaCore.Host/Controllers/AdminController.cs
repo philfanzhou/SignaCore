@@ -526,7 +526,23 @@ public class AdminController : ControllerBase
         await auditService.RecordActionAsync("app_deleted", "AppRegistration", appId,
             actorId, actorName, $"Admin deleted app: {app.AppName}", GetClientIp(),
             cancellationToken: cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception)
+            when (DatabaseConstraintViolation.IsForeignKeyViolation(exception))
+        {
+            // EV-34: the database's restrictive reference (PS-23) is the only authority — a
+            // retained interactive artifact still references this application, so nothing was
+            // deleted and no audit row survives. Deactivation (EV-09) is the immediate stop;
+            // once retention cleanup removes the last reference, the unchanged delete succeeds.
+            // The message names no record id, handle, constraint, or table.
+            return Conflict(new ErrorResponse(
+                "App is still referenced by retained interactive authorization records. " +
+                "Deactivate it and retry after retention cleanup removes them."));
+        }
 
         return Ok(new OperationResponse(true, "App deleted."));
     }

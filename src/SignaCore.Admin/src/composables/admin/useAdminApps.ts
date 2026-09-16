@@ -1,4 +1,5 @@
 import { computed, reactive, ref, watch } from "vue";
+import axios from "axios";
 import { adminClient } from "../../services/apiClient";
 import { getErrorMessage, type AdminApp } from "../../services/adminApi";
 import { handleApiError } from "../useSession";
@@ -217,6 +218,13 @@ async function deleteApp() {
     appActionModal.value = null;
     await loadApps();
   } catch (error) {
+    // 409 means the database still holds retained interactive authorization records that
+    // reference this application (EV-34): nothing was deleted, so the drawer, the confirm
+    // modal, and the list all stay as they were.
+    if (axios.isAxiosError(error) && error.response?.status === 409) {
+      notify("应用仍被保留期内的交互式授权记录引用，请先停用应用，待记录清理后再删除");
+      return;
+    }
     handleApiError("删除应用失败", error);
   } finally {
     destructiveBusy.value = false;
