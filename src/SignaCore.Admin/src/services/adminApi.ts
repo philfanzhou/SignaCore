@@ -412,25 +412,33 @@ class AdminApiClient {
     return response.data
   }
 
-  async testBootstrapSettings(payload: UpdateBootstrapPayload) {
-    const response = await this.client.post<BootstrapInspection>('/api/admin/bootstrap/test', payload)
-    return response.data
-  }
-
-  async updateBootstrapSettings(payload: UpdateBootstrapPayload) {
-    const response = await this.client.put<{ status: string; message: string }>(
-      '/api/admin/bootstrap',
+  /** The probe keeps its own body shape; the guard header is the shared unsafe-request rule. */
+  async testBootstrapSettings(payload: BootstrapTestPayload) {
+    const response = await this.client.post<BootstrapInspection>(
+      '/api/admin/bootstrap/test',
       payload,
+      { headers: { 'X-ServiceMantle-Request': '1' } },
     )
     return response.data
   }
-}
 
-export interface BootstrapProvider {
-  provider: string
-  serverVersions: string[]
-  defaultPort: number | null
-  singleInstanceOnly: boolean
+  /**
+   * 管理员换库走共享更新条目：空 master key 时省略属性表示保留既有 key，确认复选框映射为
+   * 固定确认 Header。成功返回 `{"restartRequired":true}`，服务随后重启。
+   */
+  async updateBootstrapSettings(payload: BootstrapUpdatePayload) {
+    const response = await this.client.put<{ restartRequired: boolean }>(
+      '/management/v1/bootstrap',
+      payload,
+      {
+        headers: {
+          'X-ServiceMantle-Request': '1',
+          'X-SignaCore-Confirm-Database-Change': '1',
+        },
+      },
+    )
+    return response.data
+  }
 }
 
 export interface BootstrapSettings {
@@ -442,9 +450,9 @@ export interface BootstrapSettings {
   editable: boolean
   singleInstanceOnly: boolean
   scopeNotice: string
-  supportedProviders: BootstrapProvider[]
 }
 
+/** 试连仍使用结构化字段；后端 binder 负责组装与分类，不改变任何文件。 */
 export interface BootstrapDatabasePayload {
   provider: string
   serverVersion: string | null
@@ -457,10 +465,20 @@ export interface BootstrapDatabasePayload {
   connectionString?: string
 }
 
-export interface UpdateBootstrapPayload {
+export interface BootstrapTestPayload {
   database: BootstrapDatabasePayload
+  /** 空值表示沿用运行中的 key。 */
   masterKey: string | null
-  confirm: boolean
+}
+
+/** 共享 PUT 只接受完整连接串；masterKey 为空时省略属性表示保留。 */
+export interface BootstrapUpdatePayload {
+  database: {
+    provider: string
+    serverVersion: string | null
+    connectionString: string
+  }
+  masterKey?: string
 }
 
 export interface BootstrapInspection {

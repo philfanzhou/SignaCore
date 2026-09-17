@@ -182,6 +182,50 @@ public sealed class SignaCoreBootstrapCandidateValidatorTests : IAsyncLifetime
 
         Assert.False(result.IsValid);
         Assert.Equal("signacore.bootstrap.master_key_replacement_refused", result.ErrorCode);
+        // The refusal is decided before anything is created: no prepared empty target is left
+        // behind by a rejected candidate.
+        Assert.False(File.Exists(Path.Combine(_directory, "fresh.db")));
+    }
+
+    [Fact]
+    public async Task MissingTargetWithALocallyInvalidShape_IsRefusedBeforePreparation()
+    {
+        // A shared rejection of database.target_not_found resolves every target-independent rule
+        // first: a shape this process could not reload is refused under the local code, and the
+        // missing target is never prepared for it. Without the early check the same candidate
+        // would keep the shared database.target_not_found after a failed preparation attempt.
+        var validator = new SignaCoreBootstrapCandidateValidator(
+            new BootstrapDatabaseProviderRegistry([new TargetNotFoundProvider("SQLite")]),
+            currentMasterKey: null);
+        var result = await validator.ValidateAsync(
+            Candidate(
+                connectionString: $"Data Source={Path.Combine(_directory, "never.db")};Mode=Memory",
+                masterKey: "any-key"),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsValid);
+        Assert.Equal("signacore.bootstrap.database_invalid", result.ErrorCode);
+        Assert.False(File.Exists(Path.Combine(_directory, "never.db")));
+    }
+
+    [Fact]
+    public async Task MissingTargetWithAReplacementKeyOnTheFakeSharedRejection_IsRefusedNotPrepared()
+    {
+        // The same ordering proof on the key rule: with the shared checks reporting a missing
+        // target, a running host that would swap its key is refused under the SignaCore code and
+        // the preparation never creates the target.
+        var validator = new SignaCoreBootstrapCandidateValidator(
+            new BootstrapDatabaseProviderRegistry([new TargetNotFoundProvider("SQLite")]),
+            currentMasterKey: "the-running-key");
+        var result = await validator.ValidateAsync(
+            Candidate(
+                connectionString: $"Data Source={Path.Combine(_directory, "never.db")}",
+                masterKey: "a-different-key"),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsValid);
+        Assert.Equal("signacore.bootstrap.master_key_replacement_refused", result.ErrorCode);
+        Assert.False(File.Exists(Path.Combine(_directory, "never.db")));
     }
 
     [Fact]
@@ -194,6 +238,9 @@ public sealed class SignaCoreBootstrapCandidateValidatorTests : IAsyncLifetime
             TestContext.Current.CancellationToken);
 
         Assert.True(result.IsValid);
+        // The contrast to the refused replacement: a candidate keeping the running key passes and
+        // the missing target is explicitly prepared for it.
+        Assert.True(File.Exists(Path.Combine(_directory, "fresh.db")));
     }
 
     [Fact]
@@ -235,6 +282,24 @@ public sealed class SignaCoreBootstrapCandidateValidatorTests : IAsyncLifetime
 
         Assert.False(result.IsValid);
         Assert.Equal("candidate.validation_failed", result.ErrorCode);
+    }
+
+    /// <summary>
+    /// A shared-checks stand-in that always reports the missing-target rejection for one provider
+    /// id, so the ordering of the target-independent refusals is observable without a server.
+    /// </summary>
+    private sealed class TargetNotFoundProvider(string providerId) : IBootstrapDatabaseProvider
+    {
+        public BootstrapDatabaseProviderDescriptor Descriptor { get; } = new(
+            providerId,
+            providerId,
+            BootstrapDatabaseTargetKind.File,
+            BootstrapServerVersionRequirement.Forbidden);
+
+        public ValueTask<BootstrapValidationResult> ValidateAsync(
+            BootstrapDatabaseConfiguration database,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult(BootstrapValidationResult.Failure("database.target_not_found"));
     }
 
     private async Task<string> CreateProtectedTargetAsync()

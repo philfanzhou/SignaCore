@@ -1,11 +1,19 @@
 import { computed, reactive, ref } from "vue";
+import axios from "axios";
 import { adminClient } from "../../services/apiClient";
 import {
   getErrorMessage,
   type AdminSetting,
   type BootstrapSettings,
+  type BootstrapTestPayload,
+  type BootstrapUpdatePayload,
 } from "../../services/adminApi";
 import { handleApiError } from "../useSession";
+import { bootstrapProviderCatalog } from "../../utils/bootstrapProviders";
+import {
+  buildPostgreSqlConnectionString,
+  buildSqliteConnectionString,
+} from "../../utils/bootstrapConnectionString";
 import { notify } from "./useAdminFeedback";
 
 export type SettingsSectionKey =
@@ -94,6 +102,7 @@ const bootstrapSettings = ref<BootstrapSettings | null>(null);
 const bootstrapLoading = ref(false);
 const bootstrapSaving = ref(false);
 const bootstrapTesting = ref(false);
+const bootstrapRestarting = ref(false);
 const bootstrapMessage = ref("");
 const bootstrapError = ref("");
 const bootstrapForm = reactive({
@@ -231,11 +240,53 @@ async function loadBootstrap() {
   }
 }
 
-function bootstrapPayload() {
+/** The provider list is the one fixed catalog shared with the first-install form. */
+function bootstrapProviderList() {
+  return bootstrapProviderCatalog;
+}
+
+/**
+ * The shared update entry accepts only a complete connection string: the advanced field wins when
+ * set, otherwise the structured fields are assembled through the shared quoting helper so every
+ * character survives the provider parser verbatim.
+ */
+function assembleConnectionString(): string {
+  const advanced = bootstrapForm.connectionString.trim();
+  if (advanced) return advanced;
+  if (bootstrapForm.provider === "SQLite") {
+    return buildSqliteConnectionString(bootstrapForm.filePath.trim());
+  }
+  return buildPostgreSqlConnectionString({
+    host: bootstrapForm.host.trim(),
+    port: bootstrapForm.port ? Number(bootstrapForm.port) : null,
+    database: bootstrapForm.database.trim(),
+    username: bootstrapForm.username.trim(),
+    password: bootstrapForm.password,
+  });
+}
+
+/** An empty key omits the property — the shared entry treats omission as "keep the current key". */
+function bootstrapUpdatePayload(): BootstrapUpdatePayload {
+  const payload: BootstrapUpdatePayload = {
+    database: {
+      provider: bootstrapForm.provider,
+      serverVersion:
+        bootstrapForm.provider === "SQLite" ? null : bootstrapForm.serverVersion.trim() || null,
+      connectionString: assembleConnectionString(),
+    },
+  };
+  const key = bootstrapForm.masterKey.trim();
+  if (key) payload.masterKey = key;
+  return payload;
+}
+
+/** The probe keeps the structured body; a blank key means "test against the running one". */
+function bootstrapTestPayload(): BootstrapTestPayload {
   return {
     database: {
       provider: bootstrapForm.provider,
-      serverVersion: bootstrapForm.serverVersion || null,
+      serverVersion:
+        bootstrapForm.provider === "SQLite" ? null : bootstrapForm.serverVersion.trim() || null,
       host: bootstrapForm.host.trim() || undefined,
       port: bootstrapForm.port ? Number(bootstrapForm.port) : null,
       database: bootstrapForm.database.trim() || undefined,
@@ -245,8 +296,23 @@ function bootstrapPayload() {
       connectionString: bootstrapForm.connectionString.trim() || undefined,
     },
     masterKey: bootstrapForm.masterKey.trim() || null,
-    confirm: bootstrapForm.confirm,
   };
+}
+
+/** Maps the closed rejection set of the shared entry and the two SignaCore guard codes. */
+function bootstrapUpdateMessageFrom(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    const errorCode = (error.response?.data as { errorCode?: string } | undefined)?.errorCode;
+    if (status === 401) return "登录状态无效，请重新登录。";
+    if (status === 403) return "当前账号没有管理后台访问权限。";
+    if (errorCode === "signacore.bootstrap.confirmation_required")
+      return "换库前必须勾选确认；本次请求没有改变任何文件。";
+    if (errorCode === "signacore.bootstrap.not_file_backed")
+      return "当前实例不是从引导文件启动的，不能在这里换库。";
+    if (status === 503) return "服务暂时无法完成请求，请稍后重试。";
+  }
+  return getErrorMessage(error);
 }
 
 async function testBootstrapSettings() {
@@ -255,7 +321,7 @@ async function testBootstrapSettings() {
   bootstrapTesting.value = true;
   bootstrapError.value = "";
   try {
-    const result = await adminClient.testBootstrapSettings(bootstrapPayload());
+    const result = await adminClient.testBootstrapSettings(bootstrapTestPayload());
     bootstrapMessage.value = `${result.message} 目标：${result.endpoint}`;
   } catch (error) {
     bootstrapError.value = getErrorMessage(error);
@@ -264,17 +330,58 @@ async function testBootstrapSettings() {
   }
 }
 
+/**
+ * After a committed update the instance restarts. The normal host does not map the installation
+ * status entry, so recovery watches liveness: once /health/live has been observed unavailable,
+ * the first 200 again means the restart completed and the console reloads — into a fresh login if
+ * the new target holds a different key ring. Five minutes without a restart fall back to a
+ * manual instruction.
+ */
+async function waitForRestartAfterUpdate() {
+  bootstrapRestarting.value = true;
+  const startedAt = Date.now();
+  let observedDown = false;
+  for (;;) {
+    try {
+      const response = await axios.get("/health/live", {
+        timeout: 3000,
+        validateStatus: () => true,
+      });
+      if (observedDown && response.status === 200) {
+        window.location.assign("/admin");
+        return;
+      }
+      if (response.status !== 200) observedDown = true;
+    } catch {
+      observedDown = true;
+    }
+
+    if (Date.now() - startedAt > 5 * 60 * 1000) {
+      bootstrapRestarting.value = false;
+      bootstrapError.value =
+        "服务在五分钟内没有完成重启。请手动重启实例后刷新本页；如新目标使用不同的密钥环，需要重新登录。";
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+}
+
 async function saveBootstrapSettings() {
   if (!bootstrapForm.confirm) return notify("保存前必须明确确认，服务会重启");
   bootstrapSaving.value = true;
   bootstrapError.value = "";
   try {
-    const result =
-      await adminClient.updateBootstrapSettings(bootstrapPayload());
-    bootstrapMessage.value = result.message;
+    const result = await adminClient.updateBootstrapSettings(bootstrapUpdatePayload());
+    if (!result.restartRequired) {
+      bootstrapError.value = "服务返回了意外的更新结果，请刷新后检查实例状态。";
+      return;
+    }
+    bootstrapMessage.value = "数据库引导配置已保存，服务正在重启。";
     notify("数据库引导配置已保存，服务将重启");
+    await waitForRestartAfterUpdate();
   } catch (error) {
-    bootstrapError.value = getErrorMessage(error);
+    bootstrapError.value = bootstrapUpdateMessageFrom(error);
   } finally {
     bootstrapSaving.value = false;
   }
@@ -294,6 +401,7 @@ export function useAdminSettings() {
     bootstrapLoading,
     bootstrapSaving,
     bootstrapTesting,
+    bootstrapRestarting,
     bootstrapMessage,
     bootstrapError,
     bootstrapForm,
@@ -307,6 +415,7 @@ export function useAdminSettings() {
     saveSettings,
     discardSettings,
     loadBootstrap,
+    bootstrapProviderList,
     testBootstrapSettings,
     saveBootstrapSettings,
   };
