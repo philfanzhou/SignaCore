@@ -1429,6 +1429,67 @@ public class AdminControllerTests : IDisposable
             It.IsAny<string?>(), null, null, cancellation.Token), Times.Once);
     }
 
+    [Fact]
+    public async Task DeleteApp_WhenAForeignKeyViolationIsReported_ReturnsConflictAndWritesNothing()
+    {
+        SetAdminUser();
+        var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "a", AppName = "MyApp" };
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken))
+            .ReturnsAsync(app);
+        _appRegRepoMock
+            .Setup(r => r.DeleteAsync(app, TestContext.Current.CancellationToken))
+            .Returns(Task.CompletedTask);
+        _unitOfWorkMock
+            .Setup(u => u.SaveChangesAsync(TestContext.Current.CancellationToken))
+            .ThrowsAsync(new DbUpdateException(
+                "An error occurred while saving the entity changes.",
+                new Microsoft.Data.Sqlite.SqliteException(
+                    "FOREIGN KEY constraint failed", 19, 1811)));
+
+        var result = await _controller.DeleteApp(
+            "a",
+            _appRegRepoMock.Object,
+            _unitOfWorkMock.Object,
+            _auditServiceMock.Object,
+            TestContext.Current.CancellationToken);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Equal(
+            "App is still referenced by retained interactive authorization records. " +
+            "Deactivate it and retry after retention cleanup removes them.",
+            Assert.IsType<ErrorResponse>(conflict.Value).Message);
+        _appRegRepoMock.Verify(r => r.DeleteAsync(app, TestContext.Current.CancellationToken), Times.Once);
+        _unitOfWorkMock.Verify(
+            u => u.SaveChangesAsync(TestContext.Current.CancellationToken), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteApp_WhenAnotherUpdateFailureIsReported_LetsTheExceptionPropagate()
+    {
+        SetAdminUser();
+        var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "a", AppName = "MyApp" };
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken))
+            .ReturnsAsync(app);
+        _appRegRepoMock
+            .Setup(r => r.DeleteAsync(app, TestContext.Current.CancellationToken))
+            .Returns(Task.CompletedTask);
+        _unitOfWorkMock
+            .Setup(u => u.SaveChangesAsync(TestContext.Current.CancellationToken))
+            .ThrowsAsync(new DbUpdateException(
+                "An error occurred while saving the entity changes.",
+                new Microsoft.Data.Sqlite.SqliteException(
+                    "UNIQUE constraint failed: accounts.username", 19, 2067)));
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => _controller.DeleteApp(
+            "a",
+            _appRegRepoMock.Object,
+            _unitOfWorkMock.Object,
+            _auditServiceMock.Object,
+            TestContext.Current.CancellationToken));
+    }
+
     #endregion
 
     #region UpdateSmsPolicy

@@ -206,6 +206,53 @@ describe('admin application control plane', () => {
     expect(state.selectedApp.value).toBeNull()
     expect(state.appDrawerOpen.value).toBe(false)
   })
+
+  it('keeps the drawer, modal, and list when deletion answers 409', async () => {
+    const state = useAdminApps()
+    const selected = app()
+    state.selectedApp.value = selected
+    state.deleteConfirmId.value = 'orders'
+    state.appDrawerOpen.value = true
+    state.appActionModal.value = 'delete-app'
+    mocks.api.getApps.mockResolvedValue([])
+    const conflict = {
+      isAxiosError: true,
+      response: { status: 409, data: { message: 'App is still referenced.' } },
+    }
+    mocks.api.deleteApp.mockRejectedValueOnce(conflict)
+    mocks.notify.mockClear()
+    mocks.api.getApps.mockClear()
+
+    await state.deleteApp()
+
+    expect(mocks.notify).toHaveBeenCalledWith(
+      '应用仍被保留期内的交互式授权记录引用，请先停用应用，待记录清理后再删除',
+    )
+    expect(state.selectedApp.value?.appId).toBe('orders')
+    expect(state.appDrawerOpen.value).toBe(true)
+    expect(state.appActionModal.value).toBe('delete-app')
+    expect(mocks.api.getApps).not.toHaveBeenCalled()
+    expect(mocks.handleApiError).not.toHaveBeenCalled()
+  })
+
+  it('routes non-409 deletion failures through the shared error handler', async () => {
+    const state = useAdminApps()
+    state.selectedApp.value = app()
+    state.deleteConfirmId.value = 'orders'
+    const failure = {
+      isAxiosError: true,
+      response: { status: 500, data: { message: 'boom' } },
+    }
+    mocks.api.deleteApp.mockRejectedValueOnce(failure)
+    mocks.notify.mockClear()
+
+    await state.deleteApp()
+
+    expect(mocks.notify).not.toHaveBeenCalledWith(
+      '应用仍被保留期内的交互式授权记录引用，请先停用应用，待记录清理后再删除',
+    )
+    expect(mocks.handleApiError).toHaveBeenCalledWith('删除应用失败', failure)
+  })
 })
 
 describe('admin application access', () => {

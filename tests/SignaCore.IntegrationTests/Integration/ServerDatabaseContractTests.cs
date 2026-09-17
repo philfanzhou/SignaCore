@@ -1489,6 +1489,182 @@ public sealed class ServerDatabaseContractTests
         }
     }
 
+    /// <summary>
+    /// <c>EV-34</c> on the real PostgreSQL matrix: the restrictive <c>authorization_requests</c>
+    /// reference makes a referenced application's delete fail as a recognizable foreign-key
+    /// violation, and the concurrent insert/delete window resolves by the commit order — the
+    /// deleter blocks behind the uncommitted continuation and reports the violation after the
+    /// insert commits, while an insert racing an already committed delete fails on its own side.
+    /// </summary>
+    [Fact]
+    public async Task PostgreSqlAppDeletion_RestrictiveReferenceAndTheConcurrentWindow()
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL application deletion contract.");
+
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var databaseOptions = CreateDatabaseOptions(
+                "PostgreSQL",
+                container.GetConnectionString());
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            await using (var migration = new IdentityDbContext(options))
+            {
+                await migration.Database.MigrateAsync(TestContext.Current.CancellationToken);
+            }
+
+            var cancellationToken = TestContext.Current.CancellationToken;
+
+            // ---- Scenario 2: a referenced application cannot be deleted; the violation is
+            // recognizable and nothing disappears.
+            var referencedAppId = Guid.NewGuid();
+            await SeedDeletionApplicationAsync(options, referencedAppId);
+            await InsertDeletionContinuationAsync(options, referencedAppId, 0);
+            var referencedException = await Assert.ThrowsAsync<DbUpdateException>(() =>
+                DeleteDeletionApplicationAsync(options, referencedAppId));
+            Assert.True(DatabaseConstraintViolation.IsForeignKeyViolation(referencedException));
+            await using (var verify = new IdentityDbContext(options))
+            {
+                Assert.True(await verify.AppRegistrations.AsNoTracking()
+                    .AnyAsync(app => app.Id == referencedAppId, cancellationToken));
+                Assert.True(await verify.AppRedirectUris.AsNoTracking()
+                    .AnyAsync(uri => uri.AppRegistrationId == referencedAppId, cancellationToken));
+                Assert.Equal(1, await verify.AuthorizationRequests.AsNoTracking()
+                    .CountAsync(row => row.AppRegistrationId == referencedAppId, cancellationToken));
+            }
+
+            // ---- Scenario 5a: the continuation insert commits first; the concurrent delete
+            // blocks behind it and then reports the foreign-key violation.
+            var racingAppId = Guid.NewGuid();
+            await SeedDeletionApplicationAsync(options, racingAppId);
+            var insertReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseInsert = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var insertTask = Task.Run(async () =>
+            {
+                await using var context = new IdentityDbContext(options);
+                var strategy = context.Database.CreateExecutionStrategy();
+                await strategy.ExecuteAsync(async () =>
+                {
+                    await using var transaction = await context.Database
+                        .BeginTransactionAsync(CancellationToken.None);
+                    context.AuthorizationRequests.Add(CreateDeletionContinuation(racingAppId, 100));
+                    await context.SaveChangesAsync(CancellationToken.None);
+                    insertReady.SetResult();
+                    await releaseInsert.Task.WaitAsync(TimeSpan.FromSeconds(60), CancellationToken.None);
+                    await transaction.CommitAsync(CancellationToken.None);
+                });
+            }, CancellationToken.None);
+
+            await insertReady.Task.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+
+            var blockedDelete = DeleteDeletionApplicationAsync(options, racingAppId);
+            await Assert.ThrowsAsync<TimeoutException>(() =>
+                blockedDelete.WaitAsync(TimeSpan.FromMilliseconds(500)));
+
+            releaseInsert.SetResult();
+            await insertTask.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+            var blockedException = await Assert.ThrowsAsync<DbUpdateException>(() =>
+                blockedDelete.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken));
+            Assert.True(DatabaseConstraintViolation.IsForeignKeyViolation(blockedException));
+            await using (var verify = new IdentityDbContext(options))
+            {
+                Assert.True(await verify.AppRegistrations.AsNoTracking()
+                    .AnyAsync(app => app.Id == racingAppId, cancellationToken));
+                Assert.Equal(1, await verify.AuthorizationRequests.AsNoTracking()
+                    .CountAsync(row => row.AppRegistrationId == racingAppId, cancellationToken));
+            }
+
+            // ---- Scenario 5b: the delete commits first; the racing insert fails on its own side.
+            var deletedAppId = Guid.NewGuid();
+            await SeedDeletionApplicationAsync(options, deletedAppId);
+            await DeleteDeletionApplicationAsync(options, deletedAppId);
+            await using (var insertContext = new IdentityDbContext(options))
+            {
+                insertContext.AuthorizationRequests.Add(CreateDeletionContinuation(deletedAppId, 200));
+                var insertException = await Assert.ThrowsAsync<DbUpdateException>(() =>
+                    insertContext.SaveChangesAsync(cancellationToken));
+                Assert.True(DatabaseConstraintViolation.IsForeignKeyViolation(insertException));
+            }
+        }
+    }
+
+    private static async Task SeedDeletionApplicationAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid appId)
+    {
+        await using var context = new IdentityDbContext(options);
+        context.AppRegistrations.Add(new AppRegistrationEntity
+        {
+            Id = appId,
+            AppId = $"deletion-app-{appId:N}",
+            AppSecretHash = "hash",
+            AppName = "Deletion Contract App",
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow,
+            RedirectUris =
+            [
+                new AppRedirectUriEntity
+                {
+                    Id = Guid.NewGuid(),
+                    AppRegistrationId = appId,
+                    Kind = RedirectUriKind.Redirect,
+                    CanonicalUri = "https://bff.deletion.test/callback"
+                }
+            ]
+        });
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    private static AuthorizationRequestEntity CreateDeletionContinuation(Guid appId, int sequence) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            HandleDigest = LoginHandleDigest.Compute(
+                $"deletion-pg-handle-{sequence}-0123456789abcdefgh"),
+            AppRegistrationId = appId,
+            RedirectUri = "https://bff.deletion.test/callback",
+            Scope = "openid",
+            State = "deletion-state",
+            Nonce = "deletion-nonce",
+            CodeChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+            CreatedAt = DateTimeOffset.UtcNow,
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(
+                IdentityConstants.LoginHandleLifetimeMinutes)
+        };
+
+    private static async Task InsertDeletionContinuationAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid appId,
+        int sequence)
+    {
+        await using var context = new IdentityDbContext(options);
+        context.AuthorizationRequests.Add(CreateDeletionContinuation(appId, sequence));
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    private static async Task DeleteDeletionApplicationAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid appId)
+    {
+        await using var context = new IdentityDbContext(options);
+        var app = await context.AppRegistrations
+            .SingleAsync(app => app.Id == appId, TestContext.Current.CancellationToken);
+        context.AppRegistrations.Remove(app);
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
     private static IdentitySessionEntity CreateIdentitySession(
         Guid accountId,
         Guid credentialId,

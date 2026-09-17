@@ -200,6 +200,112 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
             document.GetProperty("grant_types_supported").EnumerateArray().Select(value => value.GetString()));
     }
 
+    /// <summary>
+    /// <c>EV-34</c>: while a retained login continuation references the application, the hard
+    /// delete answers 409 with the fixed message, keeps the application and its children, and
+    /// writes no deletion audit; once the reference is gone the unchanged delete succeeds.
+    /// </summary>
+    [Fact]
+    public async Task DeletingAReferencedApplication_IsAConflictAndWritesNothing()
+    {
+        using var http = await _fixture.CreateAdminHttpClientAsync();
+
+        var created = await http.PostAsJsonAsync(
+            "/api/admin/apps",
+            new { appName = "Deletion Conflict App", callbackUrl = (string?)null, ttlSeconds = 3600 },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+        var creation = await created.Content.ReadFromJsonAsync<JsonElement>(
+            TestContext.Current.CancellationToken);
+        var appId = creation.GetProperty("appId").GetString()!;
+
+        var addedRedirect = await http.PostAsJsonAsync(
+            $"/api/admin/apps/{appId}/oidc/redirect-uris",
+            new { kind = "Redirect", uris = new[] { "https://bff.deletion.test/callback" } },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, addedRedirect.StatusCode);
+
+        Guid applicationRowId;
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            applicationRowId = await dbContext.AppRegistrations
+                .Where(app => app.AppId == appId)
+                .Select(app => app.Id)
+                .SingleAsync(TestContext.Current.CancellationToken);
+            dbContext.AuthorizationRequests.Add(new AuthorizationRequestEntity
+            {
+                Id = Guid.NewGuid(),
+                HandleDigest = LoginHandleDigest.Compute(
+                    "deletion-http-handle-0123456789abcdefghij"),
+                AppRegistrationId = applicationRowId,
+                RedirectUri = "https://bff.deletion.test/callback",
+                Scope = "openid",
+                State = "deletion-http-state",
+                Nonce = "deletion-http-nonce",
+                CodeChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+                CreatedAt = DateTimeOffset.UtcNow,
+                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(
+                    IdentityConstants.LoginHandleLifetimeMinutes)
+            });
+            await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var refused = await http.DeleteAsync(
+            $"/api/admin/apps/{appId}", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        var refusal = await refused.Content.ReadFromJsonAsync<JsonElement>(
+            TestContext.Current.CancellationToken);
+        Assert.Equal(
+            "App is still referenced by retained interactive authorization records. " +
+            "Deactivate it and retry after retention cleanup removes them.",
+            refusal.GetProperty("message").GetString());
+
+        // The application, its redirect registration, and its list membership survive, and no
+        // deletion audit was written.
+        var apps = await http.GetFromJsonAsync<JsonElement>(
+            "/api/admin/apps", TestContext.Current.CancellationToken);
+        Assert.Contains(
+            apps.EnumerateArray(), item => item.GetProperty("appId").GetString() == appId);
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            Assert.True(await dbContext.AppRedirectUris.AsNoTracking()
+                .AnyAsync(uri => uri.AppRegistrationId == applicationRowId, TestContext.Current.CancellationToken));
+            Assert.False(await dbContext.AuditLogs.AsNoTracking()
+                .AnyAsync(log => log.Action == "app_deleted" && log.TargetId == appId,
+                    TestContext.Current.CancellationToken));
+        }
+
+        // Retention cleanup removes the last reference; the unchanged delete succeeds and takes
+        // the cascaded children with it.
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var continuation = await dbContext.AuthorizationRequests
+                .SingleAsync(row => row.AppRegistrationId == applicationRowId,
+                    TestContext.Current.CancellationToken);
+            dbContext.AuthorizationRequests.Remove(continuation);
+            await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var deleted = await http.DeleteAsync(
+            $"/api/admin/apps/{appId}", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, deleted.StatusCode);
+
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            Assert.False(await dbContext.AppRegistrations.AsNoTracking()
+                .AnyAsync(app => app.Id == applicationRowId, TestContext.Current.CancellationToken));
+            Assert.False(await dbContext.AppRedirectUris.AsNoTracking()
+                .AnyAsync(uri => uri.AppRegistrationId == applicationRowId, TestContext.Current.CancellationToken));
+            Assert.True(await dbContext.AuditLogs.AsNoTracking()
+                .AnyAsync(log => log.Action == "app_deleted" && log.TargetId == appId,
+                    TestContext.Current.CancellationToken));
+        }
+    }
+
     private async Task SeedAsync(string appId = AppId)
     {
         using var scope = _fixture.Services.CreateScope();

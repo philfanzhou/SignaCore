@@ -12,6 +12,16 @@ Administrators create, list, inspect, and delete client application registration
 4. Preserve transaction boundaries and cancellation-token propagation.
 5. Record security-relevant activity where the audit policy requires it.
 
+## Deletion result
+
+Deleting an application is refused while a retained interactive authorization artifact (a login
+continuation, and later an authorization code or refresh-family record) still references it: the
+database's restrictive reference is the only authority, `DELETE /api/admin/apps/{appId}` answers
+409 with a fixed message, and neither the application, its cascaded children, nor the deletion
+audit is written. Deactivation is the immediate stop; once retention cleanup removes the last
+reference, the unchanged delete succeeds. See `EV-34` in the
+[canonical semantic model](../../../oidc/CanonicalSemanticModel.md).
+
 ## Per-application policies
 
 Beyond registration and callbacks, an application carries four policies that administrators set:
