@@ -12,17 +12,6 @@ using SignaCore.Host.Migration;
 
 namespace SignaCore.Host.Startup;
 
-internal sealed record BootstrapPhaseResult(
-    BootstrapConfiguration Bootstrap,
-    InstallationPhase Phase,
-    InstallationRuntimeState RuntimeState,
-    IMasterKeyProvider MasterKeyProvider,
-    IConfigurationProtector ConfigurationProtector,
-    SystemSettingsStore SettingsStore,
-    SystemSettingsSnapshot? Snapshot,
-    string? PlaintextSetupCode,
-    DateTimeOffset? SetupCodeExpiresAt);
-
 /// <summary>
 /// Everything that must happen before the application phase can be composed: open the business
 /// database named by the bootstrap file, migrate it, and determine the installation state.
@@ -32,7 +21,7 @@ internal sealed record BootstrapPhaseResult(
 /// unreachable — starting anyway would only serve wrong answers convincingly.
 /// </para>
 /// </summary>
-internal static class BootstrapPhase
+internal static class InstallationStartup
 {
     public static Task<BootstrapPhaseResult> RunAsync(
         BootstrapConfiguration bootstrap,
@@ -54,7 +43,7 @@ internal static class BootstrapPhase
         IDatabaseMigrationExecutor? migrationExecutor,
         CancellationToken cancellationToken = default)
     {
-        var logger = loggerFactory.CreateLogger(typeof(BootstrapPhase).FullName!);
+        var logger = loggerFactory.CreateLogger(typeof(InstallationStartup).FullName!);
 
         logger.LogInformation(
             "Bootstrap loaded from {Origin}: Provider={Provider}, Database={Database}",

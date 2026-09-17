@@ -45,7 +45,7 @@ public sealed class ServiceMantleMigrationGateTests
         await using var container = await StartContainerAsync();
         var database = ContainerDatabaseOptions(container);
 
-        var result = await BootstrapPhase.RunAsync(
+        var result = await InstallationStartup.RunAsync(
             NewBootstrap(database),
             new ConfigurationBuilder().Build(),
             StubEnvironment(),
@@ -177,12 +177,12 @@ public sealed class ServiceMantleMigrationGateTests
         // the retained outer lock's command timeout out of the assertion under test.
         await MigrateToAsync(database, null);
 
-        var firstPhase = BootstrapPhase.RunAsync(
+        var firstPhase = InstallationStartup.RunAsync(
             NewBootstrap(database),
             new ConfigurationBuilder().Build(),
             StubEnvironment(),
             NullLoggerFactory.Instance);
-        var secondPhase = BootstrapPhase.RunAsync(
+        var secondPhase = InstallationStartup.RunAsync(
             NewBootstrap(database),
             new ConfigurationBuilder().Build(),
             StubEnvironment(),
@@ -231,7 +231,7 @@ public sealed class ServiceMantleMigrationGateTests
 
         // The full bootstrap phase is what acquires the outer lock before the gate, so a process
         // holding only the old outer lock makes the new entry wait exactly as before.
-        var phase = BootstrapPhase.RunAsync(
+        var phase = InstallationStartup.RunAsync(
             NewBootstrap(database),
             new ConfigurationBuilder().Build(),
             StubEnvironment(),

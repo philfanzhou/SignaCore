@@ -64,6 +64,40 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
         Assert.NotEqual(ServiceStartupPhase.Completed, snapshot.Phase);
     }
 
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("pending")]
+    [InlineData("completed")]
+    public async Task PreHostResolutionAndPhaseGate_AgreeOnCompletion(string stateName)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var db = await CreateContextAsync();
+        var installationStore = InstallationStores.CreateInstallationStore(db);
+        if (stateName != "missing")
+        {
+            await installationStore.CreatePendingAsync(InstallationStores.ServiceId, ct);
+            var setupCodeStore = InstallationStores.CreateSetupCodeStore(db);
+            var issued = await setupCodeStore.CreateAsync(InstallationStores.ServiceId, ct);
+            if (stateName == "completed")
+            {
+                Assert.True((await setupCodeStore.StageConsumeAsync(
+                    InstallationStores.ServiceId, issued.SetupCode!.Reveal(), ct)).IsStaged);
+                await db.SaveChangesAsync(ct);
+            }
+        }
+
+        var state = await installationStore.FindAsync(InstallationStores.ServiceId, ct);
+        var shared = SharedInstallationPhase.Resolve(state);
+        var snapshot = await new InstallationHealthSnapshotSource(db).GetSnapshotAsync(ct);
+        db.ChangeTracker.Clear();
+        var resolution = await InstallationStateResolver.ResolveAsync(db, ct);
+
+        Assert.Equal(shared, snapshot.Phase);
+        Assert.Equal(
+            shared == ServiceStartupPhase.Completed,
+            resolution.Phase == InstallationPhase.Completed);
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_context is not null)

@@ -28,7 +28,7 @@ using var bootstrapLoggerFactory = LoggerFactory.Create(logging =>
 // database lock, and prints the new code once. It can never reset a Completed installation.
 if (args.Contains("--rotate-setup-code", StringComparer.Ordinal))
 {
-    return await BootstrapPhase.RotateSetupCodeAsync(builder.Configuration, builder.Environment);
+    return await InstallationStartup.RotateSetupCodeAsync(builder.Configuration, builder.Environment);
 }
 
 // The listening port is a deployment concern owned by the launcher, not database-backed
@@ -108,7 +108,7 @@ if (bootstrap is null)
 BootstrapPhaseResult bootstrapResult;
 try
 {
-    bootstrapResult = await BootstrapPhase.RunAsync(
+    bootstrapResult = await InstallationStartup.RunAsync(
         bootstrap,
         builder.Configuration,
         builder.Environment,

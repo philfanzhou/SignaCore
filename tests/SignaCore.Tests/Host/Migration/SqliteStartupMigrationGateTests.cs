@@ -433,7 +433,7 @@ public sealed class SqliteStartupMigrationGateTests
         try
         {
             var bootstrap = NewBootstrap(TestDatabaseOptions(databasePath));
-            var result = await BootstrapPhase.RunAsync(
+            var result = await InstallationStartup.RunAsync(
                 bootstrap, EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance);
 
             Assert.Equal(InstallationPhase.PendingSetup, result.Phase);
@@ -489,7 +489,7 @@ public sealed class SqliteStartupMigrationGateTests
                 StubEnvironment());
             Assert.Equal(options.ConnectionString, bootstrap.Database.ConnectionString);
 
-            var result = await BootstrapPhase.RunAsync(
+            var result = await InstallationStartup.RunAsync(
                 bootstrap, EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance);
 
             Assert.Equal(InstallationPhase.Completed, result.Phase);
@@ -527,7 +527,7 @@ public sealed class SqliteStartupMigrationGateTests
             }
 
             // Missing legacy configuration still fails closed after the migration gate passed.
-            await Assert.ThrowsAsync<SettingsSnapshotException>(() => BootstrapPhase.RunAsync(
+            await Assert.ThrowsAsync<SettingsSnapshotException>(() => InstallationStartup.RunAsync(
                 NewBootstrap(options), EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance));
 
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(
@@ -537,7 +537,7 @@ public sealed class SqliteStartupMigrationGateTests
                     [SystemSettingKeys.JwtIssuer] = "http://localhost",
                     [SystemSettingKeys.AdminUsername] = "administrator"
                 }).Build();
-            var result = await BootstrapPhase.RunAsync(
+            var result = await InstallationStartup.RunAsync(
                 NewBootstrap(options), configuration, StubEnvironment(), NullLoggerFactory.Instance);
 
             Assert.Equal(InstallationPhase.Completed, result.Phase);
@@ -569,7 +569,7 @@ public sealed class SqliteStartupMigrationGateTests
             var options = TestDatabaseOptions(databasePath);
 
             // First boot creates the pending installation and issues its code.
-            var first = await BootstrapPhase.RunAsync(
+            var first = await InstallationStartup.RunAsync(
                 NewBootstrap(options), EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance);
             Assert.Equal(InstallationPhase.PendingSetup, first.Phase);
             Assert.NotNull(first.PlaintextSetupCode);
@@ -580,7 +580,7 @@ public sealed class SqliteStartupMigrationGateTests
                 databasePath,
                 "UPDATE service_installations SET setup_code_generation = 0, setup_code_digest = NULL, setup_code_issued_at_utc = NULL, setup_code_expires_at_utc = NULL");
 
-            var second = await BootstrapPhase.RunAsync(
+            var second = await InstallationStartup.RunAsync(
                 NewBootstrap(options), EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance);
             Assert.Equal(InstallationPhase.PendingSetup, second.Phase);
             Assert.NotNull(second.PlaintextSetupCode);
@@ -621,7 +621,7 @@ public sealed class SqliteStartupMigrationGateTests
             var storedDigestBeforeFailure = await StoredSetupCodeDigestAsync(databasePath);
             Assert.Null(storedDigestBeforeFailure);
 
-            var exception = await Assert.ThrowsAsync<StartupMigrationException>(() => BootstrapPhase.RunAsync(
+            var exception = await Assert.ThrowsAsync<StartupMigrationException>(() => InstallationStartup.RunAsync(
                 NewBootstrap(options), EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance));
             Assert.Equal(WellKnownMigrationErrorCodes.VersionTooNew, exception.ErrorCode);
 
@@ -668,7 +668,7 @@ public sealed class SqliteStartupMigrationGateTests
                 )
                 """);
 
-            var exception = await Assert.ThrowsAsync<StartupMigrationException>(() => BootstrapPhase.RunAsync(
+            var exception = await Assert.ThrowsAsync<StartupMigrationException>(() => InstallationStartup.RunAsync(
                 NewBootstrap(options), EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance));
             Assert.Equal(WellKnownMigrationErrorCodes.ExecutionFailed, exception.ErrorCode);
 
@@ -680,7 +680,7 @@ public sealed class SqliteStartupMigrationGateTests
             // A safe retry after the operator removes the conflicting object resumes the existing
             // migration behavior; no history, installation row, or database deletion is involved.
             ExecuteSql(databasePath, "DROP TABLE service_installations");
-            var result = await BootstrapPhase.RunAsync(
+            var result = await InstallationStartup.RunAsync(
                 NewBootstrap(options), EmptyConfiguration(), StubEnvironment(), NullLoggerFactory.Instance);
             Assert.Equal(InstallationPhase.PendingSetup, result.Phase);
             Assert.NotNull(result.PlaintextSetupCode);
@@ -706,7 +706,7 @@ public sealed class SqliteStartupMigrationGateTests
             {
                 using var cts = new CancellationTokenSource();
                 var (executor, entered) = CancellingExecutor(stage, cts);
-                var gate = BootstrapPhase.RunAsync(
+                var gate = InstallationStartup.RunAsync(
                     NewBootstrap(TestDatabaseOptions(databasePath)),
                     EmptyConfiguration(),
                     StubEnvironment(),
@@ -757,7 +757,7 @@ public sealed class SqliteStartupMigrationGateTests
             };
 
             var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                BootstrapPhase.RunAsync(
+                InstallationStartup.RunAsync(
                     NewBootstrap(TestDatabaseOptions(databasePath)),
                     EmptyConfiguration(),
                     StubEnvironment(),
