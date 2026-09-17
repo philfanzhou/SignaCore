@@ -84,6 +84,18 @@ public static class IdentityConstants
     public const int IdentitySessionActivityThresholdMinutes = 1;
     public const int IdentitySessionRetentionHours = 24;
     public const int MaxIdentitySessionRevocationReasonLength = 32;
+
+    /// <summary>
+    /// The fixed 15-minute lifetime of the interactive Authorization Code flow access token
+    /// (<c>PS-13</c>); it never reads <see cref="JwtOptions.TokenExpirationHours"/>.
+    /// </summary>
+    public const int InteractiveAccessTokenLifetimeSeconds = 900;
+
+    /// <summary>
+    /// The bound on the serialized compact JWS of an interactive access token (<c>PS-13</c>).
+    /// A longer token fails issuance before anything commits; it is never truncated or issued.
+    /// </summary>
+    public const int InteractiveTokenMaxSerializedLength = 8192;
     public const int MaxRemarkLength = 500;
     public const int MaxNicknameLength = 100;
     public const int MaxKeyNameLength = 100;
