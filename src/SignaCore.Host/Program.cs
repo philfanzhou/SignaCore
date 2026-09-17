@@ -1,5 +1,9 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Serilog;
+using ServiceMantle;
+using ServiceMantle.AspNetCore.Health;
+using ServiceMantle.Health;
+using ServiceMantle.Installation;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
@@ -72,33 +76,129 @@ catch (Exception exception)
 
 // ---- Bootstrap Configuration Mode ----
 // No database is known, so nothing that needs one is composed. The process stays live, reports
-// readiness as false, and serves exactly one workflow: create the bootstrap file.
+// readiness as false, and serves exactly one workflow: create the bootstrap file through the
+// shared anonymous management entry, authorized by a one-time credential this start reissues and
+// prints once.
 if (bootstrap is null)
 {
-    var codeAuthority = BootstrapCodeAuthority.Create(out var bootstrapCode);
-    StartupBanner.WriteBootstrapCode(
-        bootstrapCode,
-        bootstrapFilePath,
-        codeAuthority.ExpiresAt);
-    StartupBanner.WriteBootstrapModeNotice();
+    // Every start reissues the one-time credential, invalidating the credential of any previous
+    // start, and prints the new plaintext exactly once.
+    var credentialStartup = await BootstrapCredentialProvisioner.ProvisionAsync(bootstrapFilePath);
 
-    builder.Host.UseAgentSerilog("SignaCore");
-    ConfigureKestrel(builder);
-    BootstrapModeHost.ConfigureServices(builder, codeAuthority, bootstrapFilePath);
-
-    var bootstrapApp = builder.Build();
-    BootstrapModeHost.ConfigurePipeline(bootstrapApp, httpPort);
-
-    bootstrapApp.Lifetime.ApplicationStopping.Register(() =>
+    if (credentialStartup.Outcome == BootstrapCredentialStartupOutcome.AlreadyConfigured)
     {
-        if (bootstrapApp.Services.GetRequiredService<BootstrapCodeAuthority>().IsConsumed)
+        // Another process published a bootstrap file between the load above and the reissue. This
+        // process continues as the configured instance it now is.
+        bootstrap = SignaCoreBootstrapStore.TryLoad(builder.Configuration, builder.Environment);
+        if (bootstrap is null)
         {
-            StartupBanner.WriteRestartInstruction();
+            Console.Error.WriteLine("SignaCore failed to start.");
+            Console.Error.WriteLine(
+                $"The bootstrap file that appeared at '{bootstrapFilePath}' is no longer readable.");
+            return 1;
         }
-    });
+    }
+    else if (credentialStartup.Outcome == BootstrapCredentialStartupOutcome.Failed)
+    {
+        // The notice with the record path has already been printed; the record is untouched.
+        return 1;
+    }
+    else
+    {
+        builder.Host.UseAgentSerilog("SignaCore");
+        ConfigureKestrel(builder);
 
-    await bootstrapApp.RunAsync();
-    return 0;
+        // ---- Bootstrap Configuration Mode composition ----
+        // SignaCore's candidate rules replace the shared default before AddServiceMantle's TryAdd
+        // could register it; the manager the shared creation entry publishes through owns a store
+        // instance over the same resolved path. The mode host has no current master key, so the
+        // key-replacement refusal step of the validator is inert here.
+        builder.Services.AddSingleton<IBootstrapCandidateValidator>(
+            _ => new SignaCoreBootstrapCandidateValidator(
+                SignaCoreBootstrapStore.CreateProviderRegistry(),
+                currentMasterKey: null));
+        builder.Services.AddSingleton<BootstrapConfigurationManager>(provider =>
+            new BootstrapConfigurationManager(
+                SignaCoreBootstrapStore.Create(builder.Configuration),
+                provider.GetRequiredService<InstanceId>(),
+                provider.GetRequiredService<IBootstrapCandidateValidator>()!));
+
+        var bootstrapMantle = builder.Services.AddSignaCoreServiceMantle(bootstrapFilePath);
+        // The cookie scheme is a prerequisite of the shared Bootstrap group (the update entry it
+        // also maps authorizes through it); without a database the key ring stays process-local,
+        // which is sound here because no session can be established in this phase anyway.
+        bootstrapMantle.AddManagementCookieAuthentication();
+        bootstrapMantle.AddServiceMantleManagementApiV1();
+        bootstrapMantle.AddServiceMantleBootstrapManagement();
+        bootstrapMantle.AddServiceMantleInstallationStatus();
+        bootstrapMantle.AddServiceMantleHealthEndpoints();
+        bootstrapMantle.AddSecurityResponseHeaders();
+        bootstrapMantle.AddRateLimiting();
+
+        // One store instance serves the creation entry's consumption, the probe's non-consuming
+        // verification, and the startup reissue that printed the credential.
+        builder.Services.AddSingleton(credentialStartup.Store!);
+        builder.Services.AddSingleton<IBootstrapCredentialStore>(credentialStartup.Store!);
+        builder.Services.AddSingleton<IBootstrapCredentialVerifier>(credentialStartup.Store!);
+        builder.Services.AddSingleton<IServiceHealthSnapshotSource, BootstrapModeSnapshotSource>();
+        builder.Services.AddSingleton<BootstrapConfigurationService>();
+
+        var bootstrapApp = builder.Build();
+
+        // The restart trigger. The shared restart latch is internal, so the host watches the
+        // creation entry itself: after the response completes, the file being published - or a
+        // Bootstrap exception proving a file is there but unreadable - stops the process so a
+        // supervisor restarts it into the next phase. Deciding on the file rather than the status
+        // code keeps a published-but-lost response from stranding a configured instance.
+        bootstrapApp.Use(async (context, next) =>
+        {
+            if (HttpMethods.IsPost(context.Request.Method) &&
+                context.Request.Path.StartsWithSegments("/management/v1/bootstrap"))
+            {
+                // Resolved while the request scope still exists: after the response completes,
+                // HttpContext.RequestServices is gone, but the captured singleton is not.
+                var manager = context.RequestServices.GetRequiredService<BootstrapConfigurationManager>();
+                context.Response.OnCompleted(() =>
+                {
+                    try
+                    {
+                        if (!manager.GetStatus().IsConfigured)
+                        {
+                            return Task.CompletedTask;
+                        }
+                    }
+                    catch (ServiceMantle.Bootstrap.BootstrapException)
+                    {
+                        // The file is there but unreadable; the restart path owns reporting that.
+                    }
+
+                    bootstrapApp.Logger.LogInformation(
+                        "The bootstrap file was published; stopping so a supervisor can restart this process.");
+                    bootstrapApp.Lifetime.StopApplication();
+                    return Task.CompletedTask;
+                });
+            }
+
+            await next(context);
+        });
+
+        bootstrapApp.UseMiddleware<ExceptionHandlingMiddleware>();
+        bootstrapApp.UseServiceMantlePipeline();
+
+        bootstrapApp.MapServiceMantleHealthEndpoints();
+        bootstrapApp.MapServiceMantleBootstrap();
+        bootstrapApp.MapServiceMantleInstallationStatus();
+        BootstrapTestEndpoint.Map(bootstrapApp);
+
+        // The console is served by the same mapped fallback the normal host uses, admitted only
+        // while the phase is Bootstrap Configuration; once the file exists and the process
+        // restarts, the normal host's /bootstrap redirect takes over.
+        AdminSpaBranch.MapNormalHostSpaFallback(bootstrapApp, httpPort)
+            .WithServiceMantlePhaseAdmission(ServiceStartupPhase.BootstrapConfiguration);
+
+        await bootstrapApp.RunAsync();
+        return 0;
+    }
 }
 
 // ---- Bootstrap phase ----
@@ -356,7 +456,7 @@ app.MapHealthChecks(HealthEndpoints.Legacy, new()
 app.Use(async (context, next) =>
 {
     if (context.Request.Path.StartsWithSegments(SetupModeGateMiddleware.SetupPath) ||
-        context.Request.Path.StartsWithSegments(BootstrapModeGateMiddleware.BootstrapPath))
+        context.Request.Path.StartsWithSegments(FirstRunPaths.Bootstrap))
     {
         context.Response.Redirect("/admin");
         return;

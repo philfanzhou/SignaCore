@@ -7,8 +7,8 @@ namespace SignaCore.Host.Startup;
 /// </summary>
 internal static class StartupBanner
 {
-    public static void WriteBootstrapCode(
-        string code,
+    public static void WriteBootstrapCredential(
+        string credential,
         string bootstrapFilePath,
         DateTimeOffset expiresAt)
     {
@@ -21,13 +21,13 @@ internal static class StartupBanner
             " No bootstrap file was found at:",
             $"     {bootstrapFilePath}",
             string.Empty,
-            " Open /bootstrap in a browser and enter the one-time code:",
+            " Open /bootstrap in a browser and supply this credential exactly once:",
+            "one-time bootstrap credential:",
+            credential,
             string.Empty,
-            $"     {code}",
-            string.Empty,
-            $" The code expires at {expiresAt:yyyy-MM-dd HH:mm:ss} UTC.",
-            " The code lives only in this process. Restarting SignaCore issues",
-            " a new one, which is how to recover if this output is lost.",
+            $" The credential expires at {expiresAt:yyyy-MM-dd HH:mm:ss} UTC.",
+            " It is shown only here. Restarting SignaCore issues a new credential",
+            " and invalidates this one, which is how to recover if this output is lost.",
             "=============================================================="
         };
 
@@ -39,12 +39,31 @@ internal static class StartupBanner
         Console.Out.Flush();
     }
 
-    public static void WriteBootstrapModeNotice()
+    /// <summary>
+    /// The fixed startup failure shown when the one-time bootstrap credential could not be
+    /// (re)issued: the credential record is unusable, or another process won its creation. The
+    /// record is never repaired or overwritten from here.
+    /// </summary>
+    public static void WriteBootstrapCredentialUnavailable(string credentialRecordPath)
     {
-        Console.Out.WriteLine(
-            "SignaCore is running in Bootstrap Configuration Mode. Only /bootstrap, /api/bootstrap/*, " +
-            "and health endpoints are available; every other API returns " +
-            "503 bootstrap_configuration_required.");
+        var lines = new[]
+        {
+            string.Empty,
+            "==============================================================",
+            " SignaCore bootstrap configuration",
+            "--------------------------------------------------------------",
+            " The one-time bootstrap credential could not be issued.",
+            $" Inspect or remove the credential record at:",
+            $"     {credentialRecordPath}",
+            " No credential plaintext is printed. SignaCore will not start without one.",
+            "=============================================================="
+        };
+
+        foreach (var line in lines)
+        {
+            Console.Out.WriteLine(line);
+        }
+
         Console.Out.Flush();
     }
 

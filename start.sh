@@ -16,7 +16,7 @@ PORT="${PORT:-5002}"
 # root key live in the writable bootstrap file below.
 LIVE_URL="${LIVE_URL:-http://127.0.0.1:${PORT}/health/live}"
 READY_URL="${READY_URL:-http://127.0.0.1:${PORT}/health/ready}"
-BOOTSTRAP_STATUS_URL="${BOOTSTRAP_STATUS_URL:-http://127.0.0.1:${PORT}/api/bootstrap/status}"
+BOOTSTRAP_STATUS_URL="${BOOTSTRAP_STATUS_URL:-http://127.0.0.1:${PORT}/management/v1/status}"
 SETUP_STATUS_URL="${SETUP_STATUS_URL:-http://127.0.0.1:${PORT}/api/setup/status}"
 LIVE_ATTEMPTS="${LIVE_ATTEMPTS:-60}"
 READY_ATTEMPTS="${READY_ATTEMPTS:-60}"
@@ -139,14 +139,14 @@ for ((attempt = 1; attempt <= READY_ATTEMPTS; attempt++)); do
 
     # With no file the process stays live in protected Bootstrap Configuration Mode. This is a
     # successful deployment awaiting an operator, not a readiness failure.
-    if curl -fsS --max-time 3 "$BOOTSTRAP_STATUS_URL" 2>/dev/null | grep -Eq '"status":"(required|restarting)"'; then
+    if curl -fsS --max-time 3 "$BOOTSTRAP_STATUS_URL" 2>/dev/null | grep -q '"phase":"bootstrap_configuration"'; then
         if [ -n "$PREVIOUS_CONTAINER_ID" ]; then
             docker rm "$ROLLBACK_NAME" >/dev/null ||
                 echo "Warning: retained rollback container $ROLLBACK_NAME" >&2
         fi
         DEPLOYMENT_IN_PROGRESS=false
         echo "Deployment is awaiting bootstrap configuration: $CONTAINER_NAME ($IMAGE_ID)"
-        echo "Open http://<host>:${PORT}/bootstrap and enter the one-time code printed in the container log:"
+        echo "Open http://<host>:${PORT}/bootstrap and enter the one-time bootstrap credential printed in the container log:"
         echo "  docker logs $CONTAINER_NAME"
         exit 0
     fi

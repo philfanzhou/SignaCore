@@ -20,8 +20,7 @@ internal sealed class SetupModeControllerConvention : IApplicationModelConventio
 {
     private static readonly HashSet<Type> Allowed =
     [
-        typeof(SetupController),
-        typeof(BootstrapController)
+        typeof(SetupController)
     ];
 
     public void Apply(ApplicationModel application)

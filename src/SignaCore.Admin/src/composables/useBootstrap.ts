@@ -10,10 +10,29 @@ export interface BootstrapProvider {
   singleInstanceOnly: boolean
 }
 
-interface BootstrapStatus {
-  status: 'required' | 'configured' | 'restarting'
-  filePath: string
-  supportedProviders: BootstrapProvider[]
+// The shared installation status entry discloses only the phase, not the provider catalog, so the
+// form offers the same combinations the backend accepts from this fixed list.
+const providerCatalog: BootstrapProvider[] = [
+  {
+    provider: 'PostgreSQL',
+    serverVersions: ['15', '16', '17'],
+    defaultPort: 5432,
+    singleInstanceOnly: false,
+  },
+  {
+    provider: 'SQLite',
+    serverVersions: [],
+    defaultPort: null,
+    singleInstanceOnly: true,
+  },
+]
+
+interface InstallationStatus {
+  phase: string
+  migrationStatus: string
+  databaseStatus: string
+  bootstrapConfigured: boolean
+  restartRequired: boolean
 }
 
 interface BootstrapInspection {
@@ -25,11 +44,16 @@ interface BootstrapInspection {
   message: string
 }
 
+const statusUrl = '/management/v1/status'
+const createUrl = '/management/v1/bootstrap'
+const testUrl = '/api/bootstrap/test'
+const unsafeRequestHeader = 'X-ServiceMantle-Request'
+const credentialHeader = 'X-ServiceMantle-Bootstrap-Credential'
+
 export const bootstrapPhase = ref<BootstrapPhase>('checking')
 export const bootstrapError = ref('')
 export const bootstrapMessage = ref('')
-export const bootstrapFilePath = ref('')
-export const bootstrapProviders = ref<BootstrapProvider[]>([])
+export const bootstrapProviders = ref<BootstrapProvider[]>(providerCatalog)
 export const bootstrapAdvanced = ref(false)
 
 export const bootstrapForm = reactive({
@@ -44,7 +68,7 @@ export const bootstrapForm = reactive({
   connectionString: '',
   installMode: 'new' as 'new' | 'existing',
   masterKey: '',
-  bootstrapCode: '',
+  bootstrapCredential: '',
 })
 
 function messageFrom(error: unknown, fallback: string) {
@@ -55,15 +79,30 @@ function messageFrom(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
 }
 
+function saveMessageFrom(status: number | undefined, error: unknown) {
+  if (status === 401) {
+    return 'The bootstrap credential is invalid, expired, or already used. Restart SignaCore to have a new one printed to standard output.'
+  }
+  if (status === 400) {
+    return 'The target was refused. Test the database first; the service does not create the file for this target.'
+  }
+  if (status === 503) {
+    return 'The service could not complete the request. Try again.'
+  }
+  return messageFrom(error, 'Bootstrap configuration could not be saved.')
+}
+
 export async function probeBootstrapStatus(): Promise<boolean> {
   try {
-    const response = await axios.get<BootstrapStatus>('/api/bootstrap/status', { timeout: 5000 })
-    bootstrapFilePath.value = response.data.filePath || ''
-    bootstrapProviders.value = response.data.supportedProviders || []
-    bootstrapPhase.value = response.data.status === 'restarting' ? 'restarting' : 'required'
-    const current = bootstrapProviders.value.find(item => item.provider === bootstrapForm.provider)
-    if (current) applyProviderDefaults(current)
-    return response.data.status !== 'configured'
+    const response = await axios.get<InstallationStatus>(statusUrl, {
+      timeout: 5000,
+      validateStatus: () => true,
+    })
+    if (response.status !== 200 || response.data.phase !== 'bootstrap_configuration') {
+      return false
+    }
+    bootstrapPhase.value = response.data.restartRequired ? 'restarting' : 'required'
+    return true
   } catch {
     return false
   }
@@ -75,33 +114,70 @@ export function applyProviderDefaults(provider: BootstrapProvider) {
   bootstrapForm.port = provider.defaultPort
 }
 
-function databasePayload() {
+// The shared creation entry accepts a complete connection string, so the structured fields are
+// assembled here. The password is write-only and never returned by any response.
+function buildConnectionString(): string {
+  if (bootstrapAdvanced.value) {
+    return bootstrapForm.connectionString.trim()
+  }
+  if (bootstrapForm.provider === 'SQLite') {
+    return `Data Source=${bootstrapForm.filePath.trim()}`
+  }
+  const port = bootstrapForm.port ?? 5432
+  return [
+    `Host=${bootstrapForm.host.trim()}`,
+    `Port=${port}`,
+    `Database=${bootstrapForm.database.trim()}`,
+    `Username=${bootstrapForm.username.trim()}`,
+    `Password=${bootstrapForm.password}`,
+  ].join(';')
+}
+
+function savePayload() {
+  const payload: { database: object; masterKey?: string } = {
+    database: {
+      provider: bootstrapForm.provider,
+      serverVersion: bootstrapForm.provider === 'SQLite' ? null : bootstrapForm.serverVersion || null,
+      connectionString: buildConnectionString(),
+    },
+  }
+  if (bootstrapForm.installMode === 'existing' && bootstrapForm.masterKey.trim()) {
+    payload.masterKey = bootstrapForm.masterKey.trim()
+  }
+  return payload
+}
+
+function testPayload() {
   if (bootstrapAdvanced.value) {
     return {
-      provider: bootstrapForm.provider,
-      serverVersion: bootstrapForm.serverVersion || null,
-      connectionString: bootstrapForm.connectionString.trim(),
+      database: {
+        provider: bootstrapForm.provider,
+        serverVersion: bootstrapForm.provider === 'SQLite' ? null : bootstrapForm.serverVersion || null,
+        connectionString: bootstrapForm.connectionString.trim(),
+      },
+      masterKey: bootstrapForm.installMode === 'existing' ? bootstrapForm.masterKey.trim() || null : null,
     }
   }
 
   return {
-    provider: bootstrapForm.provider,
-    serverVersion: bootstrapForm.serverVersion || null,
-    host: bootstrapForm.host.trim(),
-    port: bootstrapForm.port,
-    database: bootstrapForm.database.trim(),
-    username: bootstrapForm.username.trim(),
-    password: bootstrapForm.password,
-    filePath: bootstrapForm.filePath.trim(),
+    database: {
+      provider: bootstrapForm.provider,
+      serverVersion: bootstrapForm.provider === 'SQLite' ? null : bootstrapForm.serverVersion || null,
+      host: bootstrapForm.host.trim(),
+      port: bootstrapForm.port,
+      database: bootstrapForm.database.trim(),
+      username: bootstrapForm.username.trim(),
+      password: bootstrapForm.password,
+      filePath: bootstrapForm.filePath.trim(),
+    },
+    masterKey: bootstrapForm.installMode === 'existing' ? bootstrapForm.masterKey.trim() || null : null,
   }
 }
 
-function requestPayload() {
+function credentialHeaders() {
   return {
-    database: databasePayload(),
-    installMode: bootstrapForm.installMode,
-    masterKey: bootstrapForm.installMode === 'existing' ? bootstrapForm.masterKey : null,
-    bootstrapCode: bootstrapForm.bootstrapCode.trim(),
+    [unsafeRequestHeader]: '1',
+    [credentialHeader]: bootstrapForm.bootstrapCredential.trim(),
   }
 }
 
@@ -110,12 +186,19 @@ export async function testBootstrap() {
   bootstrapMessage.value = ''
   bootstrapPhase.value = 'testing'
   try {
-    const response = await axios.post<BootstrapInspection>('/api/bootstrap/test', requestPayload())
+    const response = await axios.post<BootstrapInspection>(testUrl, testPayload(), {
+      headers: credentialHeaders(),
+    })
     bootstrapMessage.value = response.data.hasProtectedData
       ? `${response.data.message} Master key compatibility: ${response.data.masterKey}.`
       : response.data.message
   } catch (error) {
-    bootstrapError.value = messageFrom(error, 'Database test failed.')
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      bootstrapError.value =
+        'The bootstrap credential is invalid, expired, or already used. Restart SignaCore to have a new one printed to standard output.'
+    } else {
+      bootstrapError.value = messageFrom(error, 'Database test failed.')
+    }
   } finally {
     bootstrapPhase.value = 'required'
   }
@@ -126,25 +209,31 @@ export async function saveBootstrap() {
   bootstrapMessage.value = ''
   bootstrapPhase.value = 'saving'
   try {
-    const response = await axios.post<{ message: string }>('/api/bootstrap/save', requestPayload())
-    bootstrapMessage.value = response.data.message
+    await axios.post(createUrl, savePayload(), { headers: credentialHeaders() })
+    bootstrapMessage.value = 'Bootstrap configuration saved. SignaCore is restarting to load it.'
     bootstrapForm.password = ''
     bootstrapForm.masterKey = ''
-    bootstrapForm.bootstrapCode = ''
+    bootstrapForm.bootstrapCredential = ''
     bootstrapPhase.value = 'restarting'
-    pollForConfiguredHost()
+    pollForRestartedHost()
   } catch (error) {
-    bootstrapError.value = messageFrom(error, 'Bootstrap configuration could not be saved.')
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined
+    bootstrapError.value = saveMessageFrom(status, error)
     bootstrapPhase.value = 'required'
   }
 }
 
-function pollForConfiguredHost() {
+function pollForRestartedHost() {
   const started = Date.now()
   const timer = window.setInterval(async () => {
     try {
-      const response = await axios.get<BootstrapStatus>('/api/bootstrap/status', { timeout: 3000 })
-      if (response.data.status === 'configured') {
+      const response = await axios.get<InstallationStatus>(statusUrl, {
+        timeout: 3000,
+        validateStatus: () => true,
+      })
+      // The bootstrap-mode host reports this phase; anything else — including the entry no longer
+      // existing once the restarted host no longer maps it — means the restart completed.
+      if (response.status !== 200 || response.data.phase !== 'bootstrap_configuration') {
         window.clearInterval(timer)
         window.location.assign('/setup')
         return
