@@ -76,50 +76,58 @@ public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
     public async Task AnAnonymousRender_SurvivesAManagementSessionPost_AndTheReverse()
     {
         using var instance = CreateInstance();
-        using var client = instance.CreateClient();
+        using var client = instance.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
         var managementCookieHeader = await LoginManagementAsync(instance);
 
         // Anonymous GET, management-session POST: the pair validates regardless of which session
-        // state the browser happens to carry, because nothing binds it to a principal.
-        var session = await BeginLoginAsync(instance.Services, client);
+        // state the browser happens to carry, because nothing binds it to a principal. The cancel
+        // exit of a revalidatable continuation proves the POST passed the antiforgery step.
+        var session = await BeginLegalLoginAsync(instance.Services, client);
         using var postWithManagement = await client.SendAsync(CreateLoginPost(
             fields: CancelFields(session),
             cookieHeader: $"{managementCookieHeader}; {CookieHeaderFor(session)}"),
             TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.NotImplemented, postWithManagement.StatusCode);
+        Assert.Equal(HttpStatusCode.Found, postWithManagement.StatusCode);
 
-        // Management-session GET, anonymous POST.
-        using var getRequest = new HttpRequestMessage(HttpMethod.Get, $"/oauth2/login?login_handle={session.Handle}");
+        // Management-session GET, anonymous POST — over a fresh continuation, since the cancel
+        // above consumed the first one.
+        var secondSession = await BeginLegalLoginAsync(instance.Services, client);
+        using var getRequest = new HttpRequestMessage(HttpMethod.Get, $"/oauth2/login?login_handle={secondSession.Handle}");
         getRequest.Headers.TryAddWithoutValidation(
-            "Cookie", $"{managementCookieHeader}; {CookieHeaderFor(session)}");
+            "Cookie", $"{managementCookieHeader}; {CookieHeaderFor(secondSession)}");
         using var getResponse = await client.SendAsync(getRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
-        var secondToken = ExtractToken(
-            await getResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         Assert.Null(GetSetCookieHeader(getResponse, CookieName));
 
         using var anonymousPost = await client.SendAsync(CreateLoginPost(
-            fields: CancelFields(new LoginSession(session.Handle, session.CookieValue, secondToken)),
-            cookieHeader: CookieHeaderFor(session)),
+            fields: CancelFields(secondSession),
+            cookieHeader: CookieHeaderFor(secondSession)),
             TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.NotImplemented, anonymousPost.StatusCode);
+        Assert.Equal(HttpStatusCode.Found, anonymousPost.StatusCode);
     }
 
     [Fact]
     public async Task AnIdentityCookieOnEitherSide_DoesNotDisturbTheAntiforgeryPair()
     {
         using var instance = CreateInstance();
-        using var client = instance.CreateClient();
+        using var client = instance.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
         var identityCookieHeader = await IssueIdentityCookieAsync(instance, Guid.NewGuid());
 
-        var session = await BeginLoginAsync(instance.Services, client);
+        var session = await BeginLegalLoginAsync(instance.Services, client);
         using var postWithIdentity = await client.SendAsync(CreateLoginPost(
             fields: CancelFields(session),
             cookieHeader: $"{identityCookieHeader}; {CookieHeaderFor(session)}"),
             TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.NotImplemented, postWithIdentity.StatusCode);
+        Assert.Equal(HttpStatusCode.Found, postWithIdentity.StatusCode);
 
-        using var getRequest = new HttpRequestMessage(HttpMethod.Get, $"/oauth2/login?login_handle={session.Handle}");
+        var renderSession = await BeginLegalLoginAsync(instance.Services, client);
+        using var getRequest = new HttpRequestMessage(HttpMethod.Get, $"/oauth2/login?login_handle={renderSession.Handle}");
         getRequest.Headers.TryAddWithoutValidation("Cookie", identityCookieHeader);
         using var getResponse = await client.SendAsync(getRequest, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
@@ -131,15 +139,21 @@ public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
         using var first = CreateInstance();
         using var second = CreateInstance();
 
-        using var firstClient = first.CreateClient();
-        var session = await BeginLoginAsync(first.Services, firstClient);
-        using var secondClient = second.CreateClient();
+        using var firstClient = first.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        var session = await BeginLegalLoginAsync(first.Services, firstClient);
+        using var secondClient = second.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
         using var post = await secondClient.SendAsync(CreateLoginPost(
             fields: CancelFields(session),
             cookieHeader: CookieHeaderFor(session)),
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.NotImplemented, post.StatusCode);
+        Assert.Equal(HttpStatusCode.Found, post.StatusCode);
     }
 
     [Fact]

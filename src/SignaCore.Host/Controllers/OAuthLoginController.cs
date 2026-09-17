@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 using SignaCore.Database;
 using SignaCore.Domain;
+using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Http;
@@ -19,20 +20,23 @@ namespace SignaCore.Host.Controllers;
 /// <c>POST /oauth2/login</c> processes the login or cancel submission (<c>IN-11</c>–<c>IN-15</c>).
 /// </summary>
 /// <remarks>
-/// This slice delivers only the browser surface, the antiforgery chain (<c>PS-19</c>), and the
-/// local result of a credential failure (<c>EV-17</c>). The <c>EV-01</c> success transaction and
-/// the <c>EV-02</c> cancel redirect belong to the orchestration slice; both are answered here with
-/// the fixed local 501 page and zero writes, following the authorize endpoint's precedent. A
-/// missing, malformed, unknown, expired, or consumed handle shares the single local 400 of
-/// <c>EV-03</c>/<c>SC-18</c>: no redirect, no credential check, no failure count, no replay audit.
+/// This slice delivers the browser surface, the antiforgery chain (<c>PS-19</c>), the local
+/// result of a credential failure (<c>EV-17</c>), and the cancel exit (<c>EV-02</c>): revalidating
+/// the current client and the exact redirect URI against the stored snapshot, consuming the
+/// continuation, and returning the <c>access_denied</c> safe redirect. The <c>EV-01</c> success
+/// transaction is still answered with the fixed local 501 and zero writes, following the
+/// authorize endpoint's precedent. A missing, malformed, unknown, expired, or consumed handle
+/// shares the single local 400 of <c>EV-03</c>/<c>SC-18</c>: no redirect, no credential check, no
+/// failure count, no replay audit.
 /// <para>
 /// The controller is deliberately not an <c>[ApiController]</c> and binds no parameters: the form
 /// is parsed by hand under a strict structure contract, because the automatic model-binding 400
 /// would answer with JSON ProblemDetails and violate the local HTML result contract. Every
 /// rejection returns one identical local page that echoes no request value, and every response
 /// carries the fixed browser security headers, denies framing, and never carries a
-/// <c>Location</c>. The page renders no stored continuation value — no redirect URI, scope,
-/// state, nonce, or challenge — so the login surface cannot be used to read them back.
+/// <c>Location</c> except the cancel exit's <c>access_denied</c> redirect to the exact registered
+/// URI. The page renders no stored continuation value — no redirect URI, scope, state, nonce, or
+/// challenge — so the login surface cannot be used to read them back.
 /// </para>
 /// </remarks>
 [Route("oauth2/login")]
@@ -98,7 +102,8 @@ public sealed class OAuthLoginController : ControllerBase
     private const string ReasonAntiforgery = "antiforgery";
     private const string ReasonCredentialField = "credential_field";
     private const string ReasonClientUnavailable = "client_unavailable";
-    private const string OutcomeCancel = "cancel";
+    private const string OutcomeCancelRedirected = "cancel_redirected";
+    private const string OutcomeCancelRejected = "cancel_rejected";
     private const string OutcomeCredentialPass = "credential_pass";
     private const string OutcomeCredentialFailure = "credential_failure";
 
@@ -118,23 +123,29 @@ public sealed class OAuthLoginController : ControllerBase
     private readonly IAuthorizationRequestStore _continuations;
     private readonly ILoginAntiforgeryService _antiforgery;
     private readonly ValidatorFactory _validatorFactory;
+    private readonly IOidcAuthorizationRequestValidator _revalidator;
     private readonly OidcLoginFailureRecorder _failureRecorder;
     private readonly IdentityDbContext _dbContext;
+    private readonly JwtOptions _jwtOptions;
     private readonly ILogger<OAuthLoginController> _logger;
 
     public OAuthLoginController(
         IAuthorizationRequestStore continuations,
         ILoginAntiforgeryService antiforgery,
         ValidatorFactory validatorFactory,
+        IOidcAuthorizationRequestValidator revalidator,
         OidcLoginFailureRecorder failureRecorder,
         IdentityDbContext dbContext,
+        JwtOptions jwtOptions,
         ILogger<OAuthLoginController> logger)
     {
         _continuations = continuations;
         _antiforgery = antiforgery;
         _validatorFactory = validatorFactory;
+        _revalidator = revalidator;
         _failureRecorder = failureRecorder;
         _dbContext = dbContext;
+        _jwtOptions = jwtOptions;
         _logger = logger;
     }
 
@@ -189,11 +200,12 @@ public sealed class OAuthLoginController : ControllerBase
     /// <summary>
     /// Processes the login form submission in the single canonical order: structure, continuation,
     /// action, antiforgery, the cancel exit, the conditional credential fields, and only then the
-    /// shared Password validator. A cancel submission returns before username and password are
-    /// read at all (<c>IN-15</c>); a credential failure commits its counter and audit unit before
-    /// the identical generic page is rendered (<c>EV-17</c>); a passing credential check reaches
-    /// the orchestration slice's <c>EV-01</c>, answered here as the fixed local 501 with zero
-    /// writes.
+    /// shared Password validator. A cancel submission revalidates the current client and the exact
+    /// redirect URI, consumes the continuation, and redirects <c>access_denied</c> (<c>EV-02</c>)
+    /// before username and password are read at all (<c>IN-15</c>); a credential failure commits
+    /// its counter and audit unit before the identical generic page is rendered
+    /// (<c>EV-17</c>); a passing credential check reaches the orchestration slice's
+    /// <c>EV-01</c>, answered here as the fixed local 501 with zero writes.
     /// <para>
     /// The action deliberately declares no parameters — not even a <see cref="CancellationToken"/>
     /// — and reads <see cref="HttpContext.RequestAborted"/> itself. With any declared parameter,
@@ -266,15 +278,69 @@ public sealed class OAuthLoginController : ControllerBase
             return RejectLocally(ReasonAntiforgery);
         }
 
-        // ⑤ Cancel exits before username and password are read. EV-02 (revalidation, consumption,
-        // and the access_denied redirect) belongs to the orchestration slice.
-        if (action == CancelActionValue)
+        // ⑤ The client snapshot lookup precedes both exits, because the cancel exit needs the
+        // client id for its revalidation and the credential exit needs it for the failure audit.
+        // The restrictive reference (PS-23) makes a missing row unreachable from a consistent
+        // database; the endpoint still fails closed instead of auditing or redirecting a guess.
+        var appId = await _dbContext.AppRegistrations
+            .AsNoTracking()
+            .Where(app => app.Id == continuation.AppRegistrationId)
+            .Select(app => app.AppId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (appId is null)
         {
-            LogOutcome(OutcomeCancel);
-            return NotImplemented();
+            return RejectLocally(ReasonClientUnavailable);
         }
 
-        // ⑥ Conditional credential fields (IN-12/IN-13): presence and length bounds around the
+        // ⑥ Cancel exits before username and password are read (IN-15): revalidate the current
+        // client and the exact redirect URI against the stored snapshot, then consume the
+        // continuation and redirect access_denied (EV-02). Only the client and the redirect URI
+        // are revalidated — a scope removed or refresh disabled since the form was rendered does
+        // not block the cancel.
+        if (action == CancelActionValue)
+        {
+            var revalidation = await _revalidator.ValidateAsync(
+                OidcContinuationRevalidation.BuildParameters(continuation, appId),
+                cancellationToken);
+            var redirectUri = revalidation switch
+            {
+                OidcAuthorizationValidationResult.Accepted accepted => accepted.RegisteredRedirectUri,
+                OidcAuthorizationValidationResult.RedirectRejection redirect => redirect.RegisteredRedirectUri,
+                _ => null
+            };
+            var revalidatedApplicationId = revalidation switch
+            {
+                OidcAuthorizationValidationResult.Accepted accepted => (Guid?)accepted.ApplicationId,
+                OidcAuthorizationValidationResult.RedirectRejection redirect => redirect.ApplicationId,
+                _ => null
+            };
+            if (redirectUri is null || revalidatedApplicationId != continuation.AppRegistrationId)
+            {
+                // Client, capability, or redirect-URI drift is a local error: nothing is consumed
+                // and no Location is set. The application-id guard is defense against a client id
+                // reassigned to a different application row.
+                LogOutcome(OutcomeCancelRejected);
+                return RejectLocally(ReasonClientUnavailable);
+            }
+
+            if (!await _continuations.TryConsumeAsync(loginHandle, now, cancellationToken))
+            {
+                // A concurrent consumption or an expiry race answers with the same local page as
+                // any unavailable continuation (EV-03).
+                LogOutcome(OutcomeCancelRejected);
+                return RejectLocally(ReasonContinuationUnavailable);
+            }
+
+            LogOutcome(OutcomeCancelRedirected);
+            return Redirect(OidcAuthorizationRedirect.BuildError(
+                redirectUri,
+                OAuthErrorCodes.AccessDenied,
+                OidcAuthorizationErrorDescriptions.AccessDenied,
+                continuation.State,
+                _jwtOptions.Issuer));
+        }
+
+        // ⑦ Conditional credential fields (IN-12/IN-13): presence and length bounds around the
         // NFC + invariant-uppercase normalization, no trimming of either value.
         if (!fields.TryGetValue(FormFieldNameUsername, out var username)
             || username.Length == 0
@@ -293,20 +359,7 @@ public sealed class OAuthLoginController : ControllerBase
             return RejectLocally(ReasonCredentialField);
         }
 
-        // The failure audit names the client the continuation was validated against. The
-        // restrictive reference (PS-23) makes a missing row unreachable from a consistent
-        // database; the endpoint still fails closed instead of auditing a guess.
-        var appId = await _dbContext.AppRegistrations
-            .AsNoTracking()
-            .Where(app => app.Id == continuation.AppRegistrationId)
-            .Select(app => app.AppId)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (appId is null)
-        {
-            return RejectLocally(ReasonClientUnavailable);
-        }
-
-        // ⑦ The shared Password validator: one credential chain, one lockout standard, no second
+        // ⑧ The shared Password validator: one credential chain, one lockout standard, no second
         // password path. The raw username is submitted exactly as the token grants submit it; the
         // repositories own the normalized ordinal lookup.
         var validator = _validatorFactory.GetValidator(IdentityConstants.GrantTypePassword);

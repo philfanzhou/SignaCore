@@ -108,7 +108,12 @@ public sealed class OAuthAuthorizationController : ControllerBase
             case OidcAuthorizationValidationResult.RedirectRejection redirect:
                 _metrics.RecordOidcAuthorizeOutcome(redirect.Error, redirect.ClientId);
                 await RecordAuditAsync(redirect.ApplicationId, redirect.Error, cancellationToken);
-                return Redirect(BuildErrorRedirect(redirect));
+                return Redirect(OidcAuthorizationRedirect.BuildError(
+                    redirect.RegisteredRedirectUri,
+                    redirect.Error,
+                    redirect.ErrorDescription,
+                    redirect.State,
+                    _jwtOptions.Issuer));
 
             case OidcAuthorizationValidationResult.Accepted accepted:
                 _metrics.RecordOidcAuthorizeOutcome(AcceptedOutcome, accepted.ClientId);
@@ -128,43 +133,6 @@ public sealed class OAuthAuthorizationController : ControllerBase
                 throw new InvalidOperationException(
                     $"Unhandled authorization validation result '{result.GetType().Name}'.");
         }
-    }
-
-    /// <summary>
-    /// Builds the safe redirect of <c>PS-17</c>: the exact registered URI plus <c>error</c>, a
-    /// closed-set English <c>error_description</c>, the byte-for-byte <c>state</c> when the request
-    /// supplied a usable one, and the issuer. There is no fragment or form-post response mode.
-    /// </summary>
-    private string BuildErrorRedirect(OidcAuthorizationValidationResult.RedirectRejection rejection)
-    {
-        // The registered URI may already carry a query, which registration preserves verbatim.
-        var separator = rejection.RegisteredRedirectUri.Contains('?', StringComparison.Ordinal)
-            ? '&'
-            : '?';
-
-        var builder = new StringBuilder(rejection.RegisteredRedirectUri);
-        builder.Append(separator);
-        AppendParameter(builder, "error", rejection.Error, first: true);
-        AppendParameter(builder, "error_description", rejection.ErrorDescription, first: false);
-        if (rejection.State is not null)
-        {
-            // The IN-05 alphabet is exactly the URI unreserved set, so escaping leaves a valid
-            // state unchanged and the client sees the bytes it sent.
-            AppendParameter(builder, "state", rejection.State, first: false);
-        }
-
-        AppendParameter(builder, "iss", _jwtOptions.Issuer, first: false);
-        return builder.ToString();
-    }
-
-    private static void AppendParameter(StringBuilder builder, string name, string value, bool first)
-    {
-        if (!first)
-        {
-            builder.Append('&');
-        }
-
-        builder.Append(name).Append('=').Append(Uri.EscapeDataString(value));
     }
 
     private IActionResult LocalError()

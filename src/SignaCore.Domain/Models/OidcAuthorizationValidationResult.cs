@@ -39,6 +39,7 @@ public static class OidcAuthorizationErrorDescriptions
     public const string MalformedCodeChallenge = "The code_challenge parameter is missing or malformed.";
     public const string UnsupportedCodeChallengeMethod = "The code_challenge_method must be S256.";
     public const string InvalidScope = "The requested scope is not permitted for this client.";
+    public const string AccessDenied = "The user cancelled the authorization request.";
 }
 
 /// <summary>

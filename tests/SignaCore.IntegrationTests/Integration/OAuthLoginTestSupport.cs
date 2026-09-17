@@ -31,6 +31,17 @@ internal static partial class OAuthLoginTestSupport
     public const string CanaryNonce = "login-canary-nonce-0123456789";
     public const string CanaryChallenge = "login-canary-challenge-abcdefghij0123456789";
     public const string FixedCorrelationId = "e2e-correlation-1234567890abcdef";
+
+    // The EV-02 cancel revalidation runs the real validator over the stored snapshot, so its
+    // continuations need a legally shaped snapshot and a client the current registration still
+    // trusts: a dedicated app whose redirect registration matches the stored URI verbatim. The
+    // RFC 7636 appendix B vector doubles as the legal S256 challenge.
+    public const string LegalAppId = "login-cancel-app";
+    public const string LegalRegisteredUri = "https://bff.cancel.test/callback?tenant=unit";
+    public const string LegalScope = "openid profile";
+    public const string LegalState = "cancel-legal-state-0123456789abcdef";
+    public const string LegalNonce = "cancel-legal-nonce-0123456789abcdef";
+    public const string LegalChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
     public const string ExpectedContentSecurityPolicy =
         "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
@@ -78,6 +89,98 @@ internal static partial class OAuthLoginTestSupport
         }
 
         return creation.LoginHandle;
+    }
+
+    /// <summary>
+    /// Seeds a continuation whose stored snapshot revalidates: the client registration still
+    /// trusts the exact redirect URI and the snapshot values are all legally shaped, so the
+    /// <c>EV-02</c> revalidation reaches the redirect decision instead of a local rejection.
+    /// </summary>
+    public static async Task<string> SeedLegalContinuationAsync(
+        IServiceProvider services,
+        DateTimeOffset? createdAt = null)
+    {
+        var applicationId = await SeedLegalApplicationAsync(services);
+        using var scope = services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IAuthorizationRequestStore>();
+        var creation = await store.CreateAsync(
+            new OidcAuthorizationValidationResult.Accepted(
+                LegalAppId,
+                applicationId,
+                LegalRegisteredUri,
+                LegalScope,
+                LegalState,
+                LegalNonce,
+                LegalChallenge),
+            createdAt ?? DateTimeOffset.UtcNow.AddMinutes(-1),
+            TestContext.Current.CancellationToken);
+        return creation.LoginHandle;
+    }
+
+    /// <summary>Begins a browser session over a revalidatable continuation and returns its form values.</summary>
+    public static async Task<LoginSession> BeginLegalLoginAsync(
+        IServiceProvider services,
+        HttpClient client)
+    {
+        var handle = await SeedLegalContinuationAsync(services);
+        using var response = await client.GetAsync(
+            $"/oauth2/login?login_handle={handle}", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var setCookie = GetSetCookieHeader(response, CookieName);
+        Assert.NotNull(setCookie);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        var token = TokenPattern().Match(body).Groups[1].Value;
+        Assert.False(string.IsNullOrEmpty(token));
+        return new LoginSession(handle, CookieValueFromHeader(setCookie!, CookieName), token);
+    }
+
+    private static async Task<Guid> SeedLegalApplicationAsync(IServiceProvider services)
+    {
+        await AppSeedLock.WaitAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            using var scope = services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var existing = await dbContext.AppRegistrations
+                .AsNoTracking()
+                .FirstOrDefaultAsync(app => app.AppId == LegalAppId, TestContext.Current.CancellationToken);
+            if (existing is not null)
+            {
+                return existing.Id;
+            }
+
+            var app = new AppRegistrationEntity
+            {
+                Id = Guid.NewGuid(),
+                AppId = LegalAppId,
+                AppSecretHash = BCrypt.Net.BCrypt.HashPassword("login-cancel-secret"),
+                AppName = "Login Cancel App",
+                IsActive = true,
+                CreatedAt = DateTimeOffset.UtcNow,
+                AudienceMode = AudienceMode.PerApplication,
+                ClientType = OidcClientType.Confidential,
+                AllowAuthorizationCode = true,
+                AllowedScopes = "openid profile",
+                AllowRefreshToken = false
+            };
+            app.RedirectUris =
+            [
+                new AppRedirectUriEntity
+                {
+                    Id = Guid.NewGuid(),
+                    AppRegistrationId = app.Id,
+                    Kind = RedirectUriKind.Redirect,
+                    CanonicalUri = LegalRegisteredUri
+                }
+            ];
+            dbContext.AppRegistrations.Add(app);
+            await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return app.Id;
+        }
+        finally
+        {
+            AppSeedLock.Release();
+        }
     }
 
     private static async Task<Guid> SeedApplicationAsync(IServiceProvider services)
