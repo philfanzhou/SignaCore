@@ -71,18 +71,6 @@ internal static class SetupModeHost
                         Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0
                     }));
-            // The bootstrap endpoints are mapped here too and answer "already configured"; their
-            // policy still has to exist or the endpoint cannot be built.
-            options.AddPolicy(BootstrapController.RateLimitPolicy, context =>
-                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-                    {
-                        AutoReplenishment = true,
-                        PermitLimit = 5,
-                        Window = TimeSpan.FromMinutes(1),
-                        QueueLimit = 0
-                    }));
             options.OnRejected = async (context, _) =>
             {
                 context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;

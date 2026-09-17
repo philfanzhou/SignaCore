@@ -4,7 +4,6 @@ import {
   applyProviderDefaults,
   bootstrapAdvanced,
   bootstrapError,
-  bootstrapFilePath,
   bootstrapForm,
   bootstrapMessage,
   bootstrapPhase,
@@ -44,8 +43,8 @@ function providerChanged() {
 
       <div v-else class="auth-card-body">
         <div class="auth-subtitle">
-          This protected workflow writes <code>{{ bootstrapFilePath }}</code>. The database password
-          and master key are write-only and are never returned by the service.
+          This protected workflow writes the local bootstrap file. The database password and master
+          key are write-only and are never returned by the service.
         </div>
 
         <div class="field">
@@ -107,9 +106,12 @@ function providerChanged() {
         </div>
 
         <div class="field">
-          <label>One-time bootstrap code</label>
-          <input v-model="bootstrapForm.bootstrapCode" class="input" autocomplete="off" :disabled="busy" @keyup.enter="saveBootstrap">
-          <div class="auth-subtitle" style="margin-top: 6px">Read this code once from the process standard output or container log.</div>
+          <label>One-time bootstrap credential</label>
+          <input v-model="bootstrapForm.bootstrapCredential" class="input" autocomplete="off" :disabled="busy" @keyup.enter="saveBootstrap">
+          <div class="auth-subtitle" style="margin-top: 6px">
+            Read this credential once from the process standard output or container log. Restarting
+            SignaCore issues a new one and invalidates this one.
+          </div>
         </div>
 
         <div v-if="bootstrapMessage" class="alert alert-info" style="margin-top: 12px">{{ bootstrapMessage }}</div>

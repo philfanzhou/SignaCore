@@ -10,8 +10,9 @@ Startup has a bootstrap phase and an application phase.
 
 When the fixed bootstrap file is absent, the process remains live without composing any database,
 identity, JWT, key-management, or provider services. It serves `/bootstrap`, reports readiness false,
-and gates normal APIs with `503 bootstrap_configuration_required`. A random, rate-limited one-time
-bootstrap code is printed once to standard output and is required to test or save a database target.
+and gates normal APIs with `503 service.phase.unavailable`. A random, rate-limited one-time bootstrap
+credential is printed once to standard output and is required to test or save a database target.
+Every restart issues a new credential and invalidates the previous one.
 
 For a new installation, the bootstrap backend generates the master key; for migration or recovery,
 the operator submits the existing key as a write-only value. The backend validates the provider and

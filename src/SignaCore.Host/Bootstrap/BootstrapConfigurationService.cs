@@ -11,9 +11,6 @@ internal enum BootstrapOutcome
 {
     Succeeded,
 
-    /// <summary>The one-time bootstrap code was wrong or already used.</summary>
-    InvalidCode,
-
     /// <summary>The submitted provider, version, or connection details failed validation.</summary>
     InvalidRequest,
 

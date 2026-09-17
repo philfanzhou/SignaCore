@@ -54,7 +54,7 @@ internal static class AdminSpaBranch
 
     /// <summary>
     /// Serves the admin SPA on the normal host through a mapped fallback endpoint rather than a
-    /// post-pipeline branch.
+    /// post-pipeline branch, and returns the endpoint's builder.
     /// </summary>
     /// <remarks>
     /// The normal host composes the ServiceMantle pipeline, which owns routing and runs a phase
@@ -67,14 +67,16 @@ internal static class AdminSpaBranch
     /// which runs after the gate but before endpoints — stays effective. The endpoint serves files
     /// itself: the static-file middleware does not serve a request whose selected endpoint already
     /// carries a request delegate. The method is limited to GET and HEAD so an unmatched POST keeps
-    /// routing's 405 rather than being turned into a 404 or an HTML body.
+    /// routing's 405 rather than being turned into a 404 or an HTML body. The returned builder lets
+    /// the Bootstrap Configuration Mode host mark the same fallback with its own phase admission;
+    /// the normal host ignores it.
     /// </remarks>
-    public static void MapNormalHostSpaFallback(WebApplication app, int httpPort)
+    public static IEndpointConventionBuilder MapNormalHostSpaFallback(WebApplication app, int httpPort)
     {
         var appTitle = app.Configuration["APP_TITLE"] ?? "SignaCore";
         var contentTypeProvider = new FileExtensionContentTypeProvider();
 
-        app.MapFallback("{**path}", async (HttpContext context) =>
+        return app.MapFallback("{**path}", async (HttpContext context) =>
             {
                 if (!AdminSpaRouting.ShouldServeSpaFallback(context, httpPort))
                 {

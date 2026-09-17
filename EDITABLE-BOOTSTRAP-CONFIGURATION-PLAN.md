@@ -138,9 +138,10 @@ Bootstrap Configuration Mode that:
 - does not initialize normal identity services before a validated database and master key exist.
 
 Because SignaCore may be reachable from a public or private network, the bootstrap UI must not use a
-"first visitor wins" flow. A cryptographically random, rate-limited, one-time bootstrap code is
-printed once to standard output and is required to save the bootstrap configuration. This code is
-ephemeral operational proof, not another configuration-file field.
+"first visitor wins" flow. A cryptographically random, rate-limited, one-time bootstrap credential is
+printed once to standard output and is required to save the bootstrap configuration. This credential
+is ephemeral operational proof, not another configuration-file field. Every restart issues a new
+credential and invalidates the previous one.
 
 The bootstrap form collects:
 
@@ -148,7 +149,7 @@ The bootstrap form collects:
 - database server version;
 - either structured database fields or an advanced full connection string;
 - a new-install versus existing-install choice;
-- the one-time bootstrap code.
+- the one-time bootstrap credential.
 
 For a new installation, the backend generates a cryptographically strong `MasterKey`; the operator
 does not invent one. For migration or recovery, the UI accepts the existing master key as a
@@ -277,7 +278,7 @@ this plan.
 
 - With no bootstrap file, the process stays live and serves the protected bootstrap UI.
 - Readiness remains false and normal identity endpoints return a structured 503.
-- An invalid or expired one-time bootstrap code cannot save configuration.
+- An invalid or expired one-time bootstrap credential cannot save configuration.
 - Invalid database settings do not create or replace the file.
 - A successful setup creates exactly the agreed schema with inline `MasterKey`.
 - No separate master-key file is required or generated.

@@ -88,9 +88,10 @@ mkdir -p ./config
 chmod 700 ./config
 ```
 
-On the first start, leave the directory empty. SignaCore stays live, prints a one-time bootstrap code
-to standard output, and serves `/bootstrap`. The protected form tests the database and creates this
-exact file atomically, generating the master key for a new installation:
+On the first start, leave the directory empty. SignaCore stays live, prints a one-time bootstrap
+credential to standard output, and serves `/bootstrap`. The protected form tests the database and
+creates this exact file atomically, generating the master key for a new installation. Restarting
+SignaCore issues a new credential and invalidates the previous one:
 
 ```json
 {
