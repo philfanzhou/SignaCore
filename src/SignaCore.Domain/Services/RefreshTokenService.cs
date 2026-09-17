@@ -102,9 +102,13 @@ public class RefreshTokenService : IRefreshTokenService
         string? sourceAppId = null)
     {
         var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+        var id = Guid.NewGuid();
         return (rawToken, new RefreshTokenEntity
         {
-            Id = Guid.NewGuid(),
+            Id = id,
+            // PS-07: every legacy issuance, rotation replacement, and cross-application exchange
+            // row is a singleton root — family_id = id with every interactive marker null.
+            FamilyId = id,
             AccountId = account.Id,
             TokenValue = RefreshTokenDigest.Compute(rawToken),
             CreatedAt = DateTimeOffset.UtcNow,

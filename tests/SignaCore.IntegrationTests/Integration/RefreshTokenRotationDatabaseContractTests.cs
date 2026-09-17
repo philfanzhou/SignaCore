@@ -226,9 +226,12 @@ public sealed class RefreshTokenRotationDatabaseContractTests
                 IsActive = true,
                 CreatedAt = DateTimeOffset.UtcNow
             });
+            var tokenId = Guid.NewGuid();
             context.RefreshTokens.Add(new RefreshTokenEntity
             {
-                Id = Guid.NewGuid(),
+                Id = tokenId,
+                // PS-07: a directly seeded legacy row is the singleton root of its own family.
+                FamilyId = tokenId,
                 AccountId = accountId,
                 TokenValue = RefreshTokenDigest.Compute(tokenValue),
                 CreatedAt = DateTimeOffset.UtcNow,

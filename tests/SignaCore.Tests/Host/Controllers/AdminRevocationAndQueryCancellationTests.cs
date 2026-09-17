@@ -229,9 +229,12 @@ public sealed class AdminRevocationAndQueryCancellationTests
     {
         var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true, CreatedAt = DateTimeOffset.UtcNow };
         context.Accounts.Add(account);
+        var seededTokenId = Guid.NewGuid();
         context.RefreshTokens.Add(new RefreshTokenEntity
         {
-            Id = Guid.NewGuid(),
+            Id = seededTokenId,
+            // PS-07: a directly seeded legacy row is the singleton root of its own family.
+            FamilyId = seededTokenId,
             AccountId = account.Id,
             AppId = "revocation-app",
             // Stored refresh tokens are digests; the endpoint looks the presented value up the same way.

@@ -21,8 +21,9 @@ redeemed at most once by the token endpoint on any instance, using only the shar
 - auth_time (copied from the referenced session at creation)
 - created_at / expires_at (creation plus the fixed 60-second code lifetime)
 - consumed_at (nullable; written at most once by the atomic consumption)
-- refresh_family_id (nullable, no reference, no index; reserved for the interactive refresh family
-  link — a database check constraint requires consumed_at to be set whenever it is not null)
+- refresh_family_id (nullable; the interactive refresh family root link — a restrictive reference
+  to refresh_tokens with a lookup index, added by the family migration after the legacy backfill;
+  a database check constraint requires consumed_at to be set whenever it is not null)
 
 ## Relationships and invariants
 

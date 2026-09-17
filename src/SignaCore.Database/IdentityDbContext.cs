@@ -108,9 +108,28 @@ public class IdentityDbContext : DbContext, IServiceDbContext
         {
             entity.ToTable(
                 "refresh_tokens",
-                table => table.HasCheckConstraint(
-                    "CK_refresh_tokens_app_id_not_empty",
-                    "app_id <> ''"));
+                table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_refresh_tokens_app_id_not_empty",
+                        "app_id <> ''");
+                    // PS-07/PS-06: a row is either a complete legacy row (every interactive
+                    // marker null, so only a legacy row can carry parent/consumed) or a complete
+                    // interactive row (session, scope, and auth time all present). A partial
+                    // marker is rejected on both providers.
+                    table.HasCheckConstraint(
+                        "CK_refresh_tokens_family_marker",
+                        "(identity_session_id IS NULL AND scope IS NULL AND auth_time IS NULL "
+                        + "AND consumed_at IS NULL AND parent_id IS NULL) "
+                        + "OR (identity_session_id IS NOT NULL AND scope IS NOT NULL "
+                        + "AND auth_time IS NOT NULL)");
+                    // PS-06: a root names itself and has no parent; a child names another row as
+                    // both its root and its immediate parent, and is never its own parent.
+                    table.HasCheckConstraint(
+                        "CK_refresh_tokens_family_shape",
+                        "(family_id = id AND parent_id IS NULL) "
+                        + "OR (family_id <> id AND parent_id IS NOT NULL AND parent_id <> id)");
+                });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AccountId).HasColumnName("account_id");
@@ -123,10 +142,39 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.Property(e => e.SmsUserLoginId).HasColumnName("sms_user_login_id");
             entity.Property(e => e.WechatUserLoginId).HasColumnName("wechat_user_login_id");
             entity.Property(e => e.SourceAppId).HasColumnName("source_app_id").HasMaxLength(IdentityConstants.MaxAppIdLength);
+            entity.Property(e => e.FamilyId).HasColumnName("family_id");
+            entity.Property(e => e.ParentId).HasColumnName("parent_id");
+            entity.Property(e => e.IdentitySessionId).HasColumnName("identity_session_id");
+            // The family scope copies the authorization-code snapshot byte for byte, so it shares
+            // the canonical scope length of authorization_codes.scope/authorization_requests.scope.
+            entity.Property(e => e.Scope)
+                .HasColumnName("scope")
+                .HasMaxLength(IdentityConstants.MaxOidcAllowedScopesLength);
+            ConfigureInstant(entity.Property(e => e.AuthTime).HasColumnName("auth_time"));
+            ConfigureInstant(entity.Property(e => e.ConsumedAt).HasColumnName("consumed_at"));
             entity.HasIndex(e => e.TokenValue).IsUnique();
             entity.HasIndex(e => e.LdapCredentialId);
             entity.HasIndex(e => e.SmsUserLoginId);
             entity.HasIndex(e => e.WechatUserLoginId);
+            entity.HasIndex(e => e.FamilyId);
+            entity.HasIndex(e => e.IdentitySessionId);
+            // One child per parent (PS-06): the unique nullable index is what makes a second
+            // child of the same consumed parent a database failure.
+            entity.HasIndex(e => e.ParentId).IsUnique();
+            // PS-23: the family references are restrictive; deleting a referenced root, parent,
+            // or session fails and cleanup never nulls a reference to force a delete.
+            entity.HasOne<RefreshTokenEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.FamilyId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<RefreshTokenEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.ParentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<IdentitySessionEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.IdentitySessionId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<AppRegistrationEntity>(entity =>
@@ -403,15 +451,18 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
             ConfigureInstant(entity.Property(e => e.ExpiresAt).HasColumnName("expires_at"));
             ConfigureInstant(entity.Property(e => e.ConsumedAt).HasColumnName("consumed_at"));
-            // PS-23's single reserved exception: no reference and no index on the family link in
-            // this slice; #97 adds the reference after the backfill and #98 writes the values.
+            // PS-23's single reserved exception, now resolved: #50 created the family-link column
+            // without a reference because no family root shape existed; the family migration adds
+            // the restrictive reference and its index after the legacy backfill, and #98 writes
+            // the values.
             entity.Property(e => e.RefreshFamilyId).HasColumnName("refresh_family_id");
             entity.HasIndex(e => e.CodeDigest).IsUnique();
             entity.HasIndex(e => e.IdentitySessionId);
-            // PS-23: all three references are restrictive and non-nullable, created together with
-            // this table, so a stored code can never name a client, account, or session the
-            // schema cannot resolve. Deleting a referenced row fails; cleanup deletes code rows by
-            // retention and never nulls a reference.
+            entity.HasIndex(e => e.RefreshFamilyId);
+            // PS-23: all three non-null references are restrictive and were created together with
+            // this table, and the nullable family link resolves the root it names; deleting a
+            // referenced row fails, and cleanup deletes code rows by retention without ever
+            // nulling a reference.
             entity.HasOne<AppRegistrationEntity>()
                 .WithMany()
                 .HasForeignKey(e => e.AppRegistrationId)
@@ -423,6 +474,10 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.HasOne<IdentitySessionEntity>()
                 .WithMany()
                 .HasForeignKey(e => e.IdentitySessionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<RefreshTokenEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.RefreshFamilyId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

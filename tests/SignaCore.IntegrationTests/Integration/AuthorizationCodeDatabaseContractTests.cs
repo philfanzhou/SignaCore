@@ -10,6 +10,7 @@ using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
+using SignaCore.IntegrationTests.Integration;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;
@@ -55,10 +56,12 @@ public sealed class AuthorizationCodeDatabaseContractTests
 
         await using var context = new IdentityDbContext(options);
 
-        // The exact 14-column set, in order, with nullability and the provider storage types.
+        // The exact 14-column set with nullability and the provider storage types. The family
+        // migration rebuilt this table on SQLite to add the deferred PS-23 reference, so the
+        // physical column order is the rebuild's; the contract is the name set, not the order.
         var columns = await ReadPragmaAsync(context, "PRAGMA table_info(authorization_codes)");
         Assert.Equal(
-            new[]
+            new HashSet<(string, string, bool)>
             {
                 ("id", "TEXT", true),
                 ("code_digest", "TEXT", true),
@@ -75,7 +78,7 @@ public sealed class AuthorizationCodeDatabaseContractTests
                 ("consumed_at", "INTEGER", false),
                 ("refresh_family_id", "TEXT", false)
             },
-            columns.Select(row => (row[1], row[2], row[3] == "1")).ToArray());
+            columns.Select(row => (row[1], row[2], row[3] == "1")).ToHashSet());
 
         // The unique code_digest index and the identity_session_id index exist.
         var indexNames = await ReadPragmaAsync(context, "PRAGMA index_list(authorization_codes)");
@@ -97,11 +100,13 @@ public sealed class AuthorizationCodeDatabaseContractTests
 
         Assert.Contains("code_digest", uniqueIndexedColumns);
         Assert.Contains("identity_session_id", indexedColumns);
+        Assert.Contains("refresh_family_id", indexedColumns);
 
-        // PS-23: all three references are restrictive; nothing cascades.
+        // PS-23: the three table-creating references plus the deferred family-root reference
+        // added by the family migration are restrictive; nothing cascades.
         var foreignKeys = await ReadPragmaAsync(
             context, "PRAGMA foreign_key_list(authorization_codes)");
-        Assert.Equal(3, foreignKeys.Count);
+        Assert.Equal(4, foreignKeys.Count);
         Assert.Contains(foreignKeys, key =>
             key[2] == "app_registrations" && key[3] == "app_registration_id" && key[4] == "id"
             && string.Equals(key[6], "RESTRICT", StringComparison.OrdinalIgnoreCase));
@@ -110,6 +115,9 @@ public sealed class AuthorizationCodeDatabaseContractTests
             && string.Equals(key[6], "RESTRICT", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(foreignKeys, key =>
             key[2] == "identity_sessions" && key[3] == "identity_session_id" && key[4] == "id"
+            && string.Equals(key[6], "RESTRICT", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(foreignKeys, key =>
+            key[2] == "refresh_tokens" && key[3] == "refresh_family_id" && key[4] == "id"
             && string.Equals(key[6], "RESTRICT", StringComparison.OrdinalIgnoreCase));
 
         // The family/consumption pairing check exists in the DDL...
@@ -120,11 +128,26 @@ public sealed class AuthorizationCodeDatabaseContractTests
             "CK_authorization_codes_family_requires_consumption", ddl, StringComparison.Ordinal);
 
         // ...and is enforced: a family link without consumption fails, while family-with-
-        // consumption and the empty pair both succeed.
-        await AssertFamilyRejectedAsync(context, accountId, appId, sessionId);
+        // consumption and the empty pair both succeed. The family link now also resolves the
+        // deferred PS-23 reference, so the pairing cases link a real singleton root.
+        var rootId = Guid.NewGuid();
+        context.RefreshTokens.Add(new RefreshTokenEntity
+        {
+            Id = rootId,
+            FamilyId = rootId,
+            AccountId = accountId,
+            TokenValue = RefreshTokenDigest.Compute("ps05-family-root-token"),
+            CreatedAt = Microsecond(DateTimeOffset.UtcNow),
+            ExpiresAt = Microsecond(DateTimeOffset.UtcNow).AddHours(1),
+            AppId = ClientId
+        });
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        context.ChangeTracker.Clear();
+
+        await AssertFamilyRejectedAsync(context, accountId, appId, sessionId, rootId);
         await InsertValidCodeAsync(
             context, accountId, appId, sessionId,
-            code => code.RefreshFamilyId = Guid.NewGuid(),
+            code => code.RefreshFamilyId = rootId,
             consumed: true);
         context.ChangeTracker.Clear();
 
@@ -157,6 +180,9 @@ public sealed class AuthorizationCodeDatabaseContractTests
     public async Task UpgradeFromAddIdentitySessions_IsAdditiveAndDownIsSymmetric()
     {
         const string preCodeMigration = "20260916103412_AddIdentitySessions";
+        // The migration under test, pinned: later migrations in the chain legitimately change
+        // refresh_tokens (the family columns), which is not this migration's contract.
+        const string codeMigration = "20260916160633_AddAuthorizationCodes";
         await using var database = new SqliteCodeDatabase();
         var options = database.BuildOptions();
         await using var context = new IdentityDbContext(options);
@@ -187,11 +213,6 @@ public sealed class AuthorizationCodeDatabaseContractTests
             Id = appId, AppId = ClientId, AppSecretHash = "hash",
             AppName = "Code Upgrade", IsActive = true, CreatedAt = createdAt
         });
-        context.RefreshTokens.Add(new RefreshTokenEntity
-        {
-            Id = tokenId, AccountId = accountId, TokenValue = tokenDigest,
-            CreatedAt = createdAt, ExpiresAt = createdAt.AddHours(1), AppId = ClientId
-        });
         context.AuthorizationRequests.Add(new AuthorizationRequestEntity
         {
             Id = Guid.NewGuid(),
@@ -208,6 +229,11 @@ public sealed class AuthorizationCodeDatabaseContractTests
         context.IdentitySessions.Add(CreateValidSession(accountId, credentialId, sessionId, createdAt));
         await context.SaveChangesAsync(cancellationToken);
 
+        // The legacy token row is seeded with raw SQL: the migration version under test predates
+        // the family columns a current-EF-model INSERT would name.
+        await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenSqliteAsync(
+            context, tokenId, accountId, tokenDigest, createdAt, createdAt.AddHours(1), ClientId);
+
         var accountsBefore = await GetSqliteColumnsAsync(context, "accounts");
         var credentialsBefore = await GetSqliteColumnsAsync(context, "password_credentials");
         var appsBefore = await GetSqliteColumnsAsync(context, "app_registrations");
@@ -216,7 +242,7 @@ public sealed class AuthorizationCodeDatabaseContractTests
         var sessionsBefore = await GetSqliteColumnsAsync(context, "identity_sessions");
         Assert.False(await SqliteTableExistsAsync(context, "authorization_codes"));
 
-        await migrator.MigrateAsync(cancellationToken: cancellationToken);
+        await migrator.MigrateAsync(codeMigration, cancellationToken);
 
         Assert.True(await SqliteTableExistsAsync(context, "authorization_codes"));
         Assert.Empty(await context.AuthorizationCodes.AsNoTracking().ToListAsync(cancellationToken));
@@ -238,7 +264,7 @@ public sealed class AuthorizationCodeDatabaseContractTests
             await GetSqliteColumnsAsync(context, "identity_sessions")));
         await AssertSeedUnchangedAsync(context, accountId, appId, tokenId, sessionId, tokenDigest);
 
-        await migrator.MigrateAsync(cancellationToken: cancellationToken);
+        await migrator.MigrateAsync(codeMigration, cancellationToken);
         Assert.True(await SqliteTableExistsAsync(context, "authorization_codes"));
     }
 
@@ -1196,10 +1222,11 @@ public sealed class AuthorizationCodeDatabaseContractTests
         IdentityDbContext context,
         Guid accountId,
         Guid appId,
-        Guid sessionId)
+        Guid sessionId,
+        Guid rootId)
     {
         var code = CreateValidCode(accountId, appId, sessionId, Microsecond(DateTimeOffset.UtcNow));
-        code.RefreshFamilyId = Guid.NewGuid();
+        code.RefreshFamilyId = rootId;
         context.AuthorizationCodes.Add(code);
         await Assert.ThrowsAsync<DbUpdateException>(() =>
             context.SaveChangesAsync(TestContext.Current.CancellationToken));
@@ -1251,8 +1278,10 @@ public sealed class AuthorizationCodeDatabaseContractTests
         Assert.Equal(ClientId, application.AppId);
         Assert.True(application.IsActive);
 
-        var token = await context.RefreshTokens.AsNoTracking()
-            .SingleAsync(row => row.Id == tokenId, cancellationToken);
+        // The Down state predates the family columns, so the token row is read with raw SQL
+        // instead of the current EF model.
+        var token = await RefreshTokenFamilyTestSupport.ReadRefreshTokenRowSqliteAsync(
+            context, tokenId);
         Assert.Equal(tokenDigest, token.TokenValue);
 
         var session = await context.IdentitySessions.AsNoTracking()

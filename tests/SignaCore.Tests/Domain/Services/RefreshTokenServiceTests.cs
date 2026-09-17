@@ -46,6 +46,12 @@ public class RefreshTokenServiceTests
             t.TokenValue == RefreshTokenDigest.Compute(token) &&
             !t.IsRevoked &&
             t.AppId == "app-1" &&
+            t.FamilyId == t.Id &&
+            t.ParentId == null &&
+            t.IdentitySessionId == null &&
+            t.Scope == null &&
+            t.AuthTime == null &&
+            t.ConsumedAt == null &&
             t.ExpiresAt > DateTimeOffset.UtcNow.AddDays(6))), Times.Once);
     }
 
@@ -69,7 +75,8 @@ public class RefreshTokenServiceTests
                     replacement.AccountId == account.Id &&
                     replacement.TokenValue == RefreshTokenDigest.Compute(token) &&
                     !replacement.IsRevoked &&
-                    replacement.AppId == "app-1")),
+                    replacement.AppId == "app-1" &&
+                    replacement.FamilyId == replacement.Id)),
             Times.Once);
         _repoMock.Verify(r => r.AddAsync(It.IsAny<RefreshTokenEntity>()), Times.Never);
     }
@@ -92,6 +99,8 @@ public class RefreshTokenServiceTests
             minted.AppId == "target-app" &&
             // Marks the token as already exchanged, so it cannot be exchanged a second time.
             minted.SourceAppId == "source-app" &&
+            // The cross-application mint is a fresh singleton root of its own family (PS-07).
+            minted.FamilyId == minted.Id &&
             !minted.IsRevoked)), Times.Once);
     }
 

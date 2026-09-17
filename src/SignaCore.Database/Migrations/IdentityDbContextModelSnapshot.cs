@@ -753,6 +753,8 @@ namespace SignaCore.Database.Migrations
 
                     b.HasIndex("IdentitySessionId");
 
+                    b.HasIndex("RefreshFamilyId");
+
                     b.ToTable("authorization_codes", null, t =>
                         {
                             t.HasCheckConstraint("CK_authorization_codes_family_requires_consumption", "refresh_family_id IS NULL OR consumed_at IS NOT NULL");
@@ -1218,6 +1220,14 @@ namespace SignaCore.Database.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("app_id");
 
+                    b.Property<DateTimeOffset?>("AuthTime")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("auth_time");
+
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("consumed_at");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
@@ -1226,6 +1236,14 @@ namespace SignaCore.Database.Migrations
                         .HasColumnType("timestamptz")
                         .HasColumnName("expires_at");
 
+                    b.Property<Guid>("FamilyId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("family_id");
+
+                    b.Property<Guid?>("IdentitySessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("identity_session_id");
+
                     b.Property<bool>("IsRevoked")
                         .HasColumnType("boolean")
                         .HasColumnName("is_revoked");
@@ -1233,6 +1251,15 @@ namespace SignaCore.Database.Migrations
                     b.Property<Guid?>("LdapCredentialId")
                         .HasColumnType("uuid")
                         .HasColumnName("ldap_credential_id");
+
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parent_id");
+
+                    b.Property<string>("Scope")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("scope");
 
                     b.Property<Guid?>("SmsUserLoginId")
                         .HasColumnType("uuid")
@@ -1255,7 +1282,14 @@ namespace SignaCore.Database.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("FamilyId");
+
+                    b.HasIndex("IdentitySessionId");
+
                     b.HasIndex("LdapCredentialId");
+
+                    b.HasIndex("ParentId")
+                        .IsUnique();
 
                     b.HasIndex("SmsUserLoginId");
 
@@ -1267,6 +1301,10 @@ namespace SignaCore.Database.Migrations
                     b.ToTable("refresh_tokens", null, t =>
                         {
                             t.HasCheckConstraint("CK_refresh_tokens_app_id_not_empty", "app_id <> ''");
+
+                            t.HasCheckConstraint("CK_refresh_tokens_family_marker", "(identity_session_id IS NULL AND scope IS NULL AND auth_time IS NULL AND consumed_at IS NULL AND parent_id IS NULL) OR (identity_session_id IS NOT NULL AND scope IS NOT NULL AND auth_time IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_refresh_tokens_family_shape", "(family_id = id AND parent_id IS NULL) OR (family_id <> id AND parent_id IS NOT NULL AND parent_id <> id)");
                         });
                 });
 
@@ -1496,6 +1534,11 @@ namespace SignaCore.Database.Migrations
                         .HasForeignKey("IdentitySessionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("SignaCore.Database.Entity.RefreshTokenEntity", null)
+                        .WithMany()
+                        .HasForeignKey("RefreshFamilyId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("SignaCore.Database.Entity.AuthorizationRequestEntity", b =>
@@ -1538,6 +1581,25 @@ namespace SignaCore.Database.Migrations
                         .HasForeignKey("AppRegistrationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("SignaCore.Database.Entity.RefreshTokenEntity", b =>
+                {
+                    b.HasOne("SignaCore.Database.Entity.RefreshTokenEntity", null)
+                        .WithMany()
+                        .HasForeignKey("FamilyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SignaCore.Database.Entity.IdentitySessionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("IdentitySessionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("SignaCore.Database.Entity.RefreshTokenEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("SignaCore.Database.Entity.AppRegistrationEntity", b =>

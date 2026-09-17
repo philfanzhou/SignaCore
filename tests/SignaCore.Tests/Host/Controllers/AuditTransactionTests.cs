@@ -1243,16 +1243,22 @@ public sealed class AuditTransactionTests
     }
 
     private static RefreshTokenEntity CreateRefreshToken(
-        Guid accountId, string appId, string tokenValue, DateTimeOffset expiresAt) => new()
+        Guid accountId, string appId, string tokenValue, DateTimeOffset expiresAt)
     {
-        Id = Guid.NewGuid(),
-        AccountId = accountId,
-        AppId = appId,
-        TokenValue = tokenValue,
-        ExpiresAt = expiresAt,
-        CreatedAt = DateTimeOffset.UtcNow,
-        IsRevoked = false
-    };
+        var id = Guid.NewGuid();
+        return new RefreshTokenEntity
+        {
+            Id = id,
+            // PS-07: a directly seeded legacy row is the singleton root of its own family.
+            FamilyId = id,
+            AccountId = accountId,
+            AppId = appId,
+            TokenValue = tokenValue,
+            ExpiresAt = expiresAt,
+            CreatedAt = DateTimeOffset.UtcNow,
+            IsRevoked = false
+        };
+    }
 
     /// <summary>
     /// Fails the test when an audit write observes anything other than the token the caller passed

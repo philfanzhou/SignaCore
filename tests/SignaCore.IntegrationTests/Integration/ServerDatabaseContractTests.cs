@@ -167,6 +167,9 @@ public sealed class ServerDatabaseContractTests
             "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL continuation contract.");
 
         const string preContinuationMigration = "20260914171835_DropLegacyDataProtectionKeys";
+        // The migration under test, pinned: later migrations in the chain legitimately change
+        // refresh_tokens (the family columns), which is not this migration's contract.
+        const string continuationMigration = "20260916073310_AddAuthorizationRequests";
         var container = new PostgreSqlBuilder(PostgreSqlImage)
             .WithDatabase("identity")
             .WithUsername("postgres")
@@ -213,22 +216,19 @@ public sealed class ServerDatabaseContractTests
                     IsActive = true,
                     CreatedAt = createdAt
                 });
-                context.RefreshTokens.Add(new RefreshTokenEntity
-                {
-                    Id = tokenId,
-                    AccountId = accountId,
-                    TokenValue = tokenDigest,
-                    CreatedAt = createdAt,
-                    ExpiresAt = expiresAt,
-                    AppId = "continuation-upgrade-app"
-                });
                 await context.SaveChangesAsync(cancellationToken);
+
+                // The legacy token row is seeded with raw SQL: the migration version under test
+                // predates the family columns a current-EF-model INSERT would name.
+                await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenPostgreSqlAsync(
+                    context, tokenId, accountId, tokenDigest, createdAt, expiresAt,
+                    "continuation-upgrade-app");
 
                 var refreshColumnsBefore = await GetPostgreSqlColumnsAsync(context, "refresh_tokens");
                 var appColumnsBefore = await GetPostgreSqlColumnsAsync(context, "app_registrations");
                 Assert.False(await PostgreSqlTableExistsAsync(context, "authorization_requests"));
 
-                await migrator.MigrateAsync(cancellationToken: cancellationToken);
+                await migrator.MigrateAsync(continuationMigration, cancellationToken);
 
                 Assert.True(await PostgreSqlTableExistsAsync(context, "authorization_requests"));
                 Assert.Empty(await context.AuthorizationRequests
@@ -251,7 +251,7 @@ public sealed class ServerDatabaseContractTests
                 await AssertSeedUnchangedAsync(
                     context, accountId, appId, tokenId, createdAt, expiresAt, tokenDigest);
 
-                await migrator.MigrateAsync(cancellationToken: cancellationToken);
+                await migrator.MigrateAsync(continuationMigration, cancellationToken);
             }
 
             // ---- Exact fresh schema shape ----
@@ -375,6 +375,9 @@ public sealed class ServerDatabaseContractTests
             "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL identity session contract.");
 
         const string preSessionMigration = "20260916073310_AddAuthorizationRequests";
+        // The migration under test, pinned: later migrations in the chain legitimately change
+        // refresh_tokens (the family columns), which is not this migration's contract.
+        const string sessionMigration = "20260916103405_AddIdentitySessions";
         var container = new PostgreSqlBuilder(PostgreSqlImage)
             .WithDatabase("identity")
             .WithUsername("postgres")
@@ -422,11 +425,6 @@ public sealed class ServerDatabaseContractTests
                     Id = appId, AppId = "session-upgrade-app", AppSecretHash = "hash",
                     AppName = "Session Upgrade", IsActive = true, CreatedAt = createdAt
                 });
-                context.RefreshTokens.Add(new RefreshTokenEntity
-                {
-                    Id = tokenId, AccountId = accountId, TokenValue = tokenDigest,
-                    CreatedAt = createdAt, ExpiresAt = expiresAt, AppId = "session-upgrade-app"
-                });
                 context.AuthorizationRequests.Add(new AuthorizationRequestEntity
                 {
                     Id = Guid.NewGuid(),
@@ -442,6 +440,12 @@ public sealed class ServerDatabaseContractTests
                 });
                 await context.SaveChangesAsync(cancellationToken);
 
+                // The legacy token row is seeded with raw SQL: the migration version under test
+                // predates the family columns a current-EF-model INSERT would name.
+                await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenPostgreSqlAsync(
+                    context, tokenId, accountId, tokenDigest, createdAt, expiresAt,
+                    "session-upgrade-app");
+
                 var accountsBefore = await GetPostgreSqlColumnsAsync(context, "accounts");
                 var credentialsBefore = await GetPostgreSqlColumnsAsync(context, "password_credentials");
                 var appsBefore = await GetPostgreSqlColumnsAsync(context, "app_registrations");
@@ -449,7 +453,7 @@ public sealed class ServerDatabaseContractTests
                 var continuationsBefore = await GetPostgreSqlColumnsAsync(context, "authorization_requests");
                 Assert.False(await PostgreSqlTableExistsAsync(context, "identity_sessions"));
 
-                await migrator.MigrateAsync(cancellationToken: cancellationToken);
+                await migrator.MigrateAsync(sessionMigration, cancellationToken);
 
                 Assert.True(await PostgreSqlTableExistsAsync(context, "identity_sessions"));
                 Assert.Empty(await context.IdentitySessions.AsNoTracking().ToListAsync(cancellationToken));
@@ -470,7 +474,7 @@ public sealed class ServerDatabaseContractTests
                 Assert.True(continuationsBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "authorization_requests")));
                 await AssertSeedUnchangedAsync(context);
 
-                await migrator.MigrateAsync(cancellationToken: cancellationToken);
+                await migrator.MigrateAsync(sessionMigration, cancellationToken);
                 Assert.True(await PostgreSqlTableExistsAsync(context, "identity_sessions"));
 
                 async Task AssertSeedUnchangedAsync(IdentityDbContext assertionContext)
@@ -493,8 +497,10 @@ public sealed class ServerDatabaseContractTests
                     Assert.True(application.IsActive);
                     Assert.Equal(createdAt.UtcTicks / 10, application.CreatedAt.UtcTicks / 10);
 
-                    var token = await assertionContext.RefreshTokens.AsNoTracking()
-                        .SingleAsync(row => row.Id == tokenId, cancellationToken);
+                    // The Down state predates the family columns, so the token row is read
+                    // with raw SQL instead of the current EF model.
+                    var token = await RefreshTokenFamilyTestSupport
+                        .ReadRefreshTokenRowPostgreSqlAsync(assertionContext, tokenId);
                     Assert.Equal(tokenDigest, token.TokenValue);
                     Assert.False(token.IsRevoked);
                     Assert.Equal(createdAt.UtcTicks / 10, token.CreatedAt.UtcTicks / 10);
@@ -869,6 +875,9 @@ public sealed class ServerDatabaseContractTests
             "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL authorization code contract.");
 
         const string preCodeMigration = "20260916103405_AddIdentitySessions";
+        // The migration under test, pinned: later migrations in the chain legitimately change
+        // refresh_tokens (the family columns), which is not this migration's contract.
+        const string codeMigration = "20260916160627_AddAuthorizationCodes";
         var container = new PostgreSqlBuilder(PostgreSqlImage)
             .WithDatabase("identity")
             .WithUsername("postgres")
@@ -917,11 +926,6 @@ public sealed class ServerDatabaseContractTests
                     Id = appId, AppId = "code-contract-app", AppSecretHash = "hash",
                     AppName = "Code Contract", IsActive = true, CreatedAt = createdAt
                 });
-                context.RefreshTokens.Add(new RefreshTokenEntity
-                {
-                    Id = tokenId, AccountId = accountId, TokenValue = tokenDigest,
-                    CreatedAt = createdAt, ExpiresAt = expiresAt, AppId = "code-contract-app"
-                });
                 context.AuthorizationRequests.Add(new AuthorizationRequestEntity
                 {
                     Id = Guid.NewGuid(),
@@ -948,13 +952,19 @@ public sealed class ServerDatabaseContractTests
                 });
                 await context.SaveChangesAsync(cancellationToken);
 
+                // The legacy token row is seeded with raw SQL: the migration version under test
+                // predates the family columns a current-EF-model INSERT would name.
+                await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenPostgreSqlAsync(
+                    context, tokenId, accountId, tokenDigest, createdAt, expiresAt,
+                    "code-contract-app");
+
                 var accountsBefore = await GetPostgreSqlColumnsAsync(context, "accounts");
                 var sessionsBefore = await GetPostgreSqlColumnsAsync(context, "identity_sessions");
                 var continuationsBefore = await GetPostgreSqlColumnsAsync(
                     context, "authorization_requests");
                 Assert.False(await PostgreSqlTableExistsAsync(context, "authorization_codes"));
 
-                await migrator.MigrateAsync(cancellationToken: cancellationToken);
+                await migrator.MigrateAsync(codeMigration, cancellationToken);
 
                 Assert.True(await PostgreSqlTableExistsAsync(context, "authorization_codes"));
                 Assert.Empty(await context.AuthorizationCodes
@@ -973,7 +983,7 @@ public sealed class ServerDatabaseContractTests
                 Assert.True(sessionsBefore.SetEquals(
                     await GetPostgreSqlColumnsAsync(context, "identity_sessions")));
 
-                await migrator.MigrateAsync(cancellationToken: cancellationToken);
+                await migrator.MigrateAsync(codeMigration, cancellationToken);
             }
 
             // ---- Exact fresh schema shape ----
@@ -1476,6 +1486,568 @@ public sealed class ServerDatabaseContractTests
             "server-completion-correlation",
             DateTimeOffset.UtcNow,
             TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// <c>AC-11</c> on the real PostgreSQL matrix: the exact fresh family shape, the backfill
+    /// upgrade from <c>AddAuthorizationCodes</c> that preserves every legacy value byte for byte,
+    /// the corrupt-write matrix rejected fail-closed, the restrictive references, legacy cleanup
+    /// and rotation staying away from interactive rows, and the downgrade gate with its round
+    /// trip. The SQLite half lives in <see cref="RefreshTokenFamilyDatabaseContractTests"/>.
+    /// </summary>
+    [Fact]
+    public async Task PostgreSqlRefreshTokenFamilies_BackfillConstraintsCleanupAndDownGate()
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL refresh family contract.");
+
+        const string codeMigration = "20260916160627_AddAuthorizationCodes";
+        const string appId = "family-contract-app";
+        const string canonicalScope = "openid profile";
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var databaseOptions = CreateDatabaseOptions(
+                "PostgreSQL",
+                container.GetConnectionString());
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            // ---- The backfill upgrade from AddAuthorizationCodes ----
+            var accountId = Guid.NewGuid();
+            var credentialId = Guid.NewGuid();
+            var appRegistrationId = Guid.NewGuid();
+            var liveId = Guid.NewGuid();
+            const string livePlaintext = "family-upgrade-live-token";
+            const string plaintextTokenValue = "legacy-plaintext-token-value";
+            var createdAt = DateTimeOffset.UtcNow.AddHours(-2);
+            Guid sessionId;
+
+            await using (var context = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var migrator = context.GetService<IMigrator>();
+                await migrator.MigrateAsync(codeMigration, cancellationToken);
+
+                context.Accounts.Add(new AccountEntity
+                {
+                    Id = accountId, IsActive = true, CreatedAt = createdAt
+                });
+                context.PasswordCredentials.Add(new PasswordCredentialEntity
+                {
+                    Id = credentialId, AccountId = accountId, Username = "family-contract-user",
+                    PasswordHash = "hash", CreatedAt = createdAt
+                });
+                context.AppRegistrations.Add(new AppRegistrationEntity
+                {
+                    Id = appRegistrationId, AppId = appId, AppSecretHash = "hash",
+                    AppName = "Family Contract", IsActive = true, CreatedAt = createdAt
+                });
+                var session = CreateIdentitySession(accountId, credentialId);
+                context.IdentitySessions.Add(session);
+                await context.SaveChangesAsync(cancellationToken);
+                sessionId = session.Id;
+
+                // Five legacy shapes on the pre-family schema, seeded with raw SQL: live,
+                // expired, revoked, plaintext (never rewritten; the startup conversion was
+                // removed), and a cross-application mint. Plus one consumed code, family null.
+                await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenPostgreSqlAsync(
+                    context, liveId, accountId, RefreshTokenDigest.Compute(livePlaintext),
+                    createdAt, DateTimeOffset.UtcNow.AddHours(1), appId);
+                await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenPostgreSqlAsync(
+                    context, Guid.NewGuid(), accountId, RefreshTokenDigest.Compute("family-upgrade-expired"),
+                    createdAt, createdAt.AddHours(1), appId);
+                await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenPostgreSqlAsync(
+                    context, Guid.NewGuid(), accountId, RefreshTokenDigest.Compute("family-upgrade-revoked"),
+                    createdAt, DateTimeOffset.UtcNow.AddHours(1), appId, isRevoked: true);
+                await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenPostgreSqlAsync(
+                    context, Guid.NewGuid(), accountId, plaintextTokenValue,
+                    createdAt, DateTimeOffset.UtcNow.AddHours(1), appId);
+                await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenPostgreSqlAsync(
+                    context, Guid.NewGuid(), accountId, RefreshTokenDigest.Compute("family-upgrade-exchange"),
+                    createdAt, DateTimeOffset.UtcNow.AddHours(1), appId,
+                    sourceAppId: "family-contract-source-app");
+                context.AuthorizationCodes.Add(new AuthorizationCodeEntity
+                {
+                    Id = Guid.NewGuid(),
+                    CodeDigest = AuthorizationCodeDigest.Compute(
+                        "family-upgrade-code-0123456789abcdefgh"),
+                    AppRegistrationId = appRegistrationId,
+                    AccountId = accountId,
+                    IdentitySessionId = sessionId,
+                    RedirectUri = "https://client.example.test/callback",
+                    Scope = "openid",
+                    Nonce = "family-upgrade-nonce",
+                    CodeChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+                    AuthTime = createdAt,
+                    CreatedAt = createdAt,
+                    ExpiresAt = createdAt.AddSeconds(
+                        IdentityConstants.AuthorizationCodeLifetimeSeconds),
+                    ConsumedAt = createdAt.AddSeconds(1)
+                });
+                await context.SaveChangesAsync(cancellationToken);
+
+                var tokensBefore = await DumpPostgreSqlAsync(context, FamilyLegacyTokenDumpSql);
+                var codesBefore = await DumpPostgreSqlAsync(context, FamilyCodeDumpSql);
+
+                await migrator.MigrateAsync(cancellationToken: cancellationToken);
+
+                Assert.Equal(tokensBefore, await DumpPostgreSqlAsync(context, FamilyLegacyTokenDumpSql));
+                Assert.Equal(codesBefore, await DumpPostgreSqlAsync(context, FamilyCodeDumpSql));
+
+                // family_id = id on every row, the other five family columns null.
+                var familyDump = await DumpPostgreSqlAsync(context, """
+                    SELECT id, family_id, parent_id, identity_session_id, scope, auth_time, consumed_at
+                    FROM refresh_tokens ORDER BY id
+                    """);
+                foreach (var line in familyDump.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.TrimEnd('\r')))
+                {
+                    var fields = line.Split('|');
+                    Assert.Equal(fields[0], fields[1]);
+                    Assert.Equal("NULL", fields[2]);
+                    Assert.Equal("NULL", fields[3]);
+                    Assert.Equal("NULL", fields[4]);
+                    Assert.Equal("NULL", fields[5]);
+                    Assert.Equal("NULL", fields[6]);
+                }
+
+                // The live legacy token still rotates; the replacement is a fresh singleton root.
+                var repository = new RefreshTokenRepository(context);
+                var replacementId = Guid.NewGuid();
+                Assert.True(await repository.TryRotateAsync(
+                    livePlaintext,
+                    new RefreshTokenEntity
+                    {
+                        Id = replacementId,
+                        AccountId = accountId,
+                        TokenValue = RefreshTokenDigest.Compute("family-upgrade-rotated"),
+                        CreatedAt = DateTimeOffset.UtcNow,
+                        ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                        AppId = appId
+                    },
+                    cancellationToken));
+                await context.SaveChangesAsync(cancellationToken);
+                var replacement = await context.RefreshTokens.AsNoTracking()
+                    .SingleAsync(row => row.Id == replacementId, cancellationToken);
+                Assert.Equal(replacementId, replacement.FamilyId);
+                Assert.Null(replacement.ParentId);
+                Assert.Null(replacement.IdentitySessionId);
+            }
+
+            // ---- Exact fresh family shape ----
+            await using (var context = new IdentityDbContext(options))
+            {
+                var columnDetails = await GetPostgreSqlColumnDetailsAsync(context, "refresh_tokens");
+                Assert.Equal("NO", columnDetails["family_id"].IsNullable);
+                Assert.Equal("YES", columnDetails["parent_id"].IsNullable);
+                Assert.Equal("YES", columnDetails["identity_session_id"].IsNullable);
+                Assert.Equal("YES", columnDetails["scope"].IsNullable);
+                Assert.Equal(
+                    (int?)IdentityConstants.MaxOidcAllowedScopesLength,
+                    columnDetails["scope"].MaxLength);
+                Assert.Equal("YES", columnDetails["auth_time"].IsNullable);
+                Assert.Equal("YES", columnDetails["consumed_at"].IsNullable);
+
+                var checkConstraints = await GetPostgreSqlCheckConstraintsAsync(context, "refresh_tokens");
+                Assert.Contains("CK_refresh_tokens_app_id_not_empty", checkConstraints);
+                Assert.Contains("CK_refresh_tokens_family_marker", checkConstraints);
+                Assert.Contains("CK_refresh_tokens_family_shape", checkConstraints);
+
+                var foreignKeys = await GetPostgreSqlForeignKeysAsync(context, "refresh_tokens");
+                Assert.Equal(3, foreignKeys.Count);
+                Assert.Contains(foreignKeys, key =>
+                    key.ReferencedTable == "identity_sessions" && key.DeleteAction == 'r');
+                Assert.Equal(
+                    2,
+                    foreignKeys.Count(key =>
+                        key.ReferencedTable == "refresh_tokens" && key.DeleteAction == 'r'));
+
+                var indexDefinitions = await GetPostgreSqlIndexDefinitionsAsync(context, "refresh_tokens");
+                Assert.Contains(indexDefinitions, definition =>
+                    definition.Contains("UNIQUE", StringComparison.Ordinal)
+                    && definition.Contains("parent_id", StringComparison.Ordinal));
+                Assert.Contains(indexDefinitions, definition =>
+                    definition.Contains("family_id", StringComparison.Ordinal));
+                Assert.Contains(indexDefinitions, definition =>
+                    definition.Contains("identity_session_id", StringComparison.Ordinal));
+
+                var codeForeignKeys = await GetPostgreSqlForeignKeysAsync(context, "authorization_codes");
+                Assert.Contains(codeForeignKeys, key =>
+                    key.ReferencedTable == "refresh_tokens" && key.DeleteAction == 'r');
+                var codeIndexes = await GetPostgreSqlIndexDefinitionsAsync(
+                    context, "authorization_codes");
+                Assert.Contains(codeIndexes, definition =>
+                    definition.Contains("refresh_family_id", StringComparison.Ordinal));
+            }
+
+            // ---- Corrupt writes, restrictive deletes, cleanup, rotation isolation, Down gate ----
+            await using (var context = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var migrator = context.GetService<IMigrator>();
+                var now = DateTimeOffset.UtcNow;
+                var authTime = now.AddMinutes(-5);
+
+                var rootId = Guid.NewGuid();
+                var childId = Guid.NewGuid();
+                await RefreshTokenFamilyTestSupport.InsertInteractiveMemberPostgreSqlAsync(
+                    context, rootId, accountId, appId, rootId, parentId: null, sessionId,
+                    canonicalScope, authTime, now, now.AddHours(1), consumedAt: now);
+                await RefreshTokenFamilyTestSupport.InsertInteractiveMemberPostgreSqlAsync(
+                    context, childId, accountId, appId, rootId, parentId: rootId, sessionId,
+                    canonicalScope, authTime, now, now.AddHours(1));
+
+                var missingRowId = Guid.NewGuid();
+                var corruptInserts = new (string Label, Func<Task<int>> Insert)[]
+                {
+                    ("partial-marker", () =>
+                    {
+                        var markerId = Guid.NewGuid();
+                        return InsertFamilyRowPostgreSqlAsync(
+                            context, markerId, accountId, appId,
+                            familyId: markerId, parentId: null, sessionId, canonicalScope,
+                            authTime: null, consumedAt: null);
+                    }),
+                    ("legacy-with-parent", () => InsertFamilyRowPostgreSqlAsync(
+                        context, Guid.NewGuid(), accountId, appId,
+                        familyId: childId, parentId: childId, sessionId: null, scope: null,
+                        authTime: null, consumedAt: null)),
+                    ("legacy-with-consumed", () =>
+                    {
+                        var consumedId = Guid.NewGuid();
+                        return InsertFamilyRowPostgreSqlAsync(
+                            context, consumedId, accountId, appId,
+                            familyId: consumedId, parentId: null, sessionId: null, scope: null,
+                            authTime: null, consumedAt: now);
+                    }),
+                    ("root-with-parent", () =>
+                    {
+                        var selfRootId = Guid.NewGuid();
+                        return InsertFamilyRowPostgreSqlAsync(
+                            context, selfRootId, accountId, appId,
+                            familyId: selfRootId, parentId: childId, sessionId: null, scope: null,
+                            authTime: null, consumedAt: null);
+                    }),
+                    ("self-parent", () =>
+                    {
+                        var selfId = Guid.NewGuid();
+                        return InsertFamilyRowPostgreSqlAsync(
+                            context, selfId, accountId, appId,
+                            familyId: rootId, parentId: selfId, sessionId: null, scope: null,
+                            authTime: null, consumedAt: null);
+                    }),
+                    ("family-missing", () => InsertFamilyRowPostgreSqlAsync(
+                        context, Guid.NewGuid(), accountId, appId,
+                        familyId: missingRowId, parentId: missingRowId, sessionId, canonicalScope,
+                        authTime, consumedAt: null)),
+                    ("parent-missing", () => InsertFamilyRowPostgreSqlAsync(
+                        context, Guid.NewGuid(), accountId, appId,
+                        familyId: rootId, parentId: missingRowId, sessionId, canonicalScope,
+                        authTime, consumedAt: null)),
+                    ("session-missing", () =>
+                    {
+                        var sessionRowId = Guid.NewGuid();
+                        return InsertFamilyRowPostgreSqlAsync(
+                            context, sessionRowId, accountId, appId,
+                            familyId: sessionRowId, parentId: null, Guid.NewGuid(), canonicalScope,
+                            authTime, consumedAt: null);
+                    }),
+                    ("second-child", () => InsertFamilyRowPostgreSqlAsync(
+                        context, Guid.NewGuid(), accountId, appId,
+                        familyId: rootId, parentId: rootId, sessionId, canonicalScope,
+                        authTime, consumedAt: null)),
+                };
+                var tokenCountBefore = await context.RefreshTokens.AsNoTracking()
+                    .CountAsync(cancellationToken);
+                foreach (var (_, insert) in corruptInserts)
+                {
+                    var exception = await Record.ExceptionAsync(insert);
+                    Assert.NotNull(exception);
+                    Assert.IsType<Npgsql.PostgresException>(exception);
+                }
+
+                context.AuthorizationCodes.Add(new AuthorizationCodeEntity
+                {
+                    Id = Guid.NewGuid(),
+                    CodeDigest = AuthorizationCodeDigest.Compute(
+                        "family-orphan-code-0123456789abcdefghijk"),
+                    AppRegistrationId = appRegistrationId,
+                    AccountId = accountId,
+                    IdentitySessionId = sessionId,
+                    RedirectUri = "https://client.example.test/callback",
+                    Scope = canonicalScope,
+                    Nonce = "family-orphan-nonce",
+                    CodeChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+                    AuthTime = authTime,
+                    CreatedAt = now,
+                    ExpiresAt = now.AddSeconds(IdentityConstants.AuthorizationCodeLifetimeSeconds),
+                    ConsumedAt = now,
+                    RefreshFamilyId = missingRowId
+                });
+                await Assert.ThrowsAsync<DbUpdateException>(() =>
+                    context.SaveChangesAsync(cancellationToken));
+                context.ChangeTracker.Clear();
+                Assert.Equal(
+                    tokenCountBefore,
+                    await context.RefreshTokens.AsNoTracking().CountAsync(cancellationToken));
+
+                // Restrictive deletes: the root of a child, the session of an interactive row,
+                // and a root a code links all refuse; a legacy singleton deletes fine.
+                var linkedRootId = Guid.NewGuid();
+                await InsertLegacyRootPostgreSqlAsync(context, linkedRootId, accountId, appId, now);
+                context.AuthorizationCodes.Add(new AuthorizationCodeEntity
+                {
+                    Id = Guid.NewGuid(),
+                    CodeDigest = AuthorizationCodeDigest.Compute(
+                        "family-linked-code-0123456789abcdefgh"),
+                    AppRegistrationId = appRegistrationId,
+                    AccountId = accountId,
+                    IdentitySessionId = sessionId,
+                    RedirectUri = "https://client.example.test/callback",
+                    Scope = canonicalScope,
+                    Nonce = "family-linked-nonce",
+                    CodeChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+                    AuthTime = authTime,
+                    CreatedAt = now,
+                    ExpiresAt = now.AddSeconds(IdentityConstants.AuthorizationCodeLifetimeSeconds),
+                    ConsumedAt = now,
+                    RefreshFamilyId = linkedRootId
+                });
+                await context.SaveChangesAsync(cancellationToken);
+                context.ChangeTracker.Clear();
+
+                await AssertDeleteRejectedPostgreSqlAsync(context, "refresh_tokens", rootId);
+                await AssertDeleteRejectedPostgreSqlAsync(context, "identity_sessions", sessionId);
+                await AssertDeleteRejectedPostgreSqlAsync(context, "refresh_tokens", linkedRootId);
+
+                var deletableId = Guid.NewGuid();
+                await InsertLegacyRootPostgreSqlAsync(
+                    context, deletableId, accountId, appId, now, expiresAt: now.AddHours(-1));
+                await context.Database.ExecuteSqlInterpolatedAsync(
+                    $"DELETE FROM refresh_tokens WHERE id = {deletableId}", cancellationToken);
+                Assert.False(await context.RefreshTokens.AsNoTracking()
+                    .AnyAsync(row => row.Id == deletableId, cancellationToken));
+
+                // Legacy cleanup beside a revoked-and-expired interactive family: only the
+                // legacy rows go, the family stays for #98's child-first cleanup.
+                var interactiveRootId2 = Guid.NewGuid();
+                await RefreshTokenFamilyTestSupport.InsertInteractiveMemberPostgreSqlAsync(
+                    context, interactiveRootId2, accountId, appId, interactiveRootId2,
+                    parentId: null, sessionId, canonicalScope, authTime,
+                    now.AddHours(-2), now.AddHours(-1), isRevoked: true, consumedAt: now.AddHours(-1));
+                var expiredLegacyId = Guid.NewGuid();
+                var revokedLegacyId = Guid.NewGuid();
+                await InsertLegacyRootPostgreSqlAsync(
+                    context, expiredLegacyId, accountId, appId, now, expiresAt: now.AddHours(-1));
+                await InsertLegacyRootPostgreSqlAsync(
+                    context, revokedLegacyId, accountId, appId, now, isRevoked: true);
+                var deleted = await new RefreshTokenRepository(context)
+                    .RemoveExpiredAndRevokedAsync(cancellationToken);
+                // The upgraded expired, revoked, and rotated-source legacy rows plus the two
+                // fresh ones; every interactive member and every live legacy row stays.
+                Assert.Equal(5, deleted);
+                Assert.True(await context.RefreshTokens.AsNoTracking()
+                    .AnyAsync(row => row.Id == interactiveRootId2, cancellationToken));
+                Assert.True(await context.RefreshTokens.AsNoTracking()
+                    .AnyAsync(row => row.Id == rootId, cancellationToken));
+                Assert.False(await context.RefreshTokens.AsNoTracking()
+                    .AnyAsync(row => row.Id == expiredLegacyId, cancellationToken));
+                Assert.False(await context.RefreshTokens.AsNoTracking()
+                    .AnyAsync(row => row.Id == revokedLegacyId, cancellationToken));
+
+                // Legacy rotation of an interactive member's digest refuses without any write.
+                var interactivePlaintext = "family-contract-token-" + rootId.ToString("N");
+                Assert.False(await new RefreshTokenRepository(context).TryRotateAsync(
+                    interactivePlaintext,
+                    new RefreshTokenEntity
+                    {
+                        Id = Guid.NewGuid(),
+                        AccountId = accountId,
+                        TokenValue = RefreshTokenDigest.Compute("family-rotation-replacement"),
+                        CreatedAt = now,
+                        ExpiresAt = now.AddHours(1),
+                        AppId = appId
+                    },
+                    cancellationToken));
+                await context.SaveChangesAsync(cancellationToken);
+                var rootRow = await context.RefreshTokens.AsNoTracking()
+                    .SingleAsync(row => row.Id == rootId, cancellationToken);
+                Assert.False(rootRow.IsRevoked);
+                Assert.Equal(
+                    now.UtcTicks / 10,
+                    rootRow.ConsumedAt!.Value.UtcTicks / 10);
+
+                // Down gate state 1: interactive rows exist — Down fails and changes nothing.
+                var columnsWithFamily = await GetPostgreSqlColumnsAsync(context, "refresh_tokens");
+                var blocked = await Record.ExceptionAsync(() =>
+                    migrator.MigrateAsync(codeMigration, cancellationToken));
+                Assert.NotNull(blocked);
+                var blockedText = blocked!.ToString();
+                Assert.Contains(
+                    "refresh family downgrade blocked", blockedText, StringComparison.Ordinal);
+                Assert.DoesNotContain(
+                    RefreshTokenFamilyTestSupport.DigestFor(rootId),
+                    blockedText,
+                    StringComparison.Ordinal);
+                Assert.True(columnsWithFamily.SetEquals(
+                    await GetPostgreSqlColumnsAsync(context, "refresh_tokens")));
+
+                // Down gate state 2: no interactive rows, but a code still links a root.
+                await context.Database.ExecuteSqlInterpolatedAsync(
+                    $"DELETE FROM refresh_tokens WHERE identity_session_id = {sessionId}",
+                    cancellationToken);
+                Assert.NotNull(await Record.ExceptionAsync(() =>
+                    migrator.MigrateAsync(codeMigration, cancellationToken)));
+                Assert.True(columnsWithFamily.SetEquals(
+                    await GetPostgreSqlColumnsAsync(context, "refresh_tokens")));
+
+                // Gate cleared: Down succeeds, the shape returns to AddAuthorizationCodes, and
+                // the surviving legacy rows are untouched; Up restores the singleton roots.
+                await context.Database.ExecuteSqlRawAsync(
+                    "DELETE FROM authorization_codes WHERE refresh_family_id IS NOT NULL",
+                    cancellationToken);
+                var legacyBefore = await DumpPostgreSqlAsync(context, FamilyLegacyTokenDumpSql);
+                await migrator.MigrateAsync(codeMigration, cancellationToken);
+                var columnsAfterDown = await GetPostgreSqlColumnsAsync(context, "refresh_tokens");
+                Assert.DoesNotContain("family_id", columnsAfterDown);
+                Assert.DoesNotContain("parent_id", columnsAfterDown);
+                Assert.DoesNotContain("identity_session_id", columnsAfterDown);
+                Assert.DoesNotContain("scope", columnsAfterDown);
+                Assert.DoesNotContain("auth_time", columnsAfterDown);
+                Assert.DoesNotContain("consumed_at", columnsAfterDown);
+                var codeForeignKeysAfterDown = await GetPostgreSqlForeignKeysAsync(
+                    context, "authorization_codes");
+                Assert.Equal(3, codeForeignKeysAfterDown.Count);
+                Assert.Equal(legacyBefore, await DumpPostgreSqlAsync(context, FamilyLegacyTokenDumpSql));
+
+                await migrator.MigrateAsync(cancellationToken: cancellationToken);
+                Assert.Equal(legacyBefore, await DumpPostgreSqlAsync(context, FamilyLegacyTokenDumpSql));
+                var familyAfterRoundTrip = await DumpPostgreSqlAsync(context, """
+                    SELECT id, family_id, parent_id, identity_session_id, scope, auth_time, consumed_at
+                    FROM refresh_tokens ORDER BY id
+                    """);
+                foreach (var line in familyAfterRoundTrip.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line.TrimEnd('\r')))
+                {
+                    var fields = line.Split('|');
+                    Assert.Equal(fields[0], fields[1]);
+                    Assert.Equal("NULL", fields[2]);
+                    Assert.Equal("NULL", fields[3]);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The comparable projection of every legacy refresh-token column, ordered so the upgrade,
+    /// the downgrade gate, and the round trip can compare dumps byte for byte.
+    /// </summary>
+    private const string FamilyLegacyTokenDumpSql = """
+        SELECT id, account_id, token_value, created_at, expires_at, is_revoked, app_id,
+               coalesce(ldap_credential_id::text, ''), coalesce(sms_user_login_id::text, ''),
+               coalesce(wechat_user_login_id::text, ''), coalesce(source_app_id, '')
+        FROM refresh_tokens
+        ORDER BY id
+        """;
+
+    private const string FamilyCodeDumpSql = """
+        SELECT id, code_digest, app_registration_id, account_id, identity_session_id,
+               redirect_uri, scope, nonce, code_challenge, auth_time, created_at, expires_at,
+               consumed_at
+        FROM authorization_codes
+        ORDER BY id
+        """;
+
+    private static async Task<string> DumpPostgreSqlAsync(IdentityDbContext context, string sql)
+    {
+        await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = sql;
+        await using var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken);
+        var dump = new System.Text.StringBuilder();
+        while (await reader.ReadAsync(TestContext.Current.CancellationToken))
+        {
+            for (var ordinal = 0; ordinal < reader.FieldCount; ordinal++)
+            {
+                dump.Append(reader.IsDBNull(ordinal) ? "NULL" : reader.GetValue(ordinal)?.ToString())
+                    .Append('|');
+            }
+
+            dump.AppendLine();
+        }
+
+        await context.Database.CloseConnectionAsync();
+        return dump.ToString();
+    }
+
+    private static Task<int> InsertFamilyRowPostgreSqlAsync(
+        IdentityDbContext context,
+        Guid id,
+        Guid accountId,
+        string appId,
+        Guid familyId,
+        Guid? parentId,
+        Guid? sessionId,
+        string? scope,
+        DateTimeOffset? authTime,
+        DateTimeOffset? consumedAt)
+    {
+        var created = DateTimeOffset.UtcNow;
+        var expires = created.AddHours(1);
+        var tokenDigest = RefreshTokenFamilyTestSupport.DigestFor(id);
+        return context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO refresh_tokens
+                (id, account_id, token_value, created_at, expires_at, is_revoked, app_id,
+                 family_id, parent_id, identity_session_id, scope, auth_time, consumed_at)
+            VALUES
+                ({id}, {accountId}, {tokenDigest}, {created}, {expires}, FALSE, {appId},
+                 {familyId}, {parentId}, {sessionId}, {scope}, {authTime}, {consumedAt});
+            """, TestContext.Current.CancellationToken);
+    }
+
+    private static Task InsertLegacyRootPostgreSqlAsync(
+        IdentityDbContext context,
+        Guid tokenId,
+        Guid accountId,
+        string appId,
+        DateTimeOffset now,
+        DateTimeOffset? expiresAt = null,
+        bool isRevoked = false)
+    {
+        context.RefreshTokens.Add(new RefreshTokenEntity
+        {
+            Id = tokenId,
+            FamilyId = tokenId,
+            AccountId = accountId,
+            TokenValue = RefreshTokenFamilyTestSupport.DigestFor(tokenId),
+            CreatedAt = now,
+            ExpiresAt = expiresAt ?? now.AddHours(1),
+            IsRevoked = isRevoked,
+            AppId = appId
+        });
+        return context.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    private static async Task AssertDeleteRejectedPostgreSqlAsync(
+        IdentityDbContext context, string table, Guid id)
+    {
+        var exception = await Record.ExceptionAsync(() =>
+            table == "identity_sessions"
+                ? context.Database.ExecuteSqlInterpolatedAsync(
+                    $"DELETE FROM identity_sessions WHERE id = {id}",
+                    TestContext.Current.CancellationToken)
+                : context.Database.ExecuteSqlInterpolatedAsync(
+                    $"DELETE FROM refresh_tokens WHERE id = {id}",
+                    TestContext.Current.CancellationToken));
+        Assert.IsType<Npgsql.PostgresException>(exception);
     }
 
     private static async Task<(Guid AccountId, Guid CredentialId, Guid AppId)>
@@ -2058,8 +2630,10 @@ public sealed class ServerDatabaseContractTests
         Assert.True(application.IsActive);
         Assert.Equal(createdAt.UtcTicks / 10, application.CreatedAt.UtcTicks / 10);
 
-        var token = await context.RefreshTokens.AsNoTracking()
-            .SingleAsync(item => item.Id == tokenId, cancellationToken);
+        // The Down state predates the family columns, so the token row is read with raw SQL
+        // instead of the current EF model.
+        var token = await RefreshTokenFamilyTestSupport.ReadRefreshTokenRowPostgreSqlAsync(
+            context, tokenId);
         Assert.Equal(tokenDigest, token.TokenValue);
         Assert.False(token.IsRevoked);
         Assert.Equal(createdAt.UtcTicks / 10, token.CreatedAt.UtcTicks / 10);
@@ -2192,9 +2766,12 @@ public sealed class ServerDatabaseContractTests
                 PasswordHash = "hash",
                 CreatedAt = sourceInstant
             });
+            var seededTokenId = Guid.NewGuid();
             seedContext.RefreshTokens.Add(new RefreshTokenEntity
             {
-                Id = Guid.NewGuid(),
+                Id = seededTokenId,
+                // PS-07: a directly seeded legacy row is the singleton root of its own family.
+                FamilyId = seededTokenId,
                 AccountId = accountId,
                 TokenValue = RefreshTokenDigest.Compute(token),
                 CreatedAt = sourceInstant,

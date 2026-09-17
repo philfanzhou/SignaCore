@@ -28,8 +28,28 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     {
         cancellationToken.ThrowIfCancellationRequested();
         refreshToken.TokenValue = RefreshTokenDigest.EnsureDigest(refreshToken.TokenValue);
+        EnsureLegacySingletonRoot(refreshToken);
         _dbContext.RefreshTokens.Add(refreshToken);
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The single legacy shape guard (<c>PS-07</c>) of every write through this repository: a row
+    /// without an id gets a fresh one, and a legacy row — no identity session — without a family
+    /// becomes the singleton root <c>family_id = id</c>. An interactive row is left exactly as its
+    /// writer built it; the interactive family shape belongs to the family write API (#98).
+    /// </summary>
+    private static void EnsureLegacySingletonRoot(RefreshTokenEntity refreshToken)
+    {
+        if (refreshToken.Id == Guid.Empty)
+        {
+            refreshToken.Id = Guid.NewGuid();
+        }
+
+        if (refreshToken.IdentitySessionId is null && refreshToken.FamilyId == Guid.Empty)
+        {
+            refreshToken.FamilyId = refreshToken.Id;
+        }
     }
 
     public async Task<bool> TryRevokeAsync(
@@ -92,15 +112,21 @@ public class RefreshTokenRepository : IRefreshTokenRepository
     {
         var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
         replacement.TokenValue = RefreshTokenDigest.EnsureDigest(replacement.TokenValue);
+        EnsureLegacySingletonRoot(replacement);
 
         // Token issuance owns a wider transaction that also contains the account update and login
         // history row. In that path this repository stages the replacement and leaves the only
         // SaveChanges/commit to the caller; the conditional update is protected by that ambient
         // transaction. Standalone callers retain the self-contained transaction below.
+        // The identity-session predicate keeps legacy rotation off interactive family members:
+        // only a legacy row can ever be revoked and replaced here (EV-33); interactive rotation
+        // with its consumption semantics belongs to the family API (#98).
         if (_dbContext.Database.CurrentTransaction is not null)
         {
             var affectedRows = await _dbContext.RefreshTokens
-                .Where(token => token.TokenValue == tokenDigest && !token.IsRevoked)
+                .Where(token => token.TokenValue == tokenDigest
+                    && !token.IsRevoked
+                    && token.IdentitySessionId == null)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(token => token.IsRevoked, true), cancellationToken);
             if (affectedRows != 1)
@@ -123,7 +149,9 @@ public class RefreshTokenRepository : IRefreshTokenRepository
             // blocks on the row lock, re-evaluates is_revoked after the first commits, matches 0
             // rows, and returns false.
             var affectedRows = await _dbContext.RefreshTokens
-                .Where(token => token.TokenValue == tokenDigest && !token.IsRevoked)
+                .Where(token => token.TokenValue == tokenDigest
+                    && !token.IsRevoked
+                    && token.IdentitySessionId == null)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(token => token.IsRevoked, true), operationCancellationToken);
 
@@ -167,8 +195,14 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         CancellationToken cancellationToken = default)
     {
         var now = DateTimeOffset.UtcNow;
+        // Legacy-only cleanup (PS-07): a legacy singleton root self-references, and deleting
+        // self-referencing rows in one statement succeeds identically on both providers, so the
+        // current expired-or-revoked behavior is preserved. Interactive family members are never
+        // touched here — under ON DELETE RESTRICT a whole-family single-statement delete fails on
+        // SQLite while it succeeds on PostgreSQL, so the child-first interactive cleanup belongs
+        // to the family API (#98) instead of this statement.
         return await _dbContext.RefreshTokens
-            .Where(r => r.IsRevoked || r.ExpiresAt < now)
+            .Where(r => r.IdentitySessionId == null && (r.IsRevoked || r.ExpiresAt < now))
             .ExecuteDeleteAsync(cancellationToken);
     }
 }
