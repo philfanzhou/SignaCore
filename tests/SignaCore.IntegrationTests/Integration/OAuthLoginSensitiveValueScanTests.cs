@@ -11,15 +11,17 @@ using static SignaCore.Tests.Integration.OAuthLoginTestSupport;
 namespace SignaCore.Tests.Integration;
 
 /// <summary>
-/// The sensitive-value scan of the login surface (<c>DF-01</c>, <c>DF-05</c>, <c>DF-06</c>,
-/// <c>PS-19</c>): with identifiable canaries for the password, the handle, and both antiforgery
-/// values, every local path is exercised under the default log configuration, and none of the four
-/// secrets may appear in the captured SignaCore logs, in the full <c>audit_logs</c> /
-/// <c>login_histories</c> dump, or in an error or not-implemented body. The handle and the request
-/// token appear only where the contract puts them — the login URL, the hidden form fields of the
-/// two form renders, and the <c>Set-Cookie</c> of the first render — and the password never
-/// appears in any response at all. The capture is proven non-empty through the fixed correlation
-/// id the controller logs with every local outcome.
+/// The sensitive-value scan of the login surface (<c>DF-01</c>, <c>DF-03</c>, <c>DF-05</c>,
+/// <c>DF-06</c>, <c>DF-11</c>, <c>PS-19</c>): with identifiable canaries for the password, the
+/// handle, both antiforgery values, and the full success-flow snapshot (state, nonce, challenge,
+/// redirect URI), every local path plus the committed <c>EV-01</c> success is exercised under the
+/// default log configuration, and none of the secrets may appear in the captured SignaCore logs,
+/// in the full <c>audit_logs</c> / <c>login_histories</c> dump, or in an error body. The handle
+/// and the request token appear only where the contract puts them — the login URL, the hidden form
+/// fields of the two form renders, and the <c>Set-Cookie</c> of the first render — the plaintext
+/// code appears only in the success redirect's <c>Location</c>, and the password never appears in
+/// any response at all. The capture is proven non-empty through the fixed correlation id the
+/// controller logs with every local outcome.
 /// </summary>
 public sealed class OAuthLoginSensitiveValueScanTests : IClassFixture<IdentityServerFixture>
 {
@@ -29,6 +31,7 @@ public sealed class OAuthLoginSensitiveValueScanTests : IClassFixture<IdentitySe
     private const string DisabledPassword = "Scan-Disabled-123!";
     private const string LockedUser = "scan_locked_user";
     private const string UnknownUser = "scan-unknown-user";
+    private const string SuccessUser = "scan_success_user";
 
     private readonly IdentityServerFixture _fixture;
 
@@ -43,6 +46,7 @@ public sealed class OAuthLoginSensitiveValueScanTests : IClassFixture<IdentitySe
         await SeedUserAsync(_fixture.Services, ActiveUser, CanaryPassword);
         await SeedUserAsync(_fixture.Services, DisabledUser, DisabledPassword, isActive: false);
         await SeedUserAsync(_fixture.Services, LockedUser, CanaryPassword);
+        await SeedUserAsync(_fixture.Services, SuccessUser, CanaryPassword);
         await SeedLoginAttemptAsync(
             _fixture.Services,
             LockedUser,
@@ -64,7 +68,11 @@ public sealed class OAuthLoginSensitiveValueScanTests : IClassFixture<IdentitySe
                 logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
             }));
         });
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(
+            new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+            {
+                AllowAutoRedirect = false
+            });
 
         var bodies = new List<(string Label, string Body)>();
         var setCookieHeaders = new List<string>();
@@ -155,13 +163,29 @@ public sealed class OAuthLoginSensitiveValueScanTests : IClassFixture<IdentitySe
             await CaptureAsync(failurePost, "form");
         }
 
-        // Path: the passing credential check answered with the fixed local 501.
+        // Path: the passing credential check whose canary continuation revalidates to a local
+        // rejection (the canary client never registered the stored redirect URI).
         using var passPost = await client.SendAsync(CreateLoginPost(
             fields: LoginFields(session, ActiveUser, CanaryPassword),
             cookieHeader: CookieHeaderFor(session),
             correlationId: FixedCorrelationId), TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.NotImplemented, passPost.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, passPost.StatusCode);
         await CaptureAsync(passPost, "error");
+
+        // Path: the committed EV-01 success, driven through the real authorize endpoint with the
+        // canary state/nonce/challenge and the canary redirect URI.
+        var successSession = await BeginSuccessLoginViaAuthorizeAsync(
+            factory.Services, client, existingCookieValue: cookieValue);
+        using var successPost = await client.SendAsync(CreateLoginPost(
+            fields: LoginFields(successSession, SuccessUser, CanaryPassword),
+            cookieHeader: CookieHeaderFor(successSession),
+            correlationId: FixedCorrelationId), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Found, successPost.StatusCode);
+        var successLocation = successPost.Headers.Location!.ToString();
+        var successCode = ExtractParameter(successLocation, "code");
+        var identitySetCookie = GetSetCookieHeader(successPost, IdentitySessionDefaults.CookieName);
+        Assert.NotNull(identitySetCookie);
+        await CaptureAsync(successPost, "redirect");
 
         // ---- The scan ----
 
@@ -172,14 +196,43 @@ public sealed class OAuthLoginSensitiveValueScanTests : IClassFixture<IdentitySe
         Assert.DoesNotContain(handle, logText, StringComparison.Ordinal);
         Assert.DoesNotContain(token, logText, StringComparison.Ordinal);
         Assert.DoesNotContain(cookieValue, logText, StringComparison.Ordinal);
+        Assert.DoesNotContain(successSession.Handle, logText, StringComparison.Ordinal);
+        Assert.DoesNotContain(successSession.Token, logText, StringComparison.Ordinal);
+        Assert.DoesNotContain(successCode, logText, StringComparison.Ordinal);
+        Assert.DoesNotContain(SuccessState, logText, StringComparison.Ordinal);
+        Assert.DoesNotContain(SuccessNonce, logText, StringComparison.Ordinal);
+        Assert.DoesNotContain(SuccessChallenge, logText, StringComparison.Ordinal);
+        Assert.DoesNotContain("canary=success-redirect", logText, StringComparison.Ordinal);
 
-        // The dump is proven non-empty by the committed EV-17 audit rows of the failure paths.
+        // The success redirect is the contract's only code surface: it carries the registered URI,
+        // the state, and the issuer — and none of the other snapshot or credential values.
+        Assert.Contains(SuccessRegisteredUri, successLocation, StringComparison.Ordinal);
+        Assert.Contains($"state={SuccessState}", successLocation, StringComparison.Ordinal);
+        Assert.DoesNotContain(successSession.Handle, successLocation, StringComparison.Ordinal);
+        Assert.DoesNotContain(SuccessNonce, successLocation, StringComparison.Ordinal);
+        Assert.DoesNotContain(SuccessChallenge, successLocation, StringComparison.Ordinal);
+        Assert.DoesNotContain(CanaryPassword, successLocation, StringComparison.Ordinal);
+
+        // The identity cookie carries the protected session id and nothing readable.
+        Assert.DoesNotContain(successCode, identitySetCookie!, StringComparison.Ordinal);
+        Assert.DoesNotContain(successSession.Handle, identitySetCookie!, StringComparison.Ordinal);
+
+        // The dump is proven non-empty by the committed EV-17 audit rows of the failure paths and
+        // the login_success row of the committed EV-01 transaction.
         var dump = await DumpLoginTablesAsync(factory.Services);
         Assert.Contains("oidc_login", dump, StringComparison.Ordinal);
+        Assert.Contains("login_success", dump, StringComparison.Ordinal);
         Assert.DoesNotContain(CanaryPassword, dump, StringComparison.Ordinal);
         Assert.DoesNotContain(handle, dump, StringComparison.Ordinal);
         Assert.DoesNotContain(token, dump, StringComparison.Ordinal);
         Assert.DoesNotContain(cookieValue, dump, StringComparison.Ordinal);
+        Assert.DoesNotContain(successSession.Handle, dump, StringComparison.Ordinal);
+        Assert.DoesNotContain(successSession.Token, dump, StringComparison.Ordinal);
+        Assert.DoesNotContain(successCode, dump, StringComparison.Ordinal);
+        Assert.DoesNotContain(SuccessState, dump, StringComparison.Ordinal);
+        Assert.DoesNotContain(SuccessNonce, dump, StringComparison.Ordinal);
+        Assert.DoesNotContain(SuccessChallenge, dump, StringComparison.Ordinal);
+        Assert.DoesNotContain("canary=success-redirect", dump, StringComparison.Ordinal);
 
         foreach (var (label, body) in bodies)
         {
@@ -206,6 +259,13 @@ public sealed class OAuthLoginSensitiveValueScanTests : IClassFixture<IdentitySe
             body, "name=\"__RequestVerificationToken\" value=\"([^\"]*)\"");
         Assert.True(match.Success);
         return match.Groups[1].Value;
+    }
+
+    private static string ExtractParameter(string location, string name)
+    {
+        var value = System.Web.HttpUtility.ParseQueryString(new Uri(location).Query)[name];
+        Assert.False(string.IsNullOrEmpty(value));
+        return value!;
     }
 
     private sealed class CapturingLoggerProvider : ILoggerProvider

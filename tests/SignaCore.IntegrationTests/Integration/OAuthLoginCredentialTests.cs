@@ -15,8 +15,9 @@ namespace SignaCore.Tests.Integration;
 /// The credential outcomes of <c>POST /oauth2/login</c>: the four <c>EV-17</c> failure classes are
 /// one indistinguishable local answer with exactly one committed counter/audit unit behind each,
 /// the shared lockout standard accumulates across this route and the existing Password grant, and
-/// a passing credential check is answered with the fixed local 501 and zero writes because the
-/// <c>EV-01</c> success transaction belongs to the orchestration slice.
+/// a passing credential check on a continuation whose client no longer trusts the stored redirect
+/// URI is a local error with zero writes — the <c>EV-01</c> revalidation runs before anything is
+/// consumed.
 /// </summary>
 public sealed class OAuthLoginCredentialTests : IClassFixture<IdentityServerFixture>
 {
@@ -240,10 +241,10 @@ public sealed class OAuthLoginCredentialTests : IClassFixture<IdentityServerFixt
             attempt.UsernameNormalized == IdentityValueNormalizer.Normalize(MixedUser));
     }
 
-    // ---- Acceptance 11: the not-yet-implemented success path changes nothing ----
+    // ---- Acceptance 11: a passing check on an untrusted continuation changes nothing ----
 
     [Fact]
-    public async Task PassingCredentials_AreAnsweredWithTheFixed501AndChangeNothing()
+    public async Task PassingCredentials_OnAnUntrustedContinuation_AreALocalErrorAndChangeNothing()
     {
         await SeedUserAsync(_fixture.Services, PassUser, PassPassword);
         await SeedLoginAttemptAsync(_fixture.Services, PassUser, failedAttempts: 2);
@@ -259,15 +260,16 @@ public sealed class OAuthLoginCredentialTests : IClassFixture<IdentityServerFixt
             correlationId: FixedCorrelationId);
         using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.NotImplemented, response.StatusCode);
+        // The canary continuation's client never registered the stored redirect URI, so the EV-01
+        // revalidation is a local rejection: the single local 400 with zero writes.
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         AssertLoginSecurityHeaders(response);
         Assert.Null(GetSetCookieHeader(response, CookieName));
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        Assert.Contains("Login is not available", body, StringComparison.Ordinal);
+        Assert.Contains("Invalid login request", body, StringComparison.Ordinal);
 
-        // The cancel exit on this canary continuation revalidates to a local error (the client
-        // never registered the stored redirect URI) and writes nothing; the passing-credential
-        // exit keeps the fixed 501.
+        // The cancel exit on this canary continuation revalidates to the same local error (the
+        // client never registered the stored redirect URI) and writes nothing.
         using var cancelRequest = CreateLoginPost(
             fields: CancelFields(cancelSession),
             cookieHeader: CookieHeaderFor(cancelSession),
@@ -278,7 +280,7 @@ public sealed class OAuthLoginCredentialTests : IClassFixture<IdentityServerFixt
         Assert.Null(cancelResponse.Headers.Location);
 
         // Zero writes: the prior failure count survives (no Clear), no success audit exists, and
-        // the continuation stays unconsumed for the orchestration slice.
+        // the continuation stays unconsumed.
         Assert.Equal(before, await DumpLoginTablesAsync(_fixture.Services));
         var attempt = await GetLockedAttemptAsync(PassUser);
         Assert.Equal(2, attempt.FailedAttempts);

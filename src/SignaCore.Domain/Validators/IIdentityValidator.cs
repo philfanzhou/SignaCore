@@ -65,6 +65,13 @@ public class ValidationResult
     /// </summary>
     public string? DisplayName { get; private set; }
 
+    /// <summary>
+    /// The id of the password credential that passed validation. Only <see cref="PasswordValidator"/>
+    /// sets it, on success; the browser identity session (<c>EV-01</c>) binds exactly the credential
+    /// that passed instead of querying a second time per account. No other grant reads it.
+    /// </summary>
+    public Guid? PasswordCredentialId { get; private set; }
+
     public Guid? LdapCredentialId { get; private set; }
 
     public Guid? SmsUserLoginId { get; private set; }
@@ -116,7 +123,8 @@ public class ValidationResult
         string? displayName = null,
         Guid? ldapCredentialId = null,
         Guid? smsUserLoginId = null,
-        Guid? wechatUserLoginId = null) => new()
+        Guid? wechatUserLoginId = null,
+        Guid? passwordCredentialId = null) => new()
         {
             IsSuccess = true,
             Account = account,
@@ -124,7 +132,8 @@ public class ValidationResult
             DisplayName = displayName,
             LdapCredentialId = ldapCredentialId,
             SmsUserLoginId = smsUserLoginId,
-            WechatUserLoginId = wechatUserLoginId
+            WechatUserLoginId = wechatUserLoginId,
+            PasswordCredentialId = passwordCredentialId
         };
 
     public static ValidationResult Failure(string message, string? errorCode = null) => new()

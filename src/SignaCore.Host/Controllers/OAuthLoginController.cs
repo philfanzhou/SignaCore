@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
@@ -20,23 +21,27 @@ namespace SignaCore.Host.Controllers;
 /// <c>POST /oauth2/login</c> processes the login or cancel submission (<c>IN-11</c>–<c>IN-15</c>).
 /// </summary>
 /// <remarks>
-/// This slice delivers the browser surface, the antiforgery chain (<c>PS-19</c>), the local
-/// result of a credential failure (<c>EV-17</c>), and the cancel exit (<c>EV-02</c>): revalidating
-/// the current client and the exact redirect URI against the stored snapshot, consuming the
-/// continuation, and returning the <c>access_denied</c> safe redirect. The <c>EV-01</c> success
-/// transaction is still answered with the fixed local 501 and zero writes, following the
-/// authorize endpoint's precedent. A missing, malformed, unknown, expired, or consumed handle
-/// shares the single local 400 of <c>EV-03</c>/<c>SC-18</c>: no redirect, no credential check, no
-/// failure count, no replay audit.
+/// This controller delivers the browser surface, the antiforgery chain (<c>PS-19</c>), the local
+/// result of a credential failure (<c>EV-17</c>), the cancel exit (<c>EV-02</c>), and the success
+/// exit (<c>EV-01</c>): revalidating the current client, the exact redirect URI, and the scope
+/// against the stored snapshot, then — for a passing credential check — committing the
+/// continuation consumption, the new identity session, the new authorization code, the
+/// failure-counter clear, the login-info update, and the success audit as one transaction
+/// (<see cref="OidcLoginCompletionService"/>) before the fresh <c>PS-18</c> identity cookie and the
+/// <c>PS-17</c> success redirect are written. The cancel exit consumes the continuation and
+/// returns the <c>access_denied</c> safe redirect. A missing, malformed, unknown, expired, or
+/// consumed handle shares the single local 400 of <c>EV-03</c>/<c>SC-18</c>: no redirect, no
+/// credential check, no failure count, no replay audit.
 /// <para>
 /// The controller is deliberately not an <c>[ApiController]</c> and binds no parameters: the form
 /// is parsed by hand under a strict structure contract, because the automatic model-binding 400
 /// would answer with JSON ProblemDetails and violate the local HTML result contract. Every
 /// rejection returns one identical local page that echoes no request value, and every response
-/// carries the fixed browser security headers, denies framing, and never carries a
-/// <c>Location</c> except the cancel exit's <c>access_denied</c> redirect to the exact registered
-/// URI. The page renders no stored continuation value — no redirect URI, scope, state, nonce, or
-/// challenge — so the login surface cannot be used to read them back.
+/// carries the fixed browser security headers and denies framing. A <c>Location</c> appears only
+/// on the two verified exits — the cancel's <c>access_denied</c> redirect and the success's
+/// <c>code</c> redirect — both to the exact registered URI. The page renders no stored
+/// continuation value — no redirect URI, scope, state, nonce, or challenge — so the login surface
+/// cannot be used to read them back.
 /// </para>
 /// </remarks>
 [Route("oauth2/login")]
@@ -53,18 +58,6 @@ public sealed class OAuthLoginController : ControllerBase
         + "<h1>Invalid login request</h1>"
         + "<p>The login request could not be processed. Return to the application that "
         + "sent you here and start again.</p></body></html>";
-
-    /// <summary>
-    /// The fixed local "not available" page for the two outcomes this slice cannot complete: a
-    /// passing credential check (<c>EV-01</c>, replaced by the orchestration slice) and a cancel
-    /// submission (<c>EV-02</c>, likewise). Neither path writes anything.
-    /// </summary>
-    private const string NotImplementedPage =
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-        + "<title>Login is not available</title></head><body>"
-        + "<h1>Login is not available</h1>"
-        + "<p>This authorization server cannot complete an interactive login yet.</p>"
-        + "</body></html>";
 
     /// <summary>
     /// The single generic credential-failure notice (<c>EV-17</c>). Unknown, wrong, disabled, and
@@ -104,8 +97,10 @@ public sealed class OAuthLoginController : ControllerBase
     private const string ReasonClientUnavailable = "client_unavailable";
     private const string OutcomeCancelRedirected = "cancel_redirected";
     private const string OutcomeCancelRejected = "cancel_rejected";
-    private const string OutcomeCredentialPass = "credential_pass";
     private const string OutcomeCredentialFailure = "credential_failure";
+    private const string OutcomeLoginCompleted = "login_completed";
+    private const string OutcomeLoginRedirectRejected = "login_redirect_rejected";
+    private const string OutcomeLoginClientRejected = "login_client_rejected";
 
     /// <summary>The five admitted POST form fields (<c>IN-11</c>–<c>IN-15</c>), matched ordinally.</summary>
     private static readonly string[] AdmittedFormFields =
@@ -125,6 +120,7 @@ public sealed class OAuthLoginController : ControllerBase
     private readonly ValidatorFactory _validatorFactory;
     private readonly IOidcAuthorizationRequestValidator _revalidator;
     private readonly OidcLoginFailureRecorder _failureRecorder;
+    private readonly OidcLoginCompletionService _loginCompletion;
     private readonly IdentityDbContext _dbContext;
     private readonly JwtOptions _jwtOptions;
     private readonly ILogger<OAuthLoginController> _logger;
@@ -135,6 +131,7 @@ public sealed class OAuthLoginController : ControllerBase
         ValidatorFactory validatorFactory,
         IOidcAuthorizationRequestValidator revalidator,
         OidcLoginFailureRecorder failureRecorder,
+        OidcLoginCompletionService loginCompletion,
         IdentityDbContext dbContext,
         JwtOptions jwtOptions,
         ILogger<OAuthLoginController> logger)
@@ -144,6 +141,7 @@ public sealed class OAuthLoginController : ControllerBase
         _validatorFactory = validatorFactory;
         _revalidator = revalidator;
         _failureRecorder = failureRecorder;
+        _loginCompletion = loginCompletion;
         _dbContext = dbContext;
         _jwtOptions = jwtOptions;
         _logger = logger;
@@ -204,8 +202,9 @@ public sealed class OAuthLoginController : ControllerBase
     /// redirect URI, consumes the continuation, and redirects <c>access_denied</c> (<c>EV-02</c>)
     /// before username and password are read at all (<c>IN-15</c>); a credential failure commits
     /// its counter and audit unit before the identical generic page is rendered
-    /// (<c>EV-17</c>); a passing credential check reaches the orchestration slice's
-    /// <c>EV-01</c>, answered here as the fixed local 501 with zero writes.
+    /// (<c>EV-17</c>); a passing credential check revalidates the current client, the exact
+    /// redirect URI, and the scope, commits the <c>EV-01</c> success transaction, and only then
+    /// issues the fresh identity cookie and the <c>code</c> redirect.
     /// <para>
     /// The action deliberately declares no parameters — not even a <see cref="CancellationToken"/>
     /// — and reads <see cref="HttpContext.RequestAborted"/> itself. With any declared parameter,
@@ -373,11 +372,76 @@ public sealed class OAuthLoginController : ControllerBase
 
         if (result.IsSuccess)
         {
-            // EV-01 belongs to the orchestration slice: no session, no code, no cookie, no
-            // consumption, no counter clear, and no success audit — the fixed local 501 with zero
-            // writes.
-            LogOutcome(OutcomeCredentialPass);
-            return NotImplemented();
+            // EV-01: the same revalidation entry the cancel exit uses decides the current client,
+            // the exact redirect URI, and the current scope against the stored snapshot before
+            // anything is consumed. Only its Accepted output — for the same application row —
+            // reaches the success transaction.
+            var revalidation = await _revalidator.ValidateAsync(
+                OidcContinuationRevalidation.BuildParameters(continuation, appId),
+                cancellationToken);
+
+            switch (revalidation)
+            {
+                case OidcAuthorizationValidationResult.Accepted accepted
+                    when accepted.ApplicationId == continuation.AppRegistrationId:
+                {
+                    var completion = await _loginCompletion.CompleteAsync(
+                        loginHandle,
+                        accepted,
+                        result,
+                        appId,
+                        HttpContext.GetClientIp(),
+                        HttpContext.GetUserAgent(),
+                        HttpContext.GetCorrelationId(),
+                        now,
+                        cancellationToken);
+                    if (completion is null)
+                    {
+                        // A concurrent consumption, an expiry race, or an account deactivated
+                        // after the credential check shares the single local 400 with any
+                        // unavailable continuation (EV-03); the transaction rolled back and
+                        // committed nothing.
+                        return RejectLocally(ReasonContinuationUnavailable);
+                    }
+
+                    // The cookie and the plaintext code are written only after the commit: the
+                    // sign-in names the identity scheme explicitly because the default scheme is
+                    // the management cookie (PS-18), and the session id is always the fresh one,
+                    // never an identity cookie id the request may already carry.
+                    await HttpContext.SignInAsync(
+                        IdentitySessionDefaults.AuthenticationScheme,
+                        IdentitySessionPrincipal.Create(completion.SessionId),
+                        new AuthenticationProperties { IsPersistent = false });
+                    LogOutcome(OutcomeLoginCompleted);
+                    return Redirect(OidcAuthorizationRedirect.BuildSuccess(
+                        accepted.RegisteredRedirectUri,
+                        completion.Code,
+                        continuation.State,
+                        _jwtOptions.Issuer));
+                }
+
+                case OidcAuthorizationValidationResult.RedirectRejection redirect
+                    when redirect.ApplicationId == continuation.AppRegistrationId:
+                    // Stage-4 policy drift (a removed scope, refresh disabled while
+                    // offline_access was requested) travels to the freshly verified URI with the
+                    // canonical error. Nothing is consumed — EV-01 consumes only inside its
+                    // success transaction — and no narrowed code is ever issued (SC-04).
+                    LogOutcome(OutcomeLoginRedirectRejected);
+                    return Redirect(OidcAuthorizationRedirect.BuildError(
+                        redirect.RegisteredRedirectUri,
+                        redirect.Error,
+                        redirect.ErrorDescription,
+                        continuation.State,
+                        _jwtOptions.Issuer));
+
+                default:
+                    // LocalRejection — client deactivated, the interactive capability removed, or
+                    // the redirect URI unregistered — or a result resolved to a different
+                    // application row: the single local 400 with zero writes, no consumption, no
+                    // cookie, and no Location (SC-02/SC-03).
+                    LogOutcome(OutcomeLoginClientRejected);
+                    return RejectLocally(ReasonClientUnavailable);
+            }
         }
 
         await _failureRecorder.RecordFailureAsync(
@@ -622,13 +686,6 @@ public sealed class OAuthLoginController : ControllerBase
         return content;
     }
 
-    private IActionResult NotImplemented()
-    {
-        var content = Content(NotImplementedPage, HtmlContentType, Encoding.UTF8);
-        content.StatusCode = StatusCodes.Status501NotImplemented;
-        return content;
-    }
-
     private void LogOutcome(string outcome)
     {
         _logger.LogInformation(
@@ -638,7 +695,7 @@ public sealed class OAuthLoginController : ControllerBase
     }
 
     /// <summary>
-    /// Applied before any branch runs, so every <c>/oauth2/login</c> response — 200, 400, and 501
+    /// Applied before any branch runs, so every <c>/oauth2/login</c> response — 200, 302, and 400
     /// alike — carries the same fixed set. The login page additionally denies framing outright,
     /// beyond the authorize endpoint's referrer and cache protections.
     /// </summary>

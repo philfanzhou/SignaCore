@@ -51,6 +51,8 @@ public class PasswordValidatorTests
         Assert.Equal(IdentityConstants.AuthMethodPassword, result.AuthMethod);
         Assert.NotNull(result.Account);
         Assert.Equal(account.Id, result.Account.Id);
+        // The success binds exactly the credential that passed, for the EV-01 session creation.
+        Assert.Equal(credential.Id, result.PasswordCredentialId);
     }
 
     [Fact]
@@ -77,6 +79,7 @@ public class PasswordValidatorTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("Wrong username or password", result.ErrorMessage);
+        Assert.Null(result.PasswordCredentialId);
         Assert.Equal(LoginAttemptChangeKind.RecordFailure, result.LoginAttemptChange?.Kind);
         Assert.Equal("testuser", result.LoginAttemptChange?.Username);
         loginAttemptRepository.Verify(repository => repository.RecordFailureAsync(
