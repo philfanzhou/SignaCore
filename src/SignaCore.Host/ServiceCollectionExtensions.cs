@@ -613,6 +613,7 @@ public static class ServiceCollectionExtensions
                 IdentityConstants.BCryptWorkFactor) ?? IdentityConstants.BCryptWorkFactor
         });
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
+        services.AddSingleton<PasswordDecoyHash>();
         services.AddSingleton<IPasswordPolicy, DefaultPasswordPolicy>();
         return services;
     }
