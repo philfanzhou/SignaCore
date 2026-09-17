@@ -87,7 +87,8 @@ public class PasswordValidator : IIdentityValidator
         var result = ValidationResult.Success(
             account,
             IdentityConstants.AuthMethodPassword,
-            credential.Username);
+            credential.Username,
+            passwordCredentialId: credential.Id);
         if (loginAttempt != null && loginAttempt.FailedAttempts > 0)
         {
             result.WithLoginAttemptChange(new LoginAttemptChange(

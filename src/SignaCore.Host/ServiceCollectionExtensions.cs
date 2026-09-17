@@ -233,6 +233,9 @@ public static class ServiceCollectionExtensions
         // ---- Browser OIDC login failure commit path (canonical EV-17) ----
         services.AddScoped<OidcLoginFailureRecorder>();
 
+        // ---- Browser OIDC login success commit path (canonical EV-01) ----
+        services.AddScoped<OidcLoginCompletionService>();
+
         // ---- User Query Service ----
         services.AddScoped<IUserQueryService, UserQueryService>();
 

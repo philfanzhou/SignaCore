@@ -42,6 +42,17 @@ internal static partial class OAuthLoginTestSupport
     public const string LegalState = "cancel-legal-state-0123456789abcdef";
     public const string LegalNonce = "cancel-legal-nonce-0123456789abcdef";
     public const string LegalChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
+    // The EV-01 success flow is driven through the real GET /oauth2/authorize, so its canaries
+    // cover every value the accepted request carries: the redirect URI query, the state, the
+    // nonce, and the challenge. The RFC 7636 appendix B vector doubles as the legal S256
+    // challenge.
+    public const string SuccessAppId = "login-success-app";
+    public const string SuccessRegisteredUri = "https://bff.success.test/callback?canary=success-redirect";
+    public const string SuccessScope = "openid profile";
+    public const string SuccessState = "success-canary-state-0123456789";
+    public const string SuccessNonce = "success-canary-nonce-0123456789";
+    public const string SuccessChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
     public const string ExpectedContentSecurityPolicy =
         "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
@@ -181,6 +192,105 @@ internal static partial class OAuthLoginTestSupport
         {
             AppSeedLock.Release();
         }
+    }
+
+    public static async Task<Guid> SeedSuccessApplicationAsync(IServiceProvider services)
+    {
+        await AppSeedLock.WaitAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            using var scope = services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var existing = await dbContext.AppRegistrations
+                .AsNoTracking()
+                .FirstOrDefaultAsync(app => app.AppId == SuccessAppId, TestContext.Current.CancellationToken);
+            if (existing is not null)
+            {
+                return existing.Id;
+            }
+
+            var app = new AppRegistrationEntity
+            {
+                Id = Guid.NewGuid(),
+                AppId = SuccessAppId,
+                AppSecretHash = BCrypt.Net.BCrypt.HashPassword("login-success-secret"),
+                AppName = "Login Success App",
+                IsActive = true,
+                CreatedAt = DateTimeOffset.UtcNow,
+                AudienceMode = AudienceMode.PerApplication,
+                ClientType = OidcClientType.Confidential,
+                AllowAuthorizationCode = true,
+                AllowedScopes = SuccessScope,
+                AllowRefreshToken = false
+            };
+            app.RedirectUris =
+            [
+                new AppRedirectUriEntity
+                {
+                    Id = Guid.NewGuid(),
+                    AppRegistrationId = app.Id,
+                    Kind = RedirectUriKind.Redirect,
+                    CanonicalUri = SuccessRegisteredUri
+                }
+            ];
+            dbContext.AppRegistrations.Add(app);
+            await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return app.Id;
+        }
+        finally
+        {
+            AppSeedLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Drives the real browser front half of <c>SC-01</c>: <c>GET /oauth2/authorize</c> validates
+    /// the request, persists the continuation, and redirects to the login page; the login GET
+    /// renders the form and issues the antiforgery pair. The client must not auto-redirect. The
+    /// optional state/nonce overrides let one browser run two independent continuations whose
+    /// snapshots stay distinguishable (<c>SC-07</c>); a browser that already holds a usable
+    /// antiforgery cookie is not re-issued one (<c>PS-19</c>), so its value is passed in.
+    /// </summary>
+    public static async Task<LoginSession> BeginSuccessLoginViaAuthorizeAsync(
+        IServiceProvider services,
+        HttpClient client,
+        string? state = null,
+        string? nonce = null,
+        string? existingCookieValue = null)
+    {
+        await SeedSuccessApplicationAsync(services);
+        var authorizeUrl = "/oauth2/authorize?" + string.Join('&', new[]
+        {
+            ("response_type", "code"),
+            ("client_id", SuccessAppId),
+            ("redirect_uri", SuccessRegisteredUri),
+            ("scope", SuccessScope),
+            ("state", state ?? SuccessState),
+            ("nonce", nonce ?? SuccessNonce),
+            ("code_challenge", SuccessChallenge),
+            ("code_challenge_method", "S256"),
+        }.Select(pair => $"{Uri.EscapeDataString(pair.Item1)}={Uri.EscapeDataString(pair.Item2)}"));
+
+        using var authorize = await client.GetAsync(authorizeUrl, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Found, authorize.StatusCode);
+        var location = authorize.Headers.Location!.ToString();
+        const string loginPrefix = "/oauth2/login?login_handle=";
+        Assert.StartsWith(loginPrefix, location, StringComparison.Ordinal);
+        var handle = location[loginPrefix.Length..];
+
+        using var form = await client.GetAsync(
+            $"{loginPrefix}{handle}", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        var body = await form.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        var token = TokenPattern().Match(body).Groups[1].Value;
+        Assert.False(string.IsNullOrEmpty(token));
+
+        var setCookie = GetSetCookieHeader(form, CookieName);
+        var cookieValue = setCookie is not null
+            ? CookieValueFromHeader(setCookie, CookieName)
+            : existingCookieValue;
+        Assert.NotNull(cookieValue);
+        return new LoginSession(handle, cookieValue!, token);
     }
 
     private static async Task<Guid> SeedApplicationAsync(IServiceProvider services)

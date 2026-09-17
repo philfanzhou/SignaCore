@@ -1313,6 +1313,171 @@ public sealed class ServerDatabaseContractTests
         }
     }
 
+    /// <summary>
+    /// <c>EV-01</c> on the real PostgreSQL matrix: two independent service providers run the
+    /// success transaction over the same handle concurrently — exactly one commits its session,
+    /// code, and audit, the loser observes the committed consumption and rolls back with zero
+    /// writes — and a continuation created by one instance's service completes on another
+    /// instance's service, because the whole flow rides the shared database only.
+    /// </summary>
+    [Fact]
+    public async Task PostgreSqlLoginCompletion_ConcurrentCompletionOnce_AndCrossInstanceCompletion()
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL login completion matrix.");
+
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var databaseOptions = CreateDatabaseOptions(
+                "PostgreSQL",
+                container.GetConnectionString());
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            await using (var migration = new IdentityDbContext(options))
+            {
+                await migration.Database.MigrateAsync(TestContext.Current.CancellationToken);
+            }
+
+            var (accountId, credentialId, appId) =
+                await SeedAuthorizationCodePrerequisitesAsync(options);
+
+            // ---- Two independent service providers complete the same handle: one winner ----
+            var (handle, accepted) = await CreateLoginContinuationAsync(
+                options, appId, "ServerCompletionState_0123456789ab");
+            var completions = await Task.WhenAll(
+                CompleteLoginAsync(options, handle, accepted, accountId, credentialId),
+                CompleteLoginAsync(options, handle, accepted, accountId, credentialId));
+            var winner = Assert.Single(completions, completion => completion is not null)!;
+
+            await using (var assertion = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var session = Assert.Single(await assertion.IdentitySessions.AsNoTracking()
+                    .Where(row => row.AccountId == accountId).ToListAsync(cancellationToken));
+                Assert.Equal(winner.SessionId, session.Id);
+                Assert.Equal(credentialId, session.PasswordCredentialId);
+                var code = Assert.Single(await assertion.AuthorizationCodes.AsNoTracking()
+                    .Where(row => row.AccountId == accountId).ToListAsync(cancellationToken));
+                Assert.Equal(session.Id, code.IdentitySessionId);
+                Assert.Equal(appId, code.AppRegistrationId);
+                var continuation = await assertion.AuthorizationRequests.AsNoTracking()
+                    .SingleAsync(
+                        row => row.HandleDigest == LoginHandleDigest.Compute(handle),
+                        cancellationToken);
+                Assert.NotNull(continuation.ConsumedAt);
+                var history = Assert.Single(await assertion.LoginHistories.AsNoTracking()
+                    .Where(row => row.AccountId == accountId).ToListAsync(cancellationToken));
+                Assert.Equal("login_success", history.EventType);
+                var account = await assertion.Accounts.AsNoTracking()
+                    .SingleAsync(row => row.Id == accountId, cancellationToken);
+                Assert.Equal(1, account.TotalLoginCount);
+            }
+
+            // ---- Instance A's service creates the continuation, instance B's completes it ----
+            var (secondHandle, secondAccepted) = await CreateLoginContinuationAsync(
+                options, appId, "ServerCompletionState_9876543210ab");
+            var second = await CompleteLoginAsync(
+                options, secondHandle, secondAccepted, accountId, credentialId);
+            Assert.NotNull(second);
+
+            await using (var assertion = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var sessions = await assertion.IdentitySessions.AsNoTracking()
+                    .Where(row => row.AccountId == accountId).ToListAsync(cancellationToken);
+                Assert.Equal(2, sessions.Count);
+                Assert.Contains(sessions, session => session.Id == second!.SessionId);
+                var secondCode = Assert.Single(await assertion.AuthorizationCodes.AsNoTracking()
+                    .Where(row => row.IdentitySessionId == second.SessionId)
+                    .ToListAsync(cancellationToken));
+                Assert.Equal(appId, secondCode.AppRegistrationId);
+                Assert.NotNull(secondCode.RedirectUri);
+                var secondContinuation = await assertion.AuthorizationRequests.AsNoTracking()
+                    .SingleAsync(
+                        row => row.HandleDigest == LoginHandleDigest.Compute(secondHandle),
+                        cancellationToken);
+                Assert.NotNull(secondContinuation.ConsumedAt);
+                var account = await assertion.Accounts.AsNoTracking()
+                    .SingleAsync(row => row.Id == accountId, cancellationToken);
+                Assert.Equal(2, account.TotalLoginCount);
+            }
+        }
+    }
+
+    private static async Task<(string Handle, OidcAuthorizationValidationResult.Accepted Accepted)>
+        CreateLoginContinuationAsync(
+            DbContextOptions<IdentityDbContext> options,
+            Guid appId,
+            string state)
+    {
+        var accepted = new OidcAuthorizationValidationResult.Accepted(
+            "code-contract-app",
+            appId,
+            "https://client.example.com/callback",
+            "openid profile",
+            state,
+            "ServerCanaryNonce_0123456789abcdef",
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+        await using var context = new IdentityDbContext(options);
+        var store = new AuthorizationRequestStore(
+            new AuthorizationRequestRepository(context),
+            new EfCoreUnitOfWork(context));
+        var creation = await store.CreateAsync(
+            accepted, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
+        return (creation.LoginHandle, accepted);
+    }
+
+    /// <summary>
+    /// One "instance" of the completion service on its own connection and unit of work — the same
+    /// composition the host registers per request scope.
+    /// </summary>
+    private static async Task<SignaCore.Host.Services.OidcLoginCompletion?> CompleteLoginAsync(
+        DbContextOptions<IdentityDbContext> options,
+        string handle,
+        OidcAuthorizationValidationResult.Accepted accepted,
+        Guid accountId,
+        Guid credentialId)
+    {
+        await using var context = new IdentityDbContext(options);
+        var unitOfWork = new EfCoreUnitOfWork(context);
+        var accountRepository = new AccountRepository(context);
+        var service = new SignaCore.Host.Services.OidcLoginCompletionService(
+            new AuthorizationRequestStore(new AuthorizationRequestRepository(context), unitOfWork),
+            accountRepository,
+            new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),
+            new AuthorizationCodeStore(new AuthorizationCodeRepository(context), unitOfWork),
+            new LoginAttemptRepository(context),
+            new AccountLoginInfoService(accountRepository),
+            new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            unitOfWork,
+            context);
+        return await service.CompleteAsync(
+            handle,
+            accepted,
+            ValidationResult.Success(
+                new AccountEntity { Id = accountId, IsActive = true },
+                IdentityConstants.AuthMethodPassword,
+                "server-completion-user",
+                passwordCredentialId: credentialId),
+            accepted.ClientId,
+            null,
+            null,
+            "server-completion-correlation",
+            DateTimeOffset.UtcNow,
+            TestContext.Current.CancellationToken);
+    }
+
     private static async Task<(Guid AccountId, Guid CredentialId, Guid AppId)>
         SeedAuthorizationCodePrerequisitesAsync(DbContextOptions<IdentityDbContext> options)
     {
