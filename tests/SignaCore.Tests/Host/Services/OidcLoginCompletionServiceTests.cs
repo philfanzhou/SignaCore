@@ -47,7 +47,11 @@ public sealed class OidcLoginCompletionServiceTests
         await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
         database.Context.ChangeTracker.Clear();
 
-        var now = DateTimeOffset.UtcNow;
+        // SQLite stores instants on a whole-microsecond grid, so the captured instant is aligned
+        // to it: a Linux clock ticks at 100ns and would otherwise be truncated on the round trip
+        // and fail the exact-equality assertions below.
+        var now = new DateTimeOffset(
+            DateTimeOffset.UtcNow.UtcTicks / 10 * 10, TimeSpan.Zero);
         var completion = await database.Service.CompleteAsync(
             seed.Handle,
             CreateAccepted(seed.ApplicationId),
