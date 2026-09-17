@@ -188,8 +188,14 @@ public class IdentitySessionRepository : IIdentitySessionRepository
                 operationCancellationToken);
 
             var deletedRows = await _dbContext.IdentitySessions
-                .Where(session => session.IdleExpiresAt <= cutoff
-                    || session.RevokedAt <= cutoff)
+                .Where(session => (session.IdleExpiresAt <= cutoff
+                        || session.RevokedAt <= cutoff)
+                    // PS-23 (authorization_codes slice): a session stays while any retained code
+                    // row still references it, even past the session's own retention window. The
+                    // code cleanup segment runs before this one in the same cleanup round, so a
+                    // code past its retention is already gone by the time this predicate runs.
+                    && !_dbContext.AuthorizationCodes.Any(
+                        code => code.IdentitySessionId == session.Id))
                 .ExecuteDeleteAsync(operationCancellationToken);
 
             await transaction.CommitAsync(operationCancellationToken);

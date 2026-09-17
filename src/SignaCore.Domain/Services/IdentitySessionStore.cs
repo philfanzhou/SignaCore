@@ -144,8 +144,10 @@ public interface IIdentitySessionStore
     /// <see cref="IdentityConstants.IdentitySessionRetentionHours"/> as of
     /// <paramref name="now"/>, returning the deleted count. Rows inside their retention window
     /// stay whatever their state; no reference is ever nulled to enable a delete, and a cancelled
-    /// or failed run rolls the whole unit back. Callers that later add tables referencing sessions
-    /// must teach this cleanup to skip still-referenced rows.
+    /// or failed run rolls the whole unit back. A session past its own retention window is still
+    /// kept while any retained <c>authorization_codes</c> row references it (<c>PS-23</c>); the
+    /// authorization-code cleanup segment runs before this one in the same cleanup round, so
+    /// once the last referencing code is deleted the session becomes deletable.
     /// </summary>
     Task<int> CleanupExpiredAsync(
         DateTimeOffset now,

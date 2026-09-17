@@ -668,6 +668,92 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                     b.ToTable("audit_logs", (string)null);
                 });
 
+            modelBuilder.Entity("SignaCore.Database.Entity.AuthorizationCodeEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("account_id");
+
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("app_registration_id");
+
+                    b.Property<long>("AuthTime")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("auth_time");
+
+                    b.Property<string>("CodeChallenge")
+                        .IsRequired()
+                        .HasMaxLength(43)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("code_challenge");
+
+                    b.Property<string>("CodeDigest")
+                        .IsRequired()
+                        .HasMaxLength(71)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("code_digest");
+
+                    b.Property<long?>("ConsumedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("consumed_at");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("ExpiresAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("expires_at");
+
+                    b.Property<Guid>("IdentitySessionId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("identity_session_id");
+
+                    b.Property<string>("Nonce")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("nonce");
+
+                    b.Property<string>("RedirectUri")
+                        .IsRequired()
+                        .HasMaxLength(501)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("redirect_uri");
+
+                    b.Property<Guid?>("RefreshFamilyId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("refresh_family_id");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("scope");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("AppRegistrationId");
+
+                    b.HasIndex("CodeDigest")
+                        .IsUnique();
+
+                    b.HasIndex("IdentitySessionId");
+
+                    b.ToTable("authorization_codes", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_authorization_codes_family_requires_consumption", "refresh_family_id IS NULL OR consumed_at IS NOT NULL");
+                        });
+                });
+
             modelBuilder.Entity("SignaCore.Database.Entity.AuthorizationRequestEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1383,6 +1469,27 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                         .WithMany()
                         .HasForeignKey("UserLoginId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SignaCore.Database.Entity.AuthorizationCodeEntity", b =>
+                {
+                    b.HasOne("SignaCore.Database.Entity.AccountEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SignaCore.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AppRegistrationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SignaCore.Database.Entity.IdentitySessionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("IdentitySessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

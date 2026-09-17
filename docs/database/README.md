@@ -12,6 +12,7 @@ SignaCore uses one EF Core model with provider-specific migrations for PostgreSQ
 | [app_redirect_uris](./tables/app_redirect_uris.md) | Canonical interactive OIDC redirect and post-logout registrations. |
 | [audit_logs](./tables/audit_logs.md) | Administrative and security-relevant change records. |
 | [authorization_requests](./tables/authorization_requests.md) | Shared OIDC login continuations resolved by one-time handle digest. |
+| [authorization_codes](./tables/authorization_codes.md) | Short-lived OIDC authorization codes resolved by one-time code digest. |
 | [identity_sessions](./tables/identity_sessions.md) | Shared server-side identity session authority behind the browser identity cookie. |
 | [installation_state](./tables/installation_state.md) | Removed legacy first-run/installation marker; dropped by the `DropInstallationState` migration. |
 | [login_attempts](./tables/login_attempts.md) | Password-login failure counts and lockout state by normalized username. |

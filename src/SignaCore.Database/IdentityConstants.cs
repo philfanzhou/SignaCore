@@ -76,6 +76,9 @@ public static class IdentityConstants
     public const int LoginHandleLength = 43;
     public const int LoginHandleLifetimeMinutes = 10;
     public const int AuthorizationRequestRetentionHours = 24;
+    public const int AuthorizationCodeLength = 43;
+    public const int AuthorizationCodeLifetimeSeconds = 60;
+    public const int AuthorizationCodeRetentionHours = 24;
     public const int MaxIdentitySessionAgeSeconds = 12 * 60 * 60;
     public const int IdentitySessionIdleTimeoutMinutes = 30;
     public const int IdentitySessionActivityThresholdMinutes = 1;

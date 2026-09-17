@@ -9,6 +9,7 @@ accounts
   +-- refresh_tokens (also bound to app_id and optional login source)
   +-- login_histories
   +-- identity_sessions (browser identity authority; also restrictively references password_credentials)
+  +-- authorization_codes (also restrictively references identity_sessions and app_registrations)
 
 app_registrations
   +-- otps
@@ -34,6 +35,10 @@ a value snapshot rather than a foreign key to `app_redirect_uris`.
 
 The `identity_sessions` foreign keys to `accounts` and `password_credentials` are both restrictive
 and never cascade: deleting a referenced account or credential while session rows exist fails, and
-cleanup removes rows only by retention. Nothing references `identity_sessions` yet; the future
-authorization-code, refresh-family, and logout tables own their own restrictive session references
-and must keep the session cleanup from deleting still-referenced rows.
+cleanup removes rows only by retention. The `authorization_codes` foreign keys to
+`app_registrations`, `accounts`, and `identity_sessions` follow the same `PS-23` rule; its
+`refresh_family_id` column deliberately carries no reference and no index until the interactive
+refresh family slice backfills values and adds one. Cleanup removes rows only by retention: the
+authorization-code segment runs before the session segment in the same round, and the session
+cleanup skips sessions still referenced by retained code rows. Nothing references
+`authorization_codes`.

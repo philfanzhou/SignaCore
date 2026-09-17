@@ -48,9 +48,10 @@ and any instance reads, updates, and revokes any instance's session through the 
   deployments are single-instance: the state machine holds under one writer, and multi-instance
   SQLite is not supported (`PS-22`).
 - Cleanup deletes rows only once their idle expiry or revocation is older than the 24-hour
-  retention window, as one transactional unit. Tables that later reference sessions
-  (authorization codes, refresh families, logout requests) must teach this cleanup to skip
-  still-referenced rows before their own migrations land.
+  retention window, as one transactional unit. A session past its own retention window is still
+  kept while any retained `authorization_codes` row references it: the authorization-code cleanup
+  segment runs before this one in the same round, so once the last referencing code is deleted the
+  session becomes deletable.
 
 The authoritative semantics are `PS-04` and its related rows in
 [CanonicalSemanticModel.md](../../oidc/CanonicalSemanticModel.md); this page is a projection, not a
