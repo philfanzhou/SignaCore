@@ -126,6 +126,9 @@ public static class ServiceCollectionExtensions
 
         // ---- Token Service ----
         services.AddSingleton<ITokenService, JwtTokenService>();
+        // The standalone PS-13 constructor of the interactive access token: pure and stateless,
+        // so it shares the ITokenService singleton lifetime; no current grant reads it.
+        services.AddSingleton<IInteractiveAccessTokenFactory, InteractiveAccessTokenFactory>();
 
         // ---- Password Hasher ----
         services.RegisterPasswordHashingDefaults(configuration);
