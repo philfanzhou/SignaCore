@@ -6,6 +6,7 @@ const {
   bootstrapLoading,
   bootstrapSaving,
   bootstrapTesting,
+  bootstrapRestarting,
   bootstrapMessage,
   bootstrapError,
   bootstrapForm,
@@ -24,9 +25,18 @@ const {
           这项设置只修改当前实例的引导文件，不会自动分发到其他实例；保存后会重启服务。
         </p>
       </div>
-      <span class="status-pill" :class="hasBootstrapForm ? 'green' : 'amber'">
+      <span
+        class="status-pill"
+        :class="bootstrapRestarting ? 'amber' : hasBootstrapForm ? 'green' : 'amber'"
+      >
         <i></i>{{
-          bootstrapLoading ? "读取中" : hasBootstrapForm ? "可编辑" : "不可编辑"
+          bootstrapRestarting
+            ? "正在重启"
+            : bootstrapLoading
+              ? "读取中"
+              : hasBootstrapForm
+                ? "可编辑"
+                : "不可编辑"
         }}
       </span>
     </div>
@@ -35,7 +45,10 @@ const {
       <span>✓</span>
       <p>{{ bootstrapMessage }}</p>
     </div>
-    <div v-if="bootstrapSettings" class="bootstrap-grid">
+    <div v-if="bootstrapRestarting" class="console-table-state">
+      服务正在重启。重启完成后本页会自动重新载入；如果新目标使用不同的密钥环，需要重新登录。
+    </div>
+    <div v-else-if="bootstrapSettings" class="bootstrap-grid">
       <label
         >Provider<input
           v-model="bootstrapForm.provider"
@@ -83,20 +96,20 @@ const {
           type="password"
           :disabled="!hasBootstrapForm" /></label
       ><label class="wide-field"
-        >高级连接字符串（只写）<input
+        >高级连接字符串（只写，填写后优先生效）<input
           v-model="bootstrapForm.connectionString"
           class="console-input"
           type="password"
           :disabled="!hasBootstrapForm" /></label
       ><label
-        >目标 Master Key（只写）<input
+        >目标 Master Key（只写，留空保留当前 key）<input
           v-model="bootstrapForm.masterKey"
           class="console-input"
           type="password"
           :disabled="!hasBootstrapForm"
       /></label>
     </div>
-    <div v-if="bootstrapSettings" class="bootstrap-actions">
+    <div v-if="bootstrapSettings && !bootstrapRestarting" class="bootstrap-actions">
       <label class="confirm-line"
         ><input
           v-model="bootstrapForm.confirm"
@@ -120,7 +133,10 @@ const {
         </button>
       </div>
     </div>
-    <div v-else-if="!bootstrapLoading" class="console-table-state">
+    <div
+      v-else-if="!bootstrapLoading && !bootstrapRestarting"
+      class="console-table-state"
+    >
       暂无可编辑的数据库引导配置。
     </div>
   </article>

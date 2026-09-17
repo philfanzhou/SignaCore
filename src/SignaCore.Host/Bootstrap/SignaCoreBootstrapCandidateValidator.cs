@@ -25,7 +25,9 @@ namespace SignaCore.Host.Bootstrap;
 /// validator performs exactly that explicit preparation — through the shared preparation
 /// providers, with the same maintenance-database convention the startup path uses — before the
 /// shared checks are re-run once. Preparation runs only on the creation path, only for the
-/// missing-target rejection, and never overwrites an existing target.
+/// missing-target rejection, never overwrites an existing target, and only after every
+/// target-independent refusal has been decided, so a rejected candidate never leaves a prepared
+/// target behind.
 /// </para>
 /// </remarks>
 internal sealed class SignaCoreBootstrapCandidateValidator : IBootstrapCandidateValidator
@@ -85,14 +87,30 @@ internal sealed class SignaCoreBootstrapCandidateValidator : IBootstrapCandidate
     {
         // 1. The shared checks: provider registration, server-version and connection-string rules,
         //    and target observability. Their failure codes pass through unchanged, except the one
-        //    rejection a brand-new target produces, which the explicit preparation below resolves.
+        //    rejection a brand-new target produces. Before that rejection is resolved by creating
+        //    anything, every rule that does not need the target is decided first — a missing target
+        //    protects no data, so a replacement key can never prove readable — so a refused
+        //    candidate never leaves a prepared empty target behind.
         var shared = await sharedValidator.ValidateAsync(candidate, cancellationToken);
         if (!shared.IsValid)
         {
-            if (string.Equals(shared.ErrorCode, TargetNotFoundErrorCode, StringComparison.Ordinal) &&
-                await TryPrepareMissingTargetAsync(candidate, cancellationToken))
+            if (string.Equals(shared.ErrorCode, TargetNotFoundErrorCode, StringComparison.Ordinal))
             {
-                shared = await sharedValidator.ValidateAsync(candidate, cancellationToken);
+                var earlyShape = ValidateLocalShape(SignaCoreBootstrapStore.ToDatabaseOptions(candidate.Database));
+                if (earlyShape is not null)
+                {
+                    return earlyShape;
+                }
+
+                if (IsKeyReplacement(candidate))
+                {
+                    return BootstrapValidationResult.Failure(MasterKeyReplacementRefusedErrorCode);
+                }
+
+                if (await TryPrepareMissingTargetAsync(candidate, cancellationToken))
+                {
+                    shared = await sharedValidator.ValidateAsync(candidate, cancellationToken);
+                }
             }
 
             if (!shared.IsValid)
@@ -138,8 +156,7 @@ internal sealed class SignaCoreBootstrapCandidateValidator : IBootstrapCandidate
         }
 
         // 4. A running host never swaps the key it loaded for one the target cannot read.
-        if (currentMasterKey is not null &&
-            !string.Equals(candidate.MasterKey, currentMasterKey, StringComparison.Ordinal) &&
+        if (IsKeyReplacement(candidate) &&
             inspection.KeyCompatibility != MasterKeyCompatibility.Compatible)
         {
             return BootstrapValidationResult.Failure(MasterKeyReplacementRefusedErrorCode);
@@ -147,6 +164,10 @@ internal sealed class SignaCoreBootstrapCandidateValidator : IBootstrapCandidate
 
         return BootstrapValidationResult.Success();
     }
+
+    private bool IsKeyReplacement(BootstrapConfiguration candidate) =>
+        currentMasterKey is not null &&
+        !string.Equals(candidate.MasterKey, currentMasterKey, StringComparison.Ordinal);
 
     /// <summary>
     /// The local reload-shape rules: the shared checks accept what their providers can probe, while

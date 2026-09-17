@@ -607,26 +607,84 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     {
         using var admin = await _fixture.CreateAdminHttpClientAsync();
 
-        var response = await admin.PutAsJsonAsync("/api/admin/bootstrap", new
+        // The shared update entry, still without the SignaCore confirmation header.
+        using var request = new HttpRequestMessage(HttpMethod.Put, "/management/v1/bootstrap")
         {
-            database = new
+            Content = JsonContent.Create(new
             {
-                provider = "SQLite",
-                filePath = "replacement.db"
-            },
-            confirm = false
-        }, cancellationToken: TestContext.Current.CancellationToken);
+                database = new
+                {
+                    provider = "SQLite",
+                    serverVersion = (string?)null,
+                    connectionString = "Data Source=replacement.db"
+                }
+            })
+        };
+        request.Headers.TryAddWithoutValidation("X-ServiceMantle-Request", "1");
+        using var response = await admin.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var responseText = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        Assert.Contains("explicit confirmation", responseText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("signacore.bootstrap.confirmation_required", responseText, StringComparison.Ordinal);
         Assert.DoesNotContain(IdentityServerFixture.RootSecret, responseText, StringComparison.Ordinal);
+
+        // The legacy controller route no longer exists.
+        using var legacy = await admin.PutAsJsonAsync("/api/admin/bootstrap", new { confirm = true },
+            TestContext.Current.CancellationToken);
+        Assert.True(
+            legacy.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed,
+            $"the legacy route answered {legacy.StatusCode}");
 
         using var healthClient = _fixture.CreateHttpClient();
         using var health = await healthClient.GetAsync(
             "/health/ready",
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+    }
+
+    /// <summary>
+    /// A valid externally issued token cannot authorize the bootstrap update: the entry's session
+    /// policy pins the fixed management cookie scheme, so the external default scheme stays
+    /// unauthenticated even with a Bearer token attached.
+    /// </summary>
+    [Fact]
+    public async Task BootstrapSettingsApi_RefusesAnExternallyAuthenticatedCaller()
+    {
+        using var gateway = _fixture.CreateGatewayHttpClient();
+        var tokenResponse = await gateway.PostAsJsonAsync("/api/auth/token", new
+        {
+            grantType = IdentityConstants.GrantTypePassword,
+            username = IdentityServerFixture.AdminUsername,
+            password = IdentityServerFixture.AdminPassword
+        }, TestContext.Current.CancellationToken);
+        var tokenBody = await tokenResponse.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(tokenBody.GetProperty("success").GetBoolean(), tokenBody.ToString());
+        var accessToken = tokenBody.GetProperty("accessToken").GetString()!;
+
+        using var client = _fixture.CreateHttpClient();
+        using var request = new HttpRequestMessage(HttpMethod.Put, "/management/v1/bootstrap")
+        {
+            Content = JsonContent.Create(new
+            {
+                database = new
+                {
+                    provider = "SQLite",
+                    serverVersion = (string?)null,
+                    connectionString = "Data Source=replacement.db"
+                }
+            })
+        };
+        request.Headers.TryAddWithoutValidation("X-ServiceMantle-Request", "1");
+        request.Headers.TryAddWithoutValidation("X-SignaCore-Confirm-Database-Change", "1");
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
+            "Bearer", accessToken);
+
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var responseText = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(IdentityServerFixture.RootSecret, responseText, StringComparison.Ordinal);
     }
 
     /// <summary>Browser navigation to /setup goes to the console once installation is complete.</summary>

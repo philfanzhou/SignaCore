@@ -144,15 +144,15 @@ describe('bootstrap target test', () => {
 })
 
 describe('bootstrap save', () => {
-  it('posts a complete connection string with the credential headers and omits the key for a new install', async () => {
+  it('posts a complete quoted connection string with the credential headers and omits the key for a new install', async () => {
     bootstrapForm.bootstrapCredential = '  ABCDE  '
     bootstrapForm.installMode = 'new'
     bootstrapForm.masterKey = 'must-not-be-sent'
     bootstrapForm.host = 'db'
     bootstrapForm.port = 5433
-    bootstrapForm.database = 'signacore'
+    bootstrapForm.database = 'signa;core'
     bootstrapForm.username = 'signacore'
-    bootstrapForm.password = 'secret'
+    bootstrapForm.password = 'a;b'
     mocks.post.mockResolvedValue({ status: 201, data: { restartRequired: true } })
     vi.stubGlobal('window', { setInterval: vi.fn(), clearInterval: vi.fn(), location: { assign: vi.fn() } })
 
@@ -162,11 +162,31 @@ describe('bootstrap save', () => {
       database: {
         provider: 'PostgreSQL',
         serverVersion: '15',
-        connectionString: 'Host=db;Port=5433;Database=signacore;Username=signacore;Password=secret',
+        connectionString: 'Host="db";Port=5433;Database="signa;core";Username="signacore";Password="a;b"',
       },
     }, { headers: credentialHeaders })
     expect(bootstrapPhase.value).toBe('restarting')
     expect(bootstrapForm.bootstrapCredential).toBe('')
+    vi.unstubAllGlobals()
+  })
+
+  it('quotes the SQLite file path so separator characters survive verbatim', async () => {
+    bootstrapForm.provider = 'SQLite'
+    bootstrapForm.installMode = 'new'
+    bootstrapForm.filePath = "/app/a;b'c.db"
+    bootstrapForm.bootstrapCredential = 'ABCDE'
+    mocks.post.mockResolvedValue({ status: 201, data: { restartRequired: true } })
+    vi.stubGlobal('window', { setInterval: vi.fn(), clearInterval: vi.fn(), location: { assign: vi.fn() } })
+
+    await saveBootstrap()
+
+    expect(mocks.post).toHaveBeenCalledWith('/management/v1/bootstrap', {
+      database: {
+        provider: 'SQLite',
+        serverVersion: null,
+        connectionString: 'Data Source="/app/a;b\'c.db"',
+      },
+    }, { headers: credentialHeaders })
     vi.unstubAllGlobals()
   })
 

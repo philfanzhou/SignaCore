@@ -1,31 +1,14 @@
 import axios from 'axios'
 import { reactive, ref } from 'vue'
+import { buildPostgreSqlConnectionString, buildSqliteConnectionString } from '../utils/bootstrapConnectionString'
+import {
+  bootstrapProviderCatalog,
+  type BootstrapProvider,
+} from '../utils/bootstrapProviders'
 
 export type BootstrapPhase = 'checking' | 'required' | 'testing' | 'saving' | 'restarting'
 
-export interface BootstrapProvider {
-  provider: string
-  serverVersions: string[]
-  defaultPort: number | null
-  singleInstanceOnly: boolean
-}
-
-// The shared installation status entry discloses only the phase, not the provider catalog, so the
-// form offers the same combinations the backend accepts from this fixed list.
-const providerCatalog: BootstrapProvider[] = [
-  {
-    provider: 'PostgreSQL',
-    serverVersions: ['15', '16', '17'],
-    defaultPort: 5432,
-    singleInstanceOnly: false,
-  },
-  {
-    provider: 'SQLite',
-    serverVersions: [],
-    defaultPort: null,
-    singleInstanceOnly: true,
-  },
-]
+export type { BootstrapProvider }
 
 interface InstallationStatus {
   phase: string
@@ -53,7 +36,7 @@ const credentialHeader = 'X-ServiceMantle-Bootstrap-Credential'
 export const bootstrapPhase = ref<BootstrapPhase>('checking')
 export const bootstrapError = ref('')
 export const bootstrapMessage = ref('')
-export const bootstrapProviders = ref<BootstrapProvider[]>(providerCatalog)
+export const bootstrapProviders = ref<BootstrapProvider[]>(bootstrapProviderCatalog)
 export const bootstrapAdvanced = ref(false)
 
 export const bootstrapForm = reactive({
@@ -115,22 +98,24 @@ export function applyProviderDefaults(provider: BootstrapProvider) {
 }
 
 // The shared creation entry accepts a complete connection string, so the structured fields are
-// assembled here. The password is write-only and never returned by any response.
+// assembled here through the shared quoting helper: every value is double-quoted with internal
+// quotes doubled, so any password character survives the provider parser verbatim. The password
+// is write-only and never returned by any response. The advanced mode passes its raw string
+// through unchanged.
 function buildConnectionString(): string {
   if (bootstrapAdvanced.value) {
     return bootstrapForm.connectionString.trim()
   }
   if (bootstrapForm.provider === 'SQLite') {
-    return `Data Source=${bootstrapForm.filePath.trim()}`
+    return buildSqliteConnectionString(bootstrapForm.filePath.trim())
   }
-  const port = bootstrapForm.port ?? 5432
-  return [
-    `Host=${bootstrapForm.host.trim()}`,
-    `Port=${port}`,
-    `Database=${bootstrapForm.database.trim()}`,
-    `Username=${bootstrapForm.username.trim()}`,
-    `Password=${bootstrapForm.password}`,
-  ].join(';')
+  return buildPostgreSqlConnectionString({
+    host: bootstrapForm.host.trim(),
+    port: bootstrapForm.port,
+    database: bootstrapForm.database.trim(),
+    username: bootstrapForm.username.trim(),
+    password: bootstrapForm.password,
+  })
 }
 
 function savePayload() {

@@ -306,6 +306,22 @@ builder.Services.AddConsulDiscoveryIfEnabled(builder.Configuration);
 // /health keep their current owners and responses. The shared capabilities are registered before
 // the host composes its own rate limiter below so its locked rejection contract — the JSON body
 // HostRejectionWriteCancellationTests pins — keeps serving every named policy.
+
+// ---- Shared bootstrap update prerequisites ----
+// SignaCore's candidate rules and manager replace the shared defaults before AddServiceMantle's
+// TryAdd could register them: registered after it, these TryAdds would silently keep the shared
+// default validator, which does not enforce the master-key rules of a running host. The manager
+// owns a store instance over the same resolved path, exactly like the mode host's registration.
+builder.Services.AddSingleton<IBootstrapCandidateValidator>(
+    _ => new SignaCoreBootstrapCandidateValidator(
+        SignaCoreBootstrapStore.CreateProviderRegistry(),
+        currentMasterKey: bootstrapResult.Bootstrap.MasterKey));
+builder.Services.AddSingleton<BootstrapConfigurationManager>(provider =>
+    new BootstrapConfigurationManager(
+        SignaCoreBootstrapStore.Create(builder.Configuration),
+        provider.GetRequiredService<InstanceId>(),
+        provider.GetRequiredService<IBootstrapCandidateValidator>()!));
+
 var mantle = builder.Services.AddSignaCoreServiceMantle(bootstrapFilePath);
 mantle.AddSignaCoreSharedHttpCapabilities();
 
@@ -319,6 +335,14 @@ var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(
 // ---- Shared ServiceMantle management session (fixed cookie scheme, phase gate, session entries) ----
 mantle.AddSignaCoreManagementSession(
     SignaCoreBootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database));
+
+// The shared bootstrap group: the update entry the authenticated editor drives. The credential
+// store is only constructed — never provisioned or issued here — because the shared mapping
+// requires a registered store to start; on this host the creation entry is phase-gated to a
+// 503 anyway, so the credential is never consumed.
+mantle.AddServiceMantleBootstrapManagement();
+builder.Services.AddSingleton<IBootstrapCredentialStore>(
+    BootstrapCredentialProvisioner.CreateStore(bootstrapFilePath));
 
 builder.Services.AddSingleton(bootstrapResult.RuntimeState);
 builder.Services.AddSingleton(bootstrapResult.SettingsStore);
@@ -434,6 +458,12 @@ app.UseMiddleware<SensitiveHeaderRedactionMiddleware>();
 // must not be mixed with the individual ServiceMantle entry points.
 app.UseServiceMantlePipeline();
 
+// The bootstrap update guard runs after the shared pipeline — so its 401/403 still precede the
+// host rules — and before the endpoint: it refuses a Development-fallback host and an
+// unconfirmed database change without calling the shared handler, and it owns the
+// bootstrap_updated audit row and the controlled stop after a published update.
+app.UseMiddleware<BootstrapUpdateGuardMiddleware>();
+
 // ---- Health ----
 app.MapHealthChecks(HealthEndpoints.Live, new()
 {
@@ -544,6 +574,12 @@ app.MapControllers();
 
 // ---- Shared ServiceMantle management session (login / current session / logout) ----
 app.MapSignaCoreManagementSession();
+
+// ---- Shared bootstrap entries (update; creation stays phase-gated to 503 on this host) ----
+app.MapServiceMantleBootstrap();
+
+// ---- Authenticated bootstrap overview and target probe ----
+AdminBootstrapEndpoints.Map(app);
 
 // ---- Prometheus Metrics Endpoint ----
 app.MapPrometheusScrapingEndpoint();

@@ -161,7 +161,7 @@ describe('AdminApiClient', () => {
     )
   })
 
-  it('keeps bootstrap replacement behind the dedicated endpoint and confirmation payload', async () => {
+  it('keeps the probe behind its guard header and classifies without writing', async () => {
     const payload = {
       database: {
         provider: 'SQLite',
@@ -169,13 +169,40 @@ describe('AdminApiClient', () => {
         filePath: 'identity.db',
       },
       masterKey: null,
-      confirm: true,
     }
-    mocks.http.put.mockResolvedValue({ data: { status: 'saved', message: 'saved' } })
+    mocks.http.post.mockResolvedValue({ data: { target: 'empty', endpoint: 'identity.db' } })
 
-    await createAdminApiClient().updateBootstrapSettings(payload)
+    await createAdminApiClient().testBootstrapSettings(payload)
 
-    expect(mocks.http.put).toHaveBeenCalledWith('/api/admin/bootstrap', payload)
+    expect(mocks.http.post).toHaveBeenCalledWith('/api/admin/bootstrap/test', payload, {
+      headers: { 'X-ServiceMantle-Request': '1' },
+    })
+  })
+
+  it('sends the confirmed update to the shared entry and omits an empty master key', async () => {
+    mocks.http.put.mockResolvedValue({ data: { restartRequired: true } })
+
+    const result = await createAdminApiClient().updateBootstrapSettings({
+      database: {
+        provider: 'SQLite',
+        serverVersion: null,
+        connectionString: 'Data Source=identity.db',
+      },
+    })
+
+    expect(mocks.http.put).toHaveBeenCalledWith('/management/v1/bootstrap', {
+      database: {
+        provider: 'SQLite',
+        serverVersion: null,
+        connectionString: 'Data Source=identity.db',
+      },
+    }, {
+      headers: {
+        'X-ServiceMantle-Request': '1',
+        'X-SignaCore-Confirm-Database-Change': '1',
+      },
+    })
+    expect(result).toEqual({ restartRequired: true })
   })
 })
 

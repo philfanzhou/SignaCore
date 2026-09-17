@@ -45,9 +45,18 @@ const mocks = vi.hoisted(() => ({
     testBootstrapSettings: vi.fn(),
     updateBootstrapSettings: vi.fn(),
   },
+  healthGet: vi.fn(),
+  isAxiosError: vi.fn(),
   confirm: vi.fn(),
   handleApiError: vi.fn(),
   notify: vi.fn(),
+}))
+
+vi.mock('axios', () => ({
+  default: {
+    get: mocks.healthGet,
+    isAxiosError: mocks.isAxiosError,
+  },
 }))
 
 vi.mock('../../services/apiClient', () => ({ adminClient: mocks.api }))
@@ -116,6 +125,10 @@ const emptyPage = { items: [], total: 0, page: 1, pageSize: 12 }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Mirrors axios v1: isAxiosError checks the object's own flag, so rejection doubles carrying
+  // isAxiosError: true take the axios path exactly like real AxiosError instances.
+  mocks.isAxiosError.mockImplementation(
+    (error: unknown) => (error as { isAxiosError?: boolean } | null)?.isAxiosError === true)
   for (const method of Object.values(mocks.api)) method.mockResolvedValue(undefined)
   mocks.api.getApps.mockResolvedValue([])
   mocks.api.getAppSmsUsers.mockResolvedValue([])
@@ -428,19 +441,73 @@ describe('admin security and runtime settings', () => {
     mocks.api.getBootstrapSettings.mockResolvedValue({
       provider: 'PostgreSQL', serverVersion: '15', endpoint: 'db', filePath: 'file',
       masterKeyConfigured: true, editable: true, singleInstanceOnly: false,
-      scopeNotice: 'restart', supportedProviders: [],
+      scopeNotice: 'restart',
     })
     await state.loadBootstrap()
     expect(state.hasBootstrapForm.value).toBe(true)
+    expect(state.bootstrapProviderList().map(item => item.provider)).toEqual(['PostgreSQL', 'SQLite'])
     await state.testBootstrapSettings()
     expect(mocks.notify).toHaveBeenCalledWith('测试前请确认你理解数据库目标切换影响')
     state.bootstrapForm.confirm = true
     mocks.api.testBootstrapSettings.mockResolvedValue({ message: 'ok', endpoint: 'db' })
     await state.testBootstrapSettings()
+    expect(mocks.api.testBootstrapSettings).toHaveBeenCalledWith(expect.objectContaining({
+      database: expect.objectContaining({ provider: 'PostgreSQL', serverVersion: '15' }),
+      masterKey: null,
+    }))
     expect(state.bootstrapMessage.value).toBe('ok 目标：db')
-    mocks.api.updateBootstrapSettings.mockResolvedValue({ message: 'saved' })
+
+    // The confirmed update assembles the complete connection string through the quoting helper,
+    // omits an empty master key, and waits for the restart by watching liveness.
+    state.bootstrapForm.host = 'db'
+    state.bootstrapForm.port = '5433'
+    state.bootstrapForm.database = 'signa;core'
+    state.bootstrapForm.username = 'signacore'
+    state.bootstrapForm.password = 'a;b'
+    mocks.api.updateBootstrapSettings.mockResolvedValue({ restartRequired: true })
+    mocks.healthGet
+      .mockRejectedValueOnce(new Error('shutting down'))
+      .mockResolvedValue({ status: 200 })
+    vi.stubGlobal('window', { location: { assign: vi.fn() } })
     await state.saveBootstrapSettings()
-    expect(mocks.api.updateBootstrapSettings).toHaveBeenCalled()
+    expect(mocks.api.updateBootstrapSettings).toHaveBeenCalledWith({
+      database: {
+        provider: 'PostgreSQL',
+        serverVersion: '15',
+        connectionString: 'Host="db";Port=5433;Database="signa;core";Username="signacore";Password="a;b"',
+      },
+    })
+    expect(state.bootstrapRestarting.value).toBe(true)
+    vi.unstubAllGlobals()
+  })
+
+  it('maps the closed update rejections to fixed messages', async () => {
+    const state = useAdminSettings()
+    state.bootstrapForm.confirm = true
+
+    const rejection = (status: number, errorCode?: string) => ({
+      isAxiosError: true,
+      response: { status, data: errorCode ? { errorCode } : {} },
+      message: 'Request failed',
+    })
+
+    mocks.api.updateBootstrapSettings.mockRejectedValue(rejection(401))
+    await state.saveBootstrapSettings()
+    expect(state.bootstrapError.value).toBe('登录状态无效，请重新登录。')
+
+    mocks.api.updateBootstrapSettings.mockRejectedValue(
+      rejection(400, 'signacore.bootstrap.confirmation_required'))
+    await state.saveBootstrapSettings()
+    expect(state.bootstrapError.value).toContain('勾选确认')
+
+    mocks.api.updateBootstrapSettings.mockRejectedValue(
+      rejection(409, 'signacore.bootstrap.not_file_backed'))
+    await state.saveBootstrapSettings()
+    expect(state.bootstrapError.value).toContain('不是从引导文件启动')
+
+    mocks.api.updateBootstrapSettings.mockRejectedValue(rejection(503))
+    await state.saveBootstrapSettings()
+    expect(state.bootstrapError.value).toBe('服务暂时无法完成请求，请稍后重试。')
   })
 })
 

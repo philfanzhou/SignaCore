@@ -40,41 +40,6 @@ public sealed class BootstrapDatabaseRequest
     public string? ConnectionString { get; set; }
 }
 
-/// <summary>
-/// State reported by Bootstrap Configuration Mode. It deliberately contains nothing an unauthorized
-/// caller could use: no connection string, no host, no key material.
-/// </summary>
-public sealed class BootstrapStatusResponse
-{
-    /// <summary><c>required</c>, <c>configured</c>, or <c>restarting</c>.</summary>
-    [JsonPropertyName("status")]
-    public string Status { get; set; } = string.Empty;
-
-    /// <summary>Where the bootstrap file will be written on this instance.</summary>
-    [JsonPropertyName("filePath")]
-    public string FilePath { get; set; } = string.Empty;
-
-    /// <summary>Provider values the form may offer.</summary>
-    [JsonPropertyName("supportedProviders")]
-    public IReadOnlyList<BootstrapProviderDescriptor> SupportedProviders { get; set; } = [];
-}
-
-public sealed class BootstrapProviderDescriptor
-{
-    [JsonPropertyName("provider")]
-    public string Provider { get; set; } = string.Empty;
-
-    [JsonPropertyName("serverVersions")]
-    public IReadOnlyList<string> ServerVersions { get; set; } = [];
-
-    [JsonPropertyName("defaultPort")]
-    public int? DefaultPort { get; set; }
-
-    /// <summary>SQLite cannot back an active multi-instance deployment.</summary>
-    [JsonPropertyName("singleInstanceOnly")]
-    public bool SingleInstanceOnly { get; set; }
-}
-
 /// <summary>Probe a candidate database without writing anything.</summary>
 public sealed class BootstrapTestRequest
 {
@@ -122,35 +87,6 @@ public sealed class BootstrapTestResponse
     public string Message { get; set; } = string.Empty;
 }
 
-public sealed class BootstrapSaveRequest
-{
-    [JsonPropertyName("database")]
-    public BootstrapDatabaseRequest Database { get; set; } = new();
-
-    /// <summary>
-    /// <c>new</c> generates a cryptographically strong master key; <c>existing</c> requires the
-    /// operator to supply the key the target database was initialized with.
-    /// </summary>
-    [JsonPropertyName("installMode")]
-    public string InstallMode { get; set; } = "new";
-
-    /// <summary>Write-only existing master key. Never returned once stored.</summary>
-    [JsonPropertyName("masterKey")]
-    public string? MasterKey { get; set; }
-
-    [JsonPropertyName("bootstrapCode")]
-    public string BootstrapCode { get; set; } = string.Empty;
-}
-
-public sealed class BootstrapSaveResponse
-{
-    [JsonPropertyName("status")]
-    public string Status { get; set; } = string.Empty;
-
-    [JsonPropertyName("message")]
-    public string Message { get; set; } = string.Empty;
-}
-
 /// <summary>
 /// What an authenticated operator may see about the bootstrap of the instance that served the
 /// request. Neither the connection string, its password, nor the master key is included.
@@ -183,29 +119,4 @@ public sealed class BootstrapSettingsResponse
     /// <summary>States plainly that a write here changes one instance, not the cluster.</summary>
     [JsonPropertyName("scopeNotice")]
     public string ScopeNotice { get; set; } = string.Empty;
-
-    [JsonPropertyName("supportedProviders")]
-    public IReadOnlyList<BootstrapProviderDescriptor> SupportedProviders { get; set; } = [];
-}
-
-public sealed class UpdateBootstrapRequest
-{
-    [JsonPropertyName("database")]
-    public BootstrapDatabaseRequest Database { get; set; } = new();
-
-    /// <summary>
-    /// Must be true. Repointing a running installation at a different database is not an ordinary
-    /// settings edit, so it cannot happen as a side effect of submitting a form.
-    /// </summary>
-    [JsonPropertyName("confirm")]
-    public bool Confirm { get; set; }
-
-    /// <summary>
-    /// Blank means "keep the current key". A different value is accepted only when it proves to be
-    /// the existing key of a protected target database (for an intentional database move). Raw
-    /// replacement or choosing a fresh key is rejected, because protected signing keys and settings
-    /// would otherwise become undecryptable.
-    /// </summary>
-    [JsonPropertyName("masterKey")]
-    public string? MasterKey { get; set; }
 }
