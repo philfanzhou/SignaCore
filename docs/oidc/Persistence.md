@@ -22,7 +22,7 @@ LDAP/SMS/WeChat, and `source_app_id` bindings keep their current meanings.
 | `family_id` | UUID, ultimately non-null | Root stores its own `id`; every interactive descendant stores that root id; every legacy row is a singleton root |
 | `parent_id` | UUID, nullable | Immediate interactive parent; null for every root and every legacy row |
 | `identity_session_id` | UUID, nullable | Non-null only for interactive members; restrictive reference to the `PS-04` session authority |
-| `scope` | ASCII string(200), nullable | Canonical interactive family snapshot; null for legacy rows |
+| `scope` | ASCII string(32), nullable | Canonical interactive family snapshot, byte-for-byte copied from the authorization-code snapshot, so it shares the `MaxOidcAllowedScopesLength` length unit of `authorization_codes.scope` and `authorization_requests.scope` (the canonical form is at most 29 characters); null for legacy rows |
 | `auth_time` | UTC instant, nullable | Original interactive session authentication time; copied unchanged to descendants; null for legacy rows |
 | `consumed_at` | UTC instant, nullable | Successful interactive rotation fact; null for live/revoked interactive members and always null for legacy rows |
 
@@ -77,10 +77,12 @@ The provider-specific Up migrations perform the same ordered operation:
    backfill succeeds.
 4. Add the code-to-root reference only after every existing token has a traceable root.
 
-The migration never decodes, hashes again, prints, or selects a raw token into application memory.
-An older database that still contains plaintext values continues through the existing protected
-startup rewrite after migration; that established path hashes each value once and preserves what
-the client presents. Family backfill is independent of token representation.
+The migration never decodes, hashes again, prints, or selects a raw token into application memory;
+the backfill and the downgrade gate read and write only id and marker columns. A stored
+`token_value` keeps its bytes whatever its representation: the one-time startup plaintext-to-digest
+conversion no longer exists, and a deployment older than the minimum supported upgrade version
+clears `refresh_tokens` before upgrading (see Deployment's "Minimum supported upgrade version").
+Family backfill is independent of token representation.
 
 New legacy issue/rotation/exchange writes must set `family_id=id` and keep every interactive marker
 null. New interactive roots set `family_id=id`, session/scope/auth-time, and no parent; rotation
@@ -122,9 +124,15 @@ descendant, retained authorization code, or session relationship still reference
 family as one child-first unit only after all members are beyond their usable deadline, no retained
 code needs its root link, and the canonical session/code retention rules permit deletion.
 
-Legacy singleton cleanup preserves the current expired-or-revoked behavior. The self-reference is
-handled within the same cleanup unit and must not make current rows immortal. Cleanup cancellation
-or failure rolls back the unit and never nulls a relationship to force deletion.
+Legacy singleton cleanup preserves the current expired-or-revoked behavior and touches only legacy
+rows: the cleanup statement excludes rows with an identity session. The self-reference is handled
+within the same cleanup unit and does not make current rows immortal — deleting self-referencing
+singleton rows in one statement succeeds on both providers (measured). Whole-family single-statement
+deletion under `ON DELETE RESTRICT` is provider-asymmetric — it fails on SQLite with a foreign-key
+error while PostgreSQL removes mutually referencing rows in one statement (measured) — so the
+child-first interactive family cleanup above is the only admissible family deletion path, and it
+belongs to the family write API (#98), not to the legacy statement. Cleanup cancellation or failure
+rolls back the unit and never nulls a relationship to force deletion.
 
 ## Deployment and rollback gate
 

@@ -371,15 +371,21 @@ public sealed class RepositoryCancellationTests
         return token;
     }
 
-    private static RefreshTokenEntity CreateRefreshToken(Guid accountId, string tokenValue) => new()
+    private static RefreshTokenEntity CreateRefreshToken(Guid accountId, string tokenValue)
     {
-        Id = Guid.NewGuid(),
-        AccountId = accountId,
-        TokenValue = tokenValue,
-        AppId = "repository-cancellation-app",
-        CreatedAt = DateTimeOffset.UtcNow,
-        ExpiresAt = DateTimeOffset.UtcNow.AddDays(1)
-    };
+        var id = Guid.NewGuid();
+        return new RefreshTokenEntity
+        {
+            Id = id,
+            // PS-07: a directly seeded legacy row is the singleton root of its own family.
+            FamilyId = id,
+            AccountId = accountId,
+            TokenValue = tokenValue,
+            AppId = "repository-cancellation-app",
+            CreatedAt = DateTimeOffset.UtcNow,
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(1)
+        };
+    }
 
     private sealed class TestDatabase : IAsyncDisposable
     {

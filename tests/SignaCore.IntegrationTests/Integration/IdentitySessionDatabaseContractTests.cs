@@ -10,6 +10,7 @@ using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
+using SignaCore.IntegrationTests.Integration;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;
@@ -133,6 +134,9 @@ public sealed class IdentitySessionDatabaseContractTests
     public async Task UpgradeFromAddAuthorizationRequests_IsAdditiveAndDownIsSymmetric()
     {
         const string preSessionMigration = "20260916073317_AddAuthorizationRequests";
+        // The migration under test, pinned: later migrations in the chain legitimately change
+        // refresh_tokens (the family columns), which is not this migration's contract.
+        const string sessionMigration = "20260916103412_AddIdentitySessions";
         await using var database = new SqliteSessionDatabase();
         var options = database.BuildOptions();
         await using var context = new IdentityDbContext(options);
@@ -162,11 +166,6 @@ public sealed class IdentitySessionDatabaseContractTests
             Id = appId, AppId = "session-upgrade-app", AppSecretHash = "hash",
             AppName = "Session Upgrade", IsActive = true, CreatedAt = createdAt
         });
-        context.RefreshTokens.Add(new RefreshTokenEntity
-        {
-            Id = tokenId, AccountId = accountId, TokenValue = tokenDigest,
-            CreatedAt = createdAt, ExpiresAt = createdAt.AddHours(1), AppId = "session-upgrade-app"
-        });
         context.AuthorizationRequests.Add(new AuthorizationRequestEntity
         {
             Id = Guid.NewGuid(),
@@ -182,6 +181,12 @@ public sealed class IdentitySessionDatabaseContractTests
         });
         await context.SaveChangesAsync(cancellationToken);
 
+        // The legacy token row is seeded with raw SQL: the migration version under test predates
+        // the family columns a current-EF-model INSERT would name.
+        await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenSqliteAsync(
+            context, tokenId, accountId, tokenDigest, createdAt, createdAt.AddHours(1),
+            "session-upgrade-app");
+
         var accountsBefore = await GetSqliteColumnsAsync(context, "accounts");
         var credentialsBefore = await GetSqliteColumnsAsync(context, "password_credentials");
         var appsBefore = await GetSqliteColumnsAsync(context, "app_registrations");
@@ -189,7 +194,7 @@ public sealed class IdentitySessionDatabaseContractTests
         var continuationsBefore = await GetSqliteColumnsAsync(context, "authorization_requests");
         Assert.False(await SqliteTableExistsAsync(context, "identity_sessions"));
 
-        await migrator.MigrateAsync(cancellationToken: cancellationToken);
+        await migrator.MigrateAsync(sessionMigration, cancellationToken);
 
         Assert.True(await SqliteTableExistsAsync(context, "identity_sessions"));
         Assert.Empty(await context.IdentitySessions.AsNoTracking().ToListAsync(cancellationToken));
@@ -212,7 +217,7 @@ public sealed class IdentitySessionDatabaseContractTests
         await AssertSeedUnchangedAsync(
             context, accountId, credentialId, appId, tokenId, tokenDigest, handle, createdAt);
 
-        await migrator.MigrateAsync(cancellationToken: cancellationToken);
+        await migrator.MigrateAsync(sessionMigration, cancellationToken);
         Assert.True(await SqliteTableExistsAsync(context, "identity_sessions"));
     }
 
@@ -1178,11 +1183,15 @@ public sealed class IdentitySessionDatabaseContractTests
         Assert.True(application.IsActive);
         Assert.Equal(createdAt.UtcTicks / 10, application.CreatedAt.UtcTicks / 10);
 
-        var token = await context.RefreshTokens.AsNoTracking()
-            .SingleAsync(row => row.Id == tokenId, cancellationToken);
+        // The Down state predates the family columns, so the token row is read with raw SQL
+        // instead of the current EF model.
+        var token = await RefreshTokenFamilyTestSupport.ReadRefreshTokenRowSqliteAsync(
+            context, tokenId);
         Assert.Equal(tokenDigest, token.TokenValue);
         Assert.False(token.IsRevoked);
-        Assert.Equal(createdAt.UtcTicks / 10, token.CreatedAt.UtcTicks / 10);
+        Assert.Equal(
+            RefreshTokenFamilyTestSupport.ToSqliteMicroseconds(createdAt),
+            RefreshTokenFamilyTestSupport.ToSqliteMicroseconds(token.CreatedAt));
 
         var continuation = await context.AuthorizationRequests.AsNoTracking()
             .SingleAsync(row => row.HandleDigest == LoginHandleDigest.Compute(handle), cancellationToken);

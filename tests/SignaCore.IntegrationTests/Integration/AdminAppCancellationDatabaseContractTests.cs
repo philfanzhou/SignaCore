@@ -274,16 +274,22 @@ public sealed class AdminAppCancellationDatabaseContractTests
             appId, userLogin.Id, ldapCredential.Id, smsToken.Id, wechatToken.Id, ldapToken.Id);
     }
 
-    private static RefreshTokenEntity CreateRefreshToken(Guid accountId, string appId, string tokenValue) => new()
+    private static RefreshTokenEntity CreateRefreshToken(Guid accountId, string appId, string tokenValue)
     {
-        Id = Guid.NewGuid(),
-        AccountId = accountId,
-        AppId = appId,
-        TokenValue = tokenValue,
-        ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
-        CreatedAt = DateTimeOffset.UtcNow,
-        IsRevoked = false
-    };
+        var id = Guid.NewGuid();
+        return new RefreshTokenEntity
+        {
+            Id = id,
+            // PS-07: a directly seeded legacy row is the singleton root of its own family.
+            FamilyId = id,
+            AccountId = accountId,
+            AppId = appId,
+            TokenValue = tokenValue,
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            CreatedAt = DateTimeOffset.UtcNow,
+            IsRevoked = false
+        };
+    }
 
     private sealed record RevocationTargets(
         string AppId,

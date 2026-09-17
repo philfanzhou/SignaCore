@@ -286,6 +286,9 @@ public sealed class SqliteDatabaseContractTests
     public async Task AuthorizationRequestsMigration_UpgradeFromDropLegacyDataProtectionKeysIsAdditiveAndDownIsSymmetric()
     {
         const string preContinuationMigration = "20260914171840_DropLegacyDataProtectionKeys";
+        // The migration under test, pinned: later migrations in the chain legitimately change
+        // refresh_tokens (the family columns), which is not this migration's contract.
+        const string continuationMigration = "20260916073317_AddAuthorizationRequests";
         var databasePath = Path.Combine(
             Path.GetTempPath(),
             $"signacore-continuation-upgrade-{Guid.NewGuid():N}.db");
@@ -318,22 +321,20 @@ public sealed class SqliteDatabaseContractTests
                 IsActive = true,
                 CreatedAt = createdAt
             });
-            context.RefreshTokens.Add(new RefreshTokenEntity
-            {
-                Id = tokenId,
-                AccountId = accountId,
-                TokenValue = tokenDigest,
-                CreatedAt = createdAt,
-                ExpiresAt = expiresAt,
-                AppId = "continuation-upgrade-app"
-            });
             await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+            // The legacy token row is seeded with raw SQL: the migration version under test
+            // predates the family columns a current-EF-model INSERT would name.
+            await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenSqliteAsync(
+                context, tokenId, accountId, tokenDigest, createdAt, expiresAt,
+                "continuation-upgrade-app");
 
             var refreshColumnsBefore = await GetSqliteColumnsAsync(context, "refresh_tokens");
             var appColumnsBefore = await GetSqliteColumnsAsync(context, "app_registrations");
             Assert.False(await SqliteTableExistsAsync(context, "authorization_requests"));
 
-            await migrator.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
+            await migrator.MigrateAsync(
+                continuationMigration, TestContext.Current.CancellationToken);
 
             // Purely additive: the new table exists and is empty, existing tables keep their shape.
             Assert.True(await SqliteTableExistsAsync(context, "authorization_requests"));
@@ -383,12 +384,15 @@ public sealed class SqliteDatabaseContractTests
         Assert.True(application.IsActive);
         Assert.Equal(createdAt.UtcTicks / 10, application.CreatedAt.UtcTicks / 10);
 
-        var token = await context.RefreshTokens.AsNoTracking()
-            .SingleAsync(item => item.Id == tokenId, cancellationToken);
+        var token = await RefreshTokenFamilyTestSupport.ReadRefreshTokenRowSqliteAsync(context, tokenId);
         Assert.Equal(tokenDigest, token.TokenValue);
         Assert.False(token.IsRevoked);
-        Assert.Equal(createdAt.UtcTicks / 10, token.CreatedAt.UtcTicks / 10);
-        Assert.Equal(expiresAt.UtcTicks / 10, token.ExpiresAt.UtcTicks / 10);
+        Assert.Equal(
+            RefreshTokenFamilyTestSupport.ToSqliteMicroseconds(createdAt),
+            RefreshTokenFamilyTestSupport.ToSqliteMicroseconds(token.CreatedAt));
+        Assert.Equal(
+            RefreshTokenFamilyTestSupport.ToSqliteMicroseconds(expiresAt),
+            RefreshTokenFamilyTestSupport.ToSqliteMicroseconds(token.ExpiresAt));
         Assert.Null(token.SourceAppId);
     }
 
@@ -492,6 +496,7 @@ public sealed class SqliteDatabaseContractTests
                 56,
                 TimeSpan.FromHours(8)).AddTicks(1234560);
             var accountId = Guid.NewGuid();
+            var emptyAppIdTokenId = Guid.NewGuid();
 
             await using (var writeContext = new IdentityDbContext(optionsBuilder.Options))
             {
@@ -506,7 +511,10 @@ public sealed class SqliteDatabaseContractTests
 
                 writeContext.RefreshTokens.Add(new RefreshTokenEntity
                 {
-                    Id = Guid.NewGuid(),
+                    Id = emptyAppIdTokenId,
+                    // A valid singleton-root family shape, so the only violated constraint is
+                    // the app_id check this case proves.
+                    FamilyId = emptyAppIdTokenId,
                     AccountId = accountId,
                     TokenValue = Convert.ToBase64String(Guid.NewGuid().ToByteArray()),
                     CreatedAt = sourceInstant,
@@ -553,6 +561,7 @@ public sealed class SqliteDatabaseContractTests
         {
             var accountId = Guid.NewGuid();
             var appRegistrationId = Guid.NewGuid();
+            var seededTokenId = Guid.NewGuid();
             const string refreshToken = "CaseSensitiveRefreshToken";
             const string phone = "13800138000";
             const string otpCode = "123456";
@@ -585,7 +594,9 @@ public sealed class SqliteDatabaseContractTests
                 });
                 seedContext.RefreshTokens.Add(new RefreshTokenEntity
                 {
-                    Id = Guid.NewGuid(),
+                    Id = seededTokenId,
+                    // PS-07: a directly seeded legacy row is the singleton root of its own family.
+                    FamilyId = seededTokenId,
                     AccountId = accountId,
                     TokenValue = RefreshTokenDigest.Compute(refreshToken),
                     CreatedAt = DateTimeOffset.UtcNow,
