@@ -153,10 +153,10 @@ Interactive refresh remains a separately identified future family path and does 
 legacy refresh row.
 
 #50 activates storage only (`AC-03`) and runs after #95 so its table carries the session reference
-from creation (`PS-23`); #53 activates internal code redemption only (`AC-06`).
-During `AC-06` the redemption response carries no `id_token` (added with `AC-07`) and no
-`refresh_token`, and a code containing `offline_access` is rejected with `invalid_grant` rather
-than redeemed without a refresh token — the gate lifts when the interactive refresh family lands
-(`AC-11`/`AC-12`).
-Discovery remains unchanged until #54 and its persistent-session prerequisites complete the whole
-core flow (`AC-07`). This document itself activates no route or metadata (`AC-14`).
+from creation (`PS-23`); #53 activated internal code redemption (`AC-06`); #54 completed the core
+by adding the ID token to the response and publishing the interactive metadata (`AC-07`). The
+redemption response now carries `access_token`, `token_type`, `expires_in`, `scope`, and
+`id_token`; it still carries no `refresh_token`, and a code containing `offline_access` is still
+rejected with `invalid_grant` rather than redeemed without a refresh token — that gate lifts only
+when the interactive refresh family lands (`AC-11`/`AC-12`). This document itself activates no
+route or metadata (`AC-14`).

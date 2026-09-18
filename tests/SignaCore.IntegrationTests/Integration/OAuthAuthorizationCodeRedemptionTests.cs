@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Tokens;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Services;
@@ -95,6 +96,62 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
             RedeemForm(seeded.Code, extra: [("resource", "urn:example:ignored")]),
             TestContext.Current.CancellationToken);
         await AssertSuccessAsync(response, seeded, expectedScope: "openid");
+    }
+
+    /// <summary>
+    /// The acceptance of <c>AC-07</c>: a standard JWT validator driven only by the published
+    /// Discovery document and JWKS — issuer, audience, RS256 keys, type, lifetime — accepts the
+    /// issued ID token, and the same validator rejects the access token as an ID token.
+    /// </summary>
+    [Fact]
+    public async Task Redeem_TheIdTokenValidatesThroughDiscoveryAndJwks()
+    {
+        var seeded = await SeedCodeAsync(scope: "openid profile");
+        using var http = _fixture.CreateHttpClient();
+        http.DefaultRequestHeaders.Authorization = BasicHeader(AppId, AppSecret);
+
+        var response = await http.PostAsync("/oauth2/token", RedeemForm(seeded.Code), TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
+        var idToken = body.GetProperty("id_token").GetString()!;
+
+        var discovery = await http.GetFromJsonAsync<JsonElement>(
+            "/.well-known/openid-configuration", TestContext.Current.CancellationToken);
+        var issuer = discovery.GetProperty("issuer").GetString()!;
+        Assert.Equal(
+            ["RS256"],
+            discovery.GetProperty("id_token_signing_alg_values_supported").EnumerateArray()
+                .Select(item => item.GetString()));
+
+        var jwks = await http.GetFromJsonAsync<JsonElement>("/.well-known/jwks", TestContext.Current.CancellationToken);
+        var keys = jwks.GetProperty("keys").EnumerateArray()
+            .Select(key => new RsaSecurityKey(new RSAParameters
+            {
+                Modulus = Microsoft.IdentityModel.Tokens.Base64UrlEncoder.DecodeBytes(key.GetProperty("n").GetString()!),
+                Exponent = Microsoft.IdentityModel.Tokens.Base64UrlEncoder.DecodeBytes(key.GetProperty("e").GetString()!)
+            })
+            { KeyId = key.GetProperty("kid").GetString() })
+            .Cast<Microsoft.IdentityModel.Tokens.SecurityKey>()
+            .ToArray();
+
+        var handler = new JwtSecurityTokenHandler { MapInboundClaims = false };
+        var parameters = new TokenValidationParameters
+        {
+            ValidIssuer = issuer,
+            ValidAudience = AppId,
+            IssuerSigningKeys = keys,
+            ValidTypes = ["JWT"],
+            ValidateLifetime = true
+        };
+
+        var principal = handler.ValidateToken(idToken, parameters, out var validated);
+        Assert.Equal(seeded.AccountId.ToString(), principal.FindFirst("sub")!.Value);
+        Assert.Equal(Nonce, principal.FindFirst("nonce")!.Value);
+        Assert.Equal(AppId, Assert.IsType<JwtSecurityToken>(validated).Audiences.Single());
+
+        // The access token's typ is at+jwt and never validates as an ID token.
+        var accessToken = body.GetProperty("access_token").GetString()!;
+        Assert.ThrowsAny<SecurityTokenValidationException>(
+            () => handler.ValidateToken(accessToken, parameters, out _));
     }
 
     // ---- Acceptance 2: client authentication ----
@@ -585,23 +642,37 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         }
     }
 
-    // ---- Acceptance 12: Discovery stays byte-for-byte on the derived validator list ----
+    // ---- Acceptance 12: Discovery advertises the delivered interactive core identically ----
 
     [Theory]
     [InlineData("/.well-known/openid-configuration")]
     [InlineData("/.well-known/oauth-authorization-server")]
-    public async Task Discovery_DoesNotAdvertiseTheAuthorizationCodeGrant(string path)
+    public async Task Discovery_AdvertisesTheDeliveredInteractiveCore(string path)
     {
         using var http = _fixture.CreateHttpClient();
         var document = await http.GetStringAsync(path, TestContext.Current.CancellationToken);
 
-        Assert.DoesNotContain("authorization_code", document, StringComparison.Ordinal);
-        Assert.DoesNotContain("code_challenge_methods_supported", document, StringComparison.Ordinal);
         var parsed = JsonDocument.Parse(document);
         Assert.Equal(
-            JsonValueKind.Array,
-            parsed.RootElement.GetProperty("response_types_supported").ValueKind);
-        Assert.Empty(parsed.RootElement.GetProperty("response_types_supported").EnumerateArray());
+            ["code"],
+            parsed.RootElement.GetProperty("response_types_supported").EnumerateArray()
+                .Select(item => item.GetString()));
+        Assert.Contains("authorization_code", document, StringComparison.Ordinal);
+        Assert.Contains("code_challenge_methods_supported", document, StringComparison.Ordinal);
+        Assert.Equal(
+            ["S256"],
+            parsed.RootElement.GetProperty("code_challenge_methods_supported").EnumerateArray()
+                .Select(item => item.GetString()));
+    }
+
+    [Fact]
+    public async Task Discovery_ServesByteForByteIdenticalDocumentsOnBothPaths()
+    {
+        using var http = _fixture.CreateHttpClient();
+        var oidc = await http.GetStringAsync("/.well-known/openid-configuration", TestContext.Current.CancellationToken);
+        var rfc8414 = await http.GetStringAsync("/.well-known/oauth-authorization-server", TestContext.Current.CancellationToken);
+
+        Assert.Equal(oidc, rfc8414);
     }
 
     // ---- Seeding ----
@@ -772,7 +843,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var memberNames = body.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
         Assert.Equal(
-            new HashSet<string>(StringComparer.Ordinal) { "access_token", "token_type", "expires_in", "scope" },
+            new HashSet<string>(StringComparer.Ordinal) { "access_token", "token_type", "expires_in", "scope", "id_token" },
             memberNames);
         Assert.Equal("Bearer", body.GetProperty("token_type").GetString());
         Assert.Equal(900, body.GetProperty("expires_in").GetInt64());
@@ -789,6 +860,30 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         Assert.Equal(
             IdentityConstants.InteractiveAccessTokenLifetimeSeconds,
             (token.ValidTo - token.ValidFrom).TotalSeconds);
+
+        // The ID token is the PS-12 artifact of the same redemption: typ JWT (never at+jwt), the
+        // exact authorization-request nonce, the session's auth facts, and the 5-minute lifetime.
+        // It never appears in a legacy grant response.
+        var idToken = new JwtSecurityTokenHandler().ReadJwtToken(body.GetProperty("id_token").GetString()!);
+        Assert.Equal("JWT", idToken.Header.Typ);
+        Assert.Equal(AppId, idToken.Audiences.Single());
+        Assert.Equal(seeded.AccountId.ToString(), idToken.Claims.Single(claim => claim.Type == IdentityConstants.ClaimSubject).Value);
+        Assert.Equal(seeded.SessionId.ToString(), idToken.Claims.Single(claim => claim.Type == JwtRegisteredClaimNames.Sid).Value);
+        Assert.Equal(Nonce, idToken.Claims.Single(claim => claim.Type == JwtRegisteredClaimNames.Nonce).Value);
+        Assert.Equal("pwd", idToken.Claims.Single(claim => claim.Type == JwtRegisteredClaimNames.Amr).Value);
+        Assert.Equal(
+            IdentityConstants.InteractiveIdTokenLifetimeSeconds,
+            (idToken.ValidTo - idToken.IssuedAt).TotalSeconds);
+        Assert.DoesNotContain(idToken.Claims, claim => claim.Type is "scope" or IdentityConstants.ClaimClientId);
+        // The profile scope decides whether the profile claims ride along.
+        if (expectedScope.Contains("profile", StringComparison.Ordinal))
+        {
+            Assert.Contains(idToken.Claims, claim => claim.Type == IdentityConstants.ClaimName);
+        }
+        else
+        {
+            Assert.DoesNotContain(idToken.Claims, claim => claim.Type is IdentityConstants.ClaimName or IdentityConstants.ClaimNickname);
+        }
 
         var codeRow = await GetCodeAsync(seeded.CodeId);
         Assert.NotNull(codeRow.ConsumedAt);

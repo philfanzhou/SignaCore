@@ -179,8 +179,8 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
-    /// No interactive endpoint activates anything: both discovery documents still describe the same
-    /// capabilities.
+    /// No interactive endpoint activates anything beyond the delivered core: both discovery
+    /// documents describe the same capabilities regardless of registration state.
     /// </summary>
     [Theory]
     [InlineData("/.well-known/openid-configuration")]
@@ -193,9 +193,11 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
             path,
             TestContext.Current.CancellationToken);
 
-        Assert.False(document.TryGetProperty("authorization_endpoint", out _));
-        Assert.Empty(document.GetProperty("response_types_supported").EnumerateArray());
-        Assert.DoesNotContain(
+        Assert.True(document.TryGetProperty("authorization_endpoint", out _));
+        Assert.Equal(
+            ["code"],
+            document.GetProperty("response_types_supported").EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains(
             "authorization_code",
             document.GetProperty("grant_types_supported").EnumerateArray().Select(value => value.GetString()));
     }

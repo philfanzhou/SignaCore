@@ -21,6 +21,7 @@ public class DiscoveryDocumentTests
         var document = DiscoveryDocument.Create("https://id.example.com", "https://id.example.com/", GrantTypes);
 
         Assert.Equal("https://id.example.com/.well-known/jwks", document.JwksUri);
+        Assert.Equal("https://id.example.com/oauth2/authorize", document.AuthorizationEndpoint);
         Assert.Equal("https://id.example.com/oauth2/token", document.TokenEndpoint);
         Assert.Equal("https://id.example.com/oauth2/revoke", document.RevocationEndpoint);
     }
@@ -28,7 +29,8 @@ public class DiscoveryDocumentTests
     /// <summary>
     /// grant_types_supported comes from the registered validators rather than a literal list, so this
     /// test fails if a grant is added without updating discovery. RFC 6749 §4.5 extension grants are
-    /// advertised as absolute URIs.
+    /// advertised as absolute URIs. The interactive authorization_code grant is merged in explicitly
+    /// (<c>AC-07</c>) because its redemption branch is not a registered validator.
     /// </summary>
     [Fact]
     public void Create_AdvertisesTheActualGrantTypesUnderTheirWireNames()
@@ -36,7 +38,7 @@ public class DiscoveryDocumentTests
         var document = DiscoveryDocument.Create("https://id.example.com", "https://id.example.com", GrantTypes);
 
         Assert.Equal(
-            new[] { IdentityConstants.GrantTypePassword, IdentityConstants.GrantTypeRefreshToken, OAuthGrantTypes.Sms },
+            new[] { "authorization_code", IdentityConstants.GrantTypePassword, IdentityConstants.GrantTypeRefreshToken, OAuthGrantTypes.Sms },
             document.GrantTypesSupported);
     }
 
@@ -50,13 +52,33 @@ public class DiscoveryDocumentTests
             document.TokenEndpointAuthMethodsSupported);
     }
 
-    /// <summary>No response type can be advertised without an authorization endpoint.</summary>
+    /// <summary>
+    /// The interactive core is delivered (<c>AC-07</c>): one authorization endpoint, exactly the
+    /// <c>code</c> response type, and mandatory S256 PKCE. Nothing here may announce a capability
+    /// the runtime cannot complete.
+    /// </summary>
     [Fact]
-    public void Create_DoesNotAdvertiseAnyResponseType()
+    public void Create_AdvertisesTheDeliveredInteractiveCore()
     {
         var document = DiscoveryDocument.Create("https://id.example.com", "https://id.example.com", GrantTypes);
 
-        Assert.Empty(document.ResponseTypesSupported);
+        Assert.Equal(["code"], document.ResponseTypesSupported);
+        Assert.Equal(["S256"], document.CodeChallengeMethodsSupported);
+        Assert.Equal(["RS256"], document.IdTokenSigningAlgValuesSupported);
+    }
+
+    /// <summary>
+    /// <c>offline_access</c> appears only when the interactive refresh family works end to end
+    /// (<c>AC-12</c>), and <c>userinfo_endpoint</c> only with #55; until then advertising either
+    /// would promise a request no client can complete.
+    /// </summary>
+    [Fact]
+    public void Create_AdvertisesOnlyTheScopesTheRuntimeCompletesToday()
+    {
+        var document = DiscoveryDocument.Create("https://id.example.com", "https://id.example.com", GrantTypes);
+
+        Assert.Equal(["openid", "profile"], document.ScopesSupported);
+        Assert.DoesNotContain(document.ToMetadata(), pair => pair.Key == "userinfo_endpoint");
     }
 
     [Fact]
@@ -68,8 +90,11 @@ public class DiscoveryDocumentTests
 
         Assert.Equal("https://id.example.com", metadata["issuer"]);
         Assert.Equal("https://id.example.com/.well-known/jwks", metadata["jwks_uri"]);
+        Assert.Equal("https://id.example.com/oauth2/authorize", metadata["authorization_endpoint"]);
         Assert.Equal("https://id.example.com/oauth2/revoke", metadata["revocation_endpoint"]);
         Assert.Contains("grant_types_supported", metadata.Keys);
+        Assert.Contains("code_challenge_methods_supported", metadata.Keys);
+        Assert.Contains("scopes_supported", metadata.Keys);
         Assert.Contains("token_endpoint_auth_methods_supported", metadata.Keys);
         Assert.Contains(IdentityConstants.ClaimClientId, (IReadOnlyList<string>)metadata["claims_supported"]);
     }

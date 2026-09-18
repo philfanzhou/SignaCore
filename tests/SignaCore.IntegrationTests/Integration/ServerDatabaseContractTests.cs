@@ -1698,6 +1698,7 @@ public sealed class ServerDatabaseContractTests
             new InteractiveAccessTokenFactory(
                 new JwtOptions { Issuer = "https://redemption-contract.test" },
                 NullLogger<InteractiveAccessTokenFactory>.Instance),
+            new InteractiveIdTokenFactory(new JwtOptions { Issuer = "https://redemption-contract.test" }),
             callbackService: null,
             new StaticRedemptionKeyManager(),
             new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),

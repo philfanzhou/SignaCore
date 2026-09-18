@@ -20,6 +20,7 @@ namespace SignaCore.Host.Services;
 public sealed class AuthorizationCodeRedemptionOutcome
 {
     [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(AccessToken))]
+    [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(IdToken))]
     [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(Scope))]
     [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(false, nameof(ErrorCode))]
     [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(false, nameof(ErrorDescription))]
@@ -38,6 +39,9 @@ public sealed class AuthorizationCodeRedemptionOutcome
 
     public string? AccessToken { get; private init; }
 
+    /// <summary>The ID token (<c>PS-12</c>) of the same committed redemption; the canonical scope always contains <c>openid</c>.</summary>
+    public string? IdToken { get; private init; }
+
     public long ExpiresIn { get; private init; }
 
     /// <summary>The code's canonical scope snapshot, echoed byte for byte in the response.</summary>
@@ -45,11 +49,13 @@ public sealed class AuthorizationCodeRedemptionOutcome
 
     public static AuthorizationCodeRedemptionOutcome Success(
         string accessToken,
+        string idToken,
         long expiresIn,
         string scope) => new()
     {
         IsSuccess = true,
         AccessToken = accessToken,
+        IdToken = idToken,
         ExpiresIn = expiresIn,
         Scope = scope
     };
@@ -70,12 +76,14 @@ public sealed class AuthorizationCodeRedemptionOutcome
 
 /// <summary>
 /// The internal <c>authorization_code</c> redemption of the interactive Authorization Code flow
-/// (<c>AC-06</c>): an authenticated confidential BFF exchanges one code plus its PKCE verifier
-/// for an application-scoped interactive access token (<c>PS-13</c>) in one transaction that also
-/// consumes the code and writes the redemption audit (<c>EV-20</c>). A correctly bound replay of
-/// an already consumed code revokes the linked session and commits exactly one id-only replay
-/// audit (<c>EV-24</c>); every lookup, binding, time, and current-state rejection answers with the
-/// single generic <c>invalid_grant</c> and consumes nothing (<c>EV-22</c>/<c>EV-23</c>).
+/// (<c>AC-06</c>/<c>AC-07</c>): an authenticated confidential BFF exchanges one code plus its PKCE
+/// verifier for an application-scoped interactive access token (<c>PS-13</c>) and, because the
+/// canonical scope always contains <c>openid</c>, an ID token (<c>PS-12</c>) — both signed inside
+/// one transaction that also consumes the code and writes the redemption audit (<c>EV-20</c>). A
+/// correctly bound replay of an already consumed code revokes the linked session and commits
+/// exactly one id-only replay audit (<c>EV-24</c>); every lookup, binding, time, and
+/// current-state rejection answers with the single generic <c>invalid_grant</c> and consumes
+/// nothing (<c>EV-22</c>/<c>EV-23</c>).
 /// </summary>
 /// <remarks>
 /// Same transaction shape as <see cref="OidcLoginCompletionService"/>: the explicit transaction
@@ -95,6 +103,7 @@ public sealed class AuthorizationCodeRedemptionService(
     IAccountRepository accounts,
     IPasswordCredentialRepository passwordCredentials,
     IInteractiveAccessTokenFactory tokenFactory,
+    IInteractiveIdTokenFactory idTokenFactory,
     ICallbackService? callbackService,
     IKeyManager keyManager,
     IAuditService auditService,
@@ -274,7 +283,12 @@ public sealed class AuthorizationCodeRedemptionService(
 
         // Everything below resolves outside the transaction: external HTTP never runs under a
         // held lock, and the descriptor's values survive the ChangeTracker.Clear() of a retry.
-        var displayName = await ResolveDisplayNameAsync(account, cancellationToken);
+        // One credential read feeds both name sources: the access token's display-name fallback
+        // and the ID token's PS-12 name, which is always the bound Password username.
+        var passwordUsername = await ResolvePasswordUsernameAsync(account, cancellationToken);
+        var displayName = !string.IsNullOrWhiteSpace(account.Nickname)
+            ? account.Nickname
+            : passwordUsername;
         var enrichment = new List<Claim>();
         if (app.CallbackUrl is not null && callbackService is not null)
         {
@@ -311,7 +325,15 @@ public sealed class AuthorizationCodeRedemptionService(
             enrichment);
 
         return await ExecuteIssuanceTransactionAsync(
-            descriptor, signingKey, lookup.Entity.Id, app.Id, clientIp, correlationId, now, cancellationToken);
+            descriptor,
+            passwordUsername,
+            signingKey,
+            lookup.Entity.Id,
+            app.Id,
+            clientIp,
+            correlationId,
+            now,
+            cancellationToken);
     }
 
     /// <summary>
@@ -369,11 +391,12 @@ public sealed class AuthorizationCodeRedemptionService(
 
     /// <summary>
     /// The <c>EV-20</c> issuance transaction: session lock, code lock, the authoritative rechecks
-    /// under the captured instant, the signature, the conditional consumption, the audit row, and
+    /// under the captured instant, both signatures, the conditional consumption, the audit row, and
     /// the commit — after which, and only after which, the token bytes leave this service.
     /// </summary>
     private async Task<AuthorizationCodeRedemptionOutcome> ExecuteIssuanceTransactionAsync(
         InteractiveAccessTokenDescriptor descriptor,
+        string? passwordUsername,
         RsaSecurityKey signingKey,
         Guid codeId,
         Guid applicationRowId,
@@ -459,10 +482,33 @@ public sealed class AuthorizationCodeRedemptionService(
                 return InvalidGrant();
             }
 
-            // The signature is part of the unit: an oversized or failing construction rolls the
-            // consumption back with everything else (EV-26).
+            // Both signatures are part of the unit: an oversized or failing construction of either
+            // token rolls the consumption back with everything else (EV-26).
             if (tokenFactory.Create(descriptor, signingKey, now)
                 is not InteractiveAccessTokenResult.Issued issued)
+            {
+                await transaction.RollbackAsync(operationToken);
+                return AuthorizationCodeRedemptionOutcome.Failure(
+                    StatusCodes.Status500InternalServerError,
+                    OAuthErrorCodes.ServerError,
+                    ServerErrorDescription,
+                    "server_error");
+            }
+
+            // PS-12: the ID token's nonce and auth_time are byte-for-byte the locked code row's
+            // snapshots, never a token-request value, and the profile sources are the locked rows.
+            var idDescriptor = new InteractiveIdTokenDescriptor(
+                lockedAccount.Id,
+                descriptor.ClientId,
+                lockedSession.Id,
+                lockedSession.AuthMethod,
+                lockedCode.Scope,
+                lockedCode.Nonce,
+                lockedCode.AuthTime,
+                passwordUsername,
+                lockedAccount.Nickname);
+            if (idTokenFactory.Create(idDescriptor, signingKey, now)
+                is not InteractiveIdTokenResult.Issued issuedIdToken)
             {
                 await transaction.RollbackAsync(operationToken);
                 return AuthorizationCodeRedemptionOutcome.Failure(
@@ -500,6 +546,7 @@ public sealed class AuthorizationCodeRedemptionService(
                 lockedCode.Id);
             return AuthorizationCodeRedemptionOutcome.Success(
                 issued.AccessToken,
+                issuedIdToken.IdToken,
                 IdentityConstants.InteractiveAccessTokenLifetimeSeconds,
                 lockedCode.Scope);
         }, cancellationToken);
@@ -575,15 +622,15 @@ public sealed class AuthorizationCodeRedemptionService(
     private static string[] SplitCanonicalScope(string scopeSnapshot) =>
         scopeSnapshot.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-    private async Task<string?> ResolveDisplayNameAsync(
+    /// <summary>
+    /// The bound Password username of the account, or null when the account has no password
+    /// credential. The ID token's <c>PS-12</c> <c>name</c> claim uses exactly this value — a
+    /// different source than the access token's display-name resolution.
+    /// </summary>
+    private async Task<string?> ResolvePasswordUsernameAsync(
         AccountEntity account,
         CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(account.Nickname))
-        {
-            return account.Nickname;
-        }
-
         var credential = await passwordCredentials.GetByAccountIdAsync(account.Id, cancellationToken);
         return credential?.Username;
     }

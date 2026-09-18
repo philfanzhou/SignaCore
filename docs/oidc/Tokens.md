@@ -130,6 +130,7 @@ responses. They gain no interactive `scope` or `sid`, and `/api/auth/token` gain
 `scope`. Shared-audience applications stay shared and cannot enable code flow without the explicit
 migration described in [Client Model](./ClientModel.md).
 
-Current Discovery continues to describe the runtime as an OAuth authorization server with no
-authorization response type or ID token. Only the complete #54 slice may advertise the core flow
-under `AC-07`; this document itself has no metadata effect (`AC-14`).
+Current Discovery advertises the delivered interactive core (`AC-07`): the authorization endpoint,
+`response_types_supported: ["code"]`, `authorization_code`, S256 PKCE, the usable scopes, and
+`id_token_signing_alg_values_supported`. It publishes `userinfo_endpoint` only with #55 and
+`offline_access` only at `AC-12`; this document itself has no further metadata effect (`AC-14`).

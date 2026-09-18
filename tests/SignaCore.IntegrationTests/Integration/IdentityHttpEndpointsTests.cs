@@ -174,14 +174,30 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         var origin = $"{http.BaseAddress!.Scheme}://{http.BaseAddress.Authority}";
 
         Assert.Equal($"{origin}/.well-known/jwks", document.GetProperty("jwks_uri").GetString());
+        Assert.Equal($"{origin}/oauth2/authorize", document.GetProperty("authorization_endpoint").GetString());
         Assert.Equal($"{origin}/oauth2/token", document.GetProperty("token_endpoint").GetString());
         Assert.Equal($"{origin}/oauth2/revoke", document.GetProperty("revocation_endpoint").GetString());
-        Assert.Empty(document.GetProperty("response_types_supported").EnumerateArray());
+        Assert.Equal(
+            ["code"],
+            document.GetProperty("response_types_supported").EnumerateArray().Select(item => item.GetString()));
+        Assert.Equal(
+            ["S256"],
+            document.GetProperty("code_challenge_methods_supported").EnumerateArray().Select(item => item.GetString()));
+        // offline_access appears only with the interactive refresh family (AC-12), and
+        // userinfo_endpoint only with #55; neither may be advertised before it works.
+        Assert.Equal(
+            ["openid", "profile"],
+            document.GetProperty("scopes_supported").EnumerateArray().Select(item => item.GetString()));
+        Assert.False(document.TryGetProperty("userinfo_endpoint", out _));
+        Assert.Equal(
+            ["RS256"],
+            document.GetProperty("id_token_signing_alg_values_supported").EnumerateArray().Select(item => item.GetString()));
 
         var grantTypes = document.GetProperty("grant_types_supported")
             .EnumerateArray().Select(item => item.GetString()!).ToList();
         Assert.Contains(IdentityConstants.GrantTypePassword, grantTypes);
         Assert.Contains(IdentityConstants.GrantTypeRefreshToken, grantTypes);
+        Assert.Contains("authorization_code", grantTypes);
 
         // Every advertised grant name has to be one the token endpoint genuinely knows: if any of
         // them comes back as unsupported_grant_type, the discovery document and the endpoint have
