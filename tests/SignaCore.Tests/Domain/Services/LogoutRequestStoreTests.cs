@@ -37,10 +37,12 @@ public sealed class LogoutRequestStoreTests
         Assert.Equal(descriptor.IdentitySessionId, row.IdentitySessionId);
         Assert.Equal(descriptor.VerifiedPostLogoutRedirectUri, row.PostLogoutRedirectUri);
         Assert.Equal(descriptor.State, row.State);
-        Assert.Equal(now, row.CreatedAt);
+        // Both providers persist timestamps with microsecond precision; compare at that
+        // contract rather than the raw 100ns clock ticks.
+        Assert.Equal(now.UtcTicks / 10, row.CreatedAt.UtcTicks / 10);
         Assert.Equal(
-            now.AddMinutes(IdentityConstants.LogoutHandleLifetimeMinutes),
-            row.ExpiresAt);
+            now.AddMinutes(IdentityConstants.LogoutHandleLifetimeMinutes).UtcTicks / 10,
+            row.ExpiresAt.UtcTicks / 10);
         Assert.Null(row.ConsumedAt);
         // DF-10: only the versioned digest is persisted; the plaintext handle never touches the row.
         Assert.Equal(LoginHandleDigest.Compute(creation.LogoutHandle), row.HandleDigest);
