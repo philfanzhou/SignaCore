@@ -183,12 +183,14 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(
             ["S256"],
             document.GetProperty("code_challenge_methods_supported").EnumerateArray().Select(item => item.GetString()));
-        // offline_access appears only with the interactive refresh family (AC-12), and
-        // userinfo_endpoint only with #55; neither may be advertised before it works.
+        // userinfo_endpoint is advertised with the delivered UserInfo read (AC-08);
+        // offline_access still appears only with the interactive refresh family (AC-12).
         Assert.Equal(
             ["openid", "profile"],
             document.GetProperty("scopes_supported").EnumerateArray().Select(item => item.GetString()));
-        Assert.False(document.TryGetProperty("userinfo_endpoint", out _));
+        Assert.Equal(
+            $"{origin}/oauth2/userinfo",
+            document.GetProperty("userinfo_endpoint").GetString());
         Assert.Equal(
             ["RS256"],
             document.GetProperty("id_token_signing_alg_values_supported").EnumerateArray().Select(item => item.GetString()));

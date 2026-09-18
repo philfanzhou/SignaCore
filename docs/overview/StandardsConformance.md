@@ -12,9 +12,9 @@ and lockout behave identically; only the wire format differs.
 
 **This page describes the current runtime.** SignaCore is now an OpenID Connect provider for a
 narrow, first-party profile: a pre-registered confidential BFF can complete the Authorization Code
-flow with mandatory PKCE S256 and receive an ID token. There is still no UserInfo endpoint and no
-interactive refresh token family, so `userinfo_endpoint` and `offline_access` are deliberately
-absent from Discovery.
+flow with mandatory PKCE S256 and receive an ID token. The scope-controlled UserInfo endpoint is
+delivered, so `userinfo_endpoint` is advertised. The interactive refresh token family is not yet
+delivered, so `offline_access` is still deliberately absent from Discovery.
 
 ## The standards endpoint
 
@@ -128,7 +128,7 @@ are made from the `client_id` claim, not from `aud`.
 | Gap | Specification | Impact |
 | --- | --- | --- |
 | ID tokens only for the interactive flow | OIDC Core 1.0 §2 | `id_token` exists for the confidential-BFF Authorization Code flow only; the direct credential grants keep returning access tokens alone |
-| No UserInfo endpoint | OIDC Core 1.0 §5.3 | Profile data is only available through the JWT and the callback mechanism; `userinfo_endpoint` is not advertised |
+| UserInfo is interactive-flow-only | OIDC Core 1.0 §5.3 | `GET /oauth2/userinfo` serves the closed `PS-16` claim set to a confidential BFF holding a live interactive access token; it is not a browser endpoint (no CORS) and does not serve direct-grant tokens |
 | No interactive refresh family | OAuth 2.0 BCP, OIDC Core §11 | `offline_access` is rejected with `invalid_grant` and not advertised; the legacy `refresh_token` grant is unaffected |
 | No `scope` on the direct grants | RFC 6749 §3.3 | The direct credential grants have no way to request or restrict a subset of authority; the interactive flow's scope is fixed by the registration allow list |
 | The `password` grant is the primary flow | OAuth 2.1 draft, BCP 240 | The resource-owner password grant is deprecated in current guidance; it remains here because clients depend on it |

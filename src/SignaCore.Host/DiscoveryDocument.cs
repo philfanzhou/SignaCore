@@ -9,11 +9,11 @@ namespace SignaCore.Host;
 /// The document describes exactly what this service implements and nothing else. The interactive
 /// Authorization Code flow core is delivered and advertised (<c>AC-07</c>): the authorization
 /// endpoint, <c>code</c>, <c>authorization_code</c> with mandatory S256 PKCE, and the ID token
-/// signed RS256. There is still no UserInfo endpoint (<c>#55</c>) and no interactive refresh
-/// family (<c>#98</c>), so <c>userinfo_endpoint</c> is absent and <c>offline_access</c> is not in
-/// <see cref="ScopesSupported"/> (<c>AC-12</c> advertises it only once rotation works end to end).
-/// Advertising a capability that does not exist is worse than omitting it — a conforming client
-/// would build a request it can never complete.
+/// signed RS256. The scope-controlled UserInfo endpoint is delivered (<c>#55</c>) and advertised
+/// (<c>AC-08</c>), and the interactive refresh family with atomic rotation, reuse detection, and
+/// descendant revocation is delivered (<c>#98</c>), so <c>offline_access</c> is advertised
+/// (<c>AC-12</c>). Advertising a capability that does not exist is worse than omitting it — a
+/// conforming client would build a request it can never complete.
 /// </para>
 /// <para>
 /// Conformance status and the deliberate gaps are documented in
@@ -26,6 +26,7 @@ public sealed record DiscoveryDocument(
     string AuthorizationEndpoint,
     string TokenEndpoint,
     string RevocationEndpoint,
+    string UserInfoEndpoint,
     IReadOnlyList<string> GrantTypesSupported,
     IReadOnlyList<string> ResponseTypesSupported,
     IReadOnlyList<string> CodeChallengeMethodsSupported,
@@ -54,6 +55,8 @@ public sealed record DiscoveryDocument(
             AuthorizationEndpoint: $"{origin}/oauth2/authorize",
             TokenEndpoint: $"{origin}/oauth2/token",
             RevocationEndpoint: $"{origin}/oauth2/revoke",
+            // AC-08: published only now that the scope-controlled UserInfo read exists.
+            UserInfoEndpoint: $"{origin}/oauth2/userinfo",
             // The direct credential grants are the honest set, taken from the registered validators
             // rather than a literal, so a new grant cannot ship without appearing here. Extension
             // grants are advertised under the absolute URIs RFC 6749 §4.5 requires, which is what
@@ -102,6 +105,7 @@ public sealed record DiscoveryDocument(
         ["authorization_endpoint"] = AuthorizationEndpoint,
         ["token_endpoint"] = TokenEndpoint,
         ["revocation_endpoint"] = RevocationEndpoint,
+        ["userinfo_endpoint"] = UserInfoEndpoint,
         ["grant_types_supported"] = GrantTypesSupported,
         ["response_types_supported"] = ResponseTypesSupported,
         ["code_challenge_methods_supported"] = CodeChallengeMethodsSupported,
