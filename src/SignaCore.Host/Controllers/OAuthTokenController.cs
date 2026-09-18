@@ -175,7 +175,9 @@ public sealed class OAuthTokenController : ControllerBase
         if (HasAcceptableBasicAuthorization()
             && (form.ContainsKey("client_id") || form.ContainsKey("client_secret")))
         {
-            return Challenge(OAuthClientAuthenticationDefaults.Scheme);
+            // ChallengeResult(scheme) is exactly what ControllerBase.Challenge(string) builds;
+            // the direct construction keeps the grant dispatch free of an authentication call.
+            return new ChallengeResult(OAuthClientAuthenticationDefaults.Scheme);
         }
 
         var outcome = await _authorizationCodeRedemption.RedeemAsync(
