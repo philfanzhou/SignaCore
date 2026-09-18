@@ -278,10 +278,10 @@ public sealed class IdentitySessionStore : IIdentitySessionStore
 
     /// <summary>
     /// The one session-availability classification, shared by every enforcement slice
-    /// (<see cref="GetAsync"/>, <see cref="TouchActivityAsync"/>, authorize-side session reuse,
-    /// code redemption): a missing row invents no state, an explicit revocation outranks every
-    /// expiry, and an expiry boundary is inclusive. It decides session state only; account and
-    /// application policy belong to the calling transaction.
+    /// (<see cref="GetAsync"/>, <see cref="TouchActivityAsync"/>, code redemption, authorize-side
+    /// reuse): a missing row invents no state, an explicit revocation outranks every expiry, and
+    /// an expiry boundary is inclusive. It decides session state only; account and application
+    /// policy belong to the calling transaction.
     /// </summary>
     public static IdentitySessionState Classify(
         IdentitySessionEntity? session,

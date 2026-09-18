@@ -334,6 +334,9 @@ public static class ServiceCollectionExtensions
         // ---- Token issuance pipeline shared by /api/auth/token and /oauth2/token ----
         services.AddScoped<TokenIssuanceService>();
 
+        // ---- Internal authorization_code redemption (AC-06), outside the validator factory ----
+        services.AddScoped<AuthorizationCodeRedemptionService>();
+
         // ---- Background Cleanup Service ----
         services.AddHostedService<CleanupWorker>();
 
