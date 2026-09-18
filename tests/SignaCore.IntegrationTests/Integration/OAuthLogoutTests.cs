@@ -796,6 +796,9 @@ public sealed class OAuthLogoutTests : IClassFixture<IdentityServerFixture>
         Guid sessionId,
         bool withRedirect)
     {
+        // The prepare endpoint's client authentication needs the application row; seed it here so
+        // the helper stands on its own under any test-case order.
+        await SeedLogoutAppAsync();
         using var http = host.CreateClient();
         http.DefaultRequestHeaders.Authorization = BasicHeader();
         var idToken = await MintIdTokenAsync(accountId, sessionId);
