@@ -28,6 +28,17 @@ public interface IKeyManager
     Task RefreshKeysAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
     Task<IReadOnlyList<RsaSecurityKey>> GetValidKeysAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The <c>IN-31</c> logout-hint validation set: the valid keys plus every key that expired
+    /// within <see cref="IdentityConstants.LogoutHintRetiredKeyHours"/>, so a BFF holding a
+    /// short-lived ID token signed by a just-retired key can still prepare logout. Same
+    /// private-key admission as JWKS: a key that no longer decrypts here is never vouched for.
+    /// </summary>
+    // Default keeps third-party/test implementations of the existing interface source-compatible.
+    Task<IReadOnlyList<RsaSecurityKey>> GetLogoutHintValidationKeysAsync(
+        CancellationToken cancellationToken = default)
+        => GetValidKeysAsync(cancellationToken);
     Task<bool> NeedsKeyRotationAsync(CancellationToken cancellationToken = default);
     Task RotateKeyAsync(CancellationToken cancellationToken = default);
     Task InitializationCompleted { get; }
@@ -221,6 +232,31 @@ public class KeyManager : IKeyManager
     {
         await _initializationTcs.Task.WaitAsync(cancellationToken);
         return await LoadValidKeysAsync(cancellationToken);
+    }
+
+    /// <inheritdoc cref="IKeyManager.GetLogoutHintValidationKeysAsync"/>
+    public async Task<IReadOnlyList<RsaSecurityKey>> GetLogoutHintValidationKeysAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await _initializationTcs.Task.WaitAsync(cancellationToken);
+        using var scope = _scopeFactory.CreateScope();
+        var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
+        var keyEntities = await keyRepo.GetLogoutHintKeysAsync(cancellationToken);
+
+        var keys = new List<RsaSecurityKey>();
+        foreach (var entity in keyEntities)
+        {
+            try
+            {
+                keys.Add(LoadKeyFromEntity(entity));
+            }
+            catch (CryptographicException ex)
+            {
+                _logger.LogWarning(ex, "Failed to load key {KeyId}, skipping", entity.KeyId);
+            }
+        }
+
+        return keys;
     }
 
     /// <summary>

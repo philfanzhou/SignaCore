@@ -8,6 +8,15 @@ public interface ISecurityKeyRepository
     Task<SecurityKeyEntity?> GetLatestKeyAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SecurityKeyEntity>> GetValidKeysAsync(
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The logout-hint key window (<c>IN-31</c>): every key not yet expired plus every key that
+    /// expired within <see cref="IdentityConstants.LogoutHintRetiredKeyHours"/> — a recently
+    /// retired key may legitimately have signed a short-lived ID token a BFF still holds.
+    /// </summary>
+    Task<IReadOnlyList<SecurityKeyEntity>> GetLogoutHintKeysAsync(
+        CancellationToken cancellationToken = default);
+
     Task AddAsync(SecurityKeyEntity key, CancellationToken cancellationToken = default);
 
     /// <summary>

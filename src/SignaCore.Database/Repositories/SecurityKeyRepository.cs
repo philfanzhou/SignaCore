@@ -44,6 +44,19 @@ public class SecurityKeyRepository : ISecurityKeyRepository
             .ToList();
     }
 
+    public async Task<IReadOnlyList<SecurityKeyEntity>> GetLogoutHintKeysAsync(
+        CancellationToken cancellationToken = default)
+    {
+        // Same tiny-table client evaluation as GetValidKeysAsync; the only difference is the
+        // window — retired keys within the IN-31 logout-hint hours stay in the set.
+        var now = DateTimeOffset.UtcNow;
+        var keys = await _dbContext.SecurityKeys.ToListAsync(cancellationToken);
+        return keys.Where(k => k.ExpiresAt > now.AddHours(-IdentityConstants.LogoutHintRetiredKeyHours))
+            .OrderByDescending(k => k.IsActive)
+            .ThenByDescending(k => k.CreatedAt)
+            .ToList();
+    }
+
     public Task AddAsync(
         SecurityKeyEntity key,
         CancellationToken cancellationToken = default)

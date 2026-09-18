@@ -85,6 +85,30 @@ public static class IdentityConstants
     public const int IdentitySessionRetentionHours = 24;
     public const int MaxIdentitySessionRevocationReasonLength = 32;
 
+    public const int LogoutHandleLength = 43;
+    public const int LogoutHandleLifetimeMinutes = 5;
+    public const int LogoutRequestRetentionHours = 24;
+
+    /// <summary>The <c>IN-31</c> bound of the prepared-logout <c>id_token_hint</c> in ASCII characters.</summary>
+    public const int MaxLogoutIdTokenHintLength = 8192;
+
+    /// <summary>The <c>IN-33</c> bounds of the prepared-logout <c>state</c> in ASCII characters.</summary>
+    public const int MinLogoutStateLength = 22;
+    public const int MaxLogoutStateLength = 128;
+
+    /// <summary>
+    /// The <c>IN-31</c> logout-hint key window: an ID token signed by a key that expired within
+    /// this many hours still validates for logout preparation (only), because an ID token's short
+    /// lifetime means a recently retired key may legitimately have signed it.
+    /// </summary>
+    public const int LogoutHintRetiredKeyHours = 24;
+
+    /// <summary>
+    /// The <c>IN-31</c> logout-hint freshness bound: the presented ID token's <c>iat</c> may be
+    /// at most this many hours old. Only <c>exp</c> is ignored for this check, never this bound.
+    /// </summary>
+    public const int LogoutHintMaximumAgeHours = 24;
+
     /// <summary>
     /// The fixed 15-minute lifetime of the interactive Authorization Code flow access token
     /// (<c>PS-13</c>); it never reads <see cref="JwtOptions.TokenExpirationHours"/>.

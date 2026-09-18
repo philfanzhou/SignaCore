@@ -1062,6 +1062,63 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                     b.ToTable("login_histories", (string)null);
                 });
 
+            modelBuilder.Entity("SignaCore.Database.Entity.LogoutRequestEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("account_id");
+
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("app_registration_id");
+
+                    b.Property<long?>("ConsumedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("consumed_at");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("ExpiresAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("HandleDigest")
+                        .IsRequired()
+                        .HasMaxLength(71)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("handle_digest");
+
+                    b.Property<Guid>("IdentitySessionId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("identity_session_id");
+
+                    b.Property<string>("PostLogoutRedirectUri")
+                        .HasMaxLength(501)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("post_logout_redirect_uri");
+
+                    b.Property<string>("State")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("state");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppRegistrationId");
+
+                    b.HasIndex("HandleDigest")
+                        .IsUnique();
+
+                    b.ToTable("logout_requests", (string)null);
+                });
+
             modelBuilder.Entity("SignaCore.Database.Entity.OtpEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1566,6 +1623,15 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                         .WithMany()
                         .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SignaCore.Database.Entity.LogoutRequestEntity", b =>
+                {
+                    b.HasOne("SignaCore.Database.Entity.AppRegistrationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AppRegistrationId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

@@ -229,6 +229,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IIdentitySessionStore, IdentitySessionStore>();
         services.AddScoped<IAuthorizationCodeStore, AuthorizationCodeStore>();
         services.AddScoped<IRefreshTokenFamilyStore, RefreshTokenFamilyStore>();
+        services.AddScoped<ILogoutRequestRepository, LogoutRequestRepository>();
+        services.AddScoped<ILogoutRequestStore, LogoutRequestStore>();
         services.AddScoped<IUnitOfWork, EfCoreUnitOfWork>();
 
         // ---- Gateway Validation Service ----
@@ -243,6 +245,8 @@ public static class ServiceCollectionExtensions
         // ---- Browser OIDC login success commit path (canonical EV-01) ----
         services.AddScoped<OidcLoginCompletionService>();
         services.AddScoped<OidcAuthorizationSessionReuseService>();
+        services.AddScoped<OidcLogoutPreparationService>();
+        services.AddScoped<OidcLogoutCompletionService>();
 
         // ---- User Query Service ----
         services.AddScoped<IUserQueryService, UserQueryService>();
