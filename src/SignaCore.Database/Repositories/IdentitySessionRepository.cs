@@ -177,6 +177,30 @@ public class IdentitySessionRepository : IIdentitySessionRepository
             cancellationToken);
     }
 
+    public async Task<IReadOnlyList<IdentitySessionEntity>> ListByAccountAsync(
+        Guid accountId,
+        int take,
+        int skip,
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.IdentitySessions
+            .AsNoTracking()
+            .Where(session => session.AccountId == accountId)
+            .OrderByDescending(session => session.AuthTime)
+            .ThenBy(session => session.Id)
+            .Skip(skip)
+            .Take(take)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<int> CountByAccountAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _dbContext.IdentitySessions
+            .CountAsync(session => session.AccountId == accountId, cancellationToken);
+    }
+
     public async Task<int> RemoveExpiredBeforeAsync(
         DateTimeOffset cutoff,
         CancellationToken cancellationToken = default)

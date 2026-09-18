@@ -164,6 +164,22 @@ public sealed record AdminLoginHistoryItemResponse(
     string? AppId,
     long CreatedAt);
 
+/// <summary>
+/// One non-sensitive identity-session projection for the admin console (<c>EV-15</c> view). The
+/// times are Unix seconds like every admin DTO; no credential, cookie, token, or IP/UA history
+/// value ever appears here.
+/// </summary>
+public sealed record AdminIdentitySessionItemResponse(
+    Guid Id,
+    string Status,
+    string AuthMethod,
+    long AuthTime,
+    long LastSeenAt,
+    long IdleExpiresAt,
+    long AbsoluteExpiresAt,
+    long? RevokedAt,
+    string? RevocationReason);
+
 public sealed record AdminAuditLogItemResponse(
     string Action,
     string TargetType,

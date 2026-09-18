@@ -67,6 +67,21 @@ public interface IIdentitySessionRepository
     /// count. A cancelled or failed run rolls the whole unit back; no reference is ever nulled to
     /// enable a delete.
     /// </summary>
+    /// <summary>
+    /// Lists the identity sessions of one account, newest authentication first, paged. The
+    /// account index backs the filter; the rows carry no credential, cookie, or token value.
+    /// </summary>
+    Task<IReadOnlyList<IdentitySessionEntity>> ListByAccountAsync(
+        Guid accountId,
+        int take,
+        int skip,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>The total number of identity sessions of one account.</summary>
+    Task<int> CountByAccountAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default);
+
     Task<int> RemoveExpiredBeforeAsync(
         DateTimeOffset cutoff,
         CancellationToken cancellationToken = default);

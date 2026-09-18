@@ -150,6 +150,18 @@ export interface AdminSession {
   isAuthenticated: boolean
 }
 
+export interface AdminIdentitySessionItem {
+  id: string
+  status: string
+  authMethod: string
+  authTime: number
+  lastSeenAt: number
+  idleExpiresAt: number
+  absoluteExpiresAt: number
+  revokedAt: number | null
+  revocationReason: string | null
+}
+
 export interface AdminLoginHistoryItem {
   authMethod: string
   eventType: string
@@ -233,6 +245,21 @@ class AdminApiClient {
   async getUserLoginHistory(userId: string, params: { page?: number; pageSize?: number } = {}) {
     const response = await this.client.get<PagedResponse<AdminLoginHistoryItem>>(
       `/api/admin/users/${userId}/login-history`, { params })
+    return response.data
+  }
+
+  async getUserIdentitySessions(
+    userId: string,
+    params: { page?: number; pageSize?: number } = {},
+  ) {
+    const response = await this.client.get<PagedResponse<AdminIdentitySessionItem>>(
+      `/api/admin/users/${userId}/identity-sessions`, { params })
+    return response.data
+  }
+
+  async revokeIdentitySession(userId: string, sessionId: string) {
+    const response = await this.client.post<{ success: boolean; message: string }>(
+      `/api/admin/users/${userId}/identity-sessions/${sessionId}/revoke`)
     return response.data
   }
 

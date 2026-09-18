@@ -1519,6 +1519,126 @@ public class AdminController : ControllerBase
         return Ok(new OperationResponse(true, "Refresh token revoked."));
     }
 
+    /// <summary>
+    /// The <c>EV-15</c> view: the non-sensitive identity sessions of one account, newest
+    /// authentication first. An unknown account answers 404 — unlike the login-history endpoint
+    /// of the same path family, which answers an empty page, this endpoint names a concrete
+    /// subject whose existence is the primary fact.
+    /// </summary>
+    [HttpGet("users/{userId:guid}/identity-sessions")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> GetUserIdentitySessions(
+        Guid userId,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        [FromServices] IAccountRepository accountRepository,
+        [FromServices] IIdentitySessionRepository identitySessionRepository,
+        CancellationToken cancellationToken)
+    {
+        if (await accountRepository.GetByIdAsync(userId, cancellationToken) is null)
+        {
+            return NotFound(new ErrorResponse("User not found."));
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var paging = PageRequest.Normalize(page, pageSize);
+        var total = await identitySessionRepository.CountByAccountAsync(userId, cancellationToken);
+        var sessions = await identitySessionRepository.ListByAccountAsync(
+            userId, paging.PageSize, paging.Skip, cancellationToken);
+
+        var items = sessions
+            .Select(session => new AdminIdentitySessionItemResponse(
+                session.Id,
+                IdentitySessionStore.Classify(session, now).ToString().ToLowerInvariant(),
+                session.AuthMethod,
+                session.AuthTime.ToUnixTimeSeconds(),
+                session.LastSeenAt.ToUnixTimeSeconds(),
+                session.IdleExpiresAt.ToUnixTimeSeconds(),
+                session.AbsoluteExpiresAt.ToUnixTimeSeconds(),
+                session.RevokedAt?.ToUnixTimeSeconds(),
+                session.RevocationReason))
+            .ToList();
+
+        return Ok(new PagedResponse<AdminIdentitySessionItemResponse>(items, total, paging.Page, paging.PageSize));
+    }
+
+    /// <summary>
+    /// The <c>EV-15</c> transaction: lock the named session, revoke it with reason
+    /// <c>administrative</c> (the first fact stays authoritative, so revoking an already-revoked
+    /// session is an idempotent success), revoke every interactive family bound to it, and write
+    /// the audit row — all in one retryable unit. A session that does not exist or belongs to
+    /// another account answers 404.
+    /// </summary>
+    [HttpPost("users/{userId:guid}/identity-sessions/{sessionId:guid}/revoke")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> RevokeUserIdentitySession(
+        Guid userId,
+        Guid sessionId,
+        [FromServices] IdentityDbContext dbContext,
+        [FromServices] IIdentitySessionRepository identitySessionRepository,
+        [FromServices] IRefreshTokenRepository refreshTokenRepository,
+        [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IAuditService auditService,
+        CancellationToken cancellationToken)
+    {
+        var (actorId, actorName) = GetAdminIdentity();
+        var strategy = dbContext.Database.CreateExecutionStrategy();
+        var result = await strategy.ExecuteAsync(async operationToken =>
+        {
+            dbContext.ChangeTracker.Clear();
+            await using var transaction = await dbContext.Database
+                .BeginTransactionAsync(operationToken);
+
+            var lockedSession = await identitySessionRepository.LockByIdAsync(sessionId, operationToken);
+            if (lockedSession is null || lockedSession.AccountId != userId)
+            {
+                await transaction.RollbackAsync(operationToken);
+                return (Found: false, AlreadyRevoked: false);
+            }
+
+            var alreadyRevoked = lockedSession.RevokedAt is not null;
+            if (!alreadyRevoked)
+            {
+                // The first fact stays authoritative: MarkRevokedAsync matches only an
+                // unrevoked row, so an idempotent retry changes nothing.
+                await dbContext.IdentitySessions
+                    .Where(row => row.Id == sessionId && row.RevokedAt == null)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(row => row.RevokedAt, DateTimeOffset.UtcNow)
+                        .SetProperty(row => row.RevocationReason, "administrative"),
+                        operationToken);
+                await refreshTokenRepository.RevokeInteractiveBySessionAsync(sessionId, operationToken);
+            }
+
+            await auditService.RecordActionAsync(
+                "identity_session_revoked",
+                "IdentitySession",
+                sessionId.ToString("D"),
+                actorId: actorId,
+                actorName: actorName,
+                description: alreadyRevoked
+                    ? $"account:{userId};already_revoked"
+                    : $"account:{userId}",
+                clientIp: HttpContext.GetClientIp(),
+                correlationId: HttpContext.GetCorrelationId(),
+                cancellationToken: operationToken);
+            await unitOfWork.SaveChangesAsync(operationToken);
+            await transaction.CommitAsync(operationToken);
+            return (Found: true, AlreadyRevoked: alreadyRevoked);
+        }, cancellationToken);
+
+        if (!result.Found)
+        {
+            return NotFound(new ErrorResponse("Identity session not found."));
+        }
+
+        return Ok(new OperationResponse(
+            true,
+            result.AlreadyRevoked
+                ? "Identity session was already revoked."
+                : "Identity session revoked."));
+    }
+
     [HttpGet("users/{userId:guid}/login-history")]
     [Authorize(Policy = "AdminSession")]
     public async Task<IActionResult> GetUserLoginHistory(

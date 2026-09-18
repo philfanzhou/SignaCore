@@ -182,6 +182,17 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         }, cancellationToken);
     }
 
+    public Task<int> RevokeInteractiveBySessionAsync(
+        Guid identitySessionId,
+        CancellationToken cancellationToken = default)
+    {
+        return _dbContext.RefreshTokens
+            .Where(token => token.IdentitySessionId == identitySessionId
+                && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.IsRevoked, true), cancellationToken);
+    }
+
     public Task RemoveRangeAsync(
         IEnumerable<RefreshTokenEntity> tokens,
         CancellationToken cancellationToken = default)

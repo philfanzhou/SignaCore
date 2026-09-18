@@ -3,6 +3,7 @@ import { ElMessageBox } from "element-plus";
 import { adminClient } from "../../services/apiClient";
 import {
   getErrorMessage,
+  type AdminIdentitySessionItem,
   type AdminLoginHistoryItem,
   type AdminUser,
 } from "../../services/adminApi";
@@ -22,10 +23,14 @@ const userFilters = reactive({
 });
 const selectedUser = ref<AdminUser | null>(null);
 const userDrawerOpen = ref(false);
-const userDrawerTab = ref<"profile" | "history">("profile");
+const userDrawerTab = ref<"profile" | "history" | "sessions">("profile");
 const userHistory = ref<AdminLoginHistoryItem[]>([]);
 const userHistoryTotal = ref(0);
 const userHistoryLoading = ref(false);
+const userSessions = ref<AdminIdentitySessionItem[]>([]);
+const userSessionsTotal = ref(0);
+const userSessionsLoading = ref(false);
+const userSessionRevokingId = ref("");
 const userMeta = reactive({ displayName: "", nickname: "", remark: "" });
 const userMode = ref<"password" | "phone">("password");
 const userModalOpen = ref(false);
@@ -147,8 +152,11 @@ function openUser(user: AdminUser) {
   });
   userHistory.value = [];
   userHistoryTotal.value = 0;
+  userSessions.value = [];
+  userSessionsTotal.value = 0;
   userDrawerOpen.value = true;
   void loadUserHistory();
+  void loadUserSessions();
 }
 
 async function loadUserHistory() {
@@ -165,6 +173,54 @@ async function loadUserHistory() {
     handleApiError("加载登录历史失败", error);
   } finally {
     userHistoryLoading.value = false;
+  }
+}
+
+async function loadUserSessions() {
+  if (!selectedUser.value) return;
+  userSessionsLoading.value = true;
+  try {
+    const result = await adminClient.getUserIdentitySessions(
+      selectedUser.value.userId,
+      { page: 1, pageSize: 20 },
+    );
+    userSessions.value = result.items;
+    userSessionsTotal.value = result.total;
+  } catch (error) {
+    handleApiError("加载身份会话失败", error);
+  } finally {
+    userSessionsLoading.value = false;
+  }
+}
+
+async function revokeUserSession(session: AdminIdentitySessionItem) {
+  if (!selectedUser.value) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认撤销该身份会话？该会话绑定的浏览器登录将立即失效。`,
+      "撤销身份会话",
+      {
+        confirmButtonText: "撤销",
+        cancelButtonText: "取消",
+        type: "warning",
+      },
+    );
+  } catch {
+    return;
+  }
+
+  userSessionRevokingId.value = session.id;
+  try {
+    const result = await adminClient.revokeIdentitySession(
+      selectedUser.value.userId,
+      session.id,
+    );
+    notify(result.message || "身份会话已撤销");
+    await loadUserSessions();
+  } catch (error) {
+    handleApiError("撤销身份会话失败", error);
+  } finally {
+    userSessionRevokingId.value = "";
   }
 }
 
@@ -230,6 +286,10 @@ export function useAdminUsers() {
     userHistory,
     userHistoryTotal,
     userHistoryLoading,
+    userSessions,
+    userSessionsTotal,
+    userSessionsLoading,
+    userSessionRevokingId,
     userMeta,
     userMode,
     userModalOpen,
@@ -242,6 +302,8 @@ export function useAdminUsers() {
     saveUser,
     openUser,
     loadUserHistory,
+    loadUserSessions,
+    revokeUserSession,
     updateUserMeta,
     toggleUser,
     closeUserDrawer,
