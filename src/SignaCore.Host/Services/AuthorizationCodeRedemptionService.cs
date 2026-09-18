@@ -42,6 +42,13 @@ public sealed class AuthorizationCodeRedemptionOutcome
     /// <summary>The ID token (<c>PS-12</c>) of the same committed redemption; the canonical scope always contains <c>openid</c>.</summary>
     public string? IdToken { get; private init; }
 
+    /// <summary>
+    /// The plaintext interactive refresh token of the family root committed in the same
+    /// redemption (<c>EV-21</c>/<c>PS-14</c>), present only when the code carried
+    /// <c>offline_access</c>; returned exactly once and never persisted.
+    /// </summary>
+    public string? RefreshToken { get; private init; }
+
     public long ExpiresIn { get; private init; }
 
     /// <summary>The code's canonical scope snapshot, echoed byte for byte in the response.</summary>
@@ -51,11 +58,13 @@ public sealed class AuthorizationCodeRedemptionOutcome
         string accessToken,
         string idToken,
         long expiresIn,
-        string scope) => new()
+        string scope,
+        string? refreshToken = null) => new()
     {
         IsSuccess = true,
         AccessToken = accessToken,
         IdToken = idToken,
+        RefreshToken = refreshToken,
         ExpiresIn = expiresIn,
         Scope = scope
     };
@@ -80,10 +89,12 @@ public sealed class AuthorizationCodeRedemptionOutcome
 /// verifier for an application-scoped interactive access token (<c>PS-13</c>) and, because the
 /// canonical scope always contains <c>openid</c>, an ID token (<c>PS-12</c>) — both signed inside
 /// one transaction that also consumes the code and writes the redemption audit (<c>EV-20</c>). A
-/// correctly bound replay of an already consumed code revokes the linked session and commits
-/// exactly one id-only replay audit (<c>EV-24</c>); every lookup, binding, time, and
-/// current-state rejection answers with the single generic <c>invalid_grant</c> and consumes
-/// nothing (<c>EV-22</c>/<c>EV-23</c>).
+/// code whose approved scope carries <c>offline_access</c> additionally creates and links the
+/// family root in the same unit (<c>EV-21</c>) and returns its plaintext refresh token exactly
+/// once. A correctly bound replay of an already consumed code revokes the linked family when the
+/// code names one, revokes the linked session, and commits exactly one id-only replay audit
+/// (<c>EV-24</c>); every lookup, binding, time, and current-state rejection answers with the
+/// single generic <c>invalid_grant</c> and consumes nothing (<c>EV-22</c>/<c>EV-23</c>).
 /// </summary>
 /// <remarks>
 /// Same transaction shape as <see cref="OidcLoginCompletionService"/>: the explicit transaction
@@ -92,10 +103,9 @@ public sealed class AuthorizationCodeRedemptionOutcome
 /// cancellation observed before the commit rolls the whole unit back (<c>EV-18</c>/<c>SC-20</c>).
 /// The locks follow the canonical session-then-code order (<c>EV-20</c>). External HTTP — the
 /// client callback and the signing-key refresh — happens before the transaction opens, never
-/// under a held lock. No refresh family is created or revoked here (<c>AC-11</c>/<c>AC-12</c> are
-/// not delivered): a code carrying <c>offline_access</c> is rejected outright instead of being
-/// narrowed to a no-refresh redemption, and a consumed code carrying a family link — impossible
-/// until #98 writes one — fails closed.
+/// under a held lock. Rotation, consumption semantics, and reuse handling of the created family
+/// belong to the interactive refresh slice (#98): until then the issued refresh token cannot be
+/// rotated, and a family revoked here or by a session revocation stays revoked.
 /// </remarks>
 public sealed class AuthorizationCodeRedemptionService(
     IAuthorizationCodeStore authorizationCodes,
@@ -104,6 +114,7 @@ public sealed class AuthorizationCodeRedemptionService(
     IPasswordCredentialRepository passwordCredentials,
     IInteractiveAccessTokenFactory tokenFactory,
     IInteractiveIdTokenFactory idTokenFactory,
+    IRefreshTokenFamilyStore refreshFamilies,
     ICallbackService? callbackService,
     IKeyManager keyManager,
     IAuditService auditService,
@@ -275,8 +286,7 @@ public sealed class AuthorizationCodeRedemptionService(
         }
 
         if (FailsApplicationSessionPolicy(app, session, now)
-            || !IsScopeStillAllowed(lookup.Entity.Scope, app.AllowedScopes)
-            || ContainsOfflineAccess(lookup.Entity.Scope))
+            || !IsScopeStillAllowed(lookup.Entity.Scope, app.AllowedScopes))
         {
             return InvalidGrant();
         }
@@ -475,8 +485,17 @@ public sealed class AuthorizationCodeRedemptionService(
                 return InvalidGrant();
             }
 
-            if (!IsScopeStillAllowed(lockedCode.Scope, currentApplication.AllowedScopes)
-                || ContainsOfflineAccess(lockedCode.Scope))
+            if (!IsScopeStillAllowed(lockedCode.Scope, currentApplication.AllowedScopes))
+            {
+                await transaction.RollbackAsync(operationToken);
+                return InvalidGrant();
+            }
+
+            // EV-11: the current refresh capability is an authoritative in-lock recheck — a code
+            // whose approved scope carries offline_access is only redeemable while the application
+            // still allows refresh tokens. The code stays unconsumed and no family is written.
+            var codeCarriesOfflineAccess = ContainsOfflineAccess(lockedCode.Scope);
+            if (codeCarriesOfflineAccess && !currentApplication.AllowRefreshToken)
             {
                 await transaction.RollbackAsync(operationToken);
                 return InvalidGrant();
@@ -526,6 +545,32 @@ public sealed class AuthorizationCodeRedemptionService(
                 return InvalidGrant();
             }
 
+            // EV-21: with offline_access the family root and the code-to-root link commit in this
+            // same unit. The store flushes the staged root so the conditional link write can
+            // resolve its restrictive reference; both roll back with everything else on any
+            // failure before the commit (EV-26).
+            InteractiveRefreshFamilyRootCreation? familyRoot = null;
+            if (codeCarriesOfflineAccess)
+            {
+                familyRoot = await refreshFamilies.CreateRootAsync(
+                    new InteractiveRefreshFamilyRootDescriptor(
+                        lockedAccount.Id,
+                        descriptor.ClientId,
+                        lockedSession.Id,
+                        lockedCode.Scope,
+                        lockedCode.AuthTime),
+                    now,
+                    operationToken);
+                if (!await authorizationCodes.LinkRefreshFamilyAsync(
+                        lockedCode.Id, familyRoot.RootId, operationToken))
+                {
+                    // The conditional consumption just succeeded, so an unlinked row cannot have
+                    // disappeared; fail closed on the invariant violation.
+                    throw new InvalidOperationException(
+                        "The consumed authorization code could not be linked to its refresh family root.");
+                }
+            }
+
             await auditService.RecordActionAsync(
                 RedeemedAuditAction,
                 CodeAuditTargetType,
@@ -548,14 +593,16 @@ public sealed class AuthorizationCodeRedemptionService(
                 issued.AccessToken,
                 issuedIdToken.IdToken,
                 IdentityConstants.InteractiveAccessTokenLifetimeSeconds,
-                lockedCode.Scope);
+                lockedCode.Scope,
+                familyRoot?.RefreshToken);
         }, cancellationToken);
     }
 
     /// <summary>
-    /// The shared disposal of one proven replay: the family invariant check, the session
-    /// revocation when the row still exists (<c>AlreadyRevoked</c> keeps the first fact), and the
-    /// staged id-only audit row. The caller owns the transaction and the commit.
+    /// The shared disposal of one proven replay: the precise family revocation when the code
+    /// names one (<c>EV-24</c> — never a guessed sibling), the session revocation when the row
+    /// still exists (<c>AlreadyRevoked</c> keeps the first fact), and the staged id-only audit
+    /// row. The caller owns the transaction and the commit.
     /// </summary>
     private async Task CommitReplayDisposalAsync(
         AuthorizationCodeEntity lockedCode,
@@ -565,12 +612,15 @@ public sealed class AuthorizationCodeRedemptionService(
         string? correlationId,
         CancellationToken cancellationToken)
     {
-        if (lockedCode.RefreshFamilyId is not null)
+        // The link names the exact family this code's first redemption created; sibling families
+        // of the same session become unusable through the session revocation below, never by
+        // direct writes (SC-07/SC-09).
+        var familyDescription = "none";
+        if (lockedCode.RefreshFamilyId is Guid rootId)
         {
-            // #50 and this service never write the family link; until #98 adds family revocation
-            // here, a non-null value is an invariant violation that must fail closed.
-            throw new InvalidOperationException(
-                "A replayed authorization code carries a refresh family link this flow never writes.");
+            await refreshFamilies.RevokeFamilyAsync(
+                rootId, RefreshFamilyRevocationReason.CodeReplay, cancellationToken);
+            familyDescription = rootId.ToString("D");
         }
 
         if (lockedSession is not null)
@@ -585,7 +635,7 @@ public sealed class AuthorizationCodeRedemptionService(
             lockedCode.Id.ToString("D"),
             actorId: lockedCode.AccountId,
             actorName: null,
-            description: $"session:{lockedCode.IdentitySessionId};family:none",
+            description: $"session:{lockedCode.IdentitySessionId};family:{familyDescription}",
             clientIp: clientIp,
             correlationId: correlationId,
             cancellationToken: cancellationToken);

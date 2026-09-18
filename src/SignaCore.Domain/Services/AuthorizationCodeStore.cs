@@ -129,6 +129,17 @@ public interface IAuthorizationCodeStore
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Points the consumed code row at its refresh family root (<c>EV-21</c>): a conditional
+    /// update of the still-unlinked row, so a code can never be re-pointed at a second family.
+    /// The referenced root must already be flushed in the caller's transaction. Returns
+    /// <c>false</c> when no unlinked row matched — an invariant violation inside a redemption.
+    /// </summary>
+    Task<bool> LinkRefreshFamilyAsync(
+        Guid codeId,
+        Guid rootId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Deletes rows whose <c>expires_at</c> is older than
     /// <see cref="IdentityConstants.AuthorizationCodeRetentionHours"/> as of
     /// <paramref name="now"/> — consumed and unconsumed alike — returning the deleted count. Rows
@@ -260,6 +271,15 @@ public sealed class AuthorizationCodeStore : IAuthorizationCodeStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         return _repository.TryConsumeAsync(codeId, now, cancellationToken);
+    }
+
+    public async Task<bool> LinkRefreshFamilyAsync(
+        Guid codeId,
+        Guid rootId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return await _repository.LinkRefreshFamilyAsync(codeId, rootId, cancellationToken) == 1;
     }
 
     public Task<int> CleanupExpiredAsync(

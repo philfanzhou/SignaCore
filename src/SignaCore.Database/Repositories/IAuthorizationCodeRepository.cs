@@ -21,6 +21,16 @@ public interface IAuthorizationCodeRepository
         DateTimeOffset now,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Points the consumed code row at its refresh family root (<c>EV-21</c>): a single
+    /// conditional update of the still-unlinked row, so a code can never be re-pointed at a
+    /// second family. Returns the number of rows linked (0 or 1).
+    /// </summary>
+    Task<int> LinkRefreshFamilyAsync(
+        Guid codeId,
+        Guid rootId,
+        CancellationToken cancellationToken = default);
+
     Task<int> RemoveExpiredBeforeAsync(
         DateTimeOffset cutoff,
         CancellationToken cancellationToken = default);

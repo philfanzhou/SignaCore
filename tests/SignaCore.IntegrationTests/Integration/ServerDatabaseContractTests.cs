@@ -1699,6 +1699,10 @@ public sealed class ServerDatabaseContractTests
                 new JwtOptions { Issuer = "https://redemption-contract.test" },
                 NullLogger<InteractiveAccessTokenFactory>.Instance),
             new InteractiveIdTokenFactory(new JwtOptions { Issuer = "https://redemption-contract.test" }),
+            new RefreshTokenFamilyStore(
+                new RefreshTokenRepository(context),
+                unitOfWork,
+                NullLogger<RefreshTokenFamilyStore>.Instance),
             callbackService: null,
             new StaticRedemptionKeyManager(),
             new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),

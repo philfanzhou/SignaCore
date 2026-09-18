@@ -51,7 +51,8 @@ migration. The asymmetry cost of deferring is the reason `PS-23` defers nothing 
 a reference to a populated table in place, while SQLite has to rebuild and copy that table, so the
 two histories stop sharing one statement shape and the rebuild has to preserve every retained code
 row. That cost is accepted only here, where the referenced root cannot exist earlier, and it is
-bounded because `refresh_family_id` stays null until #98 writes the first interactive root.
+bounded because `refresh_family_id` stays null until the redemption slice (#294) writes the
+first interactive root.
 
 No relationship cascades on delete. Cleanup must prove that code, session, root, parent, and
 descendant references are no longer needed before deleting them. Account/application values keep
@@ -131,7 +132,8 @@ singleton rows in one statement succeeds on both providers (measured). Whole-fam
 deletion under `ON DELETE RESTRICT` is provider-asymmetric — it fails on SQLite with a foreign-key
 error while PostgreSQL removes mutually referencing rows in one statement (measured) — so the
 child-first interactive family cleanup above is the only admissible family deletion path, and it
-belongs to the family write API (#98), not to the legacy statement. Cleanup cancellation or failure
+belongs to the family write API (delivered by #294; rotation joins with #98), not to the legacy
+statement. Cleanup cancellation or failure
 rolls back the unit and never nulls a relationship to force deletion.
 
 ## Deployment and rollback gate
@@ -141,7 +143,8 @@ family, leaves every current grant enabled, keeps `offline_access` absent from m
 rolled back while no interactive marker exists (`AC-11`). The Down migration drops only the added
 references, indexes, checks, and columns after verifying that condition.
 
-After #98 has issued an interactive root, an in-place binary or schema downgrade is unsafe: an old
+After the redemption slice (#294) has issued an interactive root, an in-place binary or schema
+downgrade is unsafe: an old
 binary would see the same bearer row without understanding session, scope, consumption, or reuse and
 could reinterpret it as legacy. Downgrade therefore fails closed while any interactive marker or
 retained code-to-root link exists. Operators must first disable interactive refresh issuance,

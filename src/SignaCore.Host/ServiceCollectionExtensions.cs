@@ -228,6 +228,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAuthorizationRequestStore, AuthorizationRequestStore>();
         services.AddScoped<IIdentitySessionStore, IdentitySessionStore>();
         services.AddScoped<IAuthorizationCodeStore, AuthorizationCodeStore>();
+        services.AddScoped<IRefreshTokenFamilyStore, RefreshTokenFamilyStore>();
         services.AddScoped<IUnitOfWork, EfCoreUnitOfWork>();
 
         // ---- Gateway Validation Service ----

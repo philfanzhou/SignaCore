@@ -27,18 +27,38 @@ public interface IRefreshTokenRepository
     Task AddAsync(
         RefreshTokenEntity refreshToken,
         CancellationToken cancellationToken = default);
-    /// <summary>
-    /// The minimal session-scoped whole-family revocation of <c>EV-15</c>/<c>EV-06</c>: a
-    /// conditional update over interactive rows only, with the first revocation fact staying
-    /// authoritative. Minimal by the #68/#72/#294 three-way agreement; the family write API
-    /// (#294) collects it when that slice merges.
-    /// </summary>
-    Task<int> RevokeInteractiveBySessionAsync(
-        Guid identitySessionId,
-        CancellationToken cancellationToken = default);
 
     Task RemoveRangeAsync(
         IEnumerable<RefreshTokenEntity> tokens,
         CancellationToken cancellationToken = default);
     Task<int> RemoveExpiredAndRevokedAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Revokes every unrevoked member of the interactive family whose root id is
+    /// <paramref name="rootId"/> (<c>EV-24</c>): a conditional update over interactive rows only,
+    /// so an already-revoked member keeps the first fact and a legacy singleton id matches nothing.
+    /// Returns the number of members this call revoked.
+    /// </summary>
+    Task<int> RevokeFamilyAsync(
+        Guid rootId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Revokes every unrevoked interactive refresh token bound to <paramref name="identitySessionId"/>
+    /// (<c>EV-06</c>/<c>EV-15</c>): legacy rows have no session and are structurally out of reach.
+    /// Returns the number of members this call revoked.
+    /// </summary>
+    Task<int> RevokeBySessionAsync(
+        Guid identitySessionId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes whole interactive families that are past every member's usable deadline and that no
+    /// retained authorization code links to — children before roots, because the restrictive
+    /// self-reference makes a single-statement whole-family delete provider-asymmetric. Returns
+    /// the deleted member count.
+    /// </summary>
+    Task<int> RemoveInteractiveFamiliesAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
 }

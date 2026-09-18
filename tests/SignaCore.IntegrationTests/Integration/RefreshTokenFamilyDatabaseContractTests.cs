@@ -544,6 +544,145 @@ public sealed class RefreshTokenFamilyDatabaseContractTests
             RefreshTokenFamilyTestSupport.ToSqliteMicroseconds(root.ConsumedAt!.Value));
     }
 
+    // ---- Acceptance 7 (family write API): revocations and child-first cleanup ----
+
+    [Fact]
+    public async Task FamilyRevocations_AreConditionalInteractiveOnlyAndFirstFactStaysAuthoritative()
+    {
+        await using var database = new SqliteFamilyDatabase();
+        var options = await database.InitializeAsync();
+        await using var context = new IdentityDbContext(options);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var (accountId, _, _, sessionId) = await SeedBasicsAsync(context);
+
+        var authTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var now = DateTimeOffset.UtcNow;
+        var rootId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+        var siblingId = Guid.NewGuid();
+        var legacyId = Guid.NewGuid();
+        await RefreshTokenFamilyTestSupport.InsertInteractiveMemberSqliteAsync(
+            context, rootId, accountId, AppId, rootId, parentId: null, sessionId,
+            CanonicalScope, authTime, now, now.AddHours(1));
+        await RefreshTokenFamilyTestSupport.InsertInteractiveMemberSqliteAsync(
+            context, childId, accountId, AppId, rootId, parentId: rootId, sessionId,
+            CanonicalScope, authTime, now, now.AddHours(1));
+        await RefreshTokenFamilyTestSupport.InsertInteractiveMemberSqliteAsync(
+            context, siblingId, accountId, AppId, siblingId, parentId: null, sessionId,
+            CanonicalScope, authTime, now, now.AddHours(1));
+        await InsertLegacyRootAsync(context, legacyId, accountId, now);
+        await context.SaveChangesAsync(cancellationToken);
+        context.ChangeTracker.Clear();
+
+        var repository = new RefreshTokenRepository(context);
+
+        // The legacy revocation paths never touch a live interactive member: presenting the
+        // sibling root's actual digest to the app-scoped legacy revoke matches no row — the
+        // identity-session predicate structurally excludes interactive rows (EV-33).
+        Assert.False(await repository.TryRevokeForAppAsync(
+            "family-contract-token-" + siblingId.ToString("N"), AppId, cancellationToken));
+        var liveSibling = await context.RefreshTokens.AsNoTracking()
+            .SingleAsync(row => row.Id == siblingId, cancellationToken);
+        Assert.False(liveSibling.IsRevoked);
+
+        // EV-24 by root: exactly the named family, both members.
+        Assert.Equal(2, await repository.RevokeFamilyAsync(rootId, cancellationToken));
+        // Already-revoked members match nothing — the first fact stays authoritative.
+        Assert.Equal(0, await repository.RevokeFamilyAsync(rootId, cancellationToken));
+        // A legacy singleton id names no interactive family.
+        Assert.Equal(0, await repository.RevokeFamilyAsync(legacyId, cancellationToken));
+
+        var revokedAfterRoot = await context.RefreshTokens.AsNoTracking()
+            .Where(row => row.IsRevoked).Select(row => row.Id).ToListAsync(cancellationToken);
+        Assert.Equal(new[] { rootId, childId }.OrderBy(id => id), revokedAfterRoot.OrderBy(id => id));
+
+        // EV-06/EV-15 by session: every interactive family of the session, never the legacy row.
+        Assert.Equal(1, await repository.RevokeBySessionAsync(sessionId, cancellationToken));
+        var survivors = await context.RefreshTokens.AsNoTracking()
+            .Where(row => !row.IsRevoked).Select(row => row.Id).ToListAsync(cancellationToken);
+        Assert.Equal(new[] { legacyId }, survivors);
+    }
+
+    [Fact]
+    public async Task InteractiveFamilyCleanup_RemovesWholeExpiredFamiliesChildFirst()
+    {
+        await using var database = new SqliteFamilyDatabase();
+        var options = await database.InitializeAsync();
+        await using var context = new IdentityDbContext(options);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var (accountId, _, appId, sessionId) = await SeedBasicsAsync(context);
+
+        var authTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var now = DateTimeOffset.UtcNow;
+
+        // An expired interactive family with a child: removed whole, children before roots.
+        var expiredRootId = Guid.NewGuid();
+        var expiredChildId = Guid.NewGuid();
+        await RefreshTokenFamilyTestSupport.InsertInteractiveMemberSqliteAsync(
+            context, expiredRootId, accountId, AppId, expiredRootId, parentId: null, sessionId,
+            CanonicalScope, authTime, now.AddHours(-3), now.AddHours(-1));
+        await RefreshTokenFamilyTestSupport.InsertInteractiveMemberSqliteAsync(
+            context, expiredChildId, accountId, AppId, expiredRootId, parentId: expiredRootId, sessionId,
+            CanonicalScope, authTime, now.AddHours(-3), now.AddHours(-1));
+
+        // A live family: stays whole even though cleanup runs.
+        var liveRootId = Guid.NewGuid();
+        await RefreshTokenFamilyTestSupport.InsertInteractiveMemberSqliteAsync(
+            context, liveRootId, accountId, AppId, liveRootId, parentId: null, sessionId,
+            CanonicalScope, authTime, now, now.AddDays(7));
+
+        // An expired family whose root a retained consumed code still links: stays resolvable so
+        // a proved replay can never become a missing code (SC-18).
+        var linkedRootId = Guid.NewGuid();
+        await RefreshTokenFamilyTestSupport.InsertInteractiveMemberSqliteAsync(
+            context, linkedRootId, accountId, AppId, linkedRootId, parentId: null, sessionId,
+            CanonicalScope, authTime, now.AddHours(-3), now.AddHours(-1));
+        context.AuthorizationCodes.Add(new AuthorizationCodeEntity
+        {
+            Id = Guid.NewGuid(),
+            CodeDigest = AuthorizationCodeDigest.Compute("family-cleanup-linked-code-0123456"),
+            AppRegistrationId = appId,
+            AccountId = accountId,
+            IdentitySessionId = sessionId,
+            RedirectUri = "https://client.example.test/callback",
+            Scope = CanonicalScope,
+            Nonce = "family-cleanup-linked-nonce",
+            CodeChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+            AuthTime = authTime,
+            CreatedAt = now.AddHours(-2),
+            ExpiresAt = now.AddHours(-2).AddMinutes(1),
+            ConsumedAt = now.AddHours(-2),
+            RefreshFamilyId = linkedRootId
+        });
+        await context.SaveChangesAsync(cancellationToken);
+        context.ChangeTracker.Clear();
+
+        var repository = new RefreshTokenRepository(context);
+        Assert.Equal(2, await repository.RemoveInteractiveFamiliesAsync(now, cancellationToken));
+
+        var remainingIds = await context.RefreshTokens.AsNoTracking()
+            .Select(row => row.Id).ToListAsync(cancellationToken);
+        Assert.Equal(
+            new[] { liveRootId, linkedRootId }.OrderBy(id => id),
+            remainingIds.OrderBy(id => id));
+
+        // Once the linking code is gone the family becomes deletable.
+        await context.Database.ExecuteSqlRawAsync(
+            "DELETE FROM authorization_codes WHERE refresh_family_id IS NOT NULL", cancellationToken);
+        Assert.Equal(1, await repository.RemoveInteractiveFamiliesAsync(now, cancellationToken));
+        Assert.Equal(
+            new[] { liveRootId },
+            await context.RefreshTokens.AsNoTracking().Select(row => row.Id).ToListAsync(cancellationToken));
+
+        // The session delete guard: the session survives while the live family references it,
+        // even past its own retention window.
+        var sessionRepository = new IdentitySessionRepository(context);
+        Assert.Equal(0, await sessionRepository.RemoveExpiredBeforeAsync(
+            now.AddYears(1), cancellationToken));
+        Assert.Equal(1, await context.IdentitySessions.AsNoTracking()
+            .CountAsync(row => row.Id == sessionId, cancellationToken));
+    }
+
     // ---- Acceptance 8 (+9): the downgrade gate and the round trip ----
 
     [Fact]

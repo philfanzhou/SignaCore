@@ -53,6 +53,56 @@ public class RefreshTokenValidatorTests
     }
 
     [Fact]
+    public async Task ValidateAsync_WithAnInteractiveFamilyMember_FailsClosedWithTheGenericFailure()
+    {
+        // EV-33 fail-closed split: a row with an identity session is an interactive family member;
+        // the legacy grant answers with the same generic failure a missing row produces, never
+        // rotates it, and never triggers family semantics.
+        var accountId = Guid.NewGuid();
+        var account = new AccountEntity
+        {
+            Id = accountId,
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        var interactiveRootId = Guid.NewGuid();
+        var refreshToken = new RefreshTokenEntity
+        {
+            Id = interactiveRootId,
+            FamilyId = interactiveRootId,
+            AccountId = accountId,
+            TokenValue = "interactive_family_member_token",
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
+            IsRevoked = false,
+            CreatedAt = DateTimeOffset.UtcNow,
+            AppId = "app-1",
+            IdentitySessionId = Guid.NewGuid(),
+            Scope = "openid profile offline_access",
+            AuthTime = DateTimeOffset.UtcNow.AddMinutes(-5)
+        };
+
+        var refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
+        refreshTokenRepoMock.Setup(r => r.GetByTokenValueAsync("interactive_family_member_token"))
+            .ReturnsAsync(refreshToken);
+        var accountRepoMock = new Mock<IAccountRepository>();
+        accountRepoMock.Setup(r => r.GetByIdAsync(accountId)).ReturnsAsync(account);
+
+        var validator = CreateValidator(refreshTokenRepoMock.Object, accountRepoMock.Object);
+
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = "interactive_family_member_token",
+            AppId = "app-1"
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("Invalid refresh token", result.ErrorMessage);
+        // The account lookup must never even run: the row is rejected on its marker alone.
+        accountRepoMock.Verify(r => r.GetByIdAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
     public async Task ValidateAsync_WithValidRefreshToken_ReturnsSuccess()
     {
         var context = CreateInMemoryContext();

@@ -22,7 +22,8 @@ public class CleanupWorkerTests
         Mock<IAuditLogRepository>? auditLogRepoMock = null,
         Mock<IAuthorizationRequestStore>? authorizationRequestStoreMock = null,
         Mock<IIdentitySessionStore>? identitySessionStoreMock = null,
-        Mock<IAuthorizationCodeStore>? authorizationCodeStoreMock = null)
+        Mock<IAuthorizationCodeStore>? authorizationCodeStoreMock = null,
+        Mock<IRefreshTokenFamilyStore>? refreshTokenFamilyStoreMock = null)
     {
         var serviceProviderMock = new Mock<IServiceProvider>();
 
@@ -53,6 +54,9 @@ public class CleanupWorkerTests
         serviceProviderMock
             .Setup(sp => sp.GetService(typeof(IAuthorizationCodeStore)))
             .Returns((authorizationCodeStoreMock ?? new Mock<IAuthorizationCodeStore>()).Object);
+        serviceProviderMock
+            .Setup(sp => sp.GetService(typeof(IRefreshTokenFamilyStore)))
+            .Returns((refreshTokenFamilyStoreMock ?? new Mock<IRefreshTokenFamilyStore>()).Object);
 
         return serviceProviderMock;
     }
@@ -283,6 +287,57 @@ public class CleanupWorkerTests
         authorizationRequestStoreMock.Verify(
             s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task CleanupExpiredDataAsync_RemovesExpiredInteractiveFamilyMembers()
+    {
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+        appRegRepoMock.Setup(r => r.DeactivateExpiredCallbacksAsync(
+            It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>())).ReturnsAsync(0);
+
+        // One shared sequence log proves the child-first family segment runs after the
+        // authorization-code segment and before the identity-session segment of the same round:
+        // a family dies only once no retained code links its root, and only before the session
+        // delete its members still reference.
+        var sequence = new List<string>();
+        var codeStoreMock = new Mock<IAuthorizationCodeStore>();
+        codeStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback(() => sequence.Add("codes"))
+            .ReturnsAsync(0);
+        var familyStoreMock = new Mock<IRefreshTokenFamilyStore>();
+        familyStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback(() => sequence.Add("families"))
+            .ReturnsAsync(3);
+        var sessionStoreMock = new Mock<IIdentitySessionStore>();
+        sessionStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback(() => sequence.Add("sessions"))
+            .ReturnsAsync(0);
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            appRegRepoMock: appRegRepoMock,
+            authorizationCodeStoreMock: codeStoreMock,
+            refreshTokenFamilyStoreMock: familyStoreMock,
+            identitySessionStoreMock: sessionStoreMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var keyManagerMock = new Mock<IKeyManager>();
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
+
+        await RunWorkerUntilAsync(
+            worker,
+            () => sequence.Contains("sessions"));
+
+        familyStoreMock.Verify(
+            s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+        Assert.Equal(
+            new[] { "codes", "families", "sessions" },
+            sequence.Where(step => step is "codes" or "families" or "sessions").Take(3));
     }
 
     [Fact]

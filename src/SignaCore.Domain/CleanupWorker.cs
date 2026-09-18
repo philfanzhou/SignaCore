@@ -90,6 +90,21 @@ public class CleanupWorker : BackgroundService
                 deletedAuthorizationCodes);
         }
 
+        // Interactive refresh families go after the code segment (so a family is deleted only once
+        // no retained code links its root) and before the session segment (the restrictive session
+        // reference would otherwise block the session delete). Child-first, whole families only.
+        cancellationToken.ThrowIfCancellationRequested();
+        var refreshTokenFamilyStore = scope.ServiceProvider.GetRequiredService<IRefreshTokenFamilyStore>();
+        var deletedFamilyMembers = await refreshTokenFamilyStore.CleanupExpiredAsync(
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        if (deletedFamilyMembers > 0)
+        {
+            _logger.LogInformation(
+                "Deleted {Count} expired interactive refresh family members",
+                deletedFamilyMembers);
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
         var deletedIdentitySessions = await identitySessionStore.CleanupExpiredAsync(
             DateTimeOffset.UtcNow,

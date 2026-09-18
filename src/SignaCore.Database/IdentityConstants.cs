@@ -103,6 +103,14 @@ public static class IdentityConstants
     /// A longer token fails issuance before anything commits; it is never truncated or issued.
     /// </summary>
     public const int InteractiveTokenMaxSerializedLength = 8192;
+
+    /// <summary>
+    /// The fixed cap of an interactive refresh family's deadline (<c>EV-21</c>): a root row's
+    /// <c>expires_at</c> is exactly this many days after creation. The family is still never
+    /// usable beyond its identity session — that bound is enforced by the live-family predicate
+    /// at use time (<c>EV-32</c>), never by taking a minimum into the column.
+    /// </summary>
+    public const int InteractiveRefreshFamilyLifetimeDays = 7;
     public const int MaxRemarkLength = 500;
     public const int MaxNicknameLength = 100;
     public const int MaxKeyNameLength = 100;

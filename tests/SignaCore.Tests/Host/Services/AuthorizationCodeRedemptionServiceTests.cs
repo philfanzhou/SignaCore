@@ -23,10 +23,12 @@ namespace SignaCore.Tests.Host.Services;
 
 /// <summary>
 /// The redemption transaction as a unit: the committed success shape (consumption, id-only
-/// audit, token claims including the bootstrap role), the <c>EV-26</c> rollback for a failing or
-/// oversized token construction, the unreachable-but-enforced conditional-consumption loss, the
-/// fail-closed family invariant of the replay disposal, the <c>EV-18</c> cancellation with zero
-/// writes, and the <c>DF-03</c>/<c>DF-04</c> canary scan of the log surface.
+/// audit, token claims including the bootstrap role), the <c>EV-21</c> offline_access family
+/// (root, code link, one-shot plaintext refresh token), the <c>EV-11</c> refresh-toggle
+/// rejection, the <c>EV-26</c> rollback for a failing or oversized token construction, the
+/// unreachable-but-enforced conditional-consumption loss, the <c>EV-24</c> replay disposal with
+/// and without a family link, the <c>EV-18</c> cancellation with zero writes, and the
+/// <c>DF-03</c>/<c>DF-04</c>/<c>DF-09</c> canary scan of the log surface.
 /// </summary>
 public sealed class AuthorizationCodeRedemptionServiceTests
 {
@@ -128,6 +130,119 @@ public sealed class AuthorizationCodeRedemptionServiceTests
     }
 
     [Fact]
+    public async Task RedeemAsync_WithOfflineAccess_CommitsTheFamilyRootAndLinkAndReturnsTheRefreshToken()
+    {
+        await using var database = await CreateDatabaseAsync();
+        var seed = await SeedAsync(database.Context, scope: "openid profile offline_access", allowRefreshToken: true);
+
+        var outcome = await database.Service.RedeemAsync(
+            seed.Application,
+            CreateForm(seed.Code),
+            "203.0.113.9",
+            CorrelationId,
+            TestContext.Current.CancellationToken);
+
+        Assert.True(outcome.IsSuccess);
+        Assert.Equal("openid profile offline_access", outcome.Scope);
+        Assert.NotNull(outcome.RefreshToken);
+        // DF-09 shape: 256 bits of CSPRNG output, 43 unpadded base64url characters.
+        Assert.Equal(43, outcome.RefreshToken.Length);
+        Assert.All(outcome.RefreshToken, character =>
+            Assert.True(char.IsAsciiLetterOrDigit(character) || character is '-' or '_'));
+
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var codeRow = await database.Context.AuthorizationCodes.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.CodeId, cancellationToken);
+        Assert.NotNull(codeRow.ConsumedAt);
+
+        // The committed root: singleton root of its own family, complete interactive marker, the
+        // 7-day cap on expires_at, and only the versioned digest — never the plaintext token.
+        var root = Assert.Single(await database.Context.RefreshTokens.AsNoTracking()
+            .ToListAsync(cancellationToken));
+        Assert.Equal(codeRow.RefreshFamilyId, root.Id);
+        Assert.Equal(root.Id, root.FamilyId);
+        Assert.Null(root.ParentId);
+        Assert.Equal(seed.AccountId, root.AccountId);
+        Assert.Equal(ClientId, root.AppId);
+        Assert.Equal(seed.SessionId, root.IdentitySessionId);
+        Assert.Equal("openid profile offline_access", root.Scope);
+        Assert.NotNull(root.AuthTime);
+        Assert.False(root.IsRevoked);
+        Assert.Equal(
+            root.CreatedAt.AddDays(IdentityConstants.InteractiveRefreshFamilyLifetimeDays),
+            root.ExpiresAt);
+        Assert.Equal(RefreshTokenDigest.Compute(outcome.RefreshToken), root.TokenValue);
+        Assert.DoesNotContain(outcome.RefreshToken, root.TokenValue, StringComparison.Ordinal);
+
+        // The session row takes no write from a redemption, and the audit stays id-only.
+        var sessionRow = await database.Context.IdentitySessions.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.SessionId, cancellationToken);
+        Assert.Null(sessionRow.RevokedAt);
+        var audit = Assert.Single(await database.Context.AuditLogs.AsNoTracking()
+            .ToListAsync(cancellationToken));
+        Assert.Equal("oidc.code.redeemed", audit.Action);
+        Assert.Equal($"session:{seed.SessionId}", audit.Description);
+    }
+
+    [Fact]
+    public async Task RedeemAsync_WithOfflineAccess_WhenRefreshIsDisabled_ReturnsTheGenericInvalidGrantAndWritesNothing()
+    {
+        // EV-11: the current AllowRefreshToken is an authoritative in-lock recheck. The code
+        // stays unconsumed, no family is written, and no refresh token is released.
+        await using var database = await CreateDatabaseAsync();
+        var seed = await SeedAsync(database.Context, scope: "openid offline_access", allowRefreshToken: false);
+
+        var outcome = await database.Service.RedeemAsync(
+            seed.Application,
+            CreateForm(seed.Code),
+            null,
+            CorrelationId,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(outcome.IsSuccess);
+        Assert.Equal(400, outcome.Status);
+        Assert.Equal("invalid_grant", outcome.ErrorCode);
+        await AssertNothingWrittenAsync(database.Context, seed);
+    }
+
+    [Fact]
+    public async Task RedeemAsync_WithOfflineAccess_AndACancelledToken_ThrowsAndWritesNothing()
+    {
+        await using var database = await CreateDatabaseAsync();
+        var seed = await SeedAsync(database.Context, scope: "openid offline_access", allowRefreshToken: true);
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            database.Service.RedeemAsync(
+                seed.Application,
+                CreateForm(seed.Code),
+                null,
+                CorrelationId,
+                cancellation.Token));
+
+        await AssertNothingWrittenAsync(database.Context, seed);
+    }
+
+    [Fact]
+    public async Task RedeemAsync_WithOfflineAccess_NeverLogsTheRefreshToken()
+    {
+        await using var database = await CreateDatabaseAsync();
+        var seed = await SeedAsync(database.Context, scope: "openid offline_access", allowRefreshToken: true);
+
+        var capture = new List<string>();
+        var service = database.CreateService(new RecordingLogger(capture));
+
+        var outcome = await service.RedeemAsync(
+            seed.Application, CreateForm(seed.Code), null, CorrelationId, TestContext.Current.CancellationToken);
+        Assert.True(outcome.IsSuccess);
+
+        var dump = string.Join(Environment.NewLine, capture);
+        Assert.DoesNotContain(outcome.RefreshToken!, dump, StringComparison.Ordinal);
+        Assert.DoesNotContain(Nonce, dump, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RedeemAsync_WhenSigningThrows_ReturnsServerErrorAndWritesNothing()
     {
         await using var database = await CreateDatabaseAsync(tokenFactory: new ThrowingTokenFactory());
@@ -226,14 +341,17 @@ public sealed class AuthorizationCodeRedemptionServiceTests
     }
 
     [Fact]
-    public async Task RedeemAsync_WhenAReplayedCodeCarriesAFamilyLink_FailsClosed()
+    public async Task RedeemAsync_OnAReplayedCodeCarryingAFamilyLink_RevokesTheFamilyAndTheSession()
     {
         await using var database = await CreateDatabaseAsync();
         var seed = await SeedAsync(database.Context);
 
-        // Commit a consumption and an impossible family link: only #98 may ever write the link,
-        // so this slice refuses to run the replay disposal rather than skip the family.
+        // Commit a consumption and the family link of a first offline_access redemption, plus a
+        // sibling family of the same session: EV-24 revokes exactly the named family directly,
+        // and the sibling only through the session revocation.
         var rootId = Guid.NewGuid();
+        var siblingId = Guid.NewGuid();
+        var authTime = DateTimeOffset.UtcNow.AddMinutes(-5);
         database.Context.RefreshTokens.Add(new RefreshTokenEntity
         {
             Id = rootId,
@@ -242,7 +360,23 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             TokenValue = RefreshTokenDigest.Compute("unit-family-root-token"),
             CreatedAt = DateTimeOffset.UtcNow,
             ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
-            AppId = ClientId
+            AppId = ClientId,
+            IdentitySessionId = seed.SessionId,
+            Scope = "openid profile offline_access",
+            AuthTime = authTime
+        });
+        database.Context.RefreshTokens.Add(new RefreshTokenEntity
+        {
+            Id = siblingId,
+            FamilyId = siblingId,
+            AccountId = seed.AccountId,
+            TokenValue = RefreshTokenDigest.Compute("unit-family-sibling-token"),
+            CreatedAt = DateTimeOffset.UtcNow,
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            AppId = ClientId,
+            IdentitySessionId = seed.SessionId,
+            Scope = "openid profile offline_access",
+            AuthTime = authTime
         });
         var codeRow = await database.Context.AuthorizationCodes
             .SingleAsync(row => row.Id == seed.CodeId, TestContext.Current.CancellationToken);
@@ -259,14 +393,23 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             TestContext.Current.CancellationToken);
 
         Assert.False(outcome.IsSuccess);
-        Assert.Equal(500, outcome.Status);
-        Assert.Equal("server_error", outcome.ErrorCode);
+        Assert.Equal(400, outcome.Status);
+        Assert.Equal("invalid_grant", outcome.ErrorCode);
 
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var namedRoot = await database.Context.RefreshTokens.AsNoTracking()
+            .SingleAsync(row => row.Id == rootId, cancellationToken);
+        Assert.True(namedRoot.IsRevoked);
         var sessionRow = await database.Context.IdentitySessions.AsNoTracking()
-            .SingleAsync(row => row.Id == seed.SessionId, TestContext.Current.CancellationToken);
-        Assert.Null(sessionRow.RevokedAt);
-        Assert.Empty(await database.Context.AuditLogs.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
+            .SingleAsync(row => row.Id == seed.SessionId, cancellationToken);
+        Assert.NotNull(sessionRow.RevokedAt);
+        Assert.Equal("code_replay", sessionRow.RevocationReason);
+
+        // The audit names the exact family id and nothing sensitive.
+        var audit = Assert.Single(await database.Context.AuditLogs.AsNoTracking()
+            .ToListAsync(cancellationToken));
+        Assert.Equal("oidc.code.replayed", audit.Action);
+        Assert.Equal($"session:{seed.SessionId};family:{rootId}", audit.Description);
     }
 
     [Fact]
@@ -415,6 +558,10 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             new PasswordCredentialRepository(context),
             tokenFactory,
             idTokenFactory,
+            new RefreshTokenFamilyStore(
+                new RefreshTokenRepository(context),
+                unitOfWork,
+                NullLogger<RefreshTokenFamilyStore>.Instance),
             callbackService: null,
             keys,
             new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
@@ -464,7 +611,10 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         return new AuthMetrics(meterFactory.Object);
     }
 
-    private static async Task<Seed> SeedAsync(IdentityDbContext context)
+    private static async Task<Seed> SeedAsync(
+        IdentityDbContext context,
+        string scope = "openid profile",
+        bool allowRefreshToken = false)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var application = new AppRegistrationEntity
@@ -478,8 +628,8 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             AudienceMode = AudienceMode.PerApplication,
             ClientType = OidcClientType.Confidential,
             AllowAuthorizationCode = true,
-            AllowedScopes = "openid profile",
-            AllowRefreshToken = false
+            AllowedScopes = scope,
+            AllowRefreshToken = allowRefreshToken
         };
         var accountId = Guid.NewGuid();
         var credentialId = Guid.NewGuid();
@@ -507,7 +657,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         var session = await sessions.CreateAsync(accountId, credentialId, DateTimeOffset.UtcNow, cancellationToken);
         var creation = await codes.CreateAsync(
             session,
-            new AuthorizationCodeBinding(application.Id, RedirectUri, "openid profile", Nonce, Challenge),
+            new AuthorizationCodeBinding(application.Id, RedirectUri, scope, Nonce, Challenge),
             DateTimeOffset.UtcNow,
             cancellationToken);
         return new Seed(application, accountId, credentialId, session.Id, creation.Id, creation.Code, session.AuthTime);
@@ -523,6 +673,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         var sessionRow = await context.IdentitySessions.AsNoTracking()
             .SingleAsync(row => row.Id == seed.SessionId, cancellationToken);
         Assert.Null(sessionRow.RevokedAt);
+        Assert.Empty(await context.RefreshTokens.AsNoTracking().ToListAsync(cancellationToken));
         Assert.Empty(await context.AuditLogs.AsNoTracking().ToListAsync(cancellationToken));
     }
 
@@ -592,6 +743,12 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             Guid codeId,
             DateTimeOffset now,
             CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+        public Task<bool> LinkRefreshFamilyAsync(
+            Guid codeId,
+            Guid rootId,
+            CancellationToken cancellationToken = default) =>
+            inner.LinkRefreshFamilyAsync(codeId, rootId, cancellationToken);
 
         public Task<int> CleanupExpiredAsync(
             DateTimeOffset now,
