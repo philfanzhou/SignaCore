@@ -53,8 +53,10 @@ public sealed class RefreshTokenFamilyStoreTests
         Assert.Equal(ClientId, root.AppId);
         Assert.Equal(harness.SessionId, root.IdentitySessionId);
         Assert.Equal(CanonicalScope, root.Scope);
-        Assert.Equal(authTime, root.AuthTime);
-        Assert.Equal(creation.ExpiresAt, root.ExpiresAt);
+        // Both providers persist timestamps with microsecond precision; compare at that
+        // contract rather than the raw 100ns clock ticks.
+        Assert.Equal(authTime.UtcTicks / 10, root.AuthTime!.Value.UtcTicks / 10);
+        Assert.Equal(creation.ExpiresAt.UtcTicks / 10, root.ExpiresAt.UtcTicks / 10);
         // DF-09: only the versioned digest is persisted; the plaintext never touches the row.
         Assert.Equal(RefreshTokenDigest.Compute(creation.RefreshToken), root.TokenValue);
         Assert.DoesNotContain(creation.RefreshToken, root.TokenValue, StringComparison.Ordinal);
