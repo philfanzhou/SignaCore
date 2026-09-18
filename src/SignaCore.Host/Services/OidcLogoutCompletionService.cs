@@ -139,7 +139,7 @@ public sealed class OidcLogoutCompletionService(
                 // explicitly in the same unit.
                 await identitySessions.RevokeAsync(
                     lockedSession!.Id, IdentitySessionRevocationReason.Logout, now, operationToken);
-                await refreshTokens.RevokeInteractiveBySessionAsync(
+                await refreshTokens.RevokeBySessionAsync(
                     lockedSession.Id, operationToken);
                 result = ResultRevoked;
             }
