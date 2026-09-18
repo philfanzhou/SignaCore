@@ -7,6 +7,8 @@ using SignaCore.Domain;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Http;
+using SignaCore.Host.Security;
+using SignaCore.Host.Services;
 
 namespace SignaCore.Host.Controllers;
 
@@ -49,8 +51,15 @@ public sealed class OAuthAuthorizationController : ControllerBase
     private const string AuditTargetType = "OidcAuthorizationRequest";
     private const string AcceptedOutcome = "accepted";
 
+    // The closed reuse outcome names written to the logs: aggregates only, with the correlation
+    // id; no session id, cookie, account, scope, state, nonce, redirect URI, or code value.
+    private const string SessionReusedOutcome = "session_reused";
+    private const string SessionUnusableOutcome = "session_unusable";
+
     private readonly IOidcAuthorizationRequestValidator _validator;
     private readonly IAuthorizationRequestStore _authorizationRequestStore;
+    private readonly IIdentitySessionCookieReader _identitySessionCookieReader;
+    private readonly OidcAuthorizationSessionReuseService _sessionReuse;
     private readonly IAuditService _auditService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly AuthMetrics _metrics;
@@ -60,6 +69,8 @@ public sealed class OAuthAuthorizationController : ControllerBase
     public OAuthAuthorizationController(
         IOidcAuthorizationRequestValidator validator,
         IAuthorizationRequestStore authorizationRequestStore,
+        IIdentitySessionCookieReader identitySessionCookieReader,
+        OidcAuthorizationSessionReuseService sessionReuse,
         IAuditService auditService,
         IUnitOfWork unitOfWork,
         AuthMetrics metrics,
@@ -68,6 +79,8 @@ public sealed class OAuthAuthorizationController : ControllerBase
     {
         _validator = validator;
         _authorizationRequestStore = authorizationRequestStore;
+        _identitySessionCookieReader = identitySessionCookieReader;
+        _sessionReuse = sessionReuse;
         _auditService = auditService;
         _unitOfWork = unitOfWork;
         _metrics = metrics;
@@ -117,11 +130,45 @@ public sealed class OAuthAuthorizationController : ControllerBase
 
             case OidcAuthorizationValidationResult.Accepted accepted:
                 _metrics.RecordOidcAuthorizeOutcome(AcceptedOutcome, accepted.ClientId);
+                var now = DateTimeOffset.UtcNow;
+                // The identity cookie may name a still-live server-side session: when the reuse
+                // transaction commits, the browser leaves with a code and no login continuation;
+                // when it rolls back, the unchanged continuation path runs afterwards, so every
+                // accepted request still commits exactly one continuation-shaped audit row.
+                var candidateSessionId = await _identitySessionCookieReader
+                    .TryReadSessionIdAsync(HttpContext);
+                if (candidateSessionId is not null)
+                {
+                    var reusedCode = await _sessionReuse.TryIssueAsync(
+                        accepted,
+                        candidateSessionId.Value,
+                        now,
+                        HttpContext.GetClientIp(),
+                        HttpContext.GetCorrelationId(),
+                        cancellationToken);
+                    if (reusedCode is not null)
+                    {
+                        _logger.LogInformation(
+                            "Authorization request answered with session reuse. Outcome={Outcome}, CorrelationId={CorrelationId}",
+                            SessionReusedOutcome,
+                            LogValueSanitizer.Sanitize(HttpContext.GetCorrelationId()));
+                        return Redirect(OidcAuthorizationRedirect.BuildSuccess(
+                            accepted.RegisteredRedirectUri,
+                            reusedCode,
+                            accepted.State,
+                            _jwtOptions.Issuer));
+                    }
+
+                    _logger.LogInformation(
+                        "Authorization request fell back to the login continuation. Outcome={Outcome}, CorrelationId={CorrelationId}",
+                            SessionUnusableOutcome,
+                            LogValueSanitizer.Sanitize(HttpContext.GetCorrelationId()));
+                }
+
                 // The accepted audit row is only staged here; the continuation store's single
                 // SaveChanges commits the continuation row and the audit row as one unit, so a
                 // failure between them cannot leave half of the outcome behind.
                 await StageAuditAsync(accepted.ApplicationId, AcceptedOutcome, cancellationToken);
-                var now = DateTimeOffset.UtcNow;
                 var creation = await _authorizationRequestStore.CreateAsync(
                     accepted, now, cancellationToken);
                 // A same-origin relative location only: no scheme or host is taken from the

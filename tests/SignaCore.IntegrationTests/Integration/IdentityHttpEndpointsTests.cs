@@ -889,12 +889,17 @@ public class IdentityServerFixture : IAsyncLifetime
         return _factory!.CreateClient();
     }
 
-    /// <summary>For asserting on a redirect itself rather than on what it points at.</summary>
-    public HttpClient CreateNonRedirectingHttpClient()
+    /// <summary>
+    /// For asserting on a redirect itself rather than on what it points at. With
+    /// <paramref name="handleCookies"/> disabled the client keeps no cookie state between
+    /// requests, so a test replays exactly the cookies it names.
+    /// </summary>
+    public HttpClient CreateNonRedirectingHttpClient(bool handleCookies = true)
     {
         return _factory!.CreateClient(new WebApplicationFactoryClientOptions
         {
-            AllowAutoRedirect = false
+            AllowAutoRedirect = false,
+            HandleCookies = handleCookies
         });
     }
 

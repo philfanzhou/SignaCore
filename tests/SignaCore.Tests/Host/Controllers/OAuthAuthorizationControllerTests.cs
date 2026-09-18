@@ -12,6 +12,8 @@ using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Host;
 using SignaCore.Host.Controllers;
+using SignaCore.Host.Security;
+using SignaCore.Host.Services;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Controllers;
@@ -101,6 +103,8 @@ public class OAuthAuthorizationControllerTests
         var controller = new OAuthAuthorizationController(
             validator.Object,
             store.Object,
+            CreateCookielessReader(),
+            sessionReuse: null!,
             audit.Object,
             unitOfWork.Object,
             AuthTestDoubles.AuthMetrics(),
@@ -181,7 +185,8 @@ public class OAuthAuthorizationControllerTests
         var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
         var store = new Mock<IAuthorizationRequestStore>(MockBehavior.Strict);
         var controller = new OAuthAuthorizationController(
-            validator.Object, store.Object, audit, unitOfWork.Object, AuthTestDoubles.AuthMetrics(),
+            validator.Object, store.Object, CreateCookielessReader(), sessionReuse: null!, audit,
+            unitOfWork.Object, AuthTestDoubles.AuthMetrics(),
             new JwtOptions { Issuer = "https://issuer.example" },
             NullLogger<OAuthAuthorizationController>.Instance).WithHttpContext();
 
@@ -220,6 +225,8 @@ public class OAuthAuthorizationControllerTests
         var controller = new OAuthAuthorizationController(
             validator.Object,
             new Mock<IAuthorizationRequestStore>().Object,
+            CreateCookielessReader(),
+            sessionReuse: null!,
             new Mock<IAuditService>().Object,
             new Mock<IUnitOfWork>().Object,
             AuthTestDoubles.AuthMetrics(),
@@ -250,5 +257,17 @@ public class OAuthAuthorizationControllerTests
             TState state,
             Exception? exception,
             Func<TState, Exception?, string> formatter) => LogEntries.Add(formatter(state, exception));
+    }
+
+    /// <summary>
+    /// The cookie reader double of the controller unit tests: no candidate session id, so the
+    /// reuse service is never reached and the continuation path runs exactly as before.
+    /// </summary>
+    private static IIdentitySessionCookieReader CreateCookielessReader()
+    {
+        var reader = new Mock<IIdentitySessionCookieReader>();
+        reader.Setup(value => value.TryReadSessionIdAsync(It.IsAny<HttpContext>()))
+            .ReturnsAsync((Guid?)null);
+        return reader.Object;
     }
 }

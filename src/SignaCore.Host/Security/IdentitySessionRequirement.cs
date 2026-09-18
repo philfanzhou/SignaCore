@@ -14,6 +14,14 @@ namespace SignaCore.Host.Security;
 /// authorization decision, and an identity principal never resolves to a management operator.
 /// Whether the referenced session is currently usable is the <c>PS-04</c> authority's decision at
 /// the request-time enforcement point, not this requirement's.
+/// <para>
+/// The handler is therefore a carrier check only, never a session authority: it does not consult
+/// the database, so it cannot see revocation, expiry, a deactivated account, or an application's
+/// session max-age. Any endpoint that must decide session usability runs the same locked
+/// database check the authorize reuse path runs — <see cref="IdentitySessionStore.Classify"/>
+/// plus the account and application policy under the session lock — instead of trusting this
+/// policy; the logout slice implements its own <c>EV-06</c>/<c>EV-07</c> decision.
+/// </para>
 /// </remarks>
 public sealed class IdentitySessionRequirement : IAuthorizationRequirement;
 
