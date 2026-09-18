@@ -301,7 +301,8 @@ public sealed class RefreshTokenFamilyStoreTests
 
         var root = await harness.Context.RefreshTokens.AsNoTracking()
             .SingleAsync(row => row.Id == rootId, cancellationToken);
-        Assert.Equal(now, root.ConsumedAt);
+        // Both providers persist timestamps with microsecond precision.
+        Assert.Equal(now.UtcTicks / 10, root.ConsumedAt!.Value.UtcTicks / 10);
         Assert.False(root.IsRevoked);
         _ = childId;
     }
