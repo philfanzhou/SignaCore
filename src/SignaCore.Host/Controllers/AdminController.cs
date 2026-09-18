@@ -1607,7 +1607,7 @@ public class AdminController : ControllerBase
                         .SetProperty(row => row.RevokedAt, DateTimeOffset.UtcNow)
                         .SetProperty(row => row.RevocationReason, "administrative"),
                         operationToken);
-                await refreshTokenRepository.RevokeInteractiveBySessionAsync(sessionId, operationToken);
+                await refreshTokenRepository.RevokeBySessionAsync(sessionId, operationToken);
             }
 
             await auditService.RecordActionAsync(

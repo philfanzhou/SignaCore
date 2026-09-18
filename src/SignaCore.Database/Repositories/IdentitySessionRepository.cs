@@ -219,7 +219,12 @@ public class IdentitySessionRepository : IIdentitySessionRepository
                     // code cleanup segment runs before this one in the same cleanup round, so a
                     // code past its retention is already gone by the time this predicate runs.
                     && !_dbContext.AuthorizationCodes.Any(
-                        code => code.IdentitySessionId == session.Id))
+                        code => code.IdentitySessionId == session.Id)
+                    // Same rule for interactive refresh families (refresh_tokens slice): the
+                    // restrictive session reference blocks the delete while any family member
+                    // survives, and the child-first family cleanup segment runs before this one.
+                    && !_dbContext.RefreshTokens.Any(
+                        token => token.IdentitySessionId == session.Id))
                 .ExecuteDeleteAsync(operationCancellationToken);
 
             await transaction.CommitAsync(operationCancellationToken);

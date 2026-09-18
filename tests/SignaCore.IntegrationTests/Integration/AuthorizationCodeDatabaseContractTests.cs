@@ -1424,6 +1424,11 @@ public sealed class AuthorizationCodeDatabaseContractTests
             DateTimeOffset now,
             CancellationToken cancellationToken = default) => Task.FromResult(false);
 
+        public Task<int> LinkRefreshFamilyAsync(
+            Guid codeId,
+            Guid rootId,
+            CancellationToken cancellationToken = default) => Task.FromResult(0);
+
         public Task<int> RemoveExpiredBeforeAsync(
             DateTimeOffset cutoff,
             CancellationToken cancellationToken = default) => Task.FromResult(0);

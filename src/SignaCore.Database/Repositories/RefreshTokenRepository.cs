@@ -57,8 +57,12 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         CancellationToken cancellationToken = default)
     {
         var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
+        // Legacy-only revocation (EV-33): an interactive family member never takes family
+        // semantics from the legacy paths, so the predicate structurally excludes it.
         var affectedRows = await _dbContext.RefreshTokens
-            .Where(token => token.TokenValue == tokenDigest && !token.IsRevoked)
+            .Where(token => token.TokenValue == tokenDigest
+                && !token.IsRevoked
+                && token.IdentitySessionId == null)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(token => token.IsRevoked, true), cancellationToken);
         return affectedRows == 1;
@@ -77,10 +81,13 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         CancellationToken cancellationToken = default)
     {
         var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
+        // Legacy-only revocation (EV-33), same defense as TryRevokeAsync: the identity-session
+        // predicate keeps a family member out of the legacy single-row revocation path.
         var affectedRows = await _dbContext.RefreshTokens
             .Where(token => token.TokenValue == tokenDigest
                 && !token.IsRevoked
-                && token.AppId == appId)
+                && token.AppId == appId
+                && token.IdentitySessionId == null)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(token => token.IsRevoked, true), cancellationToken);
         return affectedRows == 1;
@@ -182,17 +189,6 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         }, cancellationToken);
     }
 
-    public Task<int> RevokeInteractiveBySessionAsync(
-        Guid identitySessionId,
-        CancellationToken cancellationToken = default)
-    {
-        return _dbContext.RefreshTokens
-            .Where(token => token.IdentitySessionId == identitySessionId
-                && !token.IsRevoked)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(token => token.IsRevoked, true), cancellationToken);
-    }
-
     public Task RemoveRangeAsync(
         IEnumerable<RefreshTokenEntity> tokens,
         CancellationToken cancellationToken = default)
@@ -211,9 +207,84 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         // current expired-or-revoked behavior is preserved. Interactive family members are never
         // touched here — under ON DELETE RESTRICT a whole-family single-statement delete fails on
         // SQLite while it succeeds on PostgreSQL, so the child-first interactive cleanup belongs
-        // to the family API (#98) instead of this statement.
+        // to RemoveInteractiveFamiliesAsync instead of this statement.
         return await _dbContext.RefreshTokens
             .Where(r => r.IdentitySessionId == null && (r.IsRevoked || r.ExpiresAt < now))
             .ExecuteDeleteAsync(cancellationToken);
+    }
+
+    public async Task<int> RevokeFamilyAsync(
+        Guid rootId,
+        CancellationToken cancellationToken = default)
+    {
+        // EV-24: revoke exactly the family the replayed code names. The conditional update keeps
+        // the first revocation fact authoritative — an already-revoked member matches nothing —
+        // and the identity-session predicate keeps a legacy singleton id structurally out.
+        return await _dbContext.RefreshTokens
+            .Where(token => token.FamilyId == rootId
+                && token.IdentitySessionId != null
+                && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.IsRevoked, true), cancellationToken);
+    }
+
+    public async Task<int> RevokeBySessionAsync(
+        Guid identitySessionId,
+        CancellationToken cancellationToken = default)
+    {
+        // EV-06/EV-15: session-scoped whole-family revocation over interactive rows only; legacy
+        // rows have no session and cannot match. First fact stays authoritative.
+        return await _dbContext.RefreshTokens
+            .Where(token => token.IdentitySessionId == identitySessionId
+                && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.IsRevoked, true), cancellationToken);
+    }
+
+    public async Task<int> RemoveInteractiveFamiliesAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
+        return await executionStrategy.ExecuteAsync(async operationCancellationToken =>
+        {
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+                operationCancellationToken);
+
+            // A family is removable only when every member is past the family deadline (all
+            // members copy the root's expires_at) and no authorization code still links the root:
+            // a retained code keeps its replay evidence resolvable (SC-18), and the code cleanup
+            // segment runs before this one in the same cleanup round.
+            var familyIds = await _dbContext.RefreshTokens
+                .Where(token => token.IdentitySessionId != null)
+                .GroupBy(token => token.FamilyId)
+                .Where(group => group.Max(member => member.ExpiresAt) <= now
+                    && !_dbContext.AuthorizationCodes.Any(
+                        code => code.RefreshFamilyId == group.Key))
+                .Select(group => group.Key)
+                .ToListAsync(operationCancellationToken);
+            if (familyIds.Count == 0)
+            {
+                await transaction.CommitAsync(operationCancellationToken);
+                return 0;
+            }
+
+            // Child-first (PS-06): under the restrictive family_id/parent_id self-references a
+            // single-statement whole-family delete fails on SQLite, so children go before roots
+            // in two statements inside one unit.
+            var deletedChildren = await _dbContext.RefreshTokens
+                .Where(token => familyIds.Contains(token.FamilyId)
+                    && token.ParentId != null
+                    && token.IdentitySessionId != null)
+                .ExecuteDeleteAsync(operationCancellationToken);
+            var deletedRoots = await _dbContext.RefreshTokens
+                .Where(token => familyIds.Contains(token.FamilyId)
+                    && token.ParentId == null
+                    && token.IdentitySessionId != null)
+                .ExecuteDeleteAsync(operationCancellationToken);
+
+            await transaction.CommitAsync(operationCancellationToken);
+            return deletedChildren + deletedRoots;
+        }, cancellationToken);
     }
 }

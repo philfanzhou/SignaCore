@@ -57,6 +57,18 @@ public class RefreshTokenValidator : IIdentityValidator
             return ValidationResult.Failure("Invalid refresh token");
         }
 
+        // EV-33 fail-closed split: a row with an identity session is an interactive family member.
+        // The legacy grant never interprets it — no rotation, no family semantics — and answers
+        // with the same generic invalid-token failure a missing row produces, so the wire result
+        // stays indistinguishable and the family stays untouched.
+        if (refreshToken.IdentitySessionId != null)
+        {
+            _logger.LogWarning(
+                "Refresh token validation failed: interactive family member rejected by the legacy grant, AccountId={AccountId}",
+                refreshToken.AccountId);
+            return ValidationResult.Failure("Invalid refresh token");
+        }
+
         if (refreshToken.IsRevoked)
         {
             _logger.LogWarning("Refresh token validation failed: token revoked, AccountId={AccountId}", refreshToken.AccountId);

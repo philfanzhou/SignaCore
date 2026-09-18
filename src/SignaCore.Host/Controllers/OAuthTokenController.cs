@@ -194,16 +194,22 @@ public sealed class OAuthTokenController : ControllerBase
         if (outcome.IsSuccess)
         {
             // The canonical interactive scope always contains openid, so every successful
-            // redemption carries the ID token (PS-12/PS-14). A refresh_token joins only with the
-            // interactive refresh family (#98).
-            return Ok(new Dictionary<string, object>
+            // redemption carries the ID token (PS-12/PS-14). A refresh_token joins only when a
+            // committed offline_access family exists (EV-21).
+            var body = new Dictionary<string, object>
             {
                 ["access_token"] = outcome.AccessToken,
                 ["token_type"] = "Bearer",
                 ["expires_in"] = outcome.ExpiresIn,
                 ["scope"] = outcome.Scope,
                 ["id_token"] = outcome.IdToken
-            });
+            };
+            if (outcome.RefreshToken is not null)
+            {
+                body["refresh_token"] = outcome.RefreshToken;
+            }
+
+            return Ok(body);
         }
 
         return StatusCode(outcome.Status, new Dictionary<string, string>

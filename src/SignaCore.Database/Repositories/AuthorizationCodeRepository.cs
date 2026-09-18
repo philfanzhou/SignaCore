@@ -123,6 +123,46 @@ public class AuthorizationCodeRepository : IAuthorizationCodeRepository
                 cancellationToken);
     }
 
+    /// <summary>
+    /// The <c>EV-21</c> code-to-root link: a conditional update of the still-unlinked row, so the
+    /// one-family-per-code invariant is enforced against implementation drift the same way the
+    /// conditional consumption is. Inside a caller-owned transaction (the redemption unit) it
+    /// joins it and leaves the only commit to the caller; the referenced root row must already be
+    /// flushed in that transaction for the restrictive reference to resolve.
+    /// </summary>
+    public async Task<int> LinkRefreshFamilyAsync(
+        Guid codeId,
+        Guid rootId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_dbContext.Database.CurrentTransaction is not null)
+        {
+            return await ExecuteLinkAsync(codeId, rootId, cancellationToken);
+        }
+
+        var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
+        return await executionStrategy.ExecuteAsync(async operationCancellationToken =>
+        {
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+                operationCancellationToken);
+            var affectedRows = await ExecuteLinkAsync(codeId, rootId, operationCancellationToken);
+            await transaction.CommitAsync(operationCancellationToken);
+            return affectedRows;
+        }, cancellationToken);
+    }
+
+    private Task<int> ExecuteLinkAsync(
+        Guid codeId,
+        Guid rootId,
+        CancellationToken cancellationToken)
+    {
+        return _dbContext.AuthorizationCodes
+            .Where(code => code.Id == codeId && code.RefreshFamilyId == null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(code => code.RefreshFamilyId, rootId),
+                cancellationToken);
+    }
+
     public async Task<int> RemoveExpiredBeforeAsync(
         DateTimeOffset cutoff,
         CancellationToken cancellationToken = default)

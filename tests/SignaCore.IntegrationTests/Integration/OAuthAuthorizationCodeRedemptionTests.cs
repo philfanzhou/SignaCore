@@ -392,12 +392,64 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
     }
 
     [Fact]
-    public async Task Redeem_ACodeContainingOfflineAccess_ReturnsTheGenericInvalidGrant()
+    public async Task Redeem_WithOfflineAccess_CommitsTheFamilyRootAndReturnsTheRefreshTokenOnce()
     {
-        // The capability gate until AC-11/AC-12: never narrowed to a no-refresh redemption.
-        // The allow list still contains offline_access so only the gate can produce this answer.
-        var seeded = await SeedCodeAsync(scope: "openid offline_access", allowedScopes: "openid offline_access");
+        // EV-21: one transaction commits the consumption, the family root, the code-to-root link,
+        // and the audit; the response carries the plaintext refresh token exactly once.
+        var seeded = await SeedCodeAsync(
+            scope: "openid offline_access",
+            allowedScopes: "openid offline_access",
+            allowRefreshToken: true);
+        using var http = _fixture.CreateHttpClient();
+        http.DefaultRequestHeaders.Authorization = BasicHeader(AppId, AppSecret);
+
+        var response = await http.PostAsync("/oauth2/token", RedeemForm(seeded.Code), TestContext.Current.CancellationToken);
+        var outcome = await AssertSuccessAsync(
+            response, seeded, expectedScope: "openid offline_access", expectRefreshToken: true);
+
+        // The committed root: complete interactive marker, the 7-day cap, and only the digest.
+        var root = await QueryAsync(async dbContext =>
+            await dbContext.RefreshTokens.AsNoTracking()
+                .SingleAsync(row => row.IdentitySessionId == seeded.SessionId, TestContext.Current.CancellationToken));
+        Assert.Equal(root.Id, root.FamilyId);
+        Assert.Null(root.ParentId);
+        Assert.Equal(seeded.AccountId, root.AccountId);
+        Assert.Equal(AppId, root.AppId);
+        Assert.Equal("openid offline_access", root.Scope);
+        Assert.NotNull(root.AuthTime);
+        Assert.False(root.IsRevoked);
+        Assert.Equal(
+            root.CreatedAt.AddDays(IdentityConstants.InteractiveRefreshFamilyLifetimeDays),
+            root.ExpiresAt);
+        Assert.Equal(RefreshTokenDigest.Compute(outcome.RefreshToken!), root.TokenValue);
+
+        var codeRow = await GetCodeAsync(seeded.CodeId);
+        Assert.Equal(root.Id, codeRow.RefreshFamilyId);
+    }
+
+    [Fact]
+    public async Task Redeem_WithOfflineAccess_WhenRefreshWasDisabled_ReturnsTheGenericInvalidGrant()
+    {
+        // EV-11: the current AllowRefreshToken is an in-lock recheck; the allow list still
+        // contains offline_access so only the toggle can produce this answer, and the code stays
+        // unconsumed with no family written.
+        var seeded = await SeedCodeAsync(
+            scope: "openid offline_access",
+            allowedScopes: "openid offline_access",
+            allowRefreshToken: true);
+        await ExecuteAsync(async dbContext =>
+        {
+            await dbContext.AppRegistrations
+                .Where(row => row.Id == seeded.ApplicationId)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(row => row.AllowRefreshToken, false),
+                    TestContext.Current.CancellationToken);
+        });
+
         await AssertInvalidGrantNoWriteAsync(seeded.Code, seeded);
+        Assert.False(await QueryAsync(async dbContext =>
+            await dbContext.RefreshTokens.AsNoTracking()
+                .AnyAsync(row => row.IdentitySessionId == seeded.SessionId, TestContext.Current.CancellationToken)));
     }
 
     // ---- Acceptance 6: EV-24 replay ----
@@ -431,6 +483,43 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
 
         using var replay = await http.PostAsync("/oauth2/token", RedeemForm(seeded.Code), TestContext.Current.CancellationToken);
         await AssertReplayAsync(replay, seeded);
+    }
+
+    [Fact]
+    public async Task Replay_OfAnOfflineAccessCode_RevokesTheLinkedFamilyAndTheSession()
+    {
+        // EV-24 with a non-null family link: the exact named family is revoked, the session is
+        // revoked, and the one id-only replay audit names the family id.
+        var seeded = await SeedCodeAsync(
+            scope: "openid offline_access",
+            allowedScopes: "openid offline_access",
+            allowRefreshToken: true);
+        using var http = _fixture.CreateHttpClient();
+        http.DefaultRequestHeaders.Authorization = BasicHeader(AppId, AppSecret);
+
+        using var first = await http.PostAsync("/oauth2/token", RedeemForm(seeded.Code), TestContext.Current.CancellationToken);
+        await AssertSuccessAsync(
+            first, seeded, expectedScope: "openid offline_access", expectRefreshToken: true);
+
+        var rootId = (await GetCodeAsync(seeded.CodeId)).RefreshFamilyId;
+        Assert.NotNull(rootId);
+
+        using var replay = await http.PostAsync("/oauth2/token", RedeemForm(seeded.Code), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, replay.StatusCode);
+        var body = await replay.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal("invalid_grant", body.GetProperty("error").GetString());
+
+        var root = await QueryAsync(async dbContext =>
+            await dbContext.RefreshTokens.AsNoTracking()
+                .SingleAsync(row => row.Id == rootId, TestContext.Current.CancellationToken));
+        Assert.True(root.IsRevoked);
+        var session = await GetSessionAsync(seeded.SessionId);
+        Assert.NotNull(session.RevokedAt);
+        Assert.Equal("code_replay", session.RevocationReason);
+
+        var audits = await GetCodeAuditsAsync(seeded.CodeId);
+        var replayed = Assert.Single(audits, audit => audit.Action == ReplayedAction);
+        Assert.Equal($"session:{seeded.SessionId};family:{rootId}", replayed.Description);
     }
 
     [Fact]
@@ -568,9 +657,11 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         var canaryVerifier = "CanaryVerifier_0123456789abcdefghijklmnopqrstuvwxyz";
         var canaryChallenge = ComputeS256(canaryVerifier);
         var seeded = await SeedCodeAsync(
-            scope: "openid",
+            scope: "openid offline_access",
             redirectUri: canaryRedirect,
-            challenge: canaryChallenge);
+            challenge: canaryChallenge,
+            allowedScopes: "openid offline_access",
+            allowRefreshToken: true);
 
         var capture = new CapturingLoggerProvider();
         using var factory = _fixture.WithTestServices(services =>
@@ -588,12 +679,15 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         client.DefaultRequestHeaders.Authorization = BasicHeader(AppId, AppSecret);
 
         var bodies = new List<string>();
+        string? canaryRefreshToken = null;
 
         using (var success = await client.PostAsync(
             "/oauth2/token", RedeemForm(seeded.Code, verifier: canaryVerifier, redirectUri: canaryRedirect),
             TestContext.Current.CancellationToken))
         {
             Assert.Equal(HttpStatusCode.OK, success.StatusCode);
+            var body = await success.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
+            canaryRefreshToken = body.GetProperty("refresh_token").GetString();
         }
 
         foreach (var verifier in new[] { new string('w', 43), canaryChallenge })
@@ -633,12 +727,14 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         Assert.DoesNotContain(canaryChallenge, dumpText, StringComparison.Ordinal);
         Assert.DoesNotContain(canaryRedirect, dumpText, StringComparison.Ordinal);
         Assert.DoesNotContain(AppSecret, dumpText, StringComparison.Ordinal);
+        Assert.DoesNotContain(canaryRefreshToken!, dumpText, StringComparison.Ordinal);
         foreach (var body in bodies)
         {
             Assert.DoesNotContain(seeded.Code, body, StringComparison.Ordinal);
             Assert.DoesNotContain(canaryVerifier, body, StringComparison.Ordinal);
             Assert.DoesNotContain(canaryRedirect, body, StringComparison.Ordinal);
             Assert.DoesNotContain(AppSecret, body, StringComparison.Ordinal);
+            Assert.DoesNotContain(canaryRefreshToken!, body, StringComparison.Ordinal);
         }
     }
 
@@ -687,7 +783,8 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         bool allowAuthorizationCode = true,
         AudienceMode audienceMode = AudienceMode.PerApplication,
         int? maxAgeSeconds = null,
-        string allowedScopes = "openid profile")
+        string allowedScopes = "openid profile",
+        bool allowRefreshToken = false)
     {
         await SeedInteractiveAppAsync(
             _fixture.Services,
@@ -696,7 +793,8 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
             allowAuthorizationCode: allowAuthorizationCode,
             audienceMode: audienceMode,
             maxAgeSeconds: maxAgeSeconds,
-            allowedScopes: allowedScopes);
+            allowedScopes: allowedScopes,
+            allowRefreshToken: allowRefreshToken);
         await SeedInteractiveAppAsync(_fixture.Services, OtherAppId, OtherAppSecret);
         var (accountId, credentialId) = await SeedAccountAsync();
 
@@ -727,7 +825,8 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         bool allowAuthorizationCode = true,
         AudienceMode audienceMode = AudienceMode.PerApplication,
         int? maxAgeSeconds = null,
-        string allowedScopes = "openid profile")
+        string allowedScopes = "openid profile",
+        bool allowRefreshToken = false)
     {
         using var scope = services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
@@ -753,7 +852,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         application.ClientType = OidcClientType.Confidential;
         application.AllowAuthorizationCode = allowAuthorizationCode;
         application.AllowedScopes = allowedScopes;
-        application.AllowRefreshToken = false;
+        application.AllowRefreshToken = allowRefreshToken;
         application.IdentitySessionMaxAgeSeconds = maxAgeSeconds;
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
         return application.Id;
@@ -831,10 +930,13 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
 
     // ---- Assertions ----
 
-    private async Task AssertSuccessAsync(
+    private sealed record SuccessOutcome(string AccessToken, string? RefreshToken);
+
+    private async Task<SuccessOutcome> AssertSuccessAsync(
         HttpResponseMessage response,
         SeededCode seeded,
-        string expectedScope)
+        string expectedScope,
+        bool expectRefreshToken = false)
     {
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
@@ -842,12 +944,28 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
 
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var memberNames = body.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
-        Assert.Equal(
-            new HashSet<string>(StringComparer.Ordinal) { "access_token", "token_type", "expires_in", "scope", "id_token" },
-            memberNames);
+        var expectedMembers = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "access_token", "token_type", "expires_in", "scope", "id_token"
+        };
+        if (expectRefreshToken)
+        {
+            // PS-14: refresh_token appears only for a committed offline_access family.
+            expectedMembers.Add("refresh_token");
+        }
+
+        Assert.Equal(expectedMembers, memberNames);
         Assert.Equal("Bearer", body.GetProperty("token_type").GetString());
         Assert.Equal(900, body.GetProperty("expires_in").GetInt64());
         Assert.Equal(expectedScope, body.GetProperty("scope").GetString());
+        var refreshToken = expectRefreshToken ? body.GetProperty("refresh_token").GetString() : null;
+        if (expectRefreshToken)
+        {
+            // DF-09 shape: 43 unpadded base64url characters, returned once.
+            Assert.Equal(43, refreshToken!.Length);
+            Assert.All(refreshToken, character =>
+                Assert.True(char.IsAsciiLetterOrDigit(character) || character is '-' or '_'));
+        }
 
         var accessToken = body.GetProperty("access_token").GetString()!;
         var token = new JwtSecurityTokenHandler().ReadJwtToken(accessToken);
@@ -887,7 +1005,14 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
 
         var codeRow = await GetCodeAsync(seeded.CodeId);
         Assert.NotNull(codeRow.ConsumedAt);
-        Assert.Null(codeRow.RefreshFamilyId);
+        if (!expectRefreshToken)
+        {
+            // EV-20: a no-refresh redemption commits a null family link.
+            Assert.Null(codeRow.RefreshFamilyId);
+            Assert.False(await QueryAsync(async dbContext =>
+                await dbContext.RefreshTokens.AsNoTracking()
+                    .AnyAsync(row => row.IdentitySessionId == seeded.SessionId, TestContext.Current.CancellationToken)));
+        }
 
         var session = await GetSessionAsync(seeded.SessionId);
         Assert.Null(session.RevokedAt);
@@ -899,6 +1024,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         Assert.Equal(seeded.CodeId.ToString("D"), redeemed.TargetId);
         Assert.Equal(seeded.AccountId, redeemed.ActorId);
         Assert.Equal($"session:{seeded.SessionId}", redeemed.Description);
+        return new SuccessOutcome(accessToken, refreshToken);
     }
 
     private async Task AssertReplayAsync(HttpResponseMessage response, SeededCode seeded)

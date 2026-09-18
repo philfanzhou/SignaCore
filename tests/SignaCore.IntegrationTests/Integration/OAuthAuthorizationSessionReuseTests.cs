@@ -707,6 +707,12 @@ public sealed class OAuthAuthorizationSessionReuseTests : IClassFixture<Identity
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Not used by the reuse path.");
 
+        public Task<bool> LinkRefreshFamilyAsync(
+            Guid codeId,
+            Guid rootId,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Not used by the reuse path.");
+
         public Task<int> CleanupExpiredAsync(
             DateTimeOffset now,
             CancellationToken cancellationToken = default) =>

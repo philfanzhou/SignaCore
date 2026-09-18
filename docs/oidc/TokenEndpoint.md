@@ -156,7 +156,10 @@ legacy refresh row.
 from creation (`PS-23`); #53 activated internal code redemption (`AC-06`); #54 completed the core
 by adding the ID token to the response and publishing the interactive metadata (`AC-07`). The
 redemption response now carries `access_token`, `token_type`, `expires_in`, `scope`, and
-`id_token`; it still carries no `refresh_token`, and a code containing `offline_access` is still
-rejected with `invalid_grant` rather than redeemed without a refresh token — that gate lifts only
-when the interactive refresh family lands (`AC-11`/`AC-12`). This document itself activates no
-route or metadata (`AC-14`).
+`id_token`, plus a one-shot plaintext `refresh_token` when the code's approved scope carries
+`offline_access`: the redemption slice of #294 delivers `EV-21`, creating and linking the family
+root in the same redemption transaction — until the interactive rotation slice (#98) lands, that
+token cannot be rotated. A code whose current application has refresh disabled follows
+`EV-11`/`EV-13`: generic `invalid_grant`, no consumption, and no family. Legacy validation,
+rotation, and revocation fail closed on any interactive row (`EV-33`). This document itself
+activates no route or metadata (`AC-14`).
