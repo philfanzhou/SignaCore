@@ -35,6 +35,7 @@ public class IdentityDbContext : DbContext, IServiceDbContext
     public DbSet<AuthorizationRequestEntity> AuthorizationRequests => Set<AuthorizationRequestEntity>();
     public DbSet<IdentitySessionEntity> IdentitySessions => Set<IdentitySessionEntity>();
     public DbSet<AuthorizationCodeEntity> AuthorizationCodes => Set<AuthorizationCodeEntity>();
+    public DbSet<LogoutRequestEntity> LogoutRequests => Set<LogoutRequestEntity>();
     public DbSet<SystemSettingEntity> SystemSettings => Set<SystemSettingEntity>();
 
     // ServiceMantle shared installation state (service_installations): the runtime authority for
@@ -478,6 +479,39 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.HasOne<RefreshTokenEntity>()
                 .WithMany()
                 .HasForeignKey(e => e.RefreshFamilyId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<LogoutRequestEntity>(entity =>
+        {
+            entity.ToTable("logout_requests");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.HandleDigest)
+                .HasColumnName("handle_digest")
+                .HasMaxLength(LoginHandleDigest.EncodedLength)
+                .IsRequired();
+            entity.Property(e => e.AppRegistrationId).HasColumnName("app_registration_id");
+            entity.Property(e => e.AccountId).HasColumnName("account_id");
+            entity.Property(e => e.IdentitySessionId).HasColumnName("identity_session_id");
+            entity.Property(e => e.PostLogoutRedirectUri)
+                .HasColumnName("post_logout_redirect_uri")
+                .HasMaxLength(IdentityConstants.MaxOidcCanonicalRedirectUriLength);
+            entity.Property(e => e.State)
+                .HasColumnName("state")
+                .HasMaxLength(IdentityConstants.MaxLogoutStateLength);
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            ConfigureInstant(entity.Property(e => e.ExpiresAt).HasColumnName("expires_at"));
+            ConfigureInstant(entity.Property(e => e.ConsumedAt).HasColumnName("consumed_at"));
+            entity.HasIndex(e => e.HandleDigest).IsUnique();
+            // PS-08: only the client reference is referential — restrictive, non-nullable, created
+            // together with this table. The account and session values are snapshots the
+            // completion compares against live rows (IN-36); a session row may legitimately be
+            // gone by then, and EV-07 handles that without a state write, so no referential
+            // constraint may forbid the state.
+            entity.HasOne<AppRegistrationEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.AppRegistrationId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

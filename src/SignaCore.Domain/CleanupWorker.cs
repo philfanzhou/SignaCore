@@ -79,6 +79,18 @@ public class CleanupWorker : BackgroundService
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        var logoutRequestStore = scope.ServiceProvider.GetRequiredService<ILogoutRequestStore>();
+        var deletedLogoutRequests = await logoutRequestStore.CleanupExpiredAsync(
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        if (deletedLogoutRequests > 0)
+        {
+            _logger.LogInformation(
+                "Deleted {Count} expired logout requests",
+                deletedLogoutRequests);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
         var authorizationCodeStore = scope.ServiceProvider.GetRequiredService<IAuthorizationCodeStore>();
         var deletedAuthorizationCodes = await authorizationCodeStore.CleanupExpiredAsync(
             DateTimeOffset.UtcNow,

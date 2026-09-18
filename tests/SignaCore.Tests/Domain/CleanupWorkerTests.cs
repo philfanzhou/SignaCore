@@ -23,7 +23,8 @@ public class CleanupWorkerTests
         Mock<IAuthorizationRequestStore>? authorizationRequestStoreMock = null,
         Mock<IIdentitySessionStore>? identitySessionStoreMock = null,
         Mock<IAuthorizationCodeStore>? authorizationCodeStoreMock = null,
-        Mock<IRefreshTokenFamilyStore>? refreshTokenFamilyStoreMock = null)
+        Mock<IRefreshTokenFamilyStore>? refreshTokenFamilyStoreMock = null,
+        Mock<ILogoutRequestStore>? logoutRequestStoreMock = null)
     {
         var serviceProviderMock = new Mock<IServiceProvider>();
 
@@ -57,6 +58,9 @@ public class CleanupWorkerTests
         serviceProviderMock
             .Setup(sp => sp.GetService(typeof(IRefreshTokenFamilyStore)))
             .Returns((refreshTokenFamilyStoreMock ?? new Mock<IRefreshTokenFamilyStore>()).Object);
+        serviceProviderMock
+            .Setup(sp => sp.GetService(typeof(ILogoutRequestStore)))
+            .Returns((logoutRequestStoreMock ?? new Mock<ILogoutRequestStore>()).Object);
 
         return serviceProviderMock;
     }
