@@ -6,6 +6,8 @@ namespace SignaCore.Database.Repositories;
 
 public class RefreshTokenRepository : IRefreshTokenRepository
 {
+    private const string SqliteProviderName = "Microsoft.EntityFrameworkCore.Sqlite";
+
     private readonly IdentityDbContext _dbContext;
 
     public RefreshTokenRepository(IdentityDbContext dbContext)
@@ -239,6 +241,105 @@ public class RefreshTokenRepository : IRefreshTokenRepository
                 && !token.IsRevoked)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(token => token.IsRevoked, true), cancellationToken);
+    }
+
+    /// <summary>
+    /// Same lock discipline as <see cref="IdentitySessionRepository.LockByIdAsync"/>: the
+    /// ambient-transaction guard, the cleared change tracker, PostgreSQL <c>FOR UPDATE</c>
+    /// versus the SQLite plain read inside the caller's transaction (<c>Persistence.md</c> lock
+    /// order — session first, then the family root, then the presented member).
+    /// </summary>
+    public async Task<RefreshTokenEntity?> LockByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        if (_dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "Locking a refresh token requires a caller-owned ambient transaction; none is active.");
+        }
+
+        _dbContext.ChangeTracker.Clear();
+
+        if (string.Equals(
+                _dbContext.Database.ProviderName,
+                SqliteProviderName,
+                StringComparison.Ordinal))
+        {
+            return await _dbContext.RefreshTokens
+                .FirstOrDefaultAsync(token => token.Id == id, cancellationToken);
+        }
+
+        var rows = await _dbContext.RefreshTokens
+            .FromSqlInterpolated(
+                $"SELECT * FROM refresh_tokens WHERE id = {id} FOR UPDATE")
+            .ToListAsync(cancellationToken);
+
+        return rows.FirstOrDefault();
+    }
+
+    public Task<RefreshTokenEntity?> GetByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default) =>
+        _dbContext.RefreshTokens
+            .AsNoTracking()
+            .FirstOrDefaultAsync(token => token.Id == id, cancellationToken);
+
+    public async Task<bool> TryConsumeInteractiveAsync(
+        Guid memberId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        // EV-29: the conditional consumption is the single point the one-child invariant is
+        // enforced against concurrency and implementation drift — an already consumed or revoked
+        // member matches nothing, so only one rotation of the same member can ever succeed here.
+        // Legacy rows are structurally out of reach (EV-33).
+        var affectedRows = await _dbContext.RefreshTokens
+            .Where(token => token.Id == memberId
+                && token.IdentitySessionId != null
+                && !token.IsRevoked
+                && token.ConsumedAt == null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.ConsumedAt, now), cancellationToken);
+        return affectedRows == 1;
+    }
+
+    public async Task<int> RevokeLiveDescendantsAsync(
+        Guid familyId,
+        Guid memberId,
+        CancellationToken cancellationToken = default)
+    {
+        // EV-31: walk the parent chain down from the presented member — through links that may
+        // already be consumed or revoked — revoking each still-live descendant (unconsumed and
+        // unrevoked) by a conditional update so the first revocation fact stays authoritative.
+        // Ancestors and sibling families are structurally out of reach, and a consumed member
+        // keeps its committed consumption fact without a revocation mark. The chain is bounded
+        // by the family's membership.
+        var revoked = 0;
+        var frontier = new List<Guid> { memberId };
+        while (frontier.Count > 0)
+        {
+            var children = await _dbContext.RefreshTokens
+                .Where(token => token.FamilyId == familyId
+                    && token.ParentId != null
+                    && frontier.Contains(token.ParentId.Value))
+                .Select(token => token.Id)
+                .ToListAsync(cancellationToken);
+            if (children.Count == 0)
+            {
+                break;
+            }
+
+            revoked += await _dbContext.RefreshTokens
+                .Where(token => children.Contains(token.Id)
+                    && !token.IsRevoked
+                    && token.ConsumedAt == null)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(token => token.IsRevoked, true), cancellationToken);
+            frontier = children;
+        }
+
+        return revoked;
     }
 
     public async Task<int> RemoveInteractiveFamiliesAsync(

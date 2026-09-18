@@ -158,8 +158,14 @@ by adding the ID token to the response and publishing the interactive metadata (
 redemption response now carries `access_token`, `token_type`, `expires_in`, `scope`, and
 `id_token`, plus a one-shot plaintext `refresh_token` when the code's approved scope carries
 `offline_access`: the redemption slice of #294 delivers `EV-21`, creating and linking the family
-root in the same redemption transaction — until the interactive rotation slice (#98) lands, that
-token cannot be rotated. A code whose current application has refresh disabled follows
-`EV-11`/`EV-13`: generic `invalid_grant`, no consumption, and no family. Legacy validation,
-rotation, and revocation fail closed on any interactive row (`EV-33`). This document itself
-activates no route or metadata (`AC-14`).
+root in the same redemption transaction, and the rotation slice (#98) delivers the atomic
+`refresh_token` grant: one transaction consumes the presented member, inserts exactly one child,
+and returns the `PS-15` response — a new access token, a nonce-free ID token, the unchanged
+canonical scope, and exactly one new refresh token — after the commit. Replay of a consumed
+member revokes the family's live descendants without touching the session (`EV-31`); session
+expiry, a missing session row, application max-age, and scope removal revoke the family inside
+the rejecting transaction (`EV-32`); `offline_access` is advertised in Discovery (`AC-12`). A code
+whose current application has refresh disabled follows `EV-11`/`EV-13`: generic `invalid_grant`,
+no consumption, and no family. Legacy validation, rotation, and revocation fail closed on any
+interactive row (`EV-33`). This document itself activates no route or metadata beyond what its
+slices delivered (`AC-14`).

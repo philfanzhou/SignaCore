@@ -9,11 +9,11 @@ namespace SignaCore.Host;
 /// The document describes exactly what this service implements and nothing else. The interactive
 /// Authorization Code flow core is delivered and advertised (<c>AC-07</c>): the authorization
 /// endpoint, <c>code</c>, <c>authorization_code</c> with mandatory S256 PKCE, and the ID token
-/// signed RS256. There is still no UserInfo endpoint (<c>#55</c>) and no interactive refresh
-/// family (<c>#98</c>), so <c>userinfo_endpoint</c> is absent and <c>offline_access</c> is not in
-/// <see cref="ScopesSupported"/> (<c>AC-12</c> advertises it only once rotation works end to end).
-/// Advertising a capability that does not exist is worse than omitting it — a conforming client
-/// would build a request it can never complete.
+/// signed RS256. The interactive refresh family — atomic rotation, reuse detection, and
+/// descendant revocation — is delivered (<c>#98</c>), so <c>offline_access</c> is advertised
+/// (<c>AC-12</c>). There is still no UserInfo endpoint (<c>#55</c>), so <c>userinfo_endpoint</c>
+/// is absent. Advertising a capability that does not exist is worse than omitting it — a
+/// conforming client would build a request it can never complete.
 /// </para>
 /// <para>
 /// Conformance status and the deliberate gaps are documented in
@@ -70,9 +70,9 @@ public sealed record DiscoveryDocument(
             ResponseTypesSupported: ["code"],
             // RFC 7636: S256 is the only accepted code challenge method; plain is rejected.
             CodeChallengeMethodsSupported: ["S256"],
-            // Only scopes a client can actually complete today. offline_access is deliberately
-            // absent until the interactive refresh family works end to end (AC-12).
-            ScopesSupported: ["openid", "profile"],
+            // Only scopes a client can actually complete today. offline_access is advertised
+            // since the interactive refresh family rotates atomically end to end (AC-12).
+            ScopesSupported: ["openid", "profile", "offline_access"],
             SubjectTypesSupported: ["public"],
             IdTokenSigningAlgValuesSupported: ["RS256"],
             TokenEndpointAuthMethodsSupported: ["client_secret_basic", "client_secret_post"],

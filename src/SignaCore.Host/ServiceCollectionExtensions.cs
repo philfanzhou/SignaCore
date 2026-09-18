@@ -345,6 +345,9 @@ public static class ServiceCollectionExtensions
         // ---- Internal authorization_code redemption (AC-06), outside the validator factory ----
         services.AddScoped<AuthorizationCodeRedemptionService>();
 
+        // ---- Interactive refresh family rotation (EV-29–EV-32), dispatched by digest marker ----
+        services.AddScoped<InteractiveRefreshRotationService>();
+
         // ---- Background Cleanup Service ----
         services.AddHostedService<CleanupWorker>();
 
