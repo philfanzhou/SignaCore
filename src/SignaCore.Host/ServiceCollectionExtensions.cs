@@ -238,6 +238,7 @@ public static class ServiceCollectionExtensions
 
         // ---- Browser OIDC login success commit path (canonical EV-01) ----
         services.AddScoped<OidcLoginCompletionService>();
+        services.AddScoped<OidcAuthorizationSessionReuseService>();
 
         // ---- User Query Service ----
         services.AddScoped<IUserQueryService, UserQueryService>();
@@ -535,6 +536,7 @@ public static class ServiceCollectionExtensions
                 };
             });
         services.AddSingleton<IAuthorizationHandler, IdentitySessionHandler>();
+        services.AddScoped<IIdentitySessionCookieReader, IdentitySessionCookieReader>();
         services.AddAuthorizationBuilder()
             .AddPolicy(GatewayAppAuthenticationDefaults.Policy, policy =>
             {

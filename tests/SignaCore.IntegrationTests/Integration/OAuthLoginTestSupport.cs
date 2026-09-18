@@ -259,17 +259,7 @@ internal static partial class OAuthLoginTestSupport
         string? existingCookieValue = null)
     {
         await SeedSuccessApplicationAsync(services);
-        var authorizeUrl = "/oauth2/authorize?" + string.Join('&', new[]
-        {
-            ("response_type", "code"),
-            ("client_id", SuccessAppId),
-            ("redirect_uri", SuccessRegisteredUri),
-            ("scope", SuccessScope),
-            ("state", state ?? SuccessState),
-            ("nonce", nonce ?? SuccessNonce),
-            ("code_challenge", SuccessChallenge),
-            ("code_challenge_method", "S256"),
-        }.Select(pair => $"{Uri.EscapeDataString(pair.Item1)}={Uri.EscapeDataString(pair.Item2)}"));
+        var authorizeUrl = BuildSuccessAuthorizeUrl(state, nonce);
 
         using var authorize = await client.GetAsync(authorizeUrl, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Found, authorize.StatusCode);
@@ -291,6 +281,46 @@ internal static partial class OAuthLoginTestSupport
             : existingCookieValue;
         Assert.NotNull(cookieValue);
         return new LoginSession(handle, cookieValue!, token);
+    }
+
+    /// <summary>
+    /// Builds the browser URL of a legal authorize request against the success application; the
+    /// optional overrides keep two independent browser runs distinguishable.
+    /// </summary>
+    public static string BuildSuccessAuthorizeUrl(string? state = null, string? nonce = null) =>
+        "/oauth2/authorize?" + string.Join('&', new[]
+        {
+            ("response_type", "code"),
+            ("client_id", SuccessAppId),
+            ("redirect_uri", SuccessRegisteredUri),
+            ("scope", SuccessScope),
+            ("state", state ?? SuccessState),
+            ("nonce", nonce ?? SuccessNonce),
+            ("code_challenge", SuccessChallenge),
+            ("code_challenge_method", "S256"),
+        }.Select(pair => $"{Uri.EscapeDataString(pair.Item1)}={Uri.EscapeDataString(pair.Item2)}"));
+
+    /// <summary>
+    /// Completes the browser front half of one successful login over the real authorize → login
+    /// flow and returns the raw <c>name=value</c> segment of the issued <c>PS-18</c> identity
+    /// cookie, for manual replay on later requests; the caller's client must not auto-redirect.
+    /// </summary>
+    public static async Task<string> CompleteSuccessLoginAndGetIdentityCookieValueAsync(
+        IServiceProvider services,
+        HttpClient client,
+        string username,
+        string password)
+    {
+        var login = await BeginSuccessLoginViaAuthorizeAsync(services, client);
+        using var response = await client.SendAsync(
+            CreateLoginPost(
+                fields: LoginFields(login, username, password),
+                cookieHeader: CookieHeaderFor(login)),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        var setCookie = GetSetCookieHeader(response, IdentitySessionDefaults.CookieName);
+        Assert.NotNull(setCookie);
+        return CookieValueFromHeader(setCookie!, IdentitySessionDefaults.CookieName);
     }
 
     private static async Task<Guid> SeedApplicationAsync(IServiceProvider services)

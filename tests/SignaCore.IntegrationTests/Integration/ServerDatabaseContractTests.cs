@@ -1329,6 +1329,156 @@ public sealed class ServerDatabaseContractTests
     }
 
     /// <summary>
+    /// <c>AC-09</c> on the real PostgreSQL matrix: one instance's session is reused by another
+    /// instance through the shared database only; two concurrent authorize reuses of the same
+    /// session produce two distinct codes with the bounded slide written at most once
+    /// (<c>SC-07</c>); and the forced serial outcomes of revocation-versus-reuse hold —
+    /// revocation first makes the reuse answer <c>null</c> with zero writes, reuse first still
+    /// allows the later revocation.
+    /// </summary>
+    [Fact]
+    public async Task PostgreSqlAuthorizationSessionReuse_CrossInstanceConcurrencyAndSerialOutcomes()
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL authorize session reuse matrix.");
+
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var databaseOptions = CreateDatabaseOptions(
+                "PostgreSQL",
+                container.GetConnectionString());
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            await using (var migration = new IdentityDbContext(options))
+            {
+                await migration.Database.MigrateAsync(TestContext.Current.CancellationToken);
+            }
+
+            var (accountId, credentialId, appId) = await SeedAuthorizationCodePrerequisitesAsync(options);
+            var accepted = new OidcAuthorizationValidationResult.Accepted(
+                "code-contract-app",
+                appId,
+                "https://client.example.com/callback",
+                "openid profile",
+                "ServerReuseState_0123456789abcdef",
+                "ServerReuseNonce_0123456789abcdef",
+                "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+
+            // ---- SC-07: two concurrent reuses, two codes, at most one slide write ----
+            // The session's activity starts two minutes in the past, so exactly the first
+            // committed reuse slides it and the second observes the fresh activity.
+            var now = DateTimeOffset.UtcNow;
+            var racedSessionId = await CreateReuseSessionAsync(
+                options, accountId, credentialId, now.AddMinutes(-2));
+            var racedCodes = await Task.WhenAll(
+                TryReuseAsync(options, accepted, racedSessionId, now),
+                TryReuseAsync(options, accepted, racedSessionId, now));
+            Assert.All(racedCodes, code => Assert.False(string.IsNullOrEmpty(code)));
+            Assert.NotEqual(racedCodes[0], racedCodes[1]);
+
+            await using (var assertion = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var session = await assertion.IdentitySessions.AsNoTracking()
+                    .SingleAsync(row => row.Id == racedSessionId, cancellationToken);
+                Assert.Null(session.RevokedAt);
+                Assert.Equal(now.UtcTicks / 10, session.LastSeenAt.UtcTicks / 10);
+                Assert.Equal(
+                    now.AddMinutes(IdentityConstants.IdentitySessionIdleTimeoutMinutes).UtcTicks / 10,
+                    session.IdleExpiresAt.UtcTicks / 10);
+                Assert.Equal(2, await assertion.AuthorizationCodes
+                    .CountAsync(row => row.IdentitySessionId == racedSessionId, cancellationToken));
+                Assert.Equal(2, await assertion.AuditLogs
+                    .CountAsync(row => row.Action == "oidc.authorize.validated", cancellationToken));
+            }
+
+            // ---- Revocation commits first: the other instance's reuse answers null, no writes ----
+            var revokedSessionId = await CreateReuseSessionAsync(options, accountId, credentialId);
+            await RevokeRedemptionSessionAsync(options, revokedSessionId);
+            Assert.Null(await TryReuseAsync(options, accepted, revokedSessionId, DateTimeOffset.UtcNow));
+
+            await using (var assertion = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                Assert.Empty(await assertion.AuthorizationCodes.AsNoTracking()
+                    .Where(row => row.IdentitySessionId == revokedSessionId)
+                    .ToListAsync(cancellationToken));
+            }
+
+            // ---- Reuse commits first: the later revocation still succeeds ----
+            var reusedSessionId = await CreateReuseSessionAsync(options, accountId, credentialId);
+            Assert.False(string.IsNullOrEmpty(await TryReuseAsync(
+                options, accepted, reusedSessionId, DateTimeOffset.UtcNow)));
+            await RevokeRedemptionSessionAsync(options, reusedSessionId);
+
+            await using (var assertion = new IdentityDbContext(options))
+            {
+                var session = await assertion.IdentitySessions.AsNoTracking()
+                    .SingleAsync(
+                        row => row.Id == reusedSessionId, TestContext.Current.CancellationToken);
+                Assert.NotNull(session.RevokedAt);
+                Assert.True(await assertion.AuthorizationCodes.AsNoTracking()
+                    .AnyAsync(
+                        row => row.IdentitySessionId == reusedSessionId,
+                        TestContext.Current.CancellationToken));
+            }
+        }
+    }
+
+    /// <summary>Creates one session over the shared database — the "instance A" half of the reuse.</summary>
+    private static async Task<Guid> CreateReuseSessionAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid accountId,
+        Guid credentialId,
+        DateTimeOffset? authTime = null)
+    {
+        await using var context = new IdentityDbContext(options);
+        var sessions = new IdentitySessionStore(
+            new IdentitySessionRepository(context), new EfCoreUnitOfWork(context));
+        var session = await sessions.CreateAsync(
+            accountId, credentialId, authTime ?? DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
+        return session.Id;
+    }
+
+    /// <summary>
+    /// One "instance" of the reuse service on its own connection and unit of work — the same
+    /// composition the host registers per request scope.
+    /// </summary>
+    private static async Task<string?> TryReuseAsync(
+        DbContextOptions<IdentityDbContext> options,
+        OidcAuthorizationValidationResult.Accepted accepted,
+        Guid sessionId,
+        DateTimeOffset now)
+    {
+        await using var context = new IdentityDbContext(options);
+        var unitOfWork = new EfCoreUnitOfWork(context);
+        var service = new SignaCore.Host.Services.OidcAuthorizationSessionReuseService(
+            new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),
+            new AuthorizationCodeStore(new AuthorizationCodeRepository(context), unitOfWork),
+            new AccountRepository(context),
+            new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            unitOfWork,
+            context);
+        return await service.TryIssueAsync(
+            accepted,
+            sessionId,
+            now,
+            null,
+            "reuse-contract-correlation",
+            TestContext.Current.CancellationToken);
+    }
+
     /// <summary>
     /// <c>AC-06</c>/<c>EV-20</c>/<c>EV-24</c>/<c>EV-25</c> on the real PostgreSQL matrix: two
     /// independent service providers redeem the same code concurrently — exactly one commits the

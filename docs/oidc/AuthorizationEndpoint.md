@@ -82,8 +82,11 @@ this document stops at the fact that two distinct codes are created.
 ## Implementation and compatibility
 
 #93 implements validation and safe error routing; #94 later composes the session/continuation and
-code-creation path. Neither task advertises the endpoint before the complete flow reaches activation
-row `AC-07`.
+code-creation path. #96 delivers the logged-in reuse of the target design: an accepted request
+whose identity cookie names a still-usable server-side session leaves directly with a code, with
+the bounded activity slide and without a login continuation, while every unusable session shape
+falls back to the identical continuation path. None of these tasks advertises the endpoint before
+the complete flow reaches activation row `AC-07`.
 
 Current `/oauth2/token`, `/oauth2/revoke`, `/api/auth/*`, claims callbacks, management routes,
 Discovery documents, and the shared ServiceMantle management cookie (`PS-18`) remain unchanged.
