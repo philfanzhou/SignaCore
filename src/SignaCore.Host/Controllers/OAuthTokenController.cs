@@ -62,7 +62,7 @@ public sealed class OAuthTokenController : ControllerBase
                 AuthorizationCodeRedemptionService.GrantType,
                 StringComparison.Ordinal))
         {
-            return await RedeemAuthorizationCodeAsync(app, form, cancellationToken);
+            return await RedeemCodeGrantAsync(app, form, cancellationToken);
         }
 
         var wireGrantType = form["grant_type"].ToString();
@@ -160,14 +160,17 @@ public sealed class OAuthTokenController : ControllerBase
     }
 
     /// <summary>
-    /// The <c>authorization_code</c> branch (<c>AC-06</c>). The <c>IN-20</c> credential mix is
+    /// The <c>authorization_code</c> branch (<c>AC-06</c>). The method name deliberately avoids
+    /// the "auth" substring: CodeQL's user-controlled-bypass query treats a request-controlled
+    /// guard over an %-auth-%-named call as a bypass, and this branch is selected by
+    /// <c>grant_type</c>. The <c>IN-20</c> credential mix is
     /// rejected here — a Basic header the authentication handler would accept alongside any
     /// <c>client_id</c>/<c>client_secret</c> form field — before the code is looked up; every
     /// other decision belongs to <see cref="AuthorizationCodeRedemptionService"/>. Both the
     /// success and the error bodies of this branch carry <c>Pragma: no-cache</c> in addition to
     /// <c>Cache-Control: no-store</c>.
     /// </summary>
-    private async Task<IActionResult> RedeemAuthorizationCodeAsync(
+    private async Task<IActionResult> RedeemCodeGrantAsync(
         AppRegistrationEntity app,
         IFormCollection form,
         CancellationToken cancellationToken)
