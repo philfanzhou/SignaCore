@@ -1,4 +1,5 @@
 using DotNet.Testcontainers.Containers;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +10,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
+using SignaCore.Domain;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
@@ -1327,6 +1329,300 @@ public sealed class ServerDatabaseContractTests
     }
 
     /// <summary>
+    /// <summary>
+    /// <c>AC-06</c>/<c>EV-20</c>/<c>EV-24</c>/<c>EV-25</c> on the real PostgreSQL matrix: two
+    /// independent service providers redeem the same code concurrently — exactly one commits the
+    /// consumption and its audit, the loser observes the committed consumption under the locks and
+    /// commits the replay disposal; the forced serial outcomes of <c>SC-05</c>/<c>SC-06</c> hold
+    /// their write shapes; and one synthetic SQLSTATE 40001 on the consumption update replays the
+    /// whole unit exactly once under <c>EnableRetryOnFailure</c>.
+    /// </summary>
+    [Fact]
+    public async Task PostgreSqlAuthorizationCodeRedemption_ConcurrencySerialOutcomesAndRetry()
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the PostgreSQL authorization code redemption matrix.");
+
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var databaseOptions = CreateDatabaseOptions(
+                "PostgreSQL",
+                container.GetConnectionString());
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            await using (var migration = new IdentityDbContext(options))
+            {
+                await migration.Database.MigrateAsync(TestContext.Current.CancellationToken);
+            }
+
+            var (accountId, credentialId, appId) = await SeedRedemptionPrerequisitesAsync(options);
+
+            // ---- EV-25/SC-13: two instances race over one code; exactly one winner ----
+            var raced = await CreateRedemptionCodeAsync(options, accountId, credentialId, appId);
+            var outcomes = await Task.WhenAll(
+                RedeemAuthorizationCodeAsync(options, raced.Code),
+                RedeemAuthorizationCodeAsync(options, raced.Code));
+            Assert.Equal(1, outcomes.Count(outcome => outcome.IsSuccess));
+            var loser = Assert.Single(outcomes, outcome => !outcome.IsSuccess);
+            Assert.Equal(400, loser.Status);
+            Assert.Equal("replay", loser.FailureReason);
+
+            await using (var assertion = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var codeRow = await assertion.AuthorizationCodes.AsNoTracking()
+                    .SingleAsync(row => row.Id == raced.CodeId, cancellationToken);
+                Assert.NotNull(codeRow.ConsumedAt);
+                var session = await assertion.IdentitySessions.AsNoTracking()
+                    .SingleAsync(row => row.Id == raced.SessionId, cancellationToken);
+                Assert.NotNull(session.RevokedAt);
+                Assert.Equal("code_replay", session.RevocationReason);
+                // The audit ids are random Guids and the two instances commit independently,
+                // so the row order carries no meaning: the shape is the one-of-each set.
+                var audits = await assertion.AuditLogs.AsNoTracking()
+                    .Where(row => row.TargetId == raced.CodeId.ToString("D"))
+                    .ToListAsync(cancellationToken);
+                Assert.Equal(2, audits.Count);
+                Assert.Equal(
+                    new HashSet<string>(StringComparer.Ordinal) { "oidc.code.redeemed", "oidc.code.replayed" },
+                    audits.Select(row => row.Action).ToHashSet(StringComparer.Ordinal));
+                Assert.Contains(
+                    "family:none",
+                    Assert.Single(audits, row => row.Action == "oidc.code.replayed").Description,
+                    StringComparison.Ordinal);
+            }
+
+            // ---- SC-05: the revocation commits first; the redemption rejects without consuming ----
+            var revokedFirst = await CreateRedemptionCodeAsync(options, accountId, credentialId, appId);
+            await RevokeRedemptionSessionAsync(options, revokedFirst.SessionId);
+            var afterRevoke = await RedeemAuthorizationCodeAsync(options, revokedFirst.Code);
+            Assert.False(afterRevoke.IsSuccess);
+            Assert.Equal("invalid_grant", afterRevoke.FailureReason);
+
+            await using (var assertion = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var codeRow = await assertion.AuthorizationCodes.AsNoTracking()
+                    .SingleAsync(row => row.Id == revokedFirst.CodeId, cancellationToken);
+                Assert.Null(codeRow.ConsumedAt);
+                Assert.Empty(await assertion.AuditLogs.AsNoTracking()
+                    .Where(row => row.TargetId == revokedFirst.CodeId.ToString("D"))
+                    .ToListAsync(cancellationToken));
+                var session = await assertion.IdentitySessions.AsNoTracking()
+                    .SingleAsync(row => row.Id == revokedFirst.SessionId, cancellationToken);
+                Assert.Equal("administrative", session.RevocationReason);
+            }
+
+            // ---- SC-06: the redemption commits first; the later revocation still succeeds ----
+            var redeemedFirst = await CreateRedemptionCodeAsync(options, accountId, credentialId, appId);
+            var winnerOutcome = await RedeemAuthorizationCodeAsync(options, redeemedFirst.Code);
+            Assert.True(winnerOutcome.IsSuccess);
+            await RevokeRedemptionSessionAsync(options, redeemedFirst.SessionId);
+
+            await using (var assertion = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var codeRow = await assertion.AuthorizationCodes.AsNoTracking()
+                    .SingleAsync(row => row.Id == redeemedFirst.CodeId, cancellationToken);
+                Assert.NotNull(codeRow.ConsumedAt);
+                var session = await assertion.IdentitySessions.AsNoTracking()
+                    .SingleAsync(row => row.Id == redeemedFirst.SessionId, cancellationToken);
+                Assert.Equal("administrative", session.RevocationReason);
+            }
+
+            // ---- 40001: one transient serialization failure replays the unit exactly once ----
+            var retried = await CreateRedemptionCodeAsync(options, accountId, credentialId, appId);
+            var interceptor = new TransientAuthorizationCodeUpdateFailureInterceptor();
+            var interceptedBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            interceptedBuilder.UseIdentityDatabase(databaseOptions);
+            interceptedBuilder.AddInterceptors(interceptor);
+            var retriedOutcome = await RedeemAuthorizationCodeAsync(
+                interceptedBuilder.Options, retried.Code);
+            Assert.True(retriedOutcome.IsSuccess);
+            Assert.True(interceptor.ThrewOnce);
+
+            await using (var assertion = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var audits = await assertion.AuditLogs.AsNoTracking()
+                    .Where(row => row.TargetId == retried.CodeId.ToString("D"))
+                    .ToListAsync(cancellationToken);
+                var redeemed = Assert.Single(audits);
+                Assert.Equal("oidc.code.redeemed", redeemed.Action);
+            }
+        }
+    }
+
+    private static async Task<(Guid AccountId, Guid CredentialId, Guid AppId)>
+        SeedRedemptionPrerequisitesAsync(DbContextOptions<IdentityDbContext> options)
+    {
+        await using var context = new IdentityDbContext(options);
+        var accountId = Guid.NewGuid();
+        var credentialId = Guid.NewGuid();
+        var appId = Guid.NewGuid();
+        context.Accounts.Add(new AccountEntity
+        {
+            Id = accountId, IsActive = true, CreatedAt = DateTimeOffset.UtcNow
+        });
+        context.PasswordCredentials.Add(new PasswordCredentialEntity
+        {
+            Id = credentialId, AccountId = accountId, Username = "redemption-contract-user",
+            PasswordHash = "hash", CreatedAt = DateTimeOffset.UtcNow
+        });
+        context.AppRegistrations.Add(new AppRegistrationEntity
+        {
+            Id = appId, AppId = "redemption-contract-app", AppSecretHash = "hash",
+            AppName = "Redemption Contract", IsActive = true, CreatedAt = DateTimeOffset.UtcNow,
+            AudienceMode = AudienceMode.PerApplication,
+            ClientType = OidcClientType.Confidential,
+            AllowAuthorizationCode = true,
+            AllowedScopes = "openid profile",
+            AllowRefreshToken = false
+        });
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return (accountId, credentialId, appId);
+    }
+
+    private static async Task<(string Code, Guid CodeId, Guid SessionId)> CreateRedemptionCodeAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid accountId,
+        Guid credentialId,
+        Guid appId)
+    {
+        await using var context = new IdentityDbContext(options);
+        var unitOfWork = new EfCoreUnitOfWork(context);
+        var sessions = new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork);
+        var codes = new AuthorizationCodeStore(new AuthorizationCodeRepository(context), unitOfWork);
+        var session = await sessions.CreateAsync(
+            accountId, credentialId, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
+        var creation = await codes.CreateAsync(
+            session,
+            new AuthorizationCodeBinding(
+                appId,
+                "https://client.example.com/callback",
+                "openid profile",
+                "RedemptionCanaryNonce_0123456789abcdef",
+                "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"),
+            DateTimeOffset.UtcNow,
+            TestContext.Current.CancellationToken);
+        return (creation.Code, creation.Id, session.Id);
+    }
+
+    /// <summary>
+    /// One "instance" of the redemption service on its own connection and unit of work — the same
+    /// composition the host registers per request scope, with the signing key held in memory.
+    /// </summary>
+    private static async Task<SignaCore.Host.Services.AuthorizationCodeRedemptionOutcome>
+        RedeemAuthorizationCodeAsync(
+            DbContextOptions<IdentityDbContext> options,
+            string code)
+    {
+        await using var context = new IdentityDbContext(options);
+        var application = await context.AppRegistrations
+            .AsNoTracking()
+            .SingleAsync(
+                app => app.AppId == "redemption-contract-app",
+                TestContext.Current.CancellationToken);
+        var unitOfWork = new EfCoreUnitOfWork(context);
+        var accountRepository = new AccountRepository(context);
+        var meterFactory = new Mock<System.Diagnostics.Metrics.IMeterFactory>();
+        meterFactory
+            .Setup(factory => factory.Create(It.IsAny<System.Diagnostics.Metrics.MeterOptions>()))
+            .Returns(new System.Diagnostics.Metrics.Meter("SignaCore"));
+        var service = new SignaCore.Host.Services.AuthorizationCodeRedemptionService(
+            new AuthorizationCodeStore(new AuthorizationCodeRepository(context), unitOfWork),
+            new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),
+            accountRepository,
+            new PasswordCredentialRepository(context),
+            new InteractiveAccessTokenFactory(
+                new JwtOptions { Issuer = "https://redemption-contract.test" },
+                NullLogger<InteractiveAccessTokenFactory>.Instance),
+            callbackService: null,
+            new StaticRedemptionKeyManager(),
+            new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            new AuthMetrics(meterFactory.Object),
+            unitOfWork,
+            context,
+            new AdminIdentityOptions(),
+            NullLogger<SignaCore.Host.Services.AuthorizationCodeRedemptionService>.Instance);
+        return await service.RedeemAsync(
+            application,
+            new FormCollection(new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
+            {
+                ["grant_type"] = SignaCore.Host.Services.AuthorizationCodeRedemptionService.GrantType,
+                ["code"] = code,
+                ["redirect_uri"] = "https://client.example.com/callback",
+                ["code_verifier"] = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+            }),
+            null,
+            "redemption-contract-correlation",
+            TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>The forced-serial revocation of <c>SC-05</c>/<c>SC-06</c>: lock, revoke, commit.</summary>
+    private static async Task RevokeRedemptionSessionAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid sessionId)
+    {
+        await using var context = new IdentityDbContext(options);
+        var sessions = new IdentitySessionStore(
+            new IdentitySessionRepository(context), new EfCoreUnitOfWork(context));
+        var strategy = context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async operationToken =>
+        {
+            await using var transaction = await context.Database
+                .BeginTransactionAsync(operationToken);
+            await sessions.LockAsync(sessionId, operationToken);
+            await sessions.RevokeAsync(
+                sessionId, IdentitySessionRevocationReason.Administrative,
+                DateTimeOffset.UtcNow, operationToken);
+            await transaction.CommitAsync(operationToken);
+        }, TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>A synchronous, in-memory key manager for the contract composition.</summary>
+    private sealed class StaticRedemptionKeyManager : SignaCore.Domain.Keys.IKeyManager
+    {
+        private readonly Microsoft.IdentityModel.Tokens.RsaSecurityKey _key;
+
+        public StaticRedemptionKeyManager()
+        {
+            var rsa = System.Security.Cryptography.RSA.Create(2048);
+            _key = new Microsoft.IdentityModel.Tokens.RsaSecurityKey(rsa)
+            {
+                KeyId = Guid.NewGuid().ToString()
+            };
+        }
+
+        public Microsoft.IdentityModel.Tokens.RsaSecurityKey GetCurrentKey() => _key;
+
+        public IReadOnlyList<Microsoft.IdentityModel.Tokens.SecurityKey> GetValidationKeys() => [_key];
+
+        public Task RefreshKeysAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<Microsoft.IdentityModel.Tokens.RsaSecurityKey>> GetValidKeysAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Microsoft.IdentityModel.Tokens.RsaSecurityKey>>([_key]);
+
+        public Task<bool> NeedsKeyRotationAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
+        public Task RotateKeyAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task InitializationCompleted => Task.CompletedTask;
+    }
+
     /// <c>EV-01</c> on the real PostgreSQL matrix: two independent service providers run the
     /// success transaction over the same handle concurrently — exactly one commits its session,
     /// code, and audit, the loser observes the committed consumption and rolls back with zero

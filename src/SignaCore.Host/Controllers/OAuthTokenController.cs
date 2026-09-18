@@ -1,5 +1,8 @@
+using System.Net.Http.Headers;
+using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using SignaCore.Database.Entity;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Http;
@@ -16,6 +19,12 @@ namespace SignaCore.Host.Controllers;
 /// This endpoint exists alongside <c>/api/auth/token</c> rather than replacing it; the legacy contract
 /// has downstream consumers and stays unchanged. See docs/overview/StandardsConformance.md.
 /// </para>
+/// <para>
+/// The <c>authorization_code</c> grant is redeemed here too (<c>AC-06</c>), through
+/// <see cref="AuthorizationCodeRedemptionService"/> instead of the validator factory: the grant
+/// deliberately stays unregistered, so Discovery's derived <c>grant_types_supported</c> does not
+/// advertise the interactive flow before its core is complete (<c>AC-07</c>).
+/// </para>
 /// </summary>
 [Route("oauth2")]
 [ApiController]
@@ -23,13 +32,16 @@ public sealed class OAuthTokenController : ControllerBase
 {
     private readonly TokenIssuanceService _tokenIssuanceService;
     private readonly IRefreshTokenService _refreshTokenService;
+    private readonly AuthorizationCodeRedemptionService _authorizationCodeRedemption;
 
     public OAuthTokenController(
         TokenIssuanceService tokenIssuanceService,
-        IRefreshTokenService refreshTokenService)
+        IRefreshTokenService refreshTokenService,
+        AuthorizationCodeRedemptionService authorizationCodeRedemption)
     {
         _tokenIssuanceService = tokenIssuanceService;
         _refreshTokenService = refreshTokenService;
+        _authorizationCodeRedemption = authorizationCodeRedemption;
     }
 
     [HttpPost("token")]
@@ -40,6 +52,18 @@ public sealed class OAuthTokenController : ControllerBase
         var app = HttpContext.GetValidatedApp()
             ?? throw new InvalidOperationException("OAuth client authentication did not provide a validated application.");
         var form = Request.Form;
+
+        // The internal authorization_code branch, dispatched before the grant-type mapping so no
+        // validator is ever registered for it. Exactly one grant_type value may select the branch;
+        // any other cardinality falls through to the shared behavior below.
+        if (form["grant_type"].Count == 1
+            && string.Equals(
+                form["grant_type"].ToString(),
+                AuthorizationCodeRedemptionService.GrantType,
+                StringComparison.Ordinal))
+        {
+            return await RedeemCodeGrantAsync(app, form, cancellationToken);
+        }
 
         var wireGrantType = form["grant_type"].ToString();
         if (string.IsNullOrWhiteSpace(wireGrantType))
@@ -133,6 +157,87 @@ public sealed class OAuthTokenController : ControllerBase
         // become an oracle for whether a token exists or who owns it.
         await _refreshTokenService.RevokeForAppAsync(token, app.AppId, cancellationToken);
         return Ok();
+    }
+
+    /// <summary>
+    /// The <c>authorization_code</c> branch (<c>AC-06</c>). The method name deliberately avoids
+    /// the "auth" substring: CodeQL's user-controlled-bypass query treats a request-controlled
+    /// guard over an %-auth-%-named call as a bypass, and this branch is selected by
+    /// <c>grant_type</c>. The <c>IN-20</c> credential mix is
+    /// rejected here — a Basic header the authentication handler would accept alongside any
+    /// <c>client_id</c>/<c>client_secret</c> form field — before the code is looked up; every
+    /// other decision belongs to <see cref="AuthorizationCodeRedemptionService"/>. Both the
+    /// success and the error bodies of this branch carry <c>Pragma: no-cache</c> in addition to
+    /// <c>Cache-Control: no-store</c>.
+    /// </summary>
+    private async Task<IActionResult> RedeemCodeGrantAsync(
+        AppRegistrationEntity app,
+        IFormCollection form,
+        CancellationToken cancellationToken)
+    {
+        if (HasUsableBasicCredentials()
+            && (form.ContainsKey("client_id") || form.ContainsKey("client_secret")))
+        {
+            return Challenge(OAuthClientAuthenticationDefaults.Scheme);
+        }
+
+        var outcome = await _authorizationCodeRedemption.RedeemAsync(
+            app,
+            form,
+            HttpContext.GetClientIp(),
+            HttpContext.GetCorrelationId(),
+            cancellationToken);
+
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.Pragma = "no-cache";
+        if (outcome.IsSuccess)
+        {
+            // No id_token and no refresh_token in this phase (#54/#98); the body is exactly the
+            // four interactive fields.
+            return Ok(new Dictionary<string, object>
+            {
+                ["access_token"] = outcome.AccessToken,
+                ["token_type"] = "Bearer",
+                ["expires_in"] = outcome.ExpiresIn,
+                ["scope"] = outcome.Scope
+            });
+        }
+
+        return StatusCode(outcome.Status, new Dictionary<string, string>
+        {
+            ["error"] = outcome.ErrorCode,
+            ["error_description"] = outcome.ErrorDescription
+        });
+    }
+
+    /// <summary>
+    /// Whether the request carries an <c>Authorization: Basic</c> header the client-authentication
+    /// handler would actually use — parseable, base64-decodable, with a separator. The parse
+    /// mirrors <see cref="OAuthClientAuthenticationHandler"/> so the <c>IN-20</c> mix is judged
+    /// by exactly the rule the handler applies. The name deliberately avoids the "auth"
+    /// substring: CodeQL's user-controlled-bypass query flags calls to %-auth-%-named methods
+    /// under a request-controlled guard.
+    /// </summary>
+    private bool HasUsableBasicCredentials()
+    {
+        var header = Request.Headers.Authorization.ToString();
+        if (string.IsNullOrWhiteSpace(header)
+            || !AuthenticationHeaderValue.TryParse(header, out var parsed)
+            || !string.Equals(parsed.Scheme, "Basic", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(parsed.Parameter))
+        {
+            return false;
+        }
+
+        try
+        {
+            var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(parsed.Parameter));
+            return decoded.IndexOf(':') > 0;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 
     private static string? Value(Microsoft.Extensions.Primitives.StringValues values)

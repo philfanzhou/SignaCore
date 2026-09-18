@@ -276,7 +276,14 @@ public sealed class IdentitySessionStore : IIdentitySessionStore
         return _repository.RemoveExpiredBeforeAsync(retentionCutoff, cancellationToken);
     }
 
-    private static IdentitySessionState Classify(
+    /// <summary>
+    /// The one session-availability classification, shared by every enforcement slice
+    /// (<see cref="GetAsync"/>, <see cref="TouchActivityAsync"/>, code redemption, authorize-side
+    /// reuse): a missing row invents no state, an explicit revocation outranks every expiry, and
+    /// an expiry boundary is inclusive. It decides session state only; account and application
+    /// policy belong to the calling transaction.
+    /// </summary>
+    public static IdentitySessionState Classify(
         IdentitySessionEntity? session,
         DateTimeOffset now)
     {

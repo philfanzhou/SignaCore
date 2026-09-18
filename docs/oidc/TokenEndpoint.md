@@ -107,7 +107,7 @@ provider execution strategy and is retry-safe as a unit (`PS-22`).
 
 | Observed result | Canonical outcome |
 | --- | --- |
-| Missing or failed client authentication | `IN-20`: 401 `invalid_client`; no code lookup side effect |
+| Missing or failed client authentication, including a deactivated application | `IN-20`: 401 `invalid_client`; no code lookup side effect |
 | Unknown grant or disabled code capability | `IN-21`/`EV-10`: `unsupported_grant_type` or `unauthorized_client`; code remains unconsumed |
 | Malformed code fields or present `scope` | `IN-22`–`IN-25`: `invalid_request`; no code state write |
 | Missing code | `EV-22`: generic `invalid_grant`; no replay audit |
@@ -154,5 +154,9 @@ legacy refresh row.
 
 #50 activates storage only (`AC-03`) and runs after #95 so its table carries the session reference
 from creation (`PS-23`); #53 activates internal code redemption only (`AC-06`).
+During `AC-06` the redemption response carries no `id_token` (added with `AC-07`) and no
+`refresh_token`, and a code containing `offline_access` is rejected with `invalid_grant` rather
+than redeemed without a refresh token — the gate lifts when the interactive refresh family lands
+(`AC-11`/`AC-12`).
 Discovery remains unchanged until #54 and its persistent-session prerequisites complete the whole
 core flow (`AC-07`). This document itself activates no route or metadata (`AC-14`).
