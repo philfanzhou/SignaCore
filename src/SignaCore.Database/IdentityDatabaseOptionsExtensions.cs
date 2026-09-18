@@ -4,9 +4,16 @@ namespace SignaCore.Database;
 
 public static class IdentityDatabaseOptionsExtensions
 {
+    /// <param name="enableRetryOnFailure">
+    /// Whether the PostgreSQL provider retries transient connection failures. The default keeps the
+    /// historical retrying strategy. The first-run setup completion transaction must pass
+    /// <c>false</c>: a retrying strategy replays a caller-opened transaction whole, which the shared
+    /// setup entry contract forbids (one attempt, then the caller retries).
+    /// </param>
     public static DbContextOptionsBuilder UseIdentityDatabase(
         this DbContextOptionsBuilder optionsBuilder,
-        DatabaseOptions databaseOptions)
+        DatabaseOptions databaseOptions,
+        bool enableRetryOnFailure = true)
     {
         databaseOptions.Validate();
 
@@ -17,10 +24,13 @@ public static class IdentityDatabaseOptionsExtensions
                 providerOptions =>
                 {
                     providerOptions.MigrationsAssembly(typeof(IdentityDbContext).Assembly.FullName);
-                    providerOptions.EnableRetryOnFailure(
-                        maxRetryCount: 3,
-                        maxRetryDelay: TimeSpan.FromSeconds(4),
-                        errorCodesToAdd: null);
+                    if (enableRetryOnFailure)
+                    {
+                        providerOptions.EnableRetryOnFailure(
+                            maxRetryCount: 3,
+                            maxRetryDelay: TimeSpan.FromSeconds(4),
+                            errorCodesToAdd: null);
+                    }
                 }),
             DatabaseProvider.Sqlite => optionsBuilder.UseSqlite(
                 databaseOptions.ConnectionString,

@@ -276,19 +276,9 @@ public static class ServiceCollectionExtensions
                         QueueLimit = 0
                     });
             });
-            // The setup endpoints are mapped by every host, so the policy their actions reference
-            // has to exist here too even though a configured, completed installation only ever
-            // answers 409 from them.
-            options.AddPolicy(Controllers.SetupController.RateLimitPolicy, context =>
-                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
-                    {
-                        AutoReplenishment = true,
-                        PermitLimit = 5,
-                        Window = TimeSpan.FromMinutes(1),
-                        QueueLimit = 0
-                    }));
+            // The setup completion entry is owned by the shared ServiceMantle setup group and is
+            // rate-limited by its own policy; a configured, completed installation only ever
+            // receives the fixed 409 replay answer from it.
             options.AddFixedWindowLimiter("default", opt =>
             {
                 opt.AutoReplenishment = true;
