@@ -22,8 +22,9 @@ namespace SignaCore.Host.Controllers;
 /// <para>
 /// The <c>authorization_code</c> grant is redeemed here too (<c>AC-06</c>), through
 /// <see cref="AuthorizationCodeRedemptionService"/> instead of the validator factory: the grant
-/// deliberately stays unregistered, so Discovery's derived <c>grant_types_supported</c> does not
-/// advertise the interactive flow before its core is complete (<c>AC-07</c>).
+/// deliberately stays unregistered with <see cref="TokenIssuanceService"/>, because this branch is
+/// not a validator-shaped credential grant. Discovery advertises <c>authorization_code</c>
+/// explicitly as a delivered capability (<c>AC-07</c>), never through validator registration.
 /// </para>
 /// </summary>
 [Route("oauth2")]
@@ -192,14 +193,16 @@ public sealed class OAuthTokenController : ControllerBase
         Response.Headers.Pragma = "no-cache";
         if (outcome.IsSuccess)
         {
-            // No id_token and no refresh_token in this phase (#54/#98); the body is exactly the
-            // four interactive fields.
+            // The canonical interactive scope always contains openid, so every successful
+            // redemption carries the ID token (PS-12/PS-14). A refresh_token joins only with the
+            // interactive refresh family (#98).
             return Ok(new Dictionary<string, object>
             {
                 ["access_token"] = outcome.AccessToken,
                 ["token_type"] = "Bearer",
                 ["expires_in"] = outcome.ExpiresIn,
-                ["scope"] = outcome.Scope
+                ["scope"] = outcome.Scope,
+                ["id_token"] = outcome.IdToken
             });
         }
 

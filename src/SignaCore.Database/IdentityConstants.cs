@@ -92,6 +92,13 @@ public static class IdentityConstants
     public const int InteractiveAccessTokenLifetimeSeconds = 900;
 
     /// <summary>
+    /// The fixed 5-minute lifetime of the interactive Authorization Code flow ID token
+    /// (<c>PS-12</c>); an ID token is an authentication statement, not a bearer credential,
+    /// so it outlives the code exchange only briefly.
+    /// </summary>
+    public const int InteractiveIdTokenLifetimeSeconds = 300;
+
+    /// <summary>
     /// The bound on the serialized compact JWS of an interactive access token (<c>PS-13</c>).
     /// A longer token fails issuance before anything commits; it is never truncated or issued.
     /// </summary>

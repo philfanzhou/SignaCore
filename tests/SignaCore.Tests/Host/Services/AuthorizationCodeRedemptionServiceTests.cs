@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
@@ -40,7 +41,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
     private const string Challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
     [Fact]
-    public async Task RedeemAsync_CommitsTheConsumptionTheAuditAndTheToken()
+    public async Task RedeemAsync_CommitsTheConsumptionTheAuditAndBothTokens()
     {
         await using var database = await CreateDatabaseAsync();
         var seed = await SeedAsync(database.Context);
@@ -55,6 +56,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         Assert.True(outcome.IsSuccess);
         Assert.Equal(IdentityConstants.InteractiveAccessTokenLifetimeSeconds, outcome.ExpiresIn);
         Assert.Equal("openid profile", outcome.Scope);
+        Assert.NotEqual(outcome.AccessToken, outcome.IdToken);
 
         var cancellationToken = TestContext.Current.CancellationToken;
         var codeRow = await database.Context.AuthorizationCodes.AsNoTracking()
@@ -85,6 +87,44 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         // admin rule injects role:admin for the configured account.
         Assert.Equal(Username, token.Claims.Single(c => c.Type == IdentityConstants.ClaimName).Value);
         Assert.Equal("admin", token.Claims.Single(c => c.Type == IdentityConstants.ClaimRole).Value);
+        // The access token never carries a nonce.
+        Assert.DoesNotContain(token.Claims, claim => claim.Type == JwtRegisteredClaimNames.Nonce);
+
+        // The ID token is a separate PS-12 artifact: no at+jwt type, the exact code-row nonce
+        // snapshot, the session's auth facts, and the profile sources — not the display-name
+        // resolution the access token uses.
+        var idToken = new JwtSecurityTokenHandler().ReadJwtToken(outcome.IdToken);
+        Assert.Equal("JWT", idToken.Header.Typ);
+        Assert.Equal(ClientId, idToken.Audiences.Single());
+        Assert.Equal(seed.AccountId.ToString(), idToken.Claims.Single(c => c.Type == IdentityConstants.ClaimSubject).Value);
+        Assert.Equal(seed.SessionId.ToString(), idToken.Claims.Single(c => c.Type == JwtRegisteredClaimNames.Sid).Value);
+        Assert.Equal(Nonce, idToken.Claims.Single(c => c.Type == JwtRegisteredClaimNames.Nonce).Value);
+        Assert.Equal("pwd", idToken.Claims.Single(c => c.Type == JwtRegisteredClaimNames.Amr).Value);
+        Assert.Equal(Username, idToken.Claims.Single(c => c.Type == IdentityConstants.ClaimName).Value);
+        Assert.Equal(
+            seed.AuthTime.ToUnixTimeSeconds(),
+            long.Parse(idToken.Claims.Single(c => c.Type == JwtRegisteredClaimNames.AuthTime).Value, CultureInfo.InvariantCulture));
+        Assert.Equal(
+            ((DateTimeOffset)idToken.IssuedAt).ToUnixTimeSeconds() + IdentityConstants.InteractiveIdTokenLifetimeSeconds,
+            ((DateTimeOffset)idToken.ValidTo).ToUnixTimeSeconds());
+        // The closed PS-12 set: no access-token binding claims and no enrichment of any kind.
+        Assert.DoesNotContain(idToken.Claims, claim => claim.Type is "scope" or IdentityConstants.ClaimClientId
+            or IdentityConstants.ClaimAuthMethod or IdentityConstants.ClaimRole or JwtRegisteredClaimNames.Jti);
+        Assert.Null(idToken.Payload.Nbf);
+
+        // A standard validator accepts the ID token through the same key material JWKS publishes.
+        var key = database.Key;
+        new JwtSecurityTokenHandler().ValidateToken(
+            outcome.IdToken,
+            new TokenValidationParameters
+            {
+                ValidIssuer = "https://redemption-unit.test",
+                ValidAudience = ClientId,
+                IssuerSigningKey = key,
+                ValidTypes = ["JWT"],
+                ValidateLifetime = true
+            },
+            out _);
     }
 
     [Fact]
@@ -110,6 +150,44 @@ public sealed class AuthorizationCodeRedemptionServiceTests
     public async Task RedeemAsync_WhenTheTokenExceedsTheMaximumLength_ReturnsServerErrorAndWritesNothing()
     {
         await using var database = await CreateDatabaseAsync(tokenFactory: new OversizedTokenFactory());
+        var seed = await SeedAsync(database.Context);
+
+        var outcome = await database.Service.RedeemAsync(
+            seed.Application,
+            CreateForm(seed.Code),
+            null,
+            CorrelationId,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(outcome.IsSuccess);
+        Assert.Equal(500, outcome.Status);
+        Assert.Equal("server_error", outcome.ErrorCode);
+        await AssertNothingWrittenAsync(database.Context, seed);
+    }
+
+    [Fact]
+    public async Task RedeemAsync_WhenTheIdTokenExceedsTheMaximumLength_ReturnsServerErrorAndWritesNothing()
+    {
+        await using var database = await CreateDatabaseAsync(idTokenFactory: new OversizedIdTokenFactory());
+        var seed = await SeedAsync(database.Context);
+
+        var outcome = await database.Service.RedeemAsync(
+            seed.Application,
+            CreateForm(seed.Code),
+            null,
+            CorrelationId,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(outcome.IsSuccess);
+        Assert.Equal(500, outcome.Status);
+        Assert.Equal("server_error", outcome.ErrorCode);
+        await AssertNothingWrittenAsync(database.Context, seed);
+    }
+
+    [Fact]
+    public async Task RedeemAsync_WhenTheIdTokenConstructionThrows_ReturnsServerErrorAndWritesNothing()
+    {
+        await using var database = await CreateDatabaseAsync(idTokenFactory: new ThrowingIdTokenFactory());
         var seed = await SeedAsync(database.Context);
 
         var outcome = await database.Service.RedeemAsync(
@@ -266,6 +344,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         Assert.DoesNotContain(seed.Code, dump, StringComparison.Ordinal);
         Assert.DoesNotContain(Verifier, dump, StringComparison.Ordinal);
         Assert.DoesNotContain(RedirectUri, dump, StringComparison.Ordinal);
+        Assert.DoesNotContain(Nonce, dump, StringComparison.Ordinal);
         Assert.DoesNotContain(seed.SessionId.ToString(), dump, StringComparison.Ordinal);
     }
 
@@ -277,7 +356,8 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         Guid CredentialId,
         Guid SessionId,
         Guid CodeId,
-        string Code);
+        string Code,
+        DateTimeOffset AuthTime);
 
     private static IFormCollection CreateForm(string code, string? verifier = null) =>
         new FormCollection(new Dictionary<string, StringValues>
@@ -291,18 +371,23 @@ public sealed class AuthorizationCodeRedemptionServiceTests
     private sealed class RedemptionDatabase(
         SqliteConnection connection,
         IdentityDbContext context,
-        AuthorizationCodeRedemptionService service) : IAsyncDisposable
+        AuthorizationCodeRedemptionService service,
+        StaticKeyManager keys) : IAsyncDisposable
     {
         public SqliteConnection Connection { get; } = connection;
         public IdentityDbContext Context { get; } = context;
         public AuthorizationCodeRedemptionService Service { get; } = service;
+        public StaticKeyManager Keys { get; } = keys;
+        public RsaSecurityKey Key => Keys.GetCurrentKey();
 
         public AuthorizationCodeRedemptionService CreateService(
             ILogger<AuthorizationCodeRedemptionService> logger) =>
             BuildService(
                 Context,
                 NullTokenFactory(),
+                NullIdTokenFactory(),
                 codeStore: null,
+                Keys,
                 logger);
 
         public async ValueTask DisposeAsync()
@@ -315,7 +400,9 @@ public sealed class AuthorizationCodeRedemptionServiceTests
     private static AuthorizationCodeRedemptionService BuildService(
         IdentityDbContext context,
         IInteractiveAccessTokenFactory tokenFactory,
+        IInteractiveIdTokenFactory idTokenFactory,
         IAuthorizationCodeStore? codeStore,
+        StaticKeyManager keys,
         ILogger<AuthorizationCodeRedemptionService> logger)
     {
         var unitOfWork = new EfCoreUnitOfWork(context);
@@ -327,8 +414,9 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             accountRepository,
             new PasswordCredentialRepository(context),
             tokenFactory,
+            idTokenFactory,
             callbackService: null,
-            new StaticKeyManager(),
+            keys,
             new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
             CreateMetrics(),
             unitOfWork,
@@ -339,6 +427,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
 
     private static async Task<RedemptionDatabase> CreateDatabaseAsync(
         IInteractiveAccessTokenFactory? tokenFactory = null,
+        IInteractiveIdTokenFactory? idTokenFactory = null,
         Func<IdentityDbContext, IAuthorizationCodeStore>? codeStoreOverride = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -347,18 +436,24 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             .UseSqlite(connection).Options);
         await context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
 
+        var keys = new StaticKeyManager();
         var service = BuildService(
             context,
             tokenFactory ?? NullTokenFactory(),
+            idTokenFactory ?? NullIdTokenFactory(),
             codeStoreOverride?.Invoke(context),
+            keys,
             NullLogger<AuthorizationCodeRedemptionService>.Instance);
-        return new RedemptionDatabase(connection, context, service);
+        return new RedemptionDatabase(connection, context, service, keys);
     }
 
     private static IInteractiveAccessTokenFactory NullTokenFactory() =>
         new InteractiveAccessTokenFactory(
             new JwtOptions { Issuer = "https://redemption-unit.test" },
             NullLogger<InteractiveAccessTokenFactory>.Instance);
+
+    private static IInteractiveIdTokenFactory NullIdTokenFactory() =>
+        new InteractiveIdTokenFactory(new JwtOptions { Issuer = "https://redemption-unit.test" });
 
     private static AuthMetrics CreateMetrics()
     {
@@ -415,7 +510,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             new AuthorizationCodeBinding(application.Id, RedirectUri, "openid profile", Nonce, Challenge),
             DateTimeOffset.UtcNow,
             cancellationToken);
-        return new Seed(application, accountId, credentialId, session.Id, creation.Id, creation.Code);
+        return new Seed(application, accountId, credentialId, session.Id, creation.Id, creation.Code, session.AuthTime);
     }
 
     private static async Task AssertNothingWrittenAsync(IdentityDbContext context, Seed seed)
@@ -445,6 +540,22 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             InteractiveAccessTokenDescriptor descriptor,
             RsaSecurityKey signingKey,
             DateTimeOffset now) => new InteractiveAccessTokenResult.ExceedsMaximumLength();
+    }
+
+    private sealed class ThrowingIdTokenFactory : IInteractiveIdTokenFactory
+    {
+        public InteractiveIdTokenResult Create(
+            InteractiveIdTokenDescriptor descriptor,
+            RsaSecurityKey signingKey,
+            DateTimeOffset now) => throw new InvalidOperationException("The ID token construction failed.");
+    }
+
+    private sealed class OversizedIdTokenFactory : IInteractiveIdTokenFactory
+    {
+        public InteractiveIdTokenResult Create(
+            InteractiveIdTokenDescriptor descriptor,
+            RsaSecurityKey signingKey,
+            DateTimeOffset now) => new InteractiveIdTokenResult.ExceedsMaximumLength();
     }
 
     /// <summary>

@@ -10,10 +10,11 @@ SignaCore exposes two token surfaces:
 Both run the same issuance pipeline (`TokenIssuanceService`), so authentication policy, auditing, metrics,
 and lockout behave identically; only the wire format differs.
 
-**This page describes the current runtime. SignaCore is still not an OpenID Connect provider.** It issues OAuth 2.0 access tokens. There is no
-`id_token` and no UserInfo endpoint. `GET /oauth2/authorize` exists as a route but cannot complete
-an authorization: it validates the request and answers locally, issues no authorization code, and is
-advertised in neither discovery document.
+**This page describes the current runtime.** SignaCore is now an OpenID Connect provider for a
+narrow, first-party profile: a pre-registered confidential BFF can complete the Authorization Code
+flow with mandatory PKCE S256 and receive an ID token. There is still no UserInfo endpoint and no
+interactive refresh token family, so `userinfo_endpoint` and `offline_access` are deliberately
+absent from Discovery.
 
 ## The standards endpoint
 
@@ -54,6 +55,27 @@ Per RFC 7009 §2.1 a token is revoked only when it was issued to the authenticat
 naming another client's token succeeds with HTTP 200 and changes nothing, so the response never reveals
 whether the token exists or who owns it.
 
+## The interactive Authorization Code flow
+
+`GET /oauth2/authorize` and the `authorization_code` grant at `POST /oauth2/token` implement the
+interactive core for a pre-registered confidential BFF (`PerApplication` audience mode, code flow
+enabled) and are advertised in both discovery documents:
+
+- `authorization_endpoint`, `response_types_supported: ["code"]`,
+  `code_challenge_methods_supported: ["S256"]`, `grant_types_supported` includes
+  `authorization_code`, and `scopes_supported: ["openid", "profile"]`.
+- A successful redemption returns `access_token` (`typ: at+jwt`, 15 minutes, audience = the
+  application AppId), `id_token` (`typ: JWT`, RS256, 5 minutes, audience = the client id), the
+  canonical `scope`, and `expires_in`, with `Cache-Control: no-store`.
+
+The ID token carries `iss`, stable `sub`, `aud`, `exp`, `iat`, the session's `auth_time`, `sid`,
+`amr: ["pwd"]`, and the exact authorization-request `nonce`; `name`/`nickname` appear only when
+`profile` was granted. It never carries roles, permissions, or callback claims. A BFF consuming it
+must validate the RS256 signature through the `kid`-selected JWKS key, the exact issuer, its own
+audience, the lifetime, the `typ`, and the one-time `nonce`, and must keep every token server-side;
+`offline_access` requests are rejected with `invalid_grant` until the interactive refresh family
+lands, so the response never contains a `refresh_token` from this flow.
+
 ## Access-token audience
 
 `aud` is controlled per application by `app_registrations.audience_mode`:
@@ -93,6 +115,8 @@ are made from the `client_id` claim, not from `aud`.
 | Client authentication (RFC 6749 §2.3.1) | `client_secret_basic`, `client_secret_post` |
 | Error responses (RFC 6749 §5.2) | Conforms at `/oauth2/*` |
 | Extension grant naming (RFC 6749 §4.5) | Absolute URIs |
+| Authorization Code + PKCE (RFC 6749 §4.1, RFC 7636) | Confidential-BFF interactive flow with mandatory S256; code redemption is atomic with replay detection |
+| ID tokens (OIDC Core 1.0 §2) | RS256, 5 minutes, `nonce`/`auth_time`/`sid`/`amr`, closed claim set; `id_token_signing_alg_values_supported: ["RS256"]` |
 | Revocation (RFC 7009) | Conforms at `/oauth2/revoke` |
 | Discovery (RFC 8414) | Served at `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`; advertises only endpoints and grants that exist |
 | Refresh-token rotation | Single-use rotation with atomic consumption |
@@ -103,10 +127,10 @@ are made from the `client_id` claim, not from `aud`.
 
 | Gap | Specification | Impact |
 | --- | --- | --- |
-| No `id_token` | OIDC Core 1.0 §2 | The defining OIDC artifact is absent; this is an OAuth 2.0 authorization server, not an OP |
-| No advertised authorization-code flow | RFC 6749 §4.1, RFC 7636 | The interactive pieces exist internally but are not advertised: `GET /oauth2/authorize` routes validated requests to the browser login that issues the code and the identity session, and `POST /oauth2/token` redeems that code with mandatory S256 PKCE for pre-registered confidential clients; Discovery still lists only the direct credential grants, so a conforming client cannot discover or complete the flow yet |
-| No UserInfo endpoint | OIDC Core 1.0 §5.3 | Profile data is only available through the JWT and the callback mechanism |
-| No `scope` | RFC 6749 §3.3 | There is no way to request or restrict a subset of authority |
+| ID tokens only for the interactive flow | OIDC Core 1.0 §2 | `id_token` exists for the confidential-BFF Authorization Code flow only; the direct credential grants keep returning access tokens alone |
+| No UserInfo endpoint | OIDC Core 1.0 §5.3 | Profile data is only available through the JWT and the callback mechanism; `userinfo_endpoint` is not advertised |
+| No interactive refresh family | OAuth 2.0 BCP, OIDC Core §11 | `offline_access` is rejected with `invalid_grant` and not advertised; the legacy `refresh_token` grant is unaffected |
+| No `scope` on the direct grants | RFC 6749 §3.3 | The direct credential grants have no way to request or restrict a subset of authority; the interactive flow's scope is fixed by the registration allow list |
 | The `password` grant is the primary flow | OAuth 2.1 draft, BCP 240 | The resource-owner password grant is deprecated in current guidance; it remains here because clients depend on it |
 | No refresh-token reuse detection | OAuth 2.0 Security BCP §4.14 | Replaying a consumed refresh token fails, but descendants of the replayed token are not revoked |
 | Development `Jwt:Issuer` defaults to `SignaCore` | RFC 8414 §2 | Development remains convenient; production startup requires an absolute HTTPS issuer unless an explicit temporary legacy override is enabled |

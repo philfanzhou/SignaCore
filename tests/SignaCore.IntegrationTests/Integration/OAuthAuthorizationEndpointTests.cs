@@ -1022,12 +1022,12 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
         Assert.Equal(before, after);
     }
 
-    // ---- Regression: the capability is not advertised ----
+    // ---- Regression: the advertised capability matches the delivered core ----
 
     [Theory]
     [InlineData("/.well-known/openid-configuration")]
     [InlineData("/.well-known/oauth-authorization-server")]
-    public async Task DiscoveryDocuments_DoNotAdvertiseTheAuthorizationEndpoint(string path)
+    public async Task DiscoveryDocuments_AdvertiseTheAuthorizationEndpointCore(string path)
     {
         using var http = _fixture.CreateHttpClient();
 
@@ -1035,14 +1035,19 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
             path,
             TestContext.Current.CancellationToken);
 
-        Assert.False(document.TryGetProperty("authorization_endpoint", out _));
-        Assert.False(document.TryGetProperty("code_challenge_methods_supported", out _));
-        Assert.Empty(document.GetProperty("response_types_supported").EnumerateArray());
+        Assert.True(document.TryGetProperty("authorization_endpoint", out _));
+        Assert.Equal(
+            ["S256"],
+            document.GetProperty("code_challenge_methods_supported").EnumerateArray()
+                .Select(value => value.GetString()));
+        Assert.Equal(
+            ["code"],
+            document.GetProperty("response_types_supported").EnumerateArray().Select(value => value.GetString()));
         var grantTypes = document.GetProperty("grant_types_supported")
             .EnumerateArray()
             .Select(value => value.GetString())
             .ToList();
-        Assert.DoesNotContain("authorization_code", grantTypes);
+        Assert.Contains("authorization_code", grantTypes);
     }
 
     private string Issuer => _fixture.Services.GetRequiredService<JwtOptions>().Issuer;
