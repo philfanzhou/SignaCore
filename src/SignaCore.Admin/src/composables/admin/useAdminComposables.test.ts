@@ -37,6 +37,8 @@ const mocks = vi.hoisted(() => ({
     updateUserRemark: vi.fn(),
     updateUserStatus: vi.fn(),
     getUserLoginHistory: vi.fn(),
+    getUserIdentitySessions: vi.fn(),
+    revokeIdentitySession: vi.fn(),
     getAuditLogs: vi.fn(),
     revokeRefreshToken: vi.fn(),
     getSettings: vi.fn(),
@@ -140,6 +142,11 @@ beforeEach(() => {
   mocks.api.getLdapDirectories.mockResolvedValue([])
   mocks.api.getUsers.mockResolvedValue(emptyPage)
   mocks.api.getUserLoginHistory.mockResolvedValue(emptyPage)
+  mocks.api.getUserIdentitySessions.mockResolvedValue(emptyPage)
+  mocks.api.revokeIdentitySession.mockResolvedValue({
+    success: true,
+    message: 'Identity session revoked.',
+  })
   mocks.api.getAuditLogs.mockResolvedValue(emptyPage)
   mocks.api.getSettings.mockResolvedValue({
     configurationVersion: 1,
@@ -381,6 +388,101 @@ describe('admin user directory', () => {
     expect(mocks.api.updateUserStatus).toHaveBeenCalledWith('user-1', false)
     state.closeUserDrawer()
     expect(state.selectedUser.value).toBeNull()
+  })
+
+  it('loads the identity sessions of the selected account', async () => {
+    const state = useAdminUsers()
+    const session = {
+      id: 'session-1',
+      status: 'active',
+      authMethod: 'Password',
+      authTime: 1,
+      lastSeenAt: 2,
+      idleExpiresAt: 3,
+      absoluteExpiresAt: 4,
+      revokedAt: null,
+      revocationReason: null,
+    }
+    mocks.api.getUserIdentitySessions.mockResolvedValue({
+      items: [session],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    })
+
+    state.openUser(user())
+    await nextTick()
+    expect(state.userSessionsTotal.value).toBe(1)
+    expect(state.userSessions.value).toEqual([session])
+
+    await state.loadUserSessions()
+    expect(mocks.api.getUserIdentitySessions).toHaveBeenCalledWith('user-1', {
+      page: 1,
+      pageSize: 20,
+    })
+  })
+
+  it('revokes a session after confirmation and reloads the list', async () => {
+    const state = useAdminUsers()
+    state.openUser(user())
+    await nextTick()
+
+    await state.revokeUserSession({
+      id: 'session-1',
+      status: 'active',
+      authMethod: 'Password',
+      authTime: 1,
+      lastSeenAt: 2,
+      idleExpiresAt: 3,
+      absoluteExpiresAt: 4,
+      revokedAt: null,
+      revocationReason: null,
+    })
+    expect(mocks.api.revokeIdentitySession).toHaveBeenCalledWith('user-1', 'session-1')
+    expect(mocks.api.getUserIdentitySessions).toHaveBeenCalled()
+    expect(state.userSessionRevokingId.value).toBe('')
+  })
+
+  it('does not revoke a session when the confirmation is cancelled', async () => {
+    const state = useAdminUsers()
+    state.openUser(user())
+    await nextTick()
+    mocks.confirm.mockRejectedValueOnce(new Error('cancel'))
+    mocks.api.revokeIdentitySession.mockClear()
+
+    await state.revokeUserSession({
+      id: 'session-1',
+      status: 'active',
+      authMethod: 'Password',
+      authTime: 1,
+      lastSeenAt: 2,
+      idleExpiresAt: 3,
+      absoluteExpiresAt: 4,
+      revokedAt: null,
+      revocationReason: null,
+    })
+    expect(mocks.api.revokeIdentitySession).not.toHaveBeenCalled()
+  })
+
+  it('surfaces revoke failures through the shared error handler', async () => {
+    const state = useAdminUsers()
+    state.openUser(user())
+    await nextTick()
+    mocks.api.revokeIdentitySession.mockRejectedValueOnce(new Error('boom'))
+
+    await state.revokeUserSession({
+      id: 'session-1',
+      status: 'active',
+      authMethod: 'Password',
+      authTime: 1,
+      lastSeenAt: 2,
+      idleExpiresAt: 3,
+      absoluteExpiresAt: 4,
+      revokedAt: null,
+      revocationReason: null,
+    })
+    expect(mocks.handleApiError).toHaveBeenCalledWith('撤销身份会话失败', expect.anything())
+    expect(state.userSessionRevokingId.value).toBe('')
   })
 })
 

@@ -27,6 +27,16 @@ public interface IRefreshTokenRepository
     Task AddAsync(
         RefreshTokenEntity refreshToken,
         CancellationToken cancellationToken = default);
+    /// <summary>
+    /// The minimal session-scoped whole-family revocation of <c>EV-15</c>/<c>EV-06</c>: a
+    /// conditional update over interactive rows only, with the first revocation fact staying
+    /// authoritative. Minimal by the #68/#72/#294 three-way agreement; the family write API
+    /// (#294) collects it when that slice merges.
+    /// </summary>
+    Task<int> RevokeInteractiveBySessionAsync(
+        Guid identitySessionId,
+        CancellationToken cancellationToken = default);
+
     Task RemoveRangeAsync(
         IEnumerable<RefreshTokenEntity> tokens,
         CancellationToken cancellationToken = default);

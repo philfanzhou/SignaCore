@@ -9,12 +9,31 @@ const {
   userHistory,
   userHistoryTotal,
   userHistoryLoading,
+  userSessions,
+  userSessionsTotal,
+  userSessionsLoading,
+  userSessionRevokingId,
   userMeta,
   updateUserMeta,
   toggleUser,
   closeUserDrawer,
   loadUserHistory,
+  loadUserSessions,
+  revokeUserSession,
 } = useAdminUsers();
+
+const sessionStatusText: Record<string, string> = {
+  active: "活动",
+  idleexpired: "空闲过期",
+  absoluteexpired: "绝对过期",
+  revoked: "已撤销",
+};
+
+function sessionStatusClass(status: string) {
+  if (status === "active") return "green";
+  if (status === "revoked") return "red";
+  return "gray";
+}
 </script>
 
 <template>
@@ -61,7 +80,15 @@ const {
             loadUserHistory();
           "
         >
-          登录历史 <span>{{ userHistoryTotal }}</span>
+          登录历史 <span>{{ userHistoryTotal }}</span></button
+        ><button
+          :class="{ active: userDrawerTab === 'sessions' }"
+          @click="
+            userDrawerTab = 'sessions';
+            loadUserSessions();
+          "
+        >
+          身份会话 <span>{{ userSessionsTotal }}</span>
         </button>
       </div>
       <div class="drawer-body">
@@ -122,7 +149,7 @@ const {
           >
             {{ selectedUser.isActive ? "禁用账户" : "启用账户" }}
           </button></template
-        ><template v-else
+        ><template v-else-if="userDrawerTab === 'history'"
           ><div v-if="userHistoryLoading" class="console-table-state">
             <span class="console-spinner"></span>读取登录历史…
           </div>
@@ -151,7 +178,53 @@ const {
               </div>
             </div>
           </div></template
-        >
+        ><template v-else
+          >
+          <div v-if="userSessionsLoading" class="console-table-state">
+            <span class="console-spinner"></span>读取身份会话…
+          </div>
+          <div v-else-if="!userSessions.length" class="console-table-state">
+            <span class="big-state-icon">⏱</span><b>暂无身份会话</b>
+          </div>
+          <div v-else class="history-list">
+            <div
+              v-for="session in userSessions"
+              :key="session.id"
+              class="history-row"
+            >
+              <span
+                class="status-dot"
+                :class="sessionStatusClass(session.status)"
+              ></span>
+              <div>
+                <b>
+                  {{ sessionStatusText[session.status] || session.status }} ·
+                  {{ session.authMethod }}
+                </b>
+                <p>登录 {{ formatDate(session.authTime) }}</p>
+                <p>
+                  最近活跃 {{ formatDate(session.lastSeenAt) }} · 空闲截止
+                  {{ formatDate(session.idleExpiresAt) }}
+                </p>
+                <small v-if="session.revokedAt" class="danger-text">
+                  已于 {{ formatDate(session.revokedAt) }} 撤销（原因：{{
+                    session.revocationReason || "未知"
+                  }}）
+                </small>
+              </div>
+              <button
+                v-if="session.status === 'active'"
+                class="console-button danger compact"
+                :disabled="userSessionRevokingId === session.id"
+                @click="revokeUserSession(session)"
+              >
+                {{
+                  userSessionRevokingId === session.id ? "撤销中…" : "撤销会话"
+                }}
+              </button>
+            </div>
+          </div>
+        </template>
       </div>
     </aside>
   </div>
