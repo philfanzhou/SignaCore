@@ -431,8 +431,10 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
         Assert.Equal(
             ["openid", "profile", "offline_access"],
             document.GetProperty("scopes_supported").EnumerateArray().Select(item => item.GetString()));
-        // userinfo_endpoint still waits for #55, and no other declaration changed with AC-12.
-        Assert.False(document.TryGetProperty("userinfo_endpoint", out _));
+        // userinfo_endpoint is advertised with the delivered UserInfo read (#55); no other
+        // declaration changed with AC-12.
+        var origin = $"{http.BaseAddress!.Scheme}://{http.BaseAddress.Authority}";
+        Assert.Equal($"{origin}/oauth2/userinfo", document.GetProperty("userinfo_endpoint").GetString());
         Assert.Equal(
             ["RS256"],
             document.GetProperty("id_token_signing_alg_values_supported").EnumerateArray()

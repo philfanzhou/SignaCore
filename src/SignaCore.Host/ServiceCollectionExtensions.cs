@@ -242,6 +242,9 @@ public static class ServiceCollectionExtensions
         // ---- Browser OIDC login failure commit path (canonical EV-17) ----
         services.AddScoped<OidcLoginFailureRecorder>();
 
+        // ---- Scope-controlled OIDC UserInfo read (AC-08), standalone validation pipeline ----
+        services.AddScoped<OidcUserInfoService>();
+
         // ---- Browser OIDC login success commit path (canonical EV-01) ----
         services.AddScoped<OidcLoginCompletionService>();
         services.AddScoped<OidcAuthorizationSessionReuseService>();

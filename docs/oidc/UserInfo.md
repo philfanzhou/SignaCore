@@ -84,6 +84,8 @@ carrier, maximum length and non-ASCII input, exact per-application audience, abs
 scope removal, and claim omission. `SC-10`–`SC-12` prove time and policy propagation; `SC-18` proves
 that missing authority invents no state.
 
-The route is not usable and `userinfo_endpoint` stays absent until #55 is implemented after #96
-(`AC-08`). This target document changes no current `/api/profile/*` route, JWT policy, CORS policy,
-grant, or metadata (`AC-14`).
+The route is delivered (#55) and `userinfo_endpoint` is advertised in both Discovery documents
+(`AC-08`). The delivered endpoint composes the host's CORS middleware by path so this route is
+never CORS-evaluated — no `Access-Control-Allow-*` header and no useful preflight — because the
+ServiceMantle pipeline rejects endpoint-level CORS metadata on this host. No `/api/profile/*`
+route, JWT policy, grant, or other metadata changed (`AC-14`).
