@@ -42,6 +42,7 @@ const createAppForm = reactive({
   appName: "",
   callbackUrl: "",
   ttlSeconds: 86400,
+  clientType: "Confidential" as "Confidential" | "Public",
 });
 const appActionModal = ref<AppActionModal>(null);
 const secretValue = ref("");
@@ -82,6 +83,7 @@ function resetAppForm() {
     appName: "",
     callbackUrl: "",
     ttlSeconds: 86400,
+    clientType: "Confidential",
   });
 }
 
@@ -174,11 +176,17 @@ async function createApp() {
       appName: createAppForm.appName.trim(),
       callbackUrl: createAppForm.callbackUrl.trim() || undefined,
       ttlSeconds: Math.max(0, Number(createAppForm.ttlSeconds) || 0),
+      clientType: createAppForm.clientType,
     });
     appModalOpen.value = false;
-    secretValue.value = created.appSecret;
-    secretAcknowledged.value = false;
-    appActionModal.value = "secret";
+    if (created.appSecret === null) {
+      // A Public client never holds a secret: there is nothing to show once, so no secret modal.
+      notify("Public 应用已注册，不生成 App Secret");
+    } else {
+      secretValue.value = created.appSecret;
+      secretAcknowledged.value = false;
+      appActionModal.value = "secret";
+    }
     resetAppForm();
     await loadApps();
   } catch (error) {

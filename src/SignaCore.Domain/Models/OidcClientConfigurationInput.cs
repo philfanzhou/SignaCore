@@ -23,8 +23,11 @@ namespace SignaCore.Domain.Models;
 public sealed class OidcClientConfigurationInput
 {
     /// <summary>
-    /// <c>Confidential</c> or <c>Public</c>. Null or empty means <c>Confidential</c>, which is the
-    /// fail-closed upgrade default; <c>Public</c> is reserved and cannot hold any capability.
+    /// <c>Confidential</c> or <c>Public</c>. Null or empty keeps the application's current type
+    /// (a brand-new application defaults to <c>Confidential</c>); an omitted value is never a
+    /// silent conversion. A <c>Public</c> client holds no secret and remains fail closed: no
+    /// capability may be enabled on it, and an existing <c>Confidential</c> client cannot be
+    /// downgraded to <c>Public</c>.
     /// </summary>
     public string? ClientType { get; set; }
 

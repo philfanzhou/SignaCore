@@ -32,7 +32,7 @@ tasks must preserve the separation in their schema, DTOs, labels, and tests.
 | Policy field | Canonical owner | Implementation consequence |
 | --- | --- | --- |
 | `allow_authorization_code` | `PS-01`, `PS-21` | Gates browser authorization and code redemption; old applications remain fail closed |
-| `client_type` | `PS-21` | Only confidential clients are actionable in this phase; public is reserved fail-closed data |
+| `client_type` | `PS-21` | Public clients are registrable and never hold a secret or a hash; every protocol surface still requires Confidential, so a Public registration stays fail closed and non-actionable until its capability task (#82) |
 | `allowed_scopes` | `PS-21`, `IN-04` | Closed set with canonical ordering; request validation never invents or silently narrows scope |
 | `allow_refresh_token` | `PS-21`, `EV-11` | Controls whether `offline_access` can be configured and what a later state change does |
 | Redirect URI sets | `PS-02`, `PS-20` | Independent ordered registrations, never derived from the claims callback |

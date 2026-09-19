@@ -128,7 +128,9 @@ async function handleCreateApp() {
     ElMessage.success('应用创建成功')
     showCreateAppDialog.value = false
     resetCreateAppForm()
-    latestCreatedAppSecret.value = result.appSecret
+    // The legacy console only registers Confidential apps (no clientType), so a secret is always
+    // issued; the null branch exists solely because the shared API type also serves Public.
+    latestCreatedAppSecret.value = result.appSecret ?? ''
     latestSecretAppId.value = result.appId
     secretSavedConfirmed.value = false
     secretCopied.value = false

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using SignaCore.Database;
+using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Validators;
 
@@ -47,6 +48,14 @@ public class GatewayValidationService
         if (app.CallbackExpiresAt.HasValue && app.CallbackExpiresAt < DateTimeOffset.UtcNow)
         {
             return GatewayAuthResult.Failure("App registration has expired");
+        }
+
+        // A Public client holds no secret, and an empty hash is never a verifiable credential
+        // (BCrypt throws on it instead of returning false): both fail closed with the exact shape
+        // of a wrong secret — no exception, no 500, and no type or hash-state disclosure.
+        if (app.ClientType == OidcClientType.Public || string.IsNullOrEmpty(app.AppSecretHash))
+        {
+            return GatewayAuthResult.Failure("AppSecret mismatch");
         }
 
         if (!BCrypt.Net.BCrypt.Verify(appSecret, app.AppSecretHash))

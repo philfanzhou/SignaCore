@@ -351,8 +351,8 @@ const { tokenModalOpen } = useAdminSecurity();
                 >
               </div>
               <p v-if="isPublicClient" class="section-description">
-                Public 客户端目前是保留状态，控制台不提供启用路径，也不会提交 Public
-                配置。
+                Public 客户端不持有 Secret，也没有重置入口；授权码与 refresh
+                能力保持关闭（由后续任务开放），控制台不提供启用路径。
               </p>
               <p v-if="oidcError" class="inline-error">
                 {{ oidcError }}
@@ -546,6 +546,7 @@ const { tokenModalOpen } = useAdminSecurity();
           </div>
           <div class="danger-actions">
             <button
+              v-if="!isPublicClient"
               class="danger-action"
               @click="appActionModal = 'reset-secret'"
             >
