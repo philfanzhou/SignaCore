@@ -49,4 +49,17 @@ public class PasswordCredentialRepository : IPasswordCredentialRepository
         return await _dbContext.PasswordCredentials
             .AnyAsync(c => c.UsernameNormalized == normalizedUsername, cancellationToken);
     }
+
+    public async Task<int> UpdatePasswordHashAsync(
+        Guid credentialId,
+        string newPasswordHash,
+        CancellationToken cancellationToken = default)
+    {
+        // A direct conditional write so the hash change participates in the caller's transaction
+        // exactly like the revocation primitives; only the hash column is touched.
+        return await _dbContext.PasswordCredentials
+            .Where(c => c.Id == credentialId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(c => c.PasswordHash, newPasswordHash), cancellationToken);
+    }
 }

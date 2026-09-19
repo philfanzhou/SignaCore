@@ -258,6 +258,22 @@ public class RefreshTokenRepository : IRefreshTokenRepository
                 .SetProperty(token => token.IsRevoked, true), cancellationToken);
     }
 
+    public async Task<int> RevokeLegacyByAccountAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        // The self-service password-change transaction's legacy disposal: the mirror image of
+        // RevokeByAccountAsync — legacy rows only (IdentitySessionId == null, PS-07). Kept as a
+        // separate primitive so the EV-08 account-disable contract (interactive-only) is
+        // unchanged. First fact stays authoritative, so an idempotent retry changes nothing.
+        return await _dbContext.RefreshTokens
+            .Where(token => token.AccountId == accountId
+                && token.IdentitySessionId == null
+                && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.IsRevoked, true), cancellationToken);
+    }
+
     public async Task<int> RevokeByApplicationAsync(
         string appId,
         CancellationToken cancellationToken = default)
