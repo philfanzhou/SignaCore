@@ -3,6 +3,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="SignaCore.Tests" />
     <InternalsVisibleTo Include="SignaCore.IntegrationTests" />
+    <InternalsVisibleTo Include="SignaCore.ReferenceBff.Tests" />
   </ItemGroup>
 
   <ItemGroup>

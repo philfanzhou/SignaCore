@@ -136,6 +136,23 @@ jobs:
             --results-directory reports \
             --no-restore
 
+      # The reference BFF keeps its own test project: its failures must not mix with the
+      # SignaCore slices' signals, and its assemblies stay out of the unit coverage gate's
+      # denominator. Like the integration step, it carries no coverage minimum.
+      - name: Reference BFF tests
+        run: |
+          dotnet restore tests/SignaCore.ReferenceBff.Tests/SignaCore.ReferenceBff.Tests.csproj
+          dotnet test tests/SignaCore.ReferenceBff.Tests/SignaCore.ReferenceBff.Tests.csproj \
+            --configuration Release \
+            --coverage \
+            --coverage-output signacore-reference-bff.cobertura.xml \
+            --coverage-output-format cobertura \
+            --coverage-settings tests/coverage.settings.xml \
+            --report-xunit-trx \
+            --report-xunit-trx-filename signacore-reference-bff.trx \
+            --results-directory reports \
+            --no-restore
+
       - name: Pre-pull PostgreSQL image
         run: .github/scripts/docker-pull.sh "$SIGNACORE_POSTGRES_IMAGE"
 
