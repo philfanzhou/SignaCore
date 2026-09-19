@@ -303,6 +303,10 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
     // strategy would replay the whole user transaction, which the shared entry contract forbids.
     builder.Services.AddDbContext<IdentityDbContext>(options =>
         options.UseIdentityDatabase(setupDatabaseOptions, enableRetryOnFailure: false));
+    // The completion writes the shared service_settings aggregate through the same transactional
+    // update service the normal host composes; no snapshot services exist before the first
+    // snapshot can.
+    builder.Services.AddSignaCoreSharedSettingUpdates(builder.Environment.IsDevelopment());
     // The shared setup entry reads the installation authority through this store; the readiness
     // snapshot reads it through the same source below.
     builder.Services.AddScoped<ServiceMantle.Installation.IServiceInstallationStore>(
@@ -455,7 +459,12 @@ builder.Services.AddSingleton<IBootstrapCredentialStore>(
 builder.Services.AddSingleton(bootstrapResult.RuntimeState);
 builder.Services.AddSingleton(bootstrapResult.SettingsStore);
 
-// ---- Shared ServiceMantle setting stack (parallel to the legacy system_settings path) ----
+// The bootstrap phase activated the runtime snapshot on this exact accessor instance. Registering
+// it before the shared setting stack lets the stack's TryAdd adoption keep the activated snapshot
+// visible to IServiceSettingCurrentSnapshotAccessor and ServiceSettingQueryService consumers.
+builder.Services.AddSingleton(bootstrapResult.CurrentSnapshotAccessor);
+
+// ---- Shared ServiceMantle setting stack (the runtime snapshot authority since #548) ----
 builder.Services.AddSignaCoreSharedSettings(
     SignaCoreBootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database),
     builder.Environment.IsDevelopment());

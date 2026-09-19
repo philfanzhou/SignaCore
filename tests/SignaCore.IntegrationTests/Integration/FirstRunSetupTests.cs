@@ -298,8 +298,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
         await using var db = OpenDatabase();
-        var settings = await db.SystemSettings.ToDictionaryAsync(setting => setting.Key, cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal("true", settings[SystemSettingKeys.SecurityAllowNonHttpsIssuer].Value);
+        Assert.Equal("true", (await ReadAggregateValuesAsync(db))["security.allow_non_https_issuer"]);
     }
 
     [Fact]
@@ -314,9 +313,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         await using var db = OpenDatabase();
         Assert.Equal(
             "urn:example:services",
-            (await db.SystemSettings.SingleAsync(
-                setting => setting.Key == SystemSettingKeys.JwtAudience,
-                cancellationToken: TestContext.Current.CancellationToken)).Value);
+            (await ReadAggregateValuesAsync(db))["jwt.audience"]);
     }
 
     [Fact]
@@ -342,18 +339,22 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         // The one-time code is invalidated in the same transaction that completes installation.
         Assert.Null(installation.SetupCodeDigest);
         Assert.Null(installation.SetupCodeExpiresAtUtc);
-        // The completion published configuration version 1.
-        Assert.Equal(1, await db.SystemSettings.MaxAsync(
-            setting => (int?)setting.Version, cancellationToken: TestContext.Current.CancellationToken));
+        // The completion published the shared aggregate as its first version.
+        var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken);
+        Assert.NotNull(aggregate);
+        Assert.Equal(1, aggregate!.Version);
 
         var credential = await db.PasswordCredentials.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(AdminUsername, credential.Username);
         Assert.True(BCrypt.Net.BCrypt.Verify(AdminPassword, credential.PasswordHash));
 
-        var settings = await db.SystemSettings.ToDictionaryAsync(setting => setting.Key, cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal(PublicBaseUrl, settings[SystemSettingKeys.PublicBaseUrl].Value);
-        Assert.Equal(PublicBaseUrl, settings[SystemSettingKeys.JwtIssuer].Value);
-        Assert.Equal(AdminUsername, settings[SystemSettingKeys.AdminUsername].Value);
+        var aggregateValues = SharedSettingTestDatabase.ParseValues(aggregate);
+        Assert.Equal(PublicBaseUrl, aggregateValues["endpoints.public_base_url"]);
+        Assert.Equal(PublicBaseUrl, aggregateValues["jwt.issuer"]);
+        Assert.Equal(AdminUsername, aggregateValues["admin.username"]);
+        // The switched completion writes the shared aggregate only; the legacy table stays empty.
+        Assert.False(await db.SystemSettings.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
 
         var audit = await db.AuditLogs.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("installation.setup.completed", audit.Action);
@@ -378,9 +379,9 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// The administrator password exists only as its hash, and secret settings only as encrypted
-    /// envelopes. Neither may be recoverable by reading the tables, and neither may surface in the
-    /// audit projection.
+    /// The administrator password exists only as its hash, and secret settings only as shared
+    /// protection envelopes. Neither may be recoverable by reading the tables, and neither may
+    /// surface in the audit projection.
     /// </summary>
     [Fact]
     public async Task Setup_NeverStoresPlaintextCredentialsOrSecretSettings()
@@ -400,14 +401,17 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Null(audit.BeforeSnapshot);
         Assert.Null(audit.AfterSnapshot);
 
-        var secrets = await db.SystemSettings.Where(setting => setting.IsSecret).ToListAsync(
-            cancellationToken: TestContext.Current.CancellationToken);
-        Assert.NotEmpty(secrets);
-        var protector = new AesGcmConfigurationProtector(new BootstrapMasterKeyProvider(RootSecret));
-        foreach (var secret in secrets)
+        var aggregateValues = await ReadAggregateValuesAsync(db);
+        var sensitiveKeys = SystemSettingsCatalog.Definitions
+            .Where(definition => definition.IsSecret)
+            .Select(definition => SharedSettingKeys.NormalizedByLegacyKey[definition.Key])
+            .ToList();
+        Assert.NotEmpty(sensitiveKeys);
+        foreach (var sensitiveKey in sensitiveKeys)
         {
-            // Stored form is an opaque envelope; only the configured root key recovers the value.
-            Assert.NotEqual(protector.Unprotect(secret.Key, secret.Value), secret.Value);
+            // Stored form is an opaque shared-protector envelope; only the configured root key
+            // recovers the value.
+            Assert.StartsWith("sm:v1:", aggregateValues[sensitiveKey], StringComparison.Ordinal);
         }
     }
 
@@ -443,9 +447,11 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
 
         await using var db = OpenDatabase();
         Assert.Equal(1, await db.PasswordCredentials.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
-        // The completion published configuration version 1: every stored settings row carries it.
-        Assert.Equal(1, await db.SystemSettings.MaxAsync(
-            setting => (int?)setting.Version, cancellationToken: TestContext.Current.CancellationToken));
+        // The completion published the shared aggregate as its first version.
+        var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken);
+        Assert.NotNull(aggregate);
+        Assert.Equal(1, aggregate!.Version);
     }
 
     /// <summary>
@@ -511,8 +517,9 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// A completed installation whose settings were deleted must fail closed, not reopen setup —
-    /// otherwise deleting rows would hand the service to the next anonymous visitor.
+    /// A completed installation whose aggregate lost a required key must fail closed, not reopen
+    /// setup — otherwise damaging the aggregate would hand the service to the next anonymous
+    /// visitor.
     /// </summary>
     [Fact]
     public async Task CompletedInstallationWithMissingSettings_FailsClosedInsteadOfReopeningSetup()
@@ -527,9 +534,15 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
 
         await using (var db = OpenDatabase())
         {
-            await db.SystemSettings
-                .Where(setting => setting.Key == SystemSettingKeys.JwtAudience)
-                .ExecuteDeleteAsync(cancellationToken: TestContext.Current.CancellationToken);
+            // Remove one required key without a default from the aggregate's persisted values.
+            var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
+                db, TestContext.Current.CancellationToken);
+            Assert.NotNull(aggregate);
+            var values = SharedSettingTestDatabase.ParseValues(aggregate!);
+            Assert.True(values.Remove("endpoints.public_base_url"));
+            await db.Database.ExecuteSqlAsync(
+                $"""UPDATE service_settings SET values_json = {JsonSerializer.Serialize(values)}""",
+                TestContext.Current.CancellationToken);
         }
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(async () =>
@@ -538,7 +551,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             await http.GetAsync("/health/live", TestContext.Current.CancellationToken);
         });
 
-        Assert.Contains(SystemSettingKeys.JwtAudience, Flatten(exception), StringComparison.Ordinal);
+        Assert.Contains("endpoints.public_base_url", Flatten(exception), StringComparison.Ordinal);
 
         await using var verifyDb = OpenDatabase();
         Assert.Equal(InstallationStatus.Completed, (await verifyDb.ServiceInstallations.SingleAsync(
@@ -616,8 +629,19 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(existingAccounts, await db.Accounts.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(existingCredentials, await db.PasswordCredentials.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.False(await db.SystemSettings.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Null(await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken));
         Assert.False(await db.AuditLogs.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
         await AssertInstallationStillPendingAsync();
+    }
+
+    /// <summary>Reads the shared aggregate's persisted values as a plain dictionary.</summary>
+    private static async Task<Dictionary<string, string>> ReadAggregateValuesAsync(IdentityDbContext db)
+    {
+        var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken);
+        Assert.NotNull(aggregate);
+        return SharedSettingTestDatabase.ParseValues(aggregate!);
     }
 
     private static string Flatten(Exception exception)

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using ServiceMantle;
 using ServiceMantle.AspNetCore;
 using ServiceMantle.Configuration;
@@ -90,26 +91,24 @@ internal static class ServiceMantleComposition
     }
 
     /// <summary>
-    /// Registers the shared ServiceMantle setting stack in the normal host: the product definitions,
-    /// the composite validator, the EF Core single-aggregate store, the transactional update path,
-    /// the root key source, and the snapshot/query services.
+    /// Registers the shared ServiceMantle setting stack in the normal host: the product
+    /// definitions, the composite validator, the EF Core single-aggregate store, the transactional
+    /// update path, the root key source, and the snapshot/query services.
     /// </summary>
     /// <remarks>
-    /// This is a parallel addition: the legacy <c>system_settings</c> path, its endpoints, and the
-    /// first-run setup write path stay untouched; the new aggregate starts empty at version 0.
-    /// Setup and Bootstrap mode hosts deliberately do not register any of this. The update
-    /// transaction and update service are scoped over the same scoped <c>IdentityDbContext</c> the
-    /// host already registers; the store owns its contexts through the factory.
+    /// This is a parallel addition: the legacy <c>system_settings</c> read path of the admin
+    /// console and the legacy import stay untouched. The update transaction and update service are
+    /// scoped over the same scoped <c>IdentityDbContext</c> the host already registers; the store
+    /// owns its contexts through the factory. When the bootstrap phase pre-registered its activated
+    /// <see cref="ServiceSettingCurrentSnapshotAccessor"/> instance, the snapshot registrations
+    /// adopt that instance instead of building a second one.
     /// </remarks>
     internal static IServiceCollection AddSignaCoreSharedSettings(
         this IServiceCollection services,
         DatabaseOptions databaseOptions,
         bool isDevelopment)
     {
-        services.AddSingleton<IServiceSettingDefinitionProvider, ServiceSettingDefinitions>();
-        services.AddSingleton<IServiceSettingCompositeValidator>(_ =>
-            new SignaCoreSettingCompositeValidator(isDevelopment));
-        services.AddSingleton<IServiceSettingRootKeySource, MasterKeyRootKeySource>();
+        services.AddSignaCoreSharedSettingUpdates(isDevelopment);
 
         // The shared store creates and releases its own contexts; both registrations use the same
         // provider options as the scoped business context.
@@ -119,6 +118,35 @@ internal static class ServiceMantleComposition
             new EfCoreServiceSettingStore<IdentityDbContext>(
                 serviceProvider.GetRequiredService<IDbContextFactory<IdentityDbContext>>()));
 
+        services.AddServiceMantleSettingSnapshots();
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the transactional shared setting update path without any snapshot or store
+    /// services: the product definitions, the composite validator, the definition registry, the
+    /// root key source, and the scoped update transaction and update service over the caller's
+    /// scoped <c>IdentityDbContext</c>.
+    /// </summary>
+    /// <remarks>
+    /// The PendingSetup host registers exactly this so first-run completion writes the shared
+    /// aggregate through the same update service the normal host composes, while nothing resolves
+    /// a snapshot loader before a snapshot can exist. The context registration must disable the
+    /// retrying execution strategy — the completion transaction is caller-opened and may be
+    /// attempted exactly once.
+    /// </remarks>
+    internal static IServiceCollection AddSignaCoreSharedSettingUpdates(
+        this IServiceCollection services,
+        bool isDevelopment)
+    {
+        services.AddSingleton<IServiceSettingDefinitionProvider, ServiceSettingDefinitions>();
+        services.AddSingleton<IServiceSettingCompositeValidator>(_ =>
+            new SignaCoreSettingCompositeValidator(isDevelopment));
+        services.AddSingleton<IServiceSettingRootKeySource, MasterKeyRootKeySource>();
+        services.TryAddSingleton(serviceProvider => new ServiceSettingDefinitionRegistry(
+            serviceProvider.GetServices<IServiceSettingDefinitionProvider>(),
+            serviceProvider.GetServices<IServiceSettingCompositeValidator>()));
+
         services.AddScoped<IServiceSettingUpdateTransaction>(serviceProvider =>
             new EfCoreServiceSettingUpdateTransaction<IdentityDbContext>(
                 serviceProvider.GetRequiredService<IdentityDbContext>()));
@@ -127,8 +155,6 @@ internal static class ServiceMantleComposition
             serviceProvider.GetRequiredService<ServiceSettingDefinitionRegistry>(),
             serviceProvider.GetRequiredService<IServiceSettingUpdateTransaction>(),
             serviceProvider.GetRequiredService<IServiceSettingRootKeySource>()));
-
-        services.AddServiceMantleSettingSnapshots();
         return services;
     }
 }

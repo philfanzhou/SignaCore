@@ -49,6 +49,15 @@ public sealed class SharedSettingProjectionTests : IClassFixture<IdentityServerF
     {
         var service = _fixture.Services.GetRequiredService<ServiceSettingQueryService>();
 
+        // 0. The host's startup migrated the legacy rows (#548); delete the aggregate row to
+        //    recreate the empty-aggregate state the query contract has to fail closed on.
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<SignaCore.Database.IdentityDbContext>();
+            await SharedSettingTestDatabase.DeleteAggregateAsync(
+                context, TestContext.Current.CancellationToken);
+        }
+
         // 1. The aggregate starts empty and the setup-collected keys are required without
         //    defaults, so the current-values query is not servable until the first update.
         var empty = await service.GetCurrentAsync(TestContext.Current.CancellationToken);
@@ -58,17 +67,26 @@ public sealed class SharedSettingProjectionTests : IClassFixture<IdentityServerF
         Assert.All(empty.Errors, error =>
             Assert.Matches("^[a-z0-9][a-z0-9._-]*$", error.ErrorCode));
 
-        // 2. Seed the aggregate once through the real composed update path.
+        // 2. Seed the aggregate once through the real composed update path. The process-local
+        //    loader keeps the boot snapshot at version 1, and a same-version candidate with
+        //    different content is a conflict by contract — so a second update advances the version
+        //    before the query can serve the reseeded aggregate.
         using (var scope = _fixture.Services.CreateScope())
         {
             var context = scope.ServiceProvider.GetRequiredService<SignaCore.Database.IdentityDbContext>();
             await using var transaction = await context.Database.BeginTransactionAsync(
                 TestContext.Current.CancellationToken);
             var update = scope.ServiceProvider.GetRequiredService<ServiceSettingUpdateService>();
-            var result = await update.UpdateAsync(
+            var seed = await update.UpdateAsync(
                 new ServiceSettingUpdateCommand(0, SeedChanges(), Operator),
                 TestContext.Current.CancellationToken);
-            Assert.True(result.Succeeded);
+            Assert.True(seed.Succeeded);
+            Assert.Equal(1, seed.Version);
+            var advance = await update.UpdateAsync(
+                new ServiceSettingUpdateCommand(1, SeedChanges(), Operator),
+                TestContext.Current.CancellationToken);
+            Assert.True(advance.Succeeded);
+            Assert.Equal(2, advance.Version);
             await transaction.CommitAsync(TestContext.Current.CancellationToken);
         }
 
@@ -76,7 +94,7 @@ public sealed class SharedSettingProjectionTests : IClassFixture<IdentityServerF
         //    values behind the boundary.
         var seeded = await service.GetCurrentAsync(TestContext.Current.CancellationToken);
         Assert.True(seeded.Succeeded);
-        Assert.Equal(1, seeded.Version);
+        Assert.Equal(2, seeded.Version);
         var byKey = seeded.Values.ToDictionary(value => value.Key, StringComparer.Ordinal);
 
         var baseUrl = byKey["endpoints.public_base_url"];

@@ -22,7 +22,8 @@ SignaCore uses one EF Core model with provider-specific migrations for PostgreSQ
 | [refresh_tokens](./tables/refresh_tokens.md) | Rotating, revocable refresh credentials bound to an account and application. |
 | [security_keys](./tables/security_keys.md) | RSA signing-key metadata and encrypted private parameters. |
 | [service_installations](./tables/service_installations.md) | Shared ServiceMantle installation state and one-time setup-code state (the runtime authority). |
-| [system_settings](./tables/system_settings.md) | Global application configuration, with secret values encrypted. |
+| [service_settings](./tables/service_settings.md) | Shared settings aggregate — the authoritative global application configuration, with secret values encrypted. |
+| [system_settings](./tables/system_settings.md) | Legacy global application configuration (read-only after the runtime switch). |
 | [user_logins](./tables/user_logins.md) | External provider identity bindings, including phone and WeChat identities. |
 | [ldap_credentials](./tables/ldap_credentials.md) | LDAP directory identity bindings. |
 | [app_ldap_accesses](./tables/app_ldap_accesses.md) | Per-application LDAP identity admissions. |

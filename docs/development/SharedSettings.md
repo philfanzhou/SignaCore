@@ -1,11 +1,15 @@
 # Shared settings stack
 
-SignaCore registers its product configuration on the shared ServiceMantle setting contract, in
-parallel to the legacy `system_settings` path. This stack is composed only in the normal host;
-Setup Mode and Bootstrap Configuration Mode deliberately keep their existing composition.
+SignaCore registers its product configuration on the shared ServiceMantle setting contract. Since
+the runtime switch, this stack is the configuration authority: the bootstrap phase activates the
+shared snapshot, `IConfiguration` is fed through the reverse projection onto the legacy colon
+keys, and first-run setup writes the shared aggregate. The legacy `system_settings` table stays as
+read-only legacy data, still served by the legacy admin console endpoints and the legacy import
+until their own switches land.
 
-> Status: implemented (ServiceMantle task #101). The legacy path stays fully operational; the
-> switch, the data import, and the removal of the old path are tracked separately.
+> Status: implemented (ServiceMantle tasks #101 and #547, runtime switch #548). The legacy read
+> path of the admin console and the legacy configuration import are tracked separately; removing
+> the old types is tracked after those.
 
 ## What is registered
 
@@ -21,7 +25,9 @@ Setup Mode and Bootstrap Configuration Mode deliberately keep their existing com
 
 Everything lives in `src/SignaCore.Host/Configuration/` and is internal; no public API is added.
 The composition entry point is `ServiceMantleComposition.AddSignaCoreSharedSettings`, called from
-`Program.cs` after the identity infrastructure.
+`Program.cs` after the identity infrastructure. The PendingSetup host registers only the
+transactional update path (`AddSignaCoreSharedSettingUpdates`) so first-run completion writes the
+aggregate; nothing that reads or publishes a runtime snapshot is composed before one can exist.
 
 ## Key mapping
 
@@ -53,6 +59,31 @@ keys, SMS/LDAP/WeChat binder validation, reverse-proxy IP parsing). Equivalence 
 `SharedSettingEquivalenceTests`, which feeds equivalent snapshots to both validators and requires
 identical accept/reject outcomes.
 
+## Runtime activation (#548)
+
+- During the bootstrap phase, inside the startup initialization lock, a database whose aggregate is
+  still empty while legacy `system_settings` rows exist runs the one-shot migration (#547): every
+  legacy row is decrypted with the legacy protector and re-protected into the shared aggregate as
+  its first version, inside one caller-owned transaction. A migration refusal fails startup with
+  key names and a classification code only; the installation is never rolled back to `Pending`.
+- The bootstrap phase then activates the snapshot with a bootstrap-owned
+  `ServiceSettingSnapshotLoader` and publishes it on one `ServiceSettingCurrentSnapshotAccessor`
+  instance, which is pre-registered with DI so the composed snapshot services observe the same
+  process-local snapshot instead of building a second, empty one.
+- The activated snapshot is projected back onto the legacy colon-keyed configuration shape
+  (`SharedSettingConfigurationProjection`): every normalized key maps through
+  `SharedSettingKeys`, JSON values expand into `IConfiguration` sub-keys exactly like the legacy
+  snapshot path, and no consumer of `IConfiguration` had to change. Equivalence against the legacy
+  path is asserted key by key, including the JSON sub-keys.
+- The configuration-version authority is the aggregate version (a `long`, narrowed once at the
+  bootstrap boundary). **The version is renumbered by the migration**: a deployment that just
+  migrated reports version 1 again, regardless of what the legacy `MAX(version)` used to be. The
+  guarantee is that the version is monotonic from there and that every instance observing the same
+  persisted state observes the same version and the same complete snapshot.
+- Fail-closed discipline is unchanged in shape: an incomplete, damaged, or undecryptable aggregate
+  refuses activation without replacing an existing snapshot, reports key names and closed
+  classification codes only, and never rolls a `Completed` installation back to `Pending`.
+
 ## Storage and updates
 
 - `service_settings` holds one row per service (`signacore`), with the complete value set as JSON
@@ -66,13 +97,16 @@ identical accept/reject outcomes.
   context failures produce the closed result set (`ValidationFailed`, `ProtectionFailed`,
   `StorageFailed`, `VersionConflict`, `TransactionRequired`, `ContextNotClean`) and leave zero
   changes and zero audit rows.
-- The legacy `system_settings` table, the legacy endpoints, and the first-run setup write path are
-  untouched; no data is imported or double-written (tracked separately).
+- First-run setup writes the shared aggregate through the same update service as the first version
+  of the completion transaction, together with the administrator, the installation audit
+  projection, and the code consumption. The legacy `system_settings` table is no longer written by
+  the runtime; it is read-only legacy data until the admin console and import switches land.
 
 ## Operators
 
-- The new aggregate is a parallel source of truth until the switch: changing settings through the
-  legacy admin console does not update `service_settings`, and updating `service_settings` does
-  not change the running configuration (all `requiresRestart` keys).
+- The shared aggregate is the configuration authority. Changes land through the shared update path
+  and take effect on the next restart (all keys are `requiresRestart`); the legacy admin console
+  still edits the legacy table, which no longer feeds the runtime — operators should treat the
+  console's settings page as pending its own switch.
 - The PostgreSQL concurrency contract (exactly one winner per version) runs in CI under
   `RUN_SIGNACORE_DATABASE_CONTRACTS=true`; the SQLite contract tests run in every build.
