@@ -1,4 +1,5 @@
 using ServiceMantle.Bootstrap;
+using ServiceMantle.Configuration;
 using SignaCore.Domain.Keys;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
@@ -13,5 +14,6 @@ internal sealed record BootstrapPhaseResult(
     IConfigurationProtector ConfigurationProtector,
     SystemSettingsStore SettingsStore,
     SystemSettingsSnapshot? Snapshot,
+    ServiceSettingCurrentSnapshotAccessor CurrentSnapshotAccessor,
     string? PlaintextSetupCode,
     DateTimeOffset? SetupCodeExpiresAt);

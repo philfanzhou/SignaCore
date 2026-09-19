@@ -123,7 +123,8 @@ SMS, WeChat, LDAP, Loki, OpenTelemetry, callback allowlists, and application reg
 part of first-run setup. They are configured from authenticated administration pages later.
 
 The administrator plaintext password is used only to create its password hash. It is never stored in
-`system_settings`, `service_installations`, logs, audit payloads, or the bootstrap file.
+`system_settings`, `service_settings`, `service_installations`, logs, audit payloads, or the
+bootstrap file.
 
 ## Completion is atomic
 
@@ -147,16 +148,21 @@ strategy — in this order:
 3. read and validate the input: the five-field shape, the absolute HTTPS public base URL (HTTP only
    with the explicit opt-in), the non-empty audience, the username length, the password policy, and
    the complete proposed settings snapshot; every failure is the fixed `400`;
-4. run the shared ServiceMantle setup orchestration over the initial-administrator contributor:
+4. write the complete default settings snapshot into the shared `service_settings` aggregate as its
+   first version (expected version 0) through the shared transactional update service — validation,
+   sensitive re-protection, and the per-key `configuration.changed` shared audit rows happen inside
+   this transaction; any refusal is answered with the fixed `503`. The aggregate is written before
+   anything else stages, because the shared update transaction refuses a context that already
+   carries pending changes;
+5. run the shared ServiceMantle setup orchestration over the initial-administrator contributor:
    its read-only validation re-checks the password policy and the normalized-username uniqueness,
    and its registration stages the administrator account and the password hash without saving. A
    taken username or a policy-failing password is the fixed `400`; any other orchestration failure
    is the fixed `503`;
-5. insert the complete default global-settings snapshot;
 6. stage the setup-completed audit event — expressed with the shared audit model
    (`installation.completed` on the `service:signacore` target, operator source `setup_code`
    carrying the created account id) and projected onto the existing `audit_logs` row, where the
-   actor links to the account created in step 4;
+   actor links to the account created in step 5;
 7. re-verify and stage consumption of the code together with the `Completed` status, the
    completion timestamp, and the version increment; a refusal here rolls everything staged above
    back: an installation that completed concurrently answers the fixed `409`, any other refusal the
@@ -197,10 +203,12 @@ instance that observes completion leaves Setup Mode.
 
 ### The installation audit projection
 
-The setup-completed event is the only audit write in the transaction, and its projection is
-closed: the legacy action stays `installation.setup.completed` with target `Installation` /
-`signacore`, the actor id is the account this transaction created, and the actor name is the
-validated administrator username — product identity data the existing row keeps. The description
+The setup-completed event is the only audit write of the transaction on the existing `audit_logs`
+table, and its projection is closed: the legacy action stays `installation.setup.completed` with
+target `Installation` / `signacore`, the actor id is the account this transaction created, and the
+actor name is the validated administrator username — product identity data the existing row keeps.
+(The aggregate write in step 4 records its own per-key `configuration.changed` rows in the shared
+`service_audit_logs` table; they carry keys and metadata only, never values.) The description
 is the fixed completion note with the numeric configuration version and no longer includes the
 public base URL; earlier rows keep whatever they recorded and are not rewritten. Before/after
 snapshots, metadata, and correlation identifiers remain empty, and no password, setup code, root

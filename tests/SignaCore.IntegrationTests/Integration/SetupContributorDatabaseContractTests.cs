@@ -15,10 +15,12 @@ using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Configuration;
 using ServiceMantle.Audit;
+using ServiceMantle.Configuration;
 using ServiceMantle.Installation;
 using ServiceMantle.AspNetCore.ManagementApi.Setup;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Host.Installation;
+using SignaCore.Tests.Integration;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -173,21 +175,21 @@ public sealed class SetupContributorDatabaseContractTests
     [InlineData("PostgreSQL")]
     public async Task SettingsAndAuditFailures_LeaveNothingWrittenAndAnswerUnavailable(string provider)
     {
-        await using var protectorFailure = await SetupDatabase.CreateAsync(provider);
-        await using (var context = protectorFailure.CreateContext())
+        await using var rootKeyFailure = await SetupDatabase.CreateAsync(provider);
+        await using (var context = rootKeyFailure.CreateContext())
         {
             var result = await CompleteAsync(
-                context, protectorFailure.Options, protectorFailure.SetupCode,
-                protector: new ThrowingProtector(),
+                context, rootKeyFailure.Options, rootKeyFailure.SetupCode,
+                rootKeySource: new ThrowingRootKeySource(),
                 cancellationToken: TestContext.Current.CancellationToken);
 
             Assert.Equal(SetupCompletionStatus.Unavailable, result.Status);
         }
 
-        await VerifyNothingWasWrittenAsync(protectorFailure);
+        await VerifyNothingWasWrittenAsync(rootKeyFailure);
 
         // The shared audit model refuses a client IP that is not an address, which fails the audit
-        // staging after the settings were staged: everything must still roll back.
+        // staging after the aggregate was staged: everything must still roll back.
         await using var auditFailure = await SetupDatabase.CreateAsync(provider);
         await using (var context = auditFailure.CreateContext())
         {
@@ -544,17 +546,21 @@ public sealed class SetupContributorDatabaseContractTests
         string username = Username,
         IPasswordHasher? hasher = null,
         IPasswordPolicy? policy = null,
-        IConfigurationProtector? protector = null,
+        IServiceSettingRootKeySource? rootKeySource = null,
         ILogger? logger = null,
         CancellationToken cancellationToken = default)
     {
         hasher ??= CreateFastHasher();
         policy ??= new DefaultPasswordPolicy();
+        var masterKeyProvider = new BootstrapMasterKeyProvider(RootKey);
         return SetupCompletionExecutor.CompleteAsync(
             context,
             options,
-            new SystemSettingsStore(
-                protector ?? new AesGcmConfigurationProtector(new BootstrapMasterKeyProvider(RootKey))),
+            new ServiceSettingUpdateService(
+                InstallationStores.ServiceId,
+                SharedSettingComposition.CreateRegistry(isDevelopment: false),
+                new EfCoreServiceSettingUpdateTransaction<IdentityDbContext>(context),
+                rootKeySource ?? SharedSettingComposition.CreateRootKeySource(masterKeyProvider)),
             policy,
             new InitialAdministratorSetupContributorFactory(context, hasher, policy),
             logger ?? NullLogger.Instance,
@@ -618,9 +624,11 @@ public sealed class SetupContributorDatabaseContractTests
     }
 
     /// <summary>
-    /// The committed slice: one administrator with a verifiable hash, one consistent configuration
-    /// version, encrypted secret defaults, exactly one legacy audit row linked to the created
-    /// account, and a consumed setup code.
+    /// The committed slice: one administrator with a verifiable hash, one first-version shared
+    /// settings aggregate with all keys as envelopes for secrets, exactly one legacy audit row
+    /// linked to the created account, the shared per-key audit projection of the aggregate write,
+    /// and a consumed setup code. The legacy <c>system_settings</c> table stays empty: it is
+    /// read-only legacy data since the aggregate became the write authority.
     /// </summary>
     private static async Task VerifyCommittedSliceAsync(
         SetupDatabase database,
@@ -648,26 +656,39 @@ public sealed class SetupContributorDatabaseContractTests
         Assert.Equal(expectedAccounts, await context.Accounts.CountAsync(
             cancellationToken: TestContext.Current.CancellationToken));
 
-        var settings = await context.SystemSettings
-            .AsNoTracking()
-            .ToDictionaryAsync(setting => setting.Key, cancellationToken: TestContext.Current.CancellationToken);
-        var expectedKeys = SystemSettingsCatalog.BuildDefaults().Keys
-            .Append(SystemSettingKeys.PublicBaseUrl)
-            .Append(SystemSettingKeys.JwtIssuer)
-            .Append(SystemSettingKeys.JwtAudience)
-            .ToHashSet();
-        Assert.Equal(expectedKeys, settings.Keys.ToHashSet());
-        Assert.All(settings.Values, setting => Assert.Equal(1, setting.Version));
-        Assert.Equal(PublicBaseUrl, settings[SystemSettingKeys.PublicBaseUrl].Value);
-        Assert.Equal(username, settings[SystemSettingKeys.AdminUsername].Value);
-
-        var protector = new AesGcmConfigurationProtector(new BootstrapMasterKeyProvider(RootKey));
-        var secrets = settings.Values.Where(setting => setting.IsSecret).ToList();
-        Assert.NotEmpty(secrets);
-        foreach (var secret in secrets)
+        // The shared aggregate is the first version and carries the complete catalog: the rendered
+        // setup values plus defaults, with secrets as shared-protector envelopes.
+        var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(context);
+        Assert.NotNull(aggregate);
+        Assert.Equal(1, aggregate!.Version);
+        Assert.Equal(username, aggregate.UpdatedBy);
+        var aggregateValues = SharedSettingTestDatabase.ParseValues(aggregate);
+        var expectedKeys = SystemSettingsCatalog.Definitions
+            .Select(definition => SharedSettingKeys.NormalizedByLegacyKey[definition.Key])
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(expectedKeys, aggregateValues.Keys.ToHashSet(StringComparer.Ordinal));
+        Assert.Equal(PublicBaseUrl, aggregateValues["endpoints.public_base_url"]);
+        Assert.Equal(PublicBaseUrl, aggregateValues["jwt.issuer"]);
+        Assert.Equal(username, aggregateValues["admin.username"]);
+        var sensitiveKeys = SystemSettingsCatalog.Definitions
+            .Where(definition => definition.IsSecret)
+            .Select(definition => SharedSettingKeys.NormalizedByLegacyKey[definition.Key])
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.NotEmpty(sensitiveKeys);
+        foreach (var sensitiveKey in sensitiveKeys)
         {
-            Assert.NotEqual(secret.Value, protector.Unprotect(secret.Key, secret.Value));
+            Assert.StartsWith("sm:v1:", aggregateValues[sensitiveKey], StringComparison.Ordinal);
         }
+
+        // The legacy table is never written by the switched completion.
+        Assert.False(await context.SystemSettings.AnyAsync(
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        // The aggregate write also produced its value-free shared audit projection, one row per
+        // changed key, without any submitted value.
+        var sharedAuditJson = await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(context);
+        Assert.Equal(expectedKeys.Count, sharedAuditJson.Count);
+        Assert.All(sharedAuditJson, row => Assert.DoesNotContain(PublicBaseUrl, row, StringComparison.Ordinal));
 
         var repository = new AuditLogRepository(context);
         var auditRows = await repository.QueryAsync(
@@ -694,8 +715,8 @@ public sealed class SetupContributorDatabaseContractTests
 
     /// <summary>
     /// Nothing from a refused, failed, or canceled attempt reached the database: no accounts,
-    /// credentials, settings, or audit rows were created, and the installation is still pending
-    /// with its setup code intact.
+    /// credentials, aggregate, shared audit rows, or legacy audit rows were created, and the
+    /// installation is still pending with its setup code intact.
     /// </summary>
     private static async Task VerifyNothingWasWrittenAsync(
         SetupDatabase database,
@@ -716,6 +737,8 @@ public sealed class SetupContributorDatabaseContractTests
             cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(existingCredentials, await context.PasswordCredentials.CountAsync(
             cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Null(await SharedSettingTestDatabase.LoadAggregateAsync(context));
+        Assert.Empty(await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(context));
         Assert.False(await context.SystemSettings.AnyAsync(
             cancellationToken: TestContext.Current.CancellationToken));
         Assert.False(await context.AuditLogs.AnyAsync(
@@ -810,12 +833,10 @@ public sealed class SetupContributorDatabaseContractTests
         public bool VerifyPassword(string password, string hash) => false;
     }
 
-    private sealed class ThrowingProtector : IConfigurationProtector
+    private sealed class ThrowingRootKeySource : IServiceSettingRootKeySource
     {
-        public string Protect(string settingKey, string plaintext) =>
-            throw new CryptographicException("synthetic protection failure");
-
-        public string Unprotect(string settingKey, string protectedValue) => protectedValue;
+        public ValueTask<string> GetRootKeyAsync(CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("synthetic root key failure");
     }
 
     /// <summary>

@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ServiceMantle.Audit;
 using ServiceMantle.AspNetCore.ManagementApi.Setup;
+using ServiceMantle.Configuration;
 using ServiceMantle.Installation;
 using SignaCore.Database;
 using SignaCore.Domain.Services;
@@ -20,8 +21,9 @@ namespace SignaCore.Host.Installation;
 /// <para>
 /// The shared endpoint hands over a strictly shape-checked body: the candidate setup code and the
 /// opaque <see cref="SetupInput"/> object. This executor owns the one serializable transaction that
-/// everything first-run setup writes — the initial administrator, the default settings snapshot,
-/// the installation audit projection, and the consumption of the code — and answers with the closed
+/// everything first-run setup writes — the default settings snapshot into the shared
+/// <c>service_settings</c> aggregate, the initial administrator, the installation audit
+/// projection, and the consumption of the code — and answers with the closed
 /// <see cref="SetupCompletionResult"/> only after the transaction settled.
 /// </para>
 /// <para>
@@ -29,7 +31,8 @@ namespace SignaCore.Host.Installation;
 /// <see cref="IdentityDbContext"/>, is attempted exactly once (never under a retrying execution
 /// strategy), and is never retried or resumed after a failure. The administrator plaintext password
 /// is used only to produce its hash: it is never written to <c>system_settings</c>,
-/// <c>service_installations</c>, logs, audit payloads, or the bootstrap file.
+/// <c>service_settings</c>, <c>service_installations</c>, logs, audit payloads, or the bootstrap
+/// file.
 /// </para>
 /// </summary>
 internal static class SetupCompletionExecutor
@@ -49,7 +52,7 @@ internal static class SetupCompletionExecutor
             return await CompleteAsync(
                 services.GetRequiredService<IdentityDbContext>(),
                 services.GetRequiredService<DatabaseOptions>(),
-                services.GetRequiredService<SystemSettingsStore>(),
+                services.GetRequiredService<ServiceSettingUpdateService>(),
                 services.GetRequiredService<IPasswordPolicy>(),
                 services.GetRequiredService<InitialAdministratorSetupContributorFactory>(),
                 services.GetRequiredService<ILoggerFactory>()
@@ -69,7 +72,7 @@ internal static class SetupCompletionExecutor
     internal static async Task<SetupCompletionResult> CompleteAsync(
         IdentityDbContext db,
         DatabaseOptions databaseOptions,
-        SystemSettingsStore settingsStore,
+        ServiceSettingUpdateService settingsUpdateService,
         IPasswordPolicy passwordPolicy,
         InitialAdministratorSetupContributorFactory contributorFactory,
         ILogger logger,
@@ -86,7 +89,7 @@ internal static class SetupCompletionExecutor
                              cancellationToken))
             {
                 result = await StageCompletionAsync(
-                    db, databaseOptions, settingsStore, passwordPolicy, contributorFactory,
+                    db, databaseOptions, settingsUpdateService, passwordPolicy, contributorFactory,
                     logger, clientIp, setupCode, input, transaction, cancellationToken);
             }
 
@@ -113,7 +116,7 @@ internal static class SetupCompletionExecutor
     private static async Task<SetupCompletionResult> StageCompletionAsync(
         IdentityDbContext db,
         DatabaseOptions databaseOptions,
-        SystemSettingsStore settingsStore,
+        ServiceSettingUpdateService settingsUpdateService,
         IPasswordPolicy passwordPolicy,
         InitialAdministratorSetupContributorFactory contributorFactory,
         ILogger logger,
@@ -186,6 +189,32 @@ internal static class SetupCompletionExecutor
             return SetupCompletionResult.ValidationFailed();
         }
 
+        // The shared aggregate is written first, while the change tracker is still clean: the
+        // shared update transaction refuses a context that already carries pending work, and the
+        // administrator contributor stages its entities afterwards. The shared validation and
+        // sensitive re-protection are authoritative; a refusal here is discarded whole with the
+        // transaction, so the safe outcome is the fixed unavailable answer.
+        var normalizedChanges = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var (settingKey, value) in values)
+        {
+            normalizedChanges[SharedSettingKeys.NormalizedByLegacyKey[settingKey]] = value;
+        }
+
+        var settingsOperator = ManagementAuditOperator.Create(
+            SetupAuditWriter.OperatorSource,
+            administratorUsername);
+        var settingsUpdate = await settingsUpdateService.UpdateAsync(
+            new ServiceSettingUpdateCommand(0, normalizedChanges, settingsOperator),
+            cancellationToken);
+        if (!settingsUpdate.Succeeded)
+        {
+            return SetupCompletionResult.Unavailable();
+        }
+
+        // The aggregate counts its own versions from 1; the bootstrap boundary has already narrowed
+        // the value range, and a first completion is version 1 by construction.
+        var configurationVersion = checked((int)settingsUpdate.Version!.Value);
+
         // One orchestrator and one contributor per completion, staging into this scope's context.
         // The orchestrator validates read-only first and refuses to run on a context with pending
         // changes, which is what pins the consume-last order below.
@@ -208,11 +237,6 @@ internal static class SetupCompletionExecutor
                 _ => SetupCompletionResult.Unavailable()
             };
         }
-
-        var configurationVersion =
-            await SystemSettingsStore.ReadConfigurationVersionAsync(db, cancellationToken) + 1;
-
-        await settingsStore.WriteAsync(db, values, configurationVersion, administratorUsername, cancellationToken);
 
         // The installation event is expressed with the shared audit model and staged once, after
         // the administrator and the settings succeeded. The closed projection into the existing

@@ -1,7 +1,10 @@
 # system_settings
 
-Global application configuration. The business database is the configuration authority, so every
-instance reads the same active configuration and there is no per-instance drift.
+Legacy global application configuration. Since the runtime switch, the authoritative configuration
+lives in the shared `service_settings` aggregate (see `service_settings.md` and
+[Shared settings stack](../../development/SharedSettings.md)); this table is read-only legacy data,
+still served by the legacy admin endpoints and the one-shot migration source until their own
+switches land. Deployments that predate the aggregate keep their rows untouched here.
 
 ## Columns
 
@@ -32,4 +35,6 @@ instance reads the same active configuration and there is no per-instance drift.
 ## Ownership
 
 SignaCore owns all writes to this table. Other services must use the HTTP API rather than direct
-database access. Editing rows by hand bypasses snapshot validation and encryption.
+database access. Editing rows by hand bypasses snapshot validation and encryption. The runtime no
+longer reads this table for its active configuration; the startup migration reads it exactly once
+per not-yet-migrated deployment.
