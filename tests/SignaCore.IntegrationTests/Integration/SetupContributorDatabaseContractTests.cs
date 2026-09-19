@@ -1,8 +1,10 @@
 using System.Data.Common;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using SignaCore.Database;
@@ -12,7 +14,9 @@ using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Configuration;
+using ServiceMantle.Audit;
 using ServiceMantle.Installation;
+using ServiceMantle.AspNetCore.ManagementApi.Setup;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Host.Installation;
 using Testcontainers.PostgreSql;
@@ -21,13 +25,15 @@ using Xunit;
 namespace SignaCore.IntegrationTests.Integration;
 
 /// <summary>
-/// Database contract of the contributor-backed first-run setup slice: the shared orchestration
-/// stages the initial administrator, the settings snapshot, and the installation audit projection
-/// into one transaction whose only save and commit belong to the setup service.
+/// Database contract of the executor-backed first-run setup slice: the shared setup entry hands the
+/// completion to <see cref="SetupCompletionExecutor"/>, which stages the initial administrator,
+/// the settings snapshot, and the installation audit projection into one transaction whose only
+/// save and commit belong to the executor.
 /// <para>
 /// The SQLite provider runs everywhere; the PostgreSQL cases join the container matrix gated by
 /// <c>RUN_SIGNACORE_DATABASE_CONTRACTS=true</c>, which the CI database-contract job selects through
-/// the <c>DatabaseContractTests</c> name filter.
+/// the <c>DatabaseContractTests</c> name filter. Every context is built with the retrying
+/// execution strategy disabled, exactly the way the PendingSetup host registers its contexts.
 /// </para>
 /// </summary>
 public sealed class SetupContributorDatabaseContractTests
@@ -37,8 +43,6 @@ public sealed class SetupContributorDatabaseContractTests
     private const string Password = "SetupAdmin123";
     private const string PublicBaseUrl = "https://identity.example.test";
     private const string ClientIp = "192.0.2.10";
-    private const string CancelledMessage =
-        "First-run setup was cancelled before the installation could be completed.";
 
     private static readonly string PostgreSqlImage =
         Environment.GetEnvironmentVariable("SIGNACORE_POSTGRES_IMAGE") is { Length: > 0 } image
@@ -52,12 +56,12 @@ public sealed class SetupContributorDatabaseContractTests
     {
         await using var database = await SetupDatabase.CreateAsync(provider);
         await using var context = database.CreateContext();
-        var service = CreateService(context, database.Options);
 
-        var result = await service.CompleteAsync(
-            CreateRequest(database.SetupCode), ClientIp, TestContext.Current.CancellationToken);
+        var result = await CompleteAsync(
+            context, database.Options, database.SetupCode,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(SetupOutcome.Completed, result.Outcome);
+        Assert.Equal(SetupCompletionStatus.Committed, result.Status);
         await VerifyCommittedSliceAsync(database);
     }
 
@@ -75,14 +79,14 @@ public sealed class SetupContributorDatabaseContractTests
         await using var context = database.CreateContext();
         var hasher = new RecordingHasher(CreateFastHasher());
         var policy = new RecordingPolicy(new DefaultPasswordPolicy());
-        var service = CreateService(context, database.Options, hasher: hasher, policy: policy);
 
-        var result = await service.CompleteAsync(
-            CreateRequest(database.SetupCode), ClientIp, TestContext.Current.CancellationToken);
+        var result = await CompleteAsync(
+            context, database.Options, database.SetupCode, hasher: hasher, policy: policy,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(SetupOutcome.Completed, result.Outcome);
-        // One hash from the contributor's single registration; the policy answered the request-level
-        // shape check and the contributor's read-only validation.
+        Assert.Equal(SetupCompletionStatus.Committed, result.Status);
+        // One hash from the contributor's single registration; the policy answered the executor's
+        // request-level shape check and the contributor's read-only validation.
         Assert.Equal(1, hasher.HashCalls);
         Assert.Equal(2, policy.ValidateCalls);
         await VerifyCommittedSliceAsync(database);
@@ -101,15 +105,12 @@ public sealed class SetupContributorDatabaseContractTests
         await using var database = await SetupDatabase.CreateAsync(provider);
         await using var context = database.CreateContext();
         var policy = new RecordingPolicy(new DefaultPasswordPolicy(), failOnCall: 2);
-        var service = CreateService(context, database.Options, policy: policy);
 
-        var result = await service.CompleteAsync(
-            CreateRequest(database.SetupCode), ClientIp, TestContext.Current.CancellationToken);
+        var result = await CompleteAsync(
+            context, database.Options, database.SetupCode, policy: policy,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(SetupOutcome.InvalidRequest, result.Outcome);
-        Assert.Equal(
-            "The administrator password does not satisfy the password policy.",
-            result.Error);
+        Assert.Equal(SetupCompletionStatus.ValidationFailed, result.Status);
         Assert.Equal(2, policy.ValidateCalls);
         await VerifyNothingWasWrittenAsync(database);
     }
@@ -122,15 +123,12 @@ public sealed class SetupContributorDatabaseContractTests
         await using var database = await SetupDatabase.CreateAsync(provider);
         await SeedExistingAdministratorAsync(database, Username);
         await using var context = database.CreateContext();
-        var service = CreateService(context, database.Options);
 
-        var result = await service.CompleteAsync(
-            CreateRequest(database.SetupCode), ClientIp, TestContext.Current.CancellationToken);
+        var result = await CompleteAsync(
+            context, database.Options, database.SetupCode,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(SetupOutcome.InvalidRequest, result.Outcome);
-        Assert.Equal(
-            "An account with this administrator username already exists.",
-            result.Error);
+        Assert.Equal(SetupCompletionStatus.ValidationFailed, result.Status);
         await VerifyNothingWasWrittenAsync(database, existingAccounts: 1, existingCredentials: 1);
 
         await using var verify = database.CreateContext();
@@ -145,9 +143,13 @@ public sealed class SetupContributorDatabaseContractTests
         return cases;
     }
 
+    /// <summary>
+    /// A contributor failure is the one safe-unavailable outcome — never a validation verdict, and
+    /// never a detail-carrying exception across the executor boundary.
+    /// </summary>
     [Theory]
     [MemberData(nameof(ContributorFailureModes))]
-    public async Task ContributorFailures_RollBackCleanlyWithASafeException(string failureMode)
+    public async Task ContributorFailures_LeaveNothingWrittenAndAnswerUnavailable(string failureMode)
     {
         await using var database = await SetupDatabase.CreateAsync("SQLite");
         await using var context = database.CreateContext();
@@ -157,35 +159,29 @@ public sealed class SetupContributorDatabaseContractTests
             "hasher-cancel-internally" => new InternallyCancelingHasher(),
             _ => throw new ArgumentOutOfRangeException(nameof(failureMode))
         };
-        var service = CreateService(context, database.Options, hasher: hasher);
 
-        var exception = await Assert.ThrowsAsync<SetupStagingException>(
-            async () => await service.CompleteAsync(
-                CreateRequest(database.SetupCode), ClientIp, TestContext.Current.CancellationToken));
+        var result = await CompleteAsync(
+            context, database.Options, database.SetupCode, hasher: hasher,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Null(exception.InnerException);
-        Assert.Equal(SetupStagingException.FixedMessage, exception.Message);
+        Assert.Equal(SetupCompletionStatus.Unavailable, result.Status);
         await VerifyNothingWasWrittenAsync(database);
     }
 
     [Theory]
     [InlineData("SQLite")]
     [InlineData("PostgreSQL")]
-    public async Task SettingsAndAuditFailures_RollBackCleanly(string provider)
+    public async Task SettingsAndAuditFailures_LeaveNothingWrittenAndAnswerUnavailable(string provider)
     {
         await using var protectorFailure = await SetupDatabase.CreateAsync(provider);
         await using (var context = protectorFailure.CreateContext())
         {
-            var service = CreateService(
-                context, protectorFailure.Options, protector: new ThrowingProtector());
+            var result = await CompleteAsync(
+                context, protectorFailure.Options, protectorFailure.SetupCode,
+                protector: new ThrowingProtector(),
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            var exception = await Assert.ThrowsAsync<SetupStagingException>(
-                async () => await service.CompleteAsync(
-                    CreateRequest(protectorFailure.SetupCode),
-                    ClientIp,
-                    TestContext.Current.CancellationToken));
-
-            Assert.Null(exception.InnerException);
+            Assert.Equal(SetupCompletionStatus.Unavailable, result.Status);
         }
 
         await VerifyNothingWasWrittenAsync(protectorFailure);
@@ -195,15 +191,11 @@ public sealed class SetupContributorDatabaseContractTests
         await using var auditFailure = await SetupDatabase.CreateAsync(provider);
         await using (var context = auditFailure.CreateContext())
         {
-            var service = CreateService(context, auditFailure.Options);
+            var result = await CompleteAsync(
+                context, auditFailure.Options, auditFailure.SetupCode, clientIp: "not-an-ip",
+                cancellationToken: TestContext.Current.CancellationToken);
 
-            var exception = await Assert.ThrowsAsync<SetupStagingException>(
-                async () => await service.CompleteAsync(
-                    CreateRequest(auditFailure.SetupCode),
-                    "not-an-ip",
-                    TestContext.Current.CancellationToken));
-
-            Assert.Null(exception.InnerException);
+            Assert.Equal(SetupCompletionStatus.Unavailable, result.Status);
         }
 
         await VerifyNothingWasWrittenAsync(auditFailure);
@@ -212,17 +204,32 @@ public sealed class SetupContributorDatabaseContractTests
     [Theory]
     [InlineData("SQLite")]
     [InlineData("PostgreSQL")]
-    public async Task SaveFailure_RollsBackCleanly(string provider)
+    public async Task SaveFailure_LeavesNothingWrittenAndAnswersUnavailable(string provider)
     {
         await using var database = await SetupDatabase.CreateAsync(provider);
         await using var context = database.CreateServicedContext(new FailingSaveInterceptor());
-        var service = CreateService(context, database.Options);
 
-        var exception = await Assert.ThrowsAsync<SetupStagingException>(
-            async () => await service.CompleteAsync(
-                CreateRequest(database.SetupCode), ClientIp, TestContext.Current.CancellationToken));
+        var result = await CompleteAsync(
+            context, database.Options, database.SetupCode,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Null(exception.InnerException);
+        Assert.Equal(SetupCompletionStatus.Unavailable, result.Status);
+        await VerifyNothingWasWrittenAsync(database);
+    }
+
+    [Theory]
+    [InlineData("SQLite")]
+    [InlineData("PostgreSQL")]
+    public async Task CommitFailure_LeavesNothingWrittenAndAnswersUnavailable(string provider)
+    {
+        await using var database = await SetupDatabase.CreateAsync(provider);
+        await using var context = database.CreateServicedContext(new FailingCommitInterceptor());
+
+        var result = await CompleteAsync(
+            context, database.Options, database.SetupCode,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupCompletionStatus.Unavailable, result.Status);
         await VerifyNothingWasWrittenAsync(database);
     }
 
@@ -239,15 +246,19 @@ public sealed class SetupContributorDatabaseContractTests
         await using var database = await SetupDatabase.CreateAsync(
             provider, seedVersion: int.MaxValue - 1);
         await using var context = database.CreateContext();
-        var service = CreateService(context, database.Options);
 
-        var result = await service.CompleteAsync(
-            CreateRequest(database.SetupCode), ClientIp, TestContext.Current.CancellationToken);
+        var result = await CompleteAsync(
+            context, database.Options, database.SetupCode,
+            cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(SetupOutcome.InvalidSetupCode, result.Outcome);
+        Assert.Equal(SetupCompletionStatus.CredentialInvalid, result.Status);
         await VerifyNothingWasWrittenAsync(database, expectedVersion: int.MaxValue);
     }
 
+    /// <summary>
+    /// A refusal does not poison the transaction owner: the same code completes cleanly on the
+    /// next submission, through a fresh scope with fresh attempt state.
+    /// </summary>
     [Theory]
     [InlineData("SQLite")]
     [InlineData("PostgreSQL")]
@@ -255,20 +266,22 @@ public sealed class SetupContributorDatabaseContractTests
     {
         await using var database = await SetupDatabase.CreateAsync(provider);
         await SeedExistingAdministratorAsync(database, Username);
-        await using var context = database.CreateContext();
-        var service = CreateService(context, database.Options);
+        await using (var context = database.CreateContext())
+        {
+            var rejected = await CompleteAsync(
+                context, database.Options, database.SetupCode, username: Username,
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(SetupCompletionStatus.ValidationFailed, rejected.Status);
+        }
 
-        var rejected = await service.CompleteAsync(
-            CreateRequest(database.SetupCode, username: Username),
-            ClientIp,
-            TestContext.Current.CancellationToken);
-        var completed = await service.CompleteAsync(
-            CreateRequest(database.SetupCode, username: "second_admin"),
-            ClientIp,
-            TestContext.Current.CancellationToken);
+        await using (var context = database.CreateContext())
+        {
+            var completed = await CompleteAsync(
+                context, database.Options, database.SetupCode, username: "second_admin",
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(SetupCompletionStatus.Committed, completed.Status);
+        }
 
-        Assert.Equal(SetupOutcome.InvalidRequest, rejected.Outcome);
-        Assert.Equal(SetupOutcome.Completed, completed.Outcome);
         await VerifyCommittedSliceAsync(database, username: "second_admin", expectedAccounts: 2);
     }
 
@@ -286,11 +299,11 @@ public sealed class SetupContributorDatabaseContractTests
     }
 
     /// <summary>
-    /// Every caller-cancellation checkpoint delivers the same safe result: an
-    /// <see cref="OperationCanceledException"/> carrying the original token, the fixed message, and
-    /// no inner exception — once the transaction and its cleanup have settled. Cancellation
-    /// observed after the commit keeps the committed facts; cancellation observed during the
-    /// cleanup of an otherwise refused attempt wins over that refusal.
+    /// Every caller-cancellation checkpoint delivers the caller's own cancellation — an
+    /// <see cref="OperationCanceledException"/> carrying the original token — once the transaction
+    /// and its cleanup have settled. Cancellation observed after the commit keeps the committed
+    /// facts; cancellation observed during the cleanup of an otherwise refused attempt wins over
+    /// that refusal.
     /// </summary>
     [Theory]
     [MemberData(nameof(CancellationCheckpoints))]
@@ -351,8 +364,15 @@ public sealed class SetupContributorDatabaseContractTests
     /// <summary>
     /// Two independent scopes on a real PostgreSQL server overlap on the singleton installation
     /// row: the contender provably waits on a server-observed row lock, the winner completes, and
-    /// the contender reports <see cref="SetupOutcome.AlreadyCompleted"/> — with exactly one
-    /// committed first-run slice between them.
+    /// exactly one first-run slice is committed between them.
+    /// <para>
+    /// The contender's answer depends on where the race caught it. A submission that arrives after
+    /// the winner committed reads <c>Completed</c> and answers the closed conflict. A submission
+    /// that is waiting on the row lock when the winner commits is released with the Serializable
+    /// serialization failure; the shared entry contract forbids replaying the user transaction, so
+    /// that loser answers unavailable and its next submission observes the completion — which is
+    /// what the operator-facing surface (and the frontend's 503-then-retry path) relies on.
+    /// </para>
     /// </summary>
     [Fact]
     public async Task OverlappingScopes_OnPostgreSql_SerializeOnTheInstallationRow()
@@ -370,15 +390,15 @@ public sealed class SetupContributorDatabaseContractTests
         await using var winnerContext = database.CreateServicedContext(
             new HoldLockAfterRowLockInterceptor(locked, release));
         await using var contenderContext = database.CreateContext();
-        var winnerService = CreateService(winnerContext, database.Options);
-        var contenderService = CreateService(contenderContext, database.Options);
 
-        var winner = Task.Run(() => winnerService.CompleteAsync(
-            CreateRequest(database.SetupCode), ClientIp, TestContext.Current.CancellationToken));
-        await locked.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var winner = Task.Run(() =>
+            CompleteAsync(winnerContext, database.Options, database.SetupCode,
+                cancellationToken: TestContext.Current.CancellationToken));
+        await locked.Task.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
-        var contender = Task.Run(() => contenderService.CompleteAsync(
-            CreateRequest(database.SetupCode), ClientIp, TestContext.Current.CancellationToken));
+        var contender = Task.Run(() =>
+            CompleteAsync(contenderContext, database.Options, database.SetupCode,
+                cancellationToken: TestContext.Current.CancellationToken));
 
         // The contender must actually be waiting on the server's row lock — not merely queued in
         // the test process — before the winner releases anything.
@@ -406,18 +426,29 @@ public sealed class SetupContributorDatabaseContractTests
         release.TrySetResult();
         var results = await Task.WhenAll(winner, contender);
 
-        Assert.Equal(SetupOutcome.Completed, results[0].Outcome);
-        Assert.Equal(SetupOutcome.AlreadyCompleted, results[1].Outcome);
+        Assert.Equal(SetupCompletionStatus.Committed, results[0].Status);
+        Assert.Contains(
+            results[1].Status,
+            new[] { SetupCompletionStatus.Conflict, SetupCompletionStatus.Unavailable });
         await VerifyCommittedSliceAsync(database);
+
+        // Whatever the loser answered, the completion is durable: the next submission always
+        // observes it and answers the closed conflict.
+        await using var aftermath = database.CreateContext();
+        var resubmission = await CompleteAsync(
+            aftermath, database.Options, database.SetupCode,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(SetupCompletionStatus.Conflict, resubmission.Status);
     }
 
     /// <summary>
-    /// A serialization-class transient failure inside the setup transaction is retried by the
-    /// existing execution strategy; the retried attempt re-reads the installation and reports the
-    /// completion instead of staging a second slice.
+    /// A serialization-class transient failure inside the completion transaction is attempted
+    /// exactly once — the shared entry contract forbids replaying a user transaction — and answers
+    /// unavailable; the next submission, on a clean scope, re-reads the installation and answers
+    /// the conflict.
     /// </summary>
     [Fact]
-    public async Task TransientFailure_IsRetriedAndReobservesCompletion()
+    public async Task TransientFailure_IsAttemptedOnceAndTheNextSubmissionReobservesCompletion()
     {
         Assert.SkipUnless(
             ShouldRunContainerMatrix(),
@@ -429,26 +460,54 @@ public sealed class SetupContributorDatabaseContractTests
 
         await using (var firstContext = database.CreateContext())
         {
-            var first = CreateService(firstContext, database.Options);
-            Assert.Equal(
-                SetupOutcome.Completed,
-                (await first.CompleteAsync(
-                    CreateRequest(database.SetupCode),
-                    ClientIp,
-                    TestContext.Current.CancellationToken)).Outcome);
+            var first = await CompleteAsync(
+                firstContext, database.Options, database.SetupCode,
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(SetupCompletionStatus.Committed, first.Status);
         }
 
         var transient = new TransientSerializationFailureInterceptor();
         await using var secondContext = database.CreateServicedContext(transient);
         transient.Armed = true;
-        var second = CreateService(secondContext, database.Options);
 
-        var result = await second.CompleteAsync(
-            CreateRequest(database.SetupCode), ClientIp, TestContext.Current.CancellationToken);
+        var second = await CompleteAsync(
+            secondContext, database.Options, database.SetupCode,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(transient.ThrewOnce);
-        Assert.Equal(SetupOutcome.AlreadyCompleted, result.Outcome);
+        Assert.Equal(SetupCompletionStatus.Unavailable, second.Status);
         await VerifyCommittedSliceAsync(database);
+
+        await using var thirdContext = database.CreateContext();
+        var third = await CompleteAsync(
+            thirdContext, database.Options, database.SetupCode,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(SetupCompletionStatus.Conflict, third.Status);
+    }
+
+    /// <summary>
+    /// The fixed completion log line carries only the service id and the configuration version:
+    /// none of the submitted values — password, setup code, audience, username, public base URL —
+    /// may reach a log.
+    /// </summary>
+    [Fact]
+    public async Task CompletionLog_NeverCarriesSubmittedValues()
+    {
+        await using var database = await SetupDatabase.CreateAsync("SQLite");
+        await using var context = database.CreateContext();
+        var logger = new RecordingLogger();
+
+        var result = await CompleteAsync(
+            context, database.Options, database.SetupCode, logger: logger,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(SetupCompletionStatus.Committed, result.Status);
+        var line = Assert.Single(logger.Lines);
+        Assert.Contains("First-run setup completed", line, StringComparison.Ordinal);
+        Assert.DoesNotContain(Password, line, StringComparison.Ordinal);
+        Assert.DoesNotContain(database.SetupCode, line, StringComparison.Ordinal);
+        Assert.DoesNotContain(Username, line, StringComparison.Ordinal);
+        Assert.DoesNotContain(PublicBaseUrl, line, StringComparison.Ordinal);
     }
 
     private static async Task RunCanceledCompletionAsync(
@@ -459,14 +518,14 @@ public sealed class SetupContributorDatabaseContractTests
         IPasswordPolicy? policy = null)
     {
         await using var context = database.CreateServicedContext(interceptor);
-        var service = CreateService(context, database.Options, hasher: hasher, policy: policy);
 
         OperationCanceledException? exception = null;
         try
         {
-            var result = await service.CompleteAsync(
-                CreateRequest(database.SetupCode), ClientIp, cancellation.Token);
-            Assert.Fail($"Expected cancellation at the checkpoint, got {result.Outcome}.");
+            var result = await CompleteAsync(
+                context, database.Options, database.SetupCode,
+                hasher: hasher, policy: policy, cancellationToken: cancellation.Token);
+            Assert.Fail($"Expected cancellation at the checkpoint, got {result.Status}.");
         }
         catch (OperationCanceledException caught)
         {
@@ -475,34 +534,56 @@ public sealed class SetupContributorDatabaseContractTests
 
         Assert.NotNull(exception);
         Assert.Equal(cancellation.Token, exception.CancellationToken);
-        Assert.Null(exception.InnerException);
-        Assert.Equal(CancelledMessage, exception.Message);
     }
 
-    private static SetupRequest CreateRequest(
-        string setupCode,
-        string username = Username,
-        string password = Password) =>
-        new(PublicBaseUrl, false, "SignaCore.Services", username, password, setupCode);
-
-    private static InstallationSetupService CreateService(
+    private static Task<SetupCompletionResult> CompleteAsync(
         IdentityDbContext context,
         DatabaseOptions options,
+        string setupCode,
+        string? clientIp = ClientIp,
+        string username = Username,
         IPasswordHasher? hasher = null,
         IPasswordPolicy? policy = null,
-        IConfigurationProtector? protector = null)
+        IConfigurationProtector? protector = null,
+        ILogger? logger = null,
+        CancellationToken cancellationToken = default)
     {
         hasher ??= CreateFastHasher();
         policy ??= new DefaultPasswordPolicy();
-        return new InstallationSetupService(
+        return SetupCompletionExecutor.CompleteAsync(
             context,
             options,
             new SystemSettingsStore(
                 protector ?? new AesGcmConfigurationProtector(new BootstrapMasterKeyProvider(RootKey))),
             policy,
             new InitialAdministratorSetupContributorFactory(context, hasher, policy),
-            NullLogger<InstallationSetupService>.Instance);
+            logger ?? NullLogger.Instance,
+            clientIp,
+            ParseCode(setupCode),
+            CreateInput(username: username),
+            cancellationToken);
     }
+
+    private static SetupCode ParseCode(string setupCode)
+    {
+        Assert.True(SetupCode.TryParse(setupCode, out var parsed), "The seeded code must parse.");
+        return parsed!;
+    }
+
+    private static JsonElement CreateInput(
+        string publicBaseUrl = PublicBaseUrl,
+        bool allowNonHttpsIssuer = false,
+        string jwtAudience = "SignaCore.Services",
+        string username = Username,
+        string password = Password) =>
+        JsonSerializer.SerializeToElement(new
+        {
+            publicBaseUrl,
+            allowNonHttpsIssuer,
+            jwtAudience,
+            username,
+            password,
+        });
 
     private static IPasswordHasher CreateFastHasher() =>
         new BCryptPasswordHasher(new PasswordHasherOptions { WorkFactor = 4 });
@@ -647,6 +728,22 @@ public sealed class SetupContributorDatabaseContractTests
             "true",
             StringComparison.OrdinalIgnoreCase);
 
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<string> Lines { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) => Lines.Add(formatter(state, exception));
+    }
+
     private sealed class RecordingHasher(
         IPasswordHasher inner,
         CancellationTokenSource? cancellation = null,
@@ -739,6 +836,20 @@ public sealed class SetupContributorDatabaseContractTests
     }
 
     /// <summary>
+    /// Fails the setup transaction's commit so the staged slice meets a deterministic commit
+    /// failure after the single save succeeded.
+    /// </summary>
+    private sealed class FailingCommitInterceptor : DbTransactionInterceptor
+    {
+        public override ValueTask<InterceptionResult> TransactionCommittingAsync(
+            DbTransaction transaction,
+            TransactionEventData eventData,
+            InterceptionResult result,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("synthetic commit failure");
+    }
+
+    /// <summary>
     /// Cancels and throws while the setup transaction is committing: the flush already happened,
     /// so the transaction rolls back and nothing is committed.
     /// </summary>
@@ -758,9 +869,9 @@ public sealed class SetupContributorDatabaseContractTests
     }
 
     /// <summary>
-    /// Cancels after the commit finished without throwing from the interceptor: only the service's
-    /// final cancellation check can still observe this cancellation, which is exactly what the
-    /// test asserts against.
+    /// Cancels after the commit finished without throwing from the interceptor: only the
+    /// executor's post-settlement cancellation check can still observe this cancellation, which is
+    /// exactly what the test asserts against.
     /// </summary>
     private sealed class CancelAfterCommitInterceptor(CancellationTokenSource cancellation)
         : DbTransactionInterceptor
@@ -800,8 +911,9 @@ public sealed class SetupContributorDatabaseContractTests
     }
 
     /// <summary>
-    /// Throws one PostgreSQL serialization-failure error inside the transaction so the existing
-    /// retrying execution strategy replays the whole setup attempt.
+    /// Throws one PostgreSQL serialization-failure error inside the transaction; with the retrying
+    /// execution strategy disabled the completion must answer unavailable after exactly one
+    /// attempt instead of replaying the user transaction.
     /// </summary>
     private sealed class TransientSerializationFailureInterceptor : DbCommandInterceptor
     {
@@ -833,7 +945,8 @@ public sealed class SetupContributorDatabaseContractTests
 
     /// <summary>
     /// A migrated, pending SignaCore installation with one revealed setup code. SQLite contexts
-    /// share one open connection; PostgreSQL contexts connect through the provider's pool.
+    /// share one open connection; PostgreSQL contexts connect through the provider's pool with the
+    /// retrying execution strategy disabled, matching the PendingSetup host's registration.
     /// </summary>
     private sealed class SetupDatabase : IAsyncDisposable
     {
@@ -905,12 +1018,7 @@ public sealed class SetupContributorDatabaseContractTests
                 };
                 return await CreateCoreAsync(
                     container,
-                    () =>
-                {
-                    var builder = new DbContextOptionsBuilder<IdentityDbContext>();
-                    builder.UseIdentityDatabase(options);
-                    return builder;
-                },
+                    () => CreatePostgreSqlOptionsBuilder(options),
                     options,
                     seedVersion,
                     interceptor);
@@ -932,15 +1040,18 @@ public sealed class SetupContributorDatabaseContractTests
             };
             return await CreateCoreAsync(
                 new NoopOwner(),
-                () =>
-                {
-                    var builder = new DbContextOptionsBuilder<IdentityDbContext>();
-                    builder.UseIdentityDatabase(options);
-                    return builder;
-                },
+                () => CreatePostgreSqlOptionsBuilder(options),
                 options,
                 seedVersion: null,
                 interceptor: null);
+        }
+
+        private static DbContextOptionsBuilder<IdentityDbContext> CreatePostgreSqlOptionsBuilder(
+            DatabaseOptions options)
+        {
+            var builder = new DbContextOptionsBuilder<IdentityDbContext>();
+            builder.UseIdentityDatabase(options, enableRetryOnFailure: false);
+            return builder;
         }
 
         private static async Task<SetupDatabase> CreateCoreAsync(

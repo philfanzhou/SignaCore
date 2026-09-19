@@ -7,7 +7,7 @@ namespace SignaCore.Host.Installation;
 /// The setup transaction's unit of work as shared orchestration sees it.
 /// <para>
 /// Discarding clears Entity Framework's change tracker only; it never saves, commits, or rolls
-/// back, because the transaction belongs to <see cref="InstallationSetupService"/>. Clearing is
+/// back, because the transaction belongs to <see cref="SetupCompletionExecutor"/>. Clearing is
 /// deliberately not interrupted by a caller's cancellation token, so the orchestrator's failure
 /// cleanup always runs to completion.
 /// </para>

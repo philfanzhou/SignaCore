@@ -13,8 +13,9 @@ and lockout behave identically; only the wire format differs.
 **This page describes the current runtime.** SignaCore is now an OpenID Connect provider for a
 narrow, first-party profile: a pre-registered confidential BFF can complete the Authorization Code
 flow with mandatory PKCE S256 and receive an ID token. The scope-controlled UserInfo endpoint is
-delivered, so `userinfo_endpoint` is advertised. The interactive refresh token family is not yet
-delivered, so `offline_access` is still deliberately absent from Discovery.
+delivered, so `userinfo_endpoint` is advertised. The interactive refresh token family is delivered
+too: `offline_access` at the code endpoint creates a rotating refresh family whose replay revokes
+its live descendants, and `offline_access` is advertised in Discovery.
 
 ## The standards endpoint
 
@@ -63,18 +64,20 @@ enabled) and are advertised in both discovery documents:
 
 - `authorization_endpoint`, `response_types_supported: ["code"]`,
   `code_challenge_methods_supported: ["S256"]`, `grant_types_supported` includes
-  `authorization_code`, and `scopes_supported: ["openid", "profile"]`.
+  `authorization_code`, and `scopes_supported: ["openid", "profile", "offline_access"]`.
 - A successful redemption returns `access_token` (`typ: at+jwt`, 15 minutes, audience = the
   application AppId), `id_token` (`typ: JWT`, RS256, 5 minutes, audience = the client id), the
-  canonical `scope`, and `expires_in`, with `Cache-Control: no-store`.
+  canonical `scope`, and `expires_in`, with `Cache-Control: no-store`; an `offline_access`
+  redemption additionally returns a one-shot `refresh_token` that names a rotating family.
 
 The ID token carries `iss`, stable `sub`, `aud`, `exp`, `iat`, the session's `auth_time`, `sid`,
 `amr: ["pwd"]`, and the exact authorization-request `nonce`; `name`/`nickname` appear only when
 `profile` was granted. It never carries roles, permissions, or callback claims. A BFF consuming it
 must validate the RS256 signature through the `kid`-selected JWKS key, the exact issuer, its own
-audience, the lifetime, the `typ`, and the one-time `nonce`, and must keep every token server-side;
-`offline_access` requests are rejected with `invalid_grant` until the interactive refresh family
-lands, so the response never contains a `refresh_token` from this flow.
+audience, the lifetime, the `typ`, and the one-time `nonce`, and must keep every token server-side.
+A refresh at `POST /oauth2/token` with `grant_type=refresh_token` rotates the family atomically and
+returns a new access token, a nonce-free ID token, and exactly one new refresh token; replaying a
+consumed member revokes every live descendant of the family and answers `invalid_grant`.
 
 ## Access-token audience
 
@@ -129,10 +132,9 @@ are made from the `client_id` claim, not from `aud`.
 | --- | --- | --- |
 | ID tokens only for the interactive flow | OIDC Core 1.0 §2 | `id_token` exists for the confidential-BFF Authorization Code flow only; the direct credential grants keep returning access tokens alone |
 | UserInfo is interactive-flow-only | OIDC Core 1.0 §5.3 | `GET /oauth2/userinfo` serves the closed `PS-16` claim set to a confidential BFF holding a live interactive access token; it is not a browser endpoint (no CORS) and does not serve direct-grant tokens |
-| No interactive refresh family | OAuth 2.0 BCP, OIDC Core §11 | `offline_access` is rejected with `invalid_grant` and not advertised; the legacy `refresh_token` grant is unaffected |
 | No `scope` on the direct grants | RFC 6749 §3.3 | The direct credential grants have no way to request or restrict a subset of authority; the interactive flow's scope is fixed by the registration allow list |
 | The `password` grant is the primary flow | OAuth 2.1 draft, BCP 240 | The resource-owner password grant is deprecated in current guidance; it remains here because clients depend on it |
-| No refresh-token reuse detection | OAuth 2.0 Security BCP §4.14 | Replaying a consumed refresh token fails, but descendants of the replayed token are not revoked |
+| Legacy grants lack reuse detection | OAuth 2.0 Security BCP §4.14 | Interactive refresh families rotate atomically and revoke live descendants on replay; the legacy `refresh_token` grant keeps its current rotation without that guarantee (`EV-33`) |
 | Development `Jwt:Issuer` defaults to `SignaCore` | RFC 8414 §2 | Development remains convenient; production startup requires an absolute HTTPS issuer unless an explicit temporary legacy override is enabled |
 | Legacy `/api/auth/*` routes | RFC 6749 | Kept deliberately; not standards-shaped and not advertised in discovery |
 

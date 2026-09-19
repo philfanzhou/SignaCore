@@ -38,18 +38,24 @@ cannot provide correct identity behavior while its authoritative identity databa
 
 ## Setup Mode
 
-While installation is `Pending`:
+While installation is `Pending`, the process serves a minimal host composed of the shared
+ServiceMantle capabilities: the management pipeline with its phase gate, the anonymous setup entry,
+the health endpoints, and the admin SPA. While installation is `Pending`:
 
-- `/admin` and any other browser navigation redirect to `/setup`;
-- `/setup` serves the setup UI;
-- `/api/setup/status` and `/api/setup/complete` are available;
-- `/health/live` reports process and database liveness;
-- `/health/ready` reports not ready;
-- token, discovery, JWKS, profile, gateway, and normal admin APIs return a structured
-  `503 installation_required` JSON response;
+- `/setup` (and any console route such as `/admin`) serves the same SPA build; the SPA probes the
+  setup entry itself and renders the setup form;
+- `GET /management/v1/setup` reports `{"status":"pending"}`;
+- `POST /management/v1/setup` accepts the completion submission;
+- `/health/live` reports liveness; `/health/ready` and `/health` report not ready;
+- token, discovery, JWKS, profile, gateway, and normal admin APIs have no endpoint: a read is a
+  plain `404`, and a write — which routing answers with its synthetic method-mismatch endpoint —
+  is answered by the shared phase gate with the fixed `503 service.phase.unavailable`, exactly as
+  the Bootstrap Configuration Mode host behaves;
 - the normal admin login route is unavailable.
 
-API requests receive JSON rather than an HTML redirect; only browser navigation is redirected.
+API requests receive no identity surface at all; only browser navigation reaches the console
+build, which then renders the setup form client-side. There is no server-side redirect into
+`/setup` anymore.
 
 ## The one-time setup code
 
@@ -79,8 +85,9 @@ docker logs signacore
 ==============================================================
 ```
 
-Verification is rate-limited to 5 attempts per minute per source address and compares hashes in constant
-time. The hash and expiry are cleared in the same transaction that completes installation.
+Verification is rate-limited by the shared setup policy (5 requests per minute per source address)
+and compares hashes in constant time. The hash and expiry are cleared in the same transaction that
+completes installation.
 
 The code is an ephemeral proof that the user can inspect the deployment, not an application setting;
 it does not belong in the bootstrap file.
@@ -120,32 +127,52 @@ The administrator plaintext password is used only to create its password hash. I
 
 ## Completion is atomic
 
-`POST /api/setup/complete` performs the following in one serializable transaction:
+`POST /management/v1/setup` performs the completion in one serializable transaction. The request
+carries the fixed cross-site request header `X-ServiceMantle-Request: 1` and a JSON body of exactly
+`{"code":"...","input":{...}}`, where `input` holds exactly the five form values: `publicBaseUrl`
+(string), `allowNonHttpsIssuer` (bool), `jwtAudience` (string), `username` (string), and `password`
+(string). The password confirmation is compared only in the browser and never travels. A missing,
+extra, or wrongly typed field, or an HTTP shape the shared entry refuses, is answered with the fixed
+management `400` before the executor runs.
 
-1. re-read and lock the singleton installation row;
-2. confirm the status is still `Pending` and validate the setup code read-only;
-3. run the shared ServiceMantle setup orchestration over the initial-administrator contributor:
+The executor owns one transaction and attempts it exactly once — never under a retrying execution
+strategy — in this order:
+
+1. lock the singleton installation row (`SELECT ... FOR UPDATE` on PostgreSQL; the SQLite write
+   transaction serializes on the file); a missing row is a fixed `503`, a `Completed` row is the
+   fixed management `409`;
+2. validate the setup code read-only; an invalid, expired, or already-rotated code is answered
+   `401 {"errorCode":"management.setup.credential_invalid"}` without consuming anything, and
+   before any content of the input can influence the answer;
+3. read and validate the input: the five-field shape, the absolute HTTPS public base URL (HTTP only
+   with the explicit opt-in), the non-empty audience, the username length, the password policy, and
+   the complete proposed settings snapshot; every failure is the fixed `400`;
+4. run the shared ServiceMantle setup orchestration over the initial-administrator contributor:
    its read-only validation re-checks the password policy and the normalized-username uniqueness,
-   and its registration stages the administrator account and the password hash without saving;
-4. insert the complete default global-settings snapshot;
-5. stage the setup-completed audit event — expressed with the shared audit model
+   and its registration stages the administrator account and the password hash without saving. A
+   taken username or a policy-failing password is the fixed `400`; any other orchestration failure
+   is the fixed `503`;
+5. insert the complete default global-settings snapshot;
+6. stage the setup-completed audit event — expressed with the shared audit model
    (`installation.completed` on the `service:signacore` target, operator source `setup_code`
    carrying the created account id) and projected onto the existing `audit_logs` row, where the
-   actor links to the account created in step 3;
-6. re-verify and stage consumption of the code together with the `Completed` status, the
-   completion timestamp, and the version increment;
-7. save once, commit once;
-8. once the transaction has been released and its cleanup settled, observe caller cancellation one
-   last time before reporting the result.
+   actor links to the account created in step 4;
+7. re-verify and stage consumption of the code together with the `Completed` status, the
+   completion timestamp, and the version increment; a refusal here rolls everything staged above
+   back: an installation that completed concurrently answers the fixed `409`, any other refusal the
+   shared `401`;
+8. save once, commit once, and only then answer `204` with an empty body.
 
-The staging order is pinned by the shared orchestrator: it refuses to run on a context that
-already carries pending changes, so the code consumption cannot silently move ahead of the
-contributor's staging. The orchestrator, its contributor, and the audit projection are created
-fresh for every execution-strategy attempt, so a retried PostgreSQL attempt never reuses a
-previous attempt's identifiers or tracked entities.
+The staging order is pinned by the shared orchestrator: it refuses to run on a context that already
+carries pending changes, so the code consumption cannot silently move ahead of the contributor's
+staging. The orchestrator, its contributor, and the audit projection are created fresh for every
+completion request inside the request's own scope.
 
-Only one concurrent request can succeed. Others receive a completed/conflict result without changing
-data, and every instance that observes completion leaves Setup Mode.
+Only one concurrent request can succeed. A loser that arrives after the winner committed answers
+the fixed conflict; a loser that was waiting on the row lock when the winner committed is released
+with a serialization failure and answers the fixed `503` — its next submission observes the
+completion and answers the conflict. Either way nothing of the loser's is written, and every
+instance that observes completion leaves Setup Mode.
 
 ### Failure and cancellation boundaries
 
@@ -153,18 +180,20 @@ data, and every instance that observes completion leaves Setup Mode.
 - A wrong or expired code is answered from the read-only validation and never consumed; if the
   final consumption re-check refuses (for example the code expired after validation), everything
   staged in between is discarded by the rollback and nothing is committed.
-- A username whose normalized form already owns a credential is refused with a fixed message; the
+- A username whose normalized form already owns a credential is refused with the fixed `400`; the
   existing rows and the code are untouched, and a unique-constraint violation is never surfaced to
   the caller.
-- Any other staging failure — hashing, settings protection, the audit projection, or the single
-  save — rolls the transaction back and reports one fixed, detail-free exception through the
-  generic error handling. The installation stays `Pending` and its code is preserved.
-- Caller cancellation is observed only once the transaction and its cleanup have settled. Wherever
-  it is observed, setup answers with a single fixed message, the original cancellation token, and
-  no inner exception. Cancellation observed before the commit rolls everything back; cancellation
-  observed after the commit keeps every committed fact and the installation is `Completed` for
-  later requests even though the caller receives no success response. An internal cancellation
-  that is not the caller's is treated as an ordinary failure, not as a caller cancellation.
+- Any other failure — hashing, settings protection, the audit projection, the single save, the
+  commit, or a transient connection problem — rolls the transaction back and answers the fixed
+  `503 {"errorCode":"management.setup.unavailable"}`. The installation stays `Pending` and its code
+  is preserved; the caller simply submits again. There is exactly one attempt: the completion
+  transaction never runs under the provider's retrying execution strategy, so a transient failure
+  can never replay a partially staged attempt.
+- Caller cancellation is answered with the caller's own cancellation, never with a result. It is
+  observed only once the transaction and its cleanup have settled: cancellation before the commit
+  rolls everything back; cancellation after the commit keeps every committed fact, and the
+  installation is `Completed` for later requests even though the caller receives no success
+  response. An internal cancellation that is not the caller's is treated as an ordinary failure.
 
 ### The installation audit projection
 
@@ -182,7 +211,10 @@ key, or settings value is passed into the event, the description, logs, or the r
 After a successful setup transaction:
 
 1. the browser shows a "configuration saved; service is starting" page and polls `/health/ready`;
-2. the host calls `StopApplication()` after the response has completed;
+2. after the completion response finishes, the host re-reads the persisted installation state in a
+   fresh scope; only a `Completed` row stops the process, so an instance that lost the completion
+   race also restarts, and a response lost in transit never strands a completed installation in
+   Setup Mode;
 3. Docker's `unless-stopped` policy, systemd, Kubernetes, or another supervisor restarts the process;
 4. a manually launched process prints an instruction to start SignaCore again;
 5. on restart the host observes `Completed`, loads and validates the settings, and starts normally.
@@ -190,8 +222,10 @@ After a successful setup transaction:
 A restart is used rather than rebuilding JWT, CORS, LDAP, SMS, telemetry, and key-management
 singletons inside an already running dependency-injection container.
 
-After installation is completed, `/setup` redirects browser navigation to the admin console and
-`/api/setup/complete` answers `409`. They never permit reinitialization.
+After installation is completed, `/setup` redirects browser navigation to the admin console,
+`GET /management/v1/setup` answers `{"status":"completed"}`, and `POST /management/v1/setup`
+answers the fixed management `409` without parsing the request body. They never permit
+reinitialization.
 
 ## Upgrading an existing deployment
 

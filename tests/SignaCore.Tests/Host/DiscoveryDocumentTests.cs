@@ -69,16 +69,16 @@ public class DiscoveryDocumentTests
 
     /// <summary>
     /// <c>userinfo_endpoint</c> is advertised since the scope-controlled UserInfo read exists
-    /// (<c>AC-08</c>); <c>offline_access</c> still appears only when the interactive refresh
-    /// family works end to end (<c>AC-12</c>), and advertising either earlier would promise a
-    /// request no client can complete.
+    /// (<c>AC-08</c>), and <c>offline_access</c> since the interactive refresh family rotates
+    /// atomically end to end (<c>AC-12</c>); advertising either earlier would promise a request
+    /// no client can complete.
     /// </summary>
     [Fact]
     public void Create_AdvertisesOnlyTheScopesTheRuntimeCompletesToday()
     {
         var document = DiscoveryDocument.Create("https://id.example.com", "https://id.example.com", GrantTypes);
 
-        Assert.Equal(["openid", "profile"], document.ScopesSupported);
+        Assert.Equal(["openid", "profile", "offline_access"], document.ScopesSupported);
         Assert.Equal("https://id.example.com/oauth2/userinfo", document.UserInfoEndpoint);
     }
 

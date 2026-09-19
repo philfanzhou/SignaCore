@@ -35,7 +35,7 @@ public class AdminSpaRoutingTests
     [InlineData("/api/profile/wechat")]
     [InlineData("/oauth2/token")]
     [InlineData("/oauth2/revoke")]
-    [InlineData("/api/setup/status")]
+    [InlineData("/api/auth/token")]
     [InlineData("/.well-known/openid-configuration")]
     [InlineData("/.well-known/jwks")]
     [InlineData("/.well-known/jwks.json")]

@@ -183,10 +183,10 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(
             ["S256"],
             document.GetProperty("code_challenge_methods_supported").EnumerateArray().Select(item => item.GetString()));
-        // userinfo_endpoint is advertised with the delivered UserInfo read (AC-08);
-        // offline_access still appears only with the interactive refresh family (AC-12).
+        // userinfo_endpoint is advertised with the delivered UserInfo read (AC-08), and
+        // offline_access with the delivered interactive refresh family (AC-12).
         Assert.Equal(
-            ["openid", "profile"],
+            ["openid", "profile", "offline_access"],
             document.GetProperty("scopes_supported").EnumerateArray().Select(item => item.GetString()));
         Assert.Equal(
             $"{origin}/oauth2/userinfo",
@@ -419,29 +419,28 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
-    /// A completed installation must never permit reinitialization: the setup API stays routable so
-    /// clients get a clear answer, but it can only ever report "already completed".
+    /// A completed installation must never permit reinitialization: the shared setup entry stays
+    /// routable so clients get a clear answer, but its read can only ever report "completed" and
+    /// its completion answers the fixed management conflict without parsing the request.
     /// </summary>
     [Fact]
     public async Task SetupEndpoints_AfterInstallation_RefuseReinitialization()
     {
         using var http = _fixture.CreateHttpClient();
 
-        var status = await http.GetAsync("/api/setup/status", TestContext.Current.CancellationToken);
+        var status = await http.GetAsync("/management/v1/setup", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, status.StatusCode);
         Assert.Equal(
             "completed",
             (await status.Content.ReadFromJsonAsync<JsonElement>(
                 cancellationToken: TestContext.Current.CancellationToken)).GetProperty("status").GetString());
 
-        var complete = await http.PostAsJsonAsync("/api/setup/complete", new
+        var complete = await http.SendAsync(new HttpRequestMessage(
+            HttpMethod.Post, "/management/v1/setup")
         {
-            publicBaseUrl = "https://attacker.example",
-            username = "attacker",
-            password = "Attacker123",
-            confirmPassword = "Attacker123",
-            setupCode = "does-not-matter"
-        }, cancellationToken: TestContext.Current.CancellationToken);
+            Headers = { { "X-ServiceMantle-Request", "1" } },
+            Content = JsonContent.Create(new { anything = "unparsed" }),
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Conflict, complete.StatusCode);
     }

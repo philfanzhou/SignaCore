@@ -237,26 +237,32 @@ jobs:
           set -euo pipefail
           fail() { echo "SMOKE FAIL: $*"; exit 1; }
 
-          curl -fsS --max-time 10 http://localhost:5002/api/setup/status | grep -q '"status":"pending"' \
+          curl -fsS --max-time 10 http://localhost:5002/management/v1/setup | grep -q '"status":"pending"' \
             || fail 'a new database did not enter Setup Mode'
 
           ready_status="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
             http://localhost:5002/health/ready)"
           [ "$ready_status" = '503' ] || fail "/health/ready returned $ready_status while pending"
 
+          # While the installation is pending no identity endpoint exists: a read is a plain 404
+          # through the SPA fallback's guard, and a write reaches routing's method-mismatch
+          # endpoint, which the shared phase gate answers with the fixed unavailable result.
+          read_status="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+            http://localhost:5002/.well-known/openid-configuration)"
+          [ "$read_status" = '404' ] || fail "discovery read returned $read_status while pending"
+
           token_status="$(curl -sS --max-time 10 -o /tmp/pending.json -w '%{http_code}' \
             -X POST http://localhost:5002/api/auth/token \
             -H 'Content-Type: application/json' -d '{"grantType":"password"}')"
           [ "$token_status" = '503' ] || fail "token endpoint returned $token_status while pending"
-          grep -q 'installation_required' /tmp/pending.json \
-            || fail "pending token response lacks installation_required: $(cat /tmp/pending.json)"
+          grep -q 'service.phase.unavailable' /tmp/pending.json \
+            || fail "pending token response is not the phase gate answer: $(cat /tmp/pending.json)"
 
-          redirect="$(curl -sS --max-time 10 -o /dev/null -w '%{redirect_url}' \
-            -H 'Accept: text/html' http://localhost:5002/admin)"
-          case "$redirect" in
-            */setup) ;;
-            *) fail "/admin redirected to '$redirect' instead of /setup" ;;
-          esac
+          # Browser navigation reaches the console build; the SPA itself probes the setup entry and
+          # renders the setup form. There is no server-side redirect anymore.
+          admin_body="$(curl -fsS --max-time 10 -H 'Accept: text/html' http://localhost:5002/admin)"
+          echo "$admin_body" | grep -qi '<html' \
+            || fail '/admin did not serve the console build while pending'
 
           echo 'Setup Mode assertions passed'
 
@@ -275,20 +281,32 @@ jobs:
           [ -n "$SETUP_CODE" ] || { echo 'no setup code found in the container log'; exit 1; }
           echo "::add-mask::$SETUP_CODE"
 
-          # A wrong code must be refused without changing anything.
+          # A well-formed but wrong code must be refused with the shared 401 without changing
+          # anything. The shared parser only accepts 32-character Base64URL codes.
           bad_status="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
-            -X POST http://localhost:5002/api/setup/complete \
+            -X POST http://localhost:5002/management/v1/setup \
             -H 'Content-Type: application/json' \
+            -H 'X-ServiceMantle-Request: 1' \
             -d "$(jq -n --arg password "$ADMIN_PASSWORD" \
-              '{publicBaseUrl:"https://signacore.test",username:"smoke_admin",password:$password,confirmPassword:$password,setupCode:"AAAAA-BBBBB-CCCCC-DDDDD"}')")"
-          [ "$bad_status" = '403' ] || { echo "wrong setup code returned $bad_status"; exit 1; }
+              '{code:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",input:{publicBaseUrl:"https://signacore.test",allowNonHttpsIssuer:false,jwtAudience:"SignaCore.Services",username:"smoke_admin",password:$password}}')")"
+          [ "$bad_status" = '401' ] || { echo "wrong setup code returned $bad_status"; exit 1; }
 
-          status="$(curl -sS --max-time 10 -o /tmp/setup.json -w '%{http_code}' \
-            -X POST http://localhost:5002/api/setup/complete \
+          # A completion request without the fixed cross-site request header is refused before
+          # the executor runs.
+          headerless_status="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+            -X POST http://localhost:5002/management/v1/setup \
             -H 'Content-Type: application/json' \
             -d "$(jq -n --arg password "$ADMIN_PASSWORD" --arg code "$SETUP_CODE" \
-              '{publicBaseUrl:"https://signacore.test",username:"smoke_admin",password:$password,confirmPassword:$password,setupCode:$code}')")"
-          [ "$status" = '200' ] || { echo "setup returned $status: $(cat /tmp/setup.json)"; exit 1; }
+              '{code:$code,input:{publicBaseUrl:"https://signacore.test",allowNonHttpsIssuer:false,jwtAudience:"SignaCore.Services",username:"smoke_admin",password:$password}}')")"
+          [ "$headerless_status" = '400' ] || { echo "headerless setup returned $headerless_status"; exit 1; }
+
+          status="$(curl -sS --max-time 10 -o /tmp/setup.json -w '%{http_code}' \
+            -X POST http://localhost:5002/management/v1/setup \
+            -H 'Content-Type: application/json' \
+            -H 'X-ServiceMantle-Request: 1' \
+            -d "$(jq -n --arg password "$ADMIN_PASSWORD" --arg code "$SETUP_CODE" \
+              '{code:$code,input:{publicBaseUrl:"https://signacore.test",allowNonHttpsIssuer:false,jwtAudience:"SignaCore.Services",username:"smoke_admin",password:$password}}')")"
+          [ "$status" = '204' ] || { echo "setup returned $status: $(cat /tmp/setup.json)"; exit 1; }
 
       - name: Wait for readiness after the restart
         run: |
@@ -312,14 +330,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          curl -fsS --max-time 10 http://localhost:5002/api/setup/status | grep -q '"status":"completed"' \
+          curl -fsS --max-time 10 http://localhost:5002/management/v1/setup | grep -q '"status":"completed"' \
             || { echo 'setup status did not become completed'; exit 1; }
 
+          # A completed installation answers the fixed 409 without parsing the request body.
           status="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
-            -X POST http://localhost:5002/api/setup/complete \
+            -X POST http://localhost:5002/management/v1/setup \
             -H 'Content-Type: application/json' \
-            -d '{"publicBaseUrl":"https://attacker.test","username":"attacker","password":"Attacker1234","confirmPassword":"Attacker1234","setupCode":"AAAAA-BBBBB-CCCCC-DDDDD"}')"
+            -H 'X-ServiceMantle-Request: 1' \
+            -d '{"code":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","input":{"publicBaseUrl":"https://attacker.test","allowNonHttpsIssuer":false,"jwtAudience":"SignaCore.Services","username":"attacker","password":"Attacker1234"}}')"
           [ "$status" = '409' ] || { echo "completed installation accepted setup: $status"; exit 1; }
+
+          # The normal host redirects browser navigation away from the completed setup page.
+          redirect="$(curl -sS --max-time 10 -o /dev/null -w '%{redirect_url}' \
+            -H 'Accept: text/html' http://localhost:5002/setup)"
+          case "$redirect" in
+            */admin) ;;
+            *) echo "/setup redirected to '$redirect' instead of /admin"; exit 1 ;;
+          esac
 
       - name: Smoke assertions
         run: |
