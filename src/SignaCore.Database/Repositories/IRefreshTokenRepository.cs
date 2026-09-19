@@ -63,6 +63,18 @@ public interface IRefreshTokenRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Revokes every unrevoked <em>legacy</em> refresh token of <paramref name="accountId"/>:
+    /// rows with no identity session (<c>PS-07</c>), which <see cref="RevokeByAccountAsync"/> is
+    /// structurally unable to reach. This is the self-service password-change transaction's
+    /// legacy disposal, symmetric to but deliberately separate from the interactive-family
+    /// primitive so the <c>EV-08</c> account-disable semantics stay unchanged. Returns the number
+    /// of rows this call revoked.
+    /// </summary>
+    Task<int> RevokeLegacyByAccountAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Revokes every unrevoked interactive refresh token issued to <paramref name="appId"/>
     /// (<c>EV-09</c>/<c>EV-11</c>): the application-deactivation and refresh-capability
     /// transactions' family disposal. Interactive rows only — legacy rows are structurally out

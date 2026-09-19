@@ -1,5 +1,7 @@
 using System.Data.Common;
 using System.Net;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -14,6 +16,7 @@ using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Management;
@@ -25,14 +28,15 @@ using Xunit;
 namespace SignaCore.Tests.Integration;
 
 /// <summary>
-/// The <c>EV-08</c> serialization contract of the account-disable transaction against the two
-/// live product transactions of the same account — interactive refresh rotation (<c>EV-29</c>)
-/// and authorization-code redemption (<c>EV-21</c>): run concurrently over one shared database,
-/// the session-row lock order admits exactly two outcomes. Either the disable commits first and
-/// the product transaction fails closed without consuming anything and without manufacturing a
-/// replay audit, or the product transaction commits first and every artifact it produced is
-/// revoked by the subsequently committing disable. A third outcome — a consumed artifact, or a
-/// replay audit against the disable — is a defect.
+/// The <c>EV-08</c> serialization contract of the account-disable transaction and the matching
+/// contract of the self-service password-change transaction against the two live product
+/// transactions of the same account — interactive refresh rotation (<c>EV-29</c>) and
+/// authorization-code redemption (<c>EV-21</c>): run concurrently over one shared database, the
+/// session-row lock order admits exactly two outcomes. Either the account-state transaction
+/// commits first and the product transaction fails closed without consuming anything and without
+/// manufacturing a replay audit, or the product transaction commits first and every artifact it
+/// produced is revoked by the subsequently committing account-state transaction. A third outcome
+/// — a consumed artifact, or a replay audit against it — is a defect.
 /// <para>
 /// The SQLite file form runs everywhere; the shared-PostgreSQL form is the production
 /// multi-instance shape and is gated on <c>RUN_SIGNACORE_DATABASE_CONTRACTS</c> like the rest
@@ -44,6 +48,8 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
     private const string ClientId = "state-concurrency-app";
     private const string CanonicalScope = "openid profile offline_access";
     private const string Username = "state_concurrency_user";
+    private const string CurrentPassword = "State-Concurrency-1";
+    private const string ChangedPassword = "State-Concurrency-2";
 
     public static TheoryData<string, bool> Contenders()
     {
@@ -148,6 +154,94 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
     }
 
     /// <summary>
+    /// The self-service password change against the same two product transactions: the session-row
+    /// lock order admits the identical two canonical outcomes, with the sessions revoked under the
+    /// <c>password_changed</c> reason and the account left active (a password change never disables).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Contenders))]
+    public async Task PasswordChangeAgainstAProductTransaction_AdmitsExactlyTheTwoCanonicalOutcomes(
+        string contender,
+        bool headStart)
+    {
+        await using var database = new ConcurrencyDatabase();
+        var seed = await database.SeedAsync();
+        var (_, plaintext) = await ConcurrencyDatabase.SeedRootMemberAsync(
+            database.BuildOptions(), seed);
+        var code = await ConcurrencyDatabase.SeedCodeAsync(database.BuildOptions(), seed);
+
+        Task<object> contenderTask = contender == "rotation"
+            ? RotateAsync(ConcurrencyDatabase.BuildRotationService(database.BuildOptions()), seed, plaintext)
+            : RedeemAsync(ConcurrencyDatabase.BuildRedemptionService(database.BuildOptions()), seed, code);
+        if (headStart)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken);
+        }
+
+        var changeTask = ChangePasswordAsync(database.BuildOptions(), seed);
+
+        var changeResult = await changeTask;
+        Assert.IsType<OkObjectResult>(changeResult);
+        var outcome = await contenderTask;
+
+        await using var verification = new IdentityDbContext(database.BuildOptions());
+        var session = await verification.IdentitySessions.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.SessionId, TestContext.Current.CancellationToken);
+        var account = await verification.Accounts.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.AccountId, TestContext.Current.CancellationToken);
+        var credential = await verification.PasswordCredentials.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.CredentialId, TestContext.Current.CancellationToken);
+        var family = await verification.RefreshTokens.AsNoTracking()
+            .Where(row => row.IdentitySessionId == seed.SessionId)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        var replayAudits = await verification.AuditLogs.AsNoTracking()
+            .Where(row => row.Action == "oidc.refresh.replayed" || row.Action == "oidc.code.replayed")
+            .ToListAsync(TestContext.Current.CancellationToken);
+        var codeRow = await verification.AuthorizationCodes.AsNoTracking()
+            .SingleAsync(row => row.Id == code.Id, TestContext.Current.CancellationToken);
+
+        // The password-change transaction always committed its own facts: the new hash and every
+        // session revoked under the canonical reason, with the account left active.
+        Assert.True(account.IsActive);
+        Assert.True(BCrypt.Net.BCrypt.Verify(ChangedPassword, credential.PasswordHash));
+        Assert.NotNull(session.RevokedAt);
+        Assert.Equal("password_changed", session.RevocationReason);
+
+        if (outcome is ContenderSuccess)
+        {
+            Assert.NotEmpty(family);
+            Assert.All(family, member => Assert.True(member.IsRevoked));
+            if (contender == "redemption")
+            {
+                Assert.Equal(2, family.Count);
+                Assert.NotNull(codeRow.ConsumedAt);
+            }
+            else
+            {
+                Assert.Equal(2, family.Count);
+            }
+        }
+        else
+        {
+            var failure = Assert.IsType<ContenderFailure>(outcome);
+            Assert.Equal("invalid_grant", failure.Error);
+            if (contender == "redemption")
+            {
+                Assert.Null(codeRow.ConsumedAt);
+            }
+            else
+            {
+                Assert.Single(family);
+                Assert.Null(family[0].ConsumedAt);
+            }
+
+            Assert.All(family, member => Assert.True(member.IsRevoked));
+        }
+
+        Assert.Empty(replayAudits);
+    }
+
+    /// <summary>
     /// The <c>SC-14</c> cross-instance form: the disable controller and the product transaction
     /// over two independent contexts against one shared PostgreSQL database.
     /// </summary>
@@ -228,6 +322,108 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
             else
             {
             var failure = Assert.IsType<ContenderFailure>(outcome);
+                Assert.Equal("invalid_grant", failure.Error);
+                if (contender == "redemption")
+                {
+                    Assert.Null(codeRow.ConsumedAt);
+                }
+                else
+                {
+                    Assert.Single(family);
+                    Assert.Null(family[0].ConsumedAt);
+                }
+
+                Assert.All(family, member => Assert.True(member.IsRevoked));
+            }
+
+            Assert.Empty(replayAudits);
+        }
+    }
+
+    /// <summary>
+    /// The <c>SC-14</c> cross-instance form of the password change: the profile controller and the
+    /// product transaction over two independent contexts against one shared PostgreSQL database.
+    /// </summary>
+    [Theory]
+    [InlineData("PostgreSQL", "rotation")]
+    [InlineData("PostgreSQL", "redemption")]
+    public async Task PasswordChangeAgainstAProductTransaction_OverOneSharedPostgreSql_AdmitsExactlyTheTwoCanonicalOutcomes(
+        string provider,
+        string contender)
+    {
+        Assert.SkipUnless(
+            ShouldRunContainerMatrix(),
+            $"Set RUN_SIGNACORE_DATABASE_CONTRACTS=true to run the {provider} state-propagation matrix.");
+
+        var container = new PostgreSqlBuilder(PostgreSqlImage)
+            .WithDatabase("identity")
+            .WithUsername("postgres")
+            .WithPassword("postgres")
+            .Build();
+        await using (container)
+        {
+            await container.StartAsync(TestContext.Current.CancellationToken);
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(new DatabaseOptions
+            {
+                Provider = provider,
+                ServerVersion = "15",
+                ConnectionString = container.GetConnectionString()
+            });
+            var options = optionsBuilder.Options;
+            await WaitUntilConnectableAsync(options);
+
+            var seed = await ConcurrencyDatabase.SeedAsync(options);
+            var (_, plaintext) = await ConcurrencyDatabase.SeedRootMemberAsync(options, seed);
+            var code = await ConcurrencyDatabase.SeedCodeAsync(options, seed);
+
+            var changeTask = ChangePasswordAsync(options, seed);
+            Task<object> contenderTask = contender == "rotation"
+                ? RotateAsync(ConcurrencyDatabase.BuildRotationService(options), seed, plaintext)
+                : RedeemAsync(ConcurrencyDatabase.BuildRedemptionService(options), seed, code);
+
+            var changeResult = await changeTask;
+            Assert.IsType<OkObjectResult>(changeResult);
+            var outcome = await contenderTask;
+
+            await using var verification = new IdentityDbContext(options);
+            var session = await verification.IdentitySessions.AsNoTracking()
+                .SingleAsync(row => row.Id == seed.SessionId, TestContext.Current.CancellationToken);
+            var account = await verification.Accounts.AsNoTracking()
+                .SingleAsync(row => row.Id == seed.AccountId, TestContext.Current.CancellationToken);
+            var credential = await verification.PasswordCredentials.AsNoTracking()
+                .SingleAsync(row => row.Id == seed.CredentialId, TestContext.Current.CancellationToken);
+            var family = await verification.RefreshTokens.AsNoTracking()
+                .Where(row => row.IdentitySessionId == seed.SessionId)
+                .ToListAsync(TestContext.Current.CancellationToken);
+            var replayAudits = await verification.AuditLogs.AsNoTracking()
+                .Where(row => row.Action == "oidc.refresh.replayed" || row.Action == "oidc.code.replayed")
+                .ToListAsync(TestContext.Current.CancellationToken);
+            var codeRow = await verification.AuthorizationCodes.AsNoTracking()
+                .SingleAsync(row => row.Id == code.Id, TestContext.Current.CancellationToken);
+
+            Assert.True(account.IsActive);
+            Assert.True(BCrypt.Net.BCrypt.Verify(ChangedPassword, credential.PasswordHash));
+            Assert.NotNull(session.RevokedAt);
+            Assert.Equal("password_changed", session.RevocationReason);
+
+            if (outcome is ContenderSuccess)
+            {
+                Assert.NotEmpty(family);
+                Assert.All(family, member => Assert.True(member.IsRevoked));
+                if (contender == "redemption")
+                {
+                    Assert.Equal(2, family.Count);
+                    Assert.NotNull(codeRow.ConsumedAt);
+                }
+                else
+                {
+                    Assert.Equal(2, family.Count);
+                }
+            }
+            else
+            {
+                var failure = Assert.IsType<ContenderFailure>(outcome);
                 Assert.Equal("invalid_grant", failure.Error);
                 if (contender == "redemption")
                 {
@@ -347,6 +543,71 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
                 unitOfWork,
                 NullLogger<RefreshTokenFamilyStore>.Instance),
             TestContext.Current.CancellationToken);
+    }
+
+    // ---- Password-change driver ----
+
+    /// <summary>
+    /// Invokes the self-service password change directly against a fresh context over the shared
+    /// database. The controller reads the account id from the JWT name-identifier claim and the
+    /// correlation id from the ServiceMantle slot, so both are established exactly as the composed
+    /// host does — never by writing the library's private slot key.
+    /// </summary>
+    private static Task<IActionResult> ChangePasswordAsync(
+        DbContextOptions<IdentityDbContext> options,
+        ConcurrencySeed seed)
+    {
+        var context = new IdentityDbContext(options);
+        var unitOfWork = new EfCoreUnitOfWork(context);
+        var refreshTokens = new RefreshTokenRepository(context);
+        var hasherOptions = new PasswordHasherOptions { WorkFactor = 4 };
+        var controller = new ProfileController();
+        var httpContext = new DefaultHttpContext();
+        httpContext.Connection.RemoteIpAddress = IPAddress.Parse("127.0.0.1");
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, seed.AccountId.ToString())],
+            "Test"));
+        CorrelationPipeline.Establish(httpContext);
+        controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
+
+        return controller.ChangePassword(
+            new ChangePasswordRequest(CurrentPassword, ChangedPassword),
+            new PasswordCredentialRepository(context),
+            new BCryptPasswordHasher(hasherOptions),
+            new DefaultPasswordPolicy(),
+            new PasswordDecoyHash(hasherOptions),
+            new LoginAttemptRepository(context),
+            new IdentitySessionRepository(context),
+            new RefreshTokenFamilyStore(
+                refreshTokens, unitOfWork, NullLogger<RefreshTokenFamilyStore>.Instance),
+            refreshTokens,
+            context,
+            unitOfWork,
+            new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Runs the real ServiceMantle correlation middleware over an in-process context, through the
+    /// same public registration the production hosts compose.
+    /// </summary>
+    private static class CorrelationPipeline
+    {
+        private static readonly RequestDelegate Pipeline = Build();
+
+        public static void Establish(HttpContext context) =>
+            Pipeline(context).GetAwaiter().GetResult();
+
+        private static RequestDelegate Build()
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSignaCoreServiceMantle();
+            var provider = services.BuildServiceProvider();
+            var app = new ApplicationBuilder(provider);
+            app.UseServiceMantleCorrelationId();
+            return app.Build();
+        }
     }
 
     // ---- Shared database harness ----
@@ -474,7 +735,9 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
                 Id = credentialId,
                 AccountId = accountId,
                 Username = $"{Username}_{accountId:N}",
-                PasswordHash = "hash",
+                // A real low-work-factor hash so the password-change driver can re-prove the
+                // current password; the disable/rotation/redemption paths never verify it.
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(CurrentPassword, 4),
                 CreatedAt = DateTimeOffset.UtcNow
             });
             await context.SaveChangesAsync(TestContext.Current.CancellationToken);

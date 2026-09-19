@@ -67,7 +67,11 @@ public enum IdentitySessionRevocationReason
     CodeReplay,
 
     /// <summary><c>EV-08</c>: the account-disable transaction revoked every live session of the account.</summary>
-    AccountDisabled
+    AccountDisabled,
+
+    /// <summary>The self-service password-change transaction revoked every live session of the
+    /// account, including the caller's own.</summary>
+    PasswordChanged
 }
 
 /// <summary>
@@ -322,6 +326,7 @@ public sealed class IdentitySessionStore : IIdentitySessionStore
         IdentitySessionRevocationReason.Administrative => "administrative",
         IdentitySessionRevocationReason.CodeReplay => "code_replay",
         IdentitySessionRevocationReason.AccountDisabled => "account_disabled",
+        IdentitySessionRevocationReason.PasswordChanged => "password_changed",
         _ => throw new ArgumentOutOfRangeException(
             nameof(reason), reason, "Unknown identity session revocation reason.")
     };
