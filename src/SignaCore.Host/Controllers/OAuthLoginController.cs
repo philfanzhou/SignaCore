@@ -12,6 +12,7 @@ using SignaCore.Domain.Validators;
 using SignaCore.Host.Http;
 using SignaCore.Host.Security;
 using SignaCore.Host.Services;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace SignaCore.Host.Controllers;
 
@@ -216,6 +217,7 @@ public sealed class OAuthLoginController : ControllerBase
     /// </para>
     /// </summary>
     [HttpPost]
+    [EnableRateLimiting(OidcRateLimitPolicies.Login)]
     public async Task<IActionResult> SubmitLoginForm()
     {
         ApplyBrowserSecurityHeaders();

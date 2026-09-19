@@ -165,4 +165,17 @@ public static class IdentityConstants
 
     public const int LoginHistoryRetentionDays = 90;
     public const int AuditLogRetentionDays = 365;
+
+    // ---- OIDC interactive rate limits ----
+    // Fixed single-process budgets per interactive endpoint class (issue #304): deliberately
+    // constants rather than configuration, below the host-wide global limiter's per-IP budget
+    // so the per-endpoint contract binds first, and above what any legitimate single client
+    // needs. Rejections carry no queue: overload fails fast with the fixed response shape.
+
+    public const int OidcAuthorizeRateLimitPerMinute = 90;
+    public const int OidcLoginRateLimitPerMinute = 90;
+    public const int OidcTokenRateLimitPerMinute = 90;
+    public const int OidcUserInfoRateLimitPerMinute = 90;
+    public const int OidcLogoutRateLimitPerMinute = 90;
+    public const int OidcRevokeRateLimitPerMinute = 90;
 }

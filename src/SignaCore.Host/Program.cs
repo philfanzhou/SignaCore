@@ -581,6 +581,10 @@ app.Use((context, next) =>
 // before, and the gateway schemes still authenticate on demand deeper in the pipeline through
 // HttpContextExtensions, which prefers the protected Items copy.
 app.UseMiddleware<SensitiveHeaderRedactionMiddleware>();
+// The interactive OIDC rate-limit partition resolver runs ahead of the composed pipeline: the
+// limiter's policy factory is synchronous, so the registered-client resolution for the
+// client:{appId} partitions is staged here, cache-first and cancellation-observing (#304).
+app.UseMiddleware<OidcClientPartitionResolverMiddleware>();
 // The composed ServiceMantle pipeline replaces the individually inserted correlation-id,
 // rate-limiting, authentication, and authorization middleware. It must be called exactly once and
 // must not be mixed with the individual ServiceMantle entry points.

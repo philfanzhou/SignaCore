@@ -9,6 +9,7 @@ using SignaCore.Domain;
 using SignaCore.Host.Http;
 using SignaCore.Host.Security;
 using SignaCore.Host.Services;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace SignaCore.Host.Controllers;
 
@@ -28,6 +29,7 @@ namespace SignaCore.Host.Controllers;
 /// byte-for-byte; every other success renders the local completion page.
 /// </remarks>
 [Route("oauth2")]
+[EnableRateLimiting(OidcRateLimitPolicies.Logout)]
 public sealed class OAuthLogoutController : ControllerBase
 {
     /// <summary>

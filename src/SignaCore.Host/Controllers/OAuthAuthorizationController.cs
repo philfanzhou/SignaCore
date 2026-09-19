@@ -9,6 +9,7 @@ using SignaCore.Domain.Services;
 using SignaCore.Host.Http;
 using SignaCore.Host.Security;
 using SignaCore.Host.Services;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace SignaCore.Host.Controllers;
 
@@ -30,6 +31,7 @@ namespace SignaCore.Host.Controllers;
 /// </summary>
 [Route("oauth2")]
 [ApiController]
+[EnableRateLimiting(OidcRateLimitPolicies.Authorize)]
 public sealed class OAuthAuthorizationController : ControllerBase
 {
     /// <summary>
