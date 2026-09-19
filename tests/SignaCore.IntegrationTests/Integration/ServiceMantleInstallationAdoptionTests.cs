@@ -8,6 +8,7 @@ using SignaCore.Database;
 using SignaCore.Database.Entity;
 using Testcontainers.PostgreSql;
 using Xunit;
+using SignaCore.Tests.Integration;
 
 namespace SignaCore.IntegrationTests.Integration;
 
@@ -17,6 +18,8 @@ namespace SignaCore.IntegrationTests.Integration;
 /// provider models match their snapshots, and the fail-closed adoption backfill never leaves an
 /// upgraded database looking like a fresh, setup-open install.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class ServiceMantleInstallationAdoptionTests
 {
     private const string ServiceIdValue = "signacore";
@@ -63,7 +66,7 @@ public sealed class ServiceMantleInstallationAdoptionTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(databasePath))
             {
                 File.Delete(databasePath);
@@ -86,7 +89,7 @@ public sealed class ServiceMantleInstallationAdoptionTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(databasePath))
             {
                 File.Delete(databasePath);

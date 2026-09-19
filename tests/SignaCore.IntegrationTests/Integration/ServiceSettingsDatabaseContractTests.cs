@@ -28,6 +28,8 @@ namespace SignaCore.Tests.Integration;
 /// encrypted-at-rest boundary, and the upgrade of an existing database. The PostgreSQL concurrency
 /// race runs only under <c>RUN_SIGNACORE_DATABASE_CONTRACTS=true</c>, matching the CI matrix.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class ServiceSettingsDatabaseContractTests
 {
     private static readonly ServiceId Service = InstallationStores.ServiceId;
@@ -559,7 +561,7 @@ public sealed class ServiceSettingsDatabaseContractTests
         Assert.Equal(ServiceSettingUpdateStatus.Applied, first.Status);
         Assert.Equal(1, first.Version);
 
-        SqliteConnection.ClearAllPools();
+        TestSqlitePools.ClearAll();
         if (File.Exists(path))
         {
             File.Delete(path);

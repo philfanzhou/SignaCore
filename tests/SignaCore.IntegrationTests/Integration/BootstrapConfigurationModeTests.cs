@@ -17,6 +17,7 @@ using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Host.Bootstrap;
 using Xunit;
+using SignaCore.Tests.Integration;
 
 namespace SignaCore.IntegrationTests.Integration;
 
@@ -25,6 +26,8 @@ namespace SignaCore.IntegrationTests.Integration;
 /// the shared installation status entry, the credential-gated read-only probe, and the phase gate
 /// that keeps everything else unreachable.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
 {
     private const string SpaTemplate = "<html><head><title>Console</title></head><body>Console</body></html>";
@@ -612,7 +615,7 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
         });
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         await context.DisposeAsync();
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        TestSqlitePools.ClearAll();
         foreach (var sidecar in new[] { "-journal", "-wal", "-shm" })
         {
             var sidecarPath = databasePath + sidecar;

@@ -24,6 +24,8 @@ namespace SignaCore.Tests.Integration;
 /// other's purpose. The identity state stays internal: a handleless login GET is a local error
 /// and no Discovery capability is activated (AC-02).
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class IdentitySessionCookieSharingTests : IAsyncLifetime
 {
     private const string IdentityCookieName = "__Host-signacore_identity";
@@ -264,7 +266,7 @@ public sealed class IdentitySessionCookieSharingTests : IAsyncLifetime
             factory.Dispose();
         }
 
-        SqliteConnection.ClearAllPools();
+        TestSqlitePools.ClearAll();
         foreach (var databasePath in _databasePaths)
         {
             if (File.Exists(databasePath))

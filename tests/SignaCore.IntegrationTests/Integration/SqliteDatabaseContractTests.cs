@@ -7,9 +7,12 @@ using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Validators;
 using Xunit;
+using SignaCore.Tests.Integration;
 
 namespace SignaCore.IntegrationTests.Integration;
 
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class SqliteDatabaseContractTests
 {
     private const string PreOidcMigration = "20260820091047_PersistDataProtectionKeys";
@@ -119,7 +122,7 @@ public sealed class SqliteDatabaseContractTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(databasePath)) File.Delete(databasePath);
         }
     }
@@ -178,7 +181,7 @@ public sealed class SqliteDatabaseContractTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(databasePath)) File.Delete(databasePath);
         }
     }
@@ -277,7 +280,7 @@ public sealed class SqliteDatabaseContractTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(databasePath)) File.Delete(databasePath);
         }
     }
@@ -356,7 +359,7 @@ public sealed class SqliteDatabaseContractTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(databasePath)) File.Delete(databasePath);
         }
     }
@@ -465,7 +468,7 @@ public sealed class SqliteDatabaseContractTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(databasePath)) File.Delete(databasePath);
         }
     }
@@ -535,7 +538,7 @@ public sealed class SqliteDatabaseContractTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(databasePath))
             {
                 File.Delete(databasePath);
@@ -656,7 +659,7 @@ public sealed class SqliteDatabaseContractTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(databasePath))
             {
                 File.Delete(databasePath);

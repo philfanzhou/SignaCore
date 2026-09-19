@@ -17,6 +17,8 @@ namespace SignaCore.Tests.Integration;
 /// <c>POST /api/admin/bootstrap/test</c>. Both carry the fixed management session and the shared
 /// unsafe-request guard where required, and neither writes anything.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class AdminBootstrapEndpointsTests : IAsyncLifetime
 {
     private const string OverviewPath = "/api/admin/bootstrap";
@@ -52,7 +54,7 @@ public sealed class AdminBootstrapEndpointsTests : IAsyncLifetime
 
     public ValueTask DisposeAsync()
     {
-        SqliteConnection.ClearAllPools();
+        TestSqlitePools.ClearAll();
         if (Directory.Exists(_directory))
         {
             Directory.Delete(_directory, recursive: true);

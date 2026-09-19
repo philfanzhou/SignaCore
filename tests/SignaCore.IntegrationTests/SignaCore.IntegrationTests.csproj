@@ -8,6 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Pins the assembly's parallelism contract so local full runs and CI make the same
+         scheduling assumptions (issue #293): collections run in parallel, assemblies never. -->
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
     <!-- Supplies the hang dump option, the Microsoft.Testing.Platform replacement for VSTest blame-hang. -->

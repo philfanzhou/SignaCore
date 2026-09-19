@@ -20,6 +20,12 @@ using Xunit;
 
 namespace SignaCore.Tests.Integration;
 
+/// <remarks>
+/// The shared fixture this class owns performs the process-wide pool clear in its disposal
+/// (issue #293), so the class belongs to the serialized sqlite-process-state collection.
+/// </remarks>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
 {
     private readonly IdentityServerFixture _fixture;
@@ -803,6 +809,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
 /// Uses a dedicated server fixture because this test intentionally exhausts a limiter partition.
 /// Sharing that state with the general endpoint contract tests would make their order observable.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class RateLimitingHttpTests : IClassFixture<IdentityServerFixture>
 {
     private readonly IdentityServerFixture _fixture;
@@ -1032,7 +1040,7 @@ public class IdentityServerFixture : IAsyncLifetime
         }
 
         _factory?.Dispose();
-        SqliteConnection.ClearAllPools();
+        TestSqlitePools.ClearAll();
         if (_databasePath != null && File.Exists(_databasePath))
         {
             File.Delete(_databasePath);
