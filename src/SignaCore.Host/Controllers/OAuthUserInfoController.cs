@@ -1,8 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using SignaCore.Host.Services;
-using SignaCore.Host.Security;
 using Microsoft.AspNetCore.RateLimiting;
+using SignaCore.Domain;
+using SignaCore.Host.Security;
+using SignaCore.Host.Services;
 
 namespace SignaCore.Host.Controllers;
 
@@ -38,10 +39,12 @@ public sealed class OAuthUserInfoController : ControllerBase
         "The access token does not carry the required scope.";
 
     private readonly OidcUserInfoService _userInfo;
+    private readonly AuthMetrics _authMetrics;
 
-    public OAuthUserInfoController(OidcUserInfoService userInfo)
+    public OAuthUserInfoController(OidcUserInfoService userInfo, AuthMetrics authMetrics)
     {
         _userInfo = userInfo;
+        _authMetrics = authMetrics;
     }
 
     [HttpGet("userinfo")]
@@ -56,10 +59,22 @@ public sealed class OAuthUserInfoController : ControllerBase
             || Request.Query.ContainsKey("client_secret")
             || Request.HasFormContentType;
 
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var outcome = await _userInfo.ReadAsync(
             Request.Headers.Authorization,
             alternateCarrierPresent,
             cancellationToken);
+        _authMetrics.RecordOidcEndpointOutcome(
+            AuthMetrics.OidcMetricEndpoints.UserInfo,
+            outcome.IsSuccess ? "success" : outcome.Rejection switch
+            {
+                OidcUserInfoRejection.MissingBearer or OidcUserInfoRejection.InvalidRequest => "invalid_request",
+                OidcUserInfoRejection.InsufficientScope => "insufficient_scope",
+                _ => "invalid_token"
+            });
+        _authMetrics.RecordOidcEndpointDuration(
+            AuthMetrics.OidcMetricEndpoints.UserInfo,
+            stopwatch.Elapsed.TotalMilliseconds);
 
         Response.Headers.CacheControl = "no-store";
         Response.Headers.Pragma = "no-cache";

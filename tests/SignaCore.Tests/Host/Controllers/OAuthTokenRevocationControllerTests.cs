@@ -9,6 +9,7 @@ using SignaCore.Domain.Services;
 using SignaCore.Host.Http;
 using SignaCore.Host.Controllers;
 using Xunit;
+using SignaCore.Domain;
 
 namespace SignaCore.Tests.Host.Controllers;
 
@@ -49,6 +50,15 @@ public class OAuthTokenRevocationControllerTests
         repository.VerifyNoOtherCalls();
     }
 
+    private static System.Diagnostics.Metrics.IMeterFactory StubMeterFactory()
+    {
+        var factory = new Moq.Mock<System.Diagnostics.Metrics.IMeterFactory>();
+        factory
+            .Setup(f => f.Create(It.IsAny<System.Diagnostics.Metrics.MeterOptions>()))
+            .Returns(new System.Diagnostics.Metrics.Meter("SignaCore"));
+        return factory.Object;
+    }
+
     private static OAuthTokenController CreateController(IRefreshTokenRepository repository)
     {
         // Revocation uses neither the token issuance service nor the interactive branches.
@@ -56,7 +66,8 @@ public class OAuthTokenRevocationControllerTests
             null!,
             new RefreshTokenService(repository, new RefreshTokenOptions()),
             null!,
-            null!).WithHttpContext();
+            null!,
+            new AuthMetrics(StubMeterFactory())).WithHttpContext();
         controller.HttpContext.Items[IdentityHeaders.ValidatedApp] = new AppRegistrationEntity { AppId = "app-1" };
         controller.Request.Form = new FormCollection(new Dictionary<string, StringValues>
         {

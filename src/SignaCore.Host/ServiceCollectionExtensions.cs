@@ -635,6 +635,9 @@ public static class ServiceCollectionExtensions
 
         // ---- Auth Metrics ----
         services.AddSingleton<AuthMetrics>();
+        // The five bounded retention gauges of the interactive OIDC artifacts (#305): sampled at
+        // collection time from the database, closed provider label, never protocol-relevant.
+        services.AddSingleton<Metrics.OidcRetentionGauges>();
 
         return (jwtOptions, databaseOptions.Provider);
     }
