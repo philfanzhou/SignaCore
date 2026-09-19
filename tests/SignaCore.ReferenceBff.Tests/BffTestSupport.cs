@@ -302,7 +302,9 @@ public static class BffTestServer
         string clientId,
         string clientSecret,
         string redirectUri,
-        HttpClient backchannel) =>
+        HttpClient backchannel,
+        HttpMessageHandler? userInfoHandler = null,
+        TimeProvider? timeProvider = null) =>
         new WebApplicationFactory<BffSample.Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ReferenceBff:Authority", authority);
@@ -319,6 +321,21 @@ public static class BffTestServer
                 {
                     options.Backchannel = backchannel;
                 });
+
+                // Route the BFF's UserInfo backchannel (the named "signacore" client) to the
+                // in-memory SignaCore TestServer instead of the network.
+                if (userInfoHandler is not null)
+                {
+                    services.AddHttpClient("signacore")
+                        .ConfigurePrimaryHttpMessageHandler(() => userInfoHandler);
+                }
+
+                // A test-controlled clock replaces the system one for the ticket store's expiry
+                // decisions (the last registration wins).
+                if (timeProvider is not null)
+                {
+                    services.AddSingleton(timeProvider);
+                }
             });
         });
 
