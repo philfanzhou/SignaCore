@@ -28,9 +28,15 @@ namespace SignaCore.Tests.Integration;
 /// </summary>
 public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentityServerFixture>
 {
-    private const string FirstAppId = "state-propagation-first-app";
+    // xunit v3 runs the methods of one class in parallel; every method therefore seeds its own
+    // application pair, so an app-scoped revocation can never reach another method's family.
+    private const string DisableFirstAppId = "state-propagation-disable-first-app";
+    private const string DisableSecondAppId = "state-propagation-disable-second-app";
+    private const string DeactivateFirstAppId = "state-propagation-deactivate-first-app";
+    private const string DeactivateSecondAppId = "state-propagation-deactivate-second-app";
+    private const string RefreshOffFirstAppId = "state-propagation-refresh-off-first-app";
+    private const string RefreshOffSecondAppId = "state-propagation-refresh-off-second-app";
     private const string FirstAppSecret = "state-propagation-first-secret";
-    private const string SecondAppId = "state-propagation-second-app";
     private const string SecondAppSecret = "state-propagation-second-secret";
     private const string Username = "state_propagation_matrix_user";
 
@@ -55,8 +61,8 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
     public async Task DisablingAnAccount_RevokesItsSessionsAndFamiliesInTheSameTransaction()
     {
         var account = await SeedAccountAsync();
-        var first = await SeedRedeemedFamilyAsync(FirstAppId, FirstAppSecret, account);
-        var second = await SeedRedeemedFamilyAsync(SecondAppId, SecondAppSecret, account);
+        var first = await SeedRedeemedFamilyAsync(DisableFirstAppId, FirstAppSecret, account);
+        var second = await SeedRedeemedFamilyAsync(DisableSecondAppId, SecondAppSecret, account);
         using var admin = await _fixture.CreateAdminHttpClientAsync();
 
         using var response = await admin.PatchAsJsonAsync(
@@ -101,7 +107,7 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
     [Fact]
     public async Task AfterTheAccountDisable_TheWholeInteractiveReadMatrixFailsClosed()
     {
-        var seeded = await SeedRedeemedFamilyAsync(FirstAppId, FirstAppSecret);
+        var seeded = await SeedRedeemedFamilyAsync(DisableFirstAppId, FirstAppSecret);
         var accessToken = await RedeemForAccessTokenAsync(seeded);
         // The read-side fail-closed proof disables the account directly (the write-side
         // transaction has its own tests); the read must fail closed on the committed flag alone.
@@ -132,7 +138,7 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
         // Refresh: the family is not revoked by the direct write, but the live account read
         // fails closed with the generic invalid_grant and no replay audit.
         using var tokenClient = host.CreateClient();
-        tokenClient.DefaultRequestHeaders.Authorization = BasicHeader(FirstAppId, FirstAppSecret);
+        tokenClient.DefaultRequestHeaders.Authorization = BasicHeader(DisableFirstAppId, FirstAppSecret);
         using var refresh = await tokenClient.PostAsync(
             "/oauth2/token",
             new FormUrlEncodedContent(new Dictionary<string, string>
@@ -194,7 +200,7 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
     [Fact]
     public async Task TheIssuedAccessToken_StillValidatesDownstreamWhileUserInfoFailsClosed()
     {
-        var seeded = await SeedRedeemedFamilyAsync(FirstAppId, FirstAppSecret);
+        var seeded = await SeedRedeemedFamilyAsync(DisableFirstAppId, FirstAppSecret);
         var accessToken = await RedeemForAccessTokenAsync(seeded);
         using var admin = await _fixture.CreateAdminHttpClientAsync();
         using var disabled = await admin.PatchAsJsonAsync(
@@ -221,7 +227,7 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
         var parameters = new TokenValidationParameters
         {
             ValidIssuer = document.GetProperty("issuer").GetString(),
-            ValidAudience = FirstAppId,
+            ValidAudience = DisableFirstAppId,
             IssuerSigningKeys = keys
         };
         new JwtSecurityTokenHandler().ValidateToken(accessToken, parameters, out _);
@@ -241,12 +247,12 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
     public async Task DeactivatingAnApplication_RevokesOnlyItsOwnFamilies()
     {
         var account = await SeedAccountAsync();
-        var first = await SeedRedeemedFamilyAsync(FirstAppId, FirstAppSecret, account);
-        var second = await SeedRedeemedFamilyAsync(SecondAppId, SecondAppSecret, account);
+        var first = await SeedRedeemedFamilyAsync(DeactivateFirstAppId, FirstAppSecret, account);
+        var second = await SeedRedeemedFamilyAsync(DeactivateSecondAppId, SecondAppSecret, account);
         using var admin = await _fixture.CreateAdminHttpClientAsync();
 
         using var response = await admin.PutAsJsonAsync(
-            $"/api/admin/apps/{FirstAppId}/callback",
+            $"/api/admin/apps/{DeactivateFirstAppId}/callback",
             new { callbackUrl = (string?)null, ttlSeconds = 0, isActive = false },
             TestContext.Current.CancellationToken);
 
@@ -260,14 +266,14 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
 
         var audit = await QueryAsync(async context => await context.AuditLogs.AsNoTracking()
             .SingleAsync(row => row.Action == "app_callback_updated"
-                && row.TargetId == FirstAppId,
+                && row.TargetId == DeactivateFirstAppId,
                 TestContext.Current.CancellationToken));
         Assert.Contains("\"revokedFamilyMembers\":1", audit.AfterSnapshot, StringComparison.Ordinal);
 
         // The surviving application still refreshes successfully.
         using var host = CreateHost();
         using var tokenClient = host.CreateClient();
-        tokenClient.DefaultRequestHeaders.Authorization = BasicHeader(SecondAppId, SecondAppSecret);
+        tokenClient.DefaultRequestHeaders.Authorization = BasicHeader(DeactivateSecondAppId, SecondAppSecret);
         using var refresh = await tokenClient.PostAsync(
             "/oauth2/token",
             new FormUrlEncodedContent(new Dictionary<string, string>
@@ -281,7 +287,7 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
         // The deactivated application's own client authentication fails closed: the generic
         // invalid_client of any unknown client, indistinguishable from a deactivated one.
         using var firstClient = host.CreateClient();
-        firstClient.DefaultRequestHeaders.Authorization = BasicHeader(FirstAppId, FirstAppSecret);
+        firstClient.DefaultRequestHeaders.Authorization = BasicHeader(DeactivateFirstAppId, FirstAppSecret);
         using var rejected = await firstClient.PostAsync(
             "/oauth2/token",
             new FormUrlEncodedContent(new Dictionary<string, string>
@@ -302,12 +308,12 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
     public async Task TurningRefreshOff_RevokesOnlyThatApplicationsFamilies()
     {
         var account = await SeedAccountAsync();
-        var first = await SeedRedeemedFamilyAsync(FirstAppId, FirstAppSecret, account);
-        var second = await SeedRedeemedFamilyAsync(SecondAppId, SecondAppSecret, account);
+        var first = await SeedRedeemedFamilyAsync(RefreshOffFirstAppId, FirstAppSecret, account);
+        var second = await SeedRedeemedFamilyAsync(RefreshOffSecondAppId, SecondAppSecret, account);
         using var admin = await _fixture.CreateAdminHttpClientAsync();
 
         using var response = await admin.PutAsJsonAsync(
-            $"/api/admin/apps/{FirstAppId}/oidc-policy",
+            $"/api/admin/apps/{RefreshOffFirstAppId}/oidc-policy",
             new
             {
                 clientType = "Confidential",
@@ -324,14 +330,14 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
 
         var audit = await QueryAsync(async context => await context.AuditLogs.AsNoTracking()
             .SingleAsync(row => row.Action == "app_oidc_policy_updated"
-                && row.TargetId == FirstAppId,
+                && row.TargetId == RefreshOffFirstAppId,
                 TestContext.Current.CancellationToken));
         Assert.Contains("\"revokedFamilyMembers\":1", audit.AfterSnapshot, StringComparison.Ordinal);
 
         // The other application still refreshes.
         using var host = CreateHost();
         using var tokenClient = host.CreateClient();
-        tokenClient.DefaultRequestHeaders.Authorization = BasicHeader(SecondAppId, SecondAppSecret);
+        tokenClient.DefaultRequestHeaders.Authorization = BasicHeader(RefreshOffSecondAppId, SecondAppSecret);
         using var refresh = await tokenClient.PostAsync(
             "/oauth2/token",
             new FormUrlEncodedContent(new Dictionary<string, string>
@@ -350,7 +356,7 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
 
     private static string BuildAuthorizeUrl() =>
         "/oauth2/authorize?" + string.Join('&',
-            $"client_id={FirstAppId}",
+            $"client_id={DisableFirstAppId}",
             $"redirect_uri={Uri.EscapeDataString(RedirectUri)}",
             "response_type=code",
             $"scope={Uri.EscapeDataString("openid profile")}",
@@ -488,7 +494,7 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
     }
 
     private async Task<string> CreateCodeAsync(SeededFamily seeded) =>
-        await CreateCodeAsync(seeded.AccountId, seeded.SessionId, FirstAppId);
+        await CreateCodeAsync(seeded.AccountId, seeded.SessionId, DisableFirstAppId);
 
     private async Task<string> CreateCodeAsync(Guid accountId, Guid sessionId, string appId)
     {
@@ -518,7 +524,7 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
     {
         var code = await CreateCodeAsync(seeded);
         using var http = _fixture.CreateHttpClient();
-        http.DefaultRequestHeaders.Authorization = BasicHeader(FirstAppId, FirstAppSecret);
+        http.DefaultRequestHeaders.Authorization = BasicHeader(DisableFirstAppId, FirstAppSecret);
         using var response = await http.PostAsync("/oauth2/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["grant_type"] = "authorization_code",
