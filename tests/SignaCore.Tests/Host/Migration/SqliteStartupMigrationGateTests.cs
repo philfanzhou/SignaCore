@@ -496,6 +496,21 @@ public sealed class SqliteStartupMigrationGateTests
             Assert.Null(result.PlaintextSetupCode);
             Assert.NotNull(result.Snapshot);
             Assert.Equal("administrator", result.Snapshot!.Values[SystemSettingKeys.AdminUsername]);
+
+            // The database held only legacy system_settings rows: the startup migration created the
+            // shared aggregate as its first version and the snapshot was activated from it.
+            var verificationBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            verificationBuilder.UseIdentityDatabase(options);
+            using (var verification = new IdentityDbContext(verificationBuilder.Options))
+            {
+                var aggregate = await SharedSettingAggregate.ReadVersionAsync(
+                    verification, TestContext.Current.CancellationToken);
+                Assert.Equal(1, aggregate);
+            }
+
+            // The bootstrap phase activated the snapshot on the process-shared accessor instance.
+            Assert.True(result.CurrentSnapshotAccessor.TryGetCurrent(out var activated));
+            Assert.Equal(1, activated!.Version);
         }
         finally
         {
@@ -546,8 +561,17 @@ public sealed class SqliteStartupMigrationGateTests
             Assert.Equal("http://localhost", result.Snapshot!.Values[SystemSettingKeys.PublicBaseUrl]);
 
             // The business data made the backfill adopt a completed service_installations row; the
-            // import filled system_settings and left the shared row completed. The legacy
+            // import filled system_settings, and the same boot migrated those rows into the shared
+            // aggregate, which the activated snapshot was loaded from. The legacy
             // installation_state table is gone.
+            var importVerificationBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            importVerificationBuilder.UseIdentityDatabase(options);
+            using (var verification = new IdentityDbContext(importVerificationBuilder.Options))
+            {
+                Assert.Equal(1, await SharedSettingAggregate.ReadVersionAsync(
+                    verification, TestContext.Current.CancellationToken));
+            }
+
             Assert.False(TableExists(databasePath, "installation_state"));
             Assert.Equal(
                 (int)ServiceMantle.Installation.InstallationStatus.Completed,

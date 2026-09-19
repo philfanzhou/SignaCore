@@ -34,6 +34,17 @@ public sealed class SharedSettingMigrationTests : IClassFixture<IdentityServerFi
     [Fact]
     public async Task CompletedInstallation_MigratesOnceAndConvergesOnReplay()
     {
+        // 0. The host's startup already migrated the legacy rows once (#548); delete the aggregate
+        //    row to recreate the pre-migration state of a not-yet-migrated deployment.
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<SignaCore.Database.IdentityDbContext>();
+            await SharedSettingTestDatabase.DeleteAggregateAsync(
+                context, TestContext.Current.CancellationToken);
+            Assert.Null(await SharedSettingTestDatabase.LoadAggregateAsync(
+                context, TestContext.Current.CancellationToken));
+        }
+
         // 1. Precondition: the real first-run installation wrote the complete legacy catalog and the
         //    shared aggregate is still empty.
         List<SystemSettingEntity> legacyRows;
@@ -141,9 +152,11 @@ public sealed class SharedSettingMigrationTests : IClassFixture<IdentityServerFi
 }
 
 /// <summary>
-/// Fail-closed discipline on the real composed host: every refusal leaves the shared aggregate
-/// absent and reports key names and classifications only. Each test stages its broken state inside
-/// the caller's transaction and rolls back, so the fixture database stays a valid installation.
+/// Fail-closed discipline on the real composed host: every refusal reports key names and
+/// classifications only and leaves the shared aggregate byte-identical. The host's startup already
+/// migrated the fixture once (#548), so each test captures the aggregate as its baseline and
+/// stages its broken state inside the caller's transaction and rolls back, leaving the fixture
+/// database a valid installation.
 /// </summary>
 public sealed class SharedSettingMigrationFailureTests : IClassFixture<IdentityServerFixture>
 {
@@ -164,7 +177,7 @@ public sealed class SharedSettingMigrationFailureTests : IClassFixture<IdentityS
     [Fact]
     public async Task UndecryptableSecretEnvelope_FailsClosedWithKeyNamesOnly()
     {
-        var result = await StageBrokenStateAndMigrateAsync(
+        var (result, baseline) = await StageBrokenStateAndMigrateAsync(
             async context =>
             {
                 var row = await context.SystemSettings.SingleAsync(
@@ -179,13 +192,13 @@ public sealed class SharedSettingMigrationFailureTests : IClassFixture<IdentityS
         Assert.Equal(SharedSettingMigrationResult.UndecryptableSecretsClassification, result.FailureClassification);
         Assert.Equal([SystemSettingKeys.SmsOtpHmacKey], result.FailedKeys);
         Assert.DoesNotContain(CorruptedEnvelope, result.ToString(), StringComparison.Ordinal);
-        await AssertAggregateStillAbsentAsync();
+        await AssertAggregateUnchangedAsync(baseline!);
     }
 
     [Fact]
     public async Task UnregisteredLegacyRow_FailsClosed()
     {
-        var result = await StageBrokenStateAndMigrateAsync(
+        var (result, baseline) = await StageBrokenStateAndMigrateAsync(
             async context =>
             {
                 context.SystemSettings.Add(new SystemSettingEntity
@@ -205,15 +218,20 @@ public sealed class SharedSettingMigrationFailureTests : IClassFixture<IdentityS
         Assert.Equal(SharedSettingMigrationStatus.Failed, result.Status);
         Assert.Equal(SharedSettingMigrationResult.UnregisteredKeysClassification, result.FailureClassification);
         Assert.Equal(["Legacy:Injected"], result.FailedKeys);
-        await AssertAggregateStillAbsentAsync();
+        await AssertAggregateUnchangedAsync(baseline!);
     }
 
     [Fact]
     public async Task ConstraintViolatingValue_FailsClosedThroughSharedValidation()
     {
-        var result = await StageBrokenStateAndMigrateAsync(
+        var (result, baseline) = await StageBrokenStateAndMigrateAsync(
             async context =>
             {
+                // The host's startup already migrated the fixture once (#548); drop the aggregate
+                // inside the transaction so the broken source actually reaches the shared
+                // validation on the single expected-version-0 write.
+                await SharedSettingTestDatabase.DeleteAggregateAsync(
+                    context, TestContext.Current.CancellationToken);
                 var row = await context.SystemSettings.SingleAsync(
                     setting => setting.Key == SystemSettingKeys.LdapEnabled,
                     TestContext.Current.CancellationToken);
@@ -225,18 +243,18 @@ public sealed class SharedSettingMigrationFailureTests : IClassFixture<IdentityS
         Assert.Equal(SharedSettingMigrationStatus.Failed, result.Status);
         Assert.Equal("service_settings.validation_failed", result.FailureClassification);
         Assert.Contains("ldap.enabled", result.FailedKeys);
-        await AssertAggregateStillAbsentAsync();
+        await AssertAggregateUnchangedAsync(baseline!);
     }
 
     [Fact]
     public async Task EmptyLegacyTable_ReturnsNothingToMigrate()
     {
-        var result = await StageBrokenStateAndMigrateAsync(
+        var (result, baseline) = await StageBrokenStateAndMigrateAsync(
             context => context.SystemSettings.ExecuteDeleteAsync(TestContext.Current.CancellationToken));
 
         Assert.Equal(SharedSettingMigrationStatus.NothingToMigrate, result.Status);
         Assert.Null(result.FailureClassification);
-        await AssertAggregateStillAbsentAsync();
+        await AssertAggregateUnchangedAsync(baseline!);
     }
 
     [Fact]
@@ -244,6 +262,15 @@ public sealed class SharedSettingMigrationFailureTests : IClassFixture<IdentityS
     {
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
+
+        SharedSettingAggregateRow? baseline;
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var setupContext = scope.ServiceProvider
+                .GetRequiredService<SignaCore.Database.IdentityDbContext>();
+            baseline = await SharedSettingTestDatabase.LoadAggregateAsync(
+                setupContext, TestContext.Current.CancellationToken);
+        }
 
         using (var scope = _fixture.Services.CreateScope())
         {
@@ -255,12 +282,13 @@ public sealed class SharedSettingMigrationFailureTests : IClassFixture<IdentityS
                 () => migrator.MigrateAsync(context, MigrationOperator, cancellation.Token));
         }
 
-        await AssertAggregateStillAbsentAsync();
+        await AssertAggregateUnchangedAsync(baseline!);
     }
 
     /// <summary>Stages broken state inside a caller-owned transaction, migrates, then rolls back.</summary>
-    private async Task<SharedSettingMigrationResult> StageBrokenStateAndMigrateAsync(
-        Func<SignaCore.Database.IdentityDbContext, Task> stageAsync)
+    private async Task<(SharedSettingMigrationResult Result, SharedSettingAggregateRow? Baseline)>
+        StageBrokenStateAndMigrateAsync(
+            Func<SignaCore.Database.IdentityDbContext, Task> stageAsync)
     {
         using var scope = _fixture.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<SignaCore.Database.IdentityDbContext>();
@@ -270,17 +298,23 @@ public sealed class SharedSettingMigrationFailureTests : IClassFixture<IdentityS
 
         await using var transaction = await context.Database.BeginTransactionAsync(
             TestContext.Current.CancellationToken);
+        var baseline = await SharedSettingTestDatabase.LoadAggregateAsync(
+            context, TestContext.Current.CancellationToken);
         await stageAsync(context);
         var result = await migrator.MigrateAsync(
             context, MigrationOperator, TestContext.Current.CancellationToken);
         await transaction.RollbackAsync(TestContext.Current.CancellationToken);
-        return result;
+        return (result, baseline);
     }
 
-    private async Task AssertAggregateStillAbsentAsync()
+    private async Task AssertAggregateUnchangedAsync(SharedSettingAggregateRow baseline)
     {
         using var scope = _fixture.Services.CreateScope();
-        Assert.Null(await SharedSettingMigrationDatabase.LoadAggregateAsync(scope));
+        var current = await SharedSettingMigrationDatabase.LoadAggregateAsync(scope);
+        Assert.NotNull(current);
+        Assert.Equal(baseline.Version, current!.Version);
+        Assert.Equal(baseline.ValuesJson, current.ValuesJson);
+        Assert.Equal(baseline.UpdatedBy, current.UpdatedBy);
     }
 }
 

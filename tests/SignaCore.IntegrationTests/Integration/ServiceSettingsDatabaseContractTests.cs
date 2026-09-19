@@ -568,10 +568,10 @@ public sealed class ServiceSettingsDatabaseContractTests
         }
     }
 
-    // ---- A8: only the normal host registers the shared stack ----
+    // ---- A8: the setup host registers the update path only ----
 
     [Fact]
-    public async Task PendingSetupHost_DoesNotRegisterTheSharedStack()
+    public async Task PendingSetupHost_RegistersOnlyTheSharedUpdatePath()
     {
         var workingDirectory = Path.Combine(
             Path.GetTempPath(), $"signacore-setup-nostack-{Guid.NewGuid():N}");
@@ -596,9 +596,13 @@ public sealed class ServiceSettingsDatabaseContractTests
             });
         using var _ = factory.CreateClient();
 
+        // The completion transaction writes the shared aggregate, so the update path is composed;
+        // nothing that reads or publishes a runtime snapshot exists before the first snapshot can.
         Assert.Null(factory.Services.GetService<IServiceSettingStore>());
-        Assert.Null(factory.Services.GetService<ServiceSettingUpdateService>());
-        Assert.Null(factory.Services.GetService<IServiceSettingUpdateTransaction>());
+        Assert.Null(factory.Services.GetService<ServiceSettingSnapshotLoader>());
+        Assert.Null(factory.Services.GetService<ServiceSettingQueryService>());
+        Assert.NotNull(factory.Services.GetService<ServiceSettingUpdateService>());
+        Assert.NotNull(factory.Services.GetService<IServiceSettingUpdateTransaction>());
 
         if (Directory.Exists(workingDirectory))
         {

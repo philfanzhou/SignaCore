@@ -1,8 +1,11 @@
 # Configuration Reference
 
-SignaCore keeps global application configuration in the business database, in the `system_settings`
-table. Every instance therefore reads the same active configuration, changes are transactional and
-audited, and there is no per-instance configuration drift.
+SignaCore keeps global application configuration in the business database, in the shared
+`service_settings` aggregate. Every instance therefore reads the same active configuration, changes
+are transactional and audited, and there is no per-instance configuration drift. The legacy
+`system_settings` table is read-only legacy data, still served by the legacy admin endpoints until
+their own switch lands; deployments that predate the aggregate are migrated into it once, inside
+the startup initialization lock. See [Shared settings stack](SharedSettings.md).
 
 Only two things cannot live there, because they are required to open and decrypt that database:
 
@@ -77,8 +80,9 @@ A new, empty database starts in Setup Mode. See [First-run setup](./FirstRunSetu
 
 ## Database-backed settings
 
-These keys are owned by `system_settings`. Defaults are the safe product defaults used to seed a new
-installation, and live in versioned application code.
+These keys are owned by the shared `service_settings` aggregate (normalized keys; see
+[Shared settings stack](SharedSettings.md)). Defaults are the safe product defaults used to seed a
+new installation, and live in versioned application code.
 
 ### Public identity
 
@@ -172,8 +176,8 @@ Prometheus metrics are available at `/metrics`. The service/resource name is `Si
 ### Consul service discovery
 
 Consul KV is no longer a configuration authority, and the local plaintext configuration cache has
-been removed. Optional service registration remains; its settings are themselves read from
-`system_settings`.
+been removed. Optional service registration remains; its settings are themselves read from the
+shared settings aggregate.
 
 | Key | Default | Secret |
 | --- | --- | --- |
@@ -254,15 +258,17 @@ Pre-seeding an application activates no OIDC endpoint and changes neither discov
 
 ## How secret settings are protected
 
-Sensitive settings are encrypted before being written to `system_settings`. The external root key
+Sensitive settings are encrypted before being written to the shared `service_settings` aggregate,
+as `sm:v1:` envelopes bound to the service id and the normalized setting key. The external root key
 from the bootstrap file remains the root of trust:
 
 - the existing derivation for stored RSA private keys is preserved, so upgrading a deployment keeps
   its signing keys decryptable;
-- a separate configuration-protection key is derived with a distinct HKDF info value;
+- the shared configuration-protection key is derived with its own HKDF domain, separate from the
+  signing-key derivation;
 - each secret setting is encrypted with AES-GCM and a unique random nonce;
-- the setting key and schema version are bound as authenticated associated data, so an envelope
-  cannot be moved from one setting into another;
+- the service id, setting key, and schema version are bound as authenticated associated data, so an
+  envelope cannot be moved from one setting or service into another;
 - secret values are never returned from general settings-list APIs.
 
 The database connection string remains protected by bootstrap-file permissions, because it cannot be

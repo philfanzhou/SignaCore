@@ -1,5 +1,8 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Audit;
 using ServiceMantle.Bootstrap;
+using ServiceMantle.Configuration;
 using ServiceMantle.Installation;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using ServiceMantle.Migration;
@@ -54,6 +57,7 @@ internal static class InstallationStartup
         var masterKeyProvider = new BootstrapMasterKeyProvider(bootstrap.MasterKey);
         var protector = new AesGcmConfigurationProtector(masterKeyProvider);
         var settingsStore = new SystemSettingsStore(protector);
+        var currentSnapshotAccessor = new ServiceSettingCurrentSnapshotAccessor();
         var databaseOptions = SignaCoreBootstrapStore.ToDatabaseOptions(bootstrap.Database);
 
         await using var db = CreateDbContext(databaseOptions);
@@ -115,22 +119,38 @@ internal static class InstallationStartup
                     protector,
                     settingsStore,
                     Snapshot: null,
-                    resolution.SetupCode?.Plaintext,
-                    resolution.SetupCode?.ExpiresAtUtc);
+                    CurrentSnapshotAccessor: currentSnapshotAccessor,
+                    PlaintextSetupCode: resolution.SetupCode?.Plaintext,
+                    SetupCodeExpiresAt: resolution.SetupCode?.ExpiresAtUtc);
             }
 
-            var snapshot = await settingsStore.LoadAsync(db, resolution.ConfigurationVersion, cancellationToken);
+            // Legacy deployments that predate the shared aggregate are migrated once, here inside
+            // the initialization lock and inside one caller-owned transaction. A refusal fails
+            // startup without touching the installation state: a completed installation is never
+            // rolled back to Pending.
+            await MigrateLegacySettingsAsync(db, protector, masterKeyProvider, environment.IsDevelopment(), logger, cancellationToken);
 
-            // Fail closed. A completed installation is never rolled back to Pending because settings
-            // are missing: that would reopen anonymous setup against a database that owns accounts.
-            SettingsSnapshotValidator.ThrowIfInvalid(snapshot.Values, environment.IsDevelopment());
+            // The runtime snapshot authority is the shared loader: it reads the aggregate, decrypts
+            // sensitive values with the shared protector, validates the complete candidate, and
+            // activates it on the process-shared accessor instance. Failure never replaces an
+            // existing snapshot and never rolls the installation back.
+            var (sharedSnapshot, projectedSnapshot) = await ActivateSharedSnapshotAsync(
+                databaseOptions, masterKeyProvider, currentSnapshotAccessor, environment.IsDevelopment(), cancellationToken);
+
+            // The aggregate version is a long; the host's configuration-version surfaces are int.
+            // Versions count from 1 and are monotonic, so a real deployment cannot cross
+            // int.MaxValue — the activation boundary above fails closed before this cast.
+            runtimeState = new InstallationRuntimeState(
+                resolution.Phase,
+                runtimeState.InstallationId,
+                configurationVersion: (int)sharedSnapshot.Version);
 
             logger.LogInformation(
                 "Loaded configuration snapshot: ServiceId={ServiceId}, " +
                 "ConfigurationVersion={Version}, SettingCount={SettingCount}",
                 InstallationStores.ServiceIdValue,
-                resolution.ConfigurationVersion,
-                snapshot.Values.Count);
+                runtimeState.ConfigurationVersion,
+                sharedSnapshot.Values.Count);
 
             return new BootstrapPhaseResult(
                 bootstrap,
@@ -139,10 +159,129 @@ internal static class InstallationStartup
                 masterKeyProvider,
                 protector,
                 settingsStore,
-                snapshot,
+                projectedSnapshot,
+                currentSnapshotAccessor,
                 PlaintextSetupCode: null,
                 SetupCodeExpiresAt: null);
         }
+    }
+
+    /// <summary>
+    /// Migrates the legacy <c>system_settings</c> rows into the shared aggregate when the
+    /// aggregate is still empty, inside one caller-owned transaction (the shared update
+    /// transaction requires the ambient transaction and a clean change tracker). An already-seeded
+    /// aggregate — including one written by a concurrent instance — is left untouched. A failed
+    /// migration fails startup; the installation state is never modified here.
+    /// </summary>
+    private static async Task MigrateLegacySettingsAsync(
+        IdentityDbContext db,
+        IConfigurationProtector legacyProtector,
+        IMasterKeyProvider masterKeyProvider,
+        bool isDevelopment,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (await SharedSettingAggregate.ReadVersionAsync(db, cancellationToken) is not null)
+        {
+            return;
+        }
+
+        var registry = SharedSettingComposition.CreateRegistry(isDevelopment);
+        var updateService = new ServiceSettingUpdateService(
+            InstallationStores.ServiceId,
+            registry,
+            new EfCoreServiceSettingUpdateTransaction<IdentityDbContext>(db),
+            SharedSettingComposition.CreateRootKeySource(masterKeyProvider));
+        var migrator = new SharedSettingMigrator(legacyProtector, updateService);
+
+        // PostgreSQL runs a retrying execution strategy; explicit transactions must be wrapped in
+        // it, and a retried attempt re-begins its own transaction (the migrator re-reads inside
+        // the lambda, so the update transaction's read/apply pairing stays consistent).
+        var strategy = db.Database.CreateExecutionStrategy();
+        var result = await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable, cancellationToken);
+            var migration = await migrator.MigrateAsync(
+                db, SharedSettingComposition.MigrationOperator, cancellationToken);
+            if (migration.Status == SharedSettingMigrationStatus.Failed)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return migration;
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            return migration;
+        });
+
+        if (result.Status == SharedSettingMigrationStatus.Failed)
+        {
+            throw new SettingsSnapshotException(
+                "The legacy system_settings rows could not be migrated into the shared " +
+                $"service_settings aggregate ({result.FailureClassification}). Affected keys: " +
+                $"{string.Join(", ", result.FailedKeys)}. The installation stays completed; fix " +
+                "the reported problem and restart.",
+                result.FailedKeys);
+        }
+
+        if (result.Status == SharedSettingMigrationStatus.Migrated)
+        {
+            logger.LogInformation(
+                "Migrated {SettingCount} legacy setting rows into the shared aggregate.",
+                result.MigratedKeyCount);
+        }
+    }
+
+    /// <summary>
+    /// Activates the shared snapshot with a bootstrap-owned loader over the shared aggregate. The
+    /// accessor instance is the one the DI hosts keep using, so the bootstrap activation and the
+    /// composed snapshot services observe the same process-local snapshot.
+    /// </summary>
+    private static async Task<(ServiceSettingSnapshot Shared, SystemSettingsSnapshot Projected)>
+        ActivateSharedSnapshotAsync(
+            DatabaseOptions databaseOptions,
+            IMasterKeyProvider masterKeyProvider,
+            ServiceSettingCurrentSnapshotAccessor accessor,
+            bool isDevelopment,
+            CancellationToken cancellationToken)
+    {
+        var registry = SharedSettingComposition.CreateRegistry(isDevelopment);
+        var store = new EfCoreServiceSettingStore<IdentityDbContext>(
+            new BootstrapDbContextFactory(databaseOptions));
+        using var loader = new ServiceSettingSnapshotLoader(
+            InstallationStores.ServiceId,
+            new ServiceSettingStoreSnapshotSource(store, registry),
+            registry,
+            accessor,
+            SharedSettingComposition.CreateRootKeySource(masterKeyProvider));
+
+        var refresh = await loader.RefreshAsync(cancellationToken);
+        if (!refresh.Succeeded || refresh.Snapshot is null)
+        {
+            // Fail closed, keys and classification codes only: an incomplete, damaged, or
+            // undecryptable aggregate is never activated and never replaces an existing snapshot.
+            var details = string.Join(
+                ", ", refresh.Errors.Select(error => $"{error.Key ?? "<snapshot>"} ({error.ErrorCode})"));
+            throw new SettingsSnapshotException(
+                "The stored configuration snapshot is incomplete, damaged, or could not be " +
+                $"decrypted with the configured root key. Affected keys: {details}. The " +
+                "installation stays completed; fix the reported problem and restart.",
+                refresh.Errors.Select(error => error.Key ?? error.ErrorCode).ToList());
+        }
+
+        // Bootstrap boundary narrowing of the long aggregate version: versions start at 1 and are
+        // monotonic, so overflow means a corrupt row, which fails closed like any other damage.
+        if (refresh.Snapshot.Version > int.MaxValue)
+        {
+            throw new SettingsSnapshotException(
+                $"The shared configuration version {refresh.Snapshot.Version} exceeds the supported range.",
+                []);
+        }
+
+        var (values, entries) = SharedSettingConfigurationProjection.Project(refresh.Snapshot);
+        return (
+            refresh.Snapshot,
+            new SystemSettingsSnapshot((int)refresh.Snapshot.Version, values, entries));
     }
 
     /// <summary>
@@ -232,5 +371,20 @@ internal static class InstallationStartup
         var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
         optionsBuilder.UseIdentityDatabase(databaseOptions);
         return new IdentityDbContext(optionsBuilder.Options);
+    }
+
+    /// <summary>
+    /// A one-off factory over the bootstrap database options so the shared setting store can own
+    /// its contexts during the bootstrap load, exactly like its DI registration does.
+    /// </summary>
+    private sealed class BootstrapDbContextFactory(DatabaseOptions databaseOptions)
+        : IDbContextFactory<IdentityDbContext>
+    {
+        public IdentityDbContext CreateDbContext()
+        {
+            var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
+            optionsBuilder.UseIdentityDatabase(databaseOptions);
+            return new IdentityDbContext(optionsBuilder.Options);
+        }
     }
 }
