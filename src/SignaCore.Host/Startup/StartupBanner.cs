@@ -94,14 +94,6 @@ internal static class StartupBanner
         Console.Out.Flush();
     }
 
-    public static void WriteSetupModeNotice()
-    {
-        Console.Out.WriteLine(
-            "SignaCore is running in Setup Mode. Only /setup, /api/setup/*, and health endpoints " +
-            "are available; every other API returns 503 installation_required.");
-        Console.Out.Flush();
-    }
-
     /// <summary>
     /// Manually launched processes have no supervisor to restart them, so say so explicitly rather
     /// than exiting silently after setup succeeds.

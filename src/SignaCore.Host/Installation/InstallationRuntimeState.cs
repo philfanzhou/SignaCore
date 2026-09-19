@@ -1,13 +1,13 @@
 namespace SignaCore.Host.Installation;
 
 /// <summary>
-/// Process-wide view of the installation, published for health checks, diagnostics, and the setup
-/// endpoints. It reflects what the bootstrap phase decided; it is not a second source of truth.
+/// Process-wide view of the installation, published for health checks and diagnostics. It reflects
+/// what the bootstrap phase decided; it is not a second source of truth. Whether an installation
+/// completed is always read from the persisted <c>service_installations</c> row, never from a
+/// flag here: a losing instance of a completion race must observe the winner's commit.
 /// </summary>
 internal sealed class InstallationRuntimeState
 {
-    private int _setupCompleted;
-
     public InstallationRuntimeState(
         InstallationPhase phase,
         Guid installationId,
@@ -24,12 +24,4 @@ internal sealed class InstallationRuntimeState
 
     /// <summary>The <c>configuration_version</c> the running snapshot was loaded at.</summary>
     public int ConfigurationVersion { get; }
-
-    /// <summary>
-    /// True once this process has committed first-run setup and is shutting down so a supervisor can
-    /// restart it into the normal host. The browser polls status against this.
-    /// </summary>
-    public bool SetupCompleted => Volatile.Read(ref _setupCompleted) == 1;
-
-    public void MarkSetupCompleted() => Interlocked.Exchange(ref _setupCompleted, 1);
 }

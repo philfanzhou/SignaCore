@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Serilog;
 using ServiceMantle;
 using ServiceMantle.AspNetCore.Health;
@@ -277,17 +278,117 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
                 ?? DateTimeOffset.UtcNow.Add(ServiceMantle.Installation.SetupCodeLifetime.MaximumValue));
     }
 
-    StartupBanner.WriteSetupModeNotice();
+    // ---- PendingSetup host composition ----
+    // Mirrors the Bootstrap Configuration Mode host: the shared management capabilities, the shared
+    // pipeline with its phase gate, the shared setup entry, and the admin SPA — nothing that needs
+    // the (not yet existing) configuration snapshot is composed, which is precisely why setup
+    // cannot start a half-configured identity service. The capability set matches the shared
+    // entry's startable baseline; a missing capability fails the host start.
+    var setupDatabaseOptions = SignaCoreBootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database);
+    var setupMantle = builder.Services.AddSignaCoreServiceMantle(bootstrapFilePath);
+    setupMantle.AddSensitiveHeaders();
+    setupMantle.AddSecurityResponseHeaders();
+    setupMantle.AddRateLimiting();
+    setupMantle.AddManagementCookieAuthentication();
+    setupMantle.AddServiceMantleManagementApiV1();
+    setupMantle.AddServiceMantleManagementEntries();
+    setupMantle.AddServiceMantleHealthEndpoints();
 
-    SetupModeHost.ConfigureServices(builder, bootstrapResult);
+    builder.Services.AddSingleton(setupDatabaseOptions);
+    builder.Services.AddSingleton(bootstrapResult.MasterKeyProvider);
+    builder.Services.AddSingleton(bootstrapResult.ConfigurationProtector);
+    builder.Services.AddSingleton(bootstrapResult.SettingsStore);
+
+    // The setup completion transaction must run exactly once per request: a retrying execution
+    // strategy would replay the whole user transaction, which the shared entry contract forbids.
+    builder.Services.AddDbContext<IdentityDbContext>(options =>
+        options.UseIdentityDatabase(setupDatabaseOptions, enableRetryOnFailure: false));
+    // The shared setup entry reads the installation authority through this store; the readiness
+    // snapshot reads it through the same source below.
+    builder.Services.AddScoped<ServiceMantle.Installation.IServiceInstallationStore>(
+        serviceProvider => InstallationStores.CreateInstallationStore(
+            serviceProvider.GetRequiredService<IdentityDbContext>()));
+    builder.Services.AddScoped<IServiceHealthSnapshotSource, InstallationHealthSnapshotSource>();
+
+    builder.Services.RegisterPasswordHashingDefaults();
+    // The per-request contributor factory the completion executor resolves inside its fresh scope;
+    // scoped so every completion binds its contributor to that scope's IdentityDbContext.
+    builder.Services.AddScoped<InitialAdministratorSetupContributorFactory>();
+
     var setupApp = builder.Build();
-    SetupModeHost.ConfigurePipeline(setupApp, httpPort);
 
+    // The restart trigger, same shape as the Bootstrap Configuration Mode host: after the response
+    // completes, the persisted installation state — not an in-process flag — decides whether this
+    // process stops so a supervisor restarts it into the normal host. Deciding on the persisted
+    // state means an instance that lost the completion race also restarts, and a response lost in
+    // transit never strands a completed installation in Setup Mode.
+    setupApp.Use(async (context, next) =>
+    {
+        if (HttpMethods.IsPost(context.Request.Method) &&
+            context.Request.Path.StartsWithSegments("/management/v1/setup"))
+        {
+            // Resolved while the request scope still exists; the root factory outlives the request.
+            var scopeFactory = context.RequestServices.GetRequiredService<IServiceScopeFactory>();
+            context.Response.OnCompleted(async () =>
+            {
+                try
+                {
+                    await using var scope = scopeFactory.CreateAsyncScope();
+                    var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+                    var completed = await db.ServiceInstallations.AsNoTracking().AnyAsync(
+                        row => row.ServiceId == InstallationStores.ServiceIdValue &&
+                               row.Status == InstallationStatus.Completed,
+                        CancellationToken.None);
+                    if (!completed)
+                    {
+                        return;
+                    }
+                }
+                catch
+                {
+                    // A read failure must not stop the host; the next request or restart re-decides.
+                    return;
+                }
+
+                setupApp.Logger.LogInformation(
+                    "First-run setup completed; stopping so a supervisor can restart this process.");
+                setupApp.Lifetime.StopApplication();
+            });
+        }
+
+        await next(context);
+    });
+
+    setupApp.UseMiddleware<ExceptionHandlingMiddleware>();
+    setupApp.UseServiceMantlePipeline();
+
+    setupApp.MapServiceMantleHealthEndpoints();
+    setupApp.MapServiceMantleSetup(SetupCompletionExecutor.ExecuteAsync);
+
+    // The console is served by the same mapped fallback the normal host uses, admitted only while
+    // the phase is PendingSetup; the SPA itself probes the setup entry and renders the setup form.
+    AdminSpaBranch.MapNormalHostSpaFallback(setupApp, httpPort)
+        .WithServiceMantlePhaseAdmission(ServiceStartupPhase.PendingSetup);
+
+    // A manually launched process has no supervisor: say so explicitly, but only when the
+    // persisted state really completed installation during this process's lifetime.
     setupApp.Lifetime.ApplicationStopping.Register(() =>
     {
-        if (setupApp.Services.GetRequiredService<InstallationRuntimeState>().SetupCompleted)
+        try
         {
-            StartupBanner.WriteRestartInstruction();
+            using var scope = setupApp.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            if (db.ServiceInstallations.AsNoTracking().Any(
+                    row => row.ServiceId == InstallationStores.ServiceIdValue &&
+                           row.Status == InstallationStatus.Completed))
+            {
+                StartupBanner.WriteRestartInstruction();
+            }
+        }
+        catch
+        {
+            // A state read failure at shutdown is not worth another diagnostic; the operator
+            // restart path is documented for every other failure too.
         }
     });
 
@@ -335,6 +436,13 @@ var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(
 // ---- Shared ServiceMantle management session (fixed cookie scheme, phase gate, session entries) ----
 mantle.AddSignaCoreManagementSession(
     SignaCoreBootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database));
+
+// The shared setup entry is mapped on this host too: with the installation Completed it answers
+// the status read with "completed" and refuses every completion with the fixed 409 without
+// parsing the request body. The handler needs the installation authority through this store.
+builder.Services.AddScoped<ServiceMantle.Installation.IServiceInstallationStore>(
+    serviceProvider => InstallationStores.CreateInstallationStore(
+        serviceProvider.GetRequiredService<IdentityDbContext>()));
 
 // The shared bootstrap group: the update entry the authenticated editor drives. The credential
 // store is only constructed — never provisioned or issued here — because the shared mapping
@@ -480,12 +588,13 @@ app.MapHealthChecks(HealthEndpoints.Legacy, new()
 });
 
 // A completed installation must never re-enter setup. Browser navigation goes to the console; the
-// API surface is handled by SetupClosedController. This is middleware rather than a mapped endpoint
-// because the setup-mode host serves the same path from the SPA branch, and the branch's guard list
-// has to stay identical between the two hosts.
+// setup entry itself answers the fixed management conflict for a completed installation without
+// parsing the request. This is middleware rather than a mapped endpoint because the SPA branch of
+// a not-yet-restarted host serves the same path, and the guard has to stay identical between the
+// two hosts.
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments(SetupModeGateMiddleware.SetupPath) ||
+    if (context.Request.Path.StartsWithSegments(FirstRunPaths.Setup) ||
         context.Request.Path.StartsWithSegments(FirstRunPaths.Bootstrap))
     {
         context.Response.Redirect("/admin");
@@ -574,6 +683,9 @@ app.MapControllers();
 
 // ---- Shared ServiceMantle management session (login / current session / logout) ----
 app.MapSignaCoreManagementSession();
+
+// ---- Shared setup entries (status read + the completion replay boundary) ----
+app.MapServiceMantleSetup(SetupCompletionExecutor.ExecuteAsync);
 
 // ---- Shared bootstrap entries (update; creation stays phase-gated to 503 on this host) ----
 app.MapServiceMantleBootstrap();

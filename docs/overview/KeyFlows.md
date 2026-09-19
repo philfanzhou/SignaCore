@@ -30,7 +30,7 @@ bootstrap file absent -> minimal live/not-ready host -> protected /bootstrap wor
 
 writable protected bootstrap file -> derive root key -> connect business database
     -> initialization lock -> migration gate -> apply migrations -> read service_installations
-    -> Pending: Setup Mode          (only /setup, /api/setup/*, /health/*)
+    -> Pending: Setup Mode host   (shared setup entry, console SPA, health endpoints)
     -> Completed: load and validate the system_settings snapshot -> normal host
 ```
 
@@ -44,9 +44,9 @@ owns accounts.
 ```text
 empty database -> create Pending installation + one-time setup code (printed once to stdout)
    -> operator opens /setup -> submits public base URL, administrator credentials, setup code
-   -> one serializable transaction: seed default settings, create administrator, audit,
-      mark Completed, invalidate the code
-   -> process stops; supervisor restarts it into the normal host
+      to the shared setup entry (one serializable transaction: seed default settings, create
+      administrator, audit, mark Completed, invalidate the code)
+   -> process stops after the response completes; supervisor restarts it into the normal host
 ```
 
 Only one concurrent request can complete an installation. A database that already contains business

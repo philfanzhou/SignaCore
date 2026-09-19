@@ -569,7 +569,7 @@ public sealed class ServiceSettingsDatabaseContractTests
     // ---- A8: only the normal host registers the shared stack ----
 
     [Fact]
-    public async Task SetupModeHost_DoesNotRegisterTheSharedStack()
+    public async Task PendingSetupHost_DoesNotRegisterTheSharedStack()
     {
         var workingDirectory = Path.Combine(
             Path.GetTempPath(), $"signacore-setup-nostack-{Guid.NewGuid():N}");

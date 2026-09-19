@@ -22,8 +22,8 @@ using Xunit;
 namespace SignaCore.Tests.Integration;
 
 /// <summary>
-/// End-to-end behavior of a brand-new, uninitialized database: Setup Mode, the one-time code, and
-/// the atomic completion transaction.
+/// End-to-end behavior of a brand-new, uninitialized database: the PendingSetup host built on the
+/// shared ServiceMantle setup entry, the one-time code, and the atomic completion transaction.
 /// </summary>
 public sealed class FirstRunSetupTests : IAsyncLifetime
 {
@@ -31,6 +31,9 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     private const string AdminUsername = "setup_admin";
     private const string AdminPassword = "SetupAdmin123";
     private const string PublicBaseUrl = "https://identity.example.test";
+    private const string SetupEntryPath = "/management/v1/setup";
+    private const string UnsafeRequestHeader = "X-ServiceMantle-Request";
+    private const string WrongCode = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
     private string _workingDirectory = string.Empty;
     private string _databasePath = string.Empty;
@@ -46,24 +49,39 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         _factory?.Dispose();
-        SqliteConnection.ClearAllPools();
-        if (Directory.Exists(_workingDirectory))
-        {
-            Directory.Delete(_workingDirectory, recursive: true);
-        }
 
-        return ValueTask.CompletedTask;
+        // The PendingSetup host stops itself after a successful completion, and its restart
+        // watcher releases its SQLite scope asynchronously; a single pool clear can therefore race
+        // a still-open connection. Retry the cleanup briefly instead of failing the test on the
+        // working directory's deletion.
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            SqliteConnection.ClearAllPools();
+            try
+            {
+                if (Directory.Exists(_workingDirectory))
+                {
+                    Directory.Delete(_workingDirectory, recursive: true);
+                }
+
+                return;
+            }
+            catch (IOException) when (attempt < 4)
+            {
+                await Task.Delay(200);
+            }
+        }
     }
 
     [Fact]
-    public async Task EmptyDatabase_EntersSetupMode()
+    public async Task EmptyDatabase_ReportsPendingThroughTheSharedEntry()
     {
-        using var http = await StartSetupModeHostAsync();
+        using var http = await StartHostAsync();
 
-        var response = await http.GetAsync("/api/setup/status", TestContext.Current.CancellationToken);
+        var response = await http.GetAsync(SetupEntryPath, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
@@ -73,7 +91,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     [Fact]
     public async Task EmptyDatabase_CreatesAPendingInstallationWithAHashedSetupCode()
     {
-        using var _ = await StartSetupModeHostAsync();
+        using var _ = await StartHostAsync();
 
         await using var db = OpenDatabase();
         var installation = await db.ServiceInstallations.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -86,56 +104,34 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Null(installation.CompletedAtUtc);
     }
 
-    [Theory]
-    [InlineData("/")]
-    [InlineData("/admin")]
-    public async Task BrowserNavigation_WhilePending_RedirectsToSetup(string path)
-    {
-        using var http = await StartSetupModeHostAsync(allowRedirects: false);
-        http.DefaultRequestHeaders.Add("Accept", "text/html");
-
-        var response = await http.GetAsync(path, TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
-        Assert.Equal("/setup", response.Headers.Location?.ToString());
-    }
-
+    /// <summary>
+    /// While the installation is pending the identity surface does not exist. A read matches only
+    /// the phase-admitted SPA fallback, whose handler declines API-shaped paths with a plain 404. A
+    /// write matches no endpoint at all — routing answers it with its synthetic method-mismatch
+    /// endpoint — and the shared phase gate answers that endpoint with the fixed
+    /// <c>503 service.phase.unavailable</c>, exactly as the Bootstrap Configuration Mode host
+    /// already behaves.
+    /// </summary>
     [Theory]
     [InlineData("/api/auth/token")]
     [InlineData("/oauth2/token")]
     [InlineData("/.well-known/openid-configuration")]
     [InlineData("/.well-known/jwks")]
     [InlineData("/.well-known/jwks.json")]
-    [InlineData("/api/admin/session/login")]
-    public async Task NormalApis_WhilePending_ReturnInstallationRequired(string path)
+    [InlineData("/metrics")]
+    public async Task NormalApiReads_WhilePending_AreNotFoundAndWrites_ArePhaseUnavailable(string path)
     {
-        using var http = await StartSetupModeHostAsync();
+        using var http = await StartHostAsync();
 
-        var response = await http.GetAsync(path, TestContext.Current.CancellationToken);
+        var read = await http.GetAsync(path, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, read.StatusCode);
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal("installation_required", body.GetProperty("error").GetString());
-    }
-
-    /// <summary>
-    /// The verbs the endpoints actually declare, which is what a real client sends. A GET reaches
-    /// the gate only because it matches no action; a POST resolves the endpoint and would drag its
-    /// <c>[Authorize]</c> metadata into a Setup Mode that registers no policies.
-    /// </summary>
-    [Theory]
-    [InlineData("/api/auth/token")]
-    [InlineData("/oauth2/token")]
-    [InlineData("/api/admin/session/login")]
-    public async Task NormalApis_WhilePending_ReturnInstallationRequiredForTheirOwnVerb(string path)
-    {
-        using var http = await StartSetupModeHostAsync();
-
-        var response = await http.PostAsJsonAsync(path, new { grantType = "password" }, cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal("installation_required", body.GetProperty("error").GetString());
+        var write = await http.PostAsync(path, JsonContent.Create(new { grantType = "password" }),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, write.StatusCode);
+        Assert.Equal(
+            "{\"errorCode\":\"service.phase.unavailable\"}",
+            await write.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
 
     /// <summary>
@@ -145,21 +141,42 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     [Fact]
     public async Task HealthEndpoints_WhilePending_ReportLiveButNotReady()
     {
-        using var http = await StartSetupModeHostAsync();
+        using var http = await StartHostAsync();
 
         Assert.Equal(HttpStatusCode.OK, (await http.GetAsync("/health/live", TestContext.Current.CancellationToken)).StatusCode);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await http.GetAsync("/health/ready", TestContext.Current.CancellationToken)).StatusCode);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await http.GetAsync("/health", TestContext.Current.CancellationToken)).StatusCode);
     }
 
+    /// <summary>
+    /// The fixed cross-site request header is part of the shared entry contract: without it the
+    /// submission is refused before the executor runs, which the still-valid code afterwards
+    /// proves — a consumed code could never complete the installation a second time.
+    /// </summary>
+    [Fact]
+    public async Task Submission_WithoutTheUnsafeRequestHeader_NeverRunsTheExecutor()
+    {
+        using var http = await StartHostAsync();
+        var code = await RotateSetupCodeAsync();
+
+        var headerless = await PostSetupAsync(http, code, includeUnsafeRequestHeader: false);
+
+        Assert.Equal(HttpStatusCode.BadRequest, headerless.StatusCode);
+
+        var accepted = await PostSetupAsync(http, code);
+        Assert.Equal(HttpStatusCode.NoContent, accepted.StatusCode);
+    }
+
     [Fact]
     public async Task Setup_WithAWrongCode_IsRefusedAndChangesNothing()
     {
-        using var http = await StartSetupModeHostAsync();
+        using var http = await StartHostAsync();
 
-        var response = await PostSetupAsync(http, setupCode: "AAAAA-BBBBB-CCCCC-DDDDD");
+        var response = await PostSetupAsync(http, WrongCode);
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(AdminPassword, body, StringComparison.Ordinal);
 
         await using var db = OpenDatabase();
         Assert.Equal(InstallationStatus.PendingSetup, (await db.ServiceInstallations.SingleAsync(
@@ -171,43 +188,103 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     [Fact]
     public async Task Setup_WithAnExpiredCode_IsRefused()
     {
-        using var http = await StartSetupModeHostAsync();
+        using var http = await StartHostAsync();
         var code = await RotateSetupCodeAsync(expiresAt: DateTimeOffset.UtcNow.AddMinutes(-1));
 
         var response = await PostSetupAsync(http, code);
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    /// <summary>
+    /// A rotated code invalidates the previous one; only the newest code can complete the
+    /// installation.
+    /// </summary>
     [Fact]
-    public async Task Setup_WithAWeakPassword_IsRefusedBeforeAnythingIsWritten()
+    public async Task Setup_WithASupersededCode_IsRefusedAndTheNewCodeWins()
     {
-        using var http = await StartSetupModeHostAsync();
-        var code = await RotateSetupCodeAsync();
+        using var http = await StartHostAsync();
+        var superseded = await RotateSetupCodeAsync();
+        var current = await RotateSetupCodeAsync();
 
-        var response = await PostSetupAsync(http, code, password: "short");
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-
-        await using var db = OpenDatabase();
-        Assert.False(await db.Accounts.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await PostSetupAsync(http, superseded)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await PostSetupAsync(http, current)).StatusCode);
     }
 
-    [Fact]
-    public async Task Setup_WithAPlainHttpPublicBaseUrl_IsRefusedOutsideDevelopment()
+    public static TheoryData<string> InvalidInputShapes()
     {
-        using var http = await StartSetupModeHostAsync();
+        return
+        [
+            "missing-password",
+            "missing-publicBaseUrl",
+            "extra-field",
+            "wrong-type-allowNonHttpsIssuer",
+            "wrong-type-username",
+        ];
+    }
+
+    /// <summary>
+    /// Every structural input problem is the one fixed validation rejection, changes nothing, and
+    /// leaves the code consumable.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(InvalidInputShapes))]
+    public async Task Setup_WithAStructurallyInvalidInput_IsRefusedAndTheCodeStaysUsable(string shape)
+    {
+        using var http = await StartHostAsync();
         var code = await RotateSetupCodeAsync();
 
-        var response = await PostSetupAsync(http, code, publicBaseUrl: "http://identity.example.test");
+        var response = await PostSetupAsync(http, code, inputShape: shape);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertInstallationStillPendingAsync();
+
+        Assert.Equal(HttpStatusCode.NoContent, (await PostSetupAsync(http, code)).StatusCode);
+    }
+
+    public static TheoryData<string> InvalidInputValues()
+    {
+        return
+        [
+            "weak-password",
+            "plain-http-publicBaseUrl",
+            "empty-jwtAudience",
+            "overlong-username",
+            "taken-username",
+        ];
+    }
+
+    /// <summary>
+    /// Every semantic input problem is the one fixed validation rejection (the shared 400 carries
+    /// no field-level reason), rolls the transaction back, and leaves the code consumable.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(InvalidInputValues))]
+    public async Task Setup_WithASemanticallyInvalidInput_IsRefusedAndTheCodeStaysUsable(string value)
+    {
+        using var http = await StartHostAsync();
+        var code = await RotateSetupCodeAsync();
+        var existingAccounts = 0;
+        var existingCredentials = 0;
+        if (value == "taken-username")
+        {
+            await SeedExistingAdministratorAsync();
+            existingAccounts = 1;
+            existingCredentials = 1;
+        }
+
+        var response = await PostSetupAsync(http, code, inputValue: value);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertNothingNewWasWrittenAsync(existingAccounts, existingCredentials);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await PostSetupAsync(http, code)).StatusCode);
     }
 
     [Fact]
     public async Task Setup_WithExplicitHttpOptIn_AcceptsHttpWithoutClassifyingTheHost()
     {
-        using var http = await StartSetupModeHostAsync();
+        using var http = await StartHostAsync();
         var code = await RotateSetupCodeAsync();
 
         var response = await PostSetupAsync(
@@ -216,7 +293,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             publicBaseUrl: "http://identity.example.test",
             allowNonHttpsIssuer: true);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
         await using var db = OpenDatabase();
         var settings = await db.SystemSettings.ToDictionaryAsync(setting => setting.Key, cancellationToken: TestContext.Current.CancellationToken);
@@ -226,12 +303,12 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     [Fact]
     public async Task Setup_StoresTheOperatorSelectedAudience()
     {
-        using var http = await StartSetupModeHostAsync();
+        using var http = await StartHostAsync();
         var code = await RotateSetupCodeAsync();
 
         var response = await PostSetupAsync(http, code, jwtAudience: "urn:example:services");
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         await using var db = OpenDatabase();
         Assert.Equal(
             "urn:example:services",
@@ -243,12 +320,18 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     [Fact]
     public async Task Setup_WithAValidCode_CompletesAtomically()
     {
-        using var http = await StartSetupModeHostAsync();
+        using var http = await StartHostAsync();
         var code = await RotateSetupCodeAsync();
 
         var response = await PostSetupAsync(http, code);
+        var responseBody = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(0, responseBody.Length);
+        // No candidate code, password, or root secret is echoed by any completion answer.
+        Assert.DoesNotContain(code, responseBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(AdminPassword, responseBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(RootSecret, responseBody, StringComparison.Ordinal);
 
         await using var db = OpenDatabase();
         var installation = await db.ServiceInstallations.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -294,12 +377,13 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
 
     /// <summary>
     /// The administrator password exists only as its hash, and secret settings only as encrypted
-    /// envelopes. Neither may be recoverable by reading the tables.
+    /// envelopes. Neither may be recoverable by reading the tables, and neither may surface in the
+    /// audit projection.
     /// </summary>
     [Fact]
     public async Task Setup_NeverStoresPlaintextCredentialsOrSecretSettings()
     {
-        using var http = await StartSetupModeHostAsync();
+        using var http = await StartHostAsync();
         await PostSetupAsync(http, await RotateSetupCodeAsync());
 
         await using var db = OpenDatabase();
@@ -327,22 +411,32 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
 
     /// <summary>
     /// A successful setup stops its own host so a supervisor restarts it into the normal host, so a
-    /// second attempt necessarily lands on the restarted process — which must refuse it.
+    /// second attempt necessarily lands on the restarted process — which must refuse it without
+    /// parsing the request.
     /// </summary>
     [Fact]
     public async Task Setup_AfterCompletion_IsRefusedByTheRestartedHost()
     {
-        using (var setupHost = await StartSetupModeHostAsync())
+        using (var setupHost = await StartHostAsync())
         {
-            Assert.Equal(HttpStatusCode.OK, (await PostSetupAsync(setupHost, await RotateSetupCodeAsync())).StatusCode);
+            Assert.Equal(HttpStatusCode.NoContent, (await PostSetupAsync(setupHost, await RotateSetupCodeAsync())).StatusCode);
         }
 
         _factory?.Dispose();
         _factory = null;
 
         using var restarted = await StartHostAsync();
-        var second = await PostSetupAsync(restarted, "TESTA-TESTB-TESTC-TESTD");
 
+        var status = await restarted.GetAsync(SetupEntryPath, TestContext.Current.CancellationToken);
+        Assert.Equal("completed", (await status.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken))
+            .GetProperty("status").GetString());
+
+        // The replay answer does not depend on the request body at all.
+        var second = await restarted.SendAsync(new HttpRequestMessage(HttpMethod.Post, SetupEntryPath)
+        {
+            Headers = { { UnsafeRequestHeader, "1" } },
+            Content = JsonContent.Create(new { anything = "garbage" }),
+        }, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
 
         await using var db = OpenDatabase();
@@ -354,17 +448,15 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
 
     /// <summary>
     /// Concurrent completions must serialize on the singleton row: exactly one wins, and the losers
-    /// change nothing.
+    /// change nothing. The winner stops the host once its response completes, so a loser may be cut
+    /// off rather than answered.
     /// </summary>
     [Fact]
     public async Task ConcurrentSetupRequests_ProduceExactlyOneInstallation()
     {
-        using var http = await StartSetupModeHostAsync();
+        using var http = await StartHostAsync();
         var code = await RotateSetupCodeAsync();
 
-        // The winner stops the host once its response completes, so a loser may be cut off rather
-        // than answered. What must hold is that at most one request succeeded and the database saw
-        // exactly one installation.
         var outcomes = await Task.WhenAll(Enumerable.Range(0, 4).Select(async _ =>
         {
             try
@@ -377,7 +469,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             }
         }));
 
-        Assert.Equal(1, outcomes.Count(status => status == HttpStatusCode.OK));
+        Assert.Equal(1, outcomes.Count(status => status == HttpStatusCode.NoContent));
 
         await using var db = OpenDatabase();
         Assert.Equal(1, await db.PasswordCredentials.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -401,7 +493,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             [SystemSettingKeys.LegacyAdminBootstrapUsername] = "legacy_admin"
         });
 
-        var status = await http.GetAsync("/api/setup/status", TestContext.Current.CancellationToken);
+        var status = await http.GetAsync(SetupEntryPath, TestContext.Current.CancellationToken);
         Assert.Equal("completed", (await status.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken))
             .GetProperty("status").GetString());
 
@@ -423,7 +515,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     [Fact]
     public async Task CompletedInstallationWithMissingSettings_FailsClosedInsteadOfReopeningSetup()
     {
-        using (var http = await StartSetupModeHostAsync())
+        using (var http = await StartHostAsync())
         {
             await PostSetupAsync(http, await RotateSetupCodeAsync());
         }
@@ -458,9 +550,9 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     [Fact]
     public async Task WrongRootKey_FailsClosedAndLeavesStoredSigningKeysUntouched()
     {
-        using (var setupHost = await StartSetupModeHostAsync())
+        using (var setupHost = await StartHostAsync())
         {
-            Assert.Equal(HttpStatusCode.OK, (await PostSetupAsync(setupHost, await RotateSetupCodeAsync())).StatusCode);
+            Assert.Equal(HttpStatusCode.NoContent, (await PostSetupAsync(setupHost, await RotateSetupCodeAsync())).StatusCode);
         }
 
         _factory?.Dispose();
@@ -507,6 +599,25 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(before, after);
     }
 
+    private async Task AssertInstallationStillPendingAsync()
+    {
+        await using var db = OpenDatabase();
+        var installation = await db.ServiceInstallations.SingleAsync(
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(InstallationStatus.PendingSetup, installation.Status);
+        Assert.NotNull(installation.SetupCodeDigest);
+    }
+
+    private async Task AssertNothingNewWasWrittenAsync(int existingAccounts = 0, int existingCredentials = 0)
+    {
+        await using var db = OpenDatabase();
+        Assert.Equal(existingAccounts, await db.Accounts.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(existingCredentials, await db.PasswordCredentials.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.False(await db.SystemSettings.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.False(await db.AuditLogs.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
+        await AssertInstallationStillPendingAsync();
+    }
+
     private static string Flatten(Exception exception)
     {
         var messages = new List<string>();
@@ -517,9 +628,6 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
 
         return string.Join(" | ", messages);
     }
-
-    private Task<HttpClient> StartSetupModeHostAsync(bool allowRedirects = true) =>
-        StartHostAsync(allowRedirects: allowRedirects);
 
     private async Task<HttpClient> StartHostAsync(
         IDictionary<string, string?>? extraSettings = null,
@@ -554,22 +662,88 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     private async Task<HttpResponseMessage> PostSetupAsync(
         HttpClient http,
         string setupCode,
+        bool allowNonHttpsIssuer = false,
         string password = AdminPassword,
         string publicBaseUrl = PublicBaseUrl,
-        bool allowNonHttpsIssuer = false,
-        string jwtAudience = "SignaCore.Services")
+        string jwtAudience = "SignaCore.Services",
+        string? inputShape = null,
+        string? inputValue = null,
+        bool includeUnsafeRequestHeader = true)
     {
-        return await http.PostAsJsonAsync("/api/setup/complete", new
+        object input = (inputShape, inputValue) switch
         {
-            publicBaseUrl,
-            allowNonHttpsIssuer,
-            jwtAudience,
-            username = AdminUsername,
-            password,
-            confirmPassword = password,
-            setupCode
-        });
+            ("missing-password", _) => new
+            {
+                publicBaseUrl,
+                allowNonHttpsIssuer,
+                jwtAudience,
+                username = AdminUsername,
+            },
+            ("missing-publicBaseUrl", _) => new
+            {
+                allowNonHttpsIssuer,
+                jwtAudience,
+                username = AdminUsername,
+                password,
+            },
+            ("extra-field", _) => new
+            {
+                publicBaseUrl,
+                allowNonHttpsIssuer,
+                jwtAudience,
+                username = AdminUsername,
+                password,
+                confirmPassword = password,
+            },
+            ("wrong-type-allowNonHttpsIssuer", _) => new
+            {
+                publicBaseUrl,
+                allowNonHttpsIssuer = "true",
+                jwtAudience,
+                username = AdminUsername,
+                password,
+            },
+            ("wrong-type-username", _) => new
+            {
+                publicBaseUrl,
+                allowNonHttpsIssuer,
+                jwtAudience,
+                username = 42,
+                password,
+            },
+            (_, "weak-password") => ValidInput(publicBaseUrl, allowNonHttpsIssuer, jwtAudience, AdminUsername, "short"),
+            (_, "plain-http-publicBaseUrl") => ValidInput("http://identity.example.test", allowNonHttpsIssuer, jwtAudience, AdminUsername, password),
+            (_, "empty-jwtAudience") => ValidInput(publicBaseUrl, allowNonHttpsIssuer, "", AdminUsername, password),
+            (_, "overlong-username") => ValidInput(publicBaseUrl, allowNonHttpsIssuer, jwtAudience, new string('u', 101), password),
+            (_, "taken-username") => ValidInput(publicBaseUrl, allowNonHttpsIssuer, jwtAudience, "existing_admin", password),
+            _ => ValidInput(publicBaseUrl, allowNonHttpsIssuer, jwtAudience, AdminUsername, password),
+        };
+
+        var request = new HttpRequestMessage(HttpMethod.Post, SetupEntryPath)
+        {
+            Content = JsonContent.Create(new { code = setupCode, input }),
+        };
+        if (includeUnsafeRequestHeader)
+        {
+            request.Headers.Add(UnsafeRequestHeader, "1");
+        }
+
+        return await http.SendAsync(request, TestContext.Current.CancellationToken);
     }
+
+    private static object ValidInput(
+        string publicBaseUrl,
+        bool allowNonHttpsIssuer,
+        string jwtAudience,
+        string username,
+        string password) => new
+    {
+        publicBaseUrl,
+        allowNonHttpsIssuer,
+        jwtAudience,
+        username,
+        password,
+    };
 
     /// <summary>
     /// The plaintext code is printed to stdout once and never stored, so a test cannot read it
@@ -594,6 +768,27 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         }
 
         return issued.SetupCode!.Reveal();
+    }
+
+    private async Task SeedExistingAdministratorAsync()
+    {
+        await using var db = OpenDatabase();
+        var accountId = Guid.NewGuid();
+        db.Accounts.Add(new AccountEntity
+        {
+            Id = accountId,
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+        db.PasswordCredentials.Add(new PasswordCredentialEntity
+        {
+            Id = Guid.NewGuid(),
+            AccountId = accountId,
+            Username = "existing_admin",
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword("ExistingAdmin123"),
+            CreatedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
     }
 
     private async Task SeedPreChangeDeploymentAsync()

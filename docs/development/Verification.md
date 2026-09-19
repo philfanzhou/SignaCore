@@ -34,10 +34,14 @@ APIs. Confirm a wrong/expired code and invalid database target do not create the
 protected bootstrap form and verify the resulting JSON has only `Database` and inline `MasterKey`,
 with mode `0600`.
 
-After restart, a new empty database reports `"status":"pending"` from `/api/setup/status`, serves
-`/setup`, and returns
-`503 installation_required` from every other API. Complete setup with the one-time code from the
-container log, wait for the container to restart, then verify the normal surface:
+After restart, a new empty database reports `"status":"pending"` from `/management/v1/setup`, serves
+`/setup`, and exposes no identity endpoint: reads of other APIs are `404`, and writes are the
+shared phase gate's `503 service.phase.unavailable`. Complete setup with the one-time code from the
+container log by posting
+`{"code":"...","input":{"publicBaseUrl":...,"allowNonHttpsIssuer":false,"jwtAudience":...,
+"username":...,"password":...}}` with the `X-ServiceMantle-Request: 1` header; a wrong code is
+answered `401`, success is `204`, and a replay against the restarted host is `409`. Wait for the
+container to restart, then verify the normal surface:
 
 ```bash
 curl --fail http://localhost:5002/health/ready
