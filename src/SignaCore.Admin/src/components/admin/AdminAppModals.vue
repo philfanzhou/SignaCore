@@ -44,14 +44,32 @@ const {
         </button>
       </div>
       <div class="modal-body">
-        <div class="console-info-band compact-band">
+        <div
+          v-if="createAppForm.clientType === 'Confidential'"
+          class="console-info-band compact-band"
+        >
           <span>ⓘ</span>
           <p>注册成功后 App Secret 只展示一次，请在受控环境保存。</p>
+        </div>
+        <div v-else class="console-info-band compact-band">
+          <span>ⓘ</span>
+          <p>
+            Public 客户端不生成、不保存、不展示
+            Secret；授权码与 refresh 能力保持关闭，由后续任务开放。
+          </p>
         </div>
         <label
           >应用名称<input
             v-model="createAppForm.appName"
             class="console-input" /></label
+        ><label
+          >客户端类型<select
+            v-model="createAppForm.clientType"
+            class="console-input"
+          >
+            <option value="Confidential">Confidential（生成 Secret）</option>
+            <option value="Public">Public（无 Secret）</option>
+          </select></label
         ><label
           >Callback URL<input
             v-model="createAppForm.callbackUrl"

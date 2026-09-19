@@ -15,7 +15,8 @@ public static class OidcClientConfigurationValidator
         AudienceMode audienceMode,
         IEnumerable<string> redirectUris,
         IEnumerable<string> postLogoutRedirectUris,
-        bool isDevelopment)
+        bool isDevelopment,
+        OidcClientType? currentClientType = null)
     {
         if (!Enum.IsDefined(clientType))
         {
@@ -45,6 +46,16 @@ public static class OidcClientConfigurationValidator
         {
             throw new OidcClientConfigurationException(
                 "Public clients are reserved and must remain fail closed.");
+        }
+
+        // The conversion policy: an existing Confidential client is never downgraded to Public
+        // through a configuration update. Creation contexts (no current type) are unaffected, and
+        // the upgrade direction is an explicit, secret-minting transaction owned by the caller.
+        if (currentClientType == OidcClientType.Confidential
+            && clientType == OidcClientType.Public)
+        {
+            throw new OidcClientConfigurationException(
+                "The requested client type conversion is not allowed.");
         }
 
         if (allowAuthorizationCode)

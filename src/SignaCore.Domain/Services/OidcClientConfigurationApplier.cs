@@ -34,7 +34,11 @@ public static class OidcClientConfigurationApplier
         ArgumentNullException.ThrowIfNull(application);
         ArgumentNullException.ThrowIfNull(input);
 
-        var clientType = ParseClientType(input.ClientType);
+        // The stored type is the conversion baseline and the omitted-value fallback: a request
+        // that does not name a client type keeps the existing one instead of silently rewriting
+        // it to the creation default.
+        var currentClientType = application.ClientType;
+        var clientType = ResolveClientType(input.ClientType, currentClientType);
         var audienceMode = input.AudienceMode is null
             ? application.AudienceMode
             : ParseAudienceMode(input.AudienceMode);
@@ -48,7 +52,8 @@ public static class OidcClientConfigurationApplier
             audienceMode,
             input.RedirectUris ?? [],
             input.PostLogoutRedirectUris ?? [],
-            isDevelopment);
+            isDevelopment,
+            currentClientType);
 
         application.ClientType = validated.ClientType;
         application.AllowAuthorizationCode = validated.AllowAuthorizationCode;
@@ -112,11 +117,17 @@ public static class OidcClientConfigurationApplier
         return (added, removed);
     }
 
-    private static OidcClientType ParseClientType(string? value)
+    /// <summary>
+    /// Resolves the requested client-type name against the closed set. A null, empty, or
+    /// whitespace value keeps <paramref name="currentClientType"/> — an omitted type is never a
+    /// silent conversion. An unknown name is rejected with the shared closed-set message, so the
+    /// administration API and the <c>bootstrap-apps.json</c> pre-seed answer identically.
+    /// </summary>
+    public static OidcClientType ResolveClientType(string? value, OidcClientType currentClientType)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            return OidcClientType.Confidential;
+            return currentClientType;
         }
 
         if (!Enum.TryParse<OidcClientType>(value, ignoreCase: true, out var clientType)

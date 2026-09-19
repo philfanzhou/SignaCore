@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SignaCore.Database;
+using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 // CallbackUrlValidator belongs to SignaCore.Domain even though its file is under Domain/Services.
 using SignaCore.Domain;
@@ -67,11 +68,20 @@ public class CallbackRegistrationController : ControllerBase
             return Ok(new RegisterCallbackResponse { Success = false, Message = "AppId not registered" });
         }
 
-        if (HttpContext.GetValidatedApp() is null && !BCrypt.Net.BCrypt.Verify(appSecret, app.AppSecretHash))
+        if (HttpContext.GetValidatedApp() is null)
         {
-            _logger.LogWarning("Callback registration failed: AppId={AppId}, Reason=AppSecret mismatch",
-                LogValueSanitizer.Sanitize(appId));
-            return Ok(new RegisterCallbackResponse { Success = false, Message = "AppSecret mismatch" });
+            // A Public client holds no secret, and an empty hash is never a verifiable credential
+            // (BCrypt throws on it instead of returning false): both fail closed in the existing
+            // mismatch shape — no exception, no 500, and no type or hash-state disclosure.
+            var secretAccepted = app.ClientType != OidcClientType.Public
+                && !string.IsNullOrEmpty(app.AppSecretHash)
+                && BCrypt.Net.BCrypt.Verify(appSecret, app.AppSecretHash);
+            if (!secretAccepted)
+            {
+                _logger.LogWarning("Callback registration failed: AppId={AppId}, Reason=AppSecret mismatch",
+                    LogValueSanitizer.Sanitize(appId));
+                return Ok(new RegisterCallbackResponse { Success = false, Message = "AppSecret mismatch" });
+            }
         }
 
         app.CallbackUrl = request.CallbackUrl;

@@ -94,7 +94,9 @@ export function useAdminAppOidc(selectedApp: Ref<AdminApp | null>) {
 
   async function saveOidcPolicy() {
     if (!selectedApp.value) return;
-    // Public 客户端由 #81 开放；在此之前界面不提供任何提交 Public 的路径，也不去试探服务端。
+    // #81 opened Public registration, not Public capability: a Public client stays fail closed
+    // with no code/refresh path, so the console offers no Public policy submission and does not
+    // probe the server. Capability activation belongs to the later code-flow task (#82).
     if (isPublicClient.value) {
       return notify("Public 客户端保持保留状态，当前无法从控制台启用。");
     }

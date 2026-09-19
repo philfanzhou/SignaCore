@@ -216,6 +216,75 @@ public class OidcClientConfigurationApplierTests
         Assert.Equal(OidcClientType.Confidential, app.ClientType);
     }
 
+    /// <summary>
+    /// The silent-conversion fix: an omitted client type keeps whatever the application already
+    /// is, so updating an unrelated policy field of a Public client can never rewrite it to
+    /// Confidential.
+    /// </summary>
+    [Fact]
+    public void Apply_AnOmittedClientType_KeepsTheCurrentType()
+    {
+        var publicApp = Application();
+        publicApp.ClientType = OidcClientType.Public;
+
+        OidcClientConfigurationApplier.Apply(
+            publicApp,
+            new OidcClientConfigurationInput { AllowedScopes = ["openid"] },
+            isDevelopment: false);
+        Assert.Equal(OidcClientType.Public, publicApp.ClientType);
+
+        var confidentialApp = Application();
+        OidcClientConfigurationApplier.Apply(
+            confidentialApp,
+            new OidcClientConfigurationInput { AllowedScopes = ["openid"] },
+            isDevelopment: false);
+        Assert.Equal(OidcClientType.Confidential, confidentialApp.ClientType);
+    }
+
+    [Fact]
+    public void Apply_RejectsTheConfidentialToPublicDowngrade_AndChangesNothing()
+    {
+        var app = Application();
+
+        Assert.Throws<OidcClientConfigurationException>(() =>
+            OidcClientConfigurationApplier.Apply(
+                app,
+                new OidcClientConfigurationInput { ClientType = "Public", AllowedScopes = ["openid"] },
+                isDevelopment: false));
+
+        Assert.Equal(OidcClientType.Confidential, app.ClientType);
+    }
+
+    [Fact]
+    public void Apply_AcceptsTheExplicitUpgradeOutOfPublic()
+    {
+        var app = Application();
+        app.ClientType = OidcClientType.Public;
+
+        OidcClientConfigurationApplier.Apply(
+            app,
+            new OidcClientConfigurationInput { ClientType = "Confidential", AllowedScopes = ["openid"] },
+            isDevelopment: false);
+
+        Assert.Equal(OidcClientType.Confidential, app.ClientType);
+    }
+
+    [Fact]
+    public void ResolveClientType_KeepsTheCurrentTypeOnAnOmittedValue_AndRejectsUnknownNames()
+    {
+        Assert.Equal(
+            OidcClientType.Public,
+            OidcClientConfigurationApplier.ResolveClientType(null, OidcClientType.Public));
+        Assert.Equal(
+            OidcClientType.Confidential,
+            OidcClientConfigurationApplier.ResolveClientType("  ", OidcClientType.Confidential));
+        Assert.Equal(
+            OidcClientType.Public,
+            OidcClientConfigurationApplier.ResolveClientType("public", OidcClientType.Confidential));
+        Assert.Throws<OidcClientConfigurationException>(() =>
+            OidcClientConfigurationApplier.ResolveClientType("Delegated", OidcClientType.Confidential));
+    }
+
     [Fact]
     public void Apply_RejectsAnUnknownAudienceMode()
     {

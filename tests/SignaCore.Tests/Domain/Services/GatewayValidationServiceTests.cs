@@ -154,4 +154,40 @@ public class GatewayValidationServiceTests
         Assert.False(result.IsSuccess);
         Assert.Equal("AppSecret mismatch", result.ErrorMessage);
     }
+
+    /// <summary>
+    /// A Public client holds an empty hash. Without the guard, <c>BCrypt.Verify</c> throws on the
+    /// empty salt (a 500), so the guard must fail closed with the same shape as a wrong secret.
+    /// </summary>
+    [Fact]
+    public async Task ValidateAsync_WithAPublicClient_FailsClosedWithoutThrowing()
+    {
+        var app = CreateActiveApp();
+        app.ClientType = OidcClientType.Public;
+        app.AppSecretHash = string.Empty;
+        var repoMock = CreateAppRegRepoMock(app);
+        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+
+        var result = await service.ValidateAsync("testapp", "any-presented-secret");
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("AppSecret mismatch", result.ErrorMessage);
+    }
+
+    /// <summary>
+    /// An anomalous Confidential row with an empty hash also fails closed rather than throwing.
+    /// </summary>
+    [Fact]
+    public async Task ValidateAsync_WithAnEmptyHash_FailsClosedWithoutThrowing()
+    {
+        var app = CreateActiveApp();
+        app.AppSecretHash = string.Empty;
+        var repoMock = CreateAppRegRepoMock(app);
+        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+
+        var result = await service.ValidateAsync("testapp", "any-presented-secret");
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("AppSecret mismatch", result.ErrorMessage);
+    }
 }
