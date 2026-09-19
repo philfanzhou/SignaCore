@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/SignaCore.ReferenceBff/SignaCore.ReferenceBff.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/SignaCore.Database.Migrations.Sqlite/SignaCore.Database.Migrations.Sqlite.csproj" />
     <Project Path="src/SignaCore.Database/SignaCore.Database.csproj" />
@@ -7,6 +10,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj" />
+    <Project Path="tests/SignaCore.ReferenceBff.Tests/SignaCore.ReferenceBff.Tests.csproj" />
     <Project Path="tests/SignaCore.Tests/SignaCore.Tests.csproj" />
   </Folder>
 </Solution>

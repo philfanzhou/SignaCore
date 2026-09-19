@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- xUnit.net v3 test projects are executables hosted by Microsoft.Testing.Platform. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The alias keeps the sample's top-level Program distinct from SignaCore.Host's. -->
+    <ProjectReference Include="..\..\samples\SignaCore.ReferenceBff\SignaCore.ReferenceBff.csproj" Aliases="BffSample" />
+    <ProjectReference Include="..\..\src\SignaCore.Database\SignaCore.Database.csproj" />
+    <ProjectReference Include="..\..\src\SignaCore.Domain\SignaCore.Domain.csproj" />
+    <ProjectReference Include="..\..\src\SignaCore.Host\SignaCore.Host.csproj">
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+      <ExcludeAssets>buildTransitive</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>
