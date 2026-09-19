@@ -64,7 +64,10 @@ public enum IdentitySessionRevocationReason
 {
     Logout,
     Administrative,
-    CodeReplay
+    CodeReplay,
+
+    /// <summary><c>EV-08</c>: the account-disable transaction revoked every live session of the account.</summary>
+    AccountDisabled
 }
 
 /// <summary>
@@ -318,6 +321,7 @@ public sealed class IdentitySessionStore : IIdentitySessionStore
         IdentitySessionRevocationReason.Logout => "logout",
         IdentitySessionRevocationReason.Administrative => "administrative",
         IdentitySessionRevocationReason.CodeReplay => "code_replay",
+        IdentitySessionRevocationReason.AccountDisabled => "account_disabled",
         _ => throw new ArgumentOutOfRangeException(
             nameof(reason), reason, "Unknown identity session revocation reason.")
     };

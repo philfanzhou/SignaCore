@@ -177,6 +177,49 @@ public class IdentitySessionRepository : IIdentitySessionRepository
             cancellationToken);
     }
 
+    public async Task<int> MarkRevokedByAccountAsync(
+        Guid accountId,
+        string revocationReason,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        // EV-08: the account-state transaction revokes every still-unrevoked session of the
+        // account. The conditional update keeps each row's first revocation fact authoritative,
+        // and the row writes serialize against a concurrent redemption/rotation that holds the
+        // session-row lock of the canonical lock order.
+        if (_dbContext.Database.CurrentTransaction is not null)
+        {
+            return await ExecuteRevokeByAccountAsync(accountId, revocationReason, now, cancellationToken);
+        }
+
+        var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
+        return await executionStrategy.ExecuteAsync(async operationCancellationToken =>
+        {
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+                operationCancellationToken);
+
+            var affectedRows = await ExecuteRevokeByAccountAsync(
+                accountId, revocationReason, now, operationCancellationToken);
+
+            await transaction.CommitAsync(operationCancellationToken);
+            return affectedRows;
+        }, cancellationToken);
+    }
+
+    private Task<int> ExecuteRevokeByAccountAsync(
+        Guid accountId,
+        string revocationReason,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        return _dbContext.IdentitySessions
+            .Where(session => session.AccountId == accountId && session.RevokedAt == null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(session => session.RevokedAt, now)
+                .SetProperty(session => session.RevocationReason, revocationReason),
+            cancellationToken);
+    }
+
     public async Task<IReadOnlyList<IdentitySessionEntity>> ListByAccountAsync(
         Guid accountId,
         int take,

@@ -284,6 +284,18 @@ public class AdminController : ControllerBase
         return Ok(new OperationResponse(true, "Nickname updated."));
     }
 
+    /// <summary>
+    /// PATCH /api/admin/users/{userId}/status — the <c>EV-08</c> account-state transaction.
+    /// <para>
+    /// Disabling an account (the <c>true → false</c> transition) revokes every still-unrevoked
+    /// identity session of the account with reason <c>account_disabled</c> and every interactive
+    /// refresh family of the account — session rows first, so the writes serialize against a
+    /// concurrent code redemption or refresh rotation of the same account through the canonical
+    /// session-row lock. The revocations, the state change, and the audit row (whose <c>after</c>
+    /// payload carries the two bounded revocation counts) share one commit boundary; a repeat
+    /// disable of an already-disabled account performs no writes at all.
+    /// </para>
+    /// </summary>
     [HttpPatch("users/{userId:guid}/status")]
     [Authorize(Policy = "AdminSession")]
     public async Task<IActionResult> UpdateUserStatus(
@@ -292,31 +304,65 @@ public class AdminController : ControllerBase
         [FromServices] IAccountRepository accountRepository,
         [FromServices] IUnitOfWork unitOfWork,
         [FromServices] IAuditService auditService,
+        [FromServices] IdentityDbContext dbContext,
+        [FromServices] IIdentitySessionRepository identitySessionRepository,
+        [FromServices] IRefreshTokenFamilyStore refreshTokenFamilyStore,
         CancellationToken cancellationToken = default)
     {
-        var account = await accountRepository.GetByIdAsync(userId, cancellationToken);
-        if (account == null)
+        var (actorId, actorName) = GetAdminIdentity();
+        var strategy = dbContext.Database.CreateExecutionStrategy();
+        var result = await strategy.ExecuteAsync(async operationToken =>
+        {
+            dbContext.ChangeTracker.Clear();
+            await using var transaction = await dbContext.Database
+                .BeginTransactionAsync(operationToken);
+
+            var account = await accountRepository.GetByIdAsync(userId, operationToken);
+            if (account == null)
+            {
+                await transaction.RollbackAsync(operationToken);
+                return (Found: false, Message: string.Empty);
+            }
+
+            var beforeStatus = account.IsActive;
+            account.IsActive = request.IsActive;
+            await accountRepository.UpdateAsync(account, operationToken);
+
+            var revokedSessions = 0;
+            var revokedFamilyMembers = 0;
+            if (beforeStatus && !request.IsActive)
+            {
+                // EV-08: the disable transaction owns every promised explicit revocation. The
+                // conditional updates keep each row's first revocation fact authoritative, and
+                // the session writes run first so a concurrent redemption/rotation of the same
+                // account serializes on the session-row lock of the canonical lock order.
+                var now = DateTimeOffset.UtcNow;
+                revokedSessions = await identitySessionRepository.MarkRevokedByAccountAsync(
+                    account.Id, "account_disabled", now, operationToken);
+                revokedFamilyMembers = await refreshTokenFamilyStore.RevokeByAccountAsync(
+                    account.Id, RefreshFamilyRevocationReason.AccountDisabled, operationToken);
+            }
+
+            await auditService.RecordActionAsync(
+                request.IsActive ? "account_enabled" : "account_disabled",
+                "Account", account.Id.ToString(),
+                actorId, actorName,
+                request.IsActive ? $"Admin enabled user: {userId}" : $"Admin disabled user: {userId}",
+                GetClientIp(),
+                before: new { IsActive = beforeStatus },
+                after: new { IsActive = request.IsActive, RevokedSessions = revokedSessions, RevokedFamilyMembers = revokedFamilyMembers },
+                cancellationToken: operationToken);
+            await unitOfWork.SaveChangesAsync(operationToken);
+            await transaction.CommitAsync(operationToken);
+            return (Found: true, Message: request.IsActive ? "User enabled." : "User disabled.");
+        }, cancellationToken);
+
+        if (!result.Found)
         {
             return NotFound(new ErrorResponse("User not found."));
         }
 
-        var beforeStatus = account.IsActive;
-        account.IsActive = request.IsActive;
-        await accountRepository.UpdateAsync(account, cancellationToken);
-
-        var (actorId, actorName) = GetAdminIdentity();
-        await auditService.RecordActionAsync(
-            request.IsActive ? "account_enabled" : "account_disabled",
-            "Account", account.Id.ToString(),
-            actorId, actorName,
-            request.IsActive ? $"Admin enabled user: {userId}" : $"Admin disabled user: {userId}",
-            GetClientIp(),
-            before: new { IsActive = beforeStatus },
-            after: new { IsActive = request.IsActive },
-            cancellationToken: cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return Ok(new OperationResponse(true, request.IsActive ? "User enabled." : "User disabled."));
+        return Ok(new OperationResponse(true, result.Message));
     }
 
     [HttpGet("apps")]
@@ -437,6 +483,17 @@ public class AdminController : ControllerBase
             app.CallbackExpiresAt.HasValue ? app.CallbackExpiresAt.Value.ToUnixTimeSeconds() : null));
     }
 
+    /// <summary>
+    /// PUT /api/admin/apps/{appId}/callback — the callback configuration transaction, which also
+    /// owns the <c>EV-09</c> application-deactivation revocation.
+    /// <para>
+    /// Deactivating an application (the <c>IsActive</c> <c>true → false</c> transition) revokes
+    /// every still-unrevoked interactive refresh family of that application in the same unit;
+    /// the identity sessions stay untouched because a session is shared across applications. The
+    /// audit row's <c>after</c> payload carries the bounded family-revocation count. URI
+    /// validation (which may resolve DNS) runs before the transaction opens.
+    /// </para>
+    /// </summary>
     [HttpPut("apps/{appId}/callback")]
     [Authorize(Policy = "AdminSession")]
     public async Task<IActionResult> UpdateCallback(
@@ -446,61 +503,96 @@ public class AdminController : ControllerBase
         [FromServices] CallbackUrlValidator callbackUrlValidator,
         [FromServices] IUnitOfWork unitOfWork,
         [FromServices] IAuditService auditService,
+        [FromServices] IdentityDbContext dbContext,
+        [FromServices] IRefreshTokenFamilyStore refreshTokenFamilyStore,
         CancellationToken cancellationToken = default)
     {
-        var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
-        if (app == null)
+        // Validated before the transaction opens: the check depends only on the submitted URL,
+        // and holding a database transaction across its DNS resolution would be wrong.
+        string? validatedCallbackUrl = null;
+        if (!string.IsNullOrWhiteSpace(request.CallbackUrl))
         {
-            return NotFound(new ErrorResponse("App not found."));
-        }
-
-        // Captured before the entity is mutated. IsActive is part of the snapshot because
-        // deactivating an application is a security-relevant state change.
-        var before = new
-        {
-            app.CallbackUrl,
-            CallbackExpiresAt = app.CallbackExpiresAt?.ToUnixTimeSeconds(),
-            app.IsActive
-        };
-
-        if (string.IsNullOrWhiteSpace(request.CallbackUrl))
-        {
-            app.CallbackUrl = null;
-            app.CallbackExpiresAt = null;
-        }
-        else
-        {
-            var callbackUrl = request.CallbackUrl.Trim();
+            validatedCallbackUrl = request.CallbackUrl.Trim();
             var validation = await callbackUrlValidator.ValidateAsync(
-                callbackUrl,
+                validatedCallbackUrl,
                 cancellationToken);
             if (!validation.IsValid)
             {
                 return BadRequest(new ErrorResponse(
                     $"Invalid callback URL: {validation.ErrorMessage}"));
             }
-
-            app.CallbackUrl = callbackUrl;
-            app.CallbackExpiresAt = request.TtlSeconds == IdentityConstants.CallbackTtlNeverExpire
-                ? null
-                : DateTimeOffset.UtcNow.AddSeconds(request.TtlSeconds > 0 ? request.TtlSeconds : IdentityConstants.DefaultCallbackTtlSeconds);
         }
 
-        app.IsActive = request.IsActive;
-
         var (actorId, actorName) = GetAdminIdentity();
-        await auditService.RecordActionAsync(
-            "app_callback_updated", "AppRegistration", app.AppId, actorId, actorName,
-            $"Admin updated callback configuration for app: {app.AppName}", GetClientIp(),
-            before: before,
-            after: new
+        var strategy = dbContext.Database.CreateExecutionStrategy();
+        var result = await strategy.ExecuteAsync(async operationToken =>
+        {
+            dbContext.ChangeTracker.Clear();
+            await using var transaction = await dbContext.Database
+                .BeginTransactionAsync(operationToken);
+
+            var app = await appRegistrationRepository.GetByAppIdAsync(appId, operationToken);
+            if (app == null)
+            {
+                await transaction.RollbackAsync(operationToken);
+                return false;
+            }
+
+            // Captured before the entity is mutated. IsActive is part of the snapshot because
+            // deactivating an application is a security-relevant state change.
+            var before = new
             {
                 app.CallbackUrl,
                 CallbackExpiresAt = app.CallbackExpiresAt?.ToUnixTimeSeconds(),
                 app.IsActive
-            },
-            cancellationToken: cancellationToken);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+            };
+
+            if (validatedCallbackUrl is null)
+            {
+                app.CallbackUrl = null;
+                app.CallbackExpiresAt = null;
+            }
+            else
+            {
+                app.CallbackUrl = validatedCallbackUrl;
+                app.CallbackExpiresAt = request.TtlSeconds == IdentityConstants.CallbackTtlNeverExpire
+                    ? null
+                    : DateTimeOffset.UtcNow.AddSeconds(request.TtlSeconds > 0 ? request.TtlSeconds : IdentityConstants.DefaultCallbackTtlSeconds);
+            }
+
+            var deactivating = app.IsActive && !request.IsActive;
+            app.IsActive = request.IsActive;
+
+            var revokedFamilyMembers = 0;
+            if (deactivating)
+            {
+                // EV-09: the deactivation transaction owns the promised family disposal. Sessions
+                // stay: a session of the same account on another application remains usable.
+                revokedFamilyMembers = await refreshTokenFamilyStore.RevokeByApplicationAsync(
+                    app.AppId, RefreshFamilyRevocationReason.ApplicationDisabled, operationToken);
+            }
+
+            await auditService.RecordActionAsync(
+                "app_callback_updated", "AppRegistration", app.AppId, actorId, actorName,
+                $"Admin updated callback configuration for app: {app.AppName}", GetClientIp(),
+                before: before,
+                after: new
+                {
+                    app.CallbackUrl,
+                    CallbackExpiresAt = app.CallbackExpiresAt?.ToUnixTimeSeconds(),
+                    app.IsActive,
+                    RevokedFamilyMembers = revokedFamilyMembers
+                },
+                cancellationToken: operationToken);
+            await unitOfWork.SaveChangesAsync(operationToken);
+            await transaction.CommitAsync(operationToken);
+            return true;
+        }, cancellationToken);
+
+        if (!result)
+        {
+            return NotFound(new ErrorResponse("App not found."));
+        }
 
         return Ok(new OperationResponse(true, "Callback configuration updated."));
     }
@@ -781,6 +873,12 @@ public class AdminController : ControllerBase
     /// fail when the application has no redirect URI, instead of committing a policy the
     /// authorization endpoint could never honour.
     /// </para>
+    /// <para>
+    /// Turning the refresh capability off (the <c>allow_refresh_token</c> <c>true → false</c>
+    /// transition) also revokes every still-unrevoked interactive refresh family of the
+    /// application inside the same transaction (<c>EV-11</c>); the audit row's <c>after</c>
+    /// payload carries the bounded revocation count.
+    /// </para>
     /// </summary>
     [HttpPut("apps/{appId}/oidc-policy")]
     [Authorize(Policy = "AdminSession")]
@@ -791,34 +889,87 @@ public class AdminController : ControllerBase
         [FromServices] IUnitOfWork unitOfWork,
         [FromServices] IAuditService auditService,
         [FromServices] IWebHostEnvironment environment,
+        [FromServices] IdentityDbContext dbContext,
+        [FromServices] IRefreshTokenFamilyStore refreshTokenFamilyStore,
         CancellationToken cancellationToken)
     {
-        var app = await appRegistrationRepository.GetByAppIdWithOidcConfigurationAsync(
-            appId,
-            cancellationToken);
-        if (app == null) return NotFound(new ErrorResponse("App not found."));
+        var (actorId, actorName) = GetAdminIdentity();
+        var strategy = dbContext.Database.CreateExecutionStrategy();
+        var result = await strategy.ExecuteAsync<IActionResult?>(async operationToken =>
+        {
+            dbContext.ChangeTracker.Clear();
+            await using var transaction = await dbContext.Database
+                .BeginTransactionAsync(operationToken);
 
-        var before = Snapshot(app);
-        return await ApplyOidcConfigurationAsync(
-            app,
-            new OidcClientConfigurationInput
+            var app = await appRegistrationRepository.GetByAppIdWithOidcConfigurationAsync(
+                appId, operationToken);
+            if (app == null)
             {
-                ClientType = request.ClientType,
-                AllowAuthorizationCode = request.AllowAuthorizationCode,
-                AllowedScopes = request.AllowedScopes,
-                AllowRefreshToken = request.AllowRefreshToken,
-                IdentitySessionMaxAgeSeconds = request.IdentitySessionMaxAgeSeconds,
-                RedirectUris = RegisteredUris(app, RedirectUriKind.Redirect),
-                PostLogoutRedirectUris = RegisteredUris(app, RedirectUriKind.PostLogout)
-            },
-            before,
-            "app_oidc_policy_updated",
-            "Interactive OIDC policy updated.",
-            appRegistrationRepository,
-            unitOfWork,
-            auditService,
-            environment,
-            cancellationToken);
+                await transaction.RollbackAsync(operationToken);
+                return null;
+            }
+
+            var before = Snapshot(app);
+            var beforeAllowRefreshToken = app.AllowRefreshToken;
+            OidcClientConfigurationChange change;
+            try
+            {
+                change = OidcClientConfigurationApplier.Apply(
+                    app,
+                    new OidcClientConfigurationInput
+                    {
+                        ClientType = request.ClientType,
+                        AllowAuthorizationCode = request.AllowAuthorizationCode,
+                        AllowedScopes = request.AllowedScopes,
+                        AllowRefreshToken = request.AllowRefreshToken,
+                        IdentitySessionMaxAgeSeconds = request.IdentitySessionMaxAgeSeconds,
+                        RedirectUris = RegisteredUris(app, RedirectUriKind.Redirect),
+                        PostLogoutRedirectUris = RegisteredUris(app, RedirectUriKind.PostLogout)
+                    },
+                    environment.IsDevelopment());
+            }
+            catch (OidcClientConfigurationException exception)
+            {
+                // A rejected configuration leaves the tracked graph untouched; the rollback
+                // drops the re-read entity so nothing of this attempt survives.
+                await transaction.RollbackAsync(operationToken);
+                return BadRequest(new ErrorResponse(exception.Message));
+            }
+
+            await appRegistrationRepository.AddRedirectUrisAsync(change.AddedRegistrations, operationToken);
+            await appRegistrationRepository.RemoveRedirectUrisAsync(change.RemovedRegistrations, operationToken);
+
+            var revokedFamilyMembers = 0;
+            if (beforeAllowRefreshToken && !app.AllowRefreshToken)
+            {
+                // EV-11: the capability-off transaction owns the promised family disposal.
+                revokedFamilyMembers = await refreshTokenFamilyStore.RevokeByApplicationAsync(
+                    app.AppId, RefreshFamilyRevocationReason.RefreshCapabilityDisabled, operationToken);
+            }
+
+            await auditService.RecordActionAsync(
+                "app_oidc_policy_updated", "AppRegistration", app.AppId, actorId, actorName,
+                "Interactive OIDC policy updated.", GetClientIp(),
+                before: before,
+                after: new
+                {
+                    ClientType = app.ClientType.ToString(),
+                    app.AllowAuthorizationCode,
+                    AllowedScopes = app.AllowedScopes,
+                    app.AllowRefreshToken,
+                    app.IdentitySessionMaxAgeSeconds,
+                    AudienceMode = app.AudienceMode.ToString(),
+                    RedirectUris = RegisteredUris(app, RedirectUriKind.Redirect),
+                    PostLogoutRedirectUris = RegisteredUris(app, RedirectUriKind.PostLogout),
+                    RevokedFamilyMembers = revokedFamilyMembers
+                },
+                cancellationToken: operationToken);
+            await unitOfWork.SaveChangesAsync(operationToken);
+            await transaction.CommitAsync(operationToken);
+            return Ok(Describe(app));
+        }, cancellationToken);
+
+        return result ?? NotFound(new ErrorResponse("App not found."));
     }
 
     /// <summary>

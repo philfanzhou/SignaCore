@@ -16,10 +16,10 @@ outcome column; the refresh-family contract owns that projection.
 | Session idle/absolute expiry | `EV-04` | Authorization, code redemption, and UserInfo each compare one captured UTC time; cleanup is not the enforcement mechanism | `SC-10` and exact-boundary cases |
 | Application session max-age | `EV-05` | Authorization, code redemption, and UserInfo load current per-application policy against immutable `auth_time` | Exact-boundary and unaffected second-application cases |
 | Prepared logout and its code race | `EV-06`, `EV-07`, `EV-28` | Browser completion owns handle consumption; session-first transaction owns matching revocation | `SC-05`, `SC-06`, `SC-15` |
-| Account disable/delete | `EV-08` | Account-state transaction owns session revocation; authorization, code, and UserInfo retain live reads | Disable/delete between code issue and each live read; unaffected second-account case |
-| Application deactivation | `EV-09` | Application-state transaction and every application-specific endpoint read | `SC-12` |
+| Account disable/delete | `EV-08` | Disable: `AdminController.UpdateUserStatus` revokes the account's unrevoked sessions (reason `account_disabled`) and interactive families in the transaction, sessions first (`AdminStatePropagationMatrixTests`, `AdminStatePropagationConcurrencyDatabaseContractTests`); delete: no endpoint exists. Reads: authorization, code, and UserInfo retain live reads | Disable/delete between code issue and each live read; unaffected second-account case |
+| Application deactivation | `EV-09` | Deactivate: `AdminController.UpdateCallback` revokes the application's interactive families in the transaction (sessions stay); reads: every application-specific endpoint (`AdminStatePropagationMatrixTests`) | `SC-12` |
 | Authorization-code capability off | `EV-10` | Application update plus authorization/code capability reads | Pending, new, and already-issued-code cases |
-| Refresh capability off, non-refresh projection | `EV-11` | Authorization/code check `offline_access`; UserInfo ignores it; session is unchanged | Requests with and without `offline_access` |
+| Refresh capability off, non-refresh projection | `EV-11` | Off: `AdminController.UpdateOidcPolicy` revokes the application's interactive families in the transaction; authorization/code check `offline_access`; UserInfo ignores it; session is unchanged (`AdminStatePropagationMatrixTests`) | Requests with and without `offline_access` |
 | Redirect URI removal | `EV-12` | Authorization revalidates current registration; code redemption uses its exact stored snapshot | Removed-while-pending and removed-after-code cases |
 | Scope removal | `EV-13` | Authorization/code use current allow list; UserInfo intersects it with token scope | `SC-11` |
 | Administrative session revocation | `EV-15` | Session-admin transaction owns named revocation; code and UserInfo retain live reads | Named-session and unaffected-sibling-session cases |
@@ -38,8 +38,13 @@ authorize a guessed session or family.
 
 Identity-session revocation and application/account changes are live inputs to code redemption and
 UserInfo. They do not remotely erase or shorten self-contained access or ID tokens: downstream
-validation continues to `exp`, while UserInfo performs its separate current-state read. Application
-session max-age never becomes a global session revocation.
+validation continues to `exp`, while UserInfo performs its separate current-state read. The
+already-issued-token window is therefore bounded by the interactive access-token lifetime
+(`PS-13`: 15 minutes); downstream services that need an immediate cut must add their own live
+check, because SignaCore provides no introspection. Application session max-age never becomes a
+global session revocation. Account deletion has no endpoint today; the delete half of `EV-08`
+becomes reachable only when such an endpoint is delivered, and that delivery owns its
+same-transaction revocation duty.
 
 Each state-changing operation owns its complete transaction. Account/application changes write all
 promised explicit revocations with the setting change; prepared logout owns request consumption and

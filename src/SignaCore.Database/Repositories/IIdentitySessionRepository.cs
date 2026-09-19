@@ -63,6 +63,20 @@ public interface IIdentitySessionRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The account-scoped conditional revocation (<c>EV-08</c>): every still-unrevoked session of
+    /// <paramref name="accountId"/> is revoked with the given canonical reason, so the first
+    /// revocation fact of each row stays authoritative. Intended to run inside the caller's
+    /// account-state transaction; the session-row writes are also the serialization point against
+    /// a concurrent code redemption or refresh rotation of the same account (both lock the
+    /// session row first). Returns the number of sessions this call revoked.
+    /// </summary>
+    Task<int> MarkRevokedByAccountAsync(
+        Guid accountId,
+        string revocationReason,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Deletes rows past the retention cutoff as one transactional unit and returns the deleted
     /// count. A cancelled or failed run rolls the whole unit back; no reference is ever nulled to
     /// enable a delete.

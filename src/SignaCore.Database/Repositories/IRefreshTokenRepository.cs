@@ -53,6 +53,26 @@ public interface IRefreshTokenRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Revokes every unrevoked interactive refresh token of <paramref name="accountId"/>
+    /// (<c>EV-08</c>): the account-disable transaction's family disposal. Interactive rows only —
+    /// legacy rows have no identity session and are structurally out of reach (<c>PS-07</c>).
+    /// Returns the number of members this call revoked.
+    /// </summary>
+    Task<int> RevokeByAccountAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Revokes every unrevoked interactive refresh token issued to <paramref name="appId"/>
+    /// (<c>EV-09</c>/<c>EV-11</c>): the application-deactivation and refresh-capability
+    /// transactions' family disposal. Interactive rows only — legacy rows are structurally out
+    /// of reach (<c>PS-07</c>). Returns the number of members this call revoked.
+    /// </summary>
+    Task<int> RevokeByApplicationAsync(
+        string appId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Deletes whole interactive families that are past every member's usable deadline and that no
     /// retained authorization code links to — children before roots, because the restrictive
     /// self-reference makes a single-statement whole-family delete provider-asymmetric. Returns

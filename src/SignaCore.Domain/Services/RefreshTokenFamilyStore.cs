@@ -35,7 +35,16 @@ public enum RefreshFamilyRevocationReason
     ApplicationMaxAge,
 
     /// <summary><c>EV-13</c>/<c>EV-32</c>: a family scope member left the application's current allow list.</summary>
-    ScopeRemoved
+    ScopeRemoved,
+
+    /// <summary><c>EV-08</c>: the account-disable transaction revoked every interactive family of the account.</summary>
+    AccountDisabled,
+
+    /// <summary><c>EV-09</c>: the application-deactivation transaction revoked the application's interactive families.</summary>
+    ApplicationDisabled,
+
+    /// <summary><c>EV-11</c>: the refresh-capability-off transaction revoked the application's interactive families.</summary>
+    RefreshCapabilityDisabled
 }
 
 /// <summary>
@@ -182,6 +191,27 @@ public interface IRefreshTokenFamilyStore
     /// </summary>
     Task<int> RevokeBySessionAsync(
         Guid identitySessionId,
+        RefreshFamilyRevocationReason reason,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Revokes every unrevoked interactive refresh family of one account (<c>EV-08</c>): the
+    /// account-disable transaction's family disposal, a conditional update over interactive rows
+    /// only — legacy rows are structurally out of reach (<c>PS-07</c>). Returns the number of
+    /// members this call revoked.
+    /// </summary>
+    Task<int> RevokeByAccountAsync(
+        Guid accountId,
+        RefreshFamilyRevocationReason reason,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Revokes every unrevoked interactive refresh family issued to one application
+    /// (<c>EV-09</c>/<c>EV-11</c>): the application-deactivation and refresh-capability
+    /// transactions' family disposal. Returns the number of members this call revoked.
+    /// </summary>
+    Task<int> RevokeByApplicationAsync(
+        string appId,
         RefreshFamilyRevocationReason reason,
         CancellationToken cancellationToken = default);
 
@@ -389,6 +419,44 @@ public sealed class RefreshTokenFamilyStore(
                 "Revoked {Count} interactive refresh family members by session: SessionId={SessionId}, Reason={Reason}",
                 revoked,
                 identitySessionId,
+                reason);
+        }
+
+        return revoked;
+    }
+
+    public async Task<int> RevokeByAccountAsync(
+        Guid accountId,
+        RefreshFamilyRevocationReason reason,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var revoked = await refreshTokens.RevokeByAccountAsync(accountId, cancellationToken);
+        if (revoked > 0)
+        {
+            logger.LogInformation(
+                "Revoked {Count} interactive refresh family members by account: AccountId={AccountId}, Reason={Reason}",
+                revoked,
+                accountId,
+                reason);
+        }
+
+        return revoked;
+    }
+
+    public async Task<int> RevokeByApplicationAsync(
+        string appId,
+        RefreshFamilyRevocationReason reason,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var revoked = await refreshTokens.RevokeByApplicationAsync(appId, cancellationToken);
+        if (revoked > 0)
+        {
+            logger.LogInformation(
+                "Revoked {Count} interactive refresh family members by application: AppId={AppId}, Reason={Reason}",
+                revoked,
+                appId,
                 reason);
         }
 
