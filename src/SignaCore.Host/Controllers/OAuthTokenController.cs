@@ -2,13 +2,14 @@ using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using SignaCore.Database.Entity;
+using SignaCore.Domain;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Http;
 using SignaCore.Host.Security;
 using SignaCore.Host.Services;
-using Microsoft.AspNetCore.RateLimiting;
 
 namespace SignaCore.Host.Controllers;
 
@@ -42,17 +43,20 @@ public sealed class OAuthTokenController : ControllerBase
     private readonly IRefreshTokenService _refreshTokenService;
     private readonly AuthorizationCodeRedemptionService _authorizationCodeRedemption;
     private readonly InteractiveRefreshRotationService _interactiveRefreshRotation;
+    private readonly AuthMetrics _authMetrics;
 
     public OAuthTokenController(
         TokenIssuanceService tokenIssuanceService,
         IRefreshTokenService refreshTokenService,
         AuthorizationCodeRedemptionService authorizationCodeRedemption,
-        InteractiveRefreshRotationService interactiveRefreshRotation)
+        InteractiveRefreshRotationService interactiveRefreshRotation,
+        AuthMetrics authMetrics)
     {
         _tokenIssuanceService = tokenIssuanceService;
         _refreshTokenService = refreshTokenService;
         _authorizationCodeRedemption = authorizationCodeRedemption;
         _interactiveRefreshRotation = interactiveRefreshRotation;
+        _authMetrics = authMetrics;
     }
 
     [HttpPost("token")]
@@ -64,6 +68,7 @@ public sealed class OAuthTokenController : ControllerBase
         var app = HttpContext.GetValidatedApp()
             ?? throw new InvalidOperationException("OAuth client authentication did not provide a validated application.");
         var form = Request.Form;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         // The internal authorization_code branch, dispatched before the grant-type mapping so no
         // validator is ever registered for it. Exactly one grant_type value may select the branch;
@@ -74,7 +79,7 @@ public sealed class OAuthTokenController : ControllerBase
                 AuthorizationCodeRedemptionService.GrantType,
                 StringComparison.Ordinal))
         {
-            return await RedeemCodeGrantAsync(app, form, cancellationToken);
+            return await RedeemCodeGrantAsync(app, form, stopwatch, cancellationToken);
         }
 
         // The interactive refresh branch: only a digest-matched row with the complete interactive
@@ -96,23 +101,31 @@ public sealed class OAuthTokenController : ControllerBase
                 cancellationToken);
             if (dispatch.Handled)
             {
-                return RespondInteractiveRefresh(dispatch.Outcome!);
+                var rotation = dispatch.Outcome!;
+                _authMetrics.RecordOidcEndpointOutcome(
+                    AuthMetrics.OidcMetricEndpoints.Refresh,
+                    rotation.IsSuccess ? "success" : rotation.FailureReason!,
+                    app.AppId);
+                _authMetrics.RecordOidcEndpointDuration(
+                    AuthMetrics.OidcMetricEndpoints.Refresh,
+                    stopwatch.Elapsed.TotalMilliseconds);
+                return RespondInteractiveRefresh(rotation);
             }
         }
 
         var wireGrantType = form["grant_type"].ToString();
         if (string.IsNullOrWhiteSpace(wireGrantType))
         {
-            return Error(OAuthErrorCodes.InvalidRequest, "grant_type is required.");
+            return FinishToken(AuthMetrics.OidcMetricEndpoints.Token, Error(OAuthErrorCodes.InvalidRequest, "grant_type is required."), app.AppId, stopwatch);
         }
 
         // An unknown wire name maps to unsupported_grant_type without entering token issuance.
         var grantType = OAuthGrantTypes.ToInternal(wireGrantType);
         if (grantType == null || !_tokenIssuanceService.IsSupportedGrantType(grantType))
         {
-            return Error(
+            return FinishToken(AuthMetrics.OidcMetricEndpoints.Token, Error(
                 OAuthErrorCodes.UnsupportedGrantType,
-                $"grant_type '{wireGrantType}' is not supported.");
+                $"grant_type '{wireGrantType}' is not supported."), app.AppId, stopwatch);
         }
 
         // RFC 6749 §3.3: scopes are not supported, so reject an explicit scope instead of silently
@@ -120,7 +133,7 @@ public sealed class OAuthTokenController : ControllerBase
         var requestedScope = form["scope"].ToString();
         if (!string.IsNullOrWhiteSpace(requestedScope))
         {
-            return Error(OAuthErrorCodes.InvalidScope, "This authorization server does not support scopes.");
+            return FinishToken(AuthMetrics.OidcMetricEndpoints.Token, Error(OAuthErrorCodes.InvalidScope, "This authorization server does not support scopes."), app.AppId, stopwatch);
         }
 
         var outcome = await _tokenIssuanceService.IssueAsync(
@@ -139,7 +152,7 @@ public sealed class OAuthTokenController : ControllerBase
 
         if (!outcome.IsSuccess)
         {
-            return Error(outcome.ErrorCode, outcome.ErrorMessage);
+            return FinishToken(AuthMetrics.OidcMetricEndpoints.Token, Error(outcome.ErrorCode, outcome.ErrorMessage), app.AppId, stopwatch, outcome.ErrorCode);
         }
 
         // RFC 6749 §5.1: successful responses must use no-store so intermediaries do not cache tokens.
@@ -157,7 +170,27 @@ public sealed class OAuthTokenController : ControllerBase
             body["refresh_token"] = outcome.RefreshToken;
         }
 
-        return Ok(body);
+        return FinishToken(AuthMetrics.OidcMetricEndpoints.Token, Ok(body), app.AppId, stopwatch, "success");
+    }
+
+    /// <summary>
+    /// Records one <c>token</c> endpoint-class outcome and latency around the branch result. The
+    /// outcome vocabulary is closed: <c>success</c>, the service failure reasons, or the fixed
+    /// OAuth error codes of the structural rejections.
+    /// </summary>
+    private IActionResult FinishToken(
+        string endpoint,
+        IActionResult result,
+        string appId,
+        System.Diagnostics.Stopwatch stopwatch,
+        string? outcome = null)
+    {
+        _authMetrics.RecordOidcEndpointOutcome(
+            endpoint,
+            outcome ?? "invalid_request",
+            appId);
+        _authMetrics.RecordOidcEndpointDuration(endpoint, stopwatch.Elapsed.TotalMilliseconds);
+        return result;
     }
 
     /// <summary>
@@ -209,12 +242,18 @@ public sealed class OAuthTokenController : ControllerBase
     private async Task<IActionResult> RedeemCodeGrantAsync(
         AppRegistrationEntity app,
         IFormCollection form,
+        System.Diagnostics.Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
         if (HasUsableBasicCredentials()
             && (form.ContainsKey("client_id") || form.ContainsKey("client_secret")))
         {
-            return Challenge(OAuthClientAuthenticationDefaults.Scheme);
+            return FinishToken(
+                AuthMetrics.OidcMetricEndpoints.Token,
+                Challenge(OAuthClientAuthenticationDefaults.Scheme),
+                app.AppId,
+                stopwatch,
+                "invalid_client");
         }
 
         var outcome = await _authorizationCodeRedemption.RedeemAsync(
@@ -223,6 +262,13 @@ public sealed class OAuthTokenController : ControllerBase
             HttpContext.GetClientIp(),
             HttpContext.GetCorrelationId(),
             cancellationToken);
+        _authMetrics.RecordOidcEndpointOutcome(
+            AuthMetrics.OidcMetricEndpoints.Token,
+            outcome.IsSuccess ? "success" : (outcome.FailureReason ?? "server_error"),
+            app.AppId);
+        _authMetrics.RecordOidcEndpointDuration(
+            AuthMetrics.OidcMetricEndpoints.Token,
+            stopwatch.Elapsed.TotalMilliseconds);
 
         Response.Headers.CacheControl = "no-store";
         Response.Headers.Pragma = "no-cache";

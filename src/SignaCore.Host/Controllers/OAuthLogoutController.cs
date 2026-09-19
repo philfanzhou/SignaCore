@@ -3,13 +3,13 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain;
 using SignaCore.Host.Http;
 using SignaCore.Host.Security;
 using SignaCore.Host.Services;
-using Microsoft.AspNetCore.RateLimiting;
 
 namespace SignaCore.Host.Controllers;
 
@@ -64,17 +64,20 @@ public sealed class OAuthLogoutController : ControllerBase
     private readonly OidcLogoutCompletionService _completion;
     private readonly IIdentitySessionCookieReader _identityCookies;
     private readonly ILogger<OAuthLogoutController> _logger;
+    private readonly AuthMetrics _authMetrics;
 
     public OAuthLogoutController(
         OidcLogoutPreparationService preparation,
         OidcLogoutCompletionService completion,
         IIdentitySessionCookieReader identityCookies,
-        ILogger<OAuthLogoutController> logger)
+        ILogger<OAuthLogoutController> logger,
+        AuthMetrics authMetrics)
     {
         _preparation = preparation;
         _completion = completion;
         _identityCookies = identityCookies;
         _logger = logger;
+        _authMetrics = authMetrics;
     }
 
     /// <summary>
@@ -92,10 +95,11 @@ public sealed class OAuthLogoutController : ControllerBase
     {
         var app = HttpContext.GetValidatedApp()
             ?? throw new InvalidOperationException("OAuth client authentication did not provide a validated application.");
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         if (!IsAcceptedFormContentType())
         {
-            return PreparationFailure();
+            return FinishLogoutPrepare("invalid_request", PreparationFailure(), app.AppId, stopwatch);
         }
 
         IFormCollection form;
@@ -105,7 +109,7 @@ public sealed class OAuthLogoutController : ControllerBase
         }
         catch (Exception exception) when (exception is InvalidDataException or OperationCanceledException)
         {
-            return PreparationFailure();
+            return FinishLogoutPrepare("invalid_request", PreparationFailure(), app.AppId, stopwatch);
         }
 
         var fields = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -116,14 +120,18 @@ public sealed class OAuthLogoutController : ControllerBase
                 || values.Count != 1
                 || !fields.TryAdd(name, values[0] ?? string.Empty))
             {
-                return PreparationFailure();
+                return FinishLogoutPrepare("invalid_request", PreparationFailure(), app.AppId, stopwatch);
             }
         }
 
         if (HasUsableBasicCredentials()
             && (fields.ContainsKey("client_id") || fields.ContainsKey("client_secret")))
         {
-            return Challenge(OAuthClientAuthenticationDefaults.Scheme);
+            return FinishLogoutPrepare(
+                "invalid_client",
+                Challenge(OAuthClientAuthenticationDefaults.Scheme),
+                app.AppId,
+                stopwatch);
         }
 
         var success = await _preparation.PrepareAsync(
@@ -134,15 +142,53 @@ public sealed class OAuthLogoutController : ControllerBase
             cancellationToken);
         if (success is null)
         {
-            return PreparationFailure();
+            return FinishLogoutPrepare("invalid_request", PreparationFailure(), app.AppId, stopwatch);
         }
 
         Response.Headers.CacheControl = "no-store";
         Response.Headers.Pragma = "no-cache";
-        return Ok(new Dictionary<string, string>
-        {
-            ["logout_uri"] = success.LogoutUri
-        });
+        return FinishLogoutPrepare(
+            "success",
+            Ok(new Dictionary<string, string>
+            {
+                ["logout_uri"] = success.LogoutUri
+            }),
+            app.AppId,
+            stopwatch);
+    }
+
+    /// <summary>
+    /// Records one <c>logout-complete</c> endpoint-class outcome and latency around the branch
+    /// result. The browser completion surface resolves no client identity, so no client label is
+    /// attached.
+    /// </summary>
+    private IActionResult FinishLogoutComplete(
+        string outcome,
+        IActionResult result,
+        System.Diagnostics.Stopwatch stopwatch)
+    {
+        _authMetrics.RecordOidcEndpointOutcome(AuthMetrics.OidcMetricEndpoints.LogoutComplete, outcome);
+        _authMetrics.RecordOidcEndpointDuration(
+            AuthMetrics.OidcMetricEndpoints.LogoutComplete,
+            stopwatch.Elapsed.TotalMilliseconds);
+        return result;
+    }
+
+    /// <summary>
+    /// Records one <c>logout-prepare</c> endpoint-class outcome and latency around the branch
+    /// result; the outcome vocabulary is the closed set above.
+    /// </summary>
+    private IActionResult FinishLogoutPrepare(
+        string outcome,
+        IActionResult result,
+        string appId,
+        System.Diagnostics.Stopwatch stopwatch)
+    {
+        _authMetrics.RecordOidcEndpointOutcome(AuthMetrics.OidcMetricEndpoints.LogoutPrepare, outcome, appId);
+        _authMetrics.RecordOidcEndpointDuration(
+            AuthMetrics.OidcMetricEndpoints.LogoutPrepare,
+            stopwatch.Elapsed.TotalMilliseconds);
+        return result;
     }
 
     /// <summary>
@@ -159,13 +205,14 @@ public sealed class OAuthLogoutController : ControllerBase
 
         // IN-35: exactly one query field, the 43-character handle; anything else is the single
         // local 400 with no redirect and no invented consumption.
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var query = Request.Query;
         if (query.Count != 1
             || !query.TryGetValue(HandleQueryName, out var values)
             || values.Count != 1
             || !IsLogoutHandleShape(values[0]))
         {
-            return LocalBadRequest();
+            return FinishLogoutComplete("invalid_request", LocalBadRequest(), stopwatch);
         }
 
         var cookieSessionId = await _identityCookies.TryReadSessionIdAsync(HttpContext);
@@ -177,8 +224,13 @@ public sealed class OAuthLogoutController : ControllerBase
             cancellationToken);
         if (!result.IsSuccess)
         {
-            return LocalBadRequest();
+            return FinishLogoutComplete("invalid_request", LocalBadRequest(), stopwatch);
         }
+
+        _authMetrics.RecordOidcEndpointOutcome(AuthMetrics.OidcMetricEndpoints.LogoutComplete, "success");
+        _authMetrics.RecordOidcEndpointDuration(
+            AuthMetrics.OidcMetricEndpoints.LogoutComplete,
+            stopwatch.Elapsed.TotalMilliseconds);
 
         // The cookie deletion follows the committed result (PS-18 attributes, explicit scheme);
         // it never runs for an uncommitted unit and never touches the management cookie.
