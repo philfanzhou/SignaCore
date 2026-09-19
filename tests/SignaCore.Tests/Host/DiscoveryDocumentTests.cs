@@ -68,8 +68,8 @@ public class DiscoveryDocumentTests
     }
 
     /// <summary>
-    /// <c>offline_access</c> appears only when the interactive refresh family works end to end
-    /// (<c>AC-12</c>), and <c>userinfo_endpoint</c> only with #55; until then advertising either
+    /// <c>offline_access</c> is advertised since the interactive refresh family rotates atomically
+    /// end to end (<c>AC-12</c>); <c>userinfo_endpoint</c> still waits for #55, and advertising it
     /// would promise a request no client can complete.
     /// </summary>
     [Fact]
@@ -77,7 +77,7 @@ public class DiscoveryDocumentTests
     {
         var document = DiscoveryDocument.Create("https://id.example.com", "https://id.example.com", GrantTypes);
 
-        Assert.Equal(["openid", "profile"], document.ScopesSupported);
+        Assert.Equal(["openid", "profile", "offline_access"], document.ScopesSupported);
         Assert.DoesNotContain(document.ToMetadata(), pair => pair.Key == "userinfo_endpoint");
     }
 

@@ -11,8 +11,10 @@ namespace SignaCore.Domain.Services;
 /// value the calling transaction already resolved and verified — the account, the interactive
 /// client (whose AppId is the token audience), the live identity session with its authentication
 /// facts, the canonical granted scope, the exact authorization-request nonce snapshot, and the two
-/// profile sources. Callback enrichment, bootstrap roles, and every access-token binding claim are
-/// deliberately not representable here: an ID token is an authentication statement, never a
+/// profile sources. <paramref name="Nonce"/> is <c>null</c> only on the refresh variant
+/// (<c>PS-15</c>): a refreshed ID token omits the nonce claim entirely while keeping every other
+/// closed-set member. Callback enrichment, bootstrap roles, and every access-token binding claim
+/// are deliberately not representable here: an ID token is an authentication statement, never a
 /// downstream authorization (<c>PS-12</c>).
 /// </summary>
 public sealed record InteractiveIdTokenDescriptor(
@@ -21,7 +23,7 @@ public sealed record InteractiveIdTokenDescriptor(
     Guid SessionId,
     string AuthMethod,
     string Scope,
-    string Nonce,
+    string? Nonce,
     DateTimeOffset AuthTime,
     string? PasswordUsername,
     string? Nickname);
@@ -71,11 +73,13 @@ public interface IInteractiveIdTokenFactory
     /// <c>sub</c>, single-string <c>aud</c> = client id, <c>exp</c>/<c>iat</c> at the fixed
     /// 5-minute lifetime, the session's original <c>auth_time</c>, <c>sid</c>, <c>amr</c> as a JSON
     /// array, and the exact <c>nonce</c> snapshot of the initial exchange; <c>name</c> and
-    /// <c>nickname</c> appear only when <c>profile</c> was granted. The only failure is the
-    /// serialized-length bound; precondition violations are programming errors and throw.
+    /// <c>nickname</c> appear only when <c>profile</c> was granted. A <c>null</c> nonce selects the
+    /// refresh variant (<c>PS-15</c>), which omits the <c>nonce</c> claim and keeps the same closed
+    /// set otherwise. The only failure is the serialized-length bound; precondition violations are
+    /// programming errors and throw.
     /// </summary>
     /// <exception cref="ArgumentException">
-    /// An empty id, client, auth method, key id, or nonce, an unsupported auth method, or a
+    /// An empty id, client, auth method, key id, or empty nonce, an unsupported auth method, or a
     /// non-canonical scope. The message never carries an input value.
     /// </exception>
     InteractiveIdTokenResult Create(
@@ -141,7 +145,9 @@ public sealed class InteractiveIdTokenFactory : IInteractiveIdTokenFactory
                 "The client id must not be empty.", nameof(descriptor));
         }
 
-        if (string.IsNullOrEmpty(descriptor.Nonce))
+        // A null nonce selects the PS-15 refresh variant; an empty one is always a programming
+        // error, exactly like every other half-supplied snapshot.
+        if (descriptor.Nonce is not null && descriptor.Nonce.Length == 0)
         {
             throw new ArgumentException(
                 "The nonce snapshot must not be empty.", nameof(descriptor));
@@ -175,9 +181,15 @@ public sealed class InteractiveIdTokenFactory : IInteractiveIdTokenFactory
         var payloadClaims = new List<Claim>
         {
             new(IdentityConstants.ClaimSubject, descriptor.AccountId.ToString("D")),
-            new(JwtRegisteredClaimNames.Sid, descriptor.SessionId.ToString("D")),
-            new(JwtRegisteredClaimNames.Nonce, descriptor.Nonce)
+            new(JwtRegisteredClaimNames.Sid, descriptor.SessionId.ToString("D"))
         };
+
+        // PS-15: only the initial exchange carries the nonce; the refresh variant omits the
+        // claim entirely rather than emitting an empty value.
+        if (descriptor.Nonce is not null)
+        {
+            payloadClaims.Add(new Claim(JwtRegisteredClaimNames.Nonce, descriptor.Nonce));
+        }
 
         // PS-12: name is the bound Password username and nickname is the current account nickname
         // — a different source than the access token's display-name resolution — and both appear

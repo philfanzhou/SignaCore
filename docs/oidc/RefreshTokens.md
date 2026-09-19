@@ -1,6 +1,9 @@
 # Interactive Refresh Families
 
-**Status: target design.** Read the [directory boundary](./README.md), the
+**Status: delivered by [#294](https://github.com/philfanzhou/SignaCore/issues/294) (storage and
+`EV-21` redemption) and [#98](https://github.com/philfanzhou/SignaCore/issues/98) (atomic
+rotation, reuse detection, descendant revocation, and the `AC-12` Discovery activation); this
+document remains the semantic reference.** Read the [directory boundary](./README.md), the
 [canonical model](./CanonicalSemanticModel.md), and
 [interactive persistence](./Persistence.md) first.
 
@@ -164,7 +167,8 @@ scope; `IN-27`'s `invalid_request` is selected only for a positively identified 
 `offline_access` (`AC-11`). Only #98, after live session enforcement, activates atomic interactive
 rotation/reuse and adds `offline_access` to `scopes_supported` (`AC-12`). Existing advertised
 `refresh_token` grant remains truthful throughout. This document itself changes no route, setting,
-schema, or metadata (`AC-14`).
+schema, or metadata (`AC-14`). The PostgreSQL cross-instance form of `SC-14` runs in the container
+stage of CI; the SQLite single-instance form and the retry/cancellation contracts run everywhere.
 
 ## Verification mapping
 

@@ -26,6 +26,12 @@ namespace SignaCore.Host.Controllers;
 /// not a validator-shaped credential grant. Discovery advertises <c>authorization_code</c>
 /// explicitly as a delivered capability (<c>AC-07</c>), never through validator registration.
 /// </para>
+/// <para>
+/// The <c>refresh_token</c> grant is dispatched by digest classification
+/// (<see cref="InteractiveRefreshRotationService"/>): a complete interactive marker enters the
+/// atomic family rotation (<c>EV-29</c>–<c>EV-32</c>); every valid-shape legacy presentation
+/// keeps its current validator path byte for byte (<c>EV-33</c>).
+/// </para>
 /// </summary>
 [Route("oauth2")]
 [ApiController]
@@ -34,15 +40,18 @@ public sealed class OAuthTokenController : ControllerBase
     private readonly TokenIssuanceService _tokenIssuanceService;
     private readonly IRefreshTokenService _refreshTokenService;
     private readonly AuthorizationCodeRedemptionService _authorizationCodeRedemption;
+    private readonly InteractiveRefreshRotationService _interactiveRefreshRotation;
 
     public OAuthTokenController(
         TokenIssuanceService tokenIssuanceService,
         IRefreshTokenService refreshTokenService,
-        AuthorizationCodeRedemptionService authorizationCodeRedemption)
+        AuthorizationCodeRedemptionService authorizationCodeRedemption,
+        InteractiveRefreshRotationService interactiveRefreshRotation)
     {
         _tokenIssuanceService = tokenIssuanceService;
         _refreshTokenService = refreshTokenService;
         _authorizationCodeRedemption = authorizationCodeRedemption;
+        _interactiveRefreshRotation = interactiveRefreshRotation;
     }
 
     [HttpPost("token")]
@@ -64,6 +73,29 @@ public sealed class OAuthTokenController : ControllerBase
                 StringComparison.Ordinal))
         {
             return await RedeemCodeGrantAsync(app, form, cancellationToken);
+        }
+
+        // The interactive refresh branch: only a digest-matched row with the complete interactive
+        // marker diverts to the family rotation; every other presentation — no row, a legacy
+        // shape — keeps the legacy grant behavior below untouched (EV-33).
+        if (form["grant_type"].Count == 1
+            && string.Equals(
+                form["grant_type"].ToString(),
+                InteractiveRefreshRotationService.GrantType,
+                StringComparison.Ordinal))
+        {
+            var dispatch = await _interactiveRefreshRotation.RotateAsync(
+                app,
+                form,
+                clientCredentialMixPresent: HasUsableBasicCredentials()
+                    && (form.ContainsKey("client_id") || form.ContainsKey("client_secret")),
+                HttpContext.GetClientIp(),
+                HttpContext.GetCorrelationId(),
+                cancellationToken);
+            if (dispatch.Handled)
+            {
+                return RespondInteractiveRefresh(dispatch.Outcome!);
+            }
         }
 
         var wireGrantType = form["grant_type"].ToString();
@@ -216,6 +248,41 @@ public sealed class OAuthTokenController : ControllerBase
         {
             ["error"] = outcome.ErrorCode,
             ["error_description"] = outcome.ErrorDescription
+        });
+    }
+
+    /// <summary>
+    /// The interactive <c>refresh_token</c> branch response (<c>PS-15</c>): the exact success
+    /// member set released only after the rotation committed, or the branch's failure body. Both
+    /// carry <c>Cache-Control: no-store</c> and <c>Pragma: no-cache</c>; the credential-mix
+    /// rejection is answered with the client-authentication challenge like the code branch's.
+    /// </summary>
+    private IActionResult RespondInteractiveRefresh(InteractiveRefreshRotationOutcome outcome)
+    {
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.Pragma = "no-cache";
+        if (outcome.IsSuccess)
+        {
+            return Ok(new Dictionary<string, object>
+            {
+                ["access_token"] = outcome.AccessToken,
+                ["token_type"] = "Bearer",
+                ["expires_in"] = outcome.ExpiresIn,
+                ["scope"] = outcome.Scope,
+                ["id_token"] = outcome.IdToken,
+                ["refresh_token"] = outcome.RefreshToken
+            });
+        }
+
+        if (outcome.Status == StatusCodes.Status401Unauthorized)
+        {
+            return Challenge(OAuthClientAuthenticationDefaults.Scheme);
+        }
+
+        return StatusCode(outcome.Status, new Dictionary<string, string>
+        {
+            ["error"] = outcome.ErrorCode!,
+            ["error_description"] = outcome.ErrorDescription!
         });
     }
 

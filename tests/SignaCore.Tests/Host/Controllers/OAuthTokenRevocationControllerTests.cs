@@ -51,10 +51,11 @@ public class OAuthTokenRevocationControllerTests
 
     private static OAuthTokenController CreateController(IRefreshTokenRepository repository)
     {
-        // Revocation uses neither the token issuance service nor the authorization-code redemption.
+        // Revocation uses neither the token issuance service nor the interactive branches.
         var controller = new OAuthTokenController(
             null!,
             new RefreshTokenService(repository, new RefreshTokenOptions()),
+            null!,
             null!).WithHttpContext();
         controller.HttpContext.Items[IdentityHeaders.ValidatedApp] = new AppRegistrationEntity { AppId = "app-1" };
         controller.Request.Form = new FormCollection(new Dictionary<string, StringValues>

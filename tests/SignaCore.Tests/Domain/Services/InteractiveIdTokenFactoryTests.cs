@@ -80,6 +80,62 @@ public sealed class InteractiveIdTokenFactoryTests
             ((DateTimeOffset)token.ValidTo).ToUnixTimeSeconds());
     }
 
+    /// <summary>
+    /// The <c>PS-15</c> refresh variant: a null nonce omits the claim entirely — no empty string,
+    /// no placeholder — while every other closed-set member, the header, and the lifetime stay
+    /// byte-for-byte the initial path.
+    /// </summary>
+    [Fact]
+    public void Create_WithANullNonce_OmitsTheNonceClaimAndKeepsTheClosedSet()
+    {
+        var descriptor = Descriptor(nonce: null);
+        var issued = Create(descriptor);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(issued.IdToken);
+
+        Assert.Equal("RS256", token.Header.Alg);
+        Assert.Equal(_key.KeyId, token.Header.Kid);
+        Assert.Equal("JWT", token.Header.Typ);
+        Assert.Equal(Issuer, token.Issuer);
+        Assert.Equal(ClientId, token.Audiences.Single());
+        Assert.DoesNotContain(token.Claims, claim => claim.Type == "nonce");
+        Assert.Equal(descriptor.AccountId.ToString("D"), token.Claims.Single(c => c.Type == "sub").Value);
+        Assert.Equal(descriptor.SessionId.ToString("D"), token.Claims.Single(c => c.Type == "sid").Value);
+        Assert.Equal("pwd", token.Claims.Single(c => c.Type == "amr").Value);
+        Assert.Equal(
+            AuthTimeSeconds,
+            long.Parse(
+                token.Claims.Single(c => c.Type == "auth_time").Value,
+                System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(descriptor.PasswordUsername, token.Claims.Single(c => c.Type == "name").Value);
+        Assert.Equal(
+            ((DateTimeOffset)token.IssuedAt).ToUnixTimeSeconds() + IdentityConstants.InteractiveIdTokenLifetimeSeconds,
+            ((DateTimeOffset)token.ValidTo).ToUnixTimeSeconds());
+
+        // A standard validator still accepts the refresh variant; only the nonce is gone.
+        new JwtSecurityTokenHandler().ValidateToken(
+            issued.IdToken,
+            new TokenValidationParameters
+            {
+                ValidIssuer = Issuer,
+                ValidAudience = ClientId,
+                IssuerSigningKey = _key,
+                ValidTypes = ["JWT"],
+                ValidateLifetime = false
+            },
+            out _);
+    }
+
+    [Fact]
+    public void Create_WithAnEmptyNonce_IsAProgrammingError()
+    {
+        var exception = Assert.Throws<ArgumentException>(
+            () => _factory.Create(
+                Descriptor(nonce: string.Empty),
+                _key,
+                DateTimeOffset.FromUnixTimeSeconds(NowSeconds)));
+        Assert.DoesNotContain(Nonce, exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Create_SerializesAmrAsAJsonArrayAndAuthTimeAsANumber()
     {
