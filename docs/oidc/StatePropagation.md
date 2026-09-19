@@ -17,6 +17,7 @@ outcome column; the refresh-family contract owns that projection.
 | Application session max-age | `EV-05` | Authorization, code redemption, and UserInfo load current per-application policy against immutable `auth_time` | Exact-boundary and unaffected second-application cases |
 | Prepared logout and its code race | `EV-06`, `EV-07`, `EV-28` | Browser completion owns handle consumption; session-first transaction owns matching revocation | `SC-05`, `SC-06`, `SC-15` |
 | Account disable/delete | `EV-08` | Disable: `AdminController.UpdateUserStatus` revokes the account's unrevoked sessions (reason `account_disabled`) and interactive families in the transaction, sessions first (`AdminStatePropagationMatrixTests`, `AdminStatePropagationConcurrencyDatabaseContractTests`); delete: no endpoint exists. Reads: authorization, code, and UserInfo retain live reads | Disable/delete between code issue and each live read; unaffected second-account case |
+| Self-service password change | Profile-API trigger (`POST /api/profile/password`); extends the canonical revocation reason set with `password_changed`, no schema change | `ProfileController.ChangePassword` writes the new credential hash and revokes every unrevoked session (including the caller's own), interactive family, and legacy refresh token of the account in one transaction, sessions first (`ProfilePasswordChangeTests`, and `AdminStatePropagationConcurrencyDatabaseContractTests` for the rotation/redemption race) | New/old credential login results; atomic hash-write/revocation/audit commit; concurrency against rotation and redemption; already-issued tokens valid to `exp` |
 | Application deactivation | `EV-09` | Deactivate: `AdminController.UpdateCallback` revokes the application's interactive families in the transaction (sessions stay); reads: every application-specific endpoint (`AdminStatePropagationMatrixTests`) | `SC-12` |
 | Authorization-code capability off | `EV-10` | Application update plus authorization/code capability reads | Pending, new, and already-issued-code cases |
 | Refresh capability off, non-refresh projection | `EV-11` | Off: `AdminController.UpdateOidcPolicy` revokes the application's interactive families in the transaction; authorization/code check `offline_access`; UserInfo ignores it; session is unchanged (`AdminStatePropagationMatrixTests`) | Requests with and without `offline_access` |
@@ -48,8 +49,10 @@ same-transaction revocation duty.
 
 Each state-changing operation owns its complete transaction. Account/application changes write all
 promised explicit revocations with the setting change; prepared logout owns request consumption and
-session/family revocation; administrative revocation owns the named session and its bound families.
-Endpoints must not rely on cleanup to make those changes effective.
+session/family revocation; administrative revocation owns the named session and its bound families;
+the self-service password change owns the new credential hash together with every session (reason
+`password_changed`), interactive family, and legacy refresh token of the account, the caller's own
+session included. Endpoints must not rely on cleanup to make those changes effective.
 
 Every transaction uses one captured UTC time, locks the session before code/family/logout artifacts,
 runs inside the provider execution strategy, and exposes no success artifact before commit

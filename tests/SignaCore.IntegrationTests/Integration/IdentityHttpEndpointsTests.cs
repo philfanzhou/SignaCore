@@ -281,10 +281,11 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     [InlineData("POST", "api/gateway/users/batch")]
     [InlineData("POST", "oauth2/token")]
     [InlineData("POST", "oauth2/revoke")]
-    [InlineData("GET", "api/profile/wechat")]
-    [InlineData("POST", "api/profile/wechat")]
-    [InlineData("DELETE", "api/profile/wechat")]
-    public void PublicRoutes_AreRegisteredExactlyOnce(string httpMethod, string routeTemplate)
+     [InlineData("GET", "api/profile/wechat")]
+     [InlineData("POST", "api/profile/wechat")]
+     [InlineData("DELETE", "api/profile/wechat")]
+     [InlineData("POST", "api/profile/password")]
+     public void PublicRoutes_AreRegisteredExactlyOnce(string httpMethod, string routeTemplate)
     {
         var endpoints = _fixture.Services
             .GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>()

@@ -40,6 +40,9 @@ public enum RefreshFamilyRevocationReason
     /// <summary><c>EV-08</c>: the account-disable transaction revoked every interactive family of the account.</summary>
     AccountDisabled,
 
+    /// <summary>The self-service password-change transaction revoked every interactive family of the account.</summary>
+    PasswordChanged,
+
     /// <summary><c>EV-09</c>: the application-deactivation transaction revoked the application's interactive families.</summary>
     ApplicationDisabled,
 
