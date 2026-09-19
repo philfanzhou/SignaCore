@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Net;
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -44,6 +45,8 @@ public class AdminControllerTests : IDisposable
     private readonly Mock<IRefreshTokenRepository> _refreshTokenRepoMock;
     private readonly Mock<ILoginHistoryRepository> _loginHistoryRepoMock;
     private readonly Mock<IAuditLogRepository> _auditLogRepoMock;
+    private readonly Mock<IIdentitySessionRepository> _identitySessionRepoMock;
+    private readonly Mock<IRefreshTokenFamilyStore> _refreshTokenFamilyStoreMock;
 
     private static readonly Guid AdminId = Guid.NewGuid();
     private const string AdminName = "admin";
@@ -60,6 +63,10 @@ public class AdminControllerTests : IDisposable
     {
         var options = new DbContextOptionsBuilder<IdentityDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+            // The status/callback/policy endpoints open an explicit transaction; the InMemory
+            // provider has no real one, and ignoring the warning keeps the calls executable so
+            // the unit contract (order, audit, counts) stays assertable.
+            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
         _dbContext = new IdentityDbContext(options);
 
@@ -75,6 +82,8 @@ public class AdminControllerTests : IDisposable
         _refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
         _loginHistoryRepoMock = new Mock<ILoginHistoryRepository>();
         _auditLogRepoMock = new Mock<IAuditLogRepository>();
+        _identitySessionRepoMock = new Mock<IIdentitySessionRepository>();
+        _refreshTokenFamilyStoreMock = new Mock<IRefreshTokenFamilyStore>();
 
         _controller = new AdminController(
             NullLogger<AdminController>.Instance,
@@ -169,7 +178,9 @@ public class AdminControllerTests : IDisposable
         "query" => ["query"],
         "password" => ["exists", "account-add", "credential-add", "audit", "save"],
         "phone" => ["phone-read", "account-add", "login-add", "audit", "save"],
-        "status" => ["account-read", "account-update", "audit", "save"],
+        // The disable transition (the account is seeded active and the request disables it)
+        // also runs the EV-08 revocation pair between the state write and the audit row.
+        "status" => ["account-read", "account-update", "session-revoke", "family-revoke", "audit", "save"],
         _ => ["account-read", "account-update", "save"]
     };
 
@@ -215,9 +226,18 @@ public class AdminControllerTests : IDisposable
             .Returns(Task.CompletedTask);
         _unitOfWorkMock.Setup(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Callback<CancellationToken>(ct => Observe("save", ct)).ReturnsAsync(1);
+        _identitySessionRepoMock.Setup(repository => repository.MarkRevokedByAccountAsync(
+                account.Id, "account_disabled", It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, string, DateTimeOffset, CancellationToken>((_, _, _, ct) => Observe("session-revoke", ct))
+            .ReturnsAsync(0);
+        _refreshTokenFamilyStoreMock.Setup(store => store.RevokeByAccountAsync(
+                account.Id, RefreshFamilyRevocationReason.AccountDisabled, It.IsAny<CancellationToken>()))
+            .Callback<Guid, RefreshFamilyRevocationReason, CancellationToken>((_, _, ct) => Observe("family-revoke", ct))
+            .ReturnsAsync(0);
         var operation = () => InvokeUserAction(action, account.Id, _accountRepoMock.Object,
             _passwordCredentialRepoMock.Object, _userLoginRepoMock.Object, _unitOfWorkMock.Object,
-            _auditServiceMock.Object, query.Object, cancellation.Token);
+            _auditServiceMock.Object, query.Object, _dbContext,
+            _identitySessionRepoMock.Object, _refreshTokenFamilyStoreMock.Object, cancellation.Token);
 
         if (cancelAt is null)
             Assert.IsType<OkObjectResult>(await operation());
@@ -232,7 +252,9 @@ public class AdminControllerTests : IDisposable
 
     private Task<IActionResult> InvokeUserAction(
         string action, Guid accountId, IAccountRepository accounts, IPasswordCredentialRepository credentials,
-        IUserLoginRepository logins, IUnitOfWork unit, IAuditService audit, IUserQueryService query, CancellationToken ct) => action switch
+        IUserLoginRepository logins, IUnitOfWork unit, IAuditService audit, IUserQueryService query,
+        IdentityDbContext dbContext, IIdentitySessionRepository identitySessions,
+        IRefreshTokenFamilyStore refreshTokenFamilies, CancellationToken ct) => action switch
     {
         "query" => _controller.GetUsers(null, null, 1, 20, query, ct),
         "password" => _controller.CreateUser(new AdminCreateUserRequest("test-account", "unused-test-password", null, null, null),
@@ -241,7 +263,8 @@ public class AdminControllerTests : IDisposable
             accounts, logins, unit, audit, ct),
         "remark" => _controller.UpdateUserRemark(accountId, new AdminUpdateRemarkRequest("changed"), accounts, unit, ct),
         "nickname" => _controller.UpdateUserNickname(accountId, new AdminUpdateNicknameRequest("changed"), accounts, unit, ct),
-        "status" => _controller.UpdateUserStatus(accountId, new AdminUpdateStatusRequest(false), accounts, unit, audit, ct),
+        "status" => _controller.UpdateUserStatus(accountId, new AdminUpdateStatusRequest(false), accounts, unit, audit,
+            dbContext, identitySessions, refreshTokenFamilies, ct),
         _ => throw new ArgumentOutOfRangeException(nameof(action))
     };
 
@@ -276,8 +299,11 @@ public class AdminControllerTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => InvokeUserAction(action, account.Id,
             new AccountRepository(context), new PasswordCredentialRepository(context), new UserLoginRepository(context),
             new EfCoreUnitOfWork(context), new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
-            new UserQueryService(context), cancellation.Token));
-
+            new UserQueryService(context), context,
+            new IdentitySessionRepository(context),
+            new RefreshTokenFamilyStore(
+                new RefreshTokenRepository(context), new EfCoreUnitOfWork(context), NullLogger<RefreshTokenFamilyStore>.Instance),
+            cancellation.Token));
         Assert.True(interceptor.Observed);
         await using var verify = new IdentityDbContext(options);
         Assert.Equal(creates ? 0 : 1, await verify.Accounts.CountAsync(TestContext.Current.CancellationToken));
@@ -746,7 +772,8 @@ public class AdminControllerTests : IDisposable
         _accountRepoMock.Setup(r => r.GetByIdAsync(It.IsAny<Guid>())).ReturnsAsync((AccountEntity?)null);
 
         var result = await _controller.UpdateUserStatus(Guid.NewGuid(),
-            new AdminUpdateStatusRequest(true), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
+            new AdminUpdateStatusRequest(true), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _identitySessionRepoMock.Object, _refreshTokenFamilyStoreMock.Object);
 
         Assert.IsType<NotFoundObjectResult>(result);
     }
@@ -759,7 +786,8 @@ public class AdminControllerTests : IDisposable
         _accountRepoMock.Setup(r => r.GetByIdAsync(account.Id)).ReturnsAsync(account);
 
         var result = await _controller.UpdateUserStatus(account.Id,
-            new AdminUpdateStatusRequest(true), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
+            new AdminUpdateStatusRequest(true), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _identitySessionRepoMock.Object, _refreshTokenFamilyStoreMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<OperationResponse>(ok.Value);
@@ -779,7 +807,8 @@ public class AdminControllerTests : IDisposable
         _accountRepoMock.Setup(r => r.GetByIdAsync(account.Id)).ReturnsAsync(account);
 
         var result = await _controller.UpdateUserStatus(account.Id,
-            new AdminUpdateStatusRequest(false), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object);
+            new AdminUpdateStatusRequest(false), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _identitySessionRepoMock.Object, _refreshTokenFamilyStoreMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<OperationResponse>(ok.Value);
@@ -789,6 +818,64 @@ public class AdminControllerTests : IDisposable
             "account_disabled", "Account", account.Id.ToString(),
             AdminId, AdminName, It.IsAny<string>(), It.IsAny<string?>(),
             It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateUserStatus_WhenDisabling_RevokesSessionsAndFamiliesBeforeTheAuditRow()
+    {
+        SetAdminUser();
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true };
+        _accountRepoMock.Setup(r => r.GetByIdAsync(account.Id)).ReturnsAsync(account);
+        var calls = new List<string>();
+        _identitySessionRepoMock.Setup(r => r.MarkRevokedByAccountAsync(
+                account.Id, "account_disabled", It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback(() => calls.Add("session-revoke")).ReturnsAsync(2);
+        _refreshTokenFamilyStoreMock.Setup(s => s.RevokeByAccountAsync(
+                account.Id, RefreshFamilyRevocationReason.AccountDisabled, It.IsAny<CancellationToken>()))
+            .Callback(() => calls.Add("family-revoke")).ReturnsAsync(3);
+        object? observedAfter = null;
+        _auditServiceMock.Setup(a => a.RecordActionAsync(
+                "account_disabled", "Account", account.Id.ToString(), AdminId, AdminName,
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, string, string, Guid?, string?, string?, string?, string?, object?, object?, CancellationToken>(
+                (_, _, _, _, _, _, _, _, _, after, _) =>
+                {
+                    calls.Add("audit");
+                    observedAfter = after;
+                })
+            .Returns(Task.CompletedTask);
+
+        var result = await _controller.UpdateUserStatus(account.Id,
+            new AdminUpdateStatusRequest(false), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _identitySessionRepoMock.Object, _refreshTokenFamilyStoreMock.Object);
+
+        Assert.IsType<OkObjectResult>(result);
+        // The session writes run first: they are the serialization point against a concurrent
+        // redemption or rotation of the same account.
+        Assert.Equal(["session-revoke", "family-revoke", "audit"], calls);
+        // The audit after-payload carries the two bounded revocation counts.
+        var after = JsonSerializer.Serialize(observedAfter);
+        Assert.Contains("\"RevokedSessions\":2", after, StringComparison.Ordinal);
+        Assert.Contains("\"RevokedFamilyMembers\":3", after, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UpdateUserStatus_WhenAlreadyDisabled_PerformsNoRevocationWrites()
+    {
+        SetAdminUser();
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = false };
+        _accountRepoMock.Setup(r => r.GetByIdAsync(account.Id)).ReturnsAsync(account);
+
+        var result = await _controller.UpdateUserStatus(account.Id,
+            new AdminUpdateStatusRequest(false), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _identitySessionRepoMock.Object, _refreshTokenFamilyStoreMock.Object);
+
+        Assert.IsType<OkObjectResult>(result);
+        _identitySessionRepoMock.Verify(r => r.MarkRevokedByAccountAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
+        _refreshTokenFamilyStoreMock.Verify(s => s.RevokeByAccountAsync(
+            It.IsAny<Guid>(), It.IsAny<RefreshFamilyRevocationReason>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     #endregion
@@ -1117,6 +1204,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.UpdateCallback("missing",
             new AdminUpdateCallbackRequest("https://cb", 3600, true),
             _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<NotFoundObjectResult>(result);
@@ -1142,6 +1230,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("", 0, true),
             _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -1177,6 +1266,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://public.example/callback", 7200, false),
             _appRegRepoMock.Object, validator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _refreshTokenFamilyStoreMock.Object,
             cancellation.Token);
 
         Assert.IsType<OkObjectResult>(result);
@@ -1218,6 +1308,8 @@ public class AdminControllerTests : IDisposable
             CallbackValidator,
             _unitOfWorkMock.Object,
             _auditServiceMock.Object,
+            _dbContext,
+            _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
@@ -1240,6 +1332,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://cb", IdentityConstants.CallbackTtlNeverExpire, true),
             _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
@@ -1268,6 +1361,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://new.example.com/claims", 7200, false),
             _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
@@ -1292,6 +1386,70 @@ public class AdminControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateCallback_WhenDeactivating_RevokesTheApplicationsFamiliesAndCountsThem()
+    {
+        SetAdminUser();
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "a",
+            AppName = "A",
+            CallbackUrl = "https://old",
+            IsActive = true
+        };
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken))
+            .ReturnsAsync(app);
+        _refreshTokenFamilyStoreMock
+            .Setup(s => s.RevokeByApplicationAsync(
+                "a", RefreshFamilyRevocationReason.ApplicationDisabled, TestContext.Current.CancellationToken))
+            .ReturnsAsync(4);
+        var snapshots = CaptureSnapshots();
+
+        var result = await _controller.UpdateCallback("a",
+            new AdminUpdateCallbackRequest("", 0, false),
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _refreshTokenFamilyStoreMock.Object,
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(result);
+        _refreshTokenFamilyStoreMock.Verify(
+            s => s.RevokeByApplicationAsync(
+                "a", RefreshFamilyRevocationReason.ApplicationDisabled, TestContext.Current.CancellationToken),
+            Times.Once);
+        var afterJson = Serialize(Assert.Single(snapshots).After);
+        Assert.Contains("\"revokedFamilyMembers\":4", afterJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UpdateCallback_WhenAlreadyInactive_PerformsNoRevocationWrites()
+    {
+        SetAdminUser();
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "a",
+            AppName = "A",
+            CallbackUrl = "https://old",
+            IsActive = false
+        };
+        _appRegRepoMock
+            .Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken))
+            .ReturnsAsync(app);
+
+        var result = await _controller.UpdateCallback("a",
+            new AdminUpdateCallbackRequest("", 0, false),
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _refreshTokenFamilyStoreMock.Object,
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(result);
+        _refreshTokenFamilyStoreMock.Verify(s => s.RevokeByApplicationAsync(
+            It.IsAny<string>(), It.IsAny<RefreshFamilyRevocationReason>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task UpdateCallback_WhenAppNotFound_RecordsNoAudit()
     {
         SetAdminUser();
@@ -1302,6 +1460,7 @@ public class AdminControllerTests : IDisposable
         await _controller.UpdateCallback("missing",
             new AdminUpdateCallbackRequest("https://cb", 3600, true),
             _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
         VerifyNoAudit();
@@ -1326,6 +1485,7 @@ public class AdminControllerTests : IDisposable
         await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("ftp://cb.example.com/claims", 7200, false),
             _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
         VerifyNoAudit();

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -41,6 +42,8 @@ public class AdminOidcClientTests : IDisposable
     private readonly IAppRegistrationRepository _repository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly Mock<IAuditService> _auditServiceMock = new();
+    private readonly Mock<IRefreshTokenFamilyStore> _familyStoreMock = new();
+    private readonly IRefreshTokenFamilyStore _familyStore;
     private readonly IPasswordHasher _passwordHasher = new BCryptPasswordHasher(
         new PasswordHasherOptions { WorkFactor = 4 });
     private readonly IWebHostEnvironment _environment = ProductionEnvironment();
@@ -56,10 +59,14 @@ public class AdminOidcClientTests : IDisposable
     {
         var options = new DbContextOptionsBuilder<IdentityDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            // The policy endpoint commits through an explicit transaction; the InMemory provider
+            // only offers the warning-ignored stand-in for it.
+            .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
         _dbContext = new IdentityDbContext(options);
         _repository = new AppRegistrationRepository(_dbContext);
         _unitOfWork = new EfCoreUnitOfWork(_dbContext);
+        _familyStore = _familyStoreMock.Object;
 
         _controller = AuthTestDoubles.CreateAdminController(AdminId);
     }
@@ -249,6 +256,53 @@ public class AdminOidcClientTests : IDisposable
         var app = await LoadAsync();
         Assert.Equal(AudienceMode.Shared, app.AudienceMode);
         Assert.False(app.AllowAuthorizationCode);
+    }
+
+    /// <summary>
+    /// Turning the refresh capability off (<c>EV-11</c>) revokes the application's interactive
+    /// families in the same unit, and the audit row's after payload carries the bounded count.
+    /// Staying off — or turning the capability on — performs no revocation writes.
+    /// </summary>
+    [Fact]
+    public async Task UpdateOidcPolicy_TurningRefreshOff_RevokesTheApplicationsFamilies()
+    {
+        await SeedAsync();
+        await AddUrisAsync(RedirectUriKind.Redirect, "https://bff.example.test/callback");
+        await UpdatePolicyAsync(new AdminUpdateOidcPolicyRequest(
+            "Confidential", true, ["openid", "profile", "offline_access"], true, null));
+        _dbContext.ChangeTracker.Clear();
+        _familyStoreMock
+            .Setup(store => store.RevokeByApplicationAsync(
+                AppId, RefreshFamilyRevocationReason.RefreshCapabilityDisabled, TestContext.Current.CancellationToken))
+            .ReturnsAsync(5);
+        var snapshots = new List<(object? Before, object? After)>();
+        _auditServiceMock.Setup(a => a.RecordActionAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<object?>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, string, Guid?, string?, string?, string?, string?, object?, object?, CancellationToken>(
+                (_, _, _, _, _, _, _, _, before, after, _) => snapshots.Add((before, after)))
+            .Returns(Task.CompletedTask);
+
+        var result = await UpdatePolicyAsync(new AdminUpdateOidcPolicyRequest(
+            "Confidential", true, ["openid", "profile"], false, null));
+
+        Assert.IsType<OkObjectResult>(result);
+        _familyStoreMock.Verify(
+            store => store.RevokeByApplicationAsync(
+                AppId, RefreshFamilyRevocationReason.RefreshCapabilityDisabled, TestContext.Current.CancellationToken),
+            Times.Once);
+        var afterJson = Serialize(Assert.Single(snapshots).After);
+        Assert.Contains("\"RevokedFamilyMembers\":5", afterJson, StringComparison.Ordinal);
+
+        // Staying off performs no further revocation writes.
+        var unchanged = await UpdatePolicyAsync(new AdminUpdateOidcPolicyRequest(
+            "Confidential", true, ["openid"], false, null));
+        Assert.IsType<OkObjectResult>(unchanged);
+        _familyStoreMock.Verify(
+            store => store.RevokeByApplicationAsync(
+                It.IsAny<string>(), It.IsAny<RefreshFamilyRevocationReason>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     // ---- URI registrations ----
@@ -598,6 +652,8 @@ public class AdminOidcClientTests : IDisposable
             _unitOfWork,
             _auditServiceMock.Object,
             _environment,
+            _dbContext,
+            _familyStore,
             TestContext.Current.CancellationToken);
 
     private Task<IActionResult> RemoveUriAsync(Guid registrationId) =>

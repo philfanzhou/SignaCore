@@ -62,6 +62,11 @@ public sealed class AdminOidcConfigurationCancellationTests
                 unitOfWork,
                 audit.Object,
                 ProductionEnvironment(),
+                database.Context,
+                new RefreshTokenFamilyStore(
+                    new RefreshTokenRepository(database.Context),
+                    unitOfWork,
+                    NullLogger<RefreshTokenFamilyStore>.Instance),
                 cancellation.Token),
             "add-redirect-uri" => await controller.AddOidcRedirectUris(
                 AppId,

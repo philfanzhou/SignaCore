@@ -243,6 +243,36 @@ public class RefreshTokenRepository : IRefreshTokenRepository
                 .SetProperty(token => token.IsRevoked, true), cancellationToken);
     }
 
+    public async Task<int> RevokeByAccountAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        // EV-08: the account-disable transaction's family disposal over interactive rows only;
+        // legacy rows have no identity session and cannot match (PS-07). First fact stays
+        // authoritative, so an idempotent retry changes nothing.
+        return await _dbContext.RefreshTokens
+            .Where(token => token.AccountId == accountId
+                && token.IdentitySessionId != null
+                && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.IsRevoked, true), cancellationToken);
+    }
+
+    public async Task<int> RevokeByApplicationAsync(
+        string appId,
+        CancellationToken cancellationToken = default)
+    {
+        // EV-09/EV-11: application-scoped family disposal over interactive rows only; families of
+        // other applications and legacy rows are structurally out of reach. First fact stays
+        // authoritative.
+        return await _dbContext.RefreshTokens
+            .Where(token => token.AppId == appId
+                && token.IdentitySessionId != null
+                && !token.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(token => token.IsRevoked, true), cancellationToken);
+    }
+
     /// <summary>
     /// Same lock discipline as <see cref="IdentitySessionRepository.LockByIdAsync"/>: the
     /// ambient-transaction guard, the cleared change tracker, PostgreSQL <c>FOR UPDATE</c>
