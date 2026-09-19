@@ -18,6 +18,8 @@ namespace SignaCore.Tests.Integration;
 /// the same cookie, the session survives an instance restart, and the Data Protection key ring is
 /// persisted per service id in the shared table without plaintext key XML.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class ManagementSessionCookieSharingTests : IAsyncLifetime
 {
     private const string Root = "/management/v1";
@@ -152,7 +154,7 @@ public sealed class ManagementSessionCookieSharingTests : IAsyncLifetime
             factory.Dispose();
         }
 
-        SqliteConnection.ClearAllPools();
+        TestSqlitePools.ClearAll();
         if (_databasePath != null && File.Exists(_databasePath))
         {
             File.Delete(_databasePath);

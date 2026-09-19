@@ -7,6 +7,7 @@ using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using Xunit;
+using SignaCore.Tests.Integration;
 
 namespace SignaCore.IntegrationTests.Integration;
 
@@ -21,6 +22,8 @@ namespace SignaCore.IntegrationTests.Integration;
 /// write/lookup/consume/revoke semantics belong to #98 and are not exercised here beyond the raw
 /// rows the constraints, cleanup, and gate need.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class RefreshTokenFamilyDatabaseContractTests
 {
     private const string CodeMigration = "20260916160633_AddAuthorizationCodes";
@@ -1008,7 +1011,7 @@ public sealed class RefreshTokenFamilyDatabaseContractTests
 
         public ValueTask DisposeAsync()
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(_databasePath))
             {
                 File.Delete(_databasePath);

@@ -11,6 +11,7 @@ using SignaCore.Domain.Services.Ldap;
 using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.WeChat;
 using Xunit;
+using SignaCore.Tests.Integration;
 
 namespace SignaCore.IntegrationTests.Integration;
 
@@ -21,6 +22,8 @@ namespace SignaCore.IntegrationTests.Integration;
 /// production rather than the in-memory provider.
 /// The <c>DatabaseContractTests</c> suffix in the class name matches CI's filter.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class WechatAdmissionDatabaseContractTests : IDisposable
 {
     private const string OpenId = "o-contract-openid";
@@ -515,7 +518,7 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        TestSqlitePools.ClearAll();
         if (File.Exists(_databasePath))
         {
             File.Delete(_databasePath);

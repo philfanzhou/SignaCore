@@ -30,6 +30,8 @@ namespace SignaCore.Tests.Integration;
 /// them in CI's database matrix without Docker.
 /// </para>
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OidcLoginFailureDatabaseContractTests
 {
     private const string CanaryUsername = "failure-recorder-canary-user";
@@ -300,7 +302,7 @@ public sealed class OidcLoginFailureDatabaseContractTests
 
         public void Dispose()
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(_databasePath))
             {
                 File.Delete(_databasePath);

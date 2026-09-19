@@ -24,6 +24,8 @@ namespace SignaCore.Tests.Integration;
 /// shared key ring lets instance B validate a pair instance A rendered. In the other direction the
 /// antiforgery cookie satisfies no session policy, and no session cookie can stand in for it.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
 {
     private const string ManagementCookieName = "__Host-ServiceMantle.Management";
@@ -277,7 +279,7 @@ public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
             factory.Dispose();
         }
 
-        SqliteConnection.ClearAllPools();
+        TestSqlitePools.ClearAll();
         foreach (var databasePath in _databasePaths)
         {
             if (File.Exists(databasePath))

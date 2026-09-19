@@ -15,6 +15,8 @@ using Xunit;
 
 namespace SignaCore.IntegrationTests.Integration;
 
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class AdminSpaResponseTests
 {
     private const string Template = "<html><head><title>__APP_TITLE__</title></head><body>Console</body></html>";
@@ -170,7 +172,7 @@ public sealed class AdminSpaResponseTests
         }
         public void Dispose()
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             System.IO.Directory.Delete(Directory, recursive: true);
         }
     }

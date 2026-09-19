@@ -19,6 +19,8 @@ namespace SignaCore.Tests.Integration;
 /// the unchanged delete succeeds once the last reference is gone. The PostgreSQL half — including
 /// the concurrent insert/delete window — lives in <see cref="ServerDatabaseContractTests"/>.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class AdminAppDeletionDatabaseContractTests
 {
     [Fact]
@@ -263,7 +265,7 @@ public sealed class AdminAppDeletionDatabaseContractTests
 
         public ValueTask DisposeAsync()
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(_databasePath))
             {
                 File.Delete(_databasePath);

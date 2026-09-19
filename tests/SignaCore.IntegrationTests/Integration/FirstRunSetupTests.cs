@@ -25,6 +25,8 @@ namespace SignaCore.Tests.Integration;
 /// End-to-end behavior of a brand-new, uninitialized database: the PendingSetup host built on the
 /// shared ServiceMantle setup entry, the one-time code, and the atomic completion transaction.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class FirstRunSetupTests : IAsyncLifetime
 {
     private const string RootSecret = "first-run-setup-root-secret";
@@ -59,7 +61,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         // working directory's deletion.
         for (var attempt = 0; attempt < 5; attempt++)
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             try
             {
                 if (Directory.Exists(_workingDirectory))

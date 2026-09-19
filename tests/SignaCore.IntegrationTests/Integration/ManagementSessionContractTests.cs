@@ -20,6 +20,13 @@ namespace SignaCore.Tests.Integration;
 /// result set, credential envelope, current-session projection, logout semantics, provider
 /// failure convergence, and the sensitive-material boundary.
 /// </summary>
+/// <remarks>
+/// Registered interference path A of issue #293: its derived hosts read installation state
+/// through pooled connections that a parallel class's process-wide pool clear can kill
+/// mid-request (observed as the Setup gate's 503). The class therefore runs inside the
+/// sqlite-process-state collection and never in parallel with a pool-clearing class.
+/// </remarks>
+[Collection(SqliteProcessState.CollectionName)]
 public sealed class ManagementSessionContractTests : IClassFixture<IdentityServerFixture>
 {
     private const string Root = "/management/v1";

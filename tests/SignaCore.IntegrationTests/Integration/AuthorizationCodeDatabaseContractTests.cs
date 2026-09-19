@@ -33,6 +33,8 @@ namespace SignaCore.Tests.Integration;
 /// options-built context over the same file, which is the single-writer recovery shape.
 /// </para>
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class AuthorizationCodeDatabaseContractTests
 {
     private const string Username = "code-contract-user";
@@ -1496,7 +1498,7 @@ public sealed class AuthorizationCodeDatabaseContractTests
 
         public ValueTask DisposeAsync()
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(_databasePath))
             {
                 File.Delete(_databasePath);

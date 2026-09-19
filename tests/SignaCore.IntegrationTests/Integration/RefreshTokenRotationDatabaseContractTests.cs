@@ -8,6 +8,7 @@ using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
 using Xunit;
+using SignaCore.Tests.Integration;
 
 namespace SignaCore.IntegrationTests.Integration;
 
@@ -31,6 +32,8 @@ namespace SignaCore.IntegrationTests.Integration;
 /// every environment.
 /// </para>
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class RefreshTokenRotationDatabaseContractTests
 {
     /// <summary>
@@ -244,7 +247,7 @@ public sealed class RefreshTokenRotationDatabaseContractTests
 
         public void Dispose()
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(_databasePath))
             {
                 File.Delete(_databasePath);

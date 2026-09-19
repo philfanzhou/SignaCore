@@ -9,6 +9,7 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using Xunit;
+using SignaCore.Tests.Integration;
 
 namespace SignaCore.IntegrationTests.Integration;
 
@@ -26,6 +27,8 @@ namespace SignaCore.IntegrationTests.Integration;
 /// <c>FullyQualifiedName~DatabaseContractTests</c>, and this group needs no Docker.
 /// </para>
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class AuthorizationRequestDatabaseContractTests
 {
     private const string ClientId = "continuation-contract-app";
@@ -795,7 +798,7 @@ public sealed class AuthorizationRequestDatabaseContractTests
 
         public ValueTask DisposeAsync()
         {
-            SqliteConnection.ClearAllPools();
+            TestSqlitePools.ClearAll();
             if (File.Exists(_databasePath))
             {
                 File.Delete(_databasePath);

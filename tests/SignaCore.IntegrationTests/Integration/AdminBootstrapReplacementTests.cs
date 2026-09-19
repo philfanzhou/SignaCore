@@ -36,6 +36,8 @@ namespace SignaCore.Tests.Integration;
 /// confirmation, reachability, key rules, and the Development fallback — leaves the file, the
 /// audit trail, and the process untouched.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
 {
     private const string UpdatePath = "/management/v1/bootstrap";
@@ -92,7 +94,7 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
 
     public ValueTask DisposeAsync()
     {
-        SqliteConnection.ClearAllPools();
+        TestSqlitePools.ClearAll();
         if (Directory.Exists(_directory))
         {
             Directory.Delete(_directory, recursive: true);
@@ -634,7 +636,7 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
         });
         await context.SaveChangesAsync(Token);
         await context.DisposeAsync();
-        SqliteConnection.ClearAllPools();
+        TestSqlitePools.ClearAll();
         foreach (var sidecar in new[] { "-journal", "-wal", "-shm" })
         {
             var path = databasePath + sidecar;
@@ -812,6 +814,8 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
 /// refuses every update with the fixed <c>signacore.bootstrap.not_file_backed</c> result, without
 /// reaching the shared handler and without stopping.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class DevelopmentFallbackBootstrapUpdateTests : IAsyncLifetime
 {
     private const string UnsafeRequestHeader = "X-ServiceMantle-Request";
@@ -855,7 +859,7 @@ public sealed class DevelopmentFallbackBootstrapUpdateTests : IAsyncLifetime
 
     public ValueTask DisposeAsync()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        TestSqlitePools.ClearAll();
         if (Directory.Exists(_directory))
         {
             Directory.Delete(_directory, recursive: true);
