@@ -259,10 +259,40 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAccountLoginInfoService, AccountLoginInfoService>();
 
         // ---- Rate Limiting (ASP.NET Core built-in) ----
+        // The size-bounded cache behind the interactive OIDC partition resolver (#304).
+        services.AddMemoryCache();
         // Per-IP fixed window limiter: 100 requests per 60 seconds per client IP.
         // /health, /metrics and both JWKS routes are exempt (have their own limits or are infra).
         services.AddRateLimiter(options =>
         {
+            // The six interactive OIDC endpoint classes (issue #304): one fixed-window policy
+            // each, budgeted by the IdentityConstants constants, partitioned between resolved
+            // registered clients and the source network. The policies take effect through
+            // [EnableRateLimiting] on the endpoint classes; the partition resolver middleware
+            // stages the registered-client resolution ahead of the limiter. No queue: overload
+            // fails fast with the fixed OIDC rejection shape.
+            foreach (var (policy, budget) in new[]
+                     {
+                         (OidcRateLimitPolicies.Authorize, IdentityConstants.OidcAuthorizeRateLimitPerMinute),
+                         (OidcRateLimitPolicies.Login, IdentityConstants.OidcLoginRateLimitPerMinute),
+                         (OidcRateLimitPolicies.Token, IdentityConstants.OidcTokenRateLimitPerMinute),
+                         (OidcRateLimitPolicies.UserInfo, IdentityConstants.OidcUserInfoRateLimitPerMinute),
+                         (OidcRateLimitPolicies.Logout, IdentityConstants.OidcLogoutRateLimitPerMinute),
+                         (OidcRateLimitPolicies.Revoke, IdentityConstants.OidcRevokeRateLimitPerMinute)
+                     })
+            {
+                options.AddPolicy(policy, httpContext =>
+                    System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                        OidcRateLimitPolicies.PartitionKey(httpContext),
+                        _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            AutoReplenishment = true,
+                            PermitLimit = budget,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0
+                        }));
+            }
+
             options.AddPolicy("sms-code", httpContext =>
             {
                 // The limiter deliberately runs before authentication so invalid credentials cannot
@@ -316,6 +346,18 @@ public static class ServiceCollectionExtensions
             {
                 context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
                 context.HttpContext.Response.ContentType = "application/json";
+                // The interactive OIDC endpoint classes answer with their own fixed shape: no
+                // redirect, no partition key, no request value (issue #304). Whichever limiter
+                // fired on one of those endpoints, the answer is the same fixed body.
+                if (OidcRateLimitPolicies.IsInteractiveEndpoint(context.HttpContext.Request.Path))
+                {
+                    context.HttpContext.Response.Headers.CacheControl = "no-store";
+                    await context.HttpContext.Response.WriteAsync(
+                        OidcRateLimitPolicies.RejectionBody,
+                        cancellationToken);
+                    return;
+                }
+
                 await context.HttpContext.Response.WriteAsync(
                     """{"status":429,"title":"Too Many Requests","detail":"Rate limit exceeded. Please try again later."}""",
                     cancellationToken);

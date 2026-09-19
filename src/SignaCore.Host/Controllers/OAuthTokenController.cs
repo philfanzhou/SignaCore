@@ -8,6 +8,7 @@ using SignaCore.Domain.Validators;
 using SignaCore.Host.Http;
 using SignaCore.Host.Security;
 using SignaCore.Host.Services;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace SignaCore.Host.Controllers;
 
@@ -56,6 +57,7 @@ public sealed class OAuthTokenController : ControllerBase
 
     [HttpPost("token")]
     [Consumes("application/x-www-form-urlencoded")]
+    [EnableRateLimiting(OidcRateLimitPolicies.Token)]
     [Authorize(Policy = OAuthClientAuthenticationDefaults.Policy)]
     public async Task<IActionResult> Token(CancellationToken cancellationToken)
     {
@@ -164,6 +166,7 @@ public sealed class OAuthTokenController : ControllerBase
     /// caller whether the token was real.
     /// </summary>
     [HttpPost("revoke")]
+    [EnableRateLimiting(OidcRateLimitPolicies.Revoke)]
     [Consumes("application/x-www-form-urlencoded")]
     [Authorize(Policy = OAuthClientAuthenticationDefaults.Policy)]
     public async Task<IActionResult> Revoke(CancellationToken cancellationToken)

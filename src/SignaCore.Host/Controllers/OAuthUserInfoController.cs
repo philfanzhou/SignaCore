@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SignaCore.Host.Services;
+using SignaCore.Host.Security;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace SignaCore.Host.Controllers;
 
@@ -21,6 +23,7 @@ namespace SignaCore.Host.Controllers;
 /// </summary>
 [Route("oauth2")]
 [ApiController]
+[EnableRateLimiting(OidcRateLimitPolicies.UserInfo)]
 public sealed class OAuthUserInfoController : ControllerBase
 {
     private const string BearerChallenge = "Bearer";
