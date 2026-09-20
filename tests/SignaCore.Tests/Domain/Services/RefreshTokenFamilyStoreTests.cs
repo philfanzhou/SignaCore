@@ -1,6 +1,8 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -132,6 +134,147 @@ public sealed class RefreshTokenFamilyStoreTests
         Assert.Equal([legacyId], survivors);
 
         _ = (rootId, siblingId, childId);
+    }
+
+    /// <summary>
+    /// Ordinary revoke diagnostics carry no account or session identity (canonical DF-06): the
+    /// captured logger sees neither the raw id nor any common Guid rendering of it — in the
+    /// formatter text or in the structured state values themselves — while the repository still
+    /// receives the exact id and the caller's original token, and the success log keeps only the
+    /// fixed operation, the count, and the closed-set reason.
+    /// </summary>
+    [Fact]
+    public async Task RevokeByAccountAndSession_LogNoIdentityInStructuredStateOrText()
+    {
+        var accountId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        Assert.NotEqual(accountId, sessionId);
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var repository = new Mock<IRefreshTokenRepository>();
+        repository
+            .Setup(value => value.RevokeByAccountAsync(accountId, cancellationToken))
+            .ReturnsAsync(3);
+        repository
+            .Setup(value => value.RevokeBySessionAsync(sessionId, cancellationToken))
+            .ReturnsAsync(2);
+        var logger = new StructuredStateLogger();
+        var store = new RefreshTokenFamilyStore(repository.Object, new Mock<IUnitOfWork>().Object, logger);
+
+        Assert.Equal(3, await store.RevokeByAccountAsync(
+            accountId, RefreshFamilyRevocationReason.Administrative, cancellationToken));
+        Assert.Equal(2, await store.RevokeBySessionAsync(
+            sessionId, RefreshFamilyRevocationReason.Logout, cancellationToken));
+
+        Assert.Equal(2, logger.Entries.Count);
+        foreach (var entry in logger.Entries)
+        {
+            Assert.DoesNotContain(accountId.ToString("D"), entry.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(accountId.ToString("N"), entry.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(sessionId.ToString("D"), entry.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(sessionId.ToString("N"), entry.Text, StringComparison.Ordinal);
+            foreach (var field in entry.State)
+            {
+                Assert.DoesNotContain("AccountId", field.Key, StringComparison.Ordinal);
+                Assert.DoesNotContain("SessionId", field.Key, StringComparison.Ordinal);
+                var value = field.Value?.ToString();
+                Assert.DoesNotContain(accountId.ToString("D"), value, StringComparison.Ordinal);
+                Assert.DoesNotContain(accountId.ToString("N"), value, StringComparison.Ordinal);
+                Assert.DoesNotContain(sessionId.ToString("D"), value, StringComparison.Ordinal);
+                Assert.DoesNotContain(sessionId.ToString("N"), value, StringComparison.Ordinal);
+            }
+
+            // The success projection is bounded: the fixed message, the affected count, and the
+            // reason — no hashed or otherwise derived identity substitute either.
+            var keys = entry.State.Select(field => field.Key).ToList();
+            Assert.Contains("Count", keys);
+            Assert.Contains("Reason", keys);
+            Assert.True(keys.TrueForAll(key =>
+                key is "Count" or "Reason" or "{OriginalFormat}"));
+        }
+
+        repository.Verify(value => value.RevokeByAccountAsync(accountId, cancellationToken), Times.Once);
+        repository.Verify(value => value.RevokeBySessionAsync(sessionId, cancellationToken), Times.Once);
+    }
+
+    /// <summary>
+    /// A revoke that affects nothing stays silent: a zero count adds no success log, and the
+    /// result still returns the repository's count unchanged.
+    /// </summary>
+    [Fact]
+    public async Task RevokeByAccountAndSession_WhenNothingMatches_WriteNoSuccessLog()
+    {
+        var accountId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var repository = new Mock<IRefreshTokenRepository>();
+        repository
+            .Setup(value => value.RevokeByAccountAsync(accountId, cancellationToken))
+            .ReturnsAsync(0);
+        repository
+            .Setup(value => value.RevokeBySessionAsync(sessionId, cancellationToken))
+            .ReturnsAsync(0);
+        var logger = new StructuredStateLogger();
+        var store = new RefreshTokenFamilyStore(repository.Object, new Mock<IUnitOfWork>().Object, logger);
+
+        Assert.Equal(0, await store.RevokeByAccountAsync(
+            accountId, RefreshFamilyRevocationReason.Administrative, cancellationToken));
+        Assert.Equal(0, await store.RevokeBySessionAsync(
+            sessionId, RefreshFamilyRevocationReason.Logout, cancellationToken));
+
+        Assert.Empty(logger.Entries);
+    }
+
+    /// <summary>
+    /// Repository failure propagates unchanged and adds no success log; the raw id was still
+    /// handed to the repository call.
+    /// </summary>
+    [Fact]
+    public async Task RevokeByAccount_WhenTheRepositoryFails_PropagatesAndStaysSilent()
+    {
+        var accountId = Guid.NewGuid();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var repository = new Mock<IRefreshTokenRepository>();
+        repository
+            .Setup(value => value.RevokeByAccountAsync(accountId, cancellationToken))
+            .ThrowsAsync(new InvalidOperationException("The repository is unavailable."));
+        var logger = new StructuredStateLogger();
+        var store = new RefreshTokenFamilyStore(repository.Object, new Mock<IUnitOfWork>().Object, logger);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.RevokeByAccountAsync(accountId, RefreshFamilyRevocationReason.Administrative, cancellationToken));
+
+        Assert.Empty(logger.Entries);
+        repository.Verify(value => value.RevokeByAccountAsync(accountId, cancellationToken), Times.Once);
+    }
+
+    /// <summary>
+    /// Cancellation travels both ways: a pre-canceled token never reaches the repository, and a
+    /// cancellation observed inside the repository propagates as cancellation — neither path adds a
+    /// success log, and neither undoes the caller's id or token.
+    /// </summary>
+    [Fact]
+    public async Task RevokeBySession_ObservesPreCanceledAndInFlightCanceledTokens()
+    {
+        var sessionId = Guid.NewGuid();
+        var reason = RefreshFamilyRevocationReason.SessionExpired;
+        using var cancellation = new CancellationTokenSource();
+        var repository = new Mock<IRefreshTokenRepository>();
+        repository
+            .Setup(value => value.RevokeBySessionAsync(sessionId, cancellation.Token))
+            .ThrowsAsync(new OperationCanceledException(cancellation.Token));
+        var logger = new StructuredStateLogger();
+        var store = new RefreshTokenFamilyStore(repository.Object, new Mock<IUnitOfWork>().Object, logger);
+
+        var preCanceled = new CancellationToken(canceled: true);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            store.RevokeBySessionAsync(sessionId, reason, preCanceled));
+        repository.VerifyNoOtherCalls();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            store.RevokeBySessionAsync(sessionId, reason, cancellation.Token));
+        repository.Verify(value => value.RevokeBySessionAsync(sessionId, cancellation.Token), Times.Once);
+
+        Assert.Empty(logger.Entries);
     }
 
     [Fact]
@@ -394,6 +537,32 @@ public sealed class RefreshTokenFamilyStoreTests
     }
 
     // ---- Harness ----
+
+    /// <summary>
+    /// Captures both projections of every log call: the rendered formatter text and the structured
+    /// state itself. Asserting only on rendered text cannot prove a sink is free of the raw
+    /// value — the structured fields travel to JSON and log databases verbatim.
+    /// </summary>
+    private sealed class StructuredStateLogger : ILogger<RefreshTokenFamilyStore>
+    {
+        public sealed record Entry(string Text, IReadOnlyList<KeyValuePair<string, object?>> State);
+
+        public List<Entry> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add(new Entry(
+                formatter(state, exception),
+                state is IEnumerable<KeyValuePair<string, object?>> fields ? [.. fields] : []));
+    }
 
     private sealed record Harness(
         SqliteConnection Connection,
