@@ -58,6 +58,8 @@ export interface AdminAppOidc {
   audienceMode: AdminApp['audienceMode']
   redirectUris: AdminAppRedirectUri[]
   postLogoutRedirectUris: AdminAppRedirectUri[]
+  /** One-time secret of a Public → Confidential upgrade; absent on every other response. */
+  issuedAppSecret?: string | null
 }
 
 /** 整体替换交互式策略字段；audienceMode 有自己的端点，不在其中。 */
@@ -136,6 +138,8 @@ export interface AdminCreateAppRequest {
   appName: string
   callbackUrl?: string
   ttlSeconds: number
+  /** Omitted or 'Confidential' creates a secret-bearing client; 'Public' creates one with no secret. */
+  clientType?: 'Confidential' | 'Public'
 }
 
 export interface AdminUpdateCallbackRequest {
@@ -271,7 +275,7 @@ class AdminApiClient {
   async createApp(payload: AdminCreateAppRequest) {
     const response = await this.client.post<{
       appId: string
-      appSecret: string
+      appSecret: string | null
       appName: string
       callbackUrl: string
       callbackExpiresAt: number | null

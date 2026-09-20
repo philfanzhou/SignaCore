@@ -101,6 +101,69 @@ public sealed class OidcClientConfigurationValidatorTests
         Assert.False(result.AllowRefreshToken);
     }
 
+    /// <summary>
+    /// The conversion policy: an existing Confidential client is never downgraded to Public, even
+    /// when the requested Public target is itself fail closed. This is the acceptance that a
+    /// modification request cannot strip a client's secret-bearing class.
+    /// </summary>
+    [Fact]
+    public void Validate_RejectsTheConfidentialToPublicDowngrade()
+    {
+        var exception = Assert.Throws<OidcClientConfigurationException>(() =>
+            OidcClientConfigurationValidator.Validate(
+                OidcClientType.Public,
+                allowAuthorizationCode: false,
+                ["openid"],
+                allowRefreshToken: false,
+                identitySessionMaxAgeSeconds: null,
+                AudienceMode.Shared,
+                [],
+                [],
+                isDevelopment: false,
+                currentClientType: OidcClientType.Confidential));
+        Assert.Contains("conversion", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The upgrade direction is explicit and allowed; the caller mints the secret.</summary>
+    [Fact]
+    public void Validate_AllowsThePublicToConfidentialUpgrade()
+    {
+        var result = OidcClientConfigurationValidator.Validate(
+            OidcClientType.Confidential,
+            allowAuthorizationCode: false,
+            ["openid"],
+            allowRefreshToken: false,
+            identitySessionMaxAgeSeconds: null,
+            AudienceMode.Shared,
+            [],
+            [],
+            isDevelopment: false,
+            currentClientType: OidcClientType.Public);
+
+        Assert.Equal(OidcClientType.Confidential, result.ClientType);
+    }
+
+    /// <summary>
+    /// A creation context (no current type) may target Public directly — the downgrade rule is a
+    /// transition rule, not a ban on Public registrations.
+    /// </summary>
+    [Fact]
+    public void Validate_AllowsAPublicTargetWithNoCurrentType()
+    {
+        var result = OidcClientConfigurationValidator.Validate(
+            OidcClientType.Public,
+            allowAuthorizationCode: false,
+            ["openid"],
+            allowRefreshToken: false,
+            identitySessionMaxAgeSeconds: null,
+            AudienceMode.Shared,
+            [],
+            [],
+            isDevelopment: false);
+
+        Assert.Equal(OidcClientType.Public, result.ClientType);
+    }
+
     private static SignaCore.Domain.Models.ValidatedOidcClientConfiguration ValidateEnabled(
         OidcClientType clientType = OidcClientType.Confidential,
         AudienceMode audienceMode = AudienceMode.PerApplication,

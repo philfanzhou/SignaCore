@@ -436,14 +436,35 @@ public class AdminController : ControllerBase
             }
         }
 
+        // The closed-set client type: omitted means the historical Confidential registration with
+        // a generated secret; Public never generates, stores, or returns a secret (DF-02).
+        OidcClientType clientType;
+        try
+        {
+            clientType = OidcClientConfigurationApplier.ResolveClientType(
+                request.ClientType, OidcClientType.Confidential);
+        }
+        catch (OidcClientConfigurationException exception)
+        {
+            return BadRequest(new ErrorResponse(exception.Message));
+        }
+
+        var isPublicClient = clientType == OidcClientType.Public;
         var newAppId = Guid.NewGuid().ToString("N");
-        var newAppSecret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        var newAppSecret = isPublicClient
+            ? null
+            : Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
         var app = new AppRegistrationEntity
         {
             Id = Guid.NewGuid(),
             AppId = newAppId,
-            AppSecretHash = BCrypt.Net.BCrypt.HashPassword(newAppSecret),
+            ClientType = clientType,
+            // The Public ⇔ empty-hash invariant: a Public registration carries no hash at all,
+            // and every secret verification point fails closed on the empty value.
+            AppSecretHash = isPublicClient
+                ? string.Empty
+                : BCrypt.Net.BCrypt.HashPassword(newAppSecret!),
             AppName = request.AppName.Trim(),
             CallbackUrl = callbackUrl,
             CallbackExpiresAt = callbackUrl == null
@@ -911,6 +932,7 @@ public class AdminController : ControllerBase
 
             var before = Snapshot(app);
             var beforeAllowRefreshToken = app.AllowRefreshToken;
+            var beforeClientType = app.ClientType;
             OidcClientConfigurationChange change;
             try
             {
@@ -931,9 +953,23 @@ public class AdminController : ControllerBase
             catch (OidcClientConfigurationException exception)
             {
                 // A rejected configuration leaves the tracked graph untouched; the rollback
-                // drops the re-read entity so nothing of this attempt survives.
+                // drops the re-read entity so nothing of this attempt survives. This is also the
+                // Confidential → Public downgrade rejection: the validator refuses it, the row is
+                // unchanged, and the transaction rolls back.
                 await transaction.RollbackAsync(operationToken);
                 return BadRequest(new ErrorResponse(exception.Message));
+            }
+
+            // The upgrade direction is explicit and must not leave an empty hash behind: a
+            // Public → Confidential conversion mints a fresh secret through the existing
+            // generation path inside the same transaction and returns it once. The downgrade
+            // direction never reaches here (the validator rejects it above).
+            string? issuedAppSecret = null;
+            if (beforeClientType == OidcClientType.Public
+                && app.ClientType == OidcClientType.Confidential)
+            {
+                issuedAppSecret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+                app.AppSecretHash = BCrypt.Net.BCrypt.HashPassword(issuedAppSecret);
             }
 
             await appRegistrationRepository.AddRedirectUrisAsync(change.AddedRegistrations, operationToken);
@@ -966,7 +1002,7 @@ public class AdminController : ControllerBase
                 cancellationToken: operationToken);
             await unitOfWork.SaveChangesAsync(operationToken);
             await transaction.CommitAsync(operationToken);
-            return Ok(Describe(app));
+            return Ok(Describe(app, issuedAppSecret));
         }, cancellationToken);
 
         return result ?? NotFound(new ErrorResponse("App not found."));
@@ -1120,7 +1156,9 @@ public class AdminController : ControllerBase
             PostLogoutRedirectUris = postLogoutRedirectUris
         };
 
-    private static AdminAppOidcResponse Describe(AppRegistrationEntity app) => new(
+    private static AdminAppOidcResponse Describe(
+        AppRegistrationEntity app,
+        string? issuedAppSecret = null) => new(
         app.AppId,
         app.ClientType.ToString(),
         app.AllowAuthorizationCode,
@@ -1129,7 +1167,8 @@ public class AdminController : ControllerBase
         app.IdentitySessionMaxAgeSeconds,
         app.AudienceMode.ToString(),
         Registrations(app, RedirectUriKind.Redirect),
-        Registrations(app, RedirectUriKind.PostLogout));
+        Registrations(app, RedirectUriKind.PostLogout),
+        issuedAppSecret);
 
     /// <summary>
     /// The audit snapshot. It carries policy and registered URIs only: no secret, no hash, and no
@@ -1619,6 +1658,13 @@ public class AdminController : ControllerBase
         if (app == null)
         {
             return NotFound(new ErrorResponse("App not found."));
+        }
+
+        // A Public client holds no secret; minting one here would break the Public ⇔ empty-hash
+        // invariant. The rejection names neither the stored type nor the hash state.
+        if (app.ClientType == OidcClientType.Public)
+        {
+            return BadRequest(new ErrorResponse("The application does not support a secret reset."));
         }
 
         var newAppSecret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));

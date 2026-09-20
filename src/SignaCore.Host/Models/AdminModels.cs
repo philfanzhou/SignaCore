@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SignaCore.Host.Models;
 
 // Requests and responses used only by the admin console (/api/admin/*). See ApiModels.cs for
@@ -74,7 +76,15 @@ public sealed record AdminAppOidcResponse(
     int? IdentitySessionMaxAgeSeconds,
     string AudienceMode,
     IReadOnlyList<AdminAppRedirectUriResponse> RedirectUris,
-    IReadOnlyList<AdminAppRedirectUriResponse> PostLogoutRedirectUris);
+    IReadOnlyList<AdminAppRedirectUriResponse> PostLogoutRedirectUris,
+
+    /// <summary>
+    /// The one-time plaintext secret of a Public → Confidential upgrade, minted inside the update
+    /// transaction so the upgraded client never keeps an empty hash. Omitted from every other
+    /// response, so the existing Confidential response shape is byte-for-byte unchanged.
+    /// </summary>
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? IssuedAppSecret = null);
 
 /// <summary>
 /// A complete replacement of the interactive policy fields. The audience mode is deliberately
@@ -91,11 +101,23 @@ public sealed record AdminUpdateOidcPolicyRequest(
 /// <summary>Adds URIs to one kind. Either every value is registered or none is.</summary>
 public sealed record AdminAddRedirectUrisRequest(string Kind, IReadOnlyList<string>? Uris);
 
-public sealed record AdminCreateAppRequest(string AppName, string? CallbackUrl, int TtlSeconds);
+/// <summary>
+/// Creates one application registration. <see cref="ClientType"/> is optional and closed-set:
+/// omitted or empty creates the historical <c>Confidential</c> client with a generated secret;
+/// <c>Public</c> creates a client that never holds a secret or a hash (<c>DF-02</c>).
+/// </summary>
+public sealed record AdminCreateAppRequest(
+    string AppName,
+    string? CallbackUrl,
+    int TtlSeconds,
+    string? ClientType = null);
 
 public sealed record AdminCreateAppResponse(
     string AppId,
-    string AppSecret,
+
+    /// <summary>The one-time plaintext secret of a Confidential registration; null for a Public
+    /// client, which has no secret to carry.</summary>
+    string? AppSecret,
     string AppName,
     string CallbackUrl,
     long? CallbackExpiresAt);

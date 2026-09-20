@@ -201,6 +201,7 @@ describe('admin application control plane', () => {
       appName: 'Billing',
       callbackUrl: 'https://billing.example.test/callback',
       ttlSeconds: 86400,
+      clientType: 'Confidential',
     })
     expect(state.secretValue.value).toBe('new-secret')
     expect(state.appActionModal.value).toBe('secret')
@@ -210,6 +211,31 @@ describe('admin application control plane', () => {
     await state.resetAppSecret()
     expect(state.secretValue.value).toBe('rotated-secret')
     expect(state.appActionModal.value).toBe('secret')
+  })
+
+  it('registers a public client without ever opening the secret modal', async () => {
+    const state = useAdminApps()
+    mocks.api.getApps.mockResolvedValue([])
+    mocks.api.createApp.mockResolvedValue({ appSecret: null })
+
+    // The composable state is a module singleton: start from a known-closed modal.
+    state.appActionModal.value = null
+    state.appModalOpen.value = true
+    state.createAppForm.appName = 'Spa Client'
+    state.createAppForm.clientType = 'Public'
+    await state.createApp()
+
+    expect(mocks.api.createApp).toHaveBeenCalledWith({
+      appName: 'Spa Client',
+      callbackUrl: undefined,
+      ttlSeconds: 86400,
+      clientType: 'Public',
+    })
+    // A Public client has no secret: the one-time secret modal must not open, and the form
+    // returns to the Confidential default for the next registration.
+    expect(state.appActionModal.value).toBeNull()
+    expect(state.appModalOpen.value).toBe(false)
+    expect(state.createAppForm.clientType).toBe('Confidential')
   })
 
   it('requires an exact application id before deletion and clears the drawer', async () => {
