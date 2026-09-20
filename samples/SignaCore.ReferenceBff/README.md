@@ -11,6 +11,14 @@ OpenID Connect Discovery document. Nothing is hardcoded.
 > sessions and replicas do not share them. Replace it with a shared store before running more
 > than one instance. First-administrator binding and coordinated upstream logout are delivered by
 > later SignaCore tasks.
+>
+> **Storage not wired into the runtime yet.** `samples/SignaCore.ReferenceBff.Database` — with its
+> SQLite migration project `samples/SignaCore.ReferenceBff.Database.Migrations.Sqlite` — already
+> provides the BFF-owned `management_role_bindings` persistence: the single
+> initial-administrator slot with independent PostgreSQL and SQLite migration histories, plus the
+> staging and exact-match read boundary (`ManagementRoleBindingStore`). The running sample does
+> not use it yet: later slices wire the database configuration and the runtime authorization on
+> top of it, so this BFF still authenticates without any local database.
 
 ## Configuration
 
@@ -63,5 +71,5 @@ Then open `https://your-bff-host/` and follow **Sign in with SignaCore**.
 ## Scope
 
 This is a sample consumer of SignaCore, not a product. The ticket store is single-instance
-memory, coordinated upstream logout and first-administrator binding are out of scope, and
-deployment hardening beyond the boundaries above is intentionally left out.
+memory, coordinated upstream logout and the runtime use of the administrator binding are out of
+scope, and deployment hardening beyond the boundaries above is intentionally left out.
