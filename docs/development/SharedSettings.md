@@ -3,14 +3,13 @@
 SignaCore registers its product configuration on the shared ServiceMantle setting contract. Since
 the runtime switch, this stack is the configuration authority: the bootstrap phase activates the
 shared snapshot, `IConfiguration` is fed through the reverse projection onto the legacy colon
-keys, first-run setup writes the shared aggregate, and the admin console's settings page reads and
-writes the shared aggregate through the shared management endpoints. The legacy `system_settings`
-table stays as read-only legacy data, still consumed by the legacy configuration import until its
-own switch lands.
+keys, first-run setup writes the shared aggregate, the admin console's settings page reads and
+writes the shared aggregate through the shared management endpoints, and the protected legacy
+configuration import writes the aggregate's first version directly, without ever writing the
+legacy `system_settings` table. That table stays as read-only legacy data.
 
 > Status: implemented (ServiceMantle tasks #101 and #547, runtime switch #548, admin console
-> switch #145). The legacy configuration import is tracked separately; removing the old types is
-> tracked after those.
+> switch #145, import switch #146). Removing the old types is tracked after those.
 
 ## What is registered
 
@@ -100,8 +99,10 @@ identical accept/reject outcomes.
   changes and zero audit rows.
 - First-run setup writes the shared aggregate through the same update service as the first version
   of the completion transaction, together with the administrator, the installation audit
-  projection, and the code consumption. The legacy `system_settings` table is no longer written by
-  the runtime; it is read-only legacy data until the legacy import switch lands.
+  projection, and the code consumption. The admin console reaches the aggregate through the
+  shared management endpoints, and the protected legacy configuration import writes the same
+  aggregate the same way (both below). The legacy `system_settings` table is no longer written
+  by the runtime; it is read-only legacy data.
 
 ## Admin console endpoints (#145)
 
@@ -125,6 +126,30 @@ identical accept/reject outcomes.
   header renders "running version unknown" and never infers activation. A server version beyond
   the JavaScript safe-integer range is treated as inexpressible: the console refuses to submit
   rather than send a rounded `expectedVersion`.
+
+## Protected legacy configuration import (#146)
+
+- A pre-change deployment — business data present, no stored configuration of either era — is
+  upgraded inside the startup initialization lock: the deployment's effective `IConfiguration`
+  (appsettings, environment variables, launcher injection) is read once by
+  `LegacyConfigurationInput`, the thin product input adapter that owns the historical reading
+  rules (catalog defaults, trimming, the `AdminBootstrap:Username` alias with canonical-key
+  precedence, JSON section/scalar shapes, the plain-HTTP compatibility opt-in, and the
+  required-key completeness check with key names only).
+- The complete candidate is mapped through `SharedSettingKeys` and written with one
+  `ServiceSettingUpdateCommand(expectedVersion: 0, full batch, legacy-import operator)` inside one
+  caller-owned serializable transaction, followed by the completed installation row it requires
+  and the value-free product audit `installation.legacy_import.completed` (event, key count,
+  version). The shared update service owns validation and re-protection; nothing is persisted
+  while reading. The legacy `system_settings` table is never written by the import.
+- PostgreSQL's retrying execution strategy wraps the attempt: every attempt re-begins its own
+  transaction from a cleared change tracker and re-reads the authority, so no tracked entity or
+  audit row survives into a retried attempt.
+- A version conflict is never treated as this run's success: the committed aggregate is re-read,
+  and the shared loader further down the startup path fully validates it; a restart after a
+  committed import is an idempotent re-run that writes no second import or per-key audit. Failure
+  rolls the whole attempt back — no partial aggregate, no installation row, no audit — and fails
+  startup with key names and classification codes only, never re-opening anonymous setup.
 
 ## Operators
 

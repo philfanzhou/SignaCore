@@ -512,8 +512,114 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
 
         // Import creates no administrator: the deployment already has its own accounts.
         Assert.Equal(1, await db.PasswordCredentials.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Equal("legacy_admin", (await db.SystemSettings.SingleAsync(setting => setting.Key == SystemSettingKeys.AdminUsername,
-            cancellationToken: TestContext.Current.CancellationToken)).Value);
+
+        // The import writes the shared aggregate directly — the historical admin alias resolved
+        // onto its normalized key — and never writes the legacy system_settings table.
+        var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken);
+        Assert.NotNull(aggregate);
+        Assert.Equal(1, aggregate!.Version);
+        Assert.Equal(43, SharedSettingTestDatabase.ParseValues(aggregate).Count);
+        Assert.Equal(
+            "legacy_admin",
+            SharedSettingTestDatabase.ParseValues(aggregate)["admin.username"]);
+        Assert.Equal(0, await db.SystemSettings.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+
+        // The shared per-key audits and the one product import audit are the only audit records of
+        // the import; neither carries any value.
+        var sharedAudits = await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
+            db, TestContext.Current.CancellationToken);
+        Assert.Equal(43, sharedAudits.Count);
+        var importAudit = Assert.Single(await db.AuditLogs.AsNoTracking()
+            .Where(entry => entry.Action == "installation.legacy_import.completed")
+            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
+        // The product audit carries the deployment-supplied key count and the version, never a
+        // value: three keys came from the launcher, the whole 43-key candidate was committed.
+        Assert.Contains("Imported 3 legacy settings", importAudit.Description, StringComparison.Ordinal);
+        Assert.Contains("ConfigurationVersion=1", importAudit.Description, StringComparison.Ordinal);
+        Assert.DoesNotContain("legacy_admin", importAudit.Description, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A restart after a committed import is an idempotent re-run: the aggregate keeps its version,
+    /// and no second import audit or second per-key audit set is ever written.
+    /// </summary>
+    [Fact]
+    public async Task RestartAfterTheLegacyImport_IsIdempotent()
+    {
+        await SeedPreChangeDeploymentAsync();
+        var deployment = new Dictionary<string, string?>
+        {
+            [SystemSettingKeys.PublicBaseUrl] = PublicBaseUrl,
+            [SystemSettingKeys.JwtIssuer] = PublicBaseUrl,
+            [SystemSettingKeys.LegacyAdminBootstrapUsername] = "legacy_admin"
+        };
+
+        using (var first = await StartHostAsync(deployment))
+        {
+            Assert.Equal("completed", (await (await first.GetAsync(SetupEntryPath,
+                    TestContext.Current.CancellationToken)).Content
+                .ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken))
+                .GetProperty("status").GetString());
+        }
+
+        _factory?.Dispose();
+        _factory = null;
+
+        using (var second = await StartHostAsync(deployment))
+        {
+            Assert.Equal("completed", (await (await second.GetAsync(SetupEntryPath,
+                    TestContext.Current.CancellationToken)).Content
+                .ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken))
+                .GetProperty("status").GetString());
+        }
+
+        await using var db = OpenDatabase();
+        var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken);
+        Assert.Equal(1, aggregate!.Version);
+        Assert.Equal(43, (await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
+            db, TestContext.Current.CancellationToken)).Count);
+        Assert.Equal(1, await db.AuditLogs.AsNoTracking()
+            .CountAsync(entry => entry.Action == "installation.legacy_import.completed",
+                cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// An import whose candidate is invalid leaves nothing behind: no aggregate, no installation
+    /// row, no audit row, no legacy row — and the deployment still never reaches anonymous setup.
+    /// </summary>
+    [Fact]
+    public async Task InvalidLegacyImport_FailsClosedWithNoPartialState()
+    {
+        await SeedPreChangeDeploymentAsync();
+
+        // The issuer must keep matching the public base URL; this deployment never configured them
+        // consistently, so the shared validation refuses the whole candidate.
+        var exception = await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            using var http = await StartHostAsync(new Dictionary<string, string?>
+            {
+                [SystemSettingKeys.PublicBaseUrl] = PublicBaseUrl,
+                [SystemSettingKeys.JwtIssuer] = "https://somewhere.else.test",
+                [SystemSettingKeys.LegacyAdminBootstrapUsername] = "legacy_admin"
+            });
+            await http.GetAsync(SetupEntryPath, TestContext.Current.CancellationToken);
+        });
+
+        await using var db = OpenDatabase();
+        Assert.Null(await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken));
+        Assert.Equal(0, await db.ServiceInstallations.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(0, await db.AuditLogs.AsNoTracking()
+            .CountAsync(entry => entry.Action == "installation.legacy_import.completed",
+                cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(0, await db.SystemSettings.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+
+        // The failure names keys or classification codes, never the submitted values.
+        var flattened = Flatten(exception);
+        Assert.DoesNotContain("somewhere.else.test", flattened, StringComparison.Ordinal);
+        Assert.DoesNotContain("legacy_admin", flattened, StringComparison.Ordinal);
     }
 
     /// <summary>
