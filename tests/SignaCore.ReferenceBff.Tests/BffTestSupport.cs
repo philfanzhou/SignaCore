@@ -304,7 +304,10 @@ public static class BffTestServer
         string redirectUri,
         HttpClient backchannel,
         HttpMessageHandler? userInfoHandler = null,
-        TimeProvider? timeProvider = null) =>
+        TimeProvider? timeProvider = null,
+        string? databaseProvider = null,
+        string? databaseConnectionString = null,
+        Action<IServiceCollection>? configureTestServices = null) =>
         new WebApplicationFactory<BffSample.Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ReferenceBff:Authority", authority);
@@ -312,6 +315,16 @@ public static class BffTestServer
             builder.UseSetting("ReferenceBff:ClientSecret", clientSecret);
             builder.UseSetting("ReferenceBff:RedirectUri", redirectUri);
             builder.UseSetting("ReferenceBff:Scope", "openid profile");
+            if (databaseProvider is not null)
+            {
+                builder.UseSetting("ReferenceBffDatabase:Provider", databaseProvider);
+            }
+
+            if (databaseConnectionString is not null)
+            {
+                builder.UseSetting("ReferenceBffDatabase:ConnectionString", databaseConnectionString);
+            }
+
             // Configure (not PostConfigure): the OIDC handler's own post-configuration builds the
             // ConfigurationManager over whatever backchannel is already set, so the test client
             // has to be in place before it runs.
@@ -336,6 +349,8 @@ public static class BffTestServer
                 {
                     services.AddSingleton(timeProvider);
                 }
+
+                configureTestServices?.Invoke(services);
             });
         });
 

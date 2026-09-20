@@ -10,4 +10,11 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The BFF's own storage: the role-binding context plus the SQLite migration history that
+         the runtime never applies automatically (operators migrate before starting). -->
+    <ProjectReference Include="..\SignaCore.ReferenceBff.Database\SignaCore.ReferenceBff.Database.csproj" />
+    <ProjectReference Include="..\SignaCore.ReferenceBff.Database.Migrations.Sqlite\SignaCore.ReferenceBff.Database.Migrations.Sqlite.csproj" />
+  </ItemGroup>
+
 </Project>

@@ -6,8 +6,9 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Options;using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using SignaCore.ReferenceBff;
+using SignaCore.ReferenceBff.Database;
 
-const string UserInfoClientName = "signacore";
+const string UserInfoClientName = BffIdentityCheckService.UserInfoClientName;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,6 +22,22 @@ builder.Services.AddHostedService<TicketStoreCleanupService>();
 // The named client the BFF uses to call SignaCore's UserInfo with the stored access token. The
 // Bearer header only ever appears on this server-to-server leg, never toward the browser.
 builder.Services.AddHttpClient(UserInfoClientName);
+
+// The typed identity check and the local administrator authorization boundary. The identity
+// check is what every identity-sensitive surface shares; the admin decision composes it with the
+// BFF's own binding store and is computed fresh on every request.
+builder.Services.AddScoped<BffIdentityCheckService>();
+builder.Services.AddScoped<BffAdminAuthorizationService>();
+
+// The BFF's own database: fully optional, and when present it is the caller-migrated binding
+// storage. A partial configuration is a startup failure; nothing migrates or seeds here.
+var databaseSettings = ReferenceBffDatabaseSetup.Read(builder.Configuration);
+if (databaseSettings.IsConfigured)
+{
+    builder.Services.AddDbContext<ReferenceBffDbContext>(
+        options => ReferenceBffDatabaseSetup.ConfigureDbContext(options, databaseSettings));
+    builder.Services.AddScoped<ManagementRoleBindingStore>();
+}
 
 // Antiforgery backs the only state-changing browser surface: the local POST logout.
 builder.Services.AddAntiforgery();
@@ -124,6 +141,27 @@ builder.Services.AddAuthentication(options =>
                 context.Response.Redirect("/error?reason=authority_unreachable");
                 context.HandleResponse();
             }
+        };
+        // Capture the identity this handshake actually verified: the validated token's issuer and
+        // its single non-empty subject, byte-for-byte, into the server-side ticket properties. The
+        // configured Authority is never treated as the verified issuer, and a token without
+        // exactly one usable subject fails the sign-in — no identity is ever inferred or repaired.
+        options.Events.OnTokenValidated = context =>
+        {
+            var subjectClaims = (context.Principal?.FindAll("sub") ?? [])
+                .ToList();
+            if (subjectClaims.Count != 1
+                || string.IsNullOrEmpty(subjectClaims[0].Value)
+                || string.IsNullOrEmpty(context.SecurityToken.Issuer))
+            {
+                context.Fail(
+                    "The validated ID token must carry exactly one non-empty subject and an issuer.");
+                return Task.CompletedTask;
+            }
+
+            context.Properties!.Items[ReferenceBffVerifiedIdentity.IssuerItem] = context.SecurityToken.Issuer;
+            context.Properties.Items[ReferenceBffVerifiedIdentity.SubjectItem] = subjectClaims[0].Value;
+            return Task.CompletedTask;
         };
         options.Events.OnRemoteFailure = context =>
         {
@@ -279,78 +317,88 @@ app.MapGet("/bff/diagnostics", async (HttpContext http, IOptionsMonitor<OpenIdCo
 
 // The server-side profile read: the BFF presents its stored access token to SignaCore's UserInfo
 // endpoint (resolved from Discovery) over the named backchannel. The token and the Bearer header
-// exist only on this leg. An upstream 401 means the identity session behind the token is gone, so
-// the local session is torn down with it — fail closed, never keep a signed-in appearance.
+// exist only on this leg. The typed identity check owns the whole upstream conversation: an
+// upstream 401 (or a subject the authority no longer confirms) tears the local session down —
+// fail closed, never keep a signed-in appearance. The success contract is unchanged: the profile
+// payload SignaCore returned, verbatim.
 app.MapGet("/bff/me", async (
     HttpContext http,
-    IHttpClientFactory httpClientFactory,
-    IOptionsMonitor<OpenIdConnectOptions> oidc) =>
+    BffIdentityCheckService identityCheck) =>
 {
     if (http.User.Identity?.IsAuthenticated != true)
     {
         return Results.Challenge();
     }
 
-    var accessToken = await http.GetTokenAsync("access_token");
-    if (string.IsNullOrEmpty(accessToken))
+    BffIdentityCheckResult identity;
+    try
     {
-        // A session without token material cannot be projected upstream; treat it as invalid.
+        identity = await identityCheck.CheckAsync(http, http.RequestAborted);
+    }
+    catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
+    {
+        // The caller abandoned the request; the session is untouched and nothing half-written.
+        throw;
+    }
+
+    if (identity.Status == BffIdentityCheckStatus.SessionInvalid)
+    {
+        // A session whose upstream identity is gone (no token, an upstream 401, or an unconfirmed
+        // subject) cannot project a profile: sign out and answer the bounded page. The upstream
+        // payload is never echoed into any failure.
         await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return Results.Redirect("/error?reason=session_expired");
     }
 
-    OpenIdConnectConfiguration configuration;
+    if (identity.Status == BffIdentityCheckStatus.Unavailable)
+    {
+        return Results.Redirect("/error?reason=authority_unreachable");
+    }
+
+    return Results.Content(identity.ProfilePayload!, identity.ProfileContentType);
+});
+
+// The read-only management surface: authentication (the standard OIDC handshake) proves who signed
+// in; this endpoint proves the sample's own authorization is a separate, local decision. The
+// verified identity must currently be confirmed upstream AND exactly match the active local
+// binding. Every response is fixed and carries no identity and no token: 200 with the constant
+// body, or the manual 401/403/503 mappings — the cookie handler's 302 access-denied page is never
+// used here. Anonymous requests start the standard challenge back to this fixed route only.
+app.MapGet("/bff/admin", async (
+    HttpContext http,
+    BffAdminAuthorizationService authorization) =>
+{
+    if (http.User.Identity?.IsAuthenticated != true)
+    {
+        return Results.Challenge(new AuthenticationProperties { RedirectUri = "/bff/admin" });
+    }
+
+    BffAdminAuthorizationStatus status;
     try
     {
-        configuration = await oidc.Get(OpenIdConnectDefaults.AuthenticationScheme)
-            .ConfigurationManager!.GetConfigurationAsync(http.RequestAborted);
+        status = await authorization.AuthorizeAsync(http, http.RequestAborted);
     }
-    catch (Exception exception) when (exception is not OperationCanceledException)
+    catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested)
     {
-        return Results.Redirect("/error?reason=authority_unreachable");
-    }
-
-    var userInfoEndpoint = configuration.UserInfoEndpoint;
-    if (string.IsNullOrEmpty(userInfoEndpoint))
-    {
-        return Results.Redirect("/error?reason=authority_unreachable");
+        // The caller abandoned the request: never a session verdict, never a half decision.
+        throw;
     }
 
-    using var request = new HttpRequestMessage(HttpMethod.Get, userInfoEndpoint);
-    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+    switch (status)
+    {
+        case BffAdminAuthorizationStatus.Authorized:
+            return Results.Json(new { isAdministrator = true });
 
-    HttpResponseMessage response;
-    try
-    {
-        response = await httpClientFactory.CreateClient(UserInfoClientName)
-            .SendAsync(request, http.RequestAborted);
-    }
-    catch (HttpRequestException)
-    {
-        // Transport failure to the authority: bounded page, upstream detail stays server-side.
-        return Results.Redirect("/error?reason=authority_unreachable");
-    }
-
-    using (response)
-    {
-        if (response.StatusCode == HttpStatusCode.Unauthorized)
-        {
-            // The upstream identity session is revoked or expired: the local session dies with it.
-            // SignOutAsync removes the browser cookie and the server-side ticket in one step.
+        case BffAdminAuthorizationStatus.SessionInvalid:
             await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            return Results.Redirect("/error?reason=session_expired");
-        }
+            return Results.StatusCode(StatusCodes.Status401Unauthorized);
 
-        if (!response.IsSuccessStatusCode)
-        {
-            return Results.Redirect("/error?reason=authority_unreachable");
-        }
+        case BffAdminAuthorizationStatus.Forbidden:
+            // A local denial keeps the (still valid) session; it is not a sign-out.
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
 
-        // PS-16 only: sub/name/nickname. The BFF decides its own exposure (DF-15) and re-publishes
-        // nothing but these claims; no token material is part of this payload.
-        var payload = await response.Content.ReadAsStringAsync(http.RequestAborted);
-        var contentType = response.Content.Headers.ContentType?.ToString() ?? "application/json";
-        return Results.Content(payload, contentType);
+        default:
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     }
 });
 
