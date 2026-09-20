@@ -20,6 +20,8 @@ namespace SignaCore.Tests.Integration;
 /// an <c>error</c> code. It coexists with the legacy <c>/api/auth/token</c> JSON endpoint, which returns
 /// 200 for failures, and both routes share the same token issuance pipeline.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
 {
     private readonly IdentityServerFixture _fixture;

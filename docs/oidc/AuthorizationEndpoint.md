@@ -59,6 +59,13 @@ page. No `returnUrl`, redirect URI, scope, state, nonce, or PKCE value is render
 form. [Identity Login](./IdentityLogin.md) owns the browser interaction and current-policy
 revalidation.
 
+The continuation destination itself is constrained to a local URL. The request's `PathBase` is the
+only request-controlled input of that destination, and a legitimate reverse-proxy mount prefix is
+preserved verbatim in the 302 location; a prefix that cannot form a local URL — for example a
+scheme-relative mount — is rejected with the fixed local error before anything is written: no
+`Location`, no continuation row, and no accepted audit row. Registered cross-origin application
+callbacks are unaffected; they keep their exact-URI validation under `PS-17`.
+
 An acceptable session can proceed directly. Session authority and activity come from the database;
 the cookie is only a protected identifier. This document does not redefine session expiry or state
 propagation, which remain canonical model concerns and later #132 prose.

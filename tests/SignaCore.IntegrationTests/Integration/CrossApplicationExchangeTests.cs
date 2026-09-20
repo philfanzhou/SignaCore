@@ -14,6 +14,8 @@ namespace SignaCore.Tests.Integration;
 /// an exchanged token cannot be exchanged a second time. See
 /// docs/adr/0003-cross-application-refresh-grant.md.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public class CrossApplicationExchangeTests : IClassFixture<IdentityServerFixture>
 {
     private readonly IdentityServerFixture _fixture;

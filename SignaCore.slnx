@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/samples/">
+    <Project Path="samples/SignaCore.ReferenceBff.Database.Migrations.Sqlite/SignaCore.ReferenceBff.Database.Migrations.Sqlite.csproj" />
+    <Project Path="samples/SignaCore.ReferenceBff.Database/SignaCore.ReferenceBff.Database.csproj" />
     <Project Path="samples/SignaCore.ReferenceBff/SignaCore.ReferenceBff.csproj" />
   </Folder>
   <Folder Name="/src/">

@@ -32,7 +32,12 @@ public static class SqliteProcessState
 /// <see cref="UsesProcessWideSqlitePoolClearingAttribute"/> — and the classes that depend on
 /// host connections staying alive, on hot WAL sidecars, or on shared-fixture installation
 /// state run inside <see cref="SqliteProcessState.CollectionName"/>, never in parallel with
-/// each other. <c>SqliteProcessStateContractTests</c> asserts the membership mechanically.
+/// each other. Every consumer of <c>IdentityServerFixture</c> clears the pools through the
+/// fixture's disposal, so consumers are auto-enumerated from the
+/// <c>IClassFixture&lt;IdentityServerFixture&gt;</c> interface:
+/// <c>SqliteProcessStateContractTests</c> asserts the membership mechanically from that
+/// interface, not from the marker alone, so a class cannot slip out of the contract by
+/// forgetting both annotations.
 /// </para>
 /// </summary>
 [CollectionDefinition(SqliteProcessState.CollectionName)]
@@ -40,8 +45,10 @@ public sealed class SqliteProcessStateCollection;
 
 /// <summary>
 /// Marks a test class as performing the process-wide pool clear through the single auditable
-/// entry. Every marked class is asserted to run in the
-/// <see cref="SqliteProcessState.CollectionName"/> collection.
+/// entry — directly, or through the disposal of the <c>IdentityServerFixture</c> it consumes.
+/// Every marked class is asserted to run in the
+/// <see cref="SqliteProcessState.CollectionName"/> collection, and every fixture consumer is
+/// asserted to carry the marker.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class)]
 public sealed class UsesProcessWideSqlitePoolClearingAttribute : Attribute;

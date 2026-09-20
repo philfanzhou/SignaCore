@@ -24,6 +24,8 @@ namespace SignaCore.Tests.Integration;
 /// unit, the bounded audit row, and the full-chain effect — a revoked session's bound code fails
 /// redemption and its browser cookie falls back to the login page.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class AdminIdentitySessionEndpointTests : IClassFixture<IdentityServerFixture>
 {
     private const string Username = "admin_session_contract_user";

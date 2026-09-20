@@ -23,6 +23,8 @@ namespace SignaCore.Tests.Integration;
 /// any response at all. The capture is proven non-empty through the fixed correlation id the
 /// controller logs with every local outcome.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthLoginSensitiveValueScanTests : IClassFixture<IdentityServerFixture>
 {
     private const string CanaryPassword = "Sup3rSecret-Canary-Pw!";

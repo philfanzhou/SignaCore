@@ -3,10 +3,12 @@
 SignaCore keeps global application configuration in the business database, in the shared
 `service_settings` aggregate. Every instance therefore reads the same active configuration, changes
 are transactional and audited, and there is no per-instance configuration drift. The legacy
-`system_settings` table is read-only legacy data, still served by the legacy admin endpoints until
-their own switch lands; deployments that predate the aggregate are upgraded into it once — from
-stored legacy rows by the one-shot migration, or straight from the deployment configuration by the
-protected legacy import — inside the startup initialization lock. See
+`system_settings` table is read-only legacy data; the admin console reads and writes the shared
+aggregate through the shared management setting endpoints (`GET /management/v1/settings`,
+`GET /management/v1/settings/definitions`, and `POST /management/v1/settings`). Deployments that
+predate the aggregate are upgraded into it once — from stored legacy rows by the one-shot
+migration, or straight from the deployment configuration by the protected legacy import — inside
+the startup initialization lock. See
 [Shared settings stack](SharedSettings.md).
 
 Only two things cannot live there, because they are required to open and decrypt that database:
@@ -283,8 +285,20 @@ becomes active. A completed installation with missing or invalid required settin
 the full list of problems and is never rolled back to a pending state — that would reopen anonymous
 setup against a database that already owns accounts.
 
-Every change is currently restart-required. For multiple instances, activate the change and then
-coordinate a rolling restart. The active configuration version is reported in startup diagnostics.
+The authenticated console submits changes to `POST /management/v1/settings` as
+`{"expectedVersion":N,"changes":[{"key":"...","value":"..."}]}`; a null value removes the explicit
+value. Two racing updates over the same expected version have exactly one winner — the loser gets
+the fixed 409 and the console keeps the draft for a manual refresh. The update commits one
+serializable transaction that carries the aggregate and one key-only audit row per changed key; the
+operator is the signed-in management identity.
+
+Every change is currently restart-required. The current-values response carries the product header
+`X-SignaCore-Running-Configuration-Version`, which names the version this process activated at
+startup — not the version the query just refreshed. When the stored version moves ahead of that
+header, the console reports restart pending; a missing or invalid header means "running version
+unknown", never "already active". The header describes only the instance that answered the request,
+so with multiple instances, coordinate a rolling restart. The active configuration version is also
+reported in startup diagnostics.
 
 The authenticated bootstrap editor is separate from database-backed global settings. It never
 returns the current connection string, database password, or master key; a replacement connection

@@ -82,6 +82,8 @@ internal sealed class CarrierScan
 /// label value. The browser boundary headers and the login page's final framing value are
 /// asserted centrally, and the matrix's detection power is proven by an injected violation.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed partial class OidcSensitiveValueMatrixTests : IClassFixture<IdentityServerFixture>
 {
     private const string ClientId = "scan-matrix-app";

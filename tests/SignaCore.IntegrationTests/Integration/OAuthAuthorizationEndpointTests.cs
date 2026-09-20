@@ -32,6 +32,8 @@ namespace SignaCore.Tests.Integration;
 /// This slice issues no authorization code, so a fully valid request is answered locally as well.
 /// </para>
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixture>
 {
     private const string InteractiveAppId = "authorize-contract-app";
@@ -467,6 +469,52 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
             "/signacore/oauth2/login?login_handle=",
             response.Headers.Location!.ToString(),
             StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A mount prefix that cannot form a local continuation URL — here a scheme-relative
+    /// <c>PathBase</c> — is refused with the fixed local error before anything is written: no
+    /// <c>Location</c>, no continuation row, and no accepted audit row, and the original prefix is
+    /// never echoed.
+    /// </summary>
+    [Fact]
+    public async Task AcceptedRedirect_UnderANonLocalPathBase_IsRejectedLocally()
+    {
+        await SeedAsync();
+        using var factory = _fixture.WithTestServices(services =>
+            services.AddSingleton<IStartupFilter>(new PathBaseStartupFilter("//outside.example.test")));
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        (int Continuations, int AcceptedAudits) Count()
+        {
+            using var scope = _fixture.Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var continuations = dbContext.AuthorizationRequests.AsNoTracking()
+                .CountAsync(TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+            var audits = dbContext.AuditLogs.AsNoTracking()
+                .CountAsync(
+                    log => log.Action == "oidc.authorize.validated" && log.Description == "accepted",
+                    TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+            return (continuations, audits);
+        }
+
+        var before = Count();
+
+        // The literal path is sent against the host itself: the prefix must reach the server as
+        // request-controlled PathBase state, not be resolved away as a protocol-relative host.
+        var requestUri = new Uri(
+            $"{http.BaseAddress!.Scheme}://localhost//outside.example.test/oauth2/authorize{Valid().Build()}");
+        using var response = await http.GetAsync(requestUri, TestContext.Current.CancellationToken);
+
+        var body = await AssertLocalErrorAsync(response);
+        Assert.DoesNotContain("outside.example.test", body, StringComparison.Ordinal);
+
+        var after = Count();
+        Assert.Equal(before.Continuations, after.Continuations);
+        Assert.Equal(before.AcceptedAudits, after.AcceptedAudits);
     }
 
     /// <summary>No rejection path — local or redirected — writes a continuation row.</summary>

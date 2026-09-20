@@ -27,6 +27,8 @@ namespace SignaCore.Tests.Integration;
 /// touch; the fail-closed persistence failure; the canary scan; and the byte-identical
 /// continuation behavior of a cookie-less accepted request.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthAuthorizationSessionReuseTests : IClassFixture<IdentityServerFixture>
 {
     private const string ReuseUser = "authorize_reuse_user";

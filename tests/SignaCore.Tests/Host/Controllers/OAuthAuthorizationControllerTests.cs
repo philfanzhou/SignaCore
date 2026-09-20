@@ -1,7 +1,11 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Abstractions;
+using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -110,6 +114,9 @@ public class OAuthAuthorizationControllerTests
             AuthTestDoubles.AuthMetrics(),
             new JwtOptions { Issuer = "https://issuer.example" },
             NullLogger<OAuthAuthorizationController>.Instance).WithHttpContext("correlation-148");
+        // The accepted branch validates the continuation destination through the real local-URL
+        // predicate, so the controller needs a real URL helper exactly like the hosted pipeline.
+        UseRealUrlHelper(controller);
 
         var result = await controller.Authorize(TestContext.Current.CancellationToken);
 
@@ -117,9 +124,12 @@ public class OAuthAuthorizationControllerTests
         {
             // The accepted path redirects to the login page with the handle as its only field;
             // the continuation store owns the single save, so the controller's unit of work never
-            // commits on this branch.
-            var redirect = Assert.IsType<RedirectResult>(result);
+            // commits on this branch. The result is a local redirect: the executor re-asserts
+            // locality on top of the controller's own check.
+            var redirect = Assert.IsType<LocalRedirectResult>(result);
             Assert.StartsWith("/oauth2/login?login_handle=", redirect.Url, StringComparison.Ordinal);
+            Assert.False(redirect.Permanent);
+            Assert.False(redirect.PreserveMethod);
         }
         else
         {
@@ -189,6 +199,7 @@ public class OAuthAuthorizationControllerTests
             unitOfWork.Object, AuthTestDoubles.AuthMetrics(),
             new JwtOptions { Issuer = "https://issuer.example" },
             NullLogger<OAuthAuthorizationController>.Instance).WithHttpContext();
+        UseRealUrlHelper(controller);
 
         var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => controller.Authorize(cancellation.Token));
 
@@ -200,6 +211,80 @@ public class OAuthAuthorizationControllerTests
         Assert.Empty(await database.AuditLogs.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken));
         Assert.False(controller.Response.HasStarted);
         Assert.False(controller.Response.Headers.ContainsKey("Location"));
+    }
+
+    /// <summary>
+    /// A PathBase that cannot form a local continuation URL — here a scheme-relative mount — is
+    /// refused with the fixed local error before anything is written: no Location header, no
+    /// continuation, no audit row, and no echo of the original prefix.
+    /// </summary>
+    [Fact]
+    public async Task AcceptedOutcome_UnderANonLocalPathBase_RejectsLocallyBeforeWriting()
+    {
+        var applicationId = Guid.NewGuid();
+        var validator = new Mock<IOidcAuthorizationRequestValidator>();
+        validator.Setup(service => service.ValidateAsync(
+                It.IsAny<OidcAuthorizationParameters>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AuditedOutcome(applicationId, accepted: true));
+        var audit = new Mock<IAuditService>(MockBehavior.Strict);
+        var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
+        var store = new Mock<IAuthorizationRequestStore>(MockBehavior.Strict);
+        var controller = new OAuthAuthorizationController(
+            validator.Object,
+            store.Object,
+            CreateCookielessReader(),
+            sessionReuse: null!,
+            audit.Object,
+            unitOfWork.Object,
+            AuthTestDoubles.AuthMetrics(),
+            new JwtOptions { Issuer = "https://issuer.example" },
+            NullLogger<OAuthAuthorizationController>.Instance).WithHttpContext("correlation-149");
+        UseRealUrlHelper(controller);
+        controller.Request.PathBase = new PathString("//outside.example.test");
+
+        var content = Assert.IsType<ContentResult>(await controller.Authorize(TestContext.Current.CancellationToken));
+
+        Assert.Equal(StatusCodes.Status400BadRequest, content.StatusCode);
+        Assert.False(controller.Response.Headers.ContainsKey("Location"));
+        Assert.DoesNotContain("outside.example.test", content.Content, StringComparison.Ordinal);
+        store.VerifyNoOtherCalls();
+        audit.VerifyNoOtherCalls();
+        unitOfWork.VerifyNoOtherCalls();
+    }
+
+    /// <summary>
+    /// The final continuation redirect is a <c>LocalRedirectResult</c>: even a result whose
+    /// destination is later non-local is refused by the executor itself with no response started,
+    /// so the controller's own pre-check never remains the only guard.
+    /// </summary>
+    [Fact]
+    public async Task TheFinalContinuationRedirect_RefusesANonLocalDestination()
+    {
+        var httpContext = new DefaultHttpContext
+        {
+            // The executor resolves itself from request services, exactly like the hosted
+            // pipeline; the MVC core registrations carry it.
+            RequestServices = new ServiceCollection().AddMvcCore().Services.BuildServiceProvider()
+        };
+        var actionContext = new ActionContext(httpContext, new RouteData(), new ActionDescriptor());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new LocalRedirectResult("//outside.example.test/oauth2/login")
+                .ExecuteResultAsync(actionContext));
+
+        Assert.False(httpContext.Response.HasStarted);
+        Assert.False(httpContext.Response.Headers.ContainsKey("Location"));
+    }
+
+    /// <summary>
+    /// The accepted branch decides locality through the real URL helper predicate, so unit tests
+    /// wire one exactly like the hosted pipeline would (the manually built
+    /// <see cref="ControllerContext"/> starts without route data).
+    /// </summary>
+    private static void UseRealUrlHelper(OAuthAuthorizationController controller)
+    {
+        controller.ControllerContext.RouteData ??= new RouteData();
+        controller.Url = new UrlHelper(controller.ControllerContext);
     }
 
     private static OidcAuthorizationValidationResult AuditedOutcome(Guid applicationId, bool accepted) => accepted

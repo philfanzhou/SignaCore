@@ -12,11 +12,18 @@
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- The alias keeps the sample's top-level Program distinct from SignaCore.Host's. -->
     <ProjectReference Include="..\..\samples\SignaCore.ReferenceBff\SignaCore.ReferenceBff.csproj" Aliases="BffSample" />
+    <!-- The BFF's own storage contracts target the sample database project, never the product
+         IdentityDbContext. -->
+    <ProjectReference Include="..\..\samples\SignaCore.ReferenceBff.Database\SignaCore.ReferenceBff.Database.csproj" />
+    <!-- The SQLite contract cases load the BFF's SQLite migration history by assembly name, so the
+         assembly must be present in the test output. -->
+    <ProjectReference Include="..\..\samples\SignaCore.ReferenceBff.Database.Migrations.Sqlite\SignaCore.ReferenceBff.Database.Migrations.Sqlite.csproj" />
     <ProjectReference Include="..\..\src\SignaCore.Database\SignaCore.Database.csproj" />
     <ProjectReference Include="..\..\src\SignaCore.Domain\SignaCore.Domain.csproj" />
     <ProjectReference Include="..\..\src\SignaCore.Host\SignaCore.Host.csproj">

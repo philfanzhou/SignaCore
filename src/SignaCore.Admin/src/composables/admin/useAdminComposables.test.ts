@@ -66,7 +66,7 @@ vi.mock('../useSession', () => ({ handleApiError: mocks.handleApiError }))
 vi.mock('./useAdminFeedback', () => ({ notify: mocks.notify }))
 vi.mock('element-plus', () => ({ ElMessageBox: { confirm: mocks.confirm } }))
 
-import type { AdminApp, AdminAppOidc, AdminSetting, AdminUser } from '../../services/adminApi'
+import type { AdminApp, AdminAppOidc, AdminSettingValue, AdminUser } from '../../services/adminApi'
 import { useAdminAppAccess } from './useAdminAppAccess'
 import { useAdminAppOidc } from './useAdminAppOidc'
 import { useAdminApps } from './useAdminApps'
@@ -538,33 +538,39 @@ describe('admin security and runtime settings', () => {
 
   it('loads and saves settings, including guarded bootstrap changes', async () => {
     const state = useAdminSettings()
-    const audience: AdminSetting = {
-      key: 'Jwt:Audience', valueType: 'String', isSecret: false, value: 'Services',
-      hasValue: true, restartRequired: true, updatedAt: null, updatedBy: null,
+    const audience: AdminSettingValue = {
+      key: 'jwt.audience', valueType: 'string', isRequired: true, isSensitive: false,
+      hasDefault: false, requiresRestart: true, hasValue: true, source: 'persisted',
+      value: 'Services',
     }
-    const secret: AdminSetting = {
-      key: 'WeChat:AppSecret', valueType: 'String', isSecret: true, value: null,
-      hasValue: true, restartRequired: false, updatedAt: null, updatedBy: null,
+    const secret: AdminSettingValue = {
+      key: 'wechat.app_secret', valueType: 'string', isRequired: false, isSensitive: true,
+      hasDefault: false, requiresRestart: true, hasValue: true, source: 'persisted',
+      value: null,
     }
-    const adminOrigin: AdminSetting = {
-      key: 'AdminWeb:AllowedOrigins', valueType: 'Json', isSecret: false, value: '[]',
-      hasValue: true, restartRequired: true, updatedAt: null, updatedBy: null,
+    const adminOrigin: AdminSettingValue = {
+      key: 'admin_web.allowed_origins', valueType: 'json', isRequired: false, isSensitive: false,
+      hasDefault: false, requiresRestart: true, hasValue: true, source: 'persisted',
+      value: '[]',
     }
     mocks.api.getSettings.mockResolvedValue({
-      configurationVersion: 2, runningConfigurationVersion: 1, restartPending: true, items: [audience, secret, adminOrigin],
+      snapshot: { version: 2, values: [audience, secret, adminOrigin] },
+      runningVersion: 1,
     })
     await state.loadSettings()
-    expect(state.settingGroups.value.map((group) => group.name)).toEqual(['Jwt', 'WeChat', 'AdminWeb'])
-    expect(state.getSettingsForSection('settings-identity').map((setting) => setting.key)).toEqual(['Jwt:Audience'])
-    expect(state.getSettingsForSection('settings-admin').map((setting) => setting.key)).toEqual(['AdminWeb:AllowedOrigins'])
+    expect(state.settingGroups.value.map((group) => group.name)).toEqual(['jwt', 'wechat', 'admin_web'])
+    expect(state.getSettingsForSection('settings-identity').map((setting) => setting.key)).toEqual(['jwt.audience'])
+    expect(state.getSettingsForSection('settings-admin').map((setting) => setting.key)).toEqual(['admin_web.allowed_origins'])
     expect(state.formatValue(secret)).toBe('已配置（不会回显）')
-    state.settingsDraft['Jwt:Audience'] = 'Orders'
-    state.settingsDraft['WeChat:AppSecret'] = 'new-secret'
-    mocks.api.updateSettings.mockResolvedValue({ restartRequired: true, message: 'saved' })
-    await state.saveSettings(['Jwt:Audience'])
-    expect(mocks.api.updateSettings).toHaveBeenCalledWith({ 'Jwt:Audience': 'Orders' })
-    expect(state.settingsDraft['WeChat:AppSecret']).toBe('new-secret')
-    expect(state.changedSettings.value.map((setting) => setting.key)).toEqual(['WeChat:AppSecret'])
+    // The stored version (2) leads the running one (1): the console reports restart pending.
+    expect(state.restartPending.value).toBe(true)
+    state.settingsDraft['jwt.audience'] = 'Orders'
+    state.settingsDraft['wechat.app_secret'] = 'new-secret'
+    mocks.api.updateSettings.mockResolvedValue({ version: 3 })
+    await state.saveSettings(['jwt.audience'])
+    expect(mocks.api.updateSettings).toHaveBeenCalledWith(2, [{ key: 'jwt.audience', value: 'Orders' }])
+    expect(state.settingsDraft['wechat.app_secret']).toBe('new-secret')
+    expect(state.changedSettings.value.map((setting) => setting.key)).toEqual(['wechat.app_secret'])
 
     mocks.api.getBootstrapSettings.mockResolvedValue({
       provider: 'PostgreSQL', serverVersion: '15', endpoint: 'db', filePath: 'file',

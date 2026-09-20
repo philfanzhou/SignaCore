@@ -19,6 +19,8 @@ namespace SignaCore.Tests.Integration;
 /// and both secret-verification surfaces fail closed on a Public or empty-hash row with the exact
 /// shape of a wrong secret — never an unhandled exception.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class AdminPublicClientRegistrationTests : IClassFixture<IdentityServerFixture>
 {
     private readonly IdentityServerFixture _fixture;

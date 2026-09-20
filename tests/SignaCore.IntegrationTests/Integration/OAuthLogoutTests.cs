@@ -34,6 +34,8 @@ namespace SignaCore.Tests.Integration;
 /// cookie, and the canary scan. The standard RP-Initiated shape stays unadvertised
 /// (<c>AC-10</c>).
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthLogoutTests : IClassFixture<IdentityServerFixture>
 {
     private const string AppId = "logout-contract-app";
