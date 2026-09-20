@@ -7,6 +7,7 @@ using ServiceMantle.Installation;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using ServiceMantle.Migration;
 using SignaCore.Database;
+using SignaCore.Database.Entity;
 using SignaCore.Domain.Keys;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Configuration;
@@ -91,15 +92,10 @@ internal static class InstallationStartup
                 logger.LogWarning(
                     "A database that already contains business data has no imported configuration. " +
                     "Running the protected legacy configuration import; first-run setup stays closed.");
-                await LegacyConfigurationImporter.ImportAsync(
-                    db,
-                    configuration,
-                    settingsStore,
-                    logger,
-                    environment.IsDevelopment(),
-                    cancellationToken);
+                var importedVersion = await ImportLegacyConfigurationAsync(
+                    db, configuration, masterKeyProvider, environment.IsDevelopment(), logger, cancellationToken);
                 resolution = new InstallationResolution(
-                    InstallationPhase.Completed, ConfigurationVersion: 1, SetupCode: null);
+                    InstallationPhase.Completed, ConfigurationVersion: importedVersion, SetupCode: null);
             }
 
             // The durable installation identity is the service id; this Guid is only a stable
@@ -230,6 +226,187 @@ internal static class InstallationStartup
                 "Migrated {SettingCount} legacy setting rows into the shared aggregate.",
                 result.MigratedKeyCount);
         }
+    }
+
+    /// <summary>
+    /// The protected legacy configuration upgrade import: a pre-change deployment's effective
+    /// configuration — appsettings, environment variables, and whatever the launcher injected — is
+    /// read once through the product input adapter, mapped onto normalized keys, and written into
+    /// the shared <c>service_settings</c> aggregate as its first version inside one caller-owned
+    /// serializable transaction, together with the completed installation row it requires and the
+    /// value-free product import audit.
+    /// <para>
+    /// The write goes only to the shared aggregate and the shared per-key audit rows; the legacy
+    /// <c>system_settings</c> table is never written, no administrator is created, and the one-time
+    /// setup code is never issued — anonymous setup stays closed. Failure rolls the whole attempt
+    /// back and fails startup with key names and classification codes only.
+    /// </para>
+    /// <para>
+    /// Idempotency and a concurrent second importer go through the optimistic-version path: the
+    /// single write attempt carries expected version 0 and re-reads the authority inside its own
+    /// attempt, so an aggregate another instance already committed makes this an idempotent
+    /// re-run — the shared loader further down the startup path fully validates it — never a
+    /// second import or a second import audit.
+    /// </para>
+    /// </summary>
+    /// <returns>The aggregate version this startup observed after the import settled.</returns>
+    private static async Task<int> ImportLegacyConfigurationAsync(
+        IdentityDbContext db,
+        IConfiguration configuration,
+        IMasterKeyProvider masterKeyProvider,
+        bool isDevelopment,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        // The product input rules live in the thin adapter; nothing is persisted while reading.
+        var (legacyValues, importedKeyCount) = LegacyConfigurationInput.ReadCompleteInput(
+            configuration, logger);
+
+        var changes = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var (legacyKey, value) in legacyValues)
+        {
+            changes[SharedSettingKeys.NormalizedByLegacyKey[legacyKey]] = value;
+        }
+
+        var updateService = new ServiceSettingUpdateService(
+            InstallationStores.ServiceId,
+            SharedSettingComposition.CreateRegistry(isDevelopment),
+            new EfCoreServiceSettingUpdateTransaction<IdentityDbContext>(db),
+            SharedSettingComposition.CreateRootKeySource(masterKeyProvider));
+
+        // PostgreSQL runs a retrying execution strategy; explicit transactions must be wrapped in
+        // it, and every attempt starts from a cleared change tracker inside its own transaction, so
+        // no tracked entity or audit row can survive into a retried attempt.
+        var strategy = db.Database.CreateExecutionStrategy();
+        var (importedVersion, importedThisRun) = await strategy.ExecuteAsync<(int Version, bool Imported)>(
+            async () =>
+        {
+            db.ChangeTracker.Clear();
+
+            await using var transaction = await db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable, cancellationToken);
+
+            // Re-read the authority inside this attempt: an aggregate committed by an earlier run
+            // or a concurrent instance makes this an idempotent re-run.
+            var existingVersion = await SharedSettingAggregate.ReadVersionAsync(db, cancellationToken);
+            if (existingVersion is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return ((int)existingVersion.Value, false);
+            }
+
+            var update = await updateService.UpdateAsync(
+                new ServiceSettingUpdateCommand(
+                    expectedVersion: 0,
+                    changes,
+                    SharedSettingComposition.LegacyImportOperator),
+                cancellationToken);
+
+            if (update.Status == ServiceSettingUpdateStatus.VersionConflict)
+            {
+                // Not a success: the committed aggregate — whoever wrote it — is only usable after
+                // the authoritative re-read below; nothing is written and no audit is added here.
+                await transaction.RollbackAsync(cancellationToken);
+                return (await ReReadCommittedVersionAsync(db, cancellationToken), false);
+            }
+
+            if (!update.Succeeded || update.Version is not > 0)
+            {
+                // Validation, protection, and storage refusals are closed results; the rollback
+                // below discards whatever the update staged inside its savepoint.
+                throw new SettingsSnapshotException(
+                    "The legacy configuration could not be imported into the shared service_settings " +
+                    $"aggregate ({update.Status}). Affected keys: " +
+                    $"{string.Join(", ", update.Errors.Select(error => $"{error.Key} ({error.ErrorCode})"))}. " +
+                    "The installation stays unchanged; fix the reported problem and restart.",
+                    update.Errors.Select(error => error.Key ?? error.ErrorCode).ToList());
+            }
+
+            var configurationVersion = checked((int)update.Version.Value);
+            var now = DateTimeOffset.UtcNow;
+
+            // The shared aggregate is written first, while the change tracker is still clean; the
+            // installation row and the product audit are staged afterwards, in the same transaction
+            // and the same single SaveChanges.
+            var existingInstallation = await db.ServiceInstallations
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    row => row.ServiceId == InstallationStores.ServiceIdValue,
+                    cancellationToken);
+            if (existingInstallation is null)
+            {
+                db.ServiceInstallations.Add(new ServiceInstallationEntity
+                {
+                    ServiceId = InstallationStores.ServiceIdValue,
+                    Status = InstallationStatus.Completed,
+                    CreatedAtUtc = now.UtcDateTime,
+                    CompletedAtUtc = now.UtcDateTime,
+                    Version = 1
+                });
+            }
+
+            db.AuditLogs.Add(new AuditLogEntity
+            {
+                Id = Guid.NewGuid(),
+                Action = "installation.legacy_import.completed",
+                TargetType = "Installation",
+                TargetId = InstallationStores.ServiceIdValue,
+                ActorName = "legacy-import",
+                Description =
+                    $"Imported {importedKeyCount} legacy settings into the shared aggregate. " +
+                    $"ConfigurationVersion={configurationVersion}.",
+                CreatedAt = now
+            });
+
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return (configurationVersion, true);
+        });
+
+        db.ChangeTracker.Clear();
+
+        if (importedThisRun)
+        {
+            logger.LogInformation(
+                "Legacy configuration import completed: ServiceId={ServiceId}, " +
+                "ImportedKeyCount={ImportedKeyCount}, ConfigurationVersion={Version}",
+                InstallationStores.ServiceIdValue,
+                importedKeyCount,
+                importedVersion);
+        }
+        else
+        {
+            logger.LogInformation(
+                "Legacy configuration import skipped: an aggregate committed by an earlier run or " +
+                "a concurrent instance already exists. ServiceId={ServiceId}, " +
+                "ConfigurationVersion={Version}, no second import was written.",
+                InstallationStores.ServiceIdValue,
+                importedVersion);
+        }
+
+        return importedVersion;
+    }
+
+    /// <summary>
+    /// The authoritative re-read after a version conflict: the aggregate another writer committed
+    /// is only usable when it exists at all. The shared loader further down the startup path fully
+    /// validates the committed snapshot; this read only decides between an idempotent continue and
+    /// a fail-closed refusal.
+    /// </summary>
+    private static async Task<int> ReReadCommittedVersionAsync(
+        IdentityDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var committedVersion = await SharedSettingAggregate.ReadVersionAsync(db, cancellationToken);
+        if (committedVersion is null)
+        {
+            throw new SettingsSnapshotException(
+                "The legacy configuration import hit a version conflict but no committed aggregate " +
+                "could be re-read. The installation stays unchanged; restart to retry the import.",
+                []);
+        }
+
+        return (int)committedVersion.Value;
     }
 
     /// <summary>

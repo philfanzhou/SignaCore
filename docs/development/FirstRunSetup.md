@@ -246,12 +246,15 @@ An upgrade must not expose first-run setup against an existing identity database
    row is left unadopted.
 3. Because meaningful business data exists without an imported configuration snapshot, SignaCore
    enters the protected legacy import path rather than Setup Mode.
-4. The current effective legacy configuration is read from appsettings and environment variables,
-   validated, and stored transactionally, with secrets encrypted. The pre-change key
-   `AdminBootstrap:Username` is imported as `Admin:Username`.
+4. The current effective legacy configuration is read from appsettings and environment variables —
+   including the JSON section and scalar shapes the old deployment used and the pre-change key
+   `AdminBootstrap:Username`, imported as `Admin:Username` — and written in one transaction straight
+   into the shared `service_settings` aggregate as its first version, with secrets re-protected by
+   the shared protector. The legacy `system_settings` table is never written.
 5. Installation is marked `Completed` only after the imported snapshot is valid. If the import is
-   incomplete or invalid, startup fails closed with the list of missing keys, creates no
-   administrator, and does not expose `/setup`.
+   incomplete or invalid, startup fails closed with key names and classification codes only,
+   creates no administrator, and does not expose `/setup`. A restart after a committed import is an
+   idempotent re-run: the existing aggregate is re-read and no second import is written.
 
 Keep the legacy environment variables in place for that one start, then remove them: afterwards the
 database is authoritative and remaining overrides are reported as warnings.

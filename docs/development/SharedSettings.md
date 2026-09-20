@@ -3,13 +3,15 @@
 SignaCore registers its product configuration on the shared ServiceMantle setting contract. Since
 the runtime switch, this stack is the configuration authority: the bootstrap phase activates the
 shared snapshot, `IConfiguration` is fed through the reverse projection onto the legacy colon
-keys, and first-run setup writes the shared aggregate. The legacy `system_settings` table stays as
-read-only legacy data, still served by the legacy admin console endpoints and the legacy import
-until their own switches land.
+keys, and first-run setup writes the shared aggregate. The protected legacy configuration import
+writes the shared aggregate directly too: a pre-change deployment's effective configuration lands
+as the aggregate's first version without ever writing the legacy `system_settings` table. That
+table stays as read-only legacy data, still served by the legacy admin console endpoints until
+their own switch lands.
 
-> Status: implemented (ServiceMantle tasks #101 and #547, runtime switch #548). The legacy read
-> path of the admin console and the legacy configuration import are tracked separately; removing
-> the old types is tracked after those.
+> Status: implemented (ServiceMantle tasks #101 and #547, runtime switch #548, import switch
+> #146). The legacy read path of the admin console is tracked separately; removing the old types
+> is tracked after those.
 
 ## What is registered
 
@@ -99,8 +101,33 @@ identical accept/reject outcomes.
   changes and zero audit rows.
 - First-run setup writes the shared aggregate through the same update service as the first version
   of the completion transaction, together with the administrator, the installation audit
-  projection, and the code consumption. The legacy `system_settings` table is no longer written by
-  the runtime; it is read-only legacy data until the admin console and import switches land.
+  projection, and the code consumption. The protected legacy configuration import writes the same
+  aggregate the same way (see below). The legacy `system_settings` table is no longer written by
+  the runtime; it is read-only legacy data until the admin console switch lands.
+
+## Protected legacy configuration import (#146)
+
+- A pre-change deployment — business data present, no stored configuration of either era — is
+  upgraded inside the startup initialization lock: the deployment's effective `IConfiguration`
+  (appsettings, environment variables, launcher injection) is read once by
+  `LegacyConfigurationInput`, the thin product input adapter that owns the historical reading
+  rules (catalog defaults, trimming, the `AdminBootstrap:Username` alias with canonical-key
+  precedence, JSON section/scalar shapes, the plain-HTTP compatibility opt-in, and the
+  required-key completeness check with key names only).
+- The complete candidate is mapped through `SharedSettingKeys` and written with one
+  `ServiceSettingUpdateCommand(expectedVersion: 0, full batch, legacy-import operator)` inside one
+  caller-owned serializable transaction, followed by the completed installation row it requires
+  and the value-free product audit `installation.legacy_import.completed` (event, key count,
+  version). The shared update service owns validation and re-protection; nothing is persisted
+  while reading. The legacy `system_settings` table is never written by the import.
+- PostgreSQL's retrying execution strategy wraps the attempt: every attempt re-begins its own
+  transaction from a cleared change tracker and re-reads the authority, so no tracked entity or
+  audit row survives into a retried attempt.
+- A version conflict is never treated as this run's success: the committed aggregate is re-read,
+  and the shared loader further down the startup path fully validates it; a restart after a
+  committed import is an idempotent re-run that writes no second import or per-key audit. Failure
+  rolls the whole attempt back — no partial aggregate, no installation row, no audit — and fails
+  startup with key names and classification codes only, never re-opening anonymous setup.
 
 ## Operators
 

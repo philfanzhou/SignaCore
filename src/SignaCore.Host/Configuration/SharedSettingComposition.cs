@@ -21,6 +21,15 @@ internal static class SharedSettingComposition
         WellKnownManagementAuditOperatorSources.System,
         "settings-migration");
 
+    /// <summary>
+    /// The audit operator attributed to the protected legacy configuration upgrade import — the
+    /// one that reads the deployment <c>IConfiguration</c> of a pre-change deployment and writes it
+    /// into the shared aggregate as its first version.
+    /// </summary>
+    internal static readonly ManagementAuditOperator LegacyImportOperator = ManagementAuditOperator.Create(
+        WellKnownManagementAuditOperatorSources.System,
+        "legacy-import");
+
     /// <summary>Builds the SignaCore definition registry with its composite validator.</summary>
     internal static ServiceSettingDefinitionRegistry CreateRegistry(bool isDevelopment) => new(
         [new ServiceSettingDefinitions()],
