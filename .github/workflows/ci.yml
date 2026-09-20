@@ -573,7 +573,8 @@ jobs:
 
       # The reference BFF keeps its own test assembly, so the filter above never reaches its gated
       # classes: its PostgreSQL storage contracts run here, in their own step, under the same
-      # RUN_SIGNACORE_DATABASE_CONTRACTS gate.
+      # RUN_SIGNACORE_DATABASE_CONTRACTS gate. Like the BFF step of build-test, this project does
+      # not carry the hangdump extension, so no hangdump options are passed.
       - name: Reference BFF database contracts
         run: |
           dotnet restore tests/SignaCore.ReferenceBff.Tests/SignaCore.ReferenceBff.Tests.csproj
@@ -584,8 +585,6 @@ jobs:
             --report-xunit-trx-filename signacore-reference-bff-database-contracts.trx \
             --output Detailed \
             --results-directory reports \
-            --hangdump \
-            --hangdump-timeout 5m \
             --no-restore
 
       - name: Upload test results
