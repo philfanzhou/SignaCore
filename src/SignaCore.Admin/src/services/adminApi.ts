@@ -424,16 +424,48 @@ class AdminApiClient {
     return response.data
   }
 
-  async getSettings() {
-    const response = await this.client.get<AdminSettingsList>('/api/admin/settings')
+  /**
+   * 读取共享设置定义目录。定义响应不携带默认值与约束细节，只有 hasDefault。
+   */
+  async getSettingDefinitions() {
+    const response = await this.client.get<AdminSettingDefinitions>(
+      '/management/v1/settings/definitions')
     return response.data
   }
 
-  /** Only the supplied keys change; omitting a secret leaves it untouched. */
-  async updateSettings(values: Record<string, string>) {
-    const response = await this.client.put<AdminSettingsUpdateResult>(
-      '/api/admin/settings',
-      { values },
+  /**
+   * 读取共享聚合的当前值快照。响应体 version 是服务端 long；超出 JS 安全整数范围时以
+   * null 返回，调用方必须禁止提交而不是猜测。运行版本从产品响应头解析，缺失或非法时为
+   * null，表示"运行版本未知"。
+   */
+  async getSettings(): Promise<{
+    snapshot: AdminSettingsSnapshot
+    runningVersion: AdminRunningConfigurationVersion
+  }> {
+    const response = await this.client.get<AdminSettingsSnapshot>(
+      '/management/v1/settings',
+      {
+        // version 必须先按文本校验再转数字：JSON.parse 会把超出安全整数范围的 long 静默
+        // 舍入，舍入后的 expectedVersion 会被服务端当作另一个版本拒绝或误用。
+        transformResponse: [(raw: unknown) => parseSettingsSnapshot(raw)],
+      },
+    )
+    return {
+      snapshot: response.data,
+      runningVersion: parseRunningVersion(
+        response.headers?.[RunningConfigurationVersionHeader],
+      ),
+    }
+  }
+
+  /**
+   * 提交一批设置变更。changes 为空时调用方不应发起请求；expectedVersion 必须来自加载时的
+   * 快照版本。成功返回提交后的新版本；409 表示版本冲突。
+   */
+  async updateSettings(expectedVersion: number, changes: AdminSettingChange[]) {
+    const response = await this.client.post<AdminSettingsUpdateResult>(
+      '/management/v1/settings',
+      { expectedVersion, changes },
     )
     return response.data
   }
@@ -522,34 +554,87 @@ export interface BootstrapInspection {
   message: string
 }
 
-export interface AdminSetting {
+export interface AdminSettingDefinition {
   key: string
-  valueType: 'String' | 'Number' | 'Boolean' | 'Json'
-  isSecret: boolean
-  /** null for secrets: secret values never leave the service. */
-  value: string | null
-  hasValue: boolean
-  restartRequired: boolean
-  updatedAt: number | null
-  updatedBy: string | null
+  valueType: AdminSettingValueType
+  isRequired: boolean
+  isSensitive: boolean
+  hasDefault: boolean
+  requiresRestart: boolean
 }
 
-export interface AdminSettingsList {
-  configurationVersion: number
-  runningConfigurationVersion: number
-  restartPending: boolean
-  items: AdminSetting[]
+export interface AdminSettingDefinitions {
+  definitions: AdminSettingDefinition[]
+}
+
+export interface AdminSettingValue {
+  key: string
+  valueType: AdminSettingValueType
+  isRequired: boolean
+  isSensitive: boolean
+  hasDefault: boolean
+  requiresRestart: boolean
+  hasValue: boolean
+  source: 'missing' | 'default' | 'persisted'
+  /** null for sensitive values and unset keys: neither ever leaves the service. */
+  value: string | null
+}
+
+/**
+ * 服务端 version 是 long。当返回值超出 JS 安全整数范围时 version 为 null：
+ * 此时前端无法精确表达版本，禁止提交更新。
+ */
+export interface AdminSettingsSnapshot {
+  version: number | null
+  values: AdminSettingValue[]
+}
+
+/** null 表示移除显式值；空字符串表示"不修改"。 */
+export interface AdminSettingChange {
+  key: string
+  value: string | null
 }
 
 export interface AdminSettingsUpdateResult {
-  configurationVersion: number
-  changedKeys: string[]
-  restartRequired: boolean
-  message: string
+  version: number
 }
+
+export type AdminSettingValueType = 'string' | 'number' | 'boolean' | 'json'
+
+/** 运行版本来自产品响应头；null 表示缺失或无法解析，绝不推断为"已生效"。 */
+export type AdminRunningConfigurationVersion = number | null
+
+/** 运行版本 Header 名。CORS 已经把它加入 exposed headers。 */
+export const RunningConfigurationVersionHeader = 'X-SignaCore-Running-Configuration-Version'
 
 export function createAdminApiClient() {
   return new AdminApiClient()
+}
+
+/**
+ * 解析当前值快照，并对 version 做安全整数校验。JSON.parse 会把超出
+ * Number.MAX_SAFE_INTEGER 的 long 静默舍入，所以 version 以响应原文中的数字位为准：
+ * 无法精确表达时返回 null，调用方据此禁止提交。
+ */
+export function parseSettingsSnapshot(raw: unknown): AdminSettingsSnapshot {
+  const text = typeof raw === 'string' ? raw : ''
+  const parsed = JSON.parse(text) as AdminSettingsSnapshot
+  const match = /"version"\s*:\s*(-?\d+)/.exec(text)
+  const rawVersion = match?.[1]
+  const version =
+    rawVersion !== undefined && Number.isSafeInteger(Number(rawVersion))
+      ? Number(rawVersion)
+      : null
+  return { ...parsed, version }
+}
+
+/** 运行版本头缺失、非数字或超出安全整数范围时返回 null（运行版本未知）。 */
+export function parseRunningVersion(raw: unknown): AdminRunningConfigurationVersion {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (!/^-?\d+$/.test(trimmed)) return null
+  const parsed = Number(trimmed)
+  return Number.isSafeInteger(parsed) ? parsed : null
 }
 
 export function getErrorMessage(error: unknown) {
