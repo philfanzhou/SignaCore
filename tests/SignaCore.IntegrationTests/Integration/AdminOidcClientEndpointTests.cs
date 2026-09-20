@@ -13,6 +13,8 @@ namespace SignaCore.Tests.Integration;
 /// Wire contract of the interactive OIDC administration endpoints: who may call them, what a
 /// successful call returns, and what a rejected one leaves behind.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
 {
     private const string AppId = "oidc-endpoint-test-app";

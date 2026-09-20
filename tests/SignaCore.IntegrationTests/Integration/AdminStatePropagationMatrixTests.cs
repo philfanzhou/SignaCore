@@ -26,6 +26,8 @@ namespace SignaCore.Tests.Integration;
 /// explicit non-guarantee — the already-issued self-contained access token still validates
 /// downstream to <c>exp</c> while UserInfo's live read rejects it.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentityServerFixture>
 {
     // xunit v3 runs the methods of one class in parallel; every method therefore seeds its own

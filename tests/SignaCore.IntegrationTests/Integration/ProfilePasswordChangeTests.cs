@@ -22,6 +22,8 @@ namespace SignaCore.Tests.Integration;
 /// old one does not, an already-issued access token still validates to <c>exp</c>, and neither a
 /// plaintext password nor a hash reaches the logs, the audit snapshot, or any response.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class ProfilePasswordChangeTests : IClassFixture<IdentityServerFixture>
 {
     private const string OldPassword = "Old-Secret-123";

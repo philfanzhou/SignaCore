@@ -25,6 +25,8 @@ namespace SignaCore.Tests.Integration;
 /// sensitive-value guarantees. Every session here uses a revalidatable continuation
 /// (<see cref="SeedLegalContinuationAsync"/>) unless a test says otherwise.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthLoginCancelEndpointTests : IClassFixture<IdentityServerFixture>
 {
     private const string LocalErrorPage =

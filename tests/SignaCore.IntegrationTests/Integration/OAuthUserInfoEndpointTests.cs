@@ -24,6 +24,8 @@ namespace SignaCore.Tests.Integration;
 /// activation of <c>userinfo_endpoint</c>. Access tokens come from the real redemption endpoint,
 /// never from hand-built strings.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthUserInfoEndpointTests : IClassFixture<IdentityServerFixture>
 {
     private const string AppId = "userinfo-endpoint-app";

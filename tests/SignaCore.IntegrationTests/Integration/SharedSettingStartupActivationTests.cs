@@ -32,6 +32,8 @@ namespace SignaCore.Tests.Integration;
 /// <see cref="SharedSettingStartupActivationTestOrderer"/> pins the order independently of the
 /// compile artifact: every read-only case runs before the single database-mutating case.
 /// </remarks>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 [TestCaseOrderer(typeof(SharedSettingStartupActivationTestOrderer))]
 public sealed class SharedSettingStartupActivationTests : IClassFixture<IdentityServerFixture>
 {

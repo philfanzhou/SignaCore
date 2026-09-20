@@ -32,6 +32,8 @@ namespace SignaCore.Tests.Integration;
 /// This slice issues no authorization code, so a fully valid request is answered locally as well.
 /// </para>
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixture>
 {
     private const string InteractiveAppId = "authorize-contract-app";

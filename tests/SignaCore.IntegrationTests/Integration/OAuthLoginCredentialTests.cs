@@ -19,6 +19,8 @@ namespace SignaCore.Tests.Integration;
 /// URI is a local error with zero writes — the <c>EV-01</c> revalidation runs before anything is
 /// consumed.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthLoginCredentialTests : IClassFixture<IdentityServerFixture>
 {
     private const string ActiveUser = "login_active_user";

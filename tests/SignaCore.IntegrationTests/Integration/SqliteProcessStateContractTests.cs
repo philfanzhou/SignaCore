@@ -31,6 +31,36 @@ public sealed class SqliteProcessStateContractTests
         Assert.Empty(offenders.ToList());
     }
 
+    /// <summary>
+    /// Discovery must start from the fixture interface, not from the marker: a consumer that
+    /// simply forgot both annotations would never be enumerated by the marker-based check and
+    /// would silently run in parallel with the clear its own fixture performs at disposal. Every
+    /// class implementing <c>IClassFixture&lt;IdentityServerFixture&gt;</c> — directly or through
+    /// an inherited interface — must run in the collection and carry the marker.
+    /// </summary>
+    [Fact]
+    public void EveryIdentityServerFixtureConsumer_RunsInTheProcessStateCollectionWithTheMarker()
+    {
+        var offenders =
+            from type in Assembly.GetTypes()
+            where type.IsClass && ConsumesIdentityServerFixture(type)
+            let missing =
+                (CollectionNameOf(type) == SqliteProcessState.CollectionName ? string.Empty : "collection")
+                + (type.GetCustomAttribute<UsesProcessWideSqlitePoolClearingAttribute>() is null
+                    ? " marker"
+                    : string.Empty)
+            where missing.Length > 0
+            select $"{type.FullName}: missing {missing.Trim()}";
+
+        Assert.Empty(offenders.ToList());
+    }
+
+    private static bool ConsumesIdentityServerFixture(Type type) =>
+        type.GetInterfaces().Any(@interface =>
+            @interface.IsGenericType
+            && @interface.GetGenericTypeDefinition() == typeof(IClassFixture<>)
+            && @interface.GetGenericArguments()[0] == typeof(IdentityServerFixture));
+
     [Fact]
     public void EveryPoolClearingClass_RoutesThroughTheSingleEntry()
     {

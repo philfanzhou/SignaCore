@@ -23,6 +23,8 @@ namespace SignaCore.Tests.Integration;
 /// one Token audit case proves that the response header, the Serilog request scope, the accessor,
 /// and the persisted audit row all carry the same id.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed partial class CorrelationPropagationTests : IClassFixture<IdentityServerFixture>
 {
     private const string HeaderName = "x-correlation-id";

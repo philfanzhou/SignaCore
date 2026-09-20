@@ -26,6 +26,8 @@ namespace SignaCore.Tests.Integration;
 /// Each scenario drives a fresh derived host so its limiter state starts empty; the budgets
 /// asserted are the <c>IdentityConstants</c> values themselves.</para>
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed partial class OAuthRateLimitTests : IClassFixture<IdentityServerFixture>
 {
     private const string ClientId = "rate-limit-app";

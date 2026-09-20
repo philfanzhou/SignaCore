@@ -11,6 +11,8 @@ namespace SignaCore.Tests.Integration;
 /// migration removed the legacy <c>data_protection_keys</c> table — the shared ServiceMantle key
 /// ring is the only key store.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class LegacyAdminConsoleCoexistenceTests : IClassFixture<IdentityServerFixture>
 {
     private readonly IdentityServerFixture _fixture;

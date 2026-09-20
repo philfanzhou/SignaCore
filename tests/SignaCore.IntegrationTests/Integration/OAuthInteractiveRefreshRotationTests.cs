@@ -24,6 +24,8 @@ namespace SignaCore.Tests.Integration;
 /// and the <c>DF-09</c> canary scan of the audit surface. Tokens, codes, and sessions are
 /// obtained through the real endpoints and stores, never raw SQL.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<IdentityServerFixture>
 {
     private const string AppId = "refresh-rotation-app";
