@@ -1,17 +1,19 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 
 namespace SignaCore.ReferenceBff.Database;
 
 /// <summary>
 /// The reference BFF's own persistence context. It is intentionally independent of the product
-/// <c>IdentityDbContext</c>: this sample database owns exactly one table — the single
-/// initial-administrator binding slot — and maps no product entity and no ServiceMantle business
-/// entity.
+/// <c>IdentityDbContext</c>: beside the single initial-administrator binding slot, this context maps
+/// exactly the two ServiceMantle tables the shared installation and audit contract owns —
+/// <c>service_installations</c> and <c>service_audit_logs</c> — through the shared library mappings.
+/// No product entity and no other ServiceMantle business entity is reachable from this context.
 /// </summary>
 public sealed class ReferenceBffDbContext(DbContextOptions<ReferenceBffDbContext> options)
-    : DbContext(options)
+    : DbContext(options), IServiceDbContext
 {
     private static readonly ValueConverter<DateTimeOffset, long> UnixMicrosecondsConverter = new(
         value => (value.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / 10,
@@ -20,6 +22,9 @@ public sealed class ReferenceBffDbContext(DbContextOptions<ReferenceBffDbContext
     /// <summary>The binding slot table; the unique index on <see cref="ManagementRoleBindingEntity.Role"/>
     /// keeps it a single row.</summary>
     public DbSet<ManagementRoleBindingEntity> ManagementRoleBindings => Set<ManagementRoleBindingEntity>();
+
+    /// <summary>The shared ServiceMantle installation state for this sample's service id.</summary>
+    public DbSet<ServiceInstallationEntity> ServiceInstallations => Set<ServiceInstallationEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -47,6 +52,20 @@ public sealed class ReferenceBffDbContext(DbContextOptions<ReferenceBffDbContext
 
         entity.Property(binding => binding.IsActive).HasColumnName("is_active");
         ConfigureInstant(entity.Property(binding => binding.CreatedAtUtc).HasColumnName("created_at"));
+
+        // Shared ServiceMantle tables, applied through the library mappings only: no local clone
+        // of a shared entity. Their DateTime columns keep the library's provider-default storage —
+        // the role table's DateTimeOffset/SQLite microsecond convention deliberately does not
+        // propagate here, so the shared schema stays byte-identical to the product's. The audit
+        // dialect is chosen per provider for its text-length check constraints.
+        modelBuilder.AddServiceMantleInstallation();
+        modelBuilder.AddServiceMantleManagementAudit(
+            string.Equals(
+                Database.ProviderName,
+                "Microsoft.EntityFrameworkCore.Sqlite",
+                StringComparison.Ordinal)
+                ? ManagementAuditDatabaseDialect.Sqlite
+                : ManagementAuditDatabaseDialect.PostgreSql);
     }
 
     private void ConfigureInstant(PropertyBuilder property)

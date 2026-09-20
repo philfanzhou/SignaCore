@@ -22,6 +22,171 @@ namespace SignaCore.ReferenceBff.Database.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ServiceMantle.Persistence.EntityFrameworkCore.ManagementAuditLogEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(36)
+                        .HasColumnType("character varying(36)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("action");
+
+                    b.Property<string>("ClientIp")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("client_ip");
+
+                    b.Property<string>("CorrelationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("correlation_id");
+
+                    b.Property<string>("MetadataJson")
+                        .HasMaxLength(262144)
+                        .HasColumnType("character varying(262144)")
+                        .HasColumnName("metadata_json");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at_utc");
+
+                    b.Property<string>("OperatorDisplayName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("operator_display_name");
+
+                    b.Property<string>("OperatorId")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("operator_id");
+
+                    b.Property<string>("OperatorSource")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("operator_source");
+
+                    b.Property<int>("Outcome")
+                        .HasColumnType("integer")
+                        .HasColumnName("outcome");
+
+                    b.Property<string>("SecurityDescription")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("security_description");
+
+                    b.Property<string>("TargetId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("target_id");
+
+                    b.Property<string>("TargetType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("target_type");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OccurredAtUtc", "Id")
+                        .HasDatabaseName("ix_service_audit_logs_occurred_at_utc_id");
+
+                    b.HasIndex("Action", "OccurredAtUtc", "Id")
+                        .HasDatabaseName("ix_service_audit_logs_action_occurred_at_utc_id");
+
+                    b.HasIndex("OperatorId", "OccurredAtUtc", "Id")
+                        .HasDatabaseName("ix_service_audit_logs_operator_id_occurred_at_utc_id");
+
+                    b.HasIndex("TargetId", "OccurredAtUtc", "Id")
+                        .HasDatabaseName("ix_service_audit_logs_target_id_occurred_at_utc_id");
+
+                    b.HasIndex("TargetType", "OccurredAtUtc", "Id")
+                        .HasDatabaseName("ix_service_audit_logs_target_type_occurred_at_utc_id");
+
+                    b.HasIndex("TargetType", "TargetId", "OccurredAtUtc", "Id")
+                        .HasDatabaseName("ix_service_audit_logs_target_occurred_at_utc_id");
+
+                    b.ToTable("service_audit_logs", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_service_audit_logs_action_length", "action IS NULL OR octet_length(action) <= 800");
+
+                            t.HasCheckConstraint("ck_service_audit_logs_client_ip_length", "client_ip IS NULL OR octet_length(client_ip) <= 256");
+
+                            t.HasCheckConstraint("ck_service_audit_logs_correlation_id_length", "correlation_id IS NULL OR octet_length(correlation_id) <= 512");
+
+                            t.HasCheckConstraint("ck_service_audit_logs_id_length", "id IS NULL OR octet_length(id) <= 144");
+
+                            t.HasCheckConstraint("ck_service_audit_logs_id_not_empty", "id <> '00000000-0000-0000-0000-000000000000'");
+
+                            t.HasCheckConstraint("ck_service_audit_logs_metadata_json_length", "metadata_json IS NULL OR octet_length(metadata_json) <= 262144");
+
+                            t.HasCheckConstraint("ck_service_audit_logs_operator_display_name_length", "operator_display_name IS NULL OR octet_length(operator_display_name) <= 1024");
+
+                            t.HasCheckConstraint("ck_service_audit_logs_operator_id_length", "operator_id IS NULL OR octet_length(operator_id) <= 1024");
+
+                            t.HasCheckConstraint("ck_service_audit_logs_operator_source_length", "operator_source IS NULL OR octet_length(operator_source) <= 400");
+
+                            t.HasCheckConstraint("ck_service_audit_logs_security_description_length", "security_description IS NULL OR octet_length(security_description) <= 16000");
+
+                            t.HasCheckConstraint("ck_service_audit_logs_target_id_length", "target_id IS NULL OR octet_length(target_id) <= 1024");
+
+                            t.HasCheckConstraint("ck_service_audit_logs_target_type_length", "target_type IS NULL OR octet_length(target_type) <= 800");
+                        });
+                });
+
+            modelBuilder.Entity("ServiceMantle.Persistence.EntityFrameworkCore.ServiceInstallationEntity", b =>
+                {
+                    b.Property<string>("ServiceId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("service_id");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at_utc");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("SetupCodeDigest")
+                        .HasMaxLength(74)
+                        .HasColumnType("character varying(74)")
+                        .HasColumnName("setup_code_digest");
+
+                    b.Property<DateTime?>("SetupCodeExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("setup_code_expires_at_utc");
+
+                    b.Property<int>("SetupCodeGeneration")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("setup_code_generation");
+
+                    b.Property<DateTime?>("SetupCodeIssuedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("setup_code_issued_at_utc");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("ServiceId");
+
+                    b.ToTable("service_installations", (string)null);
+                });
+
             modelBuilder.Entity("SignaCore.ReferenceBff.Database.ManagementRoleBindingEntity", b =>
                 {
                     b.Property<Guid>("Id")
