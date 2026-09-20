@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,7 +9,6 @@ using SignaCore.Domain.Keys;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
 using Xunit;
-using Xunit.Sdk;
 
 namespace SignaCore.Tests.Integration;
 
@@ -22,19 +22,18 @@ namespace SignaCore.Tests.Integration;
 /// </summary>
 /// <remarks>
 /// The three cases share one class-level <see cref="IdentityServerFixture"/> and therefore one
-/// SQLite database. <see cref="TwoHosts_ObserveTheSameVersionAndSnapshot_AndVersionsAdvanceMonotonically"/>
-/// is the only case that commits a change to that shared database (it advances the persisted
-/// aggregate from v1 to v2), while <see cref="StartupMigration_LeavesTheLegacyRowsUntouched"/>
-/// reads the live aggregate row and requires it to still be the pristine v1 the startup migration
-/// produced. xUnit does not guarantee the intra-class execution order — it follows the compiled
-/// assembly's discovery order, which flips when unrelated test files are added — so the mutating
-/// case running first deterministically broke the pristine read (issue #320). The
-/// <see cref="SharedSettingStartupActivationTestOrderer"/> pins the order independently of the
-/// compile artifact: every read-only case runs before the single database-mutating case.
+/// SQLite database, and <see cref="TwoHosts_ObserveTheSameVersionAndSnapshot_AndVersionsAdvanceMonotonically"/>
+/// advances the persisted aggregate from v1 to v2. Every case that needs the pristine
+/// post-migration state re-establishes it first (<see cref="BootFreshlyMigratedHostAsync"/>), so
+/// no case depends on the intra-class execution order. The orderer of issue #320 cannot provide
+/// that inside this class anymore: the class must run in the
+/// <see cref="SqliteProcessState.CollectionName"/> collection (its fixture clears the process-wide
+/// SQLite pools at disposal, issue #321), and xUnit applies class-level test-case orderers only to
+/// classes of their own implicit collection — inside an explicit collection the attribute is
+/// ignored and the discovery order, which differs per platform and build artifact, decides.
 /// </remarks>
 [Collection(SqliteProcessState.CollectionName)]
 [UsesProcessWideSqlitePoolClearing]
-[TestCaseOrderer(typeof(SharedSettingStartupActivationTestOrderer))]
 public sealed class SharedSettingStartupActivationTests : IClassFixture<IdentityServerFixture>
 {
     private static readonly ManagementAuditOperator UpdateOperator = ManagementAuditOperator.Create(
@@ -49,6 +48,27 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
     }
 
     /// <summary>
+    /// Boots a host against a freshly re-migrated aggregate: the shared class-fixture database is
+    /// first reset to the not-yet-migrated state (the legacy rows stay byte-for-byte), so the
+    /// booted host's startup performs the one-shot migration again and the aggregate is pristine
+    /// v1 no matter which sibling cases ran before. Each case is thereby independent of the
+    /// intra-class execution order.
+    /// </summary>
+    private async Task<WebApplicationFactory<Program>> BootFreshlyMigratedHostAsync()
+    {
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            await SharedSettingTestDatabase.DeleteAggregateAsync(
+                database, TestContext.Current.CancellationToken);
+        }
+
+        var host = _fixture.WithTestServices(_ => { });
+        _ = host.CreateClient();
+        return host;
+    }
+
+    /// <summary>
     /// Acceptance: for every registered key (including the JSON-expanded sub-keys), the activated
     /// shared snapshot's reverse projection yields exactly the configuration entries the legacy
     /// snapshot path produced from the same stored corpus, and both render the same values through
@@ -57,6 +77,8 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
     [Fact]
     public async Task ActivatedProjection_IsEquivalentToTheLegacySnapshotPath()
     {
+        using var host = await BootFreshlyMigratedHostAsync();
+
         // The legacy path over the fixture's original system_settings corpus.
         SystemSettingsSnapshot legacy;
         using (var scope = _fixture.Services.CreateScope())
@@ -68,9 +90,9 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
         }
 
         // The activated shared snapshot, projected back onto legacy keys. Resolving the accessor
-        // through DI also proves the bootstrap-activated instance is the one the composed hosts
-        // observe, not a second empty one.
-        var accessor = _fixture.Services.GetRequiredService<IServiceSettingCurrentSnapshotAccessor>();
+        // of the freshly migrated host also proves the bootstrap-activated instance is the one the
+        // composed hosts observe, not a second empty one.
+        var accessor = host.Services.GetRequiredService<IServiceSettingCurrentSnapshotAccessor>();
         Assert.True(accessor.TryGetCurrent(out var shared));
         var (_, projectedEntries) = SharedSettingConfigurationProjection.Project(shared!);
 
@@ -106,15 +128,18 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
     [Fact]
     public async Task TwoHosts_ObserveTheSameVersionAndSnapshot_AndVersionsAdvanceMonotonically()
     {
+        // First instance on the freshly re-migrated database; its startup performed the one-shot
+        // migration again, so the aggregate is pristine v1.
+        using var firstHost = await BootFreshlyMigratedHostAsync();
+        var firstAccessor = firstHost.Services.GetRequiredService<IServiceSettingCurrentSnapshotAccessor>();
+        Assert.True(firstAccessor.TryGetCurrent(out var firstSnapshot));
+
         // Second instance on the same database: the aggregate already exists, so its startup skips
         // the migration and activates the same persisted version.
         using var secondHost = _fixture.WithTestServices(_ => { });
         _ = secondHost.CreateClient();
         var secondAccessor = secondHost.Services.GetRequiredService<IServiceSettingCurrentSnapshotAccessor>();
         Assert.True(secondAccessor.TryGetCurrent(out var secondSnapshot));
-
-        var firstAccessor = _fixture.Services.GetRequiredService<IServiceSettingCurrentSnapshotAccessor>();
-        Assert.True(firstAccessor.TryGetCurrent(out var firstSnapshot));
 
         Assert.Equal(firstSnapshot!.Version, secondSnapshot!.Version);
 
@@ -132,7 +157,7 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
 
         // One shared update advances the aggregate version; a third activation observes the higher
         // version and the new value.
-        using (var scope = _fixture.Services.CreateScope())
+        using (var scope = firstHost.Services.CreateScope())
         {
             var database = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
             var update = scope.ServiceProvider.GetRequiredService<ServiceSettingUpdateService>();
@@ -163,10 +188,14 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
     /// <summary>
     /// The fixture database keeps its legacy rows untouched: the startup migration re-protects
     /// into the shared aggregate and never modifies, deletes, or re-versions the legacy table.
+    /// The pristine aggregate state is re-established first, so the case also holds when it runs
+    /// after the version-advancing sibling.
     /// </summary>
     [Fact]
     public async Task StartupMigration_LeavesTheLegacyRowsUntouched()
     {
+        using var host = await BootFreshlyMigratedHostAsync();
+
         using var scope = _fixture.Services.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
         var rows = await database.SystemSettings
@@ -187,37 +216,4 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
             SharedSettingKeys.NormalizedByLegacyKey.Values.Order(StringComparer.Ordinal),
             SharedSettingTestDatabase.ParseValues(aggregate).Keys.Order(StringComparer.Ordinal));
     }
-}
-
-/// <summary>
-/// The intra-class execution-order contract of <see cref="SharedSettingStartupActivationTests"/>
-/// (issue #320): every read-only case runs before the single case that commits a change to the
-/// shared class-fixture database, so the assertions no longer depend on the compile-artifact
-/// discovery order xUnit would otherwise use.
-/// </summary>
-internal sealed class SharedSettingStartupActivationTestOrderer : Xunit.v3.ITestCaseOrderer
-{
-    /// <summary>
-    /// The cases that commit a change to the shared class-fixture database and must therefore run
-    /// after every read-only case. A new mutating case has to be listed here to keep the contract;
-    /// <see cref="SharedSettingStartupActivationOrdererContractTests"/> fails when a listed name no
-    /// longer resolves to a test on the class, so the set cannot silently drift from the code.
-    /// </summary>
-    private static readonly HashSet<string> DatabaseMutatingTests = new(StringComparer.Ordinal)
-    {
-        nameof(SharedSettingStartupActivationTests
-            .TwoHosts_ObserveTheSameVersionAndSnapshot_AndVersionsAdvanceMonotonically),
-    };
-
-    public IReadOnlyCollection<TTestCase> OrderTestCases<TTestCase>(
-        IReadOnlyCollection<TTestCase> testCases)
-        where TTestCase : ITestCase =>
-        testCases
-            .OrderBy(testCase => IsDatabaseMutating(testCase) ? 1 : 0)
-            .ThenBy(testCase => testCase.TestMethod?.MethodName, StringComparer.Ordinal)
-            .ToList();
-
-    private static bool IsDatabaseMutating(ITestCase testCase) =>
-        testCase.TestMethod?.MethodName is { } methodName
-        && DatabaseMutatingTests.Contains(methodName);
 }
