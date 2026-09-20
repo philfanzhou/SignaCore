@@ -23,6 +23,7 @@ using SignaCore.Domain.Validators;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.HealthChecks;
 using SignaCore.Host.Http;
+using SignaCore.Host.Management;
 using SignaCore.Host.Security;
 using SignaCore.Host.Services;
 
@@ -432,6 +433,10 @@ public static class ServiceCollectionExtensions
                     policy.WithOrigins(origins)
                         .AllowAnyHeader()
                         .AllowAnyMethod()
+                        // A cross-origin console cannot read response headers beyond the
+                        // CORS-safelisted set; the product running-version header on the shared
+                        // settings query is the one custom header the console needs to read.
+                        .WithExposedHeaders(RunningConfigurationVersionHeaderMiddleware.HeaderName)
                         .AllowCredentials();
                 }
                 else

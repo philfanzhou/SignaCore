@@ -19,7 +19,12 @@ vi.mock('axios', () => ({
   },
 }))
 
-import { createAdminApiClient, getErrorMessage } from './adminApi'
+import {
+  createAdminApiClient,
+  getErrorMessage,
+  parseRunningVersion,
+  parseSettingsSnapshot,
+} from './adminApi'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -69,29 +74,83 @@ describe('AdminApiClient', () => {
     })
   })
 
-  it('reads settings from the authenticated settings endpoint', async () => {
-    const payload = {
-      configurationVersion: 2,
-      runningConfigurationVersion: 1,
-      restartPending: true,
-      items: [],
-    }
+  it('reads settings from the shared setting query with the running-version header', async () => {
+    // The mock answers with what the response transform produced (real axios would run
+    // parseSettingsSnapshot on the raw body; its behavior is covered directly below).
+    mocks.http.get.mockResolvedValue({
+      data: { version: 2, values: [] },
+      headers: { 'X-SignaCore-Running-Configuration-Version': '1' },
+    })
+
+    const { snapshot, runningVersion } = await createAdminApiClient().getSettings()
+
+    expect(mocks.http.get).toHaveBeenCalledWith('/management/v1/settings', {
+      transformResponse: [expect.any(Function)],
+    })
+    // The snapshot body stays the shared contract; the transform only validates the version.
+    expect(snapshot).toEqual({ version: 2, values: [] })
+    expect(runningVersion).toBe(1)
+  })
+
+  it('parses the snapshot version from the raw body without silent rounding', () => {
+    expect(parseSettingsSnapshot('{"version":7,"values":[]}')).toEqual({
+      version: 7,
+      values: [],
+    })
+    // long.MaxValue cannot be expressed as a safe integer: refuse instead of rounding.
+    expect(
+      parseSettingsSnapshot('{"version":9223372036854775807,"values":[]}').version,
+    ).toBeNull()
+  })
+
+  it('marks the running version unknown when the header is missing or invalid', async () => {
+    mocks.http.get.mockResolvedValue({
+      data: { version: 2, values: [] },
+      headers: {},
+    })
+    await expect(createAdminApiClient().getSettings()).resolves.toEqual({
+      snapshot: { version: 2, values: [] },
+      runningVersion: null,
+    })
+
+    mocks.http.get.mockResolvedValue({
+      data: { version: 2, values: [] },
+      headers: { 'X-SignaCore-Running-Configuration-Version': 'not-a-number' },
+    })
+    await expect(createAdminApiClient().getSettings()).resolves.toEqual({
+      snapshot: { version: 2, values: [] },
+      runningVersion: null,
+    })
+
+    expect(parseRunningVersion('9007199254740993')).toBeNull()
+  })
+
+  it('reads the shared setting definitions', async () => {
+    const payload = { definitions: [] }
     mocks.http.get.mockResolvedValue({ data: payload })
 
-    const result = await createAdminApiClient().getSettings()
+    const result = await createAdminApiClient().getSettingDefinitions()
 
-    expect(mocks.http.get).toHaveBeenCalledWith('/api/admin/settings')
+    expect(mocks.http.get).toHaveBeenCalledWith('/management/v1/settings/definitions')
     expect(result).toBe(payload)
   })
 
-  it('sends only the supplied settings keys', async () => {
-    mocks.http.put.mockResolvedValue({ data: { changedKeys: ['Jwt:Audience'] } })
+  it('sends a versioned change batch to the shared update endpoint', async () => {
+    mocks.http.post.mockResolvedValue({ data: { version: 3 } })
 
-    await createAdminApiClient().updateSettings({ 'Jwt:Audience': 'Orders' })
+    const result = await createAdminApiClient().updateSettings(2, [
+      { key: 'jwt.audience', value: 'Orders' },
+      { key: 'sms.otp_hmac_key', value: null },
+    ])
 
-    expect(mocks.http.put).toHaveBeenCalledWith('/api/admin/settings', {
-      values: { 'Jwt:Audience': 'Orders' },
+    expect(mocks.http.post).toHaveBeenCalledWith('/management/v1/settings', {
+      expectedVersion: 2,
+      changes: [
+        { key: 'jwt.audience', value: 'Orders' },
+        { key: 'sms.otp_hmac_key', value: null },
+      ],
     })
+    expect(result).toEqual({ version: 3 })
   })
 
   it('reads the interactive OIDC configuration of one application', async () => {

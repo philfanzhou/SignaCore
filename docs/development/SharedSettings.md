@@ -3,13 +3,14 @@
 SignaCore registers its product configuration on the shared ServiceMantle setting contract. Since
 the runtime switch, this stack is the configuration authority: the bootstrap phase activates the
 shared snapshot, `IConfiguration` is fed through the reverse projection onto the legacy colon
-keys, and first-run setup writes the shared aggregate. The legacy `system_settings` table stays as
-read-only legacy data, still served by the legacy admin console endpoints and the legacy import
-until their own switches land.
+keys, first-run setup writes the shared aggregate, and the admin console's settings page reads and
+writes the shared aggregate through the shared management endpoints. The legacy `system_settings`
+table stays as read-only legacy data, still consumed by the legacy configuration import until its
+own switch lands.
 
-> Status: implemented (ServiceMantle tasks #101 and #547, runtime switch #548). The legacy read
-> path of the admin console and the legacy configuration import are tracked separately; removing
-> the old types is tracked after those.
+> Status: implemented (ServiceMantle tasks #101 and #547, runtime switch #548, admin console
+> switch #145). The legacy configuration import is tracked separately; removing the old types is
+> tracked after those.
 
 ## What is registered
 
@@ -100,13 +101,36 @@ identical accept/reject outcomes.
 - First-run setup writes the shared aggregate through the same update service as the first version
   of the completion transaction, together with the administrator, the installation audit
   projection, and the code consumption. The legacy `system_settings` table is no longer written by
-  the runtime; it is read-only legacy data until the admin console and import switches land.
+  the runtime; it is read-only legacy data until the legacy import switch lands.
+
+## Admin console endpoints (#145)
+
+- The normal host maps the shared management API v1 group with
+  `MapServiceMantleSettingQueries()` (definitions + current values) and
+  `MapServiceMantleSettingUpdates(ManagementSettingUpdateExecutor.ExecuteAsync)`. The Bootstrap
+  and Setup hosts never map the group, so those phases expose no settings surface. The legacy
+  `AdminSettingsController` and its models are gone; `/api/admin/settings` no longer exists.
+- The update executor resolves a fresh scope and its own `IdentityDbContext` built with
+  `UseIdentityDatabase(options, enableRetryOnFailure: false)`, opens one serializable transaction,
+  runs the shared update service, and returns Applied only after the commit completed. The
+  scoped update service is deliberately not resolved there: it is bound to the host's retrying
+  business context, and a caller-opened transaction under a retrying strategy is exactly what the
+  shared contract forbids. One attempt, no replay.
+- The current-values response carries the product header
+  `X-SignaCore-Running-Configuration-Version`: the version this process activated at bootstrap
+  (`InstallationRuntimeState.ConfigurationVersion`), added by a local middleware on exactly that
+  successful GET. The shared JSON stays untouched, the header appears on no other endpoint, and a
+  cross-origin console reads it through the AdminWeb CORS `WithExposedHeaders` entry. The console
+  derives restart-pending from the header versus the response version; a missing or unparseable
+  header renders "running version unknown" and never infers activation. A server version beyond
+  the JavaScript safe-integer range is treated as inexpressible: the console refuses to submit
+  rather than send a rounded `expectedVersion`.
 
 ## Operators
 
 - The shared aggregate is the configuration authority. Changes land through the shared update path
-  and take effect on the next restart (all keys are `requiresRestart`); the legacy admin console
-  still edits the legacy table, which no longer feeds the runtime — operators should treat the
-  console's settings page as pending its own switch.
+  and take effect on the next restart (all keys are `requiresRestart`); the admin console edits
+  the shared aggregate directly, with the version it loaded as `expectedVersion` and a fixed 409
+  conflict answer when another session moved ahead.
 - The PostgreSQL concurrency contract (exactly one winner per version) runs in CI under
   `RUN_SIGNACORE_DATABASE_CONTRACTS=true`; the SQLite contract tests run in every build.

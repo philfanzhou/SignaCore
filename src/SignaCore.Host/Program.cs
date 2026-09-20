@@ -605,6 +605,11 @@ app.UseServiceMantlePipeline();
 // bootstrap_updated audit row and the controlled stop after a published update.
 app.UseMiddleware<BootstrapUpdateGuardMiddleware>();
 
+// The product running-configuration-version header rides only on the shared current-values
+// response. It is registered after the shared pipeline so the exact management route it matches is
+// the one the shared endpoints serve, and it never touches any other response.
+app.UseMiddleware<RunningConfigurationVersionHeaderMiddleware>();
+
 // ---- Health ----
 app.MapHealthChecks(HealthEndpoints.Live, new()
 {
@@ -716,6 +721,15 @@ app.MapControllers();
 
 // ---- Shared ServiceMantle management session (login / current session / logout) ----
 app.MapSignaCoreManagementSession();
+
+// ---- Shared management settings (definitions / current values / transactional update) ----
+// The admin console's settings page rides the shared group from here on: the queries read the
+// shared aggregate the runtime itself loads, and the update runs in the executor's own
+// single-attempt serializable transaction instead of the legacy controller. The Bootstrap and
+// Setup hosts never map this group, so those phases expose no settings surface.
+var managementApi = app.MapServiceMantleManagementApiV1();
+managementApi.MapServiceMantleSettingQueries();
+managementApi.MapServiceMantleSettingUpdates(ManagementSettingUpdateExecutor.ExecuteAsync);
 
 // ---- Shared setup entries (status read + the completion replay boundary) ----
 app.MapServiceMantleSetup(SetupCompletionExecutor.ExecuteAsync);

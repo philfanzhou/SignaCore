@@ -9,8 +9,10 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
+using ServiceMantle.Configuration;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Keys;
@@ -453,31 +455,86 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
-    /// Settings are readable only with an admin session, and secret values never leave the service.
+    /// The shared setting queries are readable only with a management session. Sensitive values are
+    /// always null, and the product running-configuration-version header rides the current-values
+    /// response only.
     /// </summary>
     [Fact]
     public async Task SettingsApi_RequiresAnAdminSessionAndNeverReturnsSecretValues()
     {
         using var anonymous = _fixture.CreateHttpClient();
-        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/admin/settings",
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/management/v1/settings",
+            TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(
+            "/management/v1/settings/definitions",
             TestContext.Current.CancellationToken)).StatusCode);
 
         using var admin = await _fixture.CreateAdminHttpClientAsync();
-        var response = await admin.GetAsync("/api/admin/settings", TestContext.Current.CancellationToken);
+        var response = await admin.GetAsync("/management/v1/settings", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
-        var items = body.GetProperty("items").EnumerateArray().ToList();
+        var items = body.GetProperty("values").EnumerateArray().ToList();
         Assert.NotEmpty(items);
+
+        // The running version is the bootstrap version of this process; a just-installed fixture
+        // runs the same version it stored, so the header equals the response version here.
+        var runningVersion = response.Headers.GetValues("X-SignaCore-Running-Configuration-Version").Single();
+        Assert.Equal(body.GetProperty("version").GetInt64().ToString(), runningVersion);
+
+        // Every sensitive value is null in the shared projection, whatever its type.
         Assert.All(
-            items.Where(item => item.GetProperty("isSecret").GetBoolean()),
+            items.Where(item => item.GetProperty("isSensitive").GetBoolean()),
             item => Assert.Equal(JsonValueKind.Null, item.GetProperty("value").ValueKind));
 
-        // Non-secret values are returned so the console can render the current configuration.
+        // Non-secret values are returned so the console can render the current configuration, on
+        // the normalized key space.
         Assert.Contains(
             items,
-            item => item.GetProperty("key").GetString() == "Jwt:Audience"
+            item => item.GetProperty("key").GetString() == "jwt.audience"
                 && item.GetProperty("value").GetString() == _fixture.SharedAudience);
+
+        // The product header stays off every other endpoint, including the definitions query.
+        var definitions = await admin.GetAsync(
+            "/management/v1/settings/definitions", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, definitions.StatusCode);
+        Assert.False(definitions.Headers.Contains("X-SignaCore-Running-Configuration-Version"));
+    }
+
+    /// <summary>
+    /// The definitions catalog is the shared safe projection: the fixed six fields per item,
+    /// lowercase value types, ordinal-sorted normalized keys, and no default values.
+    /// </summary>
+    [Fact]
+    public async Task SettingsApi_ExposesDefinitionsForTheAdminConsole()
+    {
+        using var admin = await _fixture.CreateAdminHttpClientAsync();
+
+        var response = await admin.GetAsync(
+            "/management/v1/settings/definitions", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
+        var definitions = body.GetProperty("definitions").EnumerateArray().ToList();
+
+        // All 43 product keys, in the pinned order of the shared contract.
+        Assert.Equal(43, definitions.Count);
+        Assert.Equal(
+            definitions.Select(item => item.GetProperty("key").GetString()).ToList(),
+            definitions.Select(item => item.GetProperty("key").GetString())
+                .OrderBy(key => key, StringComparer.Ordinal).ToList());
+        Assert.Contains(definitions, item =>
+            item.GetProperty("key").GetString() == "consul.discovery.prefer_ip_address");
+        Assert.DoesNotContain(definitions, item =>
+            (item.GetProperty("key").GetString() ?? string.Empty).Contains(':'));
+
+        Assert.All(definitions, item =>
+        {
+            Assert.Equal(6, item.EnumerateObject().Count());
+            Assert.Contains(
+                item.GetProperty("valueType").GetString(),
+                new[] { "string", "number", "boolean", "json" });
+        });
     }
 
     /// <summary>
@@ -509,7 +566,7 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         client.DefaultRequestHeaders.TryAddWithoutValidation(
             "Cookie", "qz_admin_session=forged-legacy-ticket");
 
-        var response = await client.GetAsync("/api/admin/settings", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/management/v1/settings", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
@@ -524,75 +581,256 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     public async Task SettingsApi_RejectsAChangeThatWouldInvalidateTheSnapshot()
     {
         using var admin = await _fixture.CreateAdminHttpClientAsync();
+        var version = await ReadConfigurationVersionAsync(admin);
 
-        var response = await admin.PutAsJsonAsync("/api/admin/settings", new
+        var response = await admin.PostAsJsonAsync("/management/v1/settings", new
         {
-            values = new Dictionary<string, string>
+            expectedVersion = version,
+            changes = new[]
             {
                 // The issuer must keep matching the public base URL.
-                ["Jwt:Issuer"] = "https://somewhere.else.test"
+                new { key = "jwt.issuer", value = "https://somewhere.else.test" }
             }
         }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        // A validation failure answers the fixed management 400 body and never echoes the input.
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.DoesNotContain("somewhere.else.test", body, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task SettingsApi_RejectsKeysThatAreNotDatabaseBacked()
     {
         using var admin = await _fixture.CreateAdminHttpClientAsync();
+        var version = await ReadConfigurationVersionAsync(admin);
 
-        var response = await admin.PutAsJsonAsync("/api/admin/settings", new
+        var response = await admin.PostAsJsonAsync("/management/v1/settings", new
         {
-            values = new Dictionary<string, string> { ["Endpoints:Http"] = "9999" }
+            expectedVersion = version,
+            changes = new[] { new { key = "endpoints.http", value = "9999" } }
         }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     /// <summary>
-    /// A valid change increments the configuration version, encrypts secrets at rest, and records
-    /// which keys changed without recording their values.
+    /// A valid change commits one new aggregate version with per-key shared audits, keeps the
+    /// operator on the login identity, and never writes the legacy system_settings table.
     /// </summary>
     [Fact]
     public async Task SettingsApi_AppliesAValidChangeTransactionally()
     {
+        const string canary = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
         using var admin = await _fixture.CreateAdminHttpClientAsync();
-        var before = (await (await admin.GetAsync("/api/admin/settings", TestContext.Current.CancellationToken)).Content
-            .ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken)).GetProperty("configurationVersion").GetInt32();
+        var before = await ReadConfigurationVersionAsync(admin);
+        var legacyRowsBefore = await CountLegacyRowsAsync("Sms:OtpHmacKey", "Sms:MaxSendsPerHour");
+        var auditRowsBefore = await CountSharedAuditRowsAsync();
 
-        var response = await admin.PutAsJsonAsync("/api/admin/settings", new
+        var response = await admin.PostAsJsonAsync("/management/v1/settings", new
         {
-            values = new Dictionary<string, string>
+            expectedVersion = before,
+            changes = new object[]
             {
-                ["Sms:MaxSendsPerHour"] = "7",
-                ["Sms:OtpHmacKey"] = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+                new { key = "sms.max_sends_per_hour", value = "7" },
+                new { key = "sms.otp_hmac_key", value = canary }
             }
         }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal(before + 1, body.GetProperty("configurationVersion").GetInt32());
-        Assert.True(body.GetProperty("restartRequired").GetBoolean());
+        Assert.Equal(before + 1, body.GetProperty("version").GetInt64());
+        Assert.Equal(1, body.EnumerateObject().Count());
+
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+
+            // The legacy table is no longer written by the management path.
+            Assert.Equal(legacyRowsBefore,
+                await CountLegacyRowsAsync("Sms:OtpHmacKey", "Sms:MaxSendsPerHour"));
+
+            // The shared aggregate holds the new version; the operator is the login account.
+            var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
+                db, TestContext.Current.CancellationToken);
+            Assert.NotNull(aggregate);
+            Assert.Equal(before + 1, aggregate!.Version);
+            Assert.Equal(
+                (await _fixture.GetAdminAccountIdAsync()).ToString(),
+                aggregate.UpdatedBy);
+            var values = SharedSettingTestDatabase.ParseValues(aggregate);
+            Assert.Equal("7", values["sms.max_sends_per_hour"]);
+            Assert.True(values["sms.otp_hmac_key"].StartsWith("sm:v1:", StringComparison.Ordinal));
+            Assert.DoesNotContain(canary, values["sms.otp_hmac_key"], StringComparison.Ordinal);
+
+            // One key-only audit row per changed key on top of the installation's own audit set;
+            // the canary value never reaches the audit store in any form.
+            var auditTexts = await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
+                db, TestContext.Current.CancellationToken);
+            Assert.Equal(auditRowsBefore + 2, auditTexts.Count);
+            Assert.Contains(auditTexts, text =>
+                text.Contains("sms.otp_hmac_key", StringComparison.Ordinal));
+            Assert.DoesNotContain(canary, string.Join("|", auditTexts), StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// The stored version moves ahead of the running one after a committed change, while the
+    /// running-version header keeps describing the process start — that is exactly how the console
+    /// derives "restart pending" without treating a refreshed query as an activated runtime.
+    /// </summary>
+    [Fact]
+    public async Task SettingsApi_ReportsTheBootstrapVersionWhileTheStoredVersionMovesAhead()
+    {
+        using var admin = await _fixture.CreateAdminHttpClientAsync();
+        var before = await ReadConfigurationVersionAsync(admin);
+        var runningAtStart = (await admin.GetAsync("/management/v1/settings",
+            TestContext.Current.CancellationToken)).Headers
+            .GetValues("X-SignaCore-Running-Configuration-Version").Single();
+
+        var update = await admin.PostAsJsonAsync("/management/v1/settings", new
+        {
+            expectedVersion = before,
+            changes = new[] { new { key = "sms.max_sends_per_day", value = "77" } }
+        }, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+
+        var after = await admin.GetAsync("/management/v1/settings", TestContext.Current.CancellationToken);
+        var body = await response(update);
+        Assert.Equal(before + 1, body.GetProperty("version").GetInt64());
+        Assert.Equal(runningAtStart,
+            after.Headers.GetValues("X-SignaCore-Running-Configuration-Version").Single());
+    }
+
+    /// <summary>
+    /// Two racing updates over the same expected version have exactly one winner: the loser gets
+    /// the fixed management 409 and leaves no second version and no extra audit rows.
+    /// </summary>
+    [Fact]
+    public async Task SettingsApi_AnswersConflictForAStaleExpectedVersion()
+    {
+        using var admin = await _fixture.CreateAdminHttpClientAsync();
+        var version = await ReadConfigurationVersionAsync(admin);
+
+        var winner = await admin.PostAsJsonAsync("/management/v1/settings", new
+        {
+            expectedVersion = version,
+            changes = new[] { new { key = "sms.max_attempts", value = "9" } }
+        }, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, winner.StatusCode);
+
+        var loser = await admin.PostAsJsonAsync("/management/v1/settings", new
+        {
+            expectedVersion = version,
+            changes = new[] { new { key = "sms.lockout_seconds", value = "60" } }
+        }, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Conflict, loser.StatusCode);
 
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken);
+        Assert.Equal(version + 1, aggregate!.Version);
+        var values = SharedSettingTestDatabase.ParseValues(aggregate);
+        Assert.Equal("9", values["sms.max_attempts"]);
+        Assert.False(values.TryGetValue("sms.lockout_seconds", out var loserValue) &&
+            loserValue == "60");
+    }
 
-        var secret = await db.SystemSettings.AsNoTracking()
-            .SingleAsync(setting => setting.Key == "Sms:OtpHmacKey", cancellationToken: TestContext.Current.CancellationToken);
-        Assert.True(secret.IsSecret);
-        Assert.DoesNotContain("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", secret.Value, StringComparison.Ordinal);
+    /// <summary>
+    /// A protection failure inside the executor's transaction rolls the whole attempt back: the
+    /// aggregate keeps its version and no audit rows are added — no partial state anywhere.
+    /// </summary>
+    [Fact]
+    public async Task SettingsApi_RollsBackWhenProtectionFails()
+    {
+        using var rawFactory = _fixture.WithTestServices(services =>
+        {
+            services.RemoveAll<IServiceSettingRootKeySource>();
+            services.AddSingleton<IServiceSettingRootKeySource>(new ThrowingRootKeySource());
+        });
+        using var http = rawFactory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost")
+        });
 
-        var audit = await db.AuditLogs.AsNoTracking()
-            .Where(entry => entry.Action == "settings_updated")
-            .OrderByDescending(entry => entry.CreatedAt)
-            .FirstAsync(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Contains("Sms:OtpHmacKey", audit.Description ?? string.Empty, StringComparison.Ordinal);
-        Assert.DoesNotContain("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", audit.Description ?? string.Empty, StringComparison.Ordinal);
-        // The audit actor is the operator the shared management session resolved — the login
-        // account, not a cookie-specific claim shape.
-        Assert.Equal(await _fixture.GetAdminAccountIdAsync(), audit.ActorId);
-        Assert.Equal(IdentityServerFixture.AdminUsername, audit.ActorName);
+        // The derived host carries the forged legacy cookie path: without a management session the
+        // request never reaches the executor, so drive it through an anonymous request first to
+        // prove the endpoint is protected, then complete a real login on this host.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync("/management/v1/settings",
+            TestContext.Current.CancellationToken)).StatusCode);
+
+        var version = await ReadConfigurationVersionAsync(await _fixture.CreateAdminHttpClientAsync());
+        using var admin = await LoginOnHostAsync(rawFactory);
+
+        var response = await admin.PostAsJsonAsync("/management/v1/settings", new
+        {
+            expectedVersion = version,
+            changes = new[] { new { key = "sms.otp_hmac_key", value = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=" } }
+        }, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("{\"errorCode\":\"management.settings.update_unavailable\"}", body);
+
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken);
+        Assert.Equal(version, aggregate!.Version);
+    }
+
+    private static async Task<JsonElement> response(HttpResponseMessage message) =>
+        await message.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken);
+
+    private static async Task<long> ReadConfigurationVersionAsync(HttpClient admin)
+    {
+        var body = await response(await admin.GetAsync(
+            "/management/v1/settings", TestContext.Current.CancellationToken));
+        return body.GetProperty("version").GetInt64();
+    }
+
+    private async Task<int> CountLegacyRowsAsync(params string[] keys)
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        return await db.SystemSettings.AsNoTracking()
+            .CountAsync(setting => keys.Contains(setting.Key), TestContext.Current.CancellationToken);
+    }
+
+    private async Task<int> CountSharedAuditRowsAsync()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        return (await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
+            db, TestContext.Current.CancellationToken)).Count;
+    }
+
+    /// <summary>Logs the bootstrap administrator in on a specific derived host.</summary>
+    private async Task<HttpClient> LoginOnHostAsync(WebApplicationFactory<Program> factory)
+    {
+        var http = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost")
+        });
+        using var login = new HttpRequestMessage(HttpMethod.Post, "/management/v1/session/login")
+        {
+            Content = JsonContent.Create(new
+            {
+                username = IdentityServerFixture.AdminUsername,
+                password = IdentityServerFixture.AdminPassword
+            })
+        };
+        login.Headers.TryAddWithoutValidation("X-ServiceMantle-Request", "1");
+        (await http.SendAsync(login, TestContext.Current.CancellationToken)).EnsureSuccessStatusCode();
+        return http;
+    }
+
+    private sealed class ThrowingRootKeySource : IServiceSettingRootKeySource
+    {
+        public ValueTask<string> GetRootKeyAsync(CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("root key unavailable");
     }
 
     /// <summary>
