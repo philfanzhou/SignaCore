@@ -8,6 +8,7 @@ using SignaCore.Domain.Keys;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
 using Xunit;
+using Xunit.Sdk;
 
 namespace SignaCore.Tests.Integration;
 
@@ -19,6 +20,19 @@ namespace SignaCore.Tests.Integration;
 /// aggregate version and the same complete snapshot, with the version strictly monotonic across
 /// updates.
 /// </summary>
+/// <remarks>
+/// The three cases share one class-level <see cref="IdentityServerFixture"/> and therefore one
+/// SQLite database. <see cref="TwoHosts_ObserveTheSameVersionAndSnapshot_AndVersionsAdvanceMonotonically"/>
+/// is the only case that commits a change to that shared database (it advances the persisted
+/// aggregate from v1 to v2), while <see cref="StartupMigration_LeavesTheLegacyRowsUntouched"/>
+/// reads the live aggregate row and requires it to still be the pristine v1 the startup migration
+/// produced. xUnit does not guarantee the intra-class execution order — it follows the compiled
+/// assembly's discovery order, which flips when unrelated test files are added — so the mutating
+/// case running first deterministically broke the pristine read (issue #320). The
+/// <see cref="SharedSettingStartupActivationTestOrderer"/> pins the order independently of the
+/// compile artifact: every read-only case runs before the single database-mutating case.
+/// </remarks>
+[TestCaseOrderer(typeof(SharedSettingStartupActivationTestOrderer))]
 public sealed class SharedSettingStartupActivationTests : IClassFixture<IdentityServerFixture>
 {
     private static readonly ManagementAuditOperator UpdateOperator = ManagementAuditOperator.Create(
@@ -171,4 +185,37 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
             SharedSettingKeys.NormalizedByLegacyKey.Values.Order(StringComparer.Ordinal),
             SharedSettingTestDatabase.ParseValues(aggregate).Keys.Order(StringComparer.Ordinal));
     }
+}
+
+/// <summary>
+/// The intra-class execution-order contract of <see cref="SharedSettingStartupActivationTests"/>
+/// (issue #320): every read-only case runs before the single case that commits a change to the
+/// shared class-fixture database, so the assertions no longer depend on the compile-artifact
+/// discovery order xUnit would otherwise use.
+/// </summary>
+internal sealed class SharedSettingStartupActivationTestOrderer : Xunit.v3.ITestCaseOrderer
+{
+    /// <summary>
+    /// The cases that commit a change to the shared class-fixture database and must therefore run
+    /// after every read-only case. A new mutating case has to be listed here to keep the contract;
+    /// <see cref="SharedSettingStartupActivationOrdererContractTests"/> fails when a listed name no
+    /// longer resolves to a test on the class, so the set cannot silently drift from the code.
+    /// </summary>
+    private static readonly HashSet<string> DatabaseMutatingTests = new(StringComparer.Ordinal)
+    {
+        nameof(SharedSettingStartupActivationTests
+            .TwoHosts_ObserveTheSameVersionAndSnapshot_AndVersionsAdvanceMonotonically),
+    };
+
+    public IReadOnlyCollection<TTestCase> OrderTestCases<TTestCase>(
+        IReadOnlyCollection<TTestCase> testCases)
+        where TTestCase : ITestCase =>
+        testCases
+            .OrderBy(testCase => IsDatabaseMutating(testCase) ? 1 : 0)
+            .ThenBy(testCase => testCase.TestMethod?.MethodName, StringComparer.Ordinal)
+            .ToList();
+
+    private static bool IsDatabaseMutating(ITestCase testCase) =>
+        testCase.TestMethod?.MethodName is { } methodName
+        && DatabaseMutatingTests.Contains(methodName);
 }
