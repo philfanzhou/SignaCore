@@ -418,10 +418,13 @@ public sealed class RefreshTokenFamilyStore(
         var revoked = await refreshTokens.RevokeBySessionAsync(identitySessionId, cancellationToken);
         if (revoked > 0)
         {
+            // Ordinary revoke diagnostics carry no account or session identifier (canonical
+            // DF-06): only the fixed operation, the affected count, and the closed-set reason.
+            // The raw id still reaches the repository; the formal audit keeps the bounded record
+            // ids DF-13 allows.
             logger.LogInformation(
-                "Revoked {Count} interactive refresh family members by session: SessionId={SessionId}, Reason={Reason}",
+                "Revoked {Count} interactive refresh family members by session: Reason={Reason}",
                 revoked,
-                identitySessionId,
                 reason);
         }
 
@@ -437,10 +440,11 @@ public sealed class RefreshTokenFamilyStore(
         var revoked = await refreshTokens.RevokeByAccountAsync(accountId, cancellationToken);
         if (revoked > 0)
         {
+            // Same diagnostic boundary as the session revoke above: no account identifier in the
+            // ordinary log, only the fixed operation, the count, and the reason.
             logger.LogInformation(
-                "Revoked {Count} interactive refresh family members by account: AccountId={AccountId}, Reason={Reason}",
+                "Revoked {Count} interactive refresh family members by account: Reason={Reason}",
                 revoked,
-                accountId,
                 reason);
         }
 
