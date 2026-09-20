@@ -26,6 +26,7 @@ namespace SignaCore.Tests.Integration;
 /// mid-request (observed as the Setup gate's 503). The class therefore runs inside the
 /// sqlite-process-state collection and never in parallel with a pool-clearing class.
 /// </remarks>
+[UsesProcessWideSqlitePoolClearing]
 [Collection(SqliteProcessState.CollectionName)]
 public sealed class ManagementSessionContractTests : IClassFixture<IdentityServerFixture>
 {

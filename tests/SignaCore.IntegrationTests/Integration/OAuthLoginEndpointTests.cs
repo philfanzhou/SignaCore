@@ -15,6 +15,8 @@ namespace SignaCore.Tests.Integration;
 /// <c>IN-12</c>/<c>IN-13</c> field bounds. The credential outcomes live in
 /// <see cref="OAuthLoginCredentialTests"/>.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixture>
 {
     private readonly IdentityServerFixture _fixture;

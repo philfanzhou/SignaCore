@@ -18,6 +18,8 @@ namespace SignaCore.Tests.Integration;
 /// equivalence through both protection envelopes, and replays converge to AlreadyMigrated without
 /// overwriting the winner.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class SharedSettingMigrationTests : IClassFixture<IdentityServerFixture>
 {
     private static readonly ManagementAuditOperator MigrationOperator = ManagementAuditOperator.Create(
@@ -158,6 +160,8 @@ public sealed class SharedSettingMigrationTests : IClassFixture<IdentityServerFi
 /// stages its broken state inside the caller's transaction and rolls back, leaving the fixture
 /// database a valid installation.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class SharedSettingMigrationFailureTests : IClassFixture<IdentityServerFixture>
 {
     private const string CorruptedEnvelope =

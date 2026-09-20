@@ -20,6 +20,8 @@ namespace SignaCore.Tests.Integration;
 /// follow artifact creation and cleanup, the existing <c>auth.*</c> instruments keep their exact
 /// names, and a recorder that throws never changes a protocol response.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OidcMetricsIntegrationTests : IClassFixture<IdentityServerFixture>
 {
     private const string ClientId = "metrics-app";

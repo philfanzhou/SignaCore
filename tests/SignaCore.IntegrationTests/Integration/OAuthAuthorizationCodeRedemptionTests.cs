@@ -32,6 +32,8 @@ namespace SignaCore.Tests.Integration;
 /// <c>DF-03</c>/<c>DF-04</c>/<c>DF-06</c> canary scan, and the unchanged Discovery documents.
 /// Codes and sessions are seeded through the real stores, never raw SQL.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<IdentityServerFixture>
 {
     private const string AppId = "code-redemption-app";
@@ -292,6 +294,10 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
     [Fact]
     public async Task Redeem_ForAnUnknownCode_ReturnsTheGenericInvalidGrant()
     {
+        // The client must exist before the request can reach code validation, so the applications
+        // are seeded here directly: the case stays valid no matter which tests ran before it in
+        // the collection's sequential schedule.
+        await SeedInteractiveAppAsync(_fixture.Services, AppId, AppSecret);
         await AssertInvalidGrantNoWriteAsync(new string('z', 43));
     }
 

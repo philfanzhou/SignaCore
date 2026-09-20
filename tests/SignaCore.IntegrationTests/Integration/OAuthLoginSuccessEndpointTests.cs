@@ -35,6 +35,8 @@ namespace SignaCore.Tests.Integration;
 /// exactly one winner (<c>EV-03</c> race); cancellation before the commit rolls the whole unit
 /// back and the same handle retries successfully (<c>EV-18</c>/<c>SC-20</c>).
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthLoginSuccessEndpointTests : IClassFixture<IdentityServerFixture>
 {
     private const string SuccessUser = "login_success_user";

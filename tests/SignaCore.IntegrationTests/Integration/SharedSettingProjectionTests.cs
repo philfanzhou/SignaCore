@@ -14,6 +14,8 @@ namespace SignaCore.Tests.Integration;
 /// stable and sorted, and after the first update the current-value projection distinguishes
 /// Default / Missing / Persisted sources while sensitive values stay null.
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class SharedSettingProjectionTests : IClassFixture<IdentityServerFixture>
 {
     private static readonly ManagementAuditOperator Operator = ManagementAuditOperator.Create(

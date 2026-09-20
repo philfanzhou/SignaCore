@@ -19,6 +19,8 @@ namespace SignaCore.IntegrationTests.Integration;
 /// Uses a dedicated server fixture because these tests intentionally exhaust limiter partitions.
 /// </para>
 /// </summary>
+[Collection(SqliteProcessState.CollectionName)]
+[UsesProcessWideSqlitePoolClearing]
 public sealed class HostRejectionWriteCancellationTests : IClassFixture<IdentityServerFixture>
 {
     private readonly IdentityServerFixture _fixture;
