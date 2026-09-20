@@ -10,9 +10,9 @@ using SignaCore.Domain.Services.WeChat;
 namespace SignaCore.Host.Configuration;
 
 /// <summary>
-/// Carries every cross-key rule of the legacy <see cref="SettingsSnapshotValidator"/> onto the
-/// shared setting contract: the public base URL rules, the issuer equality, the non-blank keys, and
-/// the runtime option binders (SMS, LDAP, WeChat, reverse-proxy IPs).
+/// Carries every cross-key rule of the retired legacy snapshot validator onto the shared setting
+/// contract: the public base URL rules, the issuer equality, the non-blank keys, and the runtime
+/// option binders (SMS, LDAP, WeChat, reverse-proxy IPs).
 /// </summary>
 /// <remarks>
 /// The validator reconstructs the legacy-keyed snapshot from the candidate values — missing
@@ -91,7 +91,7 @@ internal sealed class SignaCoreSettingCompositeValidator(bool isDevelopment)
             return;
         }
 
-        if (!SettingsSnapshotValidator.TryNormalizeBaseUrl(publicBaseUrl, out var normalized, out _))
+        if (!PublicBaseUrlNormalizer.TryNormalizeBaseUrl(publicBaseUrl, out var normalized, out _))
         {
             errors.Add(new ServiceSettingValidationError(PublicBaseUrl, BaseUrlInvalidCode));
             return;

@@ -60,7 +60,21 @@ internal static class InstallationTestSupport
             values[key] = value;
         }
 
-        SettingsSnapshotValidator.ThrowIfInvalid(values);
+        var candidateErrors = SharedSettingComposition.ValidateCompleteCandidate(values);
+        if (candidateErrors.Count > 0)
+        {
+            // Key names and closed classification codes only: the offending key may be a secret.
+            throw new SettingsSnapshotException(
+                "The prepared configuration snapshot is not valid:" + Environment.NewLine +
+                string.Join(
+                    Environment.NewLine,
+                    candidateErrors.Select(error => $"  - {error.Key}: {error.ErrorCode}")),
+                candidateErrors
+                    .Select(error => error.Key)
+                    .Where(key => key is not null)
+                    .Distinct()
+                    .ToList()!);
+        }
 
         var protector = new AesGcmConfigurationProtector(new BootstrapMasterKeyProvider(rootSecret));
         var store = new SystemSettingsStore(protector);

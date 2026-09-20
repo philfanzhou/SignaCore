@@ -171,9 +171,10 @@ public class DiscoveryDocumentTests
     }
 
     // The rules that used to live in PublicOrigin.Validate — absolute URL, no user information,
-    // query, or fragment, HTTPS outside Development — are now enforced by
-    // SettingsSnapshotValidator over the whole snapshot, and are covered by its own tests. Keeping a
-    // second entry point for the same rules would let the two drift apart.
+    // query, or fragment, HTTPS outside Development — are enforced over the whole snapshot by the
+    // shared composite validator (fed by the PublicBaseUrlNormalizer form checks), and are covered
+    // by the candidate-contract tests. Keeping a second entry point for the same rules would let
+    // the two drift apart.
 
     private static IConfiguration Configuration(params (string Key, string Value)[] values) =>
         new ConfigurationBuilder()

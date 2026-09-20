@@ -35,6 +35,16 @@ internal static class SharedSettingComposition
         [new ServiceSettingDefinitions()],
         [new SignaCoreSettingCompositeValidator(isDevelopment)]);
 
+    /// <summary>
+    /// Validates one complete legacy-keyed candidate dictionary (the fixed 43-key input form of
+    /// first-run setup, the legacy import, and the test installation fixtures): input completeness
+    /// and integer text form first, then the shared registry that owns every other rule.
+    /// </summary>
+    internal static IReadOnlyList<ServiceSettingValidationError> ValidateCompleteCandidate(
+        IReadOnlyDictionary<string, string> legacyValues,
+        bool isDevelopment = false) =>
+        SettingCandidateValidation.Validate(legacyValues, isDevelopment);
+
     /// <summary>Adapts the bootstrap master key to the shared sensitive-value root key contract.</summary>
     internal static MasterKeyRootKeySource CreateRootKeySource(IMasterKeyProvider masterKeyProvider) =>
         new(masterKeyProvider);
