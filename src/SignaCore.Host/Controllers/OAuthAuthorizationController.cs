@@ -93,6 +93,13 @@ public sealed class OAuthAuthorizationController : ControllerBase
     /// <summary>
     /// RFC 6749 §4.1.1 authorization request. Only <c>GET</c> exists in this phase; there is no
     /// <c>POST</c> form-post variant and no fragment response mode.
+    /// <para>
+    /// The login continuation itself must be a local URL. The request's <c>PathBase</c> is the only
+    /// request-controlled input of that destination, so a prefix that cannot form a local URL — for
+    /// example a scheme-relative mount — is refused with the fixed local error before anything is
+    /// written: no <c>Location</c>, no continuation row, and no accepted audit row. Registered
+    /// cross-origin application callbacks are unaffected; they keep their exact-URI validation.
+    /// </para>
     /// </summary>
     [HttpGet("authorize")]
     public async Task<IActionResult> Authorize(CancellationToken cancellationToken)
@@ -167,6 +174,17 @@ public sealed class OAuthAuthorizationController : ControllerBase
                             LogValueSanitizer.Sanitize(HttpContext.GetCorrelationId()));
                 }
 
+                // The login continuation must stay a same-origin relative path. PathBase is
+                // request-controlled state, so the destination is validated as a local URL before
+                // anything is written: a prefix that cannot form a local URL answers the fixed
+                // local error with no Location, no continuation, and no audit row, and the original
+                // prefix value is never echoed or logged.
+                var loginPath = $"{Request.PathBase}/oauth2/login";
+                if (!Url.IsLocalUrl(loginPath))
+                {
+                    return LocalError();
+                }
+
                 // The accepted audit row is only staged here; the continuation store's single
                 // SaveChanges commits the continuation row and the audit row as one unit, so a
                 // failure between them cannot leave half of the outcome behind.
@@ -174,9 +192,10 @@ public sealed class OAuthAuthorizationController : ControllerBase
                 var creation = await _authorizationRequestStore.CreateAsync(
                     accepted, now, cancellationToken);
                 // A same-origin relative location only: no scheme or host is taken from the
-                // request, and the handle is the sole query field the login page receives.
-                return Redirect(
-                    $"{Request.PathBase}/oauth2/login?login_handle={Uri.EscapeDataString(creation.LoginHandle)}");
+                // request, the handle is the sole query field the login page receives, and the
+                // final executor re-asserts locality by refusing any non-local destination.
+                return LocalRedirect(
+                    $"{loginPath}?login_handle={Uri.EscapeDataString(creation.LoginHandle)}");
 
             default:
                 throw new InvalidOperationException(
