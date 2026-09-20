@@ -21,7 +21,16 @@ its live descendants, and `offline_access` is advertised in Discovery.
 
 ### `POST /oauth2/token`
 
-- Body: `application/x-www-form-urlencoded`.
+- Body: `application/x-www-form-urlencoded`, read once and bounded: at most 16 KiB counted on the
+  bytes actually read (never on the declared `Content-Length`), one strict UTF-8 decode, one
+  percent-decode. Duplicate fields keep their cardinality for the existing field rules; unknown
+  fields remain ignored by the grants.
+- A body past the bound, a non-UTF-8 charset, a compressed body, or malformed percent/UTF-8 is
+  rejected with the fixed `400 {"error":"invalid_request","error_description":"The form request is
+  invalid."}` — no-store/no-cache, no input echoed, no client lookup or secret verification. An
+  unreadable body answers the fixed `503 server_error`. Both answers come only after the shared
+  phase and rate-limit budget admit the request; a rejected request consumes nothing. A non-form
+  media type never selects the action and keeps MVC's action-selection `415` unchanged.
 - Client authentication: `client_secret_basic` (HTTP Basic) or `client_secret_post`
   (`client_id`/`client_secret` form fields). The legacy `X-Admin-AppId`/`X-Admin-AppSecret` headers are
   **not** accepted here.
@@ -52,9 +61,14 @@ silently ignored, so a client never receives a token whose authority differs fro
 RFC 7009: form-encoded, client-authenticated, and always HTTP 200 for a syntactically valid request
 whether or not the token existed. Only refresh tokens can be revoked — access tokens are self-contained.
 
+The endpoint shares `/oauth2/token`'s single bounded form read (16 KiB on the bytes actually read,
+one strict UTF-8 single-percent decode): an oversized, compressed, or malformed encoding is the same
+fixed `400 invalid_request`, an unreadable body the same fixed `503`, both after the shared budget
+admits the request, and the Basic credential path cannot bypass the read bound.
+
 Per RFC 7009 §2.1 a token is revoked only when it was issued to the authenticated client; a request
 naming another client's token succeeds with HTTP 200 and changes nothing, so the response never reveals
-whether the token exists or who owns it.
+whether a token exists or who owns it.
 
 ## The interactive Authorization Code flow
 

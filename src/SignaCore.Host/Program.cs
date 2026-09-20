@@ -590,6 +590,11 @@ app.Use((context, next) =>
 // before, and the gateway schemes still authenticate on demand deeper in the pipeline through
 // HttpContextExtensions, which prefers the protected Items copy.
 app.UseMiddleware<SensitiveHeaderRedactionMiddleware>();
+// The bounded, single form read of the two standard form endpoints (the outer input gate): it
+// runs after redaction and before the partition resolver so the resolver reuses the cached form
+// (or skips every candidate on the fixed failure marker), and the marked request still flows
+// through the shared phase and rate-limit budget before its fixed 400/503 answer.
+app.UseMiddleware<BoundedOidcFormReadingMiddleware>();
 // The interactive OIDC rate-limit partition resolver runs ahead of the composed pipeline: the
 // limiter's policy factory is synchronous, so the registered-client resolution for the
 // client:{appId} partitions is staged here, cache-first and cancellation-observing (#304).

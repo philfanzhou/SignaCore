@@ -41,6 +41,17 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
+        // The outer bounded-form gate owns the two standard form endpoints' body boundary: a
+        // failed gate means no credential carrier may be read and no client row consulted.
+        if (BoundedOidcFormReadingMiddleware.GetStatus(Context)
+            is OidcBoundedFormStatus.Malformed or OidcBoundedFormStatus.Unavailable)
+        {
+            return AuthenticateResult.Fail(
+                BoundedOidcFormReadingMiddleware.GetStatus(Context) == OidcBoundedFormStatus.Malformed
+                    ? "The form request is invalid."
+                    : "The request could not be processed.");
+        }
+
         var credentials = ReadBasicCredentials() ?? await ReadFormCredentialsAsync(Context.RequestAborted);
         if (credentials == null)
         {
@@ -77,9 +88,32 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
     /// RFC 6749 §5.2: an invalid_client failure answered with HTTP 401 MUST carry
     /// <c>WWW-Authenticate</c>, and the body is the standard error object rather than this
     /// repository's <c>ErrorResponse</c> envelope.
+    /// <para>
+    /// A failed bounded-form gate maps the challenge to the fixed protocol answers instead: a
+    /// malformed or oversized body is <c>400 invalid_request</c> and an unreadable body is
+    /// <c>503 server_error</c> — both with fixed bodies that echo no request value and
+    /// <c>no-store</c>/<c>no-cache</c> so no intermediary retains the error.
+    /// </para>
     /// </summary>
     protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
     {
+        switch (BoundedOidcFormReadingMiddleware.GetStatus(Context))
+        {
+            case OidcBoundedFormStatus.Malformed:
+                Response.StatusCode = StatusCodes.Status400BadRequest;
+                await WriteFixedErrorAsync(
+                    Domain.Validators.OAuthErrorCodes.InvalidRequest,
+                    "The form request is invalid.");
+                return;
+
+            case OidcBoundedFormStatus.Unavailable:
+                Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                await WriteFixedErrorAsync(
+                    Domain.Validators.OAuthErrorCodes.ServerError,
+                    "The request could not be processed.");
+                return;
+        }
+
         Response.StatusCode = StatusCodes.Status401Unauthorized;
         Response.Headers.WWWAuthenticate = $"Basic realm=\"{OAuthClientAuthenticationDefaults.Realm}\", charset=\"UTF-8\"";
         await Response.WriteAsJsonAsync(
@@ -87,6 +121,19 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
             {
                 ["error"] = Domain.Validators.OAuthErrorCodes.InvalidClient,
                 ["error_description"] = "Client authentication failed."
+            },
+            Context.RequestAborted);
+    }
+
+    private async Task WriteFixedErrorAsync(string error, string description)
+    {
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.Pragma = "no-cache";
+        await Response.WriteAsJsonAsync(
+            new Dictionary<string, string>
+            {
+                ["error"] = error,
+                ["error_description"] = description
             },
             Context.RequestAborted);
     }
