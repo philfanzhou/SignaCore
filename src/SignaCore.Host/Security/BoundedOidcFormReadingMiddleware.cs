@@ -133,23 +133,11 @@ public sealed class BoundedOidcFormReadingMiddleware(RequestDelegate next)
             context.RequestAborted.ThrowIfCancellationRequested();
             context.Items[StatusItemKey] = status;
         }
-        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        catch (Exception exception) when (exception is OperationCanceledException or IOException)
         {
-            // The caller abandoned the request: nothing is marked, staged, or answered here.
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            // An internal cancellation while the caller still waits.
-            context.Items[StatusItemKey] = OidcBoundedFormStatus.Unavailable;
-        }
-        catch (IOException) when (context.RequestAborted.IsCancellationRequested)
-        {
-            // The transport failed after the caller was already gone: cancellation still wins.
-            throw;
-        }
-        catch (IOException)
-        {
+            // Observe the original caller before classifying either read failure. An I/O
+            // exception or an internal cancellation must not replace that caller's token.
+            context.RequestAborted.ThrowIfCancellationRequested();
             context.Items[StatusItemKey] = OidcBoundedFormStatus.Unavailable;
         }
     }

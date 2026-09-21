@@ -522,20 +522,31 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         Assert.All(stream.Retained.ToArray(), b => Assert.Equal(0, b));
     }
 
-    [Fact]
-    public async Task ACallerCancellationAfterPartialData_ZerosTheRetainedBuffer()
+    [Theory]
+    [InlineData("/oauth2/token", true)]
+    [InlineData("/oauth2/revoke", true)]
+    [InlineData("/oauth2/token", false)]
+    [InlineData("/oauth2/revoke", false)]
+    public async Task ACallerCancellationAfterPartialData_ZerosTheRetainedBuffer(
+        string path, bool ioFailure)
     {
         var lifetime = new AbortedLifetimeFeature();
+        var payload = Encoding.ASCII.GetBytes("a=b");
         var stream = new PartialThenThrowStream(
-            Encoding.ASCII.GetBytes("grant_type=password&password=secret-value-4f2a"),
-            new OperationCanceledException());
-        var (context, next, invoked) = CreateContext("/oauth2/token", stream);
+            payload,
+            ioFailure ? new IOException("synthetic transport failure") : new OperationCanceledException(),
+            lifetime.Abort);
+        var (context, next, invoked) = CreateContext(path, stream);
         context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
-        lifetime.Abort();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context));
+        Assert.Equal(context.RequestAborted, exception.CancellationToken);
+        Assert.Equal(2, stream.ReadCalls);
+        Assert.Equal(payload.Length, stream.TotalRead);
+        Assert.False(stream.Retained.IsEmpty);
         Assert.Null(BoundedOidcFormReadingMiddleware.GetStatus(context));
+        Assert.Null(context.Features.Get<IFormFeature>());
         Assert.False(invoked.Value);
         Assert.All(stream.Retained.ToArray(), b => Assert.Equal(0, b));
     }
@@ -847,24 +858,31 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
     /// the <see cref="Memory{T}"/> it handed the bytes into so a test can observe whether the
     /// reader zeroed that buffer afterwards.
     /// </summary>
-    private sealed class PartialThenThrowStream(byte[] payload, Exception error) : Stream
+    private sealed class PartialThenThrowStream(
+        byte[] payload, Exception error, Action? beforeFailure = null) : Stream
     {
         private bool _delivered;
 
         public Memory<byte> Retained { get; private set; }
+        public int ReadCalls { get; private set; }
+        public int TotalRead { get; private set; }
 
         public override ValueTask<int> ReadAsync(
             Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            Retained = buffer;
+            ReadCalls++;
             if (!_delivered)
             {
                 _delivered = true;
                 var take = Math.Min(buffer.Length, payload.Length);
                 payload.AsSpan(0, take).CopyTo(buffer.Span);
+                // Keep the bytes actually written, not the empty tail passed to the next read.
+                Retained = buffer[..take];
+                TotalRead += take;
                 return ValueTask.FromResult(take);
             }
 
+            beforeFailure?.Invoke();
             throw error;
         }
 
