@@ -36,6 +36,8 @@ public sealed partial class SignaCoreHostFixture : IAsyncLifetime
     public const string Password = "Reference-Bff-123!";
     public const string Authority = "https://localhost";
 
+    public bool SeedReferenceAccountAndApplication { get; init; } = true;
+
     private WebApplicationFactory<Program>? _factory;
     private string? _bootstrapDirectory;
     private string? _databasePath;
@@ -82,7 +84,7 @@ public sealed partial class SignaCoreHostFixture : IAsyncLifetime
                 builder.UseSetting("Endpoints:Http", "0");
             });
         _factory.CreateClient();
-        await SeedAsync();
+        if (SeedReferenceAccountAndApplication) await SeedAsync();
     }
 
     public async ValueTask DisposeAsync()

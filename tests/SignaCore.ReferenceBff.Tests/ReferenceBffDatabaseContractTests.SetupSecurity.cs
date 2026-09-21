@@ -101,14 +101,16 @@ public sealed partial class ReferenceBffDatabaseContractTests
         var key = stub.Principal.FindFirst("Microsoft.AspNetCore.Authentication.Cookies-SessionId")!.Value;
         var ticket = (await bff.Services.GetRequiredService<MemoryTicketStore>().RetrieveAsync(key))!;
         var canaries = new[] { terminal.Code!.Reveal(), ticket.Properties.GetTokenValue("access_token")!,
-            ticket.Properties.GetTokenValue("id_token")!, cookie, authority.Subject, csrf, "reference-bff-test-secret" };
+            ticket.Properties.GetTokenValue("id_token")!, cookie, authority.Subject, csrf, "reference-bff-test-secret",
+            SignaCoreHostFixture.Password, BffTestServer.DatabaseRootKey,
+            bff.Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>()["ReferenceBffDatabase:ConnectionString"]! };
         fault.Text = string.Join("|", canaries);
         logs.Entries.Clear();
         using var response = await SendSetup(browser.Bff, terminal.Code.Reveal(), csrf);
         Assert.Equal(failAudit ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.NoContent, response.StatusCode);
         var output = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)
             + response.Headers + response.Content.Headers + string.Join("\n", logs.Entries);
-        Assert.All(canaries, canary => Assert.False(output.Contains(canary, StringComparison.Ordinal)));
+        BffCanaryAssertions.Absent(output, canaries, "Setup response and logs");
         await using var read = database.CreateContext();
         Assert.Equal(failAudit ? 0 : 1, await read.ManagementRoleBindings.CountAsync(TestContext.Current.CancellationToken));
         Assert.Equal(failAudit ? 0 : 1, await CountSharedAuditRowsAsync(read));
@@ -121,7 +123,7 @@ public sealed partial class ReferenceBffDatabaseContractTests
             Assert.True(await reader.ReadAsync(TestContext.Current.CancellationToken));
             for (var i = 0; i < reader.FieldCount; i++)
                 if (reader.GetValue(i) is string value)
-                    Assert.All(canaries, canary => Assert.False(value.Contains(canary, StringComparison.Ordinal)));
+                    BffCanaryAssertions.Absent(value, canaries, "Setup audit column");
         }
     }
 
