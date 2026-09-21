@@ -158,7 +158,7 @@ internal static class SetupCompletionExecutor
             return SetupCompletionResult.ValidationFailed();
         }
 
-        if (!SettingsSnapshotValidator.TryNormalizeBaseUrl(publicBaseUrl, out var normalizedBaseUrl, out _))
+        if (!PublicBaseUrlNormalizer.TryNormalizeBaseUrl(publicBaseUrl, out var normalizedBaseUrl, out _))
         {
             return SetupCompletionResult.ValidationFailed();
         }
@@ -184,7 +184,7 @@ internal static class SetupCompletionExecutor
         // Build and validate the whole proposed snapshot before staging anything: everything that
         // can be rejected from the request alone is a validation failure, not a failed transaction.
         var values = BuildSnapshot(normalizedBaseUrl, allowNonHttpsIssuer, audience, administratorUsername);
-        if (SettingsSnapshotValidator.Validate(values).Count > 0)
+        if (SharedSettingComposition.ValidateCompleteCandidate(values).Count > 0)
         {
             return SetupCompletionResult.ValidationFailed();
         }
