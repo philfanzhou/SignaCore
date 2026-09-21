@@ -36,7 +36,11 @@ Success generates 32 random bytes, exposes their 43-character base64url form onc
 the versioned SHA-256 digest with the verified identifiers, URI, state, and five-minute lifecycle
 from `PS-08`. The ID token is validated in request memory and is never stored. The no-store JSON
 response contains one relative or same-origin `logout_uri`; its only query value is the new
-`logout_handle` (`IN-34`).
+`logout_handle` (`IN-34`). The request and `oidc.logout.prepared` audit are saved together;
+handle release waits for scope cleanup. See the canonical
+[preparation persistence boundary](./CanonicalSemanticModel.md#logout-preparation-persistence-boundary)
+for failure, cancellation, retry and unknown-commit outcomes. A failed response after saving
+must not be interpreted as proof that no request was committed.
 
 ## Step 2: browser completion
 

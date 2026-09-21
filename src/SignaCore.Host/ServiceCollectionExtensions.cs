@@ -249,6 +249,18 @@ public static class ServiceCollectionExtensions
         // ---- Browser OIDC login success commit path (canonical EV-01) ----
         services.AddScoped<OidcLoginCompletionService>();
         services.AddScoped<OidcAuthorizationSessionReuseService>();
+        services.AddScoped<LogoutPreparationScope>();
+        services.AddScoped<IdentityDbContext>(provider =>
+        {
+            var options = provider.GetRequiredService<DbContextOptions<IdentityDbContext>>();
+            if (provider.GetRequiredService<LogoutPreparationScope>().IsActive)
+            {
+                options = new DbContextOptionsBuilder<IdentityDbContext>(options)
+                    .UseLoggerFactory(Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
+                    .Options;
+            }
+            return new IdentityDbContext(options);
+        });
         services.AddScoped<OidcLogoutPreparationService>();
         services.AddScoped<OidcLogoutCompletionService>();
 

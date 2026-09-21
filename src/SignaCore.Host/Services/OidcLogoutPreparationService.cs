@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
@@ -23,14 +24,12 @@ public sealed record OidcLogoutPreparationSuccess(string LogoutUri);
 /// Step 1 of the prepared logout (<c>PS-08</c>/<c>IN-30</c>–<c>IN-34</c>): an authenticated
 /// confidential BFF exchanges a validated <c>id_token_hint</c>, an optional exactly-registered
 /// post-logout URI, and an optional bounded state for one five-minute logout handle. Every
-/// authentication, token, URI, state, or form failure is one local JSON 400 and creates no row;
+/// authentication, token, URI, state, or form rejection is one local JSON 400 and creates no row;
 /// the ID token is validated in request memory and never stored (<c>DF-08</c>).
 /// </summary>
 public sealed class OidcLogoutPreparationService(
-    ILogoutRequestStore logoutRequests,
+    IServiceScopeFactory scopeFactory,
     IKeyManager keyManager,
-    IAuditService auditService,
-    IdentityDbContext dbContext,
     JwtOptions jwtOptions,
     ILogger<OidcLogoutPreparationService> logger)
 {
@@ -68,18 +67,15 @@ public sealed class OidcLogoutPreparationService(
 
         try
         {
-            return await PrepareCoreAsync(app, fields, clientIp, correlationId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await PrepareCoreAsync(app, fields, clientIp, correlationId, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            return result;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex,
-                "Logout preparation failed: AppRowId={AppRowId}, CorrelationId={CorrelationId}",
-                app.Id,
-                LogValueSanitizer.Sanitize(correlationId));
+            cancellationToken.ThrowIfCancellationRequested();
+            logger.LogError("Logout preparation failed: AppRowId={AppRowId}", app.Id);
             return null;
         }
     }
@@ -126,56 +122,67 @@ public sealed class OidcLogoutPreparationService(
         // ignores exp; the iat freshness bound still applies. The 24-hour retired-key window
         // admits a token signed by a just-rotated key.
         await keyManager.RefreshKeysAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         var keys = await keyManager.GetLogoutHintValidationKeysAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         if (!TryValidateIdTokenHint(idTokenHint, app.AppId, keys, now, out var subject, out var sessionId))
         {
             return Fail("id_token_hint_validation");
         }
 
-        // IN-32: no normalization, exact ordinal match against this client's registered
-        // post-logout set; the registered canonical value itself is what gets stored. The
-        // authenticated entity carries an unloaded navigation, so the registrations are read
-        // explicitly here.
+        var creation = await PersistAsync(app, subject, sessionId, postLogoutUri, state, now,
+            clientIp, correlationId, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (creation is null) return Fail("post_logout_redirect_uri");
+        // PersistAsync has finished scope cleanup. A staged handle never reaches this boundary.
+        logger.LogInformation(
+            "Logout request prepared: AccountId={AccountId}, AppRowId={AppRowId}, RequestId={RequestId}",
+            subject, app.Id, creation.Id);
+        return new OidcLogoutPreparationSuccess(
+            $"{CompletionPath}?logout_handle={Uri.EscapeDataString(creation.LogoutHandle)}");
+    }
+
+    private async Task<LogoutRequestCreation?> PersistAsync(
+        AppRegistrationEntity app, Guid subject, Guid sessionId, string? postLogoutUri, string? state,
+        DateTimeOffset now, string? clientIp, string? correlationId, CancellationToken cancellationToken)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        cancellationToken.ThrowIfCancellationRequested();
+        // This marker only controls this operation's context diagnostics; other request scopes
+        // and the singleton options/factory keep their original logging and retry configuration.
+        var boundary = scope.ServiceProvider.GetService<LogoutPreparationScope>();
+        if (boundary is not null) boundary.IsActive = true;
+        var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        if (dbContext.ChangeTracker.HasChanges()) throw new InvalidOperationException("A clean logout scope is required.");
+
+        // IN-32 stays read-only and ordinal, before staging anything. This query shares the fresh
+        // context so provider exception text cannot escape through request-scope EF diagnostics.
         string? verifiedPostLogoutUri = null;
         if (postLogoutUri is not null)
         {
-            var registeredUris = await dbContext.AppRedirectUris
-                .AsNoTracking()
+            var registeredUris = await dbContext.AppRedirectUris.AsNoTracking()
                 .Where(registration => registration.AppRegistrationId == app.Id
                     && registration.Kind == RedirectUriKind.PostLogout)
-                .Select(registration => registration.CanonicalUri)
-                .ToListAsync(cancellationToken);
-            verifiedPostLogoutUri = registeredUris
-                .SingleOrDefault(registered => string.Equals(registered, postLogoutUri, StringComparison.Ordinal));
-            if (verifiedPostLogoutUri is null)
-            {
-                return Fail("post_logout_redirect_uri");
-            }
+                .Select(registration => registration.CanonicalUri).ToListAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            verifiedPostLogoutUri = registeredUris.SingleOrDefault(
+                registered => string.Equals(registered, postLogoutUri, StringComparison.Ordinal));
+            if (verifiedPostLogoutUri is null) return null;
         }
 
-        var creation = await logoutRequests.CreateAsync(
-            new LogoutRequestDescriptor(app.Id, subject, sessionId, verifiedPostLogoutUri, state),
-            now,
-            cancellationToken);
-
-        await auditService.RecordActionAsync(
-            PreparedAuditAction,
-            LogoutRequestAuditTargetType,
-            creation.Id.ToString("D"),
-            actorId: subject,
-            actorName: null,
-            description: $"session:{sessionId};client:{app.Id}",
-            clientIp: clientIp,
-            correlationId: correlationId,
-            cancellationToken: cancellationToken);
-
-        logger.LogInformation(
-            "Logout request prepared: AccountId={AccountId}, AppRowId={AppRowId}, RequestId={RequestId}",
-            subject,
-            app.Id,
-            creation.Id);
-        return new OidcLogoutPreparationSuccess(
-            $"{CompletionPath}?logout_handle={Uri.EscapeDataString(creation.LogoutHandle)}");
+        var creation = await scope.ServiceProvider.GetRequiredService<ILogoutRequestStore>().StageCreateAsync(
+            new LogoutRequestDescriptor(app.Id, subject, sessionId, verifiedPostLogoutUri, state), now, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        await scope.ServiceProvider.GetRequiredService<IAuditService>().RecordActionAsync(
+            PreparedAuditAction, LogoutRequestAuditTargetType, creation.Id.ToString("D"),
+            actorId: subject, actorName: null, description: $"session:{sessionId};client:{app.Id}",
+            clientIp: clientIp, correlationId: correlationId, cancellationToken: cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        // EF's single Save owns the automatic transaction and provider execution strategy. A
+        // transient retry reuses this fixed entity graph: no new handle, id or audit is generated.
+        await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return creation;
     }
 
     /// <summary>

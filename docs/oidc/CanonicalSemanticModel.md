@@ -135,6 +135,34 @@ code-to-session reference of `PS-23` makes that retention rule fail closed in th
 than only in cleanup logic, so a retained consumed code keeps a resolvable session row. Replay
 handling in `EV-24` must still prove replay from `consumed_at` alone and must not require that read.
 
+### Logout preparation persistence boundary
+
+`PS-08` and the promised `PS-11` event `oidc.logout.prepared` are one business unit. After
+hint validation, a fresh async scope uses one clean `IdentityDbContext` for the read-only
+registered-URI check, request staging, audit staging, and one EF `SaveChangesAsync`. Request
+and audit ids are generated once before saving; the audit targets `LogoutRequest` and the
+request id. It contains only the existing bounded ids and description, never the hint, handle,
+URI, state, credential, or cookie. `StageCreateAsync` is explicitly uncommitted; the older
+`CreateAsync` still creates and saves, and the public audit service remains stage-only.
+
+| Preparation event | Persisted request / prepared audit | External result |
+| --- | --- | --- |
+| Hint, registered URI, or state validation rejects | 0 / 0 | Existing fixed local rejection; no handle or redirect |
+| Both entities stage, one automatic transaction saves, scope cleanup succeeds, caller remains active | 1 / 1 with matching target | 200 with that handle only |
+| Staging, either INSERT, save-before-commit, or caller cancellation before commit fails | 0 / 0; discard the scope | Fixed 400 or original caller cancellation; no handle |
+| Cancellation or cleanup fails after commit; commit acknowledgement is lost | If committed, 1 / 1; an unknown outcome can only be 0 / 0 or 1 / 1 | No success handle; original caller cancellation takes precedence, otherwise fixed 400; no compensation or new product generation |
+| N independent valid preparations overlap | Each committed request has its own matching audit and handle | Multiple successes are valid; preparation is not a one-winner consumption operation |
+
+Every external await, including key refresh/read, URI query, stage, audit, save and cleanup,
+is followed by observation of the original caller before classifying a result or exception.
+The controller observes `RequestAborted` again after the service returns. Success logging and
+handle release require completed save and cleanup. The PostgreSQL execution strategy retains
+its existing transient retry configuration and retries the same fixed entity graph during Save;
+no application-level retry generates another id, handle or audit. SQLite keeps its existing
+single-instance semantics. Failure never means a committed pair can be presumed absent.
+There is no historical audit backfill, new FK, migration, or change to subsequent GET completion,
+replay or retention (`EV-06/07/18/28`, `SC-05/06/18/20`).
+
 ## Endpoint × external input
 
 Form and query decoding is strict UTF-8 and happens once. A supported or explicitly rejected

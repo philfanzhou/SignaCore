@@ -645,7 +645,11 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
             message.Contains("Logout request prepared", StringComparison.Ordinal)
             || message.Contains("Logout completed", StringComparison.Ordinal));
 
-        var dump = string.Join(Environment.NewLine, capture.Messages);
+        var audits = await QueryAsync(db => db.AuditLogs.AsNoTracking()
+            .Where(row => row.Action == "oidc.logout.prepared" || row.Action == "oidc.logout.completed")
+            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Contains(audits, row => row.Action == "oidc.logout.prepared");
+        var dump = string.Join(Environment.NewLine, capture.Messages) + JsonSerializer.Serialize(audits);
         Assert.DoesNotContain(idToken, dump, StringComparison.Ordinal);
         Assert.DoesNotContain(handle, dump, StringComparison.Ordinal);
         Assert.DoesNotContain(State, dump, StringComparison.Ordinal);
@@ -954,7 +958,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
                 TState state,
                 Exception? exception,
                 Func<TState, Exception?, string> formatter) =>
-                owner._messages.Enqueue(formatter(state, exception));
+                owner._messages.Enqueue(formatter(state, exception) + exception);
         }
     }
 }

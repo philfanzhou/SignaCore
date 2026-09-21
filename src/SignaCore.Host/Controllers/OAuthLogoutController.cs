@@ -21,8 +21,8 @@ namespace SignaCore.Host.Controllers;
 /// RP-Initiated Logout, so Discovery publishes no <c>end_session_endpoint</c> (<c>AC-10</c>).
 /// </summary>
 /// <remarks>
-/// Every preparation failure is one local JSON 400 that creates no row and never redirects to
-/// request input; the completion shares one local 400 HTML page for a missing, malformed,
+/// Preparation rejects with one local JSON 400 and never redirects to
+/// request input. A lost response after save may leave a committed request/audit pair; the completion shares one local 400 HTML page for a missing, malformed,
 /// expired, or consumed handle (<c>SC-18</c>). After a committed completion the identity cookie
 /// is deleted through the explicit identity scheme (<c>PS-18</c>); the shared ServiceMantle
 /// management cookie is never touched. A <c>Location</c> appears only for the verified,
@@ -124,6 +124,7 @@ public sealed class OAuthLogoutController : ControllerBase
             HttpContext.GetClientIp(),
             HttpContext.GetCorrelationId(),
             cancellationToken);
+        HttpContext.RequestAborted.ThrowIfCancellationRequested();
         if (success is null)
         {
             return FinishLogoutPrepare("invalid_request", PreparationFailure(), app.AppId, stopwatch);
