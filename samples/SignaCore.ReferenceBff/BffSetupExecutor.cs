@@ -12,6 +12,15 @@ internal static class BffSetupExecutor
     internal static async ValueTask<SetupCompletionResult> ExecuteAsync(
         HttpContext http, SetupCode code, CancellationToken token)
     {
+        var result = await ExecuteCoreAsync(http, code, token);
+        http.RequestServices.GetRequiredService<BffOperationLog>()
+            .Record(BffLogOperation.Setup, result.Status, token);
+        return result;
+    }
+
+    private static async ValueTask<SetupCompletionResult> ExecuteCoreAsync(
+        HttpContext http, SetupCode code, CancellationToken token)
+    {
         try
         {
             token.ThrowIfCancellationRequested();
