@@ -22,7 +22,7 @@ using SignaCoreDatabase = SignaCore.Database;
 namespace SignaCore.Tests.Integration;
 
 /// <summary>
-/// The outer bounded form read of <c>POST /oauth2/token</c> and <c>POST /oauth2/revoke</c>: one
+/// The outer bounded form read of Token, Revoke and Logout preparation: one
 /// read of at most 16385 raw bytes ahead of every later stage, one strict UTF-8 single-percent
 /// decode, the fixed 400/503 answers after the shared phase and budget admit the request, and no
 /// credential, client row, or grant side effect for a rejected body. Caller cancellation outranks
@@ -35,7 +35,7 @@ namespace SignaCore.Tests.Integration;
 /// </summary>
 [Collection(SqliteProcessState.CollectionName)]
 [UsesProcessWideSqlitePoolClearing]
-public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixture>
+public sealed partial class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixture>
 {
     private const string FixedInvalidRequestBody =
         """{"error":"invalid_request","error_description":"The form request is invalid."}""";
@@ -87,6 +87,10 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
     [InlineData(16385, "/oauth2/revoke", "post")]
     [InlineData(16385, "/oauth2/token", "none")]
     [InlineData(16385, "/oauth2/revoke", "none")]
+    [InlineData(16385, "/oauth2/logout/requests", "basic")]
+    [InlineData(20 * 1024, "/oauth2/logout/requests", "basic")]
+    [InlineData(16385, "/oauth2/logout/requests", "post")]
+    [InlineData(16385, "/oauth2/logout/requests", "none")]
     public async Task ABeyondTheBound_IsTheFixed400_OnEveryCredentialPath(
         int size, string path, string credentialPath)
     {
@@ -106,11 +110,14 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         Assert.False(response.Headers.Contains("Location"));
     }
 
-    [Fact]
-    public async Task ABodyWithNoContentLength_CannotSmugglePastTheBound()
+    [Theory]
+    [InlineData("/oauth2/token")]
+    [InlineData("/oauth2/revoke")]
+    [InlineData("/oauth2/logout/requests")]
+    public async Task ABodyWithNoContentLength_CannotSmugglePastTheBound(string path)
     {
         using var http = CreateClientWithBasicAuth();
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/oauth2/token")
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
             // StreamContent without a known length is sent chunked: a lying or absent
             // Content-Length cannot smuggle a larger body past the byte-count bound.
@@ -124,8 +131,11 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         Assert.Equal(FixedInvalidRequestBody, body);
     }
 
-    [Fact]
-    public async Task AnOversizedBody_LeaksNoCanary()
+    [Theory]
+    [InlineData("/oauth2/token")]
+    [InlineData("/oauth2/revoke")]
+    [InlineData("/oauth2/logout/requests")]
+    public async Task AnOversizedBody_LeaksNoCanary(string path)
     {
         var canary = "synthetic-canary-7c31e9d0b4a2";
         using var http = CreateClientWithBasicAuth();
@@ -133,7 +143,7 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
             "grant_type=password&username=" + canary + "&password=" + canary + "&padding=" + new string('a', 20_000));
 
         using var response = await http.PostAsync(
-            "/oauth2/token", RawForm(payload), TestContext.Current.CancellationToken);
+            path, RawForm(payload), TestContext.Current.CancellationToken);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(FixedInvalidRequestBody, body);
@@ -164,9 +174,12 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
     [InlineData("/oauth2/token", "multipart/form-data; boundary=bound")]
     [InlineData("/oauth2/revoke", "application/json")]
     [InlineData("/oauth2/revoke", "multipart/form-data; boundary=bound")]
+    [InlineData("/oauth2/logout/requests", "application/json")]
+    [InlineData("/oauth2/logout/requests", "text/plain")]
+    [InlineData("/oauth2/logout/requests", "multipart/form-data; boundary=bound")]
     public async Task ANonFormMediaType_IsTheFixed400AfterTheSharedBudget(string path, string contentType)
     {
-        // The gate owns the media-type decision for both endpoints: a non-form body is the same
+        // The gate owns the media-type decision for these endpoints: a non-form body is the same
         // fixed invalid_request after the shared phase and budget — never an action-selection
         // 415 that would preempt the gate's failure path — and its body is never read.
         using var http = CreateClientWithBasicAuth();
@@ -198,14 +211,17 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         Assert.Contains("unsupported_grant_type", body, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task ACompressedBody_IsTheFixed400()
+    [Theory]
+    [InlineData("/oauth2/token")]
+    [InlineData("/oauth2/revoke")]
+    [InlineData("/oauth2/logout/requests")]
+    public async Task ACompressedBody_IsTheFixed400(string path)
     {
         using var http = CreateClientWithBasicAuth();
         var content = RawForm(Encoding.ASCII.GetBytes("grant_type=unsupported-probe"));
         content.Headers.TryAddWithoutValidation("Content-Encoding", "gzip");
 
-        using var response = await http.PostAsync("/oauth2/token", content, TestContext.Current.CancellationToken);
+        using var response = await http.PostAsync(path, content, TestContext.Current.CancellationToken);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(FixedInvalidRequestBody, body);
@@ -386,11 +402,14 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
 
     // ---- Unit-level probes: the reader itself ----
 
-    [Fact]
-    public async Task TheReader_ConsumesAtMostOneBytePastTheBound()
+    [Theory]
+    [InlineData("/oauth2/token")]
+    [InlineData("/oauth2/revoke")]
+    [InlineData("/oauth2/logout/requests")]
+    public async Task TheReader_ConsumesAtMostOneBytePastTheBound(string path)
     {
         var stream = new ChunkedMemoryStream(OversizedBody(20 * 1024), chunkSize: 1024);
-        var (context, next, invoked) = CreateContext("/oauth2/token", stream);
+        var (context, next, invoked) = CreateContext(path, stream);
 
         await new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context);
 
@@ -399,8 +418,11 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         Assert.True(invoked.Value);
     }
 
-    [Fact]
-    public async Task TheReader_IgnoresALyingContentLength_AndParsesAcrossReadBoundaries()
+    [Theory]
+    [InlineData("/oauth2/token")]
+    [InlineData("/oauth2/revoke")]
+    [InlineData("/oauth2/logout/requests")]
+    public async Task TheReader_IgnoresALyingContentLength_AndParsesAcrossReadBoundaries(string path)
     {
         // A multi-byte UTF-8 character split across single-byte reads must still decode.
         var payload = Encoding.ASCII.GetBytes("grant_type=pass")
@@ -408,7 +430,7 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
             .Concat(Encoding.ASCII.GetBytes("word&repeat=1&repeat=2"))
             .ToArray();
         var stream = new ChunkedMemoryStream(payload, chunkSize: 1);
-        var (context, next, invoked) = CreateContext("/oauth2/token", stream);
+        var (context, next, invoked) = CreateContext(path, stream);
         context.Request.ContentLength = 10; // deliberately wrong: the bound is on bytes read.
 
         await new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context);
@@ -422,24 +444,27 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         Assert.Equal("2", form["repeat"][1]);
     }
 
-    [Fact]
-    public async Task TheReader_MapsFailuresToTheFixedMarker()
+    [Theory]
+    [InlineData("/oauth2/token")]
+    [InlineData("/oauth2/revoke")]
+    [InlineData("/oauth2/logout/requests")]
+    public async Task TheReader_MapsFailuresToTheFixedMarker(string path)
     {
         var internalCancel = new CancellationTokenSource();
         await internalCancel.CancelAsync();
 
         var (ioContext, ioNext, _) = CreateContext(
-            "/oauth2/revoke", new ThrowingStream(new IOException("synthetic transport failure")));
+            path, new ThrowingStream(new IOException("synthetic transport failure")));
         await new BoundedOidcFormReadingMiddleware(ioNext).InvokeAsync(ioContext);
         Assert.Equal(OidcBoundedFormStatus.Unavailable, BoundedOidcFormReadingMiddleware.GetStatus(ioContext));
 
         var (cancelContext, cancelNext, _) = CreateContext(
-            "/oauth2/revoke", new ThrowingStream(new OperationCanceledException(internalCancel.Token)));
+            path, new ThrowingStream(new OperationCanceledException(internalCancel.Token)));
         await new BoundedOidcFormReadingMiddleware(cancelNext).InvokeAsync(cancelContext);
         Assert.Equal(OidcBoundedFormStatus.Unavailable, BoundedOidcFormReadingMiddleware.GetStatus(cancelContext));
 
         var (abortedContext, abortedNext, _) = CreateContext(
-            "/oauth2/revoke", new ThrowingStream(new OperationCanceledException()));
+            path, new ThrowingStream(new OperationCanceledException()));
         var abortedLifetime = new AbortedLifetimeFeature();
         abortedContext.Features.Set<IHttpRequestLifetimeFeature>(abortedLifetime);
         abortedLifetime.Abort();
@@ -449,13 +474,16 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
 
     // ---- Caller cancellation outranks parsing, markers, and downstream ----
 
-    [Fact]
-    public async Task APreCancelledRequest_NeverReachesAReadOrAnythingDownstream()
+    [Theory]
+    [InlineData("/oauth2/token")]
+    [InlineData("/oauth2/revoke")]
+    [InlineData("/oauth2/logout/requests")]
+    public async Task APreCancelledRequest_NeverReachesAReadOrAnythingDownstream(string path)
     {
         // Pre-cancelled while the stream still holds buffered data it would return: the entry
         // observation must win — no read, no marker, no downstream pipeline.
         var stream = new ChunkedMemoryStream(Encoding.ASCII.GetBytes("grant_type=password"), 4);
-        var (context, next, invoked) = CreateContext("/oauth2/token", stream);
+        var (context, next, invoked) = CreateContext(path, stream);
         var lifetime = new AbortedLifetimeFeature();
         context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
         lifetime.Abort();
@@ -467,13 +495,16 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         Assert.False(invoked.Value);
     }
 
-    [Fact]
-    public async Task ACallerCancelledAtTheEofReturn_IsNeverParsedOrDispatched()
+    [Theory]
+    [InlineData("/oauth2/token")]
+    [InlineData("/oauth2/revoke")]
+    [InlineData("/oauth2/logout/requests")]
+    public async Task ACallerCancelledAtTheEofReturn_IsNeverParsedOrDispatched(string path)
     {
         // The stream delivers the whole body, the caller cancels, and only then does the stream
         // report EOF: the read-return observation must throw — never a Parsed marker, never a
         // downstream call.
-        var (context, next, invoked) = CreateContext("/oauth2/token", Stream.Null);
+        var (context, next, invoked) = CreateContext(path, Stream.Null);
         var lifetime = new AbortedLifetimeFeature();
         context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
         context.Request.Body = new CancelBeforeEofStream(
@@ -486,8 +517,11 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         Assert.False(invoked.Value);
     }
 
-    [Fact]
-    public async Task AnInternalCancellationAfterDataWasRead_IsStillTheUnavailableMarker()
+    [Theory]
+    [InlineData("/oauth2/token")]
+    [InlineData("/oauth2/revoke")]
+    [InlineData("/oauth2/logout/requests")]
+    public async Task AnInternalCancellationAfterDataWasRead_IsStillTheUnavailableMarker(string path)
     {
         // The caller stays alive; the stream returns real data and then cancels internally: the
         // classification is Unavailable, and the pipeline continues so the shared budget and the
@@ -497,7 +531,7 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         var stream = new PartialThenThrowStream(
             Encoding.ASCII.GetBytes("grant_type=password"),
             new OperationCanceledException(internalCancel.Token));
-        var (context, next, invoked) = CreateContext("/oauth2/revoke", stream);
+        var (context, next, invoked) = CreateContext(path, stream);
 
         await new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context);
 
@@ -505,8 +539,11 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         Assert.True(invoked.Value);
     }
 
-    [Fact]
-    public async Task AReadFailureAfterPartialData_ZerosTheRetainedBuffer()
+    [Theory]
+    [InlineData("/oauth2/token")]
+    [InlineData("/oauth2/revoke")]
+    [InlineData("/oauth2/logout/requests")]
+    public async Task AReadFailureAfterPartialData_ZerosTheRetainedBuffer(string path)
     {
         // The probe retains the very Memory<byte> the reader wrote into: when the second read
         // throws IOException the reader must already have zeroed that memory — the clearing
@@ -514,7 +551,7 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         var stream = new PartialThenThrowStream(
             Encoding.ASCII.GetBytes("grant_type=password&password=secret-value-4f2a"),
             new IOException("synthetic transport failure"));
-        var (context, next, _) = CreateContext("/oauth2/token", stream);
+        var (context, next, _) = CreateContext(path, stream);
 
         await new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context);
 
@@ -527,6 +564,8 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
     [InlineData("/oauth2/revoke", true)]
     [InlineData("/oauth2/token", false)]
     [InlineData("/oauth2/revoke", false)]
+    [InlineData("/oauth2/logout/requests", true)]
+    [InlineData("/oauth2/logout/requests", false)]
     public async Task ACallerCancellationAfterPartialData_ZerosTheRetainedBuffer(
         string path, bool ioFailure)
     {
@@ -567,9 +606,9 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
     }
 
     [Fact]
-    public async Task TheGate_CoversOnlyItsTwoEndpoints()
+    public async Task TheGate_CoversOnlyItsThreePostEndpoints()
     {
-        foreach (var path in new[] { "/oauth2/login", "/oauth2/logout/requests", "/api/auth/token" })
+        foreach (var path in new[] { "/oauth2/login", "/oauth2/logout", "/oauth2/logout/requests-extra", "/oauth2/logout/requests//", "/api/auth/token" })
         {
             var (context, next, invoked) = CreateContext(
                 path, new ChunkedMemoryStream(OversizedBody(20 * 1024), 1024));
@@ -580,15 +619,18 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         }
     }
 
-    [Fact]
-    public async Task DownstreamReads_ReuseTheOneCachedForm_AndNeverRereadTheStream()
+    [Theory]
+    [InlineData("/oauth2/token")]
+    [InlineData("/oauth2/revoke")]
+    [InlineData("/oauth2/logout/requests")]
+    public async Task DownstreamReads_ReuseTheOneCachedForm_AndNeverRereadTheStream(string path)
     {
         // After the gate's single read, every downstream access — Request.Form and
         // ReadFormAsync alike — reuses the cached form feature; the original stream is never
         // read a second time.
         var payload = Encoding.ASCII.GetBytes("grant_type=password&repeat=1&repeat=2");
         var stream = new ChunkedMemoryStream(payload, 8);
-        var (context, next, _) = CreateContext("/oauth2/token", stream);
+        var (context, next, _) = CreateContext(path, stream);
         await new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context);
 
         var first = context.Request.Form;
@@ -602,6 +644,8 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
     [InlineData("/oauth2/token/")]
     [InlineData("/oauth2/revoke/")]
     [InlineData("/OAuth2/Revoke/")]
+    [InlineData("/oauth2/logout/requests/")]
+    [InlineData("/OAuth2/Logout/Requests/")]
     public async Task ATrailingSlashOrCasedVariant_IsStillGatedAndBounded(string path)
     {
         var stream = new ChunkedMemoryStream(OversizedBody(20 * 1024), 1024);
@@ -613,11 +657,14 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         Assert.Equal(BoundedOidcFormReadingMiddleware.MaxReadBytes, stream.TotalRead);
     }
 
-    [Fact]
-    public async Task AMountedPathBaseVariant_IsStillGatedAndBounded()
+    [Theory]
+    [InlineData("/oauth2/token")]
+    [InlineData("/oauth2/revoke")]
+    [InlineData("/oauth2/logout/requests")]
+    public async Task AMountedPathBaseVariant_IsStillGatedAndBounded(string path)
     {
         var stream = new ChunkedMemoryStream(OversizedBody(20 * 1024), 1024);
-        var (context, next, _) = CreateContext("/oauth2/token", stream);
+        var (context, next, _) = CreateContext(path, stream);
         context.Request.PathBase = "/signacore";
 
         await new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context);
@@ -633,32 +680,47 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
     {
         await using var environment = await KestrelSmokeEnvironment.StartAsync();
 
-        using (var rejected = new HttpRequestMessage(HttpMethod.Post, "/oauth2/token")
+        foreach (var path in new[] { "/oauth2/token", "/oauth2/logout/requests" })
         {
-            Content = new StreamContent(new ChunkedMemoryStream(OversizedBody(20 * 1024), 512))
-        })
-        {
-            rejected.Content.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded");
-            rejected.Headers.Authorization = environment.BasicHeader;
-            using var response = await environment.Http.SendAsync(rejected, TestContext.Current.CancellationToken);
-            var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-            Assert.Equal(FixedInvalidRequestBody, body);
+            using (var rejected = new HttpRequestMessage(HttpMethod.Post, path)
+            {
+                Content = new StreamContent(new ChunkedMemoryStream(OversizedBody(20 * 1024), 512))
+            })
+            {
+                rejected.Content.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded");
+                rejected.Headers.Authorization = environment.BasicHeader;
+                using var response = await environment.Http.SendAsync(rejected, TestContext.Current.CancellationToken);
+                var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+                Assert.Equal(FixedInvalidRequestBody, body);
+            }
+
+            using (var dispatched = new HttpRequestMessage(HttpMethod.Post, path)
+            {
+                Content = new StreamContent(new ChunkedMemoryStream(
+                    Encoding.ASCII.GetBytes("grant_type=unsupported-probe"), 7))
+            })
+            {
+                dispatched.Content.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded");
+                dispatched.Headers.Authorization = environment.BasicHeader;
+                using var response = await environment.Http.SendAsync(dispatched, TestContext.Current.CancellationToken);
+                var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+                Assert.NotEqual(FixedInvalidRequestBody, body);
+            }
         }
 
-        using (var dispatched = new HttpRequestMessage(HttpMethod.Post, "/oauth2/token")
+        var hint = await environment.CreateLogoutHintAsync();
+        var prefix = "id_token_hint=" + hint;
+        using var exact = new HttpRequestMessage(HttpMethod.Post, "/oauth2/logout/requests")
         {
             Content = new StreamContent(new ChunkedMemoryStream(
-                Encoding.ASCII.GetBytes("grant_type=unsupported-probe"), 7))
-        })
-        {
-            dispatched.Content.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded");
-            dispatched.Headers.Authorization = environment.BasicHeader;
-            using var response = await environment.Http.SendAsync(dispatched, TestContext.Current.CancellationToken);
-            var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-            Assert.Contains("unsupported_grant_type", body, StringComparison.Ordinal);
-        }
+                Encoding.ASCII.GetBytes(prefix + new string('&', 16384 - prefix.Length)), 7))
+        };
+        exact.Headers.Authorization = environment.BasicHeader;
+        exact.Content.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded");
+        using var exactResponse = await environment.Http.SendAsync(exact, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, exactResponse.StatusCode);
     }
 
     // ---- Driving ----
@@ -731,14 +793,19 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
     private sealed class ChunkedMemoryStream(byte[] payload, int chunkSize) : Stream
     {
         private int _position;
+        public Action? AfterRead { get; init; }
+        public Memory<byte> Retained { get; private set; }
+        public CancellationToken ObservedToken { get; private set; }
 
         public long TotalRead { get; private set; }
 
         public override ValueTask<int> ReadAsync(
             Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            ObservedToken = cancellationToken;
             if (_position >= payload.Length)
             {
+                AfterRead?.Invoke();
                 return ValueTask.FromResult(0);
             }
 
@@ -746,6 +813,8 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
             payload.AsSpan(_position, take).CopyTo(buffer.Span);
             _position += take;
             TotalRead += take;
+            Retained = buffer[..take];
+            AfterRead?.Invoke();
             return ValueTask.FromResult(take);
         }
 
@@ -1052,6 +1121,44 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
             {
                 Http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}/") }
             };
+        }
+
+        public async Task<string> CreateLogoutHintAsync()
+        {
+            var options = new DbContextOptionsBuilder<SignaCoreDatabase.IdentityDbContext>()
+                .UseSqlite(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = _databasePath }.ConnectionString)
+                .Options;
+            await using var database = new SignaCoreDatabase.IdentityDbContext(options);
+            var app = await database.AppRegistrations.SingleAsync(row => row.AppId == AppId, TestContext.Current.CancellationToken);
+            app.AllowAuthorizationCode = true;
+            app.ClientType = SignaCoreDatabase.Entity.OidcClientType.Confidential;
+            var credential = await database.PasswordCredentials.FirstAsync(TestContext.Current.CancellationToken);
+            var now = DateTimeOffset.UtcNow;
+            var session = new SignaCoreDatabase.Entity.IdentitySessionEntity
+            {
+                Id = Guid.NewGuid(), AccountId = credential.AccountId, PasswordCredentialId = credential.Id,
+                AuthMethod = "password", AuthTime = now, LastSeenAt = now,
+                IdleExpiresAt = now.AddHours(1), AbsoluteExpiresAt = now.AddHours(8)
+            };
+            database.IdentitySessions.Add(session);
+            await database.SaveChangesAsync(TestContext.Current.CancellationToken);
+            var key = await database.SecurityKeys.FirstAsync(row => row.IsActive, TestContext.Current.CancellationToken);
+            var protector = new SignaCore.Domain.Keys.AesGcmPrivateKeyProtector(
+                new SignaCore.Domain.Keys.BootstrapMasterKeyProvider(IdentityServerFixture.RootSecret));
+            var privateBytes = protector.Unprotect(key.EncryptedPrivateKeyParams, key.EncryptionSalt);
+            using var rsa = System.Security.Cryptography.RSA.Create();
+            try { rsa.ImportPkcs8PrivateKey(privateBytes, out _); }
+            finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(privateBytes); }
+            var discovery = await Http.GetFromJsonAsync<JsonElement>("/.well-known/openid-configuration", TestContext.Current.CancellationToken);
+            return new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().WriteToken(
+                new System.IdentityModel.Tokens.Jwt.JwtSecurityToken(
+                    new System.IdentityModel.Tokens.Jwt.JwtHeader(new Microsoft.IdentityModel.Tokens.SigningCredentials(
+                        new Microsoft.IdentityModel.Tokens.RsaSecurityKey(rsa) { KeyId = key.KeyId },
+                        Microsoft.IdentityModel.Tokens.SecurityAlgorithms.RsaSha256)),
+                    new System.IdentityModel.Tokens.Jwt.JwtPayload(discovery.GetProperty("issuer").GetString(), AppId,
+                        [new System.Security.Claims.Claim("sub", credential.AccountId.ToString("D")),
+                         new System.Security.Claims.Claim("sid", session.Id.ToString("D"))],
+                        notBefore: null, expires: now.AddMinutes(10).UtcDateTime, issuedAt: now.UtcDateTime)));
         }
 
         public async ValueTask DisposeAsync()

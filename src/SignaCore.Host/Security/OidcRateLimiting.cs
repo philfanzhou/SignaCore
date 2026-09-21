@@ -91,10 +91,10 @@ public static class OidcRateLimitPolicies
         "ip:" + (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
     /// <summary>
     /// Reads one client id candidate from the transport-side carriers only: the query string,
-    /// the Basic authorization header, or — for the two endpoints whose client credentials may
-    /// arrive as form fields — the form body's <c>client_id</c> field. The login form and the
-    /// logout endpoints are deliberately excluded from the form read: their controllers parse
-    /// the raw body themselves, and nothing legitimate ever carries a client id there. Returns
+    /// the Basic authorization header, or — for token and revoke only — the cached form body's
+    /// <c>client_id</c> field. Logout preparation retains its existing query/Basic candidate
+    /// policy: post credentials authenticate later, but do not select a client partition here.
+    /// Login and logout bodies are never read by this resolver. Returns
     /// no value when the candidate is absent or of an unbounded shape. A failed bounded-form
     /// gate skips every carrier — no candidate is trustworthy and no client row is queried, so
     /// the request falls into the source-network partition.

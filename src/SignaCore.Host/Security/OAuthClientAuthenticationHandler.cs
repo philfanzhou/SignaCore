@@ -41,7 +41,7 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        // The outer bounded-form gate owns the two standard form endpoints' body boundary: a
+        // The outer bounded-form gate owns the standard form endpoints' body boundary: a
         // failed gate means no credential carrier may be read and no client row consulted.
         if (BoundedOidcFormReadingMiddleware.GetStatus(Context)
             is OidcBoundedFormStatus.Malformed or OidcBoundedFormStatus.Unavailable)

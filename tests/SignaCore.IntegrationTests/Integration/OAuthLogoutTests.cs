@@ -36,7 +36,7 @@ namespace SignaCore.Tests.Integration;
 /// </summary>
 [Collection(SqliteProcessState.CollectionName)]
 [UsesProcessWideSqlitePoolClearing]
-public sealed class OAuthLogoutTests : IClassFixture<IdentityServerFixture>
+public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixture>
 {
     private const string AppId = "logout-contract-app";
     private const string AppSecret = "logout-contract-secret-canary";
@@ -198,14 +198,13 @@ public sealed class OAuthLogoutTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(HttpStatusCode.BadRequest, (await SendRawPrepareAsync(
             http,
             $"id_token_hint={idToken}&state={State}&state={State}")).StatusCode);
-        // An oversized body: one admitted field padded past the 16 KiB request-size bound; the
-        // server answers 413 (the Kestrel size limit) or the local 400 — never a row.
+        // The outer gate owns the actual read bound, with one fixed error surface.
         var oversized = await SendRawPrepareAsync(
             http,
             $"id_token_hint={new string('a', 17 * 1024)}");
-        Assert.True(
-            oversized.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.RequestEntityTooLarge,
-            $"Unexpected status {oversized.StatusCode}");
+        Assert.Equal(HttpStatusCode.BadRequest, oversized.StatusCode);
+        Assert.Equal("{\"error\":\"invalid_request\",\"error_description\":\"The form request is invalid.\"}",
+            await oversized.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         Assert.False(await QueryAsync(async dbContext =>
             await dbContext.LogoutRequests.AsNoTracking()
                 .AnyAsync(r => r.IdentitySessionId == sessionId, TestContext.Current.CancellationToken)));
@@ -594,6 +593,7 @@ public sealed class OAuthLogoutTests : IClassFixture<IdentityServerFixture>
     [Fact]
     public async Task SecretsNeverReachLogsOrAudits()
     {
+        await SeedLogoutAppAsync();
         var capture = new CapturingLoggerProvider();
         using var factory = _fixture.WithTestServices(services =>
         {

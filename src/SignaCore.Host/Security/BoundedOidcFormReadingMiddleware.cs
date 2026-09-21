@@ -7,7 +7,7 @@ using SignaCore.Host.Http;
 namespace SignaCore.Host.Security;
 
 /// <summary>
-/// The outcome of the outer bounded form read for the two standard form endpoints.
+/// The outcome of the outer bounded form read for the standard form endpoints.
 /// </summary>
 public enum OidcBoundedFormStatus
 {
@@ -28,7 +28,8 @@ public enum OidcBoundedFormStatus
 }
 
     /// <summary>
-    /// The single bounded, strict form read for <c>POST /oauth2/token</c> and <c>POST /oauth2/revoke</c>
+    /// The single bounded, strict form read for <c>POST /oauth2/token</c>, <c>POST /oauth2/revoke</c>,
+    /// and <c>POST /oauth2/logout/requests</c>
     /// (the outer input gate of the shared protocol model). Exactly one read of at most 16385 raw
     /// bytes happens here, ahead of the partition resolver and the composed pipeline; a successful
     /// parse is installed as the request's <c>IFormFeature</c> so every downstream
@@ -43,7 +44,8 @@ public enum OidcBoundedFormStatus
     /// not accepted. Decoding is one strict UTF-8 pass with a single percent-decode (<c>+</c> is a
     /// space; percent hex is case-insensitive; <c>=</c> after the first is value bytes). Duplicate
     /// fields keep their <see cref="StringValues"/> cardinality for the existing grant field
-    /// rules; unknown fields are preserved and stay ignored by the grants, exactly as before.
+    /// rules; unknown fields are preserved for each endpoint's existing rules (ignored by grants,
+    /// rejected by logout preparation).
     /// </para>
     /// <para>
     /// Caller cancellation outranks every classification here: the caller's token is observed at
@@ -94,7 +96,7 @@ public sealed class BoundedOidcFormReadingMiddleware(RequestDelegate next)
     }
 
     /// <summary>
-    /// Whether this path is one of the two endpoints this gate owns. Routing matches literal
+    /// Whether this path is one of the endpoints this gate owns. Routing matches literal
     /// segments case-insensitively, and the comparison here tolerates a trailing slash, so no
     /// casing or trailing-slash variant can slip past the gate into a routable shape.
     /// </summary>
@@ -107,7 +109,8 @@ public sealed class BoundedOidcFormReadingMiddleware(RequestDelegate next)
         }
 
         return string.Equals(value, "/oauth2/token", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(value, "/oauth2/revoke", StringComparison.OrdinalIgnoreCase);
+            || string.Equals(value, "/oauth2/revoke", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "/oauth2/logout/requests", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The gate's outcome for this request, or null when the gate did not run.</summary>

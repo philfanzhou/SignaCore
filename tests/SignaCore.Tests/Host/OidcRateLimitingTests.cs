@@ -151,6 +151,43 @@ public sealed class OidcRateLimitingTests
         repository.VerifyNoOtherCalls();
     }
 
+    [Theory]
+    [InlineData(OidcBoundedFormStatus.Malformed)]
+    [InlineData(OidcBoundedFormStatus.Unavailable)]
+    public async Task LogoutFailureMarker_SkipsAllClientCarriers(OidcBoundedFormStatus status)
+    {
+        var repository = new Mock<IAppRegistrationRepository>(MockBehavior.Strict);
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/oauth2/logout/requests";
+        context.Request.QueryString = new QueryString("?client_id=known-client");
+        context.Request.Headers.Authorization =
+            $"Basic {Convert.ToBase64String(Encoding.UTF8.GetBytes("known-client:secret"))}";
+        context.Items[BoundedOidcFormReadingMiddleware.StatusItemKey] = status;
+        await BuildResolver(repository.Object)(context);
+        repository.VerifyNoOtherCalls();
+        Assert.False(context.Items.ContainsKey(OidcRateLimitPolicies.RegisteredClientItemKey));
+    }
+
+    [Theory]
+    [InlineData("query", "known-client")]
+    [InlineData("basic", "known-client")]
+    [InlineData("post", null)]
+    public async Task LogoutParsedForm_PreservesTheExistingPartitionPolicy(string carrier, string? expected)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/oauth2/logout/requests";
+        context.Request.Method = "POST";
+        context.Items[BoundedOidcFormReadingMiddleware.StatusItemKey] = OidcBoundedFormStatus.Parsed;
+        context.Request.Form = new FormCollection(new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
+        {
+            ["client_id"] = "known-client", ["client_secret"] = "synthetic-secret"
+        });
+        if (carrier == "query") context.Request.QueryString = new QueryString("?client_id=known-client");
+        if (carrier == "basic") context.Request.Headers.Authorization =
+            $"Basic {Convert.ToBase64String(Encoding.UTF8.GetBytes("known-client:secret"))}";
+        Assert.Equal(expected, await OidcRateLimitPolicies.ReadClientIdCandidateAsync(context, TestContext.Current.CancellationToken));
+    }
+
     private static Func<HttpContext, Task> BuildResolver(IAppRegistrationRepository repository)
     {
         var services = new ServiceCollection();
