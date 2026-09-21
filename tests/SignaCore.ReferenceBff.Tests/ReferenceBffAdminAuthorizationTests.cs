@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using SignaCore.ReferenceBff.Database;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using Xunit;
 using BffIdentityCheckService = BffSample::SignaCore.ReferenceBff.BffIdentityCheckService;
 using BffMemoryTicketStore = BffSample::SignaCore.ReferenceBff.MemoryTicketStore;
@@ -124,7 +125,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
         await using var untouched = new ReferenceBffDbContext(
             new DbContextOptionsBuilder<ReferenceBffDbContext>()
                 .UseReferenceBffSqlite(database.ConnectionString).Options);
-        Assert.Empty(await untouched.ServiceInstallations.ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Single(await untouched.ServiceInstallations.ToListAsync(TestContext.Current.CancellationToken));
         Assert.Empty(await untouched.ManagementRoleBindings.ToListAsync(TestContext.Current.CancellationToken));
 
     }
@@ -330,13 +331,11 @@ public sealed class ReferenceBffAdminAuthorizationTests
         await using var database = TempBffDatabase.CreateUnmigrated();
         await using var bff = CreateBff(authority, database);
         using var browser = CreateBrowser(bff, authority);
-        await SignInAsync(browser);
 
         using var admin = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/admin"));
         using var response = await browser.SendOnBffAsync(admin, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        Assert.Equal(1, TicketStore(bff).Count);
-        await AssertStillSignedInAsync(browser);
+        Assert.Equal(0, TicketStore(bff).Count);
     }
 
     [Fact]
@@ -771,6 +770,8 @@ public sealed class ReferenceBffAdminAuthorizationTests
                 .Options;
             await using var context = new ReferenceBffDbContext(options);
             await context.Database.MigrateAsync(TestContext.Current.CancellationToken);
+            await new EfCoreServiceInstallationStore<ReferenceBffDbContext>(context)
+                .CreatePendingAsync(ReferenceBffServiceMantle.ServiceId, TestContext.Current.CancellationToken);
         }
 
         public async Task SeedBindingAsync(string issuer, string subject, bool active)
@@ -867,6 +868,8 @@ public sealed class ReferenceBffAdminAuthorizationTests
                 InterceptionResult<System.Data.Common.DbDataReader> result,
                 CancellationToken cancellationToken = default)
         {
+            if (!command.CommandText.Contains("management_role_bindings", StringComparison.Ordinal))
+                return ValueTask.FromResult(result);
             Observed = true;
             entered.TrySetResult();
             return WaitAsync(cancellationToken);
@@ -903,6 +906,8 @@ public sealed class ReferenceBffAdminAuthorizationTests
                 InterceptionResult<System.Data.Common.DbDataReader> result,
                 CancellationToken cancellationToken = default)
         {
+            if (!command.CommandText.Contains("management_role_bindings", StringComparison.Ordinal))
+                return ValueTask.FromResult(result);
             Observed = true;
             entered.TrySetResult();
             return WaitAsync();

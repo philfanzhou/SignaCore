@@ -59,6 +59,9 @@ internal static class ReferenceBffDatabaseSetup
         DbContextOptionsBuilder options,
         Settings settings)
     {
+        // Provider diagnostics can embed connection values or exception text. The HTTP boundary
+        // exposes only finite results; do not let EF log an exception before it reaches that boundary.
+        options.UseLoggerFactory(Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
         if (string.Equals(settings.Provider, "SQLite", StringComparison.Ordinal))
         {
             options.UseSqlite(

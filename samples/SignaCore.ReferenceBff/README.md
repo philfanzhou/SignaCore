@@ -9,8 +9,7 @@ OpenID Connect Discovery document. Nothing is hardcoded.
 
 > **Single-instance reference.** The session ticket store is in-process memory: a restart loses
 > sessions and replicas do not share them. Replace it with a shared store before running more
-> than one instance. Coordinated upstream logout and the first-administrator binding flow are
-> delivered by later SignaCore tasks.
+> than one instance. Coordinated upstream logout is delivered by a later SignaCore task.
 >
 > **Runtime authorization over an optional local database.** The sample's sign-in keeps working
 > with no database at all; `GET /bff/admin` additionally enforces the local administrator
@@ -22,8 +21,8 @@ OpenID Connect Discovery document. Nothing is hardcoded.
 > (`service_installations` and `service_audit_logs`) mapped through the pinned
 > `ServiceMantle.Persistence.EntityFrameworkCore` package — never a local clone of a shared
 > entity. The BFF's fixed ServiceMantle service id is `reference-bff`, not the product's
-> `signacore`. Nothing migrates or binds automatically at runtime, and the first-installation
-> (Setup) flow is still a later task.
+> `signacore`. Nothing migrates or binds automatically at runtime. Setup requires an explicit
+> local code command followed by authenticated HTTP completion.
 
 ## Database (data phase)
 
@@ -40,8 +39,8 @@ Two save semantics coexist by contract:
   of work the caller already owns.
 - `CreatePendingAsync` is the shared library's one initialization entry point that **owns a
   single `SaveChangesAsync`**, and it requires a clean context: calling it while other entities
-  are staged is refused. Completing an installation still belongs to the later Setup-flow task
-  (validate → orchestrate → stage-consume → one save → commit) and is not invoked here.
+  are staged is refused. HTTP completion uses validate → orchestrate → stage-consume → one save
+  → commit; it never calls this initialization entry.
 
 Apply each provider's own migrations explicitly before running anything against this database
 (the commands are in the Configuration section below); nothing migrates or seeds automatically
@@ -49,8 +48,7 @@ at startup. Rollback limits: code-only rollbacks keep the three tables in place,
 `Down` past the shared-tables migration deletes `service_installations` and `service_audit_logs`
 with their data — the binding table is untouched, yet a backup is still mandatory, `Down` must
 only ever be rehearsed on an isolated copy, and a completed installation must never be restored
-to `Pending` by re-importing a dropped row. This stage deliberately does not open the
-first-installation (Setup) flow.
+to `Pending` by re-importing a dropped row.
 
 ## Configuration
 
@@ -125,12 +123,47 @@ appropriate; do not assume a failed command means nothing was committed. A code-
 retains all installation data, code digests and bindings. Never use migration `Down`, deletion,
 or resetting Completed to Pending as code recovery.
 
-This phase does **not** enable Setup HTTP or bind an administrator. The later
-[HTTP first-binding task](https://github.com/philfanzhou/SignaCore/issues/326) consumes the code
-after verified OIDC sign-in; until that phase is delivered, a Pending installation still denies
-management. Protect database access and the terminal, and use TLS for that later HTTP flow.
+The command exits without starting HTTP or binding an administrator. Start the normal Web host
+after `create`, then complete the HTTP flow below. Protect database access and the terminal,
+and use TLS for HTTP.
 The command does not protect against terminal recording, an OS administrator or process-memory
 inspection, and does not promise cross-process exactly-once delivery.
+
+## First administrator over HTTP
+
+With database configuration present, the sample consumes `ServiceMantle.AspNetCore` at the
+existing pinned version and uses its composed pipeline and code-only Setup entries. Without
+that configuration, the original login sample remains available and Setup is not mapped.
+The Web host never migrates, creates an installation row, or issues a code. A missing schema,
+missing installation, corrupt state, or unavailable database returns 503. Run the local `create`
+command before attempting to sign in to a configured BFF.
+
+Open `/bff/setup`, sign in through the normal OIDC challenge, and enter the locally issued code.
+The form posts only `{ "code": "..." }` to `POST /management/v1/setup`, with
+`X-ServiceMantle-Request: 1` and the cookie-bound `X-ReferenceBff-CSRF` token. The shared parser
+limits JSON to 4 KiB; identity, role, duplicate fields, and extra input are rejected. The
+configured OIDC callback must not conflict with `/`, `/error`, `/bff`, or `/management` routes.
+Existing login, callback, diagnostics, profile, local logout and admin reads remain admitted in
+Pending and Completed; local administrator authorization is still required for `/bff/admin`.
+
+The authoritative BFF state model and failure boundaries are maintained in
+[the BFF tracker](https://github.com/philfanzhou/SignaCore/issues/74). Completion checks the code,
+reconfirms the ticket's verified issuer/subject through current UserInfo, and stages the first
+active binding and an opaque shared audit in a fresh scoped serializable transaction. Shared
+code consumption revalidates the code before one save and commit. PostgreSQL locks only the
+`reference-bff` installation; SQLite uses its single writer. There is no automatic retry.
+Only successful commit and scope cleanup allow 204. Then `/bff/admin` returns 200 for that identity.
+Neither an inactive slot nor a Completed installation can be claimed again.
+
+`GET`/`HEAD /management/v1/setup` reports persisted installation status. Completed POST replay
+returns 409 before reading the body. Unauthenticated or invalid/expired-code attempts return
+401; malformed input or failed CSRF returns 400; an unavailable authority or persistence
+boundary returns 503. Session-invalid identity checks clear the local ticket, while dependency
+failures preserve it. Shared phase, sensitive-header and rate-limit protections run before
+completion; exhausted Setup quota returns 429. Failure responses carry no identity or code.
+A precommit failure rolls the whole attempt back. Cancellation, cleanup failure or lost
+acknowledgement after commit does not undo installation; check persisted status before recovery.
+Code rollback preserves committed data and must never reset Completed to Pending.
 
 ## Run
 
@@ -193,6 +226,6 @@ Authentication and authorization are deliberately separate decisions in this sam
 ## Scope
 
 This is a sample consumer of SignaCore, not a product. The ticket store is single-instance
-memory; coordinated upstream logout, the first-administrator binding (Setup) flow, and deployment
-hardening beyond the boundaries above are intentionally left out — the runtime authorization
-slice proves the shape, not a production administrator console.
+memory; coordinated upstream logout, multiple administrators, role CRUD, and deployment
+hardening beyond the boundaries above are intentionally left out. This is not a production
+administrator console.
