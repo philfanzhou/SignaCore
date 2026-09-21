@@ -26,7 +26,7 @@ namespace SignaCore.ReferenceBff.Tests;
 /// throughout.
 /// </para>
 /// </summary>
-public sealed class ReferenceBffDatabaseContractTests
+public sealed partial class ReferenceBffDatabaseContractTests
 {
     private const string Issuer = "https://identity.example.test/";
     private const string Subject = "unit-administrator-b7d1f0c2a4";

@@ -10,6 +10,34 @@ using SignaCore.ReferenceBff.Database;
 
 const string UserInfoClientName = BffIdentityCheckService.UserInfoClientName;
 
+if (SetupCodeCommand.IsRequested(args))
+{
+    using var cancellation = new CancellationTokenSource();
+    ConsoleCancelEventHandler cancelHandler = (_, signal) =>
+    {
+        signal.Cancel = true;
+        cancellation.Cancel();
+    };
+    Console.CancelKeyPress += cancelHandler;
+    try
+    {
+        var exitCode = await SetupCodeCommand.RunAsync(
+            args, new SetupCodeTerminal(), SetupCodeCommand.CreateSession, cancellation.Token);
+        Environment.ExitCode = exitCode;
+        if (exitCode != 0)
+        {
+            try { Console.Error.WriteLine(SetupCodeCommand.ErrorCategory(exitCode)); }
+            catch (Exception) { /* A closed error stream must not expose an exception. */ }
+        }
+    }
+    finally
+    {
+        Console.CancelKeyPress -= cancelHandler;
+    }
+
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // The server-side session store (DF-07). The browser holds only the opaque key it returns; every
