@@ -2,36 +2,44 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SignaCore.ReferenceBff.Database;
 
 #nullable disable
 
-namespace SignaCore.ReferenceBff.Database.Migrations.Sqlite.Migrations
+namespace SignaCore.ReferenceBff.Database.Migrations
 {
     [DbContext(typeof(ReferenceBffDbContext))]
-    partial class ReferenceBffDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260921073353_AddSharedDataProtectionKeys")]
+    partial class AddSharedDataProtectionKeys
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
+            modelBuilder
+                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("Relational:MaxIdentifierLength", 63);
+
+            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("ServiceMantle.Persistence.EntityFrameworkCore.DataProtectionKeyEntity", b =>
                 {
                     b.Property<string>("ServiceId")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(128)")
                         .HasColumnName("service_id");
 
                     b.Property<string>("KeyId")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(64)")
                         .HasColumnName("key_id");
 
                     b.Property<string>("EncryptedXml")
                         .IsRequired()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("encrypted_xml");
 
                     b.HasKey("ServiceId", "KeyId");
@@ -43,69 +51,69 @@ namespace SignaCore.ReferenceBff.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<string>("Id")
                         .HasMaxLength(36)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(36)")
                         .HasColumnName("id");
 
                     b.Property<string>("Action")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(200)")
                         .HasColumnName("action");
 
                     b.Property<string>("ClientIp")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(64)")
                         .HasColumnName("client_ip");
 
                     b.Property<string>("CorrelationId")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(128)")
                         .HasColumnName("correlation_id");
 
                     b.Property<string>("MetadataJson")
                         .HasMaxLength(262144)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(262144)")
                         .HasColumnName("metadata_json");
 
                     b.Property<DateTime>("OccurredAtUtc")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("occurred_at_utc");
 
                     b.Property<string>("OperatorDisplayName")
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(256)")
                         .HasColumnName("operator_display_name");
 
                     b.Property<string>("OperatorId")
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(256)")
                         .HasColumnName("operator_id");
 
                     b.Property<string>("OperatorSource")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("operator_source");
 
                     b.Property<int>("Outcome")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("outcome");
 
                     b.Property<string>("SecurityDescription")
                         .HasMaxLength(4000)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(4000)")
                         .HasColumnName("security_description");
 
                     b.Property<string>("TargetId")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(256)")
                         .HasColumnName("target_id");
 
                     b.Property<string>("TargetType")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(200)")
                         .HasColumnName("target_type");
 
                     b.HasKey("Id");
@@ -160,43 +168,43 @@ namespace SignaCore.ReferenceBff.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<string>("ServiceId")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(128)")
                         .HasColumnName("service_id");
 
                     b.Property<DateTime?>("CompletedAtUtc")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("completed_at_utc");
 
                     b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
                     b.Property<string>("SetupCodeDigest")
                         .HasMaxLength(74)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(74)")
                         .HasColumnName("setup_code_digest");
 
                     b.Property<DateTime?>("SetupCodeExpiresAtUtc")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("setup_code_expires_at_utc");
 
                     b.Property<int>("SetupCodeGeneration")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasDefaultValue(0)
                         .HasColumnName("setup_code_generation");
 
                     b.Property<DateTime?>("SetupCodeIssuedAtUtc")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("setup_code_issued_at_utc");
 
                     b.Property<int>("Status")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("status");
 
                     b.Property<int>("Version")
                         .IsConcurrencyToken()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("version");
 
                     b.HasKey("ServiceId");
@@ -208,30 +216,30 @@ namespace SignaCore.ReferenceBff.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<long>("CreatedAtUtc")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasColumnName("is_active");
 
                     b.Property<string>("Issuer")
                         .IsRequired()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("issuer");
 
                     b.Property<string>("Role")
                         .IsRequired()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("role");
 
                     b.Property<string>("Subject")
                         .IsRequired()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("subject");
 
                     b.HasKey("Id")

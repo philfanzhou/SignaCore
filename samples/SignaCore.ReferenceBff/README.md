@@ -15,10 +15,10 @@ OpenID Connect Discovery document. Nothing is hardcoded.
 > with no database at all; `GET /bff/admin` additionally enforces the local administrator
 > binding through the optional `ReferenceBffDatabase` configuration below. The BFF-owned storage
 > lives in `samples/SignaCore.ReferenceBff.Database` (with its SQLite migration project
-> `samples/SignaCore.ReferenceBff.Database.Migrations.Sqlite`) and carries three tables: the
+> `samples/SignaCore.ReferenceBff.Database.Migrations.Sqlite`) and carries four tables: the
 > single initial-administrator binding slot (`management_role_bindings`, staging and exact-match
-> read via `ManagementRoleBindingStore`) and the two shared ServiceMantle tables
-> (`service_installations` and `service_audit_logs`) mapped through the pinned
+> read via `ManagementRoleBindingStore`) and the shared ServiceMantle tables
+> (`service_installations`, `service_audit_logs` and `service_data_protection_keys`) mapped through the pinned
 > `ServiceMantle.Persistence.EntityFrameworkCore` package — never a local clone of a shared
 > entity. The BFF's fixed ServiceMantle service id is `reference-bff`, not the product's
 > `signacore`. Nothing migrates or binds automatically at runtime. Setup requires an explicit
@@ -44,7 +44,7 @@ Two save semantics coexist by contract:
 
 Apply each provider's own migrations explicitly before running anything against this database
 (the commands are in the Configuration section below); nothing migrates or seeds automatically
-at startup. Rollback limits: code-only rollbacks keep the three tables in place, but migrating
+at startup. Rollback limits: code-only rollbacks keep the four tables in place, but migrating
 `Down` past the shared-tables migration deletes `service_installations` and `service_audit_logs`
 with their data — the binding table is untouched, yet a backup is still mandatory, `Down` must
 only ever be rehearsed on an isolated copy, and a completed installation must never be restored
@@ -61,10 +61,11 @@ to `Pending` by re-importing a dropped row.
 | `ReferenceBff:Scope` | Requested scope (must contain `openid`) |
 | `ReferenceBffDatabase:Provider` | Optional local database provider: `SQLite` or `PostgreSQL` |
 | `ReferenceBffDatabase:ConnectionString` | Optional local database connection string |
+| `ReferenceBffDatabase:DataProtectionRootKey` | External key-ring root key; inject only through a protected environment |
 
-The configuration is validated at startup; an incomplete configuration fails to start. The two
+The configuration is validated at startup; an incomplete configuration fails to start. The three
 `ReferenceBffDatabase` keys must be provided together, and a partial or unknown combination fails
-startup with a fixed message that echoes no value. With both omitted, the sample runs exactly its
+startup with a fixed message that echoes no value. With all three omitted, the sample runs exactly its
 login-only shape and every authenticated management query answers a fixed `503`.
 
 Before first use, create and migrate the database explicitly — the runtime never migrates,
@@ -80,8 +81,32 @@ dotnet ef database update --project samples/SignaCore.ReferenceBff.Database.Migr
   --startup-project samples/SignaCore.ReferenceBff.Database.Migrations.Sqlite
 ```
 
+### Persistent Data Protection and upgrades
+
+With database configuration present, the shared ServiceMantle repository stores the ASP.NET Core
+Data Protection key ring under `reference-bff`. Key and revocation XML are authenticated `sm:v1:`
+envelopes; each repository call owns a separate context and transaction and cannot commit Setup's
+unit of work. The framework continues to own key lifetimes. With no database configuration, the
+framework's default key storage is unchanged.
+
+For an existing deployment, stop the BFF, back up its database, run the provider-specific
+`dotnet ef database update` command above to apply `AddSharedDataProtectionKeys`, provision a strong
+root key through `ReferenceBffDatabase__DataProtectionRootKey`, and then restart. Keep that key stable
+and protect its backup. Never put it in command arguments, appsettings files, logs, or source control.
+The previous framework key ring is not imported: existing protected browser state must be renewed
+on this upgrade. Subsequent restarts with the same root key reuse the stored ring; antiforgery data
+remains decryptable, but in-memory sessions and in-flight OIDC state still do not survive restart.
+Missing schema, an unreachable database, a wrong root key or damaged ciphertext fail closed at
+startup or first key use; the repository never falls back to local files.
+
+A code rollback preserves the new table and data. On an isolated backup copy only, migrating to
+`AddSharedInstallationAndAudit` removes **only** `service_data_protection_keys`. This destroys the
+key ring and invalidates existing antiforgery/correlation cookies; it is not a recovery procedure.
+Root key distribution, rotation and recovery, multi-instance coordination and shared session stores
+remain operator responsibilities outside this single-instance sample.
+
 An empty migrated database denies management (`403`); a missing schema or an unreachable database
-answers a fixed `503` without ever widening permission.
+fails closed without ever widening permission (key use can fail before a management response).
 
 Register the redirect URI on the SignaCore application (interactive OIDC configuration) with the
 code flow enabled before using the sample.
@@ -89,8 +114,8 @@ code flow enabled before using the sample.
 ## Local Setup Code (operations phase)
 
 After explicitly migrating the independent BFF database above, inject
-`ReferenceBffDatabase__Provider` (`SQLite` or `PostgreSQL`) and
-`ReferenceBffDatabase__ConnectionString` through your protected environment. In a protected local
+`ReferenceBffDatabase__Provider` (`SQLite` or `PostgreSQL`),
+`ReferenceBffDatabase__ConnectionString` and `ReferenceBffDatabase__DataProtectionRootKey` through your protected environment. In a protected local
 interactive terminal, run one of:
 
 ```bash
@@ -166,6 +191,9 @@ acknowledgement after commit does not undo installation; check persisted status 
 Code rollback preserves committed data and must never reset Completed to Pending.
 
 ## Run
+
+Before this database-enabled example, inject `ReferenceBffDatabase__DataProtectionRootKey` through
+your protected environment and apply the migrations above.
 
 ```bash
 ReferenceBff__ClientSecret='<injected-client-secret>' \

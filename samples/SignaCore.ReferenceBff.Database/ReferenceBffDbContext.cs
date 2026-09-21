@@ -8,8 +8,8 @@ namespace SignaCore.ReferenceBff.Database;
 /// <summary>
 /// The reference BFF's own persistence context. It is intentionally independent of the product
 /// <c>IdentityDbContext</c>: beside the single initial-administrator binding slot, this context maps
-/// exactly the two ServiceMantle tables the shared installation and audit contract owns —
-/// <c>service_installations</c> and <c>service_audit_logs</c> — through the shared library mappings.
+/// the shared installation, audit and Data Protection tables through library mappings:
+/// <c>service_installations</c>, <c>service_audit_logs</c> and <c>service_data_protection_keys</c>.
 /// No product entity and no other ServiceMantle business entity is reachable from this context.
 /// </summary>
 public sealed class ReferenceBffDbContext(DbContextOptions<ReferenceBffDbContext> options)
@@ -59,6 +59,7 @@ public sealed class ReferenceBffDbContext(DbContextOptions<ReferenceBffDbContext
         // propagate here, so the shared schema stays byte-identical to the product's. The audit
         // dialect is chosen per provider for its text-length check constraints.
         modelBuilder.AddServiceMantleInstallation();
+        modelBuilder.AddServiceMantleDataProtectionKeys();
         modelBuilder.AddServiceMantleManagementAudit(
             string.Equals(
                 Database.ProviderName,

@@ -297,6 +297,7 @@ public sealed partial class CrossServerBrowser(
 /// </summary>
 public static class BffTestServer
 {
+    internal static readonly string DatabaseRootKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
     public static WebApplicationFactory<BffSample.Program> Create(
         string authority,
         string clientId,
@@ -323,6 +324,7 @@ public static class BffTestServer
             if (databaseConnectionString is not null)
             {
                 builder.UseSetting("ReferenceBffDatabase:ConnectionString", databaseConnectionString);
+                builder.UseSetting("ReferenceBffDatabase:DataProtectionRootKey", DatabaseRootKey);
             }
 
             // Configure (not PostConfigure): the OIDC handler's own post-configuration builds the

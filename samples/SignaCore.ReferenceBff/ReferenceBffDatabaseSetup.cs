@@ -5,11 +5,12 @@ namespace SignaCore.ReferenceBff;
 
 /// <summary>
 /// The reference BFF's own database startup configuration. Opening the BFF database is one of the
-/// two provider-level exceptions to "no business settings in appsettings": the provider and
-/// connection string are exactly what a host needs before it can open its storage.
+/// storage-level exceptions to "no business settings in appsettings": the provider and
+/// connection string open storage; the external root key protects its key ring.
 /// </summary>
 internal static class ReferenceBffDatabaseSetup
 {
+    internal const string RootKey = "ReferenceBffDatabase:DataProtectionRootKey";
     internal const string ProviderKey = "ReferenceBffDatabase:Provider";
     internal const string ConnectionStringKey = "ReferenceBffDatabase:ConnectionString";
 
@@ -26,22 +27,24 @@ internal static class ReferenceBffDatabaseSetup
     {
         var provider = configuration[ProviderKey];
         var connectionString = configuration[ConnectionStringKey];
+        var hasRootKey = !string.IsNullOrWhiteSpace(configuration[RootKey]);
         var hasProvider = !string.IsNullOrWhiteSpace(provider);
         var hasConnectionString = !string.IsNullOrWhiteSpace(connectionString);
 
-        if (!hasProvider && !hasConnectionString)
+        if (!hasProvider && !hasConnectionString && !hasRootKey)
         {
             return Settings.None;
         }
 
-        if (!hasProvider
+        if (!hasRootKey
+            || !hasProvider
             || !hasConnectionString
             || !string.Equals(provider, "SQLite", StringComparison.Ordinal)
                 && !string.Equals(provider, "PostgreSQL", StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                "The reference BFF database configuration is invalid: ReferenceBffDatabase:Provider and "
-                + "ReferenceBffDatabase:ConnectionString must be provided together, and Provider must be "
+                "The reference BFF database configuration is invalid: ReferenceBffDatabase:Provider, "
+                + "ReferenceBffDatabase:ConnectionString and ReferenceBffDatabase:DataProtectionRootKey must be provided together, and Provider must be "
                 + "SQLite or PostgreSQL.");
         }
 

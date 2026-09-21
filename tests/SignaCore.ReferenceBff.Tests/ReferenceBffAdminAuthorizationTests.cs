@@ -621,7 +621,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
                     services.RemoveAll<DbContextOptions<ReferenceBffDbContext>>();
                     services.AddDbContext<ReferenceBffDbContext>(options => options
                         .UseSqlite(database.ConnectionString)
-                        .AddInterceptors(dbInterceptor));
+                        .AddInterceptors(dbInterceptor), optionsLifetime: ServiceLifetime.Singleton);
                 });
     }
 
