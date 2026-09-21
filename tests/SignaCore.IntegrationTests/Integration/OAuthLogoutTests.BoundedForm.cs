@@ -59,9 +59,16 @@ public sealed partial class OAuthLogoutTests
         if (success) Assert.Contains("logout_uri", body, StringComparison.Ordinal);
         Assert.Equal(beforeRows + (success ? 1 : 0),
             await QueryAsync(db => db.LogoutRequests.CountAsync(TestContext.Current.CancellationToken)));
-        if (!success)
-            Assert.Equal(beforeAudit,
-                await QueryAsync(db => db.AuditLogs.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(beforeAudit + (success ? 1 : 0),
+            await QueryAsync(db => db.AuditLogs.CountAsync(TestContext.Current.CancellationToken)));
+        if (success)
+        {
+            var handle = System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("logout_uri").GetString()!.Split('=')[1];
+            var digest = LoginHandleDigest.Compute(handle);
+            var request = await QueryAsync(db => db.LogoutRequests.AsNoTracking().SingleAsync(row => row.HandleDigest == digest, TestContext.Current.CancellationToken));
+            var audit = await QueryAsync(db => db.AuditLogs.AsNoTracking().SingleAsync(row => row.TargetId == request.Id.ToString("D") && row.Action == "oidc.logout.prepared", TestContext.Current.CancellationToken));
+            Assert.Equal("LogoutRequest", audit.TargetType);
+        }
         Assert.False(body.Contains(hint, StringComparison.Ordinal));
     }
 

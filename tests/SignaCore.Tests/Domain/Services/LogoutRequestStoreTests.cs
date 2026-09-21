@@ -50,6 +50,17 @@ public sealed class LogoutRequestStoreTests
     }
 
     [Fact]
+    public async Task StageCreateAsync_DoesNotSaveOrExposeAnAlreadyPersistedRow()
+    {
+        await using var harness = await CreateHarnessAsync();
+        var creation = await harness.Store.StageCreateAsync(Descriptor(harness), DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
+        Assert.Empty(await harness.Context.LogoutRequests.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Single(harness.Context.ChangeTracker.Entries<LogoutRequestEntity>());
+        await harness.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(creation.Id, (await harness.Context.LogoutRequests.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).Id);
+    }
+
+    [Fact]
     public async Task GetActiveAsync_AnswersNullForEveryUnusableHandle()
     {
         await using var harness = await CreateHarnessAsync();

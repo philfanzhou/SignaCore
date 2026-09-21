@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
@@ -48,10 +49,11 @@ public sealed class OidcLogoutPreparationServiceTests
         IdentityDbContext Context,
         OidcLogoutPreparationService Service,
         StaticKeyManager Keys,
-        Guid ApplicationId) : IAsyncDisposable
+        Guid ApplicationId, ServiceProvider Services) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
         {
+            await Services.DisposeAsync();
             await Context.DisposeAsync();
             await Connection.DisposeAsync();
         }
@@ -90,16 +92,19 @@ public sealed class OidcLogoutPreparationServiceTests
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         context.ChangeTracker.Clear();
 
-        var unitOfWork = new EfCoreUnitOfWork(context);
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new IdentityDbContext(new DbContextOptionsBuilder<IdentityDbContext>().UseSqlite(connection).Options));
+        services.AddScoped<ILogoutRequestRepository, LogoutRequestRepository>();
+        services.AddScoped<IUnitOfWork, EfCoreUnitOfWork>();
+        services.AddScoped<ILogoutRequestStore, LogoutRequestStore>();
+        services.AddScoped<IAuditLogRepository, AuditLogRepository>();
+        services.AddScoped<ILoginHistoryRepository, LoginHistoryRepository>();
+        services.AddScoped<IAuditService, AuditService>();
+        var provider = services.BuildServiceProvider();
         var keys = new StaticKeyManager();
-        var service = new OidcLogoutPreparationService(
-            new LogoutRequestStore(new LogoutRequestRepository(context), unitOfWork),
-            keys,
-            new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
-            context,
-            new JwtOptions { Issuer = Issuer },
-            NullLogger<OidcLogoutPreparationService>.Instance);
-        return new Harness(connection, context, service, keys, application.Id);
+        var service = new OidcLogoutPreparationService(provider.GetRequiredService<IServiceScopeFactory>(), keys,
+            new JwtOptions { Issuer = Issuer }, NullLogger<OidcLogoutPreparationService>.Instance);
+        return new Harness(connection, context, service, keys, application.Id, provider);
     }
 
     private static string Mint(
@@ -161,6 +166,10 @@ public sealed class OidcLogoutPreparationServiceTests
             await Context(harness), Fields(Mint(harness)), null, null, TestContext.Current.CancellationToken);
 
         Assert.NotNull(result);
+        var request = await harness.Context.LogoutRequests.SingleAsync(TestContext.Current.CancellationToken);
+        var audit = await harness.Context.AuditLogs.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("oidc.logout.prepared", audit.Action);
+        Assert.Equal(request.Id.ToString("D"), audit.TargetId);
         Assert.StartsWith("/oauth2/logout?logout_handle=", result.LogoutUri, StringComparison.Ordinal);
     }
 

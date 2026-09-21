@@ -46,6 +46,16 @@ public interface ILogoutRequestStore
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Generates and stages an uncommitted request on the caller's unit of work. This method
+    /// never saves; the caller must save the entire business operation or discard its scope.
+    /// The returned handle must not leave the service until that save and cleanup succeed.
+    /// </summary>
+    Task<LogoutRequestCreation> StageCreateAsync(
+        LogoutRequestDescriptor descriptor,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Resolves an already shape-validated plaintext handle to its active row by digest, or
     /// <c>null</c> — the single "unavailable" answer for a missing, expired, or consumed row —
     /// without any write or invented consumption (<c>SC-18</c>). The release decision is a
@@ -103,6 +113,17 @@ public sealed class LogoutRequestStore : ILogoutRequestStore
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
+        var creation = await StageCreateAsync(descriptor, now, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return creation;
+    }
+
+    public async Task<LogoutRequestCreation> StageCreateAsync(
+        LogoutRequestDescriptor descriptor,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
         ArgumentNullException.ThrowIfNull(descriptor);
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -121,7 +142,7 @@ public sealed class LogoutRequestStore : ILogoutRequestStore
         };
 
         await _repository.AddAsync(request, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         return new LogoutRequestCreation(request.Id, logoutHandle);
     }
 
