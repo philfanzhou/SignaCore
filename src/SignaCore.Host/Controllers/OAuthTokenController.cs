@@ -34,6 +34,12 @@ namespace SignaCore.Host.Controllers;
 /// atomic family rotation (<c>EV-29</c>–<c>EV-32</c>); every valid-shape legacy presentation
 /// keeps its current validator path byte for byte (<c>EV-33</c>).
 /// </para>
+/// <para>
+/// Neither action carries <c>[Consumes]</c>: the bounded form gate owns these two endpoints'
+/// media-type decision, and an action-selection constraint would answer 415 ahead of the shared
+/// phase/budget admission and the fixed invalid_request the client-authentication challenge
+/// produces for an inadmissible body.
+/// </para>
 /// </summary>
 [Route("oauth2")]
 [ApiController]
@@ -60,7 +66,6 @@ public sealed class OAuthTokenController : ControllerBase
     }
 
     [HttpPost("token")]
-    [Consumes("application/x-www-form-urlencoded")]
     [EnableRateLimiting(OidcRateLimitPolicies.Token)]
     [Authorize(Policy = OAuthClientAuthenticationDefaults.Policy)]
     public async Task<IActionResult> Token(CancellationToken cancellationToken)
@@ -200,7 +205,6 @@ public sealed class OAuthTokenController : ControllerBase
     /// </summary>
     [HttpPost("revoke")]
     [EnableRateLimiting(OidcRateLimitPolicies.Revoke)]
-    [Consumes("application/x-www-form-urlencoded")]
     [Authorize(Policy = OAuthClientAuthenticationDefaults.Policy)]
     public async Task<IActionResult> Revoke(CancellationToken cancellationToken)
     {

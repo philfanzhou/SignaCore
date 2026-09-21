@@ -95,12 +95,19 @@ public static class OidcRateLimitPolicies
     /// arrive as form fields — the form body's <c>client_id</c> field. The login form and the
     /// logout endpoints are deliberately excluded from the form read: their controllers parse
     /// the raw body themselves, and nothing legitimate ever carries a client id there. Returns
-    /// no value when the candidate is absent or of an unbounded shape.
+    /// no value when the candidate is absent or of an unbounded shape. A failed bounded-form
+    /// gate skips every carrier — no candidate is trustworthy and no client row is queried, so
+    /// the request falls into the source-network partition.
     /// </summary>
     public static async Task<string?> ReadClientIdCandidateAsync(
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
+        if (BoundedOidcFormReadingMiddleware.IsFailed(httpContext))
+        {
+            return null;
+        }
+
         var queryId = httpContext.Request.Query["client_id"].ToString();
         if (IsPlausibleClientId(queryId))
         {
@@ -115,14 +122,29 @@ public static class OidcRateLimitPolicies
         }
 
         var path = httpContext.Request.Path.Value ?? string.Empty;
-        if ((path == "/oauth2/token" || path == "/oauth2/revoke")
-            && httpContext.Request.HasFormContentType)
+        if (path == "/oauth2/token" || path == "/oauth2/revoke")
         {
-            var form = await httpContext.Request.ReadFormAsync(cancellationToken);
-            var formId = form["client_id"].ToString();
-            if (IsPlausibleClientId(formId))
+            // The bounded-form gate already parsed and cached the body for these POSTs; reusing
+            // the cached form here is the only form read this pipeline ever performs.
+            if (BoundedOidcFormReadingMiddleware.GetStatus(httpContext) == OidcBoundedFormStatus.Parsed)
             {
-                return formId;
+                var cachedId = httpContext.Request.Form["client_id"].ToString();
+                if (IsPlausibleClientId(cachedId))
+                {
+                    return cachedId;
+                }
+
+                return null;
+            }
+
+            if (httpContext.Request.HasFormContentType)
+            {
+                var form = await httpContext.Request.ReadFormAsync(cancellationToken);
+                var formId = form["client_id"].ToString();
+                if (IsPlausibleClientId(formId))
+                {
+                    return formId;
+                }
             }
         }
 

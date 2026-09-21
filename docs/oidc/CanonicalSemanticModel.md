@@ -143,6 +143,37 @@ duplicates match. Structural rejection
 never increments the password failed-attempt counter. Fields marked secret are excluded from logs,
 audit, metrics, exception text, tracing tags, and error bodies.
 
+### Outer bounded form read of `POST /oauth2/token` and `POST /oauth2/revoke`
+
+Both standard form endpoints share one outer read gate in front of every later stage: exactly one
+read of at most 16385 raw bytes (the bound is on the bytes actually read, never on the declared
+`Content-Length`), one strict UTF-8 decode with a single percent-decode, and one parse whose
+duplicates keep their `StringValues` cardinality and whose unknown fields stay ignored by the
+grants. A successful parse is cached as the request's form feature; downstream `Request.Form` and
+`ReadFormAsync` reuse it, so the stream is read exactly once per request. Path casing and trailing
+slashes cannot reach a routable shape around the gate. A non-form media type is the same fixed
+failure — its body is never read either, and it answers the same fixed `400` after phase and
+budget admission; no action-selection rejection can preempt the gate's outcome. A `charset=utf-8`
+parameter is accepted bare or quoted, in either casing, exactly as the framework's own form reader
+accepted the request before.
+
+| Event / input | Intermediate artifact and trust boundary | Sole outcome |
+| --- | --- | --- |
+| Correct media type, at most 16384 raw bytes, valid encoding | One parsed form per request, process-local; no database write | Downstream reuses the same cached form; authentication and dispatch continue unchanged |
+| `Content-Length` above 16384, or an unknown or understated length whose stream yields a 16385th byte | Fixed failure marker; no raw error text and no input retained | No further body read; no client lookup, secret verification, or dispatch. After phase and budget admission: fixed `400 invalid_request`, no-store/no-cache |
+| A non-form media type, a non-UTF-8 charset, an extra content-type parameter, `Content-Encoding`, or malformed percent/UTF-8 | Same fixed marker | Same fixed `400`; no `Location`, no input echo |
+| Ordinary read I/O failure or internal cancellation while the caller still waits | Fixed unavailable marker | After phase and budget admission: fixed `503 server_error`; no original exception or internal detail |
+| Caller cancellation (including observation after the read completes) | No parsing, authentication, dispatch, or write | The request-aborted cancellation takes precedence |
+| Malformed marker plus an over-budget or phase-rejected limiter verdict | The marker carries no secret | The shared 429/phase result stands; it is not overridden |
+| Valid form with wrong client credentials | Existing authentication | Still `401 invalid_client` with `WWW-Authenticate: Basic` |
+| Two concurrent requests, or several reads within one request | Each request owns its own form and marker; buffers are not shared | One read and one decode per request; no cross-request bleed and no premature consumption of a protocol artifact |
+
+Sensitive values exist only in the raw request buffer and the current request's form; the read
+buffer and the percent-decode scratch are zeroed on every path — parsed, malformed, failed, or
+cancelled — and no password, code, verifier, token, secret, authorization header, or unknown value
+reaches the logs, metrics, or either fixed error body. Managed strings cannot be cleared on the
+spot.
+
 ### Authorization and identity login
 
 | ID | Endpoint / field | Encoding, length, normalization, comparison, expiry | Sensitivity | Failure result |
@@ -177,8 +208,11 @@ after rerunning the same current client, redirect, scope, and account decisions.
 
 ### Token and UserInfo
 
-`POST /oauth2/token` accepts only `application/x-www-form-urlencoded` with a body of at most 16 KiB.
-The authorization-code and interactive-refresh branches ignore unknown form fields, as OAuth
+`POST /oauth2/token` accepts only `application/x-www-form-urlencoded` with a body of at most 16 KiB,
+read and decoded once by the shared outer bounded form read above. The same gate owns
+`POST /oauth2/revoke`, which accepts the identical media type and bound; its syntactically valid
+requests remain always-200 and reveal neither token existence nor ownership. The
+authorization-code and interactive-refresh branches ignore unknown form fields, as OAuth
 requires, and never pass them into another grant's field mapping.
 
 | ID | Endpoint / field | Encoding, length, normalization, comparison, expiry | Sensitivity | Failure result |
