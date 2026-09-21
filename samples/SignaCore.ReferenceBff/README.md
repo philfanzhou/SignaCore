@@ -88,10 +88,54 @@ answers a fixed `503` without ever widening permission.
 Register the redirect URI on the SignaCore application (interactive OIDC configuration) with the
 code flow enabled before using the sample.
 
+## Local Setup Code (operations phase)
+
+After explicitly migrating the independent BFF database above, inject
+`ReferenceBffDatabase__Provider` (`SQLite` or `PostgreSQL`) and
+`ReferenceBffDatabase__ConnectionString` through your protected environment. In a protected local
+interactive terminal, run one of:
+
+```bash
+dotnet run --project samples/SignaCore.ReferenceBff -- --setup-code create
+dotnet run --project samples/SignaCore.ReferenceBff -- --setup-code rotate
+```
+
+These mutually exclusive commands require both stdin and stdout to be terminals. Do not pipe,
+redirect, capture, or record the output. No OIDC configuration or SignaCore connection is required;
+the command never starts a web listener, migrates, or writes a bootstrap file. Its only arguments
+are the command and verb; database secrets belong in the protected environment, never arguments.
+Normal web startup still initializes nothing and supports sign-in without a database.
+
+The command consumes the shared ServiceMantle lifecycle under one serializable transaction.
+`create` initializes a missing installation through `CreatePendingAsync`, then creates its first
+code. It refuses to replace existing material. `rotate` requires an existing Pending installation
+and existing material (including expired material). Completed installations and occupied
+administrator slots (active or inactive) are always refused. The shared store owns the digest,
+generation, version and default 30-minute lifetime; no plaintext is persisted. Role and audit
+rows are unchanged. See [the authoritative operations model](https://github.com/philfanzhou/SignaCore/issues/74)
+for the lifecycle and recovery boundaries.
+
+Only after commit and successful cleanup is the code displayed once. Exit codes are `0` for
+commit plus display, `2` for usage/terminal rejection, `3` for state/concurrency rejection, `4` for
+dependency/save/commit/cleanup/display failure or unknown commit outcome, and `130` for caller
+cancellation. Errors contain only fixed English categories. Nothing retries automatically.
+A failure or cancellation after commit may leave a generated code that the operator never saw.
+Check the installation independently and recover with an explicitly controlled `rotate` when
+appropriate; do not assume a failed command means nothing was committed. A code-only rollback
+retains all installation data, code digests and bindings. Never use migration `Down`, deletion,
+or resetting Completed to Pending as code recovery.
+
+This phase does **not** enable Setup HTTP or bind an administrator. The later
+[HTTP first-binding task](https://github.com/philfanzhou/SignaCore/issues/326) consumes the code
+after verified OIDC sign-in; until that phase is delivered, a Pending installation still denies
+management. Protect database access and the terminal, and use TLS for that later HTTP flow.
+The command does not protect against terminal recording, an OS administrator or process-memory
+inspection, and does not promise cross-process exactly-once delivery.
+
 ## Run
 
 ```bash
-SIGNACORE_REFERENCE_BFF_CLIENT_SECRET=... \
+ReferenceBff__ClientSecret='<injected-client-secret>' \
 dotnet run --project samples/SignaCore.ReferenceBff \
   --ReferenceBff:Authority=https://your-signacore-host \
   --ReferenceBff:ClientId=reference-bff \

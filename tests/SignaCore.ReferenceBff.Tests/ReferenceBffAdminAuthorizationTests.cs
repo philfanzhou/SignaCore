@@ -121,6 +121,12 @@ public sealed class ReferenceBffAdminAuthorizationTests
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         Assert.Equal(1, TicketStore(bff).Count);
         await AssertStillSignedInAsync(browser);
+        await using var untouched = new ReferenceBffDbContext(
+            new DbContextOptionsBuilder<ReferenceBffDbContext>()
+                .UseReferenceBffSqlite(database.ConnectionString).Options);
+        Assert.Empty(await untouched.ServiceInstallations.ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await untouched.ManagementRoleBindings.ToListAsync(TestContext.Current.CancellationToken));
+
     }
 
     [Theory]
