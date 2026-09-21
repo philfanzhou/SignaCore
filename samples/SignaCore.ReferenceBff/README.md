@@ -200,42 +200,6 @@ Then open `https://your-bff-host/` and follow **Sign in with SignaCore**.
   clears the local cookie and the server-side ticket. There is no GET logout.
 - Expired tickets are reclaimed both when presented and by a periodic background sweep.
 
-## First administrator over HTTP
-
-With database configuration present, the sample consumes `ServiceMantle.AspNetCore` at the
-existing pinned version and uses its composed pipeline and code-only Setup entries. Without
-that configuration, the original login sample remains available and Setup is not mapped.
-The Web host never migrates, creates an installation row, or issues a code. A missing schema,
-missing installation, corrupt state, or unavailable database returns 503. Run the local `create`
-command before attempting to sign in to a configured BFF.
-
-Open `/bff/setup`, sign in through the normal OIDC challenge, and enter the locally issued code.
-The form posts only `{ "code": "..." }` to `POST /management/v1/setup`, with
-`X-ServiceMantle-Request: 1` and the cookie-bound `X-ReferenceBff-CSRF` token. The shared parser
-limits JSON to 4 KiB; identity, role, duplicate fields, and extra input are rejected. The
-configured OIDC callback must not conflict with `/`, `/error`, `/bff`, or `/management` routes.
-Existing login, callback, diagnostics, profile, local logout and admin reads remain admitted in
-Pending and Completed; local administrator authorization is still required for `/bff/admin`.
-
-The authoritative BFF state model and failure boundaries are maintained in
-[the BFF tracker](https://github.com/philfanzhou/SignaCore/issues/74). Completion checks the code,
-reconfirms the ticket's verified issuer/subject through current UserInfo, and stages the first
-active binding and an opaque shared audit in a fresh scoped serializable transaction. Shared
-code consumption revalidates the code before one save and commit. PostgreSQL locks only the
-`reference-bff` installation; SQLite uses its single writer. There is no automatic retry.
-Only successful commit and scope cleanup allow 204. Then `/bff/admin` returns 200 for that identity.
-Neither an inactive slot nor a Completed installation can be claimed again.
-
-`GET`/`HEAD /management/v1/setup` reports persisted installation status. Completed POST replay
-returns 409 before reading the body. Unauthenticated or invalid/expired-code attempts return
-401; malformed input or failed CSRF returns 400; an unavailable authority or persistence
-boundary returns 503. Session-invalid identity checks clear the local ticket, while dependency
-failures preserve it. Shared phase, sensitive-header and rate-limit protections run before
-completion; exhausted Setup quota returns 429. Failure responses carry no identity or code.
-A precommit failure rolls the whole attempt back. Cancellation, cleanup failure or lost
-acknowledgement after commit does not undo installation; check persisted status before recovery.
-Code rollback preserves committed data and must never reset Completed to Pending.
-
 ## Runtime authorization (`GET /bff/admin`)
 
 Authentication and authorization are deliberately separate decisions in this sample:
