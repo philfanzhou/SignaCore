@@ -1,4 +1,6 @@
 using System.Net;
+using Microsoft.AspNetCore.DataProtection;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
@@ -63,8 +65,18 @@ builder.Services.AddScoped<BffAdminAuthorizationService>();
 var databaseSettings = ReferenceBffDatabaseSetup.Read(builder.Configuration);
 if (databaseSettings.IsConfigured)
 {
-    builder.Services.AddDbContext<ReferenceBffDbContext>(
+    // Share singleton provider options with the factory; the scoped context below keeps
+    // Setup's unit of work separate from the shared key repository's per-call transactions.
+    builder.Services.AddDbContextFactory<ReferenceBffDbContext>(
         options => ReferenceBffDatabaseSetup.ConfigureDbContext(options, databaseSettings));
+    builder.Services.AddDataProtection()
+        .SetApplicationName(ReferenceBffServiceMantle.ServiceIdValue)
+        .PersistKeysToServiceMantleEfCore<ReferenceBffDbContext>(
+            ReferenceBffServiceMantle.ServiceId,
+            _ => builder.Configuration[ReferenceBffDatabaseSetup.RootKey]!);
+    builder.Services.AddDbContext<ReferenceBffDbContext>(
+        options => ReferenceBffDatabaseSetup.ConfigureDbContext(options, databaseSettings),
+        optionsLifetime: ServiceLifetime.Singleton);
     builder.Services.AddScoped<ManagementRoleBindingStore>();
     BffSetupHosting.AddSetup(builder.Services);
 }

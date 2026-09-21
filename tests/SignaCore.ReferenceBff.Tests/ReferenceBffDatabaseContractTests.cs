@@ -45,8 +45,8 @@ public sealed partial class ReferenceBffDatabaseContractTests
 
     /// <summary>
     /// From an empty database both providers migrate, a repeated migrate applies nothing further,
-    /// and the model reports nothing pending. The migrated BFF database owns exactly its three
-    /// tables — the binding slot plus the two shared ServiceMantle tables — and no product or
+    /// and the model reports nothing pending. The migrated BFF database owns exactly its four
+    /// tables — the binding slot plus the three shared ServiceMantle tables — and no product or
     /// other ServiceMantle object is reachable from this context.
     /// </summary>
     [Theory]
@@ -69,7 +69,7 @@ public sealed partial class ReferenceBffDatabaseContractTests
                 .OrderBy(name => name, StringComparer.Ordinal)
                 .ToArray();
             Assert.Equal(
-                ["management_role_bindings", "service_audit_logs", "service_installations"],
+                ["management_role_bindings", "service_audit_logs", "service_data_protection_keys", "service_installations"],
                 tableNames);
             Assert.False(migration.Database.HasPendingModelChanges());
         }
@@ -125,7 +125,7 @@ public sealed partial class ReferenceBffDatabaseContractTests
     }
 
     /// <summary>
-    /// <c>Down</c> to the initial binding-only migration removes exactly the two shared tables —
+    /// <c>Down</c> to the initial binding-only migration removes exactly the three shared tables —
     /// the stored binding survives untouched — and re-applying latest rebuilds the shared tables
     /// empty. Only isolated sample databases are exercised here: an operator must never downgrade
     /// a live database without a backup, because the shared installation and audit data is deleted
