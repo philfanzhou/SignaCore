@@ -42,6 +42,15 @@ if (SetupCodeCommand.IsRequested(args))
 }
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Logging.ClearProviders();
+builder.AddServiceMantleSerilog(options =>
+{
+    var logging = builder.Configuration.GetSection("Logging:ServiceMantle");
+    options.MinimumLevel = logging.GetValue("MinimumLevel", LogLevel.Information);
+    options.IncludeScopes = logging.GetValue("IncludeScopes", true);
+    options.FlushTimeout = logging.GetValue("FlushTimeout", TimeSpan.FromSeconds(2));
+});
+BffLogging.AddServices(builder.Services);
 
 // The server-side session store (DF-07). The browser holds only the opaque key it returns; every
 // token stays on the server. The expiry clock is injectable so tests can advance it.
@@ -207,8 +216,16 @@ builder.Services.AddAuthentication(options =>
             context.Properties.Items[ReferenceBffVerifiedIdentity.SubjectItem] = subjectClaims[0].Value;
             return Task.CompletedTask;
         };
+        options.Events.OnTicketReceived = context =>
+        {
+            context.HttpContext.RequestServices.GetRequiredService<BffOperationLog>()
+                .Record(BffLogOperation.Login, BffLogOutcome.Succeeded, context.HttpContext.RequestAborted);
+            return Task.CompletedTask;
+        };
         options.Events.OnRemoteFailure = context =>
         {
+            context.HttpContext.RequestServices.GetRequiredService<BffOperationLog>()
+                .Record(BffLogOperation.Login, BffLogOutcome.Rejected, context.HttpContext.RequestAborted);
             // Bounded reason codes only: the failure detail never reaches the browser.
             context.Response.Redirect("/error?reason=sign_in_failed");
             context.HandleResponse();
@@ -218,6 +235,8 @@ builder.Services.AddAuthentication(options =>
         // failure: it raises the authentication-failed event, and gets the same bounded page.
         options.Events.OnAuthenticationFailed = context =>
         {
+            context.HttpContext.RequestServices.GetRequiredService<BffOperationLog>()
+                .Record(BffLogOperation.Login, BffLogOutcome.Rejected, context.HttpContext.RequestAborted);
             context.Response.Redirect("/error?reason=sign_in_failed");
             context.HandleResponse();
             return Task.CompletedTask;
@@ -459,6 +478,8 @@ routes.MapGet("/bff/admin", async (
     // fixed answer runs for a request that is already gone.
     http.RequestAborted.ThrowIfCancellationRequested();
 
+    http.RequestServices.GetRequiredService<BffOperationLog>()
+        .Record(BffLogOperation.Authorization, status, http.RequestAborted);
     switch (status)
     {
         case BffAdminAuthorizationStatus.Authorized:
@@ -494,6 +515,8 @@ routes.MapPost("/bff/logout", async (HttpContext http, IAntiforgery antiforgery)
     // Terminates the BFF local session only (cookie plus server-side ticket). Coordinated
     // upstream sign-out is out of scope for this sample.
     await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    http.RequestServices.GetRequiredService<BffOperationLog>()
+        .Record(BffLogOperation.Logout, BffLogOutcome.Succeeded, http.RequestAborted);
     return Results.Redirect("/");
 });
 
@@ -519,6 +542,8 @@ routes.MapGet("/error", (string? reason) => Results.Text(
      """,
     "text/html"));
 
+app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<BffOperationLog>()
+    .Record(BffLogOperation.WebHost, BffLogOutcome.Started, CancellationToken.None));
 app.Run();
 
 /// <summary>Exposed for Microsoft.AspNetCore.Mvc.Testing.</summary>

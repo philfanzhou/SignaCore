@@ -207,6 +207,30 @@ dotnet run --project samples/SignaCore.ReferenceBff \
 
 Then open `https://your-bff-host/` and follow **Sign in with SignaCore**.
 
+## Structured logs
+
+Every Web host uses the pinned `ServiceMantle.Serilog` Console pipeline, with service identity
+`reference-bff` and instance identity `reference-bff-local`. BFF-owned startup, login, UserInfo,
+authorization, Setup and logout events use `ServiceLogContext` scopes containing `ServiceName`,
+`ServiceVersion` and `InstanceId`. Only finite `Operation` and `Outcome` fields enter those scopes:
+the shared `StructuredLogSanitizer` drops unlisted fields and headers before any logger sees them.
+The shared host independently sanitizes structured output properties. No request bodies, identities,
+exception details, tokens, setup codes, cookies, credentials or connection values are BFF log fields.
+Cancellation is observed before emitting a result, so abandoned requests emit no successful result.
+
+The same logging registration runs with or without a local database; it adds no HTTP middleware,
+headers or endpoints. The optional Setup pipeline still owns the shared sensitive-header registry,
+including `X-ReferenceBff-CSRF`. The local `--setup-code create|rotate` branch returns before building
+a Web or logging host: its protected terminal display and fixed error categories are unchanged.
+
+Operational options can be supplied through the existing configuration providers under
+`Logging:ServiceMantle`: `MinimumLevel` defaults to `Information`, `IncludeScopes` to `true`, and
+`FlushTimeout` to `00:00:02`. Keep scopes enabled to include the identity and operation fields.
+No business settings or secrets belong in these options. This sample adds no remote sink or logging
+store. Protect collected logs and their retention/access policy; third-party free-text messages and
+external collectors are outside the BFF-owned event guarantee. A code rollback restores the previous
+logging behavior without a schema, data, token or HTTP migration.
+
 ## Security shape
 
 - SignaCore credentials never pass through this BFF: the browser is redirected to SignaCore's

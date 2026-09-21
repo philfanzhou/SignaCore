@@ -19,7 +19,7 @@ internal static class BffSetupHosting
         services.AddReferenceBffServiceMantleStores();
         services.AddScoped<IServiceSetupCodeStore, EfCoreServiceSetupCodeStore<ReferenceBffDbContext>>();
         services.AddScoped<IServiceHealthSnapshotSource, BffInstallationSnapshot>();
-        var mantle = services.AddServiceMantle(ReferenceBffServiceMantle.ServiceId, ServiceMantle.InstanceId.Parse("reference-bff-local"));
+        var mantle = BffLogging.AddServices(services);
         mantle.AddServiceMantleManagementApiV1();
         mantle.AddServiceMantleManagementEntries();
         mantle.AddSecurityResponseHeaders();

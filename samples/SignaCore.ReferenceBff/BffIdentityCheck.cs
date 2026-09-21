@@ -60,6 +60,14 @@ internal sealed class BffIdentityCheckService(
 
     public async Task<BffIdentityCheckResult> CheckAsync(HttpContext http, CancellationToken cancellationToken)
     {
+        var result = await CheckCoreAsync(http, cancellationToken);
+        http.RequestServices.GetRequiredService<BffOperationLog>()
+            .Record(BffLogOperation.UserInfo, result.Status, cancellationToken);
+        return result;
+    }
+
+    private async Task<BffIdentityCheckResult> CheckCoreAsync(HttpContext http, CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
 
         var authentication = await http.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
