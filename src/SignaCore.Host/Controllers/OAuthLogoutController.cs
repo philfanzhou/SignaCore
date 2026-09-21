@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using SignaCore.Database;
@@ -50,13 +51,6 @@ public sealed class OAuthLogoutController : ControllerBase
         + "sent you here and start again.</p></body></html>";
 
     private const string HtmlContentType = "text/html; charset=utf-8";
-    private const string FormUrlEncodedContentType = "application/x-www-form-urlencoded";
-    private const string CharsetParameterName = "charset";
-    private const string Utf8Charset = "utf-8";
-
-    /// <summary>The canonical 16 KiB bound of the preparation form body (<c>IN-30</c>).</summary>
-    private const int MaxRequestBodyBytes = 16 * 1024;
-
     private const string PreparationFailureDescription = "The logout request could not be validated.";
     private const string HandleQueryName = "logout_handle";
 
@@ -81,36 +75,25 @@ public sealed class OAuthLogoutController : ControllerBase
     }
 
     /// <summary>
-    /// The <c>IN-30</c>–<c>IN-34</c> preparation. The body is bounded by
-    /// <see cref="RequestSizeLimitAttribute"/> and parsed through the shared form feature — the
-    /// same buffered path the token endpoint uses — then re-validated under the strict structure
+    /// The <c>IN-30</c>–<c>IN-34</c> preparation. The outer bounded form gate owns the
+    /// single read and decode before authentication; this action consumes only its cached form,
+    /// then re-validates the strict structure
     /// contract: admitted fields only, exactly one occurrence each. The parsed fields also answer
     /// the <c>IN-20</c> mix question: a usable Basic header alongside any form credential field.
     /// </summary>
     [HttpPost("logout/requests")]
-    [Consumes("application/x-www-form-urlencoded")]
-    [RequestSizeLimit(MaxRequestBodyBytes)]
     [Authorize(Policy = OAuthClientAuthenticationDefaults.Policy)]
     public async Task<IActionResult> Prepare(CancellationToken cancellationToken)
     {
+        HttpContext.RequestAborted.ThrowIfCancellationRequested();
         var app = HttpContext.GetValidatedApp()
             ?? throw new InvalidOperationException("OAuth client authentication did not provide a validated application.");
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-        if (!IsAcceptedFormContentType())
-        {
-            return FinishLogoutPrepare("invalid_request", PreparationFailure(), app.AppId, stopwatch);
-        }
-
-        IFormCollection form;
-        try
-        {
-            form = await Request.ReadFormAsync(cancellationToken);
-        }
-        catch (Exception exception) when (exception is InvalidDataException or OperationCanceledException)
-        {
-            return FinishLogoutPrepare("invalid_request", PreparationFailure(), app.AppId, stopwatch);
-        }
+        // Never fall back to a framework read: the outer gate is the only body reader.
+        var form = HttpContext.Features.Get<IFormFeature>()?.Form
+            ?? throw new InvalidOperationException("The bounded form gate did not provide a cached form.");
+        HttpContext.RequestAborted.ThrowIfCancellationRequested();
 
         var fields = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (name, values) in form)
@@ -134,6 +117,7 @@ public sealed class OAuthLogoutController : ControllerBase
                 stopwatch);
         }
 
+        HttpContext.RequestAborted.ThrowIfCancellationRequested();
         var success = await _preparation.PrepareAsync(
             app,
             fields,
@@ -273,28 +257,6 @@ public sealed class OAuthLogoutController : ControllerBase
             ["error"] = "invalid_request",
             ["error_description"] = PreparationFailureDescription
         });
-    }
-
-    /// <summary>
-    /// The strict content-type gate of the manual parse: exactly the form media type, and a
-    /// charset parameter only when it names UTF-8 — the strict decoder assumes UTF-8 bytes.
-    /// </summary>
-    private bool IsAcceptedFormContentType()
-    {
-        if (!MediaTypeHeaderValue.TryParse(Request.ContentType, out var contentType))
-        {
-            return false;
-        }
-
-        if (!string.Equals(contentType.MediaType, FormUrlEncodedContentType, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return contentType.Parameters.FirstOrDefault(parameter =>
-                string.Equals(parameter.Name, CharsetParameterName, StringComparison.OrdinalIgnoreCase))
-            is not { } charset
-            || string.Equals(charset.Value, Utf8Charset, StringComparison.OrdinalIgnoreCase);
     }
 
     private ContentResult LocalBadRequest()

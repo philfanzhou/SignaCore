@@ -590,7 +590,7 @@ app.Use((context, next) =>
 // before, and the gateway schemes still authenticate on demand deeper in the pipeline through
 // HttpContextExtensions, which prefers the protected Items copy.
 app.UseMiddleware<SensitiveHeaderRedactionMiddleware>();
-// The bounded, single form read of the two standard form endpoints (the outer input gate): it
+// The bounded, single form read of Token, Revoke and Logout preparation (the outer input gate): it
 // runs after redaction and before the partition resolver so the resolver reuses the cached form
 // (or skips every candidate on the fixed failure marker), and the marked request still flows
 // through the shared phase and rate-limit budget before its fixed 400/503 answer.

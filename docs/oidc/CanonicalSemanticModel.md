@@ -143,13 +143,17 @@ duplicates match. Structural rejection
 never increments the password failed-attempt counter. Fields marked secret are excluded from logs,
 audit, metrics, exception text, tracing tags, and error bodies.
 
-### Outer bounded form read of `POST /oauth2/token` and `POST /oauth2/revoke`
+<a id="outer-bounded-form-read-of-post-oauth2token-and-post-oauth2revoke"></a>
 
-Both standard form endpoints share one outer read gate in front of every later stage: exactly one
-read of at most 16385 raw bytes (the bound is on the bytes actually read, never on the declared
+### Outer bounded form read of Token, Revoke, and Logout preparation
+
+`POST /oauth2/token`, `POST /oauth2/revoke`, and `POST /oauth2/logout/requests` share one outer
+read gate in front of every later stage: exactly one read of at most 16385 raw bytes (the bound is on the bytes actually read, never on the declared
 `Content-Length`), one strict UTF-8 decode with a single percent-decode, and one parse whose
-duplicates keep their `StringValues` cardinality and whose unknown fields stay ignored by the
-grants. A successful parse is cached as the request's form feature; downstream `Request.Form` and
+duplicates keep their `StringValues` cardinality. Token/Revoke keep their existing treatment of
+syntactically valid unknown fields; Logout preparation still rejects unknown and duplicate fields.
+`GET /oauth2/logout` never reads a body and is outside this gate. A successful parse is cached as
+the request's form feature; downstream `Request.Form` and
 `ReadFormAsync` reuse it, so the stream is read exactly once per request. Path casing and trailing
 slashes cannot reach a routable shape around the gate. A non-form media type is the same fixed
 failure — its body is never read either, and it answers the same fixed `400` after phase and

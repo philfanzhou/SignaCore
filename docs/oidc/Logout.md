@@ -11,8 +11,10 @@ Discovery does not publish `end_session_endpoint` (`AC-10`).
 ## Step 1: authenticated preparation
 
 The BFF sends `POST /oauth2/logout/requests` over authenticated TLS. The request is a bounded UTF-8
-form of at most 16 KiB. Unknown fields are rejected. Confidential-client authentication is exactly
-the exclusive Basic-or-form contract in `IN-20`/`IN-30`; browser cookies are not client
+form of at most 16 KiB. The [shared outer read gate](./CanonicalSemanticModel.md#outer-bounded-form-read-of-token-revoke-and-logout-preparation)
+owns the actual byte limit, strict decoding, request-local cached form, cancellation and failure
+classification before authentication. Unknown and duplicate fields are rejected. Confidential-client
+authentication is exactly the exclusive Basic-or-form contract in `IN-20`/`IN-30`; browser cookies are not client
 authentication.
 
 | Field | Contract |
@@ -23,7 +25,12 @@ authentication.
 
 The application must be active before its post-logout registration can be trusted (`EV-09`). Any
 authentication, token, URI, state, or form failure is a local JSON error and creates no logout row.
-No error redirects to request input.
+No error redirects to request input. After phase and budget admission, malformed/oversized/media
+failures return the gate's fixed `400 invalid_request`; read I/O or internal cancellation returns
+fixed `503 server_error`. MVC `415` and host `413` are not this endpoint's input contract.
+These failures do not validate credentials or hints, create handles, or write prepared audits.
+Valid requests retain the existing partition policy: query/Basic candidates can resolve a client;
+post credentials alone use the source-network budget.
 
 Success generates 32 random bytes, exposes their 43-character base64url form once, and stores only
 the versioned SHA-256 digest with the verified identifiers, URI, state, and five-minute lifecycle
