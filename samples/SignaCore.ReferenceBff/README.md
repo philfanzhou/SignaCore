@@ -14,12 +14,43 @@ OpenID Connect Discovery document. Nothing is hardcoded.
 >
 > **Runtime authorization over an optional local database.** The sample's sign-in keeps working
 > with no database at all; `GET /bff/admin` additionally enforces the local administrator
-> binding. The BFF-owned storage lives in `samples/SignaCore.ReferenceBff.Database` (with its
-> SQLite migration project `samples/SignaCore.ReferenceBff.Database.Migrations.Sqlite`): the
-> single initial-administrator slot with independent PostgreSQL and SQLite migration histories,
-> plus the staging and exact-match read boundary (`ManagementRoleBindingStore`). Open it through
-> the optional `ReferenceBffDatabase` configuration below — nothing migrates or binds
-> automatically at runtime, and the first-installation (Setup) flow is still a later task.
+> binding through the optional `ReferenceBffDatabase` configuration below. The BFF-owned storage
+> lives in `samples/SignaCore.ReferenceBff.Database` (with its SQLite migration project
+> `samples/SignaCore.ReferenceBff.Database.Migrations.Sqlite`) and carries three tables: the
+> single initial-administrator binding slot (`management_role_bindings`, staging and exact-match
+> read via `ManagementRoleBindingStore`) and the two shared ServiceMantle tables
+> (`service_installations` and `service_audit_logs`) mapped through the pinned
+> `ServiceMantle.Persistence.EntityFrameworkCore` package — never a local clone of a shared
+> entity. The BFF's fixed ServiceMantle service id is `reference-bff`, not the product's
+> `signacore`. Nothing migrates or binds automatically at runtime, and the first-installation
+> (Setup) flow is still a later task.
+
+## Database (data phase)
+
+`ReferenceBffDbContext` implements the shared `IServiceDbContext` contract, and
+`AddReferenceBffServiceMantleStores` registers the scoped `IServiceInstallationStore` and
+`IManagementAuditWriter` over the same caller-owned scoped context. The extension registers
+stores only — it never configures a database provider, opens a connection, or initializes an
+installation row or an administrator.
+
+Two save semantics coexist by contract:
+
+- `EfCoreManagementAuditWriter.RecordAsync` only **stages** an audit record on the caller's
+  context; the caller decides when to save and commit, so the audit write always joins the unit
+  of work the caller already owns.
+- `CreatePendingAsync` is the shared library's one initialization entry point that **owns a
+  single `SaveChangesAsync`**, and it requires a clean context: calling it while other entities
+  are staged is refused. Completing an installation still belongs to the later Setup-flow task
+  (validate → orchestrate → stage-consume → one save → commit) and is not invoked here.
+
+Apply each provider's own migrations explicitly before running anything against this database
+(the commands are in the Configuration section below); nothing migrates or seeds automatically
+at startup. Rollback limits: code-only rollbacks keep the three tables in place, but migrating
+`Down` past the shared-tables migration deletes `service_installations` and `service_audit_logs`
+with their data — the binding table is untouched, yet a backup is still mandatory, `Down` must
+only ever be rehearsed on an isolated copy, and a completed installation must never be restored
+to `Pending` by re-importing a dropped row. This stage deliberately does not open the
+first-installation (Setup) flow.
 
 ## Configuration
 

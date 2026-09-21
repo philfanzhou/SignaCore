@@ -1,12 +1,12 @@
 namespace SignaCore.Domain.Keys;
 
 /// <summary>
-/// 提供用于加密 RSA 私钥的主密钥（32 字节）。
+/// Provides the master key (32 bytes) used to encrypt RSA private keys.
 /// </summary>
 public interface IMasterKeyProvider
 {
     /// <summary>
-    /// 取主密钥。实现应缓存结果——本方法可能触发磁盘读写。
+    /// Gets the master key. Implementations should cache the result; this method may trigger disk I/O.
     /// </summary>
     byte[] GetMasterKey();
 }

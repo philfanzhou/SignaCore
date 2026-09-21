@@ -5,8 +5,9 @@ namespace SignaCore.Host.Configuration;
 
 /// <summary>
 /// Keeps the legacy integer semantics for Number settings: the shared contract parses Number as an
-/// invariant decimal, while every SignaCore Number key has always been an integer
-/// (<c>long.TryParse</c> in the legacy validator).
+/// invariant decimal, while every SignaCore Number key has always been an integer.
+/// <see cref="SettingCandidateValidation"/> enforces the same integer text form through
+/// <see cref="IsIntegerText"/> on complete candidates before the registry parses the value.
 /// </summary>
 internal sealed class IntegerSettingConstraint : IServiceSettingValueConstraint
 {

@@ -76,12 +76,17 @@ public class SystemSettingsCatalogTests
     }
 }
 
-public class SettingsSnapshotValidatorTests
+/// <summary>
+/// The frozen input/output contract of the complete-candidate pre-validation entry: fixed inputs
+/// with pinned expected keys and closed error codes, captured from the retired legacy validator's
+/// behavior baseline. Nothing here computes an expectation from another implementation.
+/// </summary>
+public class SettingCandidateValidationTests
 {
     [Fact]
     public void Validate_WithACompleteSnapshot_ReportsNoErrors()
     {
-        Assert.Empty(SettingsSnapshotValidator.Validate(CompleteSnapshot()));
+        Assert.Empty(SharedSettingComposition.ValidateCompleteCandidate(CompleteSnapshot()));
     }
 
     [Fact]
@@ -91,10 +96,14 @@ public class SettingsSnapshotValidatorTests
         values.Remove(SystemSettingKeys.JwtAudience);
         values.Remove(SystemSettingKeys.SmsMaxAttempts);
 
-        var errors = SettingsSnapshotValidator.Validate(values);
+        var errors = SharedSettingComposition.ValidateCompleteCandidate(values);
 
-        Assert.Contains(errors, error => error.Contains(SystemSettingKeys.JwtAudience, StringComparison.Ordinal));
-        Assert.Contains(errors, error => error.Contains(SystemSettingKeys.SmsMaxAttempts, StringComparison.Ordinal));
+        // Both keys have catalog defaults; completeness precedes defaults, so a missing key must
+        // never be silently filled in by the shared registry.
+        Assert.Contains(errors, error =>
+            error.Key == "jwt.audience" && error.ErrorCode == SettingCandidateValidation.MissingCode);
+        Assert.Contains(errors, error =>
+            error.Key == "sms.max_attempts" && error.ErrorCode == SettingCandidateValidation.MissingCode);
     }
 
     [Fact]
@@ -104,9 +113,11 @@ public class SettingsSnapshotValidatorTests
         values[SystemSettingKeys.PublicBaseUrl] = "http://identity.example.test";
         values[SystemSettingKeys.JwtIssuer] = "http://identity.example.test";
 
-        var errors = SettingsSnapshotValidator.Validate(values);
+        var errors = SharedSettingComposition.ValidateCompleteCandidate(values);
 
-        Assert.Contains(errors, error => error.Contains("HTTPS", StringComparison.Ordinal));
+        Assert.Contains(errors, error =>
+            error.Key == "endpoints.public_base_url" &&
+            error.ErrorCode == SignaCoreSettingCompositeValidator.HttpsRequiredCode);
     }
 
     /// <summary>
@@ -120,7 +131,7 @@ public class SettingsSnapshotValidatorTests
         values[SystemSettingKeys.JwtIssuer] = "http://identity.example.test";
         values[SystemSettingKeys.SecurityAllowNonHttpsIssuer] = "true";
 
-        Assert.Empty(SettingsSnapshotValidator.Validate(values));
+        Assert.Empty(SharedSettingComposition.ValidateCompleteCandidate(values));
     }
 
     /// <summary>
@@ -133,39 +144,75 @@ public class SettingsSnapshotValidatorTests
         var values = CompleteSnapshot();
         values[SystemSettingKeys.JwtIssuer] = "https://somewhere.else.test";
 
-        var errors = SettingsSnapshotValidator.Validate(values);
+        var errors = SharedSettingComposition.ValidateCompleteCandidate(values);
 
-        Assert.Contains(errors, error => error.Contains(SystemSettingKeys.JwtIssuer, StringComparison.Ordinal));
+        Assert.Contains(errors, error =>
+            error.Key == "jwt.issuer" &&
+            error.ErrorCode == SignaCoreSettingCompositeValidator.IssuerMismatchCode);
     }
 
     [Theory]
-    [InlineData(SystemSettingKeys.JwtAudience)]
-    [InlineData(SystemSettingKeys.AdminUsername)]
-    public void Validate_RejectsEmptyRequiredIdentitySettings(string key)
+    [InlineData(SystemSettingKeys.JwtAudience, "jwt.audience")]
+    [InlineData(SystemSettingKeys.AdminUsername, "admin.username")]
+    public void Validate_RejectsEmptyRequiredIdentitySettings(string legacyKey, string normalizedKey)
     {
         var values = CompleteSnapshot();
-        values[key] = " ";
+        values[legacyKey] = " ";
 
-        var errors = SettingsSnapshotValidator.Validate(values);
+        var errors = SharedSettingComposition.ValidateCompleteCandidate(values);
 
-        Assert.Contains(errors, error => error.Contains(key, StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Key == normalizedKey);
     }
 
     [Theory]
-    [InlineData(SystemSettingKeys.JwtTokenExpirationHours, "0")]
-    [InlineData(SystemSettingKeys.JwtTokenExpirationHours, "not-a-number")]
-    [InlineData(SystemSettingKeys.RefreshTokenExpirationDays, "0")]
-    [InlineData(SystemSettingKeys.PasswordHasherWorkFactor, "4")]
-    [InlineData(SystemSettingKeys.LdapEnabled, "yes")]
-    [InlineData(SystemSettingKeys.LdapDirectories, "{not json")]
-    public void Validate_RejectsOutOfRangeOrMistypedValues(string key, string value)
+    [InlineData(SystemSettingKeys.JwtTokenExpirationHours, "0", "setting.number_range")]
+    [InlineData(SystemSettingKeys.JwtTokenExpirationHours, "not-a-number", ServiceSettingDefinitions.IntegerErrorCode)]
+    [InlineData(SystemSettingKeys.RefreshTokenExpirationDays, "0", "setting.number_range")]
+    [InlineData(SystemSettingKeys.PasswordHasherWorkFactor, "4", "setting.number_range")]
+    [InlineData(SystemSettingKeys.LdapEnabled, "yes", "setting.invalid_boolean")]
+    [InlineData(SystemSettingKeys.LdapDirectories, "{not json", "setting.invalid_json")]
+    public void Validate_RejectsOutOfRangeOrMistypedValues(string key, string value, string expectedCode)
     {
         var values = CompleteSnapshot();
         values[key] = value;
 
-        var errors = SettingsSnapshotValidator.Validate(values);
+        var errors = SharedSettingComposition.ValidateCompleteCandidate(values);
 
-        Assert.Contains(errors, error => error.Contains(key, StringComparison.Ordinal));
+        Assert.Contains(errors, error =>
+            error.Key == SharedSettingKeys.NormalizedByLegacyKey[key] &&
+            error.ErrorCode == expectedCode);
+    }
+
+    /// <summary>
+    /// The legacy input form required integer text (<c>NumberStyles.Integer</c>); the shared
+    /// registry would accept any decimal that happens to be integral. The candidate entry keeps
+    /// the legacy text form ahead of the registry parse.
+    /// </summary>
+    [Theory]
+    [InlineData(SystemSettingKeys.JwtTokenExpirationHours, "2.0")]
+    [InlineData(SystemSettingKeys.JwtTokenExpirationHours, "2e0")]
+    public void Validate_RejectsNonIntegerNumberTextBeforeTheRegistryParsesIt(string key, string value)
+    {
+        var values = CompleteSnapshot();
+        values[key] = value;
+
+        var errors = SharedSettingComposition.ValidateCompleteCandidate(values);
+
+        Assert.Contains(errors, error =>
+            error.Key == SharedSettingKeys.NormalizedByLegacyKey[key] &&
+            error.ErrorCode == ServiceSettingDefinitions.IntegerErrorCode);
+    }
+
+    [Theory]
+    [InlineData("2")]
+    [InlineData("+2")]
+    [InlineData(" 2 ")]
+    public void Validate_AcceptsSignedAndWhitespacePaddedIntegerText(string value)
+    {
+        var values = CompleteSnapshot();
+        values[SystemSettingKeys.JwtTokenExpirationHours] = value;
+
+        Assert.Empty(SharedSettingComposition.ValidateCompleteCandidate(values));
     }
 
     [Theory]
@@ -179,9 +226,11 @@ public class SettingsSnapshotValidatorTests
         var values = CompleteSnapshot();
         values[key] = value;
 
-        var errors = SettingsSnapshotValidator.Validate(values);
+        var errors = SharedSettingComposition.ValidateCompleteCandidate(values);
 
-        Assert.Contains(errors, error => error.Contains("SMS verification-code limits", StringComparison.Ordinal));
+        // The binder message is not surfaced: the closed runtime code carries no values.
+        Assert.Contains(errors, error =>
+            error.ErrorCode == SignaCoreSettingCompositeValidator.RuntimeInvalidCode);
     }
 
     [Fact]
@@ -190,9 +239,10 @@ public class SettingsSnapshotValidatorTests
         var values = CompleteSnapshot();
         values[SystemSettingKeys.LdapEnabled] = "true";
 
-        var errors = SettingsSnapshotValidator.Validate(values);
+        var errors = SharedSettingComposition.ValidateCompleteCandidate(values);
 
-        Assert.Contains(errors, error => error.Contains(SystemSettingKeys.LdapDirectories, StringComparison.Ordinal));
+        Assert.Contains(errors, error =>
+            error.ErrorCode == SignaCoreSettingCompositeValidator.RuntimeInvalidCode);
     }
 
     [Fact]
@@ -201,18 +251,32 @@ public class SettingsSnapshotValidatorTests
         var values = CompleteSnapshot();
         values[SystemSettingKeys.ReverseProxyKnownProxies] = "[\"not-an-ip\"]";
 
-        var errors = SettingsSnapshotValidator.Validate(values);
+        var errors = SharedSettingComposition.ValidateCompleteCandidate(values);
 
-        Assert.Contains(errors, error => error.Contains(SystemSettingKeys.ReverseProxyKnownProxies, StringComparison.Ordinal));
+        Assert.Contains(errors, error =>
+            error.Key == "reverse_proxy.known_proxies" &&
+            error.ErrorCode == SignaCoreSettingCompositeValidator.RuntimeInvalidCode);
     }
 
+    private static Dictionary<string, string> CompleteSnapshot()
+    {
+        var values = SystemSettingsCatalog.BuildDefaults();
+        values[SystemSettingKeys.PublicBaseUrl] = "https://identity.example.test";
+        values[SystemSettingKeys.JwtIssuer] = "https://identity.example.test";
+        values[SystemSettingKeys.AdminUsername] = "admin";
+        return values;
+    }
+}
+
+public class PublicBaseUrlNormalizerTests
+{
     [Theory]
     [InlineData("https://identity.example.test/", "https://identity.example.test")]
     [InlineData("  https://identity.example.test  ", "https://identity.example.test")]
     [InlineData("https://identity.example.test:8443", "https://identity.example.test:8443")]
     public void TryNormalizeBaseUrl_TrimsAndDropsTheTrailingSlash(string input, string expected)
     {
-        Assert.True(SettingsSnapshotValidator.TryNormalizeBaseUrl(input, out var normalized, out _));
+        Assert.True(PublicBaseUrlNormalizer.TryNormalizeBaseUrl(input, out var normalized, out _));
         Assert.Equal(expected, normalized);
     }
 
@@ -225,16 +289,7 @@ public class SettingsSnapshotValidatorTests
     [InlineData("https://identity.example.test#fragment")]
     public void TryNormalizeBaseUrl_RejectsUnusableValues(string input)
     {
-        Assert.False(SettingsSnapshotValidator.TryNormalizeBaseUrl(input, out _, out _));
-    }
-
-    private static Dictionary<string, string> CompleteSnapshot()
-    {
-        var values = SystemSettingsCatalog.BuildDefaults();
-        values[SystemSettingKeys.PublicBaseUrl] = "https://identity.example.test";
-        values[SystemSettingKeys.JwtIssuer] = "https://identity.example.test";
-        values[SystemSettingKeys.AdminUsername] = "admin";
-        return values;
+        Assert.False(PublicBaseUrlNormalizer.TryNormalizeBaseUrl(input, out _, out _));
     }
 }
 

@@ -73,7 +73,7 @@ internal static class LegacyConfigurationInput
 
         // See the class remarks: preserve the deployment's existing plain-HTTP behavior, loudly.
         if (values.TryGetValue(SystemSettingKeys.PublicBaseUrl, out var importedBaseUrl) &&
-            SettingsSnapshotValidator.TryNormalizeBaseUrl(importedBaseUrl, out var normalizedBaseUrl, out _) &&
+            PublicBaseUrlNormalizer.TryNormalizeBaseUrl(importedBaseUrl, out var normalizedBaseUrl, out _) &&
             normalizedBaseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
             !IsExplicitlyTrue(values, SystemSettingKeys.SecurityAllowNonHttpsIssuer))
         {

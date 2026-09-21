@@ -9,7 +9,8 @@ configuration import writes the aggregate's first version directly, without ever
 legacy `system_settings` table. That table stays as read-only legacy data.
 
 > Status: implemented (ServiceMantle tasks #101 and #547, runtime switch #548, admin console
-> switch #145, import switch #146). Removing the old types is tracked after those.
+> switch #145, import switch #146; the legacy `SettingsSnapshotValidator` was retired by
+> ServiceMantle task #555). Removing the remaining old types is tracked after those.
 
 ## What is registered
 
@@ -51,13 +52,28 @@ asserted entry by entry against `SystemSettingsCatalog` in
   the shared closed error classification: the two setup-collected keys
   (`endpoints.public_base_url`, `jwt.issuer`) are required and have no defaults.
 
-Everything else is equivalent: value types, the "must be present" requirement for keys with real
-defaults, `requiresRestart` (all keys), the legacy integer semantics of every Number key, the
-three numeric ranges, the fixed JSON root kinds, and every cross-key rule of
-`SettingsSnapshotValidator` (base URL normalization, HTTPS policy, issuer equality, non-blank
-keys, SMS/LDAP/WeChat binder validation, reverse-proxy IP parsing). Equivalence is pinned by
-`SharedSettingEquivalenceTests`, which feeds equivalent snapshots to both validators and requires
-identical accept/reject outcomes.
+Everything else lives exactly once, in the shared stack: value types, the "must be present"
+requirement for keys with real defaults, `requiresRestart` (all keys), the integer semantics of
+every Number key, the three numeric ranges, the fixed JSON root kinds, and every cross-key rule
+(base URL normalization, HTTPS policy, issuer equality, non-blank keys, SMS/LDAP/WeChat binder
+validation, reverse-proxy IP parsing) in `SignaCoreSettingCompositeValidator`. The retired legacy
+snapshot validator left behind two input-form duties, now carried by a thin adapter instead of a
+second rule set:
+
+- `SettingCandidateValidation` (entry: `SharedSettingComposition.ValidateCompleteCandidate`) is
+  the pre-validation used by first-run setup, the legacy import, and the test installation
+  fixtures. It checks that the complete legacy-keyed candidate carries every one of the 43 catalog
+  keys — completeness precedes defaults, so a missing key is never silently filled in by the
+  registry — and that every Number value is integer text (`IntegerSettingConstraint.IsIntegerText`,
+  the legacy `NumberStyles.Integer` form), then maps through `SharedSettingKeys` onto the shared
+  registry. All failures are closed, key-scoped codes.
+- `PublicBaseUrlNormalizer` holds the URL normalization helper (`TryNormalizeBaseUrl`) used by the
+  composite validator, the setup pre-check, and the legacy import's plain-HTTP compatibility
+  opt-in.
+
+The accept/reject behavior is pinned by `SharedSettingContractTests`, a frozen matrix of fixed
+inputs with pinned verdicts captured from the retired validator's baseline, and by the
+`SettingCandidateValidationTests` and `PublicBaseUrlNormalizerTests` matrices.
 
 ## Runtime activation (#548)
 
