@@ -25,9 +25,13 @@ namespace SignaCore.Tests.Integration;
 /// The outer bounded form read of <c>POST /oauth2/token</c> and <c>POST /oauth2/revoke</c>: one
 /// read of at most 16385 raw bytes ahead of every later stage, one strict UTF-8 single-percent
 /// decode, the fixed 400/503 answers after the shared phase and budget admit the request, and no
-/// credential, client row, or grant side effect for a rejected body. Unit-level probes drive the
-/// middleware directly over counting streams; the HTTP matrix runs over the real host; one smoke
-/// drives a real Kestrel socket with chunked bodies (no Content-Length) — not only TestServer.
+/// credential, client row, or grant side effect for a rejected body. Caller cancellation outranks
+/// parsing and dispatch (observed at entry, after every read return, and before the pipeline
+/// continues), the raw read buffer is zeroed on normal, malformed, failed, and cancelled paths
+/// alike, and quoted or bare UTF-8 charset declarations are admitted. Unit-level probes drive the
+/// middleware directly over counting and retaining streams; the HTTP matrix runs over the real
+/// host; one smoke drives a real Kestrel socket with chunked bodies (no Content-Length) — not
+/// only TestServer.
 /// </summary>
 [Collection(SqliteProcessState.CollectionName)]
 [UsesProcessWideSqlitePoolClearing]
@@ -140,6 +144,7 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
 
     [Theory]
     [InlineData("application/x-www-form-urlencoded; charset=iso-8859-1")]
+    [InlineData("application/x-www-form-urlencoded; charset=\"iso-8859-1\"")]
     [InlineData("application/x-www-form-urlencoded; foo=bar")]
     public async Task ANonUtf8FormCharsetOrExtraParameter_IsTheFixed400(string contentType)
     {
@@ -154,28 +159,39 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
     }
 
     [Theory]
-    [InlineData("application/json")]
-    [InlineData("text/plain")]
-    [InlineData("multipart/form-data; boundary=bound")]
-    public async Task ANonFormMediaType_KeepsTheActionSelectionRejection(string contentType)
+    [InlineData("/oauth2/token", "application/json")]
+    [InlineData("/oauth2/token", "text/plain")]
+    [InlineData("/oauth2/token", "multipart/form-data; boundary=bound")]
+    [InlineData("/oauth2/revoke", "application/json")]
+    [InlineData("/oauth2/revoke", "multipart/form-data; boundary=bound")]
+    public async Task ANonFormMediaType_IsTheFixed400AfterTheSharedBudget(string path, string contentType)
     {
-        // A non-form media type never selects the form-consuming action at all, so the request
-        // ends in MVC's action-selection 415 exactly as on main: no body is ever read, and this
-        // gate adds no new direct response entry point of its own before the shared budget.
+        // The gate owns the media-type decision for both endpoints: a non-form body is the same
+        // fixed invalid_request after the shared phase and budget — never an action-selection
+        // 415 that would preempt the gate's failure path — and its body is never read.
         using var http = CreateClientWithBasicAuth();
         var content = new ByteArrayContent(Encoding.ASCII.GetBytes("grant_type=password"));
         content.Headers.TryAddWithoutValidation("Content-Type", contentType);
 
-        using var response = await http.PostAsync("/oauth2/token", content, TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        using var response = await http.PostAsync(path, content, TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(FixedInvalidRequestBody, body);
+        Assert.Empty(response.Headers.WwwAuthenticate);
     }
 
-    [Fact]
-    public async Task AUtf8CharsetDeclaration_IsAdmitted()
+    [Theory]
+    [InlineData("application/x-www-form-urlencoded; charset=utf-8")]
+    [InlineData("application/x-www-form-urlencoded; charset=UTF-8")]
+    [InlineData("application/x-www-form-urlencoded; charset=\"utf-8\"")]
+    [InlineData("application/x-www-form-urlencoded; charset=\"UTF-8\"")]
+    public async Task AUtf8CharsetDeclaration_BareOrQuotedEitherCase_IsAdmitted(string contentType)
     {
+        // The parameter grammar allows a quoted value; the framework's own form reader parsed
+        // these declarations, so the gate must not turn a legal request into a rejection.
         using var http = CreateClientWithBasicAuth();
         var content = new ByteArrayContent(Encoding.ASCII.GetBytes("grant_type=unsupported-probe"));
-        content.Headers.TryAddWithoutValidation("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+        content.Headers.TryAddWithoutValidation("Content-Type", contentType);
 
         using var response = await http.PostAsync("/oauth2/token", content, TestContext.Current.CancellationToken);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
@@ -301,6 +317,39 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         Assert.Equal("temporarily_unavailable", body.GetProperty("error").GetString());
     }
 
+    [Fact]
+    public async Task TwoConcurrentLegalRequests_NeverShareFormState()
+    {
+        // Two in-flight submissions with distinct values on an isolated host: each owns its own
+        // buffer, parse, and marker, and each dispatch error echoes its own wire value — never
+        // the other request's.
+        using var host = _fixture.WithTestServices(_ => { });
+        using var http = host.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Basic",
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(
+                $"{IdentityServerFixture.GatewayAppId}:{IdentityServerFixture.GatewayAppSecret}")));
+
+        var firstSend = http.PostAsync(
+            "/oauth2/token",
+            RawForm(Encoding.ASCII.GetBytes("grant_type=alpha-probe&pad=" + new string('a', 200))),
+            TestContext.Current.CancellationToken);
+        var secondSend = http.PostAsync(
+            "/oauth2/token",
+            RawForm(Encoding.ASCII.GetBytes("grant_type=beta-probe&pad=" + new string('b', 200))),
+            TestContext.Current.CancellationToken);        using var first = await firstSend;
+        using var second = await secondSend;
+        var firstBody = await first.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        var secondBody = await second.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("unsupported_grant_type", firstBody, StringComparison.Ordinal);
+        Assert.Contains("alpha-probe", firstBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("beta-probe", firstBody, StringComparison.Ordinal);
+        Assert.Contains("unsupported_grant_type", secondBody, StringComparison.Ordinal);
+        Assert.Contains("beta-probe", secondBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("alpha-probe", secondBody, StringComparison.Ordinal);
+    }
+
     // ---- Path variants cannot bypass the gate ----
 
     [Fact]
@@ -315,6 +364,24 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(FixedInvalidRequestBody, body);
+    }
+
+    [Fact]
+    public async Task ATrailingSlashOnTheWire_NeverReachesTheOriginalDispatch()
+    {
+        // A trailing-slash POST is gated and bounded like the canonical path and answers the
+        // gate's fixed failure — never the original dispatch.
+        using var http = CreateClientWithBasicAuth();
+
+        using var response = await http.PostAsync(
+            "/oauth2/token/",
+            RawForm(OversizedBody(20 * 1024)),
+            TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(FixedInvalidRequestBody, body);
+        Assert.DoesNotContain("unsupported_grant_type", body, StringComparison.Ordinal);
     }
 
     // ---- Unit-level probes: the reader itself ----
@@ -380,6 +447,99 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
             () => new BoundedOidcFormReadingMiddleware(abortedNext).InvokeAsync(abortedContext));
     }
 
+    // ---- Caller cancellation outranks parsing, markers, and downstream ----
+
+    [Fact]
+    public async Task APreCancelledRequest_NeverReachesAReadOrAnythingDownstream()
+    {
+        // Pre-cancelled while the stream still holds buffered data it would return: the entry
+        // observation must win — no read, no marker, no downstream pipeline.
+        var stream = new ChunkedMemoryStream(Encoding.ASCII.GetBytes("grant_type=password"), 4);
+        var (context, next, invoked) = CreateContext("/oauth2/token", stream);
+        var lifetime = new AbortedLifetimeFeature();
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+        lifetime.Abort();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context));
+        Assert.Equal(0, stream.TotalRead);
+        Assert.Null(BoundedOidcFormReadingMiddleware.GetStatus(context));
+        Assert.False(invoked.Value);
+    }
+
+    [Fact]
+    public async Task ACallerCancelledAtTheEofReturn_IsNeverParsedOrDispatched()
+    {
+        // The stream delivers the whole body, the caller cancels, and only then does the stream
+        // report EOF: the read-return observation must throw — never a Parsed marker, never a
+        // downstream call.
+        var (context, next, invoked) = CreateContext("/oauth2/token", Stream.Null);
+        var lifetime = new AbortedLifetimeFeature();
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+        context.Request.Body = new CancelBeforeEofStream(
+            Encoding.ASCII.GetBytes("grant_type=password"),
+            lifetime.Abort);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context));
+        Assert.Null(BoundedOidcFormReadingMiddleware.GetStatus(context));
+        Assert.False(invoked.Value);
+    }
+
+    [Fact]
+    public async Task AnInternalCancellationAfterDataWasRead_IsStillTheUnavailableMarker()
+    {
+        // The caller stays alive; the stream returns real data and then cancels internally: the
+        // classification is Unavailable, and the pipeline continues so the shared budget and the
+        // fixed 503 answer still own the response.
+        var internalCancel = new CancellationTokenSource();
+        await internalCancel.CancelAsync();
+        var stream = new PartialThenThrowStream(
+            Encoding.ASCII.GetBytes("grant_type=password"),
+            new OperationCanceledException(internalCancel.Token));
+        var (context, next, invoked) = CreateContext("/oauth2/revoke", stream);
+
+        await new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context);
+
+        Assert.Equal(OidcBoundedFormStatus.Unavailable, BoundedOidcFormReadingMiddleware.GetStatus(context));
+        Assert.True(invoked.Value);
+    }
+
+    [Fact]
+    public async Task AReadFailureAfterPartialData_ZerosTheRetainedBuffer()
+    {
+        // The probe retains the very Memory<byte> the reader wrote into: when the second read
+        // throws IOException the reader must already have zeroed that memory — the clearing
+        // covers the exception path, not only the normal return.
+        var stream = new PartialThenThrowStream(
+            Encoding.ASCII.GetBytes("grant_type=password&password=secret-value-4f2a"),
+            new IOException("synthetic transport failure"));
+        var (context, next, _) = CreateContext("/oauth2/token", stream);
+
+        await new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context);
+
+        Assert.Equal(OidcBoundedFormStatus.Unavailable, BoundedOidcFormReadingMiddleware.GetStatus(context));
+        Assert.All(stream.Retained.ToArray(), b => Assert.Equal(0, b));
+    }
+
+    [Fact]
+    public async Task ACallerCancellationAfterPartialData_ZerosTheRetainedBuffer()
+    {
+        var lifetime = new AbortedLifetimeFeature();
+        var stream = new PartialThenThrowStream(
+            Encoding.ASCII.GetBytes("grant_type=password&password=secret-value-4f2a"),
+            new OperationCanceledException());
+        var (context, next, invoked) = CreateContext("/oauth2/token", stream);
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+        lifetime.Abort();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context));
+        Assert.Null(BoundedOidcFormReadingMiddleware.GetStatus(context));
+        Assert.False(invoked.Value);
+        Assert.All(stream.Retained.ToArray(), b => Assert.Equal(0, b));
+    }
+
     [Theory]
     [InlineData("a=b=c", "a", "b=c")]
     [InlineData("a", "a", "")]
@@ -407,6 +567,52 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
             // Nothing was read: the legacy and login surfaces keep their own readers.
             Assert.Equal(0, ((ChunkedMemoryStream)context.Request.Body).TotalRead);
         }
+    }
+
+    [Fact]
+    public async Task DownstreamReads_ReuseTheOneCachedForm_AndNeverRereadTheStream()
+    {
+        // After the gate's single read, every downstream access — Request.Form and
+        // ReadFormAsync alike — reuses the cached form feature; the original stream is never
+        // read a second time.
+        var payload = Encoding.ASCII.GetBytes("grant_type=password&repeat=1&repeat=2");
+        var stream = new ChunkedMemoryStream(payload, 8);
+        var (context, next, _) = CreateContext("/oauth2/token", stream);
+        await new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context);
+
+        var first = context.Request.Form;
+        var second = await context.Request.ReadFormAsync(TestContext.Current.CancellationToken);
+        Assert.Same(first, second);
+        Assert.Equal(2, second["repeat"].Count);
+        Assert.Equal(payload.Length, stream.TotalRead);
+    }
+
+    [Theory]
+    [InlineData("/oauth2/token/")]
+    [InlineData("/oauth2/revoke/")]
+    [InlineData("/OAuth2/Revoke/")]
+    public async Task ATrailingSlashOrCasedVariant_IsStillGatedAndBounded(string path)
+    {
+        var stream = new ChunkedMemoryStream(OversizedBody(20 * 1024), 1024);
+        var (context, next, _) = CreateContext(path, stream);
+
+        await new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context);
+
+        Assert.Equal(OidcBoundedFormStatus.Malformed, BoundedOidcFormReadingMiddleware.GetStatus(context));
+        Assert.Equal(BoundedOidcFormReadingMiddleware.MaxReadBytes, stream.TotalRead);
+    }
+
+    [Fact]
+    public async Task AMountedPathBaseVariant_IsStillGatedAndBounded()
+    {
+        var stream = new ChunkedMemoryStream(OversizedBody(20 * 1024), 1024);
+        var (context, next, _) = CreateContext("/oauth2/token", stream);
+        context.Request.PathBase = "/signacore";
+
+        await new BoundedOidcFormReadingMiddleware(next).InvokeAsync(context);
+
+        Assert.Equal(OidcBoundedFormStatus.Malformed, BoundedOidcFormReadingMiddleware.GetStatus(context));
+        Assert.Equal(BoundedOidcFormReadingMiddleware.MaxReadBytes, stream.TotalRead);
     }
 
     // ---- A real Kestrel socket: the chunked host path ----
@@ -462,8 +668,8 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         return content;
     }
 
-    private static byte[] ExactBody(string path) => path == "/oauth2/revoke"
-        ? Encoding.ASCII.GetBytes("token=synthetic-refresh-token-for-the-bound-probe")
+    private static byte[] ExactBody(string path) => path.EndsWith("revoke", StringComparison.OrdinalIgnoreCase)
+        ? PaddingTo(16 * 1024, "token=")
         : PaddingTo(16 * 1024, "grant_type=unsupported-probe&padding=");
 
     private static byte[] OversizedBody(int size, bool includePostCredentials = false) => PaddingTo(
@@ -562,6 +768,105 @@ public sealed class BoundedOidcFormGateTests : IClassFixture<IdentityServerFixtu
         public override ValueTask<int> ReadAsync(
             Memory<byte> buffer, CancellationToken cancellationToken = default) =>
             throw exception;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// A stream that returns its whole payload once, cancels the request lifetime, and only then
+    /// reports EOF — the caller abandons the request after the body was handed over.
+    /// </summary>
+    private sealed class CancelBeforeEofStream(byte[] payload, Action cancel) : Stream
+    {
+        private bool _delivered;
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (!_delivered)
+            {
+                _delivered = true;
+                var take = Math.Min(buffer.Length, payload.Length);
+                payload.AsSpan(0, take).CopyTo(buffer.Span);
+                return ValueTask.FromResult(take);
+            }
+
+            cancel();
+            return ValueTask.FromResult(0);
+        }
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// A stream that delivers its payload on the first read and throws on the second, retaining
+    /// the <see cref="Memory{T}"/> it handed the bytes into so a test can observe whether the
+    /// reader zeroed that buffer afterwards.
+    /// </summary>
+    private sealed class PartialThenThrowStream(byte[] payload, Exception error) : Stream
+    {
+        private bool _delivered;
+
+        public Memory<byte> Retained { get; private set; }
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Retained = buffer;
+            if (!_delivered)
+            {
+                _delivered = true;
+                var take = Math.Min(buffer.Length, payload.Length);
+                payload.AsSpan(0, take).CopyTo(buffer.Span);
+                return ValueTask.FromResult(take);
+            }
+
+            throw error;
+        }
 
         public override bool CanRead => true;
 

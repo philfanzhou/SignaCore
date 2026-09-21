@@ -25,12 +25,13 @@ its live descendants, and `offline_access` is advertised in Discovery.
   bytes actually read (never on the declared `Content-Length`), one strict UTF-8 decode, one
   percent-decode. Duplicate fields keep their cardinality for the existing field rules; unknown
   fields remain ignored by the grants.
-- A body past the bound, a non-UTF-8 charset, a compressed body, or malformed percent/UTF-8 is
-  rejected with the fixed `400 {"error":"invalid_request","error_description":"The form request is
-  invalid."}` — no-store/no-cache, no input echoed, no client lookup or secret verification. An
-  unreadable body answers the fixed `503 server_error`. Both answers come only after the shared
-  phase and rate-limit budget admit the request; a rejected request consumes nothing. A non-form
-  media type never selects the action and keeps MVC's action-selection `415` unchanged.
+- A body past the bound, a non-form media type, a non-UTF-8 charset, a compressed body, or
+  malformed percent/UTF-8 is rejected with the fixed `400 {"error":"invalid_request",
+  "error_description":"The form request is invalid."}` — no-store/no-cache, no input echoed, no
+  client lookup or secret verification. An unreadable body answers the fixed `503 server_error`.
+  Both answers come only after the shared phase and rate-limit budget admit the request; a
+  rejected request consumes nothing. A `charset=utf-8` declaration is accepted bare or quoted,
+  in either casing.
 - Client authentication: `client_secret_basic` (HTTP Basic) or `client_secret_post`
   (`client_id`/`client_secret` form fields). The legacy `X-Admin-AppId`/`X-Admin-AppSecret` headers are
   **not** accepted here.

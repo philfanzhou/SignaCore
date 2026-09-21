@@ -27,30 +27,40 @@ public enum OidcBoundedFormStatus
     Unavailable = 3
 }
 
-/// <summary>
-/// The single bounded, strict form read for <c>POST /oauth2/token</c> and <c>POST /oauth2/revoke</c>
-/// (the outer input gate of the shared protocol model). Exactly one read of at most 16385 raw
-/// bytes happens here, ahead of the partition resolver and the composed pipeline; a successful
-/// parse is installed as the request's <c>IFormFeature</c> so every downstream
-/// <c>Request.Form</c>/<c>ReadFormAsync</c> reuses it, and a failed read leaves only the fixed
-/// marker so later stages neither re-read the stream nor query client rows.
-/// <para>
-/// The bound is enforced on the bytes actually read, never on the client-declared Content-Length:
-/// reading stops at one byte past the 16384-byte limit, so a lying or absent length cannot smuggle
-/// a larger body. Media type must be <c>application/x-www-form-urlencoded</c> with, at most, a
-/// <c>charset=utf-8</c> parameter; compressed bodies are not accepted. Decoding is one strict
-/// UTF-8 pass with a single percent-decode (<c>+</c> is a space; percent hex is case-insensitive;
-/// <c>=</c> after the first is value bytes). Duplicate fields keep their
-/// <see cref="StringValues"/> cardinality for the existing grant field rules; unknown fields are
-/// preserved and stay ignored by the grants, exactly as before.
-/// </para>
-/// <para>
-/// This gate never writes a response itself: a marked request continues through the pipeline so
-/// the shared phase and rate-limit budget still admit it first, and the fixed 400/503 answers are
-/// produced by the client-authentication challenge that owns those endpoints' error surface. The
-/// raw buffer is zeroed after parsing; no request value is ever logged or surfaced by this class.
-/// </para>
-/// </summary>
+    /// <summary>
+    /// The single bounded, strict form read for <c>POST /oauth2/token</c> and <c>POST /oauth2/revoke</c>
+    /// (the outer input gate of the shared protocol model). Exactly one read of at most 16385 raw
+    /// bytes happens here, ahead of the partition resolver and the composed pipeline; a successful
+    /// parse is installed as the request's <c>IFormFeature</c> so every downstream
+    /// <c>Request.Form</c>/<c>ReadFormAsync</c> reuses it, and a failed read leaves only the fixed
+    /// marker so later stages neither re-read the stream nor query client rows.
+    /// <para>
+    /// The bound is enforced on the bytes actually read, never on the client-declared
+    /// Content-Length: reading stops at one byte past the 16384-byte limit, so a lying or absent
+    /// length cannot smuggle a larger body. Media type must be
+    /// <c>application/x-www-form-urlencoded</c> with, at most, a <c>charset=utf-8</c> parameter
+    /// (bare or quoted, either casing, as the parameter grammar allows); compressed bodies are
+    /// not accepted. Decoding is one strict UTF-8 pass with a single percent-decode (<c>+</c> is a
+    /// space; percent hex is case-insensitive; <c>=</c> after the first is value bytes). Duplicate
+    /// fields keep their <see cref="StringValues"/> cardinality for the existing grant field
+    /// rules; unknown fields are preserved and stay ignored by the grants, exactly as before.
+    /// </para>
+    /// <para>
+    /// Caller cancellation outranks every classification here: the caller's token is observed at
+    /// entry, after every read return (EOF included), before the parsed form is installed, and
+    /// once more before the pipeline continues, so an abandoned request is never parsed,
+    /// authenticated, dispatched, or answered with a marker body. An internal cancellation or an
+    /// ordinary I/O failure while the caller still waits is the fixed unavailable marker instead.
+    /// </para>
+    /// <para>
+    /// This gate never writes a response itself: a marked request continues through the pipeline
+    /// so the shared phase and rate-limit budget still admit it first, and the fixed 400/503
+    /// answers are produced by the client-authentication challenge that owns those endpoints'
+    /// error surface. The raw read buffer and the percent-decode scratch buffer are zeroed on
+    /// every path — normal, malformed, failed, cancelled; no request value is ever logged or
+    /// surfaced by this class.
+    /// </para>
+    /// </summary>
 public sealed class BoundedOidcFormReadingMiddleware(RequestDelegate next)
 {
     /// <summary>The <c>HttpContext.Items</c> key carrying the gate's fixed outcome marker.</summary>
@@ -74,6 +84,10 @@ public sealed class BoundedOidcFormReadingMiddleware(RequestDelegate next)
         if (HttpMethods.IsPost(context.Request.Method) && IsGatedPath(context.Request.Path))
         {
             await ReadAndMarkAsync(context);
+            // The last observation before the pipeline continues: a request abandoned by its
+            // caller never reaches authentication or dispatch, even when its read completed
+            // cleanly. Non-gated paths keep their own framework behavior unchanged.
+            context.RequestAborted.ThrowIfCancellationRequested();
         }
 
         await next(context);
@@ -108,9 +122,15 @@ public sealed class BoundedOidcFormReadingMiddleware(RequestDelegate next)
 
     private async Task ReadAndMarkAsync(HttpContext context)
     {
+        // Entry observation: a request the caller already abandoned never reaches a body read,
+        // even when the stream still holds buffered data it would hand back synchronously.
+        context.RequestAborted.ThrowIfCancellationRequested();
         try
         {
             var status = await TryReadAndInstallFormAsync(context);
+            // The boundary has completed: observe the caller once more before the outcome is
+            // staged, so a cancellation seen after the read never becomes a parse or a marker.
+            context.RequestAborted.ThrowIfCancellationRequested();
             context.Items[StatusItemKey] = status;
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
@@ -122,6 +142,11 @@ public sealed class BoundedOidcFormReadingMiddleware(RequestDelegate next)
         {
             // An internal cancellation while the caller still waits.
             context.Items[StatusItemKey] = OidcBoundedFormStatus.Unavailable;
+        }
+        catch (IOException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // The transport failed after the caller was already gone: cancellation still wins.
+            throw;
         }
         catch (IOException)
         {
@@ -142,36 +167,49 @@ public sealed class BoundedOidcFormReadingMiddleware(RequestDelegate next)
         // Reading stops at one byte past the bound: oversize is recognized by the byte count, so
         // the declared Content-Length is irrelevant and nothing beyond the cap is ever consumed.
         var buffer = new byte[MaxReadBytes];
-        var total = 0;
-        while (total < MaxReadBytes)
+        try
         {
-            var read = await context.Request.Body.ReadAsync(
-                buffer.AsMemory(total, MaxReadBytes - total),
-                context.RequestAborted);
-            if (read == 0)
+            var total = 0;
+            while (total < MaxReadBytes)
             {
-                break;
+                var read = await context.Request.Body.ReadAsync(
+                    buffer.AsMemory(total, MaxReadBytes - total),
+                    context.RequestAborted);
+                // Every read return is an observation point, EOF included: a stream that handed
+                // back buffered data for an already-abandoned request is read no further and
+                // its bytes are never parsed.
+                context.RequestAborted.ThrowIfCancellationRequested();
+                if (read == 0)
+                {
+                    break;
+                }
+
+                total += read;
             }
 
-            total += read;
-        }
+            if (total == MaxReadBytes)
+            {
+                return OidcBoundedFormStatus.Malformed;
+            }
 
-        if (total == MaxReadBytes)
+            if (!TryParseStrictForm(buffer.AsSpan(0, total), out var fields))
+            {
+                return OidcBoundedFormStatus.Malformed;
+            }
+
+            // The parse is the last boundary before its result is installed: a caller
+            // cancellation observed here never becomes the request's cached form.
+            context.RequestAborted.ThrowIfCancellationRequested();
+            // The one parse is the only parse: downstream Request.Form/ReadFormAsync reuse it.
+            context.Features.Set<IFormFeature>(new FormFeature(new FormCollection(fields)));
+            return OidcBoundedFormStatus.Parsed;
+        }
+        finally
         {
+            // Zeroed on every path — the parsed body, a malformed body, an I/O failure, and a
+            // caller or internal cancellation alike: raw request bytes never outlive the read.
             Array.Clear(buffer);
-            return OidcBoundedFormStatus.Malformed;
         }
-
-        if (!TryParseStrictForm(buffer.AsSpan(0, total), out var fields))
-        {
-            Array.Clear(buffer);
-            return OidcBoundedFormStatus.Malformed;
-        }
-
-        Array.Clear(buffer);
-        // The one parse is the only parse: downstream Request.Form/ReadFormAsync reuse it.
-        context.Features.Set<IFormFeature>(new FormFeature(new FormCollection(fields)));
-        return OidcBoundedFormStatus.Parsed;
     }
 
     /// <summary>
@@ -236,41 +274,50 @@ public sealed class BoundedOidcFormReadingMiddleware(RequestDelegate next)
     {
         value = string.Empty;
         var decoded = new byte[component.Length];
-        var written = 0;
-        for (var index = 0; index < component.Length; index++)
+        try
         {
-            var current = component[index];
-            if (current == '+')
+            var written = 0;
+            for (var index = 0; index < component.Length; index++)
             {
-                decoded[written++] = (byte)' ';
-                continue;
+                var current = component[index];
+                if (current == '+')
+                {
+                    decoded[written++] = (byte)' ';
+                    continue;
+                }
+
+                if (current != '%')
+                {
+                    decoded[written++] = current;
+                    continue;
+                }
+
+                if (index + 2 >= component.Length
+                    || !TryReadHexNibble(component[index + 1], out var high)
+                    || !TryReadHexNibble(component[index + 2], out var low))
+                {
+                    return false;
+                }
+
+                decoded[written++] = (byte)((high << 4) | low);
+                index += 2;
             }
 
-            if (current != '%')
+            try
             {
-                decoded[written++] = current;
-                continue;
+                value = StrictUtf8.GetString(decoded.AsSpan(0, written));
+                return true;
             }
-
-            if (index + 2 >= component.Length
-                || !TryReadHexNibble(component[index + 1], out var high)
-                || !TryReadHexNibble(component[index + 2], out var low))
+            catch (Exception exception) when (exception is DecoderFallbackException or ArgumentException)
             {
                 return false;
             }
-
-            decoded[written++] = (byte)((high << 4) | low);
-            index += 2;
         }
-
-        try
+        finally
         {
-            value = StrictUtf8.GetString(decoded.AsSpan(0, written));
-            return true;
-        }
-        catch (Exception exception) when (exception is DecoderFallbackException or ArgumentException)
-        {
-            return false;
+            // The decode scratch is zeroed on the success and every failure path alike; only the
+            // managed result string outlives it (the accepted managed-string limitation).
+            Array.Clear(decoded);
         }
     }
 
@@ -295,13 +342,14 @@ public sealed class BoundedOidcFormReadingMiddleware(RequestDelegate next)
             return false;
         }
 
-        // Fail closed beyond the canonical text: a charset parameter must be utf-8, and any other
-        // parameter makes the submission structurally inadmissible.
+        // Fail closed beyond the canonical text: a charset parameter must be utf-8 — bare or
+        // quoted, as the parameter grammar allows both shapes for the same value — and any
+        // other parameter makes the submission structurally inadmissible.
         foreach (var parameter in parsed.Parameters)
         {
             if (parameter.Name.Equals(CharsetParameterName, StringComparison.OrdinalIgnoreCase))
             {
-                if (!parameter.Value.Equals(Utf8Charset, StringComparison.OrdinalIgnoreCase))
+                if (!IsUtf8CharsetDeclaration(parameter.Value))
                 {
                     return false;
                 }
@@ -313,5 +361,22 @@ public sealed class BoundedOidcFormReadingMiddleware(RequestDelegate next)
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// A parameter value may be a bare token or a quoted string; the quotes are syntax, not part
+    /// of the value's meaning, so both shapes name the same charset.
+    /// </summary>
+    private static bool IsUtf8CharsetDeclaration(string? declaration)
+    {
+        if (string.IsNullOrEmpty(declaration))
+        {
+            return false;
+        }
+
+        var bare = declaration.Length >= 2 && declaration[0] == '"' && declaration[^1] == '"'
+            ? declaration[1..^1]
+            : declaration;
+        return bare.Equals(Utf8Charset, StringComparison.OrdinalIgnoreCase);
     }
 }
