@@ -24,6 +24,80 @@ OpenID Connect Discovery document. Nothing is hardcoded.
 > `signacore`. Nothing migrates or binds automatically at runtime. Setup requires an explicit
 > local code command followed by authenticated HTTP completion.
 
+## From an empty installation to the first administrator
+
+Use .NET 10, the .NET 10 `dotnet-ef` tool
+(`dotnet tool install --global dotnet-ef --version 10.0.0`), and two reachable HTTPS origins with certificates trusted by both the browser and the BFF. Use an empty SignaCore
+database and a **separate** empty BFF database. Run commands from the repository root. Values in
+angle brackets below are placeholders; supply secrets through your protected environment, not
+shell history, command arguments, source control, or captured output.
+
+Follow this order; an installed SignaCore administrator and a BFF administrator are separate roles:
+
+1. Install and start SignaCore using [First-Run Setup](../../docs/development/FirstRunSetup.md)
+   and the [deployment guide](../../docs/development/Deployment.md). Complete bootstrap configuration
+   and `/setup`, then restart as instructed there. Configure its public HTTPS origin to match the
+   BFF's Authority. Do not use the BFF's local Setup Code for SignaCore setup.
+2. Open SignaCore's `/admin` console and sign in as the administrator created during installation.
+   The application and account API operations below require the `AdminSession` policy; an
+   application secret or an end-user access token does not authorize them. Use the console's
+   application and account pages, or the API entries listed below. The
+   [application-management specification](../../docs/modules/Admin/AppManagement/02-SPEC.md) and
+   [account-management specification](../../docs/modules/Admin/UserManagement/02-SPEC.md) describe
+   those administration boundaries, including the management-session login entry.
+3. In **Applications**, create a **Confidential** application (`POST /api/admin/apps`, body
+   `{"appName":"Reference BFF","callbackUrl":null,"ttlSeconds":0,"clientType":"Confidential"}`).
+   Save the returned `appId` as `ReferenceBff__ClientId` and the **one-time** `appSecret` as
+   `ReferenceBff__ClientSecret` in your protected environment. The secret cannot be read again.
+   A claims callback is unrelated to the OIDC redirect URI; leave it empty for this sample.
+4. Set the application's audience mode to **PerApplication** using
+   `PUT /api/admin/apps/{appId}/audience-mode` with `{"mode":"PerApplication"}`.
+5. Register the BFF's exact HTTPS callback using
+   `POST /api/admin/apps/{appId}/oidc/redirect-uris` with
+   `{"kind":"Redirect","uris":["https://<bff-host>/signin-oidc"]}`. Set the same URI in
+   `ReferenceBff__RedirectUri`. See [Interactive Client Model](../../docs/oidc/ClientModel.md)
+   for the audience and redirect-registration contract; its target-design label does not enable
+   future public-client or logout capabilities in this sample.
+6. Enable the application's interactive policy using
+   `PUT /api/admin/apps/{appId}/oidc-policy` with
+   `{"clientType":"Confidential","allowAuthorizationCode":true,"allowedScopes":["openid","profile"],"allowRefreshToken":false,"identitySessionMaxAgeSeconds":null}`.
+   **Steps 4 and 5 must precede this step.** A new application defaults to `Shared`; enabling
+   code flow then fails with `Authorization Code flow requires a per-application audience.`
+   With `PerApplication` but no redirect registration it fails with
+   `Authorization Code flow requires at least one redirect URI.` Neither failure repairs the
+   configuration automatically.
+7. In **Users**, create an active password account for the person who will become the BFF
+   administrator (`POST /api/admin/users`, body
+   `{"username":"<account-name>","password":"<injected-password>","displayName":null,"remark":null,"nickname":null}`).
+   Enter that account's credentials only on SignaCore's login page; local BFF authorization is
+   established by the next step, not by its SignaCore administrator status.
+8. Follow [Configuration](#configuration) to migrate the BFF database, using the **same**
+   `ReferenceBffDatabase__ConnectionString` for migration, the code command, and the Web host.
+   Inject all three `ReferenceBffDatabase__*` values and follow
+   [Local Setup Code](#local-setup-code-operations-phase) to run `--setup-code create` in a protected
+   interactive terminal. [Start the BFF](#run), open `/bff/login`, and sign in as the account from
+   step 7. Open `/bff/setup` and submit the locally displayed code as described in
+   [First administrator over HTTP](#first-administrator-over-http). A successful submission returns
+   `204`; `/bff/admin` then returns `200 {"isAdministrator":true}` for that same identity.
+
+## Ownership boundaries
+
+| Capability / decision | Owner | Consumer responsibility |
+| --- | --- | --- |
+| Credentials, authentication, Discovery, OIDC, JWT signing/JWKS and UserInfo | SignaCore | BFF validates the protocol and keeps tokens server-side; it never handles the account password. |
+| Installation state and Setup Code lifecycle, common management HTTP gates | ServiceMantle | BFF supplies its service id, database context, and first-administrator contributor. |
+| Management audit persistence, sensitive-header registry and structured-log sanitization/Console host | ServiceMantle | BFF emits bounded events and registers its CSRF header; it does not copy shared algorithms or storage. |
+| Encrypted Data Protection key-ring persistence | ServiceMantle (framework owns key lifetimes) | BFF supplies its independent database and external root key; see the existing upgrade section below. |
+| Local role binding and each administrator authorization decision | BFF | Match the verified issuer/subject to the active local binding after current UserInfo confirmation. SignaCore does not assign this role. |
+| Browser session and local logout | BFF / ASP.NET Core | Keep tokens in the single-instance ticket store and enforce antiforgery on logout. |
+
+The authoritative state/recovery model remains [#74](https://github.com/philfanzhou/SignaCore/issues/74),
+and the first-release boundary remains [#47](https://github.com/philfanzhou/SignaCore/issues/47).
+The centralized shared-wiring tests assert both effective registrations and ServiceMantle assembly
+provenance; their negative controls deliberately replace a store/provider or remove a required
+policy and require the same acceptance assertion to fail. This proves consumer wiring, not the
+correctness of every shared-library algorithm.
+
 ## Database (data phase)
 
 `ReferenceBffDbContext` implements the shared `IServiceDbContext` contract, and
@@ -68,8 +142,10 @@ The configuration is validated at startup; an incomplete configuration fails to 
 startup with a fixed message that echoes no value. With all three omitted, the sample runs exactly its
 login-only shape and every authenticated management query answers a fixed `503`.
 
-Before first use, create and migrate the database explicitly — the runtime never migrates,
-creates schema, or seeds:
+Before first use, provision `ReferenceBffDatabase__ConnectionString` through the protected
+environment, then run **one** command matching your provider below. Both design-time factories read
+that variable; do not rely on their fallback database names. Keep the same value for the code command
+and Web host. The runtime never migrates, creates schema, or seeds:
 
 ```bash
 # PostgreSQL
@@ -107,9 +183,6 @@ remain operator responsibilities outside this single-instance sample.
 
 An empty migrated database denies management (`403`); a missing schema or an unreachable database
 fails closed without ever widening permission (key use can fail before a management response).
-
-Register the redirect URI on the SignaCore application (interactive OIDC configuration) with the
-code flow enabled before using the sample.
 
 ## Local Setup Code (operations phase)
 
@@ -192,20 +265,20 @@ Code rollback preserves committed data and must never reset Completed to Pending
 
 ## Run
 
-Before this database-enabled example, inject `ReferenceBffDatabase__DataProtectionRootKey` through
-your protected environment and apply the migrations above.
+Complete the ordered SignaCore registration above. Inject `ReferenceBff__Authority`,
+`ReferenceBff__ClientId`, `ReferenceBff__ClientSecret`, `ReferenceBff__RedirectUri`, and
+`ReferenceBff__Scope` (`openid profile`) through your protected environment. For the database-enabled
+flow also inject the three `ReferenceBffDatabase__*` keys from [Configuration](#configuration),
+apply migrations and create the local code before starting. Root-key requirements and upgrade
+behavior are defined only in [Persistent Data Protection and upgrades](#persistent-data-protection-and-upgrades).
+Configure a trusted HTTPS listener (or TLS proxy) for the registered BFF origin, then run:
 
 ```bash
-ReferenceBff__ClientSecret='<injected-client-secret>' \
-dotnet run --project samples/SignaCore.ReferenceBff \
-  --ReferenceBff:Authority=https://your-signacore-host \
-  --ReferenceBff:ClientId=reference-bff \
-  --ReferenceBff:RedirectUri=https://your-bff-host/signin-oidc \
-  --ReferenceBffDatabase:Provider=SQLite \
-  --ReferenceBffDatabase:ConnectionString="Data Source=signacore-reference-bff.db"
+dotnet run --project samples/SignaCore.ReferenceBff --no-launch-profile
 ```
 
-Then open `https://your-bff-host/` and follow **Sign in with SignaCore**.
+Open `https://<bff-host>/bff/login`, then complete `/bff/setup` and check `/bff/admin` as described
+above. The SignaCore Authority must also be reachable over trusted HTTPS from the BFF process.
 
 ## Structured logs
 
@@ -248,8 +321,9 @@ logging behavior without a schema, data, token or HTTP migration.
   Discovery-resolved UserInfo endpoint. A UserInfo `401` (the upstream identity session is gone)
   revokes the local session and answers the bounded error page — the BFF never keeps a
   signed-in appearance over a dead upstream session.
-- The only state-changing browser surface is `POST /bff/logout`, protected by antiforgery; it
-  clears the local cookie and the server-side ticket. There is no GET logout.
+- `POST /bff/logout` is protected by antiforgery and clears the local cookie and server-side
+  ticket. There is no GET logout. The optional Setup POST has the separate protections described
+  in [First administrator over HTTP](#first-administrator-over-http).
 - Expired tickets are reclaimed both when presented and by a periodic background sweep.
 
 ## Runtime authorization (`GET /bff/admin`)
@@ -274,6 +348,25 @@ Authentication and authorization are deliberately separate decisions in this sam
   the fixed `/bff/admin` route only — no open return URL.
 - `GET /bff/me` keeps its original contract: the confirmed profile payload is passed through,
   and its failure paths remain the bounded redirect pages.
+
+## Verify the sample
+
+With Docker available, run the complete suite (including both database providers) from the root:
+
+```bash
+RUN_SIGNACORE_DATABASE_CONTRACTS=true dotnet test \
+  tests/SignaCore.ReferenceBff.Tests/SignaCore.ReferenceBff.Tests.csproj --configuration Release
+```
+
+`Readme_InstalledSignaCoreThenAdminApisLoginAndSetupCompleteInOrder` exercises the registration
+order, both premature-enable failures, and the login → Setup → administrator success path against
+the real SignaCore host. `SharedWiring_*` centralizes provenance checks and negative controls for
+installation state, Setup Code, audit, key-ring options, sensitive headers, and logging.
+The canary tests cover controlled Console output, browser bodies/headers/URLs, every bounded error
+reason, Setup audit columns, and command stdout/stderr. Session-cookie issuance at the login callback
+and form antiforgery tokens are intentional browser outputs; the session-cookie value must not be
+reflected by later pages. Canary assertion failures name only the carrier, never the sensitive value.
+These checks retain the single-instance and controlled-output limits documented above.
 
 ## Scope
 
