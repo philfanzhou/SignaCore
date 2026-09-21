@@ -35,6 +35,8 @@ internal sealed class BffAdminAuthorizationService(
         cancellationToken.ThrowIfCancellationRequested();
 
         var identity = await identityCheck.CheckAsync(http, cancellationToken);
+        // The caller's decision outranks the classification of the completed identity boundary.
+        cancellationToken.ThrowIfCancellationRequested();
         if (identity.Status != BffIdentityCheckStatus.Confirmed)
         {
             return identity.Status switch
@@ -43,8 +45,6 @@ internal sealed class BffAdminAuthorizationService(
                 _ => BffAdminAuthorizationStatus.Unavailable
             };
         }
-
-        cancellationToken.ThrowIfCancellationRequested();
 
         // No database configured: the sample keeps running its login surface, but a management
         // query can never be answered — fixed unavailable, never a default grant.

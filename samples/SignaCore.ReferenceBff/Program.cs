@@ -341,6 +341,10 @@ app.MapGet("/bff/me", async (
         throw;
     }
 
+    // The caller is observed once more before anything is classified: no session is torn down
+    // and no profile leaves the host for a request that is already gone.
+    http.RequestAborted.ThrowIfCancellationRequested();
+
     if (identity.Status == BffIdentityCheckStatus.SessionInvalid)
     {
         // A session whose upstream identity is gone (no token, an upstream 401, or an unconfirmed
@@ -383,6 +387,10 @@ app.MapGet("/bff/admin", async (
         // The caller abandoned the request: never a session verdict, never a half decision.
         throw;
     }
+
+    // The caller is observed once more before any classification: neither the sign-out nor any
+    // fixed answer runs for a request that is already gone.
+    http.RequestAborted.ThrowIfCancellationRequested();
 
     switch (status)
     {

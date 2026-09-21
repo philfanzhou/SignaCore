@@ -139,8 +139,15 @@ public sealed class FakeAuthority : IAsyncDisposable
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _state.UserInfoGate = gate;
+        _state.UserInfoArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         return gate;
     }
+
+    /// <summary>
+    /// Completes when a held UserInfo request has arrived and parked on the gate — the arrival
+    /// evidence a test awaits before abandoning the request, instead of a timer.
+    /// </summary>
+    public Task UserInfoArrived => _state.UserInfoArrived?.Task ?? Task.CompletedTask;
 
     public static async Task<FakeAuthority> StartAsync()
     {
@@ -217,6 +224,7 @@ public sealed class FakeAuthority : IAsyncDisposable
             // test releases the gate or the caller abandons the request.
             if (state.UserInfoGate is { Task.IsCompleted: false } gate)
             {
+                state.UserInfoArrived?.TrySetResult();
                 await gate.Task.WaitAsync(context.RequestAborted);
             }
 
@@ -313,6 +321,8 @@ public sealed class FakeAuthority : IAsyncDisposable
         public bool OmitUserInfoEndpoint { get; set; }
 
         public TaskCompletionSource? UserInfoGate { get; set; }
+
+        public TaskCompletionSource? UserInfoArrived { get; set; }
 
         public string LastNonce { get; set; } = string.Empty;
 

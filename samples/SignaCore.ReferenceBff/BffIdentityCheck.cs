@@ -83,12 +83,14 @@ internal sealed class BffIdentityCheckService(
         }
 
         var userInfoEndpoint = await ResolveUserInfoEndpointAsync(cancellationToken);
+        // The caller's decision outranks any classification of the completed boundary —
+        // including "the configuration carries no UserInfo endpoint": a caller who abandoned
+        // the request never receives an unavailable verdict for it.
+        cancellationToken.ThrowIfCancellationRequested();
         if (userInfoEndpoint is null)
         {
             return BffIdentityCheckResult.Unavailable;
         }
-
-        cancellationToken.ThrowIfCancellationRequested();
 
         using var request = new HttpRequestMessage(HttpMethod.Get, userInfoEndpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
@@ -192,10 +194,15 @@ internal sealed class BffIdentityCheckService(
         }
         catch (OperationCanceledException)
         {
+            // An internal cancellation while the caller still waits: bounded unavailable — but
+            // the caller is re-observed first, so a cancellation landing in the same breath as
+            // the throw still wins the classification.
+            cancellationToken.ThrowIfCancellationRequested();
             return null;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             return null;
         }
     }

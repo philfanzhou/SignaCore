@@ -5,14 +5,19 @@ using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using SignaCore.ReferenceBff.Database;
 using Xunit;
+using BffIdentityCheckService = BffSample::SignaCore.ReferenceBff.BffIdentityCheckService;
 using BffMemoryTicketStore = BffSample::SignaCore.ReferenceBff.MemoryTicketStore;
 using BffProgram = BffSample::Program;
 
@@ -417,8 +422,9 @@ public sealed class ReferenceBffAdminAuthorizationTests
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/admin"));
         var operation = browser.SendOnBffAsync(request, cancellation.Token);
 
-        // The request is parked on the deterministic UserInfo gate when it is abandoned.
-        await Task.Delay(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken);
+        // The request is parked on the deterministic UserInfo gate when it is abandoned —
+        // arrival evidence, not a timer.
+        await authority.UserInfoArrived.WaitAsync(TestContext.Current.CancellationToken);
         await cancellation.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation);
 
@@ -445,8 +451,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/admin"));
         var operation = browser.SendOnBffAsync(request, cancellation.Token);
 
-        await Task.Delay(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken);
-        Assert.True(interceptor.Observed, "The request never reached the database boundary.");
+        await interceptor.Entered.WaitAsync(TestContext.Current.CancellationToken);
         await cancellation.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation);
         _ = interceptor.Release;
@@ -469,13 +474,86 @@ public sealed class ReferenceBffAdminAuthorizationTests
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/admin"));
         var operation = browser.SendOnBffAsync(request, cts.Token);
 
-        await Task.Delay(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken);
-        Assert.True(interceptor.Observed, "The request never reached the database boundary.");
+        await interceptor.Entered.WaitAsync(TestContext.Current.CancellationToken);
         interceptor.CancelInternally();
 
         using var response = await operation;
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal(1, TicketStore(bff).Count);
+    }
+
+    [Fact]
+    public async Task CallerCancellation_AfterDiscoveryCompleted_OutranksTheMissingEndpointVerdict()
+    {
+        await using var authority = await FakeAuthority.StartAsync();
+        await using var database = await TempBffDatabase.CreateMigratedWithBindingAsync(
+            FakeAuthority.BaseAddress, FakeAuthority.DefaultSubject);
+        await using var bff = CreateBff(authority, database);
+        using var browser = CreateBrowser(bff, authority);
+        await SignInAsync(browser);
+
+        // Service-level probe over the real host's DI and the signed-in session cookie,
+        // mirroring the deterministic review experiment: Discovery's boundary parks, the
+        // caller abandons the request, and only then does the boundary complete normally with
+        // a configuration that carries no UserInfo endpoint. The observation after the
+        // boundary must propagate the caller's cancellation — never an unavailable verdict.
+        // Driving the check directly keeps the transport's own cancellation from masking the
+        // server-side outcome.
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var oidcOptions = bff.Services.GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>()
+            .Get(OpenIdConnectDefaults.AuthenticationScheme);
+        oidcOptions.ConfigurationManager = new DiscoveryBoundaryProbeManager(
+            oidcOptions.ConfigurationManager!, entered);
+        using (var scope = bff.Services.CreateScope())
+        {
+            var http = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
+            http.Request.Headers.Cookie = browser.Cookies.GetCookieHeader(browser.BffBase);
+            var check = scope.ServiceProvider.GetRequiredService<BffIdentityCheckService>();
+
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var operation = check.CheckAsync(http, cancellation.Token);
+
+            await entered.Task.WaitAsync(TestContext.Current.CancellationToken);
+            await cancellation.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation);
+        }
+
+        // No verdict ran: the session is intact and the next request authorizes normally.
+        Assert.Equal(1, TicketStore(bff).Count);
+        using var retry = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/admin"));
+        using var response = await browser.SendOnBffAsync(retry, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CallerCancellation_AfterTheJsonRead_OutranksAnyProfileVerdict()
+    {
+        var callerSource = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var authority = await FakeAuthority.StartAsync();
+        await using var database = await TempBffDatabase.CreateMigratedWithBindingAsync(
+            FakeAuthority.BaseAddress, FakeAuthority.DefaultSubject);
+        await using var bff = CreateBff(
+            authority, database, userInfoWrapper: new CancelOnContentReadHandler(callerSource));
+        using var browser = CreateBrowser(bff, authority);
+        await SignInAsync(browser);
+
+        // The UserInfo response arrives intact; the identity check's payload read cancels the
+        // caller's own source and still completes. Observed at the service level — the
+        // transport never masks it — the observation after the JSON read must propagate the
+        // caller's cancellation: never a profile, a verdict, or a session teardown.
+        using (var scope = bff.Services.CreateScope())
+        {
+            var http = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
+            http.Request.Headers.Cookie = browser.Cookies.GetCookieHeader(browser.BffBase);
+            var check = scope.ServiceProvider.GetRequiredService<BffIdentityCheckService>();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => check.CheckAsync(http, callerSource.Token));
+        }
+
+        Assert.Equal(1, TicketStore(bff).Count);
+        using var retry = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/me"));
+        using var response = await browser.SendOnBffAsync(retry, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     // ---- The route adds no state-changing surface ----
@@ -501,7 +579,8 @@ public sealed class ReferenceBffAdminAuthorizationTests
         FakeAuthority authority,
         TempBffDatabase database,
         ThrowingUserInfoHandler? failingUserInfo = null,
-        DbCommandInterceptor? dbInterceptor = null)
+        DbCommandInterceptor? dbInterceptor = null,
+        DelegatingHandler? userInfoWrapper = null)
     {
         // The backchannel client intentionally outlives this method: the BFF's OIDC handler owns
         // it for the lifetime of the factory, and the authority disposes the underlying server.
@@ -509,13 +588,21 @@ public sealed class ReferenceBffAdminAuthorizationTests
         {
             BaseAddress = new Uri(FakeAuthority.BaseAddress)
         };
+
+        HttpMessageHandler userInfo = authority.Server.CreateHandler();
+        if (userInfoWrapper is not null)
+        {
+            userInfoWrapper.InnerHandler = userInfo;
+            userInfo = userInfoWrapper;
+        }
+
         return BffTestServer.Create(
             FakeAuthority.BaseAddress,
             ClientId,
             "reference-bff-test-secret",
             SignaCoreHostFixture.RedirectUri,
             backchannelClient,
-            userInfoHandler: failingUserInfo ?? (HttpMessageHandler)authority.Server.CreateHandler(),
+            userInfoHandler: failingUserInfo ?? userInfo,
             databaseProvider: "SQLite",
             databaseConnectionString: database.ConnectionString,
             configureTestServices: dbInterceptor is null
@@ -757,7 +844,13 @@ public sealed class ReferenceBffAdminAuthorizationTests
         private readonly TaskCompletionSource release =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        private readonly TaskCompletionSource entered =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public Task Release => release.Task;
+
+        /// <summary>Completes when the query has arrived and parked — the arrival evidence.</summary>
+        public Task Entered => entered.Task;
 
         public bool Observed { get; private set; }
 
@@ -769,6 +862,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
                 CancellationToken cancellationToken = default)
         {
             Observed = true;
+            entered.TrySetResult();
             return WaitAsync(cancellationToken);
 
             async ValueTask<InterceptionResult<System.Data.Common.DbDataReader>> WaitAsync(CancellationToken token)
@@ -786,6 +880,12 @@ public sealed class ReferenceBffAdminAuthorizationTests
     {
         private readonly CancellationTokenSource internalSource = new();
 
+        private readonly TaskCompletionSource entered =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Completes when the query has arrived and parked — the arrival evidence.</summary>
+        public Task Entered => entered.Task;
+
         public bool Observed { get; private set; }
 
         public void CancelInternally() => internalSource.Cancel();
@@ -798,6 +898,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
                 CancellationToken cancellationToken = default)
         {
             Observed = true;
+            entered.TrySetResult();
             return WaitAsync();
 
             async ValueTask<InterceptionResult<System.Data.Common.DbDataReader>> WaitAsync()
@@ -805,6 +906,77 @@ public sealed class ReferenceBffAdminAuthorizationTests
                 await Task.Delay(Timeout.InfiniteTimeSpan, internalSource.Token);
                 return result;
             }
+        }
+    }
+
+    /// <summary>
+    /// Replaces Discovery for one identity-check leg: the boundary signals its arrival, waits
+    /// for the caller to abandon the request, and still completes normally with a configuration
+    /// that carries no UserInfo endpoint. The observation after the boundary must throw, never
+    /// classify the missing endpoint as unavailable.
+    /// </summary>
+    private sealed class DiscoveryBoundaryProbeManager(
+        IConfigurationManager<OpenIdConnectConfiguration> inner,
+        TaskCompletionSource entered) : IConfigurationManager<OpenIdConnectConfiguration>
+    {
+        private int _calls;
+
+        public async Task<OpenIdConnectConfiguration> GetConfigurationAsync(CancellationToken cancel)
+        {
+            if (Interlocked.Increment(ref _calls) == 1)
+            {
+                entered.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancel);
+                }
+                catch (OperationCanceledException)
+                {
+                    // The caller abandoned the request; the boundary completes anyway.
+                }
+
+                return new OpenIdConnectConfiguration();
+            }
+
+            return await inner.GetConfigurationAsync(cancel);
+        }
+
+        public void RequestRefresh() => inner.RequestRefresh();
+    }
+
+    /// <summary>
+    /// Wraps the UserInfo leg so the response payload read cancels the caller's own source and
+    /// still completes: the observation point after the JSON read must throw before any verdict.
+    /// </summary>
+    private sealed class CancelOnContentReadHandler(CancellationTokenSource callerSource) : DelegatingHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = await base.SendAsync(request, cancellationToken);
+            var payload = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            response.Content = new PayloadCancellingContent(payload, callerSource);
+            return response;
+        }
+    }
+
+    /// <summary>
+    /// A payload that abandons the caller at the exact moment the identity check reads it, then
+    /// hands over the complete body — the deterministic "cancelled after the JSON read" shape.
+    /// </summary>
+    private sealed class PayloadCancellingContent(byte[] payload, CancellationTokenSource callerSource)
+        : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            callerSource.Cancel();
+            return stream.WriteAsync(payload).AsTask();
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = payload.Length;
+            return true;
         }
     }
 }
