@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Options;using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using SignaCore.ReferenceBff;
 using SignaCore.ReferenceBff.Database;
+using ServiceMantle.Installation;
 
 const string UserInfoClientName = BffIdentityCheckService.UserInfoClientName;
 
@@ -65,10 +66,11 @@ if (databaseSettings.IsConfigured)
     builder.Services.AddDbContext<ReferenceBffDbContext>(
         options => ReferenceBffDatabaseSetup.ConfigureDbContext(options, databaseSettings));
     builder.Services.AddScoped<ManagementRoleBindingStore>();
+    BffSetupHosting.AddSetup(builder.Services);
 }
 
-// Antiforgery backs the only state-changing browser surface: the local POST logout.
-builder.Services.AddAntiforgery();
+// Keep the existing logout form token and add a BFF-specific header for Setup JSON.
+builder.Services.AddAntiforgery(options => options.HeaderName = BffSetupHosting.CsrfHeader);
 
 // The configuration is validated at startup: an incomplete configuration is a startup failure
 // with a clear message, never a silently degraded run.
@@ -85,6 +87,8 @@ builder.Services
     .Validate(o => Uri.TryCreate(o.RedirectUri, UriKind.Absolute, out var redirect)
             && redirect.Scheme == Uri.UriSchemeHttps,
         "ReferenceBff:RedirectUri must be an absolute HTTPS URL.")
+    .Validate(o => !databaseSettings.IsConfigured || BffSetupHosting.IsCallbackPathSafe(o.RedirectUri),
+        "ReferenceBff:RedirectUri callback path conflicts with a reserved route.")
     .ValidateOnStart();
 
 builder.Services.AddAuthentication(options =>
@@ -231,10 +235,33 @@ builder.Services
 
 var app = builder.Build();
 
-app.UseAuthentication();
-app.UseAuthorization();
+if (databaseSettings.IsConfigured)
+{
+    app.UseServiceMantlePipeline();
+    app.MapServiceMantleSetup(BffSetupExecutor.ExecuteAsync);
+}
+else
+{
+    app.UseAuthentication();
+    app.UseAuthorization();
+}
 
-app.MapGet("/", (HttpContext http, IAntiforgery antiforgery) =>
+var routes = app.MapGroup("");
+if (databaseSettings.IsConfigured)
+{
+    routes.WithServiceMantlePhaseAdmission(ServiceStartupPhase.PendingSetup, ServiceStartupPhase.Completed);
+    var callback = new Uri(app.Configuration["ReferenceBff:RedirectUri"]!).AbsolutePath;
+    // Routing supplies phase metadata before the standard OIDC handler consumes the callback.
+    routes.MapGet(callback, () => Results.BadRequest());
+    routes.MapGet("/bff/setup", BffSetupHosting.Form);
+    routes.MapMethods("/bff/admin", ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"], (HttpContext http) =>
+    {
+        http.Response.Headers.Allow = "GET";
+        return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
+    });
+}
+
+routes.MapGet("/", (HttpContext http, IAntiforgery antiforgery) =>
 {
     if (http.User.Identity?.IsAuthenticated != true)
     {
@@ -262,11 +289,11 @@ app.MapGet("/", (HttpContext http, IAntiforgery antiforgery) =>
          <head><title>SignaCore Reference BFF</title></head>
          <body>
          <h1>Signed in</h1>
-         <p>Subject: {http.User.FindFirst("sub")?.Value ?? "(none)"}</p>
-         <p>Name: {http.User.FindFirst("name")?.Value ?? "(none)"}</p>
+         <p>Subject: {WebUtility.HtmlEncode(http.User.FindFirst("sub")?.Value ?? "(none)")}</p>
+         <p>Name: {WebUtility.HtmlEncode(http.User.FindFirst("name")?.Value ?? "(none)")}</p>
          <p><a href="/bff/diagnostics">Diagnostics</a></p>
          <form method="post" action="/bff/logout">
-         <input type="hidden" name="__RequestVerificationToken" value="{tokens.RequestToken}" />
+         <input type="hidden" name="__RequestVerificationToken" value="{WebUtility.HtmlEncode(tokens.RequestToken)}" />
          <button type="submit">Sign out</button>
          </form>
          </body>
@@ -275,7 +302,7 @@ app.MapGet("/", (HttpContext http, IAntiforgery antiforgery) =>
         "text/html");
 });
 
-app.MapGet("/bff/login", async (
+routes.MapGet("/bff/login", async (
     HttpContext http,
     IOptionsMonitor<OpenIdConnectOptions> oidc,
     IOptionsMonitor<ReferenceBffOptions> settings) =>
@@ -315,7 +342,7 @@ app.MapGet("/bff/login", async (
     return Results.Challenge(new AuthenticationProperties { RedirectUri = "/" });
 });
 
-app.MapGet("/bff/diagnostics", async (HttpContext http, IOptionsMonitor<OpenIdConnectOptions> oidc) =>
+routes.MapGet("/bff/diagnostics", async (HttpContext http, IOptionsMonitor<OpenIdConnectOptions> oidc) =>
 {
     if (http.User.Identity?.IsAuthenticated != true)
     {
@@ -333,10 +360,10 @@ app.MapGet("/bff/diagnostics", async (HttpContext http, IOptionsMonitor<OpenIdCo
          <head><title>SignaCore Reference BFF — diagnostics</title></head>
          <body>
          <h1>Resolved from Discovery</h1>
-         <p>authorization_endpoint: {configuration.AuthorizationEndpoint}</p>
-         <p>token_endpoint: {configuration.TokenEndpoint}</p>
-         <p>jwks_uri: {configuration.JwksUri}</p>
-         <p>issuer: {configuration.Issuer}</p>
+         <p>authorization_endpoint: {WebUtility.HtmlEncode(configuration.AuthorizationEndpoint)}</p>
+         <p>token_endpoint: {WebUtility.HtmlEncode(configuration.TokenEndpoint)}</p>
+         <p>jwks_uri: {WebUtility.HtmlEncode(configuration.JwksUri)}</p>
+         <p>issuer: {WebUtility.HtmlEncode(configuration.Issuer)}</p>
          </body>
          </html>
          """,
@@ -349,7 +376,7 @@ app.MapGet("/bff/diagnostics", async (HttpContext http, IOptionsMonitor<OpenIdCo
 // upstream 401 (or a subject the authority no longer confirms) tears the local session down —
 // fail closed, never keep a signed-in appearance. The success contract is unchanged: the profile
 // payload SignaCore returned, verbatim.
-app.MapGet("/bff/me", async (
+routes.MapGet("/bff/me", async (
     HttpContext http,
     BffIdentityCheckService identityCheck) =>
 {
@@ -396,7 +423,7 @@ app.MapGet("/bff/me", async (
 // binding. Every response is fixed and carries no identity and no token: 200 with the constant
 // body, or the manual 401/403/503 mappings — the cookie handler's 302 access-denied page is never
 // used here. Anonymous requests start the standard challenge back to this fixed route only.
-app.MapGet("/bff/admin", async (
+routes.MapGet("/bff/admin", async (
     HttpContext http,
     BffAdminAuthorizationService authorization) =>
 {
@@ -440,7 +467,7 @@ app.MapGet("/bff/admin", async (
 
 // The only state-changing browser surface: a POST behind antiforgery. There is no GET logout, and
 // a cross-site POST without a valid token is rejected before any state changes.
-app.MapPost("/bff/logout", async (HttpContext http, IAntiforgery antiforgery) =>
+routes.MapPost("/bff/logout", async (HttpContext http, IAntiforgery antiforgery) =>
 {
     try
     {
@@ -458,7 +485,7 @@ app.MapPost("/bff/logout", async (HttpContext http, IAntiforgery antiforgery) =>
     return Results.Redirect("/");
 });
 
-app.MapGet("/error", (string? reason) => Results.Text(
+routes.MapGet("/error", (string? reason) => Results.Text(
     $"""
      <!doctype html>
      <html lang="en">
