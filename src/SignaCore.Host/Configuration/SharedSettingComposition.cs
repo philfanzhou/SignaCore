@@ -16,11 +16,6 @@ namespace SignaCore.Host.Configuration;
 /// </remarks>
 internal static class SharedSettingComposition
 {
-    /// <summary>The audit operator attributed to the one-shot legacy settings migration.</summary>
-    internal static readonly ManagementAuditOperator MigrationOperator = ManagementAuditOperator.Create(
-        WellKnownManagementAuditOperatorSources.System,
-        "settings-migration");
-
     /// <summary>
     /// The audit operator attributed to the protected legacy configuration upgrade import — the
     /// one that reads the deployment <c>IConfiguration</c> of a pre-change deployment and writes it

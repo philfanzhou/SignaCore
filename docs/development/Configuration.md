@@ -3,11 +3,12 @@
 SignaCore keeps global application configuration in the business database, in the shared
 `service_settings` aggregate. Every instance therefore reads the same active configuration, changes
 are transactional and audited, and there is no per-instance configuration drift. The legacy
-`system_settings` table is read-only legacy data; the admin console reads and writes the shared
+`system_settings` table has been removed by the guarded `RetireSystemSettings` drop; the admin
+console reads and writes the shared
 aggregate through the shared management setting endpoints (`GET /management/v1/settings`,
-`GET /management/v1/settings/definitions`, and `POST /management/v1/settings`). Deployments that
-predate the aggregate are upgraded into it once — from stored legacy rows by the one-shot
-migration, or straight from the deployment configuration by the protected legacy import — inside
+`GET /management/v1/settings/definitions`, and `POST /management/v1/settings`). A deployment that
+predates the aggregate is upgraded into it once — straight from the deployment configuration by
+the protected legacy import — inside
 the startup initialization lock. See
 [Shared settings stack](SharedSettings.md).
 

@@ -250,7 +250,7 @@ An upgrade must not expose first-run setup against an existing identity database
    including the JSON section and scalar shapes the old deployment used and the pre-change key
    `AdminBootstrap:Username`, imported as `Admin:Username` — and written in one transaction straight
    into the shared `service_settings` aggregate as its first version, with secrets re-protected by
-   the shared protector. The legacy `system_settings` table is never written.
+   the shared protector. No legacy configuration table exists in the retired schema.
 5. Installation is marked `Completed` only after the imported snapshot is valid. If the import is
    incomplete or invalid, startup fails closed with key names and classification codes only,
    creates no administrator, and does not expose `/setup`. A restart after a committed import is an

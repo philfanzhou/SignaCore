@@ -1,4 +1,5 @@
 using System.Data;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Audit;
 using ServiceMantle.Bootstrap;
@@ -56,8 +57,6 @@ internal static class InstallationStartup
             BootstrapDiagnostics.DescribeEndpoint(bootstrap.Database));
 
         var masterKeyProvider = new BootstrapMasterKeyProvider(bootstrap.MasterKey);
-        var protector = new AesGcmConfigurationProtector(masterKeyProvider);
-        var settingsStore = new SystemSettingsStore(protector);
         var currentSnapshotAccessor = new ServiceSettingCurrentSnapshotAccessor();
         var databaseOptions = SignaCoreBootstrapStore.ToDatabaseOptions(bootstrap.Database);
 
@@ -66,6 +65,13 @@ internal static class InstallationStartup
         await StartupDatabase.EnsureDatabaseExistsAsync(databaseOptions, cancellationToken);
         await using (await StartupDatabase.AcquireInitializationLockAsync(databaseOptions, cancellationToken))
         {
+            // The retirement pre-check runs ahead of the migration gate: a database that still
+            // holds unmigrated legacy system_settings rows must refuse the guarded drop with the
+            // fixed, operator-readable reason instead of a closed migration error code. The
+            // authoritative guard still lives inside the RetireSystemSettings migrations of both
+            // providers; this check only makes the refusal explain itself.
+            await RefuseUnmigratedLegacyRowsAsync(db, logger, cancellationToken);
+
             // The shared migration orchestration runs inside SignaCore's own outer initialization
             // lock: for PostgreSQL it acquires the service-scoped shared migration lock, runs the
             // limited observation, executes the full SignaCore migration workflow at most once, and
@@ -112,25 +118,18 @@ internal static class InstallationStartup
                     resolution.Phase,
                     runtimeState,
                     masterKeyProvider,
-                    protector,
-                    settingsStore,
-                    Snapshot: null,
+                    SharedSnapshot: null,
+                    ConfigurationEntries: null,
                     CurrentSnapshotAccessor: currentSnapshotAccessor,
                     PlaintextSetupCode: resolution.SetupCode?.Plaintext,
                     SetupCodeExpiresAt: resolution.SetupCode?.ExpiresAtUtc);
             }
 
-            // Legacy deployments that predate the shared aggregate are migrated once, here inside
-            // the initialization lock and inside one caller-owned transaction. A refusal fails
-            // startup without touching the installation state: a completed installation is never
-            // rolled back to Pending.
-            await MigrateLegacySettingsAsync(db, protector, masterKeyProvider, environment.IsDevelopment(), logger, cancellationToken);
-
             // The runtime snapshot authority is the shared loader: it reads the aggregate, decrypts
             // sensitive values with the shared protector, validates the complete candidate, and
             // activates it on the process-shared accessor instance. Failure never replaces an
             // existing snapshot and never rolls the installation back.
-            var (sharedSnapshot, projectedSnapshot) = await ActivateSharedSnapshotAsync(
+            var (sharedSnapshot, configurationEntries) = await ActivateSharedSnapshotAsync(
                 databaseOptions, masterKeyProvider, currentSnapshotAccessor, environment.IsDevelopment(), cancellationToken);
 
             // The aggregate version is a long; the host's configuration-version surfaces are int.
@@ -153,9 +152,8 @@ internal static class InstallationStartup
                 resolution.Phase,
                 runtimeState,
                 masterKeyProvider,
-                protector,
-                settingsStore,
-                projectedSnapshot,
+                sharedSnapshot,
+                configurationEntries,
                 currentSnapshotAccessor,
                 PlaintextSetupCode: null,
                 SetupCodeExpiresAt: null);
@@ -163,68 +161,66 @@ internal static class InstallationStartup
     }
 
     /// <summary>
-    /// Migrates the legacy <c>system_settings</c> rows into the shared aggregate when the
-    /// aggregate is still empty, inside one caller-owned transaction (the shared update
-    /// transaction requires the ambient transaction and a clean change tracker). An already-seeded
-    /// aggregate — including one written by a concurrent instance — is left untouched. A failed
-    /// migration fails startup; the installation state is never modified here.
+    /// The fail-fast half of the system_settings retirement guard: when the
+    /// <c>RetireSystemSettings</c> migration is still pending and the database holds legacy rows
+    /// this service never migrated into its shared aggregate, startup refuses with a fixed
+    /// message naming the bridge-upgrade requirement. Existence only — no legacy value is read,
+    /// and a missing legacy table (a database older than the shared stack, or a brand-new one)
+    /// simply passes: the in-migration guard re-checks after the table exists and is empty.
     /// </summary>
-    private static async Task MigrateLegacySettingsAsync(
+    private static async Task RefuseUnmigratedLegacyRowsAsync(
         IdentityDbContext db,
-        IConfigurationProtector legacyProtector,
-        IMasterKeyProvider masterKeyProvider,
-        bool isDevelopment,
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        if (await SharedSettingAggregate.ReadVersionAsync(db, cancellationToken) is not null)
+        List<string> pending;
+        try
+        {
+            pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+        }
+        catch (Exception exception) when (exception is DbException or InvalidOperationException)
+        {
+            // The observation could not run; the migration gate owns fail-closed observation of
+            // unreadable databases.
+            return;
+        }
+
+        if (!pending.Any(id => id.EndsWith("_RetireSystemSettings", StringComparison.Ordinal)))
         {
             return;
         }
 
-        var registry = SharedSettingComposition.CreateRegistry(isDevelopment);
-        var updateService = new ServiceSettingUpdateService(
-            InstallationStores.ServiceId,
-            registry,
-            new EfCoreServiceSettingUpdateTransaction<IdentityDbContext>(db),
-            SharedSettingComposition.CreateRootKeySource(masterKeyProvider));
-        var migrator = new SharedSettingMigrator(legacyProtector, updateService);
-
-        // PostgreSQL runs a retrying execution strategy; explicit transactions must be wrapped in
-        // it, and a retried attempt re-begins its own transaction (the migrator re-reads inside
-        // the lambda, so the update transaction's read/apply pairing stays consistent).
-        var strategy = db.Database.CreateExecutionStrategy();
-        var result = await strategy.ExecuteAsync(async () =>
+        int unmigrated;
+        try
         {
-            await using var transaction = await db.Database.BeginTransactionAsync(
-                IsolationLevel.Serializable, cancellationToken);
-            var migration = await migrator.MigrateAsync(
-                db, SharedSettingComposition.MigrationOperator, cancellationToken);
-            if (migration.Status == SharedSettingMigrationStatus.Failed)
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return migration;
-            }
-
-            await transaction.CommitAsync(cancellationToken);
-            return migration;
-        });
-
-        if (result.Status == SharedSettingMigrationStatus.Failed)
+            unmigrated = await db.Database.SqlQuery<int>($"""
+                SELECT (CASE WHEN EXISTS (SELECT 1 FROM system_settings)
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM service_settings
+                                      WHERE service_id = {InstallationStores.ServiceIdValue})
+                             THEN 1 ELSE 0 END) AS "Value"
+                """).SingleAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is DbException or InvalidOperationException)
         {
-            throw new SettingsSnapshotException(
-                "The legacy system_settings rows could not be migrated into the shared " +
-                $"service_settings aggregate ({result.FailureClassification}). Affected keys: " +
-                $"{string.Join(", ", result.FailedKeys)}. The installation stays completed; fix " +
-                "the reported problem and restart.",
-                result.FailedKeys);
+            // No legacy table on this database yet (or a brand-new one): the in-migration guard
+            // decides once the table exists inside the migration transaction.
+            return;
         }
 
-        if (result.Status == SharedSettingMigrationStatus.Migrated)
+        if (unmigrated == 1)
         {
-            logger.LogInformation(
-                "Migrated {SettingCount} legacy setting rows into the shared aggregate.",
-                result.MigratedKeyCount);
+            logger.LogError(
+                "The legacy system_settings table still holds rows this service never migrated " +
+                "into its shared service_settings aggregate; the retirement drop is refused.");
+            throw new SettingsSnapshotException(
+                "The legacy system_settings table still holds rows that were never migrated into " +
+                "the shared service_settings aggregate, so this version refuses to drop it. " +
+                "Upgrade once through a bridge build (any build that includes commit e45e9741 and " +
+                "still migrates system_settings), let it activate the shared snapshot, stop every " +
+                "old instance, and then apply this version. See " +
+                "docs/database/system-settings-retirement.md.",
+                []);
         }
     }
 
@@ -414,7 +410,7 @@ internal static class InstallationStartup
     /// accessor instance is the one the DI hosts keep using, so the bootstrap activation and the
     /// composed snapshot services observe the same process-local snapshot.
     /// </summary>
-    private static async Task<(ServiceSettingSnapshot Shared, SystemSettingsSnapshot Projected)>
+    private static async Task<(ServiceSettingSnapshot Shared, IReadOnlyDictionary<string, string?> ConfigurationEntries)>
         ActivateSharedSnapshotAsync(
             DatabaseOptions databaseOptions,
             IMasterKeyProvider masterKeyProvider,
@@ -455,10 +451,8 @@ internal static class InstallationStartup
                 []);
         }
 
-        var (values, entries) = SharedSettingConfigurationProjection.Project(refresh.Snapshot);
-        return (
-            refresh.Snapshot,
-            new SystemSettingsSnapshot((int)refresh.Snapshot.Version, values, entries));
+        var (_, entries) = SharedSettingConfigurationProjection.Project(refresh.Snapshot);
+        return (refresh.Snapshot, entries);
     }
 
     /// <summary>

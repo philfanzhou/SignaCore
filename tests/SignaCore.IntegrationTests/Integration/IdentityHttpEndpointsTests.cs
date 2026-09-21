@@ -624,7 +624,6 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         const string canary = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
         using var admin = await _fixture.CreateAdminHttpClientAsync();
         var before = await ReadConfigurationVersionAsync(admin);
-        var legacyRowsBefore = await CountLegacyRowsAsync("Sms:OtpHmacKey", "Sms:MaxSendsPerHour");
         var auditRowsBefore = await CountSharedAuditRowsAsync();
 
         var response = await admin.PostAsJsonAsync("/management/v1/settings", new
@@ -646,9 +645,9 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         {
             var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
 
-            // The legacy table is no longer written by the management path.
-            Assert.Equal(legacyRowsBefore,
-                await CountLegacyRowsAsync("Sms:OtpHmacKey", "Sms:MaxSendsPerHour"));
+            // The retired legacy table stays gone after a management-path change.
+            Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(
+                db, TestContext.Current.CancellationToken));
 
             // The shared aggregate holds the new version; the operator is the login account.
             var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
@@ -789,14 +788,6 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         var body = await response(await admin.GetAsync(
             "/management/v1/settings", TestContext.Current.CancellationToken));
         return body.GetProperty("version").GetInt64();
-    }
-
-    private async Task<int> CountLegacyRowsAsync(params string[] keys)
-    {
-        using var scope = _fixture.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-        return await db.SystemSettings.AsNoTracking()
-            .CountAsync(setting => keys.Contains(setting.Key), TestContext.Current.CancellationToken);
     }
 
     private async Task<int> CountSharedAuditRowsAsync()
@@ -1090,6 +1081,13 @@ public class IdentityServerFixture : IAsyncLifetime
     public const string AdminUsername = "http_contract_admin";
     public const string AdminPassword = "HttpContract123";
     public const string RootSecret = "test-master-key-for-e2e-testing-only";
+
+    /// <summary>
+    /// The exact legacy-keyed values the fixture seeded into the shared aggregate, for
+    /// projection-equivalence assertions.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> SeededSettingValues =>
+        InstallationTestSupport.BuildCompletedInstallationValues(AdminUsername);
 
     private WebApplicationFactory<Program>? _factory;
     private string? _databasePath;

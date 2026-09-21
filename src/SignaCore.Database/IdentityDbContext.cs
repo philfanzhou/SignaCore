@@ -36,7 +36,6 @@ public class IdentityDbContext : DbContext, IServiceDbContext
     public DbSet<IdentitySessionEntity> IdentitySessions => Set<IdentitySessionEntity>();
     public DbSet<AuthorizationCodeEntity> AuthorizationCodes => Set<AuthorizationCodeEntity>();
     public DbSet<LogoutRequestEntity> LogoutRequests => Set<LogoutRequestEntity>();
-    public DbSet<SystemSettingEntity> SystemSettings => Set<SystemSettingEntity>();
 
     // ServiceMantle shared installation state (service_installations): the runtime authority for
     // installation status and the one-time setup code. The consumer owns this mapping, its
@@ -610,21 +609,6 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.HasIndex(e => new { e.ActorId, e.CreatedAt });
             entity.HasIndex(e => new { e.Action, e.CreatedAt });
             entity.HasIndex(e => e.CreatedAt);
-        });
-
-        modelBuilder.Entity<SystemSettingEntity>(entity =>
-        {
-            entity.ToTable("system_settings");
-            entity.HasKey(e => e.Key);
-            entity.Property(e => e.Key).HasColumnName("key").HasMaxLength(IdentityConstants.MaxSettingKeyLength);
-            // No length limit: structured settings such as Ldap:Directories serialize to JSON that
-            // easily exceeds any varchar bound the three providers agree on.
-            entity.Property(e => e.Value).HasColumnName("value").IsRequired();
-            entity.Property(e => e.ValueType).HasColumnName("value_type").HasMaxLength(IdentityConstants.MaxSettingValueTypeLength);
-            entity.Property(e => e.IsSecret).HasColumnName("is_secret");
-            entity.Property(e => e.Version).HasColumnName("version");
-            ConfigureInstant(entity.Property(e => e.UpdatedAt).HasColumnName("updated_at"));
-            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by").HasMaxLength(IdentityConstants.MaxUsernameLength);
         });
 
         // ServiceMantle shared installation mapping (service_installations). Applied last so it never

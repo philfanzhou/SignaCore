@@ -609,8 +609,9 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Creates a target that holds one secret setting really protected with <paramref name="key"/>,
-    /// so key compatibility is decided by actual decryption rather than by a sentinel string.
+    /// Creates a target holding one shared sensitive envelope really protected with
+    /// <paramref name="key"/>, so key compatibility is decided by actual decryption rather than by
+    /// a sentinel string.
     /// </summary>
     private async Task<string> CreateProtectedTargetAsync(string fileName, string key)
     {
@@ -623,18 +624,19 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
         });
         await using var context = new IdentityDbContext(optionsBuilder.Options);
         await context.Database.MigrateAsync(Token);
-        var protector = new AesGcmConfigurationProtector(new BootstrapMasterKeyProvider(key));
-        context.SystemSettings.Add(new SystemSettingEntity
-        {
-            Key = "smtp.password",
-            Value = protector.Protect("smtp.password", "the-protected-value"),
-            ValueType = "string",
-            IsSecret = true,
-            Version = 1,
-            UpdatedAt = DateTimeOffset.UtcNow,
-            UpdatedBy = "seed"
-        });
-        await context.SaveChangesAsync(Token);
+        var rootKey = Convert.ToBase64String(
+            new BootstrapMasterKeyProvider(key).GetMasterKey());
+        var envelope = new ServiceMantle.Configuration.SensitiveValueProtector(
+                SignaCore.Host.Installation.InstallationStores.ServiceId,
+                "sms.otp_hmac_key")
+            .Protect("the-protected-value", rootKey);
+        var valuesJson = "{\"sms.otp_hmac_key\":\"" + envelope + "\"}";
+        await context.Database.ExecuteSqlAsync(
+            $"""
+            INSERT INTO service_settings (service_id, values_json, version, updated_at_utc, updated_by, restart_required)
+            VALUES ('signacore', {valuesJson}, 1, {DateTime.UtcNow}, 'seed', 0)
+            """,
+            Token);
         await context.DisposeAsync();
         TestSqlitePools.ClearAll();
         foreach (var sidecar in new[] { "-journal", "-wal", "-shm" })

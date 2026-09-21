@@ -128,7 +128,7 @@ public sealed class SqliteDatabaseContractTests
     }
 
     [Fact]
-    public async Task InteractiveOidcMigration_LegacyUpgradePreservesApplicationAndDownIsSymmetric()
+    public async Task InteractiveOidcMigration_LegacyUpgradePreservesApplicationAndDownRefusesAtTheRetirement()
     {
         var databasePath = Path.Combine(
             Path.GetTempPath(),
@@ -167,17 +167,20 @@ public sealed class SqliteDatabaseContractTests
             Assert.Empty(await context.AppRedirectUris.AsNoTracking().ToListAsync(
                 TestContext.Current.CancellationToken));
 
+            // The downgrade walk now ends at the retirement boundary: RetireSystemSettings
+            // refuses its Down with the fixed NotSupportedException instead of recreating an
+            // empty legacy table, so the schema stays at the post-retirement state — no
+            // half-undone downgrade, and the retired table stays absent.
             context.ChangeTracker.Clear();
-            await migrator.MigrateAsync(
-                PreOidcMigration,
-                TestContext.Current.CancellationToken);
-            Assert.False(await SqliteTableExistsAsync(context, "app_redirect_uris"));
+            var refusal = await Assert.ThrowsAsync<NotSupportedException>(
+                () => migrator.MigrateAsync(
+                    PreOidcMigration,
+                    TestContext.Current.CancellationToken));
+            Assert.Contains("irreversible", refusal.Message, StringComparison.Ordinal);
+            Assert.False(await SqliteTableExistsAsync(context, "system_settings"));
             var columns = await GetSqliteColumnsAsync(context, "app_registrations");
-            Assert.DoesNotContain("allow_authorization_code", columns);
-            Assert.DoesNotContain("allow_refresh_token", columns);
-            Assert.DoesNotContain("allowed_scopes", columns);
-            Assert.DoesNotContain("client_type", columns);
-            Assert.DoesNotContain("identity_session_max_age_seconds", columns);
+            Assert.Contains("allow_authorization_code", columns);
+            Assert.Contains("client_type", columns);
         }
         finally
         {

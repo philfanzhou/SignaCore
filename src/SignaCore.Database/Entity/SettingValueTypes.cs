@@ -1,7 +1,7 @@
 namespace SignaCore.Database.Entity;
 
 /// <summary>
-/// Storage forms for <see cref="SystemSettingEntity.Value"/>. Persisted as strings so a new form can
+/// Storage forms for setting values. Persisted as strings so a new form can
 /// be added without a schema migration.
 /// </summary>
 public static class SettingValueTypes
