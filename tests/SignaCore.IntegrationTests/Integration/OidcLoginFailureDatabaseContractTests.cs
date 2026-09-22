@@ -208,9 +208,7 @@ public sealed class OidcLoginFailureDatabaseContractTests
         ILogger<OidcLoginFailureRecorder>? logger = null) =>
         new(
             new LoginAttemptRepository(context),
-            new AuditService(
-                new LoginHistoryRepository(context),
-                new AuditLogRepository(context)),
+            new AuditService(new LoginHistoryRepository(context)),
             new EfCoreUnitOfWork(context),
             context,
             logger ?? NullLogger<OidcLoginFailureRecorder>.Instance);

@@ -687,30 +687,27 @@ public sealed class SetupContributorDatabaseContractTests
         // The aggregate write also produced its value-free shared audit projection, one row per
         // changed key, without any submitted value.
         var sharedAuditJson = await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(context);
-        Assert.Equal(expectedKeys.Count, sharedAuditJson.Count);
+        // The per-key configuration audits only: the installation event also lives in the shared
+        // table now and is asserted separately below.
+        Assert.Equal(
+            expectedKeys.Count,
+            sharedAuditJson.Count(row => row.StartsWith("configuration.changed|", StringComparison.Ordinal)));
         Assert.All(sharedAuditJson, row => Assert.DoesNotContain(PublicBaseUrl, row, StringComparison.Ordinal));
 
-        var repository = new AuditLogRepository(context);
-        var auditRows = await repository.QueryAsync(
-            "installation.setup.completed",
-            "Installation",
-            "signacore",
-            credential.AccountId,
-            pageSize: 10,
-            skip: 0,
-            cancellationToken: TestContext.Current.CancellationToken);
-        var audit = Assert.Single(auditRows);
-        Assert.Equal(credential.AccountId, audit.ActorId);
-        Assert.Equal(username, audit.ActorName);
-        Assert.Contains("ConfigurationVersion=1", audit.Description, StringComparison.Ordinal);
-        Assert.DoesNotContain(PublicBaseUrl, audit.Description, StringComparison.Ordinal);
+        var audit = Assert.Single(
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken))
+            .Where(row => row.Action == "installation.completed"));
+        Assert.Equal("installation.completed", audit.Action);
+        Assert.Equal("service", audit.TargetType);
+        Assert.Equal("signacore", audit.TargetId);
+        Assert.Equal(credential.AccountId.ToString(), audit.OperatorId);
+        Assert.Equal(username, audit.OperatorDisplayName);
+        Assert.Equal("setup_code", audit.OperatorSource);
+        Assert.Contains("ConfigurationVersion=1", audit.SecurityDescription, StringComparison.Ordinal);
+        Assert.DoesNotContain(PublicBaseUrl, audit.SecurityDescription, StringComparison.Ordinal);
         Assert.Equal(ClientIp, audit.ClientIp);
-        Assert.Null(audit.BeforeSnapshot);
-        Assert.Null(audit.AfterSnapshot);
-        // The synthetic password never reached the audit projection.
-        Assert.DoesNotContain(Password, audit.Description ?? string.Empty, StringComparison.Ordinal);
-        Assert.Equal(1, await context.AuditLogs.CountAsync(
-            cancellationToken: TestContext.Current.CancellationToken));
+        // The synthetic password never reached the audit row.
+        Assert.DoesNotContain(Password, audit.SecurityDescription ?? string.Empty, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -741,8 +738,9 @@ public sealed class SetupContributorDatabaseContractTests
         Assert.Empty(await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(context));
         Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(
             context, TestContext.Current.CancellationToken));
-        Assert.False(await context.AuditLogs.AnyAsync(
-            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    context, TestContext.Current.CancellationToken))
+                .Where(row => row.Action.StartsWith("installation.", StringComparison.Ordinal)));
     }
 
     private static bool ShouldRunContainerMatrix() =>

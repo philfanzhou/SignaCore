@@ -9,6 +9,7 @@ using ServiceMantle.Audit;
 using ServiceMantle.AspNetCore.ManagementApi.Setup;
 using ServiceMantle.Configuration;
 using ServiceMantle.Installation;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
@@ -37,6 +38,14 @@ namespace SignaCore.Host.Installation;
 /// </summary>
 internal static class SetupCompletionExecutor
 {
+    /// <summary>
+    /// The operator source that means "authorized by the one-time setup code". A consumer-defined
+    /// source; the shared well-known set has no installation-code entry. It marks both the settings
+    /// update operator and the installation audit event of the completion transaction.
+    /// </summary>
+    internal static readonly ManagementAuditOperatorSource SetupCodeOperatorSource =
+        ManagementAuditOperatorSource.Parse("setup_code");
+
     public static async ValueTask<SetupCompletionResult> ExecuteAsync(
         HttpContext httpContext,
         SetupCode setupCode,
@@ -201,7 +210,7 @@ internal static class SetupCompletionExecutor
         }
 
         var settingsOperator = ManagementAuditOperator.Create(
-            SetupAuditWriter.OperatorSource,
+            SetupCodeOperatorSource,
             administratorUsername);
         var settingsUpdate = await settingsUpdateService.UpdateAsync(
             new ServiceSettingUpdateCommand(0, normalizedChanges, settingsOperator),
@@ -239,12 +248,13 @@ internal static class SetupCompletionExecutor
         }
 
         // The installation event is expressed with the shared audit model and staged once, after
-        // the administrator and the settings succeeded. The closed projection into the existing
-        // audit row is the only audit write this transaction performs.
+        // the administrator and the settings succeeded, by the shared EF Core writer into
+        // service_audit_logs. It is the only audit write this transaction performs.
         var auditEvent = ManagementAuditEvent.Create(
             ManagementAuditOperator.Create(
-                SetupAuditWriter.OperatorSource,
-                contributor.AccountId.ToString("D")),
+                SetupCodeOperatorSource,
+                contributor.AccountId.ToString("D"),
+                administratorUsername),
             WellKnownManagementAuditActions.InstallationCompleted,
             ManagementAuditTarget.Create(
                 WellKnownManagementAuditTargetTypes.Service,
@@ -254,7 +264,8 @@ internal static class SetupCompletionExecutor
             clientIp: clientIp,
             securityDescription:
                 $"First-run setup completed. ConfigurationVersion={configurationVersion}.");
-        await new SetupAuditWriter(db, administratorUsername).RecordAsync(auditEvent, cancellationToken);
+        await new EfCoreManagementAuditWriter<IdentityDbContext>(db)
+            .RecordAsync(auditEvent, cancellationToken);
 
         // The final re-check: the shared store re-validates the candidate, then stages the
         // completed status, the completion timestamp, the code clearing, and the version increment

@@ -20,6 +20,9 @@ const tokenBusy = ref(false);
 const auditPages = computed(() =>
   Math.max(1, Math.ceil(auditTotal.value / auditPageSize)),
 );
+// keyset 分页：cursors[i] 是请求第 i+2 页时要带的 continuationCursor（第 1 页不带游标）。
+// 筛选条件变化时整栈作废，从第 1 页重新开始。
+const auditCursors = ref<string[]>([]);
 
 async function loadAuditLogs() {
   auditLoading.value = true;
@@ -31,9 +34,14 @@ async function loadAuditLogs() {
       targetId: auditFilters.targetId.trim() || undefined,
       page: auditPage.value,
       pageSize: auditPageSize,
+      cursor:
+        auditPage.value > 1 ? auditCursors.value[auditPage.value - 1] : undefined,
     });
     auditLogs.value = result.items;
-    auditTotal.value = result.total;
+    auditTotal.value = result.totalCount;
+    if (result.continuationCursor) {
+      auditCursors.value[auditPage.value] = result.continuationCursor;
+    }
   } catch (error) {
     auditError.value = getErrorMessage(error);
     handleApiError("加载审计日志失败", error);
@@ -44,6 +52,20 @@ async function loadAuditLogs() {
 
 function searchAudit() {
   auditPage.value = 1;
+  auditCursors.value = [];
+  void loadAuditLogs();
+}
+
+function auditPrevPage() {
+  if (auditPage.value <= 1) return;
+  auditPage.value--;
+  void loadAuditLogs();
+}
+
+function auditNextPage() {
+  const cursor = auditCursors.value[auditPage.value];
+  if (!cursor) return;
+  auditPage.value++;
   void loadAuditLogs();
 }
 
@@ -82,6 +104,8 @@ export function useAdminSecurity() {
     tokenBusy,
     loadAuditLogs,
     searchAudit,
+    auditPrevPage,
+    auditNextPage,
     revokeToken,
     closeTokenModal,
   };

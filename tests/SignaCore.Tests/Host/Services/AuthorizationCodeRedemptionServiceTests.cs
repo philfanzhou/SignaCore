@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Primitives;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -18,6 +19,8 @@ using SignaCore.Domain.Services;
 using SignaCore.Host;
 using SignaCore.Host.Services;
 using Xunit;
+
+using SignaCore.Tests.TestSupport;
 
 namespace SignaCore.Tests.Host.Services;
 
@@ -71,13 +74,13 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             .SingleAsync(row => row.Id == seed.SessionId, cancellationToken);
         Assert.Null(sessionRow.RevokedAt);
 
-        var audit = Assert.Single(await database.Context.AuditLogs.AsNoTracking()
-            .ToListAsync(cancellationToken));
+        var audit = Assert.Single(await SharedAuditTable.ReadAsync(database.Context, cancellationToken));
         Assert.Equal("oidc.code.redeemed", audit.Action);
-        Assert.Equal("AuthorizationCode", audit.TargetType);
+        Assert.Equal("authorizationcode", audit.TargetType);
         Assert.Equal(seed.CodeId.ToString("D"), audit.TargetId);
-        Assert.Equal(seed.AccountId, audit.ActorId);
-        Assert.Equal($"session:{seed.SessionId}", audit.Description);
+        Assert.Equal(seed.AccountId.ToString("D"), audit.OperatorId);
+        Assert.Equal("signacore.account", audit.OperatorSource);
+        Assert.Equal($"session:{seed.SessionId}", audit.SecurityDescription);
 
         var token = new JwtSecurityTokenHandler().ReadJwtToken(outcome.AccessToken);
         Assert.Equal(JwtTokenService.AccessTokenType, token.Header.Typ);
@@ -178,10 +181,9 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         var sessionRow = await database.Context.IdentitySessions.AsNoTracking()
             .SingleAsync(row => row.Id == seed.SessionId, cancellationToken);
         Assert.Null(sessionRow.RevokedAt);
-        var audit = Assert.Single(await database.Context.AuditLogs.AsNoTracking()
-            .ToListAsync(cancellationToken));
+        var audit = Assert.Single(await SharedAuditTable.ReadAsync(database.Context, cancellationToken));
         Assert.Equal("oidc.code.redeemed", audit.Action);
-        Assert.Equal($"session:{seed.SessionId}", audit.Description);
+        Assert.Equal($"session:{seed.SessionId}", audit.SecurityDescription);
     }
 
     [Fact]
@@ -406,10 +408,9 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         Assert.Equal("code_replay", sessionRow.RevocationReason);
 
         // The audit names the exact family id and nothing sensitive.
-        var audit = Assert.Single(await database.Context.AuditLogs.AsNoTracking()
-            .ToListAsync(cancellationToken));
+        var audit = Assert.Single(await SharedAuditTable.ReadAsync(database.Context, cancellationToken));
         Assert.Equal("oidc.code.replayed", audit.Action);
-        Assert.Equal($"session:{seed.SessionId};family:{rootId}", audit.Description);
+        Assert.Equal($"session:{seed.SessionId};family:{rootId}", audit.SecurityDescription);
     }
 
     [Fact]
@@ -458,11 +459,11 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         Assert.NotNull(sessionRow.RevokedAt);
         Assert.Equal("code_replay", sessionRow.RevocationReason);
 
-        var audit = Assert.Single(await database.Context.AuditLogs.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
+        var audit = Assert.Single(await SharedAuditTable.ReadAsync(
+            database.Context, TestContext.Current.CancellationToken));
         Assert.Equal("oidc.code.replayed", audit.Action);
-        Assert.Equal(seed.AccountId, audit.ActorId);
-        Assert.Equal($"session:{seed.SessionId};family:none", audit.Description);
+        Assert.Equal(seed.AccountId.ToString("D"), audit.OperatorId);
+        Assert.Equal($"session:{seed.SessionId};family:none", audit.SecurityDescription);
     }
 
     [Fact]
@@ -564,7 +565,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
                 NullLogger<RefreshTokenFamilyStore>.Instance),
             callbackService: null,
             keys,
-            new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             CreateMetrics(),
             unitOfWork,
             context,
@@ -674,7 +675,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             .SingleAsync(row => row.Id == seed.SessionId, cancellationToken);
         Assert.Null(sessionRow.RevokedAt);
         Assert.Empty(await context.RefreshTokens.AsNoTracking().ToListAsync(cancellationToken));
-        Assert.Empty(await context.AuditLogs.AsNoTracking().ToListAsync(cancellationToken));
+        Assert.Empty(await SharedAuditTable.ReadAsync(context, cancellationToken));
     }
 
     private sealed class ThrowingTokenFactory : IInteractiveAccessTokenFactory

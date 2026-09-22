@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -14,6 +15,8 @@ using SignaCore.Domain;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Services;
 using Xunit;
+
+using SignaCore.Tests.Integration;
 
 namespace SignaCore.IntegrationTests.Integration;
 
@@ -71,7 +74,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
         Assert.Equal(2, family.Count);
         Assert.Single(family, row => row.ConsumedAt is not null);
         Assert.Single(family, row => row.ConsumedAt is null && !row.IsRevoked);
-        Assert.Empty(await verification.AuditLogs.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(verification, TestContext.Current.CancellationToken));
 
         // The resumed plaintext is the one stable across the replay: it works once more and the
         // replayed presentation of the now-consumed parent is genuine reuse.
@@ -136,7 +139,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
             // SC-20 before commit: everything rolled back — no consumption, no child, no audit.
             Assert.Single(family);
             Assert.Null(family[0].ConsumedAt);
-            Assert.Empty(await verification.AuditLogs.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken));
+            Assert.Empty(await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(verification, TestContext.Current.CancellationToken));
         }
     }
 
@@ -166,9 +169,9 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
         // The winner's child was revoked by the loser's reuse disposal: nothing stays usable.
         var child = Assert.Single(family, row => row.ConsumedAt is null);
         Assert.True(child.IsRevoked);
-        Assert.Single(await verification.AuditLogs.AsNoTracking()
-            .Where(row => row.Action == "oidc.refresh.replayed")
-            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Single((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                verification, TestContext.Current.CancellationToken))
+            .Where(row => row.Action == "oidc.refresh.replayed"));
     }
 
     /// <summary>
@@ -221,9 +224,9 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
             Assert.Single(family, row => row.ConsumedAt is not null);
             var child = Assert.Single(family, row => row.ConsumedAt is null);
             Assert.True(child.IsRevoked);
-            Assert.Single(await verification.AuditLogs.AsNoTracking()
-                .Where(row => row.Action == "oidc.refresh.replayed")
-                .ToListAsync(TestContext.Current.CancellationToken));
+            Assert.Single((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    verification, TestContext.Current.CancellationToken))
+                .Where(row => row.Action == "oidc.refresh.replayed"));
         }
     }
 
@@ -323,7 +326,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
                     NullLogger<InteractiveAccessTokenFactory>.Instance),
                 new InteractiveIdTokenFactory(new JwtOptions { Issuer = "https://rotation-contract.test" }),
                 new StaticKeyManager(),
-                new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+                new EfCoreManagementAuditWriter<IdentityDbContext>(context),
                 new AuthMetrics(meterFactory.Object),
                 unitOfWork,
                 context,

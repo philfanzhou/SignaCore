@@ -3,7 +3,9 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using ServiceMantle.Audit;
 using SignaCore.Database;
+using SignaCore.Host.Audit;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
@@ -117,7 +119,7 @@ public sealed class AuthorizationCodeRedemptionService(
     IRefreshTokenFamilyStore refreshFamilies,
     ICallbackService? callbackService,
     IKeyManager keyManager,
-    IAuditService auditService,
+    IManagementAuditWriter auditWriter,
     AuthMetrics authMetrics,
     IUnitOfWork unitOfWork,
     IdentityDbContext dbContext,
@@ -571,15 +573,17 @@ public sealed class AuthorizationCodeRedemptionService(
                 }
             }
 
-            await auditService.RecordActionAsync(
+            await ManagementActionAudit.RecordAsync(
+                auditWriter,
+                ManagementActionAudit.AccountSource,
                 RedeemedAuditAction,
                 CodeAuditTargetType,
                 lockedCode.Id.ToString("D"),
-                actorId: lockedAccount.Id,
-                actorName: null,
-                description: $"session:{lockedSession.Id}",
-                clientIp: clientIp,
-                correlationId: correlationId,
+                lockedAccount.Id,
+                null,
+                $"session:{lockedSession.Id}",
+                clientIp,
+                correlationId,
                 cancellationToken: operationToken);
             await unitOfWork.SaveChangesAsync(operationToken);
             await transaction.CommitAsync(operationToken);
@@ -629,15 +633,17 @@ public sealed class AuthorizationCodeRedemptionService(
                 lockedSession.Id, IdentitySessionRevocationReason.CodeReplay, now, cancellationToken);
         }
 
-        await auditService.RecordActionAsync(
+        await ManagementActionAudit.RecordAsync(
+            auditWriter,
+            ManagementActionAudit.AccountSource,
             ReplayedAuditAction,
             CodeAuditTargetType,
             lockedCode.Id.ToString("D"),
-            actorId: lockedCode.AccountId,
-            actorName: null,
-            description: $"session:{lockedCode.IdentitySessionId};family:{familyDescription}",
-            clientIp: clientIp,
-            correlationId: correlationId,
+            lockedCode.AccountId,
+            null,
+            $"session:{lockedCode.IdentitySessionId};family:{familyDescription}",
+            clientIp,
+            correlationId,
             cancellationToken: cancellationToken);
     }
 

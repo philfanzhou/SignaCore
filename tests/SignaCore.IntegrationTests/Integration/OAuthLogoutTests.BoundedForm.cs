@@ -40,7 +40,7 @@ public sealed partial class OAuthLogoutTests
         var payload = Encoding.UTF8.GetBytes(prefix + new string('&', size - Encoding.UTF8.GetByteCount(prefix)));
         var stream = new CountingFormStream(payload);
         var beforeRows = await QueryAsync(db => db.LogoutRequests.CountAsync(TestContext.Current.CancellationToken));
-        var beforeAudit = await QueryAsync(db => db.AuditLogs.CountAsync(TestContext.Current.CancellationToken));
+        var beforeAudit = (await QueryAsync(db => SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken))).Count;
         var response = await host.Server.SendAsync(context =>
         {
             context.Request.Method = "POST";
@@ -60,14 +60,16 @@ public sealed partial class OAuthLogoutTests
         Assert.Equal(beforeRows + (success ? 1 : 0),
             await QueryAsync(db => db.LogoutRequests.CountAsync(TestContext.Current.CancellationToken)));
         Assert.Equal(beforeAudit + (success ? 1 : 0),
-            await QueryAsync(db => db.AuditLogs.CountAsync(TestContext.Current.CancellationToken)));
+            (await QueryAsync(db => SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken))).Count);
         if (success)
         {
             var handle = System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("logout_uri").GetString()!.Split('=')[1];
             var digest = LoginHandleDigest.Compute(handle);
             var request = await QueryAsync(db => db.LogoutRequests.AsNoTracking().SingleAsync(row => row.HandleDigest == digest, TestContext.Current.CancellationToken));
-            var audit = await QueryAsync(db => db.AuditLogs.AsNoTracking().SingleAsync(row => row.TargetId == request.Id.ToString("D") && row.Action == "oidc.logout.prepared", TestContext.Current.CancellationToken));
-            Assert.Equal("LogoutRequest", audit.TargetType);
+            var audit = Assert.Single(
+                (await QueryAsync(db => SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken)))
+                .Where(row => row.TargetId == request.Id.ToString("D") && row.Action == "oidc.logout.prepared"));
+            Assert.Equal("logoutrequest", audit.TargetType);
         }
         Assert.False(body.Contains(hint, StringComparison.Ordinal));
     }
@@ -117,7 +119,7 @@ public sealed partial class OAuthLogoutTests
         });
         using var http = host.CreateClient();
         var beforeRows = await QueryAsync(db => db.LogoutRequests.CountAsync(TestContext.Current.CancellationToken));
-        var beforeAudit = await QueryAsync(db => db.AuditLogs.CountAsync(TestContext.Current.CancellationToken));
+        var beforeAudit = (await QueryAsync(db => SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken))).Count;
         var payload = mode switch
         {
             "oversize" => Encoding.ASCII.GetBytes("id_token_hint=" + new string('a', 20000)),
@@ -164,7 +166,7 @@ public sealed partial class OAuthLogoutTests
         repository.Verify(repo => repo.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.AtMost(int.MaxValue));
         repository.VerifyNoOtherCalls();
         Assert.Equal(beforeRows, await QueryAsync(db => db.LogoutRequests.CountAsync(TestContext.Current.CancellationToken)));
-        Assert.Equal(beforeAudit, await QueryAsync(db => db.AuditLogs.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(beforeAudit, (await QueryAsync(db => SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken))).Count);
     }
 
     [Fact]

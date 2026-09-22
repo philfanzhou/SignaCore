@@ -7,6 +7,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using ServiceMantle.Audit;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -20,9 +22,10 @@ namespace SignaCore.Tests.Host.Controllers;
 
 /// <summary>
 /// Holds the cancellation contract of the administrative refresh-token revocation and of the login
-/// history and audit log queries: every asynchronous boundary of one request observes the exact
-/// request token, the revocation flag and its audit entry share one commit boundary, and a paged
-/// query canceled between its count and its page returns no partial response.
+/// history query: every asynchronous boundary of one request observes the exact request token, the
+/// revocation flag and its audit entry share one commit boundary, and a paged query canceled
+/// between its count and its page returns no partial response. The audit query itself is the
+/// shared restricted endpoint, whose own contract lives in the ServiceMantle suite.
 /// </summary>
 public sealed class AdminRevocationAndQueryCancellationTests
 {
@@ -43,12 +46,10 @@ public sealed class AdminRevocationAndQueryCancellationTests
         var refreshTokens = new Mock<IRefreshTokenRepository>(MockBehavior.Strict);
         refreshTokens.Setup(repository => repository.GetByTokenValueAsync(TokenValue, cancellation.Token))
             .ReturnsAsync(token);
-        var audit = new Mock<IAuditService>(MockBehavior.Strict);
-        audit.Setup(service => service.RecordActionAsync(
-                "refresh_token_revoked", "RefreshToken", accountId.ToString(), It.IsAny<Guid?>(),
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                It.IsAny<object?>(), It.IsAny<object?>(), cancellation.Token))
-            .Returns(Task.CompletedTask);
+        var audit = new Mock<IManagementAuditWriter>(MockBehavior.Strict);
+        audit.Setup(writer => writer.RecordAsync(
+                It.IsAny<ManagementAuditEvent>(), cancellation.Token))
+            .Returns(new ValueTask<ManagementAuditRecord>(default(ManagementAuditRecord)));
         var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
         unitOfWork.Setup(unit => unit.SaveChangesAsync(cancellation.Token)).ReturnsAsync(1);
 
@@ -62,7 +63,12 @@ public sealed class AdminRevocationAndQueryCancellationTests
         Assert.IsType<OkObjectResult>(result);
         Assert.True(token.IsRevoked);
         refreshTokens.VerifyAll();
-        audit.VerifyAll();
+        audit.Verify(writer => writer.RecordAsync(
+            It.Is<ManagementAuditEvent>(auditEvent =>
+                auditEvent.Action.Value == "refresh_token_revoked" &&
+                auditEvent.Target.Type.Value == "refreshtoken" &&
+                auditEvent.Target.Id == accountId.ToString()),
+            cancellation.Token));
         unitOfWork.VerifyAll();
     }
 
@@ -93,35 +99,7 @@ public sealed class AdminRevocationAndQueryCancellationTests
         histories.VerifyAll();
     }
 
-    [Fact]
-    public async Task GetAuditLogs_PassesTheRequestTokenToBothPagingReads()
-    {
-        using var cancellation = new CancellationTokenSource();
-        var logs = new Mock<IAuditLogRepository>(MockBehavior.Strict);
-        logs.Setup(repository => repository.CountAsync(
-                "login", "Session", "target1", null, cancellation.Token))
-            .ReturnsAsync(1);
-        logs.Setup(repository => repository.QueryAsync(
-                "login", "Session", "target1", null, 20, 0, cancellation.Token))
-            .ReturnsAsync([new AuditLogEntity
-            {
-                Id = Guid.NewGuid(),
-                Action = "login",
-                TargetType = "Session",
-                TargetId = "target1"
-            }]);
-
-        var result = await CreateController().GetAuditLogs(
-            "login", "Session", "target1", null, null, null, logs.Object, cancellation.Token);
-
-        var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(
-            Assert.IsType<OkObjectResult>(result).Value);
-        Assert.Equal(1, response.Total);
-        Assert.Single(response.Items);
-        logs.VerifyAll();
-    }
-
-    public static TheoryData<string> PagedQueries() => new("login-history", "audit-logs");
+    public static TheoryData<string> PagedQueries() => new("login-history");
 
     /// <summary>
     /// A paged response is built from a count and a page read: cancellation observed between them
@@ -133,29 +111,18 @@ public sealed class AdminRevocationAndQueryCancellationTests
     {
         using var cancellation = new CancellationTokenSource();
         await using var database = await MigratedSqliteTestDatabase.CreateAsync();
-        var accountId = await SeedHistoryAndAuditAsync(database.Context);
+        var accountId = await SeedLoginHistoryAsync(database.Context);
         var controller = CreateController();
         IActionResult? response = null;
 
         var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            response = query == "login-history"
-                ? await controller.GetUserLoginHistory(
-                    accountId,
-                    null,
-                    null,
-                    new CancelAfterCountLoginHistoryRepository(
-                        new LoginHistoryRepository(database.Context), cancellation),
-                    cancellation.Token)
-                : await controller.GetAuditLogs(
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    new CancelAfterCountAuditLogRepository(
-                        new AuditLogRepository(database.Context), cancellation),
-                    cancellation.Token));
+            response = await controller.GetUserLoginHistory(
+                accountId,
+                null,
+                null,
+                new CancelAfterCountLoginHistoryRepository(
+                    new LoginHistoryRepository(database.Context), cancellation),
+                cancellation.Token));
 
         Assert.Equal(cancellation.Token, exception.CancellationToken);
         Assert.Null(response);
@@ -176,9 +143,9 @@ public sealed class AdminRevocationAndQueryCancellationTests
         var interceptor = boundary == "after-commit" ? new CancelAfterSaveInterceptor(cancellation) : null;
         await using var database = await MigratedSqliteTestDatabase.CreateAsync(interceptor);
         var accountId = await SeedRefreshTokenAsync(database.Context);
-        IAuditService auditService = boundary == "before-commit"
-            ? new CancelingActionAuditService(CreateAuditService(database.Context), cancellation)
-            : CreateAuditService(database.Context);
+        IManagementAuditWriter auditWriter = boundary == "before-commit"
+            ? new CancelingActionAuditWriter(CreateAuditWriter(database.Context), cancellation)
+            : CreateAuditWriter(database.Context);
         if (interceptor != null) interceptor.Armed = true;
         IActionResult? response = null;
 
@@ -187,7 +154,7 @@ public sealed class AdminRevocationAndQueryCancellationTests
                 new AdminRevokeRefreshTokenRequest(TokenValue),
                 new RefreshTokenRepository(database.Context),
                 new EfCoreUnitOfWork(database.Context),
-                auditService,
+                auditWriter,
                 cancellation.Token));
 
         Assert.Equal(cancellation.Token, exception.CancellationToken);
@@ -198,22 +165,42 @@ public sealed class AdminRevocationAndQueryCancellationTests
             .AsNoTracking()
             .Select(token => token.IsRevoked)
             .SingleAsync(TestContext.Current.CancellationToken));
-        var audits = await database.Context.AuditLogs
-            .AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken);
+        var audits = await ReadSharedAuditRowsAsync(database.Context);
         if (committed)
         {
             var audited = Assert.Single(audits);
             Assert.Equal("refresh_token_revoked", audited.Action);
+            Assert.Equal("refreshtoken", audited.TargetType);
             Assert.Equal(accountId.ToString(), audited.TargetId);
             // The token value itself is never part of the audit trail.
-            Assert.DoesNotContain(TokenValue, audited.Description ?? string.Empty, StringComparison.Ordinal);
+            Assert.DoesNotContain(TokenValue, audited.SecurityDescription ?? string.Empty, StringComparison.Ordinal);
         }
         else
         {
             Assert.Empty(audits);
         }
     }
+
+    private sealed record SharedAuditRow(
+        string Action,
+        string TargetType,
+        string TargetId,
+        string? SecurityDescription);
+
+    /// <summary>
+    /// Reads the shared service_audit_logs table, whose entity is internal to the library, through a
+    /// portable quoted projection.
+    /// </summary>
+    private static async Task<List<SharedAuditRow>> ReadSharedAuditRowsAsync(IdentityDbContext context) =>
+        await context.Database
+            .SqlQuery<SharedAuditRow>($"""
+                SELECT "action" AS "Action",
+                       "target_type" AS "TargetType",
+                       "target_id" AS "TargetId",
+                       "security_description" AS "SecurityDescription"
+                FROM service_audit_logs
+                """)
+            .ToListAsync(TestContext.Current.CancellationToken);
 
     private static AdminController CreateController()
     {
@@ -222,8 +209,8 @@ public sealed class AdminRevocationAndQueryCancellationTests
         return controller;
     }
 
-    private static AuditService CreateAuditService(IdentityDbContext context) =>
-        new(new LoginHistoryRepository(context), new AuditLogRepository(context));
+    private static EfCoreManagementAuditWriter<IdentityDbContext> CreateAuditWriter(
+        IdentityDbContext context) => new(context);
 
     private static async Task<Guid> SeedRefreshTokenAsync(IdentityDbContext context)
     {
@@ -248,7 +235,7 @@ public sealed class AdminRevocationAndQueryCancellationTests
         return account.Id;
     }
 
-    private static async Task<Guid> SeedHistoryAndAuditAsync(IdentityDbContext context)
+    private static async Task<Guid> SeedLoginHistoryAsync(IdentityDbContext context)
     {
         var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true, CreatedAt = DateTimeOffset.UtcNow };
         context.Accounts.Add(account);
@@ -258,14 +245,6 @@ public sealed class AdminRevocationAndQueryCancellationTests
             AccountId = account.Id,
             AuthMethod = "Password",
             EventType = "login_success",
-            CreatedAt = DateTimeOffset.UtcNow
-        });
-        context.AuditLogs.Add(new AuditLogEntity
-        {
-            Id = Guid.NewGuid(),
-            Action = "account_created",
-            TargetType = "Account",
-            TargetId = account.Id.ToString(),
             CreatedAt = DateTimeOffset.UtcNow
         });
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -299,43 +278,6 @@ public sealed class AdminRevocationAndQueryCancellationTests
             inner.RemoveOlderThanAsync(cutoff, cancellationToken);
     }
 
-    /// <summary>Cancels once the total is known, i.e. between the two reads of one page.</summary>
-    private sealed class CancelAfterCountAuditLogRepository(
-        IAuditLogRepository inner, CancellationTokenSource cancellation) : IAuditLogRepository
-    {
-        public Task AddAsync(AuditLogEntity auditLog, CancellationToken cancellationToken = default) =>
-            inner.AddAsync(auditLog, cancellationToken);
-
-        public Task<List<AuditLogEntity>> QueryAsync(
-            string? action,
-            string? targetType,
-            string? targetId,
-            Guid? actorId,
-            int pageSize,
-            int skip,
-            CancellationToken cancellationToken = default)
-        {
-            Assert.Equal(cancellation.Token, cancellationToken);
-            return inner.QueryAsync(action, targetType, targetId, actorId, pageSize, skip, cancellationToken);
-        }
-
-        public async Task<int> CountAsync(
-            string? action,
-            string? targetType,
-            string? targetId,
-            Guid? actorId,
-            CancellationToken cancellationToken = default)
-        {
-            Assert.Equal(cancellation.Token, cancellationToken);
-            var total = await inner.CountAsync(action, targetType, targetId, actorId, cancellationToken);
-            await cancellation.CancelAsync();
-            return total;
-        }
-
-        public Task<int> RemoveOlderThanAsync(DateTimeOffset cutoff, CancellationToken cancellationToken = default) =>
-            inner.RemoveOlderThanAsync(cutoff, cancellationToken);
-    }
-
     /// <summary>Observes cancellation only once the revocation is already committed.</summary>
     private sealed class CancelAfterSaveInterceptor(CancellationTokenSource cancellation) : SaveChangesInterceptor
     {
@@ -358,42 +300,16 @@ public sealed class AdminRevocationAndQueryCancellationTests
     /// Cancels while the audit entry is being staged, which is the last boundary before the single
     /// commit that carries both the revocation flag and the audit entry.
     /// </summary>
-    private sealed class CancelingActionAuditService(IAuditService inner, CancellationTokenSource cancellation)
-        : IAuditService
+    private sealed class CancelingActionAuditWriter(
+        IManagementAuditWriter inner, CancellationTokenSource cancellation) : IManagementAuditWriter
     {
-        public Task RecordLoginAsync(
-            Guid? accountId,
-            string username,
-            string authMethod,
-            string eventType,
-            string? clientIp,
-            string? userAgent,
-            string? failureReason = null,
-            string? appId = null,
-            string? correlationId = null,
-            CancellationToken cancellationToken = default) =>
-            inner.RecordLoginAsync(
-                accountId, username, authMethod, eventType, clientIp, userAgent, failureReason, appId,
-                correlationId, cancellationToken);
-
-        public Task RecordActionAsync(
-            string action,
-            string targetType,
-            string targetId,
-            Guid? actorId,
-            string? actorName,
-            string? description,
-            string? clientIp = null,
-            string? correlationId = null,
-            object? before = null,
-            object? after = null,
+        public ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
             CancellationToken cancellationToken = default)
         {
             Assert.Equal(cancellation.Token, cancellationToken);
             cancellation.Cancel();
-            return inner.RecordActionAsync(
-                action, targetType, targetId, actorId, actorName, description, clientIp, correlationId,
-                before, after, cancellationToken);
+            return inner.RecordAsync(auditEvent, cancellationToken);
         }
     }
 

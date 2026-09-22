@@ -87,12 +87,12 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
         Assert.True(await GetFamilyRootAsync(second.RootId) is { IsRevoked: true });
 
         // One audit row per admin action, carrying both bounded revocation counts.
-        var audit = await QueryAsync(async context => await context.AuditLogs.AsNoTracking()
-            .SingleAsync(row => row.Action == "account_disabled"
-                && row.TargetId == first.AccountId.ToString(),
-                TestContext.Current.CancellationToken));
-        Assert.Contains("\"revokedSessions\":2", audit.AfterSnapshot, StringComparison.Ordinal);
-        Assert.Contains("\"revokedFamilyMembers\":2", audit.AfterSnapshot, StringComparison.Ordinal);
+        var audit = await QueryAsync(async context => Assert.Single(
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken))
+            .Where(row => row.Action == "account_disabled"
+                && row.TargetId == first.AccountId.ToString())));
+        Assert.Contains("revoked sessions: 2", audit.SecurityDescription, StringComparison.Ordinal);
+        Assert.Contains("revoked family members: 2", audit.SecurityDescription, StringComparison.Ordinal);
 
         // The idempotent repeat disable keeps every first fact and does not rewrite them.
         using var repeat = await admin.PatchAsJsonAsync(
@@ -153,10 +153,11 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
         var refreshBody = await refresh.Content.ReadFromJsonAsync<JsonElement>(
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("invalid_grant", refreshBody.GetProperty("error").GetString());
-        Assert.Empty(await QueryAsync(async context => await context.AuditLogs.AsNoTracking()
+        Assert.Empty(await QueryAsync(async context =>
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken))
             .Where(row => row.Action == "oidc.refresh.replayed"
                 && row.TargetId == seeded.RootId.ToString("D"))
-            .ToListAsync(TestContext.Current.CancellationToken)));
+            .ToList()));
 
         // Code redemption of a fresh code for the same account: the generic invalid_grant of a
         // missing code — indistinguishable from a disabled account.
@@ -266,11 +267,11 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
         Assert.Null((await GetSessionAsync(second.SessionId)).RevokedAt);
         Assert.Null((await GetSessionAsync(first.SessionId)).RevokedAt);
 
-        var audit = await QueryAsync(async context => await context.AuditLogs.AsNoTracking()
-            .SingleAsync(row => row.Action == "app_callback_updated"
-                && row.TargetId == DeactivateFirstAppId,
-                TestContext.Current.CancellationToken));
-        Assert.Contains("\"revokedFamilyMembers\":1", audit.AfterSnapshot, StringComparison.Ordinal);
+        var audit = await QueryAsync(async context => Assert.Single(
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken))
+            .Where(row => row.Action == "app_callback_updated"
+                && row.TargetId == DeactivateFirstAppId)));
+        Assert.Contains("revoked family members: 1", audit.SecurityDescription, StringComparison.Ordinal);
 
         // The surviving application still refreshes successfully.
         using var host = CreateHost();
@@ -330,11 +331,11 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
         Assert.False((await GetFamilyRootAsync(second.RootId)).IsRevoked);
         Assert.Null((await GetSessionAsync(first.SessionId)).RevokedAt);
 
-        var audit = await QueryAsync(async context => await context.AuditLogs.AsNoTracking()
-            .SingleAsync(row => row.Action == "app_oidc_policy_updated"
-                && row.TargetId == RefreshOffFirstAppId,
-                TestContext.Current.CancellationToken));
-        Assert.Contains("\"revokedFamilyMembers\":1", audit.AfterSnapshot, StringComparison.Ordinal);
+        var audit = await QueryAsync(async context => Assert.Single(
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken))
+            .Where(row => row.Action == "app_oidc_policy_updated"
+                && row.TargetId == RefreshOffFirstAppId)));
+        Assert.Contains("revoked family members: 1", audit.SecurityDescription, StringComparison.Ordinal);
 
         // The other application still refreshes.
         using var host = CreateHost();

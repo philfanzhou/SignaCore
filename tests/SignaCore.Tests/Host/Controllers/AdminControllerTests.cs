@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Linq.Expressions;
 using System.Net;
 using System.Security.Claims;
 using System.Text.Json;
@@ -13,6 +14,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using ServiceMantle.Audit;
 using ServiceMantle.Management;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -34,7 +36,7 @@ public class AdminControllerTests : IDisposable
 {
     private readonly IdentityDbContext _dbContext;
     private readonly AdminController _controller;
-    private readonly Mock<IAuditService> _auditServiceMock;
+    private readonly Mock<IManagementAuditWriter> _auditWriterMock;
     private readonly Mock<IAccountRepository> _accountRepoMock;
     private readonly Mock<IUnitOfWork> _unitOfWorkMock;
     private readonly Mock<IPasswordPolicy> _passwordPolicyMock;
@@ -44,7 +46,6 @@ public class AdminControllerTests : IDisposable
     private readonly Mock<IAppRegistrationRepository> _appRegRepoMock;
     private readonly Mock<IRefreshTokenRepository> _refreshTokenRepoMock;
     private readonly Mock<ILoginHistoryRepository> _loginHistoryRepoMock;
-    private readonly Mock<IAuditLogRepository> _auditLogRepoMock;
     private readonly Mock<IIdentitySessionRepository> _identitySessionRepoMock;
     private readonly Mock<IRefreshTokenFamilyStore> _refreshTokenFamilyStoreMock;
 
@@ -70,7 +71,7 @@ public class AdminControllerTests : IDisposable
             .Options;
         _dbContext = new IdentityDbContext(options);
 
-        _auditServiceMock = new Mock<IAuditService>();
+        _auditWriterMock = new Mock<IManagementAuditWriter>();
         _accountRepoMock = new Mock<IAccountRepository>();
         _unitOfWorkMock = new Mock<IUnitOfWork>();
         _unitOfWorkMock.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
@@ -81,7 +82,6 @@ public class AdminControllerTests : IDisposable
         _appRegRepoMock = new Mock<IAppRegistrationRepository>();
         _refreshTokenRepoMock = new Mock<IRefreshTokenRepository>();
         _loginHistoryRepoMock = new Mock<ILoginHistoryRepository>();
-        _auditLogRepoMock = new Mock<IAuditLogRepository>();
         _identitySessionRepoMock = new Mock<IIdentitySessionRepository>();
         _refreshTokenFamilyStoreMock = new Mock<IRefreshTokenFamilyStore>();
 
@@ -219,11 +219,8 @@ public class AdminControllerTests : IDisposable
             .Callback<Guid, CancellationToken>((_, ct) => Observe("account-read", ct)).ReturnsAsync(account);
         _accountRepoMock.Setup(repository => repository.UpdateAsync(account, It.IsAny<CancellationToken>()))
             .Callback<AccountEntity, CancellationToken>((_, ct) => Observe("account-update", ct)).Returns(Task.CompletedTask);
-        _auditServiceMock.Setup(service => service.RecordActionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                It.IsAny<object?>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
-            .Callback(new InvocationAction(call => Observe("audit", (CancellationToken)call.Arguments[^1])))
-            .Returns(Task.CompletedTask);
+        _auditWriterMock.Setup(writer => writer.RecordAsync(It.IsAny<ManagementAuditEvent>(), It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(call => Observe("audit", (CancellationToken)call.Arguments[^1])));
         _unitOfWorkMock.Setup(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Callback<CancellationToken>(ct => Observe("save", ct)).ReturnsAsync(1);
         _identitySessionRepoMock.Setup(repository => repository.MarkRevokedByAccountAsync(
@@ -236,7 +233,7 @@ public class AdminControllerTests : IDisposable
             .ReturnsAsync(0);
         var operation = () => InvokeUserAction(action, account.Id, _accountRepoMock.Object,
             _passwordCredentialRepoMock.Object, _userLoginRepoMock.Object, _unitOfWorkMock.Object,
-            _auditServiceMock.Object, query.Object, _dbContext,
+            _auditWriterMock.Object, query.Object, _dbContext,
             _identitySessionRepoMock.Object, _refreshTokenFamilyStoreMock.Object, cancellation.Token);
 
         if (cancelAt is null)
@@ -252,7 +249,7 @@ public class AdminControllerTests : IDisposable
 
     private Task<IActionResult> InvokeUserAction(
         string action, Guid accountId, IAccountRepository accounts, IPasswordCredentialRepository credentials,
-        IUserLoginRepository logins, IUnitOfWork unit, IAuditService audit, IUserQueryService query,
+        IUserLoginRepository logins, IUnitOfWork unit, IManagementAuditWriter audit, IUserQueryService query,
         IdentityDbContext dbContext, IIdentitySessionRepository identitySessions,
         IRefreshTokenFamilyStore refreshTokenFamilies, CancellationToken ct) => action switch
     {
@@ -298,7 +295,7 @@ public class AdminControllerTests : IDisposable
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => InvokeUserAction(action, account.Id,
             new AccountRepository(context), new PasswordCredentialRepository(context), new UserLoginRepository(context),
-            new EfCoreUnitOfWork(context), new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            new EfCoreUnitOfWork(context), new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             new UserQueryService(context), context,
             new IdentitySessionRepository(context),
             new RefreshTokenFamilyStore(
@@ -309,7 +306,7 @@ public class AdminControllerTests : IDisposable
         Assert.Equal(creates ? 0 : 1, await verify.Accounts.CountAsync(TestContext.Current.CancellationToken));
         Assert.False(await verify.PasswordCredentials.AnyAsync(TestContext.Current.CancellationToken));
         Assert.False(await verify.UserLogins.AnyAsync(TestContext.Current.CancellationToken));
-        Assert.False(await verify.AuditLogs.AnyAsync(TestContext.Current.CancellationToken));
+        Assert.False(await SharedAuditRows.ExistsAsync(verify, TestContext.Current.CancellationToken));
         if (!creates)
         {
             var persisted = await verify.Accounts.SingleAsync(TestContext.Current.CancellationToken);
@@ -497,7 +494,7 @@ public class AdminControllerTests : IDisposable
             new AdminCreateUserRequest("", "Password1", null, null, null),
             _passwordPolicyMock.Object, _passwordHasherMock.Object,
             _accountRepoMock.Object, _passwordCredentialRepoMock.Object,
-            _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _unitOfWorkMock.Object, _auditWriterMock.Object);
 
         Assert.IsType<BadRequestObjectResult>(result);
     }
@@ -510,7 +507,7 @@ public class AdminControllerTests : IDisposable
             new AdminCreateUserRequest("user", "", null, null, null),
             _passwordPolicyMock.Object, _passwordHasherMock.Object,
             _accountRepoMock.Object, _passwordCredentialRepoMock.Object,
-            _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _unitOfWorkMock.Object, _auditWriterMock.Object);
 
         Assert.IsType<BadRequestObjectResult>(result);
     }
@@ -527,7 +524,7 @@ public class AdminControllerTests : IDisposable
             new AdminCreateUserRequest("user", "weak", null, null, null),
             _passwordPolicyMock.Object, _passwordHasherMock.Object,
             _accountRepoMock.Object, _passwordCredentialRepoMock.Object,
-            _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _unitOfWorkMock.Object, _auditWriterMock.Object);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         var err = Assert.IsType<ErrorResponse>(bad.Value);
@@ -547,7 +544,7 @@ public class AdminControllerTests : IDisposable
             new AdminCreateUserRequest("existing", "Password1", null, null, null),
             _passwordPolicyMock.Object, _passwordHasherMock.Object,
             _accountRepoMock.Object, _passwordCredentialRepoMock.Object,
-            _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _unitOfWorkMock.Object, _auditWriterMock.Object);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Contains("already exists", Assert.IsType<ErrorResponse>(bad.Value).Message);
@@ -569,7 +566,7 @@ public class AdminControllerTests : IDisposable
             new AdminCreateUserRequest("newuser", "Password1", "Display", "remark", "nick"),
             _passwordPolicyMock.Object, _passwordHasherMock.Object,
             _accountRepoMock.Object, _passwordCredentialRepoMock.Object,
-            _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _unitOfWorkMock.Object, _auditWriterMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateUserResponse>(ok.Value);
@@ -581,10 +578,9 @@ public class AdminControllerTests : IDisposable
         _accountRepoMock.Verify();
         _passwordCredentialRepoMock.Verify();
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
-        _auditServiceMock.Verify(a => a.RecordActionAsync(
-            "account_created", "Account", It.IsAny<string>(),
-            AdminId, AdminName, It.IsAny<string>(), It.IsAny<string?>(),
-            It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>()), Times.Once);
+        VerifyAuditEvent(
+            e => e.Action.Value == "account_created" && e.Target.Type.Value == "account",
+            Times.Once());
     }
 
     [Fact]
@@ -601,7 +597,7 @@ public class AdminControllerTests : IDisposable
             new AdminCreateUserRequest("newuser", "Password1", null, null, null),
             _passwordPolicyMock.Object, _passwordHasherMock.Object,
             _accountRepoMock.Object, _passwordCredentialRepoMock.Object,
-            _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _unitOfWorkMock.Object, _auditWriterMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateUserResponse>(ok.Value);
@@ -619,7 +615,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.CreatePhoneUser(
             new AdminCreatePhoneUserRequest("", null, null, null),
             _accountRepoMock.Object, _userLoginRepoMock.Object,
-            _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _unitOfWorkMock.Object, _auditWriterMock.Object);
 
         Assert.IsType<BadRequestObjectResult>(result);
     }
@@ -634,7 +630,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.CreatePhoneUser(
             new AdminCreatePhoneUserRequest("13800001234", null, null, null),
             _accountRepoMock.Object, _userLoginRepoMock.Object,
-            _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _unitOfWorkMock.Object, _auditWriterMock.Object);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Contains("already registered", Assert.IsType<ErrorResponse>(bad.Value).Message);
@@ -651,7 +647,7 @@ public class AdminControllerTests : IDisposable
         var result = await _controller.CreatePhoneUser(
             new AdminCreatePhoneUserRequest("13800001234", "Display", "remark", "nick"),
             _accountRepoMock.Object, _userLoginRepoMock.Object,
-            _unitOfWorkMock.Object, _auditServiceMock.Object);
+            _unitOfWorkMock.Object, _auditWriterMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<AdminCreateUserResponse>(ok.Value);
@@ -662,10 +658,9 @@ public class AdminControllerTests : IDisposable
         _accountRepoMock.Verify();
         _userLoginRepoMock.Verify();
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
-        _auditServiceMock.Verify(a => a.RecordActionAsync(
-            "account_created", "Account", It.IsAny<string>(),
-            AdminId, AdminName, It.IsAny<string>(), It.IsAny<string?>(),
-            It.IsAny<string?>(), null, It.IsAny<object?>()), Times.Once);
+        VerifyAuditEvent(
+            e => e.Action.Value == "account_created" && e.Target.Type.Value == "account",
+            Times.Once());
     }
 
     #endregion
@@ -772,7 +767,7 @@ public class AdminControllerTests : IDisposable
         _accountRepoMock.Setup(r => r.GetByIdAsync(It.IsAny<Guid>())).ReturnsAsync((AccountEntity?)null);
 
         var result = await _controller.UpdateUserStatus(Guid.NewGuid(),
-            new AdminUpdateStatusRequest(true), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            new AdminUpdateStatusRequest(true), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _identitySessionRepoMock.Object, _refreshTokenFamilyStoreMock.Object);
 
         Assert.IsType<NotFoundObjectResult>(result);
@@ -786,17 +781,16 @@ public class AdminControllerTests : IDisposable
         _accountRepoMock.Setup(r => r.GetByIdAsync(account.Id)).ReturnsAsync(account);
 
         var result = await _controller.UpdateUserStatus(account.Id,
-            new AdminUpdateStatusRequest(true), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            new AdminUpdateStatusRequest(true), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _identitySessionRepoMock.Object, _refreshTokenFamilyStoreMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<OperationResponse>(ok.Value);
         Assert.Contains("enabled", response.Message);
         Assert.True(account.IsActive);
-        _auditServiceMock.Verify(a => a.RecordActionAsync(
-            "account_enabled", "Account", account.Id.ToString(),
-            AdminId, AdminName, It.IsAny<string>(), It.IsAny<string?>(),
-            It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>()), Times.Once);
+        VerifyAuditEvent(
+            e => e.Action.Value == "account_enabled" && e.Target.Id == account.Id.ToString(),
+            Times.Once());
     }
 
     [Fact]
@@ -807,17 +801,16 @@ public class AdminControllerTests : IDisposable
         _accountRepoMock.Setup(r => r.GetByIdAsync(account.Id)).ReturnsAsync(account);
 
         var result = await _controller.UpdateUserStatus(account.Id,
-            new AdminUpdateStatusRequest(false), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            new AdminUpdateStatusRequest(false), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _identitySessionRepoMock.Object, _refreshTokenFamilyStoreMock.Object);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var response = Assert.IsType<OperationResponse>(ok.Value);
         Assert.Contains("disabled", response.Message);
         Assert.False(account.IsActive);
-        _auditServiceMock.Verify(a => a.RecordActionAsync(
-            "account_disabled", "Account", account.Id.ToString(),
-            AdminId, AdminName, It.IsAny<string>(), It.IsAny<string?>(),
-            It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>()), Times.Once);
+        VerifyAuditEvent(
+            e => e.Action.Value == "account_disabled" && e.Target.Id == account.Id.ToString(),
+            Times.Once());
     }
 
     [Fact]
@@ -833,31 +826,28 @@ public class AdminControllerTests : IDisposable
         _refreshTokenFamilyStoreMock.Setup(s => s.RevokeByAccountAsync(
                 account.Id, RefreshFamilyRevocationReason.AccountDisabled, It.IsAny<CancellationToken>()))
             .Callback(() => calls.Add("family-revoke")).ReturnsAsync(3);
-        object? observedAfter = null;
-        _auditServiceMock.Setup(a => a.RecordActionAsync(
-                "account_disabled", "Account", account.Id.ToString(), AdminId, AdminName,
-                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>(),
+        ManagementAuditEvent? observedEvent = null;
+        _auditWriterMock.Setup(writer => writer.RecordAsync(
+                It.Is<ManagementAuditEvent>(e => e.Action.Value == "account_disabled"),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, string, string, Guid?, string?, string?, string?, string?, object?, object?, CancellationToken>(
-                (_, _, _, _, _, _, _, _, _, after, _) =>
-                {
-                    calls.Add("audit");
-                    observedAfter = after;
-                })
-            .Returns(Task.CompletedTask);
+            .Callback<ManagementAuditEvent, CancellationToken>((e, _) =>
+            {
+                calls.Add("audit");
+                observedEvent = e;
+            });
 
         var result = await _controller.UpdateUserStatus(account.Id,
-            new AdminUpdateStatusRequest(false), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            new AdminUpdateStatusRequest(false), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _identitySessionRepoMock.Object, _refreshTokenFamilyStoreMock.Object);
 
         Assert.IsType<OkObjectResult>(result);
         // The session writes run first: they are the serialization point against a concurrent
         // redemption or rotation of the same account.
         Assert.Equal(["session-revoke", "family-revoke", "audit"], calls);
-        // The audit after-payload carries the two bounded revocation counts.
-        var after = JsonSerializer.Serialize(observedAfter);
-        Assert.Contains("\"RevokedSessions\":2", after, StringComparison.Ordinal);
-        Assert.Contains("\"RevokedFamilyMembers\":3", after, StringComparison.Ordinal);
+        // The audit description carries the two bounded revocation counts.
+        Assert.NotNull(observedEvent);
+        Assert.Contains("revoked sessions: 2", observedEvent!.SecurityDescription, StringComparison.Ordinal);
+        Assert.Contains("revoked family members: 3", observedEvent.SecurityDescription, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -868,7 +858,7 @@ public class AdminControllerTests : IDisposable
         _accountRepoMock.Setup(r => r.GetByIdAsync(account.Id)).ReturnsAsync(account);
 
         var result = await _controller.UpdateUserStatus(account.Id,
-            new AdminUpdateStatusRequest(false), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            new AdminUpdateStatusRequest(false), _accountRepoMock.Object, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _identitySessionRepoMock.Object, _refreshTokenFamilyStoreMock.Object);
 
         Assert.IsType<OkObjectResult>(result);
@@ -974,7 +964,7 @@ public class AdminControllerTests : IDisposable
         SetAdminUser();
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("", null, 0),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
@@ -1003,7 +993,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://public.example/callback", 3600),
-            _appRegRepoMock.Object, validator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, validator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             cancellation.Token);
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -1016,11 +1006,13 @@ public class AdminControllerTests : IDisposable
         Assert.True(validationObserved);
         _appRegRepoMock.Verify(
             r => r.AddAsync(It.IsAny<AppRegistrationEntity>(), cancellation.Token),
-            Times.Once);
-        _auditServiceMock.Verify(a => a.RecordActionAsync(
-            "app_created", "AppRegistration", response.AppId,
-            AdminId, AdminName, "Admin created app: MyApp", It.IsAny<string?>(),
-            It.IsAny<string?>(), null, It.IsAny<object?>(), cancellation.Token), Times.Once);
+            Times.Once());
+        VerifyAuditEvent(
+            e => e.Action.Value == "app_created" &&
+                 e.Target.Type.Value == "appregistration" &&
+                 e.Target.Id == response.AppId &&
+                 e.SecurityDescription == "Admin created app: MyApp",
+            Times.Once());
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(cancellation.Token), Times.Once);
     }
 
@@ -1037,7 +1029,7 @@ public class AdminControllerTests : IDisposable
             _appRegRepoMock.Object,
             CallbackValidator,
             _unitOfWorkMock.Object,
-            _auditServiceMock.Object,
+            _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
@@ -1067,7 +1059,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://cb.example.com", IdentityConstants.CallbackTtlNeverExpire),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -1091,7 +1083,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "", 0),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -1117,7 +1109,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://cb.example.com", -10),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
@@ -1133,34 +1125,29 @@ public class AdminControllerTests : IDisposable
                 TestContext.Current.CancellationToken))
             .Callback<AppRegistrationEntity, CancellationToken>((app, _) => created = app)
             .Returns(Task.CompletedTask);
-        var snapshots = CaptureSnapshots();
+        var events = CaptureAuditEvents();
 
         var result = await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://cb.example.com", 3600),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         var response = Assert.IsType<AdminCreateAppResponse>(
             Assert.IsType<OkObjectResult>(result).Value);
-        _auditServiceMock.Verify(a => a.RecordActionAsync(
-            "app_created", "AppRegistration", response.AppId,
-            AdminId, AdminName, "Admin created app: MyApp", It.IsAny<string?>(),
-            It.IsAny<string?>(), null, It.IsAny<object?>(),
-            TestContext.Current.CancellationToken), Times.Once);
 
-        // A creation has no before state; the after snapshot carries exactly the fields an operator
-        // reads the registration back by.
-        var (before, after) = Assert.Single(snapshots);
-        Assert.Null(before);
-        var afterJson = Serialize(after);
-        Assert.Contains("\"appId\":\"" + response.AppId + "\"", afterJson);
-        Assert.Contains("\"appName\":\"MyApp\"", afterJson);
-        Assert.Contains("\"callbackUrl\":\"https://cb.example.com\"", afterJson);
-        Assert.Contains("\"callbackExpiresAt\":", afterJson);
-        Assert.Contains("\"isActive\":true", afterJson);
+        // The staged shared event names the application and its operator; the generated secret and
+        // its hash never reach the record.
+        var auditEvent = Assert.Single(events);
+        Assert.Equal("app_created", auditEvent.Action.Value);
+        Assert.Equal("appregistration", auditEvent.Target.Type.Value);
+        Assert.Equal(response.AppId, auditEvent.Target.Id);
+        Assert.Equal("Admin created app: MyApp", auditEvent.SecurityDescription);
+        Assert.Equal(AdminId.ToString("D"), auditEvent.Operator.OperatorId);
+        Assert.Equal(AdminName, auditEvent.Operator.DisplayName);
+        Assert.Equal(ManagementAuditOutcome.Success, auditEvent.Outcome);
 
         Assert.NotNull(created);
-        AssertNoSecret(afterJson, response.AppSecret, created!.AppSecretHash);
+        AssertNoSecret(auditEvent.SecurityDescription ?? string.Empty, response.AppSecret, created!.AppSecretHash);
     }
 
     [Fact]
@@ -1170,7 +1157,7 @@ public class AdminControllerTests : IDisposable
 
         await _controller.CreateApp(
             new AdminCreateAppRequest("", null, 0),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         VerifyNoAudit();
@@ -1183,7 +1170,7 @@ public class AdminControllerTests : IDisposable
 
         await _controller.CreateApp(
             new AdminCreateAppRequest("MyApp", "https://user:secret@cb.example.com/claims", 3600),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         VerifyNoAudit();
@@ -1203,7 +1190,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("missing",
             new AdminUpdateCallbackRequest("https://cb", 3600, true),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
@@ -1229,7 +1216,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("", 0, true),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
@@ -1265,7 +1252,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://public.example/callback", 7200, false),
-            _appRegRepoMock.Object, validator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, validator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _refreshTokenFamilyStoreMock.Object,
             cancellation.Token);
 
@@ -1276,12 +1263,12 @@ public class AdminControllerTests : IDisposable
         Assert.True(validationObserved);
         _appRegRepoMock.Verify(
             r => r.GetByAppIdAsync("a", cancellation.Token),
-            Times.Once);
-        _auditServiceMock.Verify(a => a.RecordActionAsync(
-            "app_callback_updated", "AppRegistration", "a",
-            AdminId, AdminName, "Admin updated callback configuration for app: A",
-            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>(),
-            cancellation.Token), Times.Once);
+            Times.Once());
+        VerifyAuditEvent(
+            e => e.Action.Value == "app_callback_updated" &&
+                 e.SecurityDescription!.StartsWith(
+                     "Admin updated callback configuration for app: A", StringComparison.Ordinal),
+            Times.Once());
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(cancellation.Token), Times.Once);
     }
 
@@ -1307,7 +1294,7 @@ public class AdminControllerTests : IDisposable
             _appRegRepoMock.Object,
             CallbackValidator,
             _unitOfWorkMock.Object,
-            _auditServiceMock.Object,
+            _auditWriterMock.Object,
             _dbContext,
             _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
@@ -1331,7 +1318,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://cb", IdentityConstants.CallbackTtlNeverExpire, true),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
@@ -1356,33 +1343,29 @@ public class AdminControllerTests : IDisposable
         _appRegRepoMock
             .Setup(r => r.GetByAppIdAsync("a", TestContext.Current.CancellationToken))
             .ReturnsAsync(app);
-        var snapshots = CaptureSnapshots();
+        var events = CaptureAuditEvents();
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("https://new.example.com/claims", 7200, false),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
-        _auditServiceMock.Verify(a => a.RecordActionAsync(
-            "app_callback_updated", "AppRegistration", "a",
-            AdminId, AdminName, "Admin updated callback configuration for app: MyApp",
-            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>(),
-            TestContext.Current.CancellationToken),
-            Times.Once);
 
-        // The deactivation has to be readable from the two snapshots alone.
-        var (before, after) = Assert.Single(snapshots);
-        var beforeJson = Serialize(before);
-        var afterJson = Serialize(after);
-        Assert.Contains("\"callbackUrl\":\"https://old.example.com/claims\"", beforeJson);
-        Assert.Contains("\"callbackExpiresAt\":1700000000", beforeJson);
-        Assert.Contains("\"isActive\":true", beforeJson);
-        Assert.Contains("\"callbackUrl\":\"https://new.example.com/claims\"", afterJson);
-        Assert.Contains("\"callbackExpiresAt\":", afterJson);
-        Assert.Contains("\"isActive\":false", afterJson);
-        AssertNoSecret(beforeJson + afterJson, "plaintext-app-secret", app.AppSecretHash);
+        // The deactivation has to be readable from the staged event alone: the closed description
+        // names the application and the active state, and never carries the stored hash.
+        var auditEvent = Assert.Single(events);
+        Assert.Equal("app_callback_updated", auditEvent.Action.Value);
+        Assert.Equal("appregistration", auditEvent.Target.Type.Value);
+        Assert.Equal("a", auditEvent.Target.Id);
+        Assert.Contains(
+            "Admin updated callback configuration for app: MyApp",
+            auditEvent.SecurityDescription,
+            StringComparison.Ordinal);
+        Assert.Contains("active=False", auditEvent.SecurityDescription, StringComparison.Ordinal);
+        Assert.Contains("revoked family members: 0", auditEvent.SecurityDescription, StringComparison.Ordinal);
+        AssertNoSecret(auditEvent.SecurityDescription ?? string.Empty, "plaintext-app-secret", app.AppSecretHash);
     }
 
     [Fact]
@@ -1404,11 +1387,11 @@ public class AdminControllerTests : IDisposable
             .Setup(s => s.RevokeByApplicationAsync(
                 "a", RefreshFamilyRevocationReason.ApplicationDisabled, TestContext.Current.CancellationToken))
             .ReturnsAsync(4);
-        var snapshots = CaptureSnapshots();
+        var events = CaptureAuditEvents();
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("", 0, false),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
@@ -1416,9 +1399,9 @@ public class AdminControllerTests : IDisposable
         _refreshTokenFamilyStoreMock.Verify(
             s => s.RevokeByApplicationAsync(
                 "a", RefreshFamilyRevocationReason.ApplicationDisabled, TestContext.Current.CancellationToken),
-            Times.Once);
-        var afterJson = Serialize(Assert.Single(snapshots).After);
-        Assert.Contains("\"revokedFamilyMembers\":4", afterJson, StringComparison.Ordinal);
+            Times.Once());
+        var auditEvent = Assert.Single(events);
+        Assert.Contains("revoked family members: 4", auditEvent.SecurityDescription, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1439,7 +1422,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("", 0, false),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
@@ -1459,7 +1442,7 @@ public class AdminControllerTests : IDisposable
 
         await _controller.UpdateCallback("missing",
             new AdminUpdateCallbackRequest("https://cb", 3600, true),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
@@ -1484,7 +1467,7 @@ public class AdminControllerTests : IDisposable
 
         await _controller.UpdateCallback("a",
             new AdminUpdateCallbackRequest("ftp://cb.example.com/claims", 7200, false),
-            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CallbackValidator, _unitOfWorkMock.Object, _auditWriterMock.Object,
             _dbContext, _refreshTokenFamilyStoreMock.Object,
             TestContext.Current.CancellationToken);
 
@@ -1492,28 +1475,27 @@ public class AdminControllerTests : IDisposable
     }
 
     /// <summary>
-    /// Captures the before/after snapshot arguments handed to <see cref="IAuditService"/> so that a
-    /// test can assert on what the audit record would contain.
+    /// Captures the shared audit events staged through the writer so a test can assert on what the
+    /// audit record would contain.
     /// </summary>
-    private List<(object? Before, object? After)> CaptureSnapshots()
+    private List<ManagementAuditEvent> CaptureAuditEvents()
     {
-        var snapshots = new List<(object? Before, object? After)>();
-        _auditServiceMock.Setup(a => a.RecordActionAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-            It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-            It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, string, string, Guid?, string?, string?, string?, string?, object?, object?, CancellationToken>(
-                (_, _, _, _, _, _, _, _, before, after, _) => snapshots.Add((before, after)))
-            .Returns(Task.CompletedTask);
-        return snapshots;
+        var events = new List<ManagementAuditEvent>();
+        _auditWriterMock.Setup(writer => writer.RecordAsync(
+                It.IsAny<ManagementAuditEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<ManagementAuditEvent, CancellationToken>((e, _) => events.Add(e));
+        return events;
     }
 
+    private void VerifyAuditEvent(
+        Expression<Func<ManagementAuditEvent, bool>> eventMatch,
+        Times times) =>
+        _auditWriterMock.Verify(writer => writer.RecordAsync(
+            It.Is(eventMatch), It.IsAny<CancellationToken>()), times);
+
     private void VerifyNoAudit() =>
-        _auditServiceMock.Verify(a => a.RecordActionAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-            It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-            It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>(),
-            It.IsAny<CancellationToken>()), Times.Never);
+        _auditWriterMock.Verify(writer => writer.RecordAsync(
+            It.IsAny<ManagementAuditEvent>(), It.IsAny<CancellationToken>()), Times.Never);
 
     /// <summary>
     /// Serializes a snapshot exactly the way <c>AuditService</c> does, so the assertions run against
@@ -1556,7 +1538,7 @@ public class AdminControllerTests : IDisposable
             "missing",
             _appRegRepoMock.Object,
             _unitOfWorkMock.Object,
-            _auditServiceMock.Object,
+            _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<NotFoundObjectResult>(result);
@@ -1575,7 +1557,7 @@ public class AdminControllerTests : IDisposable
             "a",
             _appRegRepoMock.Object,
             _unitOfWorkMock.Object,
-            _auditServiceMock.Object,
+            _auditWriterMock.Object,
             cancellation.Token);
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -1583,10 +1565,10 @@ public class AdminControllerTests : IDisposable
         _appRegRepoMock.Verify(r => r.GetByAppIdAsync("a", cancellation.Token), Times.Once);
         _appRegRepoMock.Verify(r => r.DeleteAsync(app, cancellation.Token), Times.Once);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(cancellation.Token), Times.Once);
-        _auditServiceMock.Verify(a => a.RecordActionAsync(
-            "app_deleted", "AppRegistration", "a",
-            AdminId, AdminName, "Admin deleted app: MyApp", It.IsAny<string?>(),
-            It.IsAny<string?>(), null, null, cancellation.Token), Times.Once);
+        VerifyAuditEvent(
+            e => e.Action.Value == "app_deleted" &&
+                 e.SecurityDescription == "Admin deleted app: MyApp",
+            Times.Once());
     }
 
     [Fact]
@@ -1611,7 +1593,7 @@ public class AdminControllerTests : IDisposable
             "a",
             _appRegRepoMock.Object,
             _unitOfWorkMock.Object,
-            _auditServiceMock.Object,
+            _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         var conflict = Assert.IsType<ConflictObjectResult>(result);
@@ -1646,7 +1628,7 @@ public class AdminControllerTests : IDisposable
             "a",
             _appRegRepoMock.Object,
             _unitOfWorkMock.Object,
-            _auditServiceMock.Object,
+            _auditWriterMock.Object,
             TestContext.Current.CancellationToken));
     }
 
@@ -1674,7 +1656,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateSmsPolicy(
             "a", new AdminUpdateSmsPolicyRequest("AutoProvision", null),
-            _appRegRepoMock.Object, CreateSmsOptions(), _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CreateSmsOptions(), _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -1692,7 +1674,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateSmsPolicy(
             "a", new AdminUpdateSmsPolicyRequest("AutoProvision", "typo"),
-            _appRegRepoMock.Object, CreateSmsOptions("primary"), _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CreateSmsOptions("primary"), _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
@@ -1709,7 +1691,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.UpdateSmsPolicy(
             "a", new AdminUpdateSmsPolicyRequest("ManualApproval", " primary "),
-            _appRegRepoMock.Object, CreateSmsOptions("primary"), _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _appRegRepoMock.Object, CreateSmsOptions("primary"), _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
@@ -1734,7 +1716,7 @@ public class AdminControllerTests : IDisposable
             "missing",
             _appRegRepoMock.Object,
             _unitOfWorkMock.Object,
-            _auditServiceMock.Object,
+            _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<NotFoundObjectResult>(result);
@@ -1759,7 +1741,7 @@ public class AdminControllerTests : IDisposable
             "a",
             _appRegRepoMock.Object,
             _unitOfWorkMock.Object,
-            _auditServiceMock.Object,
+            _auditWriterMock.Object,
             cancellation.Token);
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -1768,10 +1750,10 @@ public class AdminControllerTests : IDisposable
         Assert.NotEqual("oldhash", app.AppSecretHash);
         _appRegRepoMock.Verify(r => r.GetByAppIdAsync("a", cancellation.Token), Times.Once);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(cancellation.Token), Times.Once);
-        _auditServiceMock.Verify(a => a.RecordActionAsync(
-            "app_secret_reset", "AppRegistration", "a",
-            AdminId, AdminName, "Admin reset app secret: MyApp", It.IsAny<string?>(),
-            It.IsAny<string?>(), null, null, cancellation.Token), Times.Once);
+        VerifyAuditEvent(
+            e => e.Action.Value == "app_secret_reset" &&
+                 e.SecurityDescription == "Admin reset the application secret for MyApp",
+            Times.Once());
     }
 
     #endregion
@@ -1784,7 +1766,7 @@ public class AdminControllerTests : IDisposable
         SetAdminUser();
         var result = await _controller.RevokeRefreshToken(
             new AdminRevokeRefreshTokenRequest(""),
-            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
@@ -1798,7 +1780,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.RevokeRefreshToken(
             new AdminRevokeRefreshTokenRequest("sometoken"),
-            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
@@ -1815,17 +1797,18 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.RevokeRefreshToken(
             new AdminRevokeRefreshTokenRequest("tok"),
-            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         Assert.True(Assert.IsType<OperationResponse>(ok.Value).Success);
         Assert.True(token.IsRevoked);
         _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
-        _auditServiceMock.Verify(a => a.RecordActionAsync(
-            "refresh_token_revoked", "RefreshToken", accountId.ToString(),
-            AdminId, AdminName, It.IsAny<string>(), It.IsAny<string?>(),
-            It.IsAny<string?>(), null, null, TestContext.Current.CancellationToken), Times.Once);
+        VerifyAuditEvent(
+            e => e.Action.Value == "refresh_token_revoked" &&
+                 e.Target.Type.Value == "refreshtoken" &&
+                 e.Target.Id == accountId.ToString(),
+            Times.Once());
     }
 
     [Fact]
@@ -1836,7 +1819,7 @@ public class AdminControllerTests : IDisposable
 
         var result = await _controller.RevokeRefreshToken(
             new AdminRevokeRefreshTokenRequest("  trimmed  "),
-            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditServiceMock.Object,
+            _refreshTokenRepoMock.Object, _unitOfWorkMock.Object, _auditWriterMock.Object,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
@@ -1949,108 +1932,20 @@ public class AdminControllerTests : IDisposable
 
     #endregion
 
-    #region GetAuditLogs
+}
 
-    [Fact]
-    public async Task GetAuditLogs_ReturnsPagedLogs()
-    {
-        SetAdminUser();
-        var logs = new List<AuditLogEntity>
-        {
-            new()
-            {
-                Id = Guid.NewGuid(), Action = "account_created", TargetType = "Account",
-                TargetId = "abc", ActorId = AdminId, ActorName = AdminName,
-                Description = "Created", ClientIp = "1.2.3.4", CorrelationId = "corr",
-                CreatedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
-            }
-        };
-        _auditLogRepoMock.Setup(r => r.QueryAsync(null, null, null, null, 20, 0, TestContext.Current.CancellationToken)).ReturnsAsync(logs);
-
-        var result = await _controller.GetAuditLogs(null, null, null, null, null, null, _auditLogRepoMock.Object, TestContext.Current.CancellationToken);
-
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
-        Assert.Single(response.Items);
-        Assert.Equal("account_created", response.Items[0].Action);
-        Assert.Equal("Account", response.Items[0].TargetType);
-        Assert.Equal("abc", response.Items[0].TargetId);
-        Assert.Equal(AdminId.ToString(), response.Items[0].ActorId);
-        Assert.Equal(AdminName, response.Items[0].ActorName);
-        Assert.Equal("1.2.3.4", response.Items[0].ClientIp);
-        Assert.Equal("corr", response.Items[0].CorrelationId);
-    }
-
-    [Fact]
-    public async Task GetAuditLogs_TotalComesFromRepositoryCount_NotPageSize()
-    {
-        SetAdminUser();
-        _auditLogRepoMock.Setup(r => r.CountAsync(null, null, null, null, TestContext.Current.CancellationToken)).ReturnsAsync(84);
-        _auditLogRepoMock.Setup(r => r.QueryAsync(null, null, null, null, 20, 0, TestContext.Current.CancellationToken))
-            .ReturnsAsync(new List<AuditLogEntity>
-            {
-                new() { Id = Guid.NewGuid(), Action = "account_created", TargetType = "Account", TargetId = "abc" }
-            });
-
-        var result = await _controller.GetAuditLogs(null, null, null, null, null, null, _auditLogRepoMock.Object, TestContext.Current.CancellationToken);
-
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
-        // Regression guard: as above, Total must be the filtered total count, not the current page
-        // count.
-        Assert.Equal(84, response.Total);
-        Assert.Single(response.Items);
-    }
-
-    [Fact]
-    public async Task GetAuditLogs_CountReceivesSameFiltersAsQuery()
-    {
-        SetAdminUser();
-        var actorId = Guid.NewGuid();
-        _auditLogRepoMock.Setup(r => r.CountAsync("login", "Session", "target1", actorId, TestContext.Current.CancellationToken)).ReturnsAsync(3);
-        _auditLogRepoMock.Setup(r => r.QueryAsync("login", "Session", "target1", actorId, 10, 10, TestContext.Current.CancellationToken))
-            .ReturnsAsync(new List<AuditLogEntity>());
-
-        await _controller.GetAuditLogs("login", "Session", "target1", actorId, 2, 10, _auditLogRepoMock.Object, TestContext.Current.CancellationToken);
-
-        _auditLogRepoMock.Verify(r => r.CountAsync("login", "Session", "target1", actorId, TestContext.Current.CancellationToken), Times.Once);
-    }
-
-    [Fact]
-    public async Task GetAuditLogs_WithFilters_PassesFiltersToRepository()
-    {
-        SetAdminUser();
-        var actorId = Guid.NewGuid();
-        _auditLogRepoMock.Setup(r => r.QueryAsync("login", "Session", "target1", actorId, 10, 10, TestContext.Current.CancellationToken))
-            .ReturnsAsync(new List<AuditLogEntity>());
-
-        var result = await _controller.GetAuditLogs("login", "Session", "target1", actorId, 2, 10, _auditLogRepoMock.Object, TestContext.Current.CancellationToken);
-
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
-        Assert.Equal(2, response.Page);
-        Assert.Equal(10, response.PageSize);
-        _auditLogRepoMock.Verify(r => r.QueryAsync("login", "Session", "target1", actorId, 10, 10, TestContext.Current.CancellationToken), Times.Once);
-    }
-
-    [Fact]
-    public async Task GetAuditLogs_WithInvalidPaging_DefaultsToValidValues()
-    {
-        SetAdminUser();
-        _auditLogRepoMock.Setup(r => r.QueryAsync(
-                null, null, null, null, It.IsAny<int>(), It.IsAny<int>(), TestContext.Current.CancellationToken))
-            .ReturnsAsync(new List<AuditLogEntity>());
-
-        var result = await _controller.GetAuditLogs(null, null, null, null, -1, 0, _auditLogRepoMock.Object, TestContext.Current.CancellationToken);
-
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<PagedResponse<AdminAuditLogItemResponse>>(ok.Value);
-        Assert.Equal(1, response.Page);
-        // pageSize < 1 is treated as unspecified and falls back to the default 20, matching
-        // /api/admin/users and /api/gateway/users/search. Before all endpoints used
-        // PageRequest.Normalize, this returned 1 because their implementations differed.
-        Assert.Equal(PageRequest.DefaultPageSize, response.PageSize);
-    }
-
-    #endregion
+/// <summary>
+/// Reads the shared <c>service_audit_logs</c> table, whose entity is internal to the library, via
+/// a portable quoted SQL projection (SQLite and PostgreSQL alike).
+/// </summary>
+internal static class SharedAuditRows
+{
+    public static async Task<bool> ExistsAsync(
+        IdentityDbContext context,
+        CancellationToken cancellationToken = default) =>
+        await context.Database
+            .SqlQuery<int>($"""
+                SELECT (CASE WHEN EXISTS (SELECT 1 FROM service_audit_logs) THEN 1 ELSE 0 END) AS "Value"
+                """)
+            .SingleAsync(cancellationToken) == 1;
 }

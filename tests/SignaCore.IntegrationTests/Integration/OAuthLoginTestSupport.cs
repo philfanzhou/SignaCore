@@ -592,12 +592,13 @@ internal static partial class OAuthLoginTestSupport
                 .AppendLine();
         }
 
-        foreach (var audit in await dbContext.AuditLogs.AsNoTracking()
-                     .OrderBy(row => row.Id).ToListAsync(TestContext.Current.CancellationToken))
+        foreach (var audit in (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                     dbContext, TestContext.Current.CancellationToken))
+                     .OrderBy(row => row.Id))
         {
             dump.Append("audit|").Append(audit.Id).Append('|').Append(audit.Action).Append('|')
                 .Append(audit.TargetType).Append('|').Append(audit.TargetId).Append('|')
-                .Append(audit.Description).AppendLine();
+                .Append(audit.SecurityDescription).AppendLine();
         }
 
         foreach (var continuation in await dbContext.AuthorizationRequests.AsNoTracking()

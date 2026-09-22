@@ -201,14 +201,3 @@ public sealed record AdminIdentitySessionItemResponse(
     long AbsoluteExpiresAt,
     long? RevokedAt,
     string? RevocationReason);
-
-public sealed record AdminAuditLogItemResponse(
-    string Action,
-    string TargetType,
-    string TargetId,
-    string? ActorId,
-    string? ActorName,
-    string? Description,
-    string? ClientIp,
-    string? CorrelationId,
-    long CreatedAt);

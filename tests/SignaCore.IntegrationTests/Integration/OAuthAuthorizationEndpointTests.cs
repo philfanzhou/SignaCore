@@ -298,12 +298,12 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
         var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
         var application = await dbContext.AppRegistrations.AsNoTracking()
             .SingleAsync(app => app.AppId == InteractiveAppId, TestContext.Current.CancellationToken);
-        var acceptedBefore = await dbContext.AuditLogs.AsNoTracking()
-            .LongCountAsync(
+        var acceptedBefore = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                dbContext, TestContext.Current.CancellationToken))
+            .LongCount(
                 log => log.Action == "oidc.authorize.validated"
-                    && log.Description == "accepted"
-                    && log.TargetId == application.Id.ToString("D"),
-                TestContext.Current.CancellationToken);
+                    && log.SecurityDescription == "accepted"
+                    && log.TargetId == application.Id.ToString("D"));
 
         var response = await GetAsync(Valid());
 
@@ -336,12 +336,12 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
             (continuation.ExpiresAt - continuation.CreatedAt).TotalMinutes);
         Assert.Null(continuation.ConsumedAt);
 
-        var acceptedAfter = await verifyContext.AuditLogs.AsNoTracking()
-            .LongCountAsync(
+        var acceptedAfter = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                verifyContext, TestContext.Current.CancellationToken))
+            .LongCount(
                 log => log.Action == "oidc.authorize.validated"
-                    && log.Description == "accepted"
-                    && log.TargetId == application.Id.ToString("D"),
-                TestContext.Current.CancellationToken);
+                    && log.SecurityDescription == "accepted"
+                    && log.TargetId == application.Id.ToString("D"));
         Assert.Equal(acceptedBefore + 1, acceptedAfter);
     }
 
@@ -390,10 +390,10 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
 
         using var scope = _fixture.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-        var records = await dbContext.AuditLogs
-            .AsNoTracking()
+        var records = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                dbContext, TestContext.Current.CancellationToken))
             .Where(log => log.Action.StartsWith("oidc.authorize"))
-            .ToListAsync(TestContext.Current.CancellationToken);
+            .ToList();
 
         Assert.NotEmpty(records);
         foreach (var record in records)
@@ -403,10 +403,11 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
                 record.Action,
                 record.TargetType,
                 record.TargetId,
-                record.ActorName,
-                record.Description,
-                record.BeforeSnapshot,
-                record.AfterSnapshot,
+                record.OperatorId,
+                record.OperatorDisplayName,
+                record.OperatorSource,
+                record.SecurityDescription,
+                record.ClientIp,
                 record.CorrelationId);
 
             Assert.DoesNotContain(CanaryState, serialized, StringComparison.Ordinal);
@@ -494,10 +495,9 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
             var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
             var continuations = dbContext.AuthorizationRequests.AsNoTracking()
                 .CountAsync(TestContext.Current.CancellationToken).GetAwaiter().GetResult();
-            var audits = dbContext.AuditLogs.AsNoTracking()
-                .CountAsync(
-                    log => log.Action == "oidc.authorize.validated" && log.Description == "accepted",
-                    TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+            var audits = SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    dbContext, TestContext.Current.CancellationToken).GetAwaiter().GetResult()
+                .Count(log => log.Action == "oidc.authorize.validated" && log.SecurityDescription == "accepted");
             return (continuations, audits);
         }
 
@@ -559,10 +559,9 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
             var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
             var continuations = dbContext.AuthorizationRequests.AsNoTracking()
                 .CountAsync(TestContext.Current.CancellationToken).GetAwaiter().GetResult();
-            var audits = dbContext.AuditLogs.AsNoTracking()
-                .CountAsync(
-                    log => log.Action == "oidc.authorize.validated" && log.Description == "accepted",
-                    TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+            var audits = SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    dbContext, TestContext.Current.CancellationToken).GetAwaiter().GetResult()
+                .Count(log => log.Action == "oidc.authorize.validated" && log.SecurityDescription == "accepted");
             return (continuations, audits);
         }
 
@@ -609,10 +608,9 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
             var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
             var continuations = dbContext.AuthorizationRequests.AsNoTracking()
                 .CountAsync(TestContext.Current.CancellationToken).GetAwaiter().GetResult();
-            var audits = dbContext.AuditLogs.AsNoTracking()
-                .CountAsync(
-                    log => log.Action == "oidc.authorize.validated" && log.Description == "accepted",
-                    TestContext.Current.CancellationToken).GetAwaiter().GetResult();
+            var audits = SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    dbContext, TestContext.Current.CancellationToken).GetAwaiter().GetResult()
+                .Count(log => log.Action == "oidc.authorize.validated" && log.SecurityDescription == "accepted");
             return (continuations, audits);
         }
 
@@ -1060,13 +1058,15 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
     {
         using var scope = _fixture.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-        var before = await dbContext.AuditLogs
-            .CountAsync(log => log.Action.StartsWith("oidc.authorize"), TestContext.Current.CancellationToken);
+        var before = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                dbContext, TestContext.Current.CancellationToken))
+            .Count(log => log.Action.StartsWith("oidc.authorize"));
 
         await GetAsync(Valid().With("client_id", "another-missing-client"));
 
-        var after = await dbContext.AuditLogs
-            .CountAsync(log => log.Action.StartsWith("oidc.authorize"), TestContext.Current.CancellationToken);
+        var after = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                dbContext, TestContext.Current.CancellationToken))
+            .Count(log => log.Action.StartsWith("oidc.authorize"));
         Assert.Equal(before, after);
     }
 

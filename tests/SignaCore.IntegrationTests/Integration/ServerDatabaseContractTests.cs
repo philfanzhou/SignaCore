@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -17,6 +18,8 @@ using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using Testcontainers.PostgreSql;
 using Xunit;
+
+using SignaCore.Tests.Integration;
 
 namespace SignaCore.IntegrationTests.Integration;
 
@@ -1421,8 +1424,8 @@ public sealed class ServerDatabaseContractTests
                     session.IdleExpiresAt.UtcTicks / 10);
                 Assert.Equal(2, await assertion.AuthorizationCodes
                     .CountAsync(row => row.IdentitySessionId == racedSessionId, cancellationToken));
-                Assert.Equal(2, await assertion.AuditLogs
-                    .CountAsync(row => row.Action == "oidc.authorize.validated", cancellationToken));
+                Assert.Equal(2, (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(assertion, cancellationToken))
+                    .Count(row => row.Action == "oidc.authorize.validated"));
             }
 
             // ---- Revocation commits first: the other instance's reuse answers null, no writes ----
@@ -1489,7 +1492,7 @@ public sealed class ServerDatabaseContractTests
             new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),
             new AuthorizationCodeStore(new AuthorizationCodeRepository(context), unitOfWork),
             new AccountRepository(context),
-            new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             unitOfWork,
             context);
         return await service.TryIssueAsync(
@@ -1562,16 +1565,16 @@ public sealed class ServerDatabaseContractTests
                 Assert.Equal("code_replay", session.RevocationReason);
                 // The audit ids are random Guids and the two instances commit independently,
                 // so the row order carries no meaning: the shape is the one-of-each set.
-                var audits = await assertion.AuditLogs.AsNoTracking()
+                var audits = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(assertion, cancellationToken))
                     .Where(row => row.TargetId == raced.CodeId.ToString("D"))
-                    .ToListAsync(cancellationToken);
+                    .ToList();
                 Assert.Equal(2, audits.Count);
                 Assert.Equal(
                     new HashSet<string>(StringComparer.Ordinal) { "oidc.code.redeemed", "oidc.code.replayed" },
                     audits.Select(row => row.Action).ToHashSet(StringComparer.Ordinal));
                 Assert.Contains(
                     "family:none",
-                    Assert.Single(audits, row => row.Action == "oidc.code.replayed").Description,
+                    Assert.Single(audits, row => row.Action == "oidc.code.replayed").SecurityDescription,
                     StringComparison.Ordinal);
             }
 
@@ -1588,9 +1591,8 @@ public sealed class ServerDatabaseContractTests
                 var codeRow = await assertion.AuthorizationCodes.AsNoTracking()
                     .SingleAsync(row => row.Id == revokedFirst.CodeId, cancellationToken);
                 Assert.Null(codeRow.ConsumedAt);
-                Assert.Empty(await assertion.AuditLogs.AsNoTracking()
-                    .Where(row => row.TargetId == revokedFirst.CodeId.ToString("D"))
-                    .ToListAsync(cancellationToken));
+                Assert.Empty((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(assertion, cancellationToken))
+                    .Where(row => row.TargetId == revokedFirst.CodeId.ToString("D")));
                 var session = await assertion.IdentitySessions.AsNoTracking()
                     .SingleAsync(row => row.Id == revokedFirst.SessionId, cancellationToken);
                 Assert.Equal("administrative", session.RevocationReason);
@@ -1627,9 +1629,9 @@ public sealed class ServerDatabaseContractTests
             await using (var assertion = new IdentityDbContext(options))
             {
                 var cancellationToken = TestContext.Current.CancellationToken;
-                var audits = await assertion.AuditLogs.AsNoTracking()
+                var audits = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(assertion, cancellationToken))
                     .Where(row => row.TargetId == retried.CodeId.ToString("D"))
-                    .ToListAsync(cancellationToken);
+                    .ToList();
                 var redeemed = Assert.Single(audits);
                 Assert.Equal("oidc.code.redeemed", redeemed.Action);
             }
@@ -1727,7 +1729,7 @@ public sealed class ServerDatabaseContractTests
                 NullLogger<RefreshTokenFamilyStore>.Instance),
             callbackService: null,
             new StaticRedemptionKeyManager(),
-            new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             new AuthMetrics(meterFactory.Object),
             unitOfWork,
             context,
@@ -1945,7 +1947,7 @@ public sealed class ServerDatabaseContractTests
             new AuthorizationCodeStore(new AuthorizationCodeRepository(context), unitOfWork),
             new LoginAttemptRepository(context),
             new AccountLoginInfoService(accountRepository),
-            new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            new AuditService(new LoginHistoryRepository(context)),
             unitOfWork,
             context);
         return await service.CompleteAsync(
@@ -3115,7 +3117,6 @@ public sealed class ServerDatabaseContractTests
                 await migrator.MigrateAsync(preAlignmentMigration, TestContext.Current.CancellationToken);
 
                 var userAgent = new string('U', 600) + "-upgrade-tail";
-                var description = new string('D', 1500) + "-upgrade-tail";
                 var remark = new string('R', 800) + "-upgrade-tail";
                 var accountId = Guid.NewGuid();
                 await context.Database.ExecuteSqlInterpolatedAsync($"""
@@ -3130,11 +3131,6 @@ public sealed class ServerDatabaseContractTests
                          {"Wrong username or password"}, {userAgent}, {"upgrade-app"},
                          {DateTimeOffset.UtcNow});
 
-                    INSERT INTO audit_logs
-                        (id, action, target_type, target_id, description, created_at)
-                    VALUES
-                        ({Guid.NewGuid()}, {"login.failed"}, {"LoginHistory"}, {"overlong-upgrade-target"},
-                         {description}, {DateTimeOffset.UtcNow});
                     """, cancellationToken: TestContext.Current.CancellationToken);
 
                 await migrator.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -3145,12 +3141,20 @@ public sealed class ServerDatabaseContractTests
                 var historyAgent = await context.Database.SqlQuery<string>(
                     $"SELECT user_agent AS \"Value\" FROM login_histories WHERE username = {"overlong-upgrade-user"}")
                     .SingleAsync(TestContext.Current.CancellationToken);
-                var auditDescription = await context.Database.SqlQuery<string>(
-                    $"SELECT description AS \"Value\" FROM audit_logs WHERE action = {"login.failed"}")
-                    .SingleAsync(TestContext.Current.CancellationToken);
                 Assert.Equal(remark, accountRemark);
                 Assert.Equal(userAgent, historyAgent);
-                Assert.Equal(description, auditDescription);
+                // The forward drop migration removed the legacy audit table with the alignment's
+                // audit columns; its history survives only in deployment backups.
+                await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
+                await using (var auditTableCommand = context.Database.GetDbConnection().CreateCommand())
+                {
+                    auditTableCommand.CommandText =
+                        "SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public' AND tablename = 'audit_logs'";
+                    Assert.Equal(
+                        0L,
+                        Convert.ToInt64(await auditTableCommand.ExecuteScalarAsync(
+                            TestContext.Current.CancellationToken)));
+                }
 
                 // The column is physically text before and after: the alignment is a metadata
                 // statement about the model, not a schema change.
@@ -3258,9 +3262,7 @@ public sealed class ServerDatabaseContractTests
             await using var context = new IdentityDbContext(options);
             var recorder = new SignaCore.Host.Services.OidcLoginFailureRecorder(
                 new LoginAttemptRepository(context),
-                new AuditService(
-                    new LoginHistoryRepository(context),
-                    new AuditLogRepository(context)),
+                new AuditService(new LoginHistoryRepository(context)),
                 new EfCoreUnitOfWork(context),
                 context,
                 NullLogger<SignaCore.Host.Services.OidcLoginFailureRecorder>.Instance);

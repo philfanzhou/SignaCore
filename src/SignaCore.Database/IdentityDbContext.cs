@@ -26,7 +26,6 @@ public class IdentityDbContext : DbContext, IServiceDbContext
     public DbSet<OtpEntity> Otps => Set<OtpEntity>();
     public DbSet<LoginAttemptEntity> LoginAttempts => Set<LoginAttemptEntity>();
     public DbSet<LoginHistoryEntity> LoginHistories => Set<LoginHistoryEntity>();
-    public DbSet<AuditLogEntity> AuditLogs => Set<AuditLogEntity>();
     public DbSet<LdapCredentialEntity> LdapCredentials => Set<LdapCredentialEntity>();
     public DbSet<AppLdapAccessEntity> AppLdapAccesses => Set<AppLdapAccessEntity>();
     public DbSet<AppSmsAccessEntity> AppSmsAccesses => Set<AppSmsAccessEntity>();
@@ -589,28 +588,6 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.HasIndex(e => e.ClientIp);
         });
 
-        modelBuilder.Entity<AuditLogEntity>(entity =>
-        {
-            entity.ToTable("audit_logs");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id");
-            entity.Property(e => e.Action).HasColumnName("action").HasMaxLength(IdentityConstants.MaxAuditActionLength);
-            entity.Property(e => e.TargetType).HasColumnName("target_type").HasMaxLength(IdentityConstants.MaxAuditTargetTypeLength);
-            entity.Property(e => e.TargetId).HasColumnName("target_id").HasMaxLength(64);
-            entity.Property(e => e.ActorId).HasColumnName("actor_id");
-            entity.Property(e => e.ActorName).HasColumnName("actor_name").HasMaxLength(IdentityConstants.MaxUsernameLength);
-            entity.Property(e => e.BeforeSnapshot).HasColumnName("before_snapshot").HasMaxLength(IdentityConstants.MaxSnapshotLength);
-            entity.Property(e => e.AfterSnapshot).HasColumnName("after_snapshot").HasMaxLength(IdentityConstants.MaxSnapshotLength);
-            entity.Property(e => e.Description).HasColumnName("description").HasMaxLength(IdentityConstants.MaxAuditDescriptionLength);
-            entity.Property(e => e.ClientIp).HasColumnName("client_ip").HasMaxLength(IdentityConstants.MaxClientIpLength);
-            entity.Property(e => e.CorrelationId).HasColumnName("correlation_id").HasMaxLength(64);
-            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
-            entity.HasIndex(e => new { e.TargetType, e.TargetId, e.CreatedAt });
-            entity.HasIndex(e => new { e.ActorId, e.CreatedAt });
-            entity.HasIndex(e => new { e.Action, e.CreatedAt });
-            entity.HasIndex(e => e.CreatedAt);
-        });
-
         // ServiceMantle shared installation mapping (service_installations). Applied last so it never
         // interferes with the SignaCore-owned configuration above. ServiceInstallationEntity uses
         // DateTime, so its *_at_utc columns keep the library's provider-default storage rather than
@@ -641,7 +618,7 @@ public class IdentityDbContext : DbContext, IServiceDbContext
     }
 
     /// <summary>
-    /// The 37 PostgreSQL columns the early migrations created as <c>TEXT</c> with a
+    /// The 28 PostgreSQL columns the early migrations created as <c>TEXT</c> with a
     /// <c>maxLength</c> the runtime never enforced. The model now states the physical fact
     /// (<c>text</c>) for exactly these columns — the <c>HasMaxLength</c> metadata above stays
     /// untouched — so the snapshot and every future generated <c>AlterColumn</c> stop disagreeing
@@ -659,15 +636,6 @@ public class IdentityDbContext : DbContext, IServiceDbContext
         (typeof(AppRegistrationEntity), nameof(AppRegistrationEntity.AppName)),
         (typeof(AppRegistrationEntity), nameof(AppRegistrationEntity.AppSecretHash)),
         (typeof(AppRegistrationEntity), nameof(AppRegistrationEntity.CallbackUrl)),
-        (typeof(AuditLogEntity), nameof(AuditLogEntity.Action)),
-        (typeof(AuditLogEntity), nameof(AuditLogEntity.ActorName)),
-        (typeof(AuditLogEntity), nameof(AuditLogEntity.AfterSnapshot)),
-        (typeof(AuditLogEntity), nameof(AuditLogEntity.BeforeSnapshot)),
-        (typeof(AuditLogEntity), nameof(AuditLogEntity.ClientIp)),
-        (typeof(AuditLogEntity), nameof(AuditLogEntity.CorrelationId)),
-        (typeof(AuditLogEntity), nameof(AuditLogEntity.Description)),
-        (typeof(AuditLogEntity), nameof(AuditLogEntity.TargetId)),
-        (typeof(AuditLogEntity), nameof(AuditLogEntity.TargetType)),
         (typeof(LoginAttemptEntity), nameof(LoginAttemptEntity.Username)),
         (typeof(LoginHistoryEntity), nameof(LoginHistoryEntity.AppId)),
         (typeof(LoginHistoryEntity), nameof(LoginHistoryEntity.AuthMethod)),

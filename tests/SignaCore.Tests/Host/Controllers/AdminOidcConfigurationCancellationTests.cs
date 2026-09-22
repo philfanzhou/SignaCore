@@ -18,6 +18,10 @@ using SignaCore.Host.Controllers;
 using SignaCore.Host.Models;
 using Xunit;
 
+using ServiceMantle.Audit;
+using ServiceMantle.Persistence.EntityFrameworkCore;
+using SignaCore.Tests.TestSupport;
+
 namespace SignaCore.Tests.Host.Controllers;
 
 /// <summary>
@@ -225,9 +229,9 @@ public sealed class AdminOidcConfigurationCancellationTests
         }
 
         database.Context.ChangeTracker.Clear();
-        IAuditService auditService = boundary == "before-commit"
-            ? new CancelingActionAuditService(CreateAuditService(database.Context), cancellation)
-            : CreateAuditService(database.Context);
+        IManagementAuditWriter auditWriter = boundary == "before-commit"
+            ? new CancelingActionAuditWriter(CreateAuditWriter(database.Context), cancellation)
+            : CreateAuditWriter(database.Context);
         var appRegistrations = new AppRegistrationRepository(database.Context);
         var unitOfWork = new EfCoreUnitOfWork(database.Context);
         if (interceptor != null) interceptor.Armed = true;
@@ -242,7 +246,7 @@ public sealed class AdminOidcConfigurationCancellationTests
                     new AdminAddRedirectUrisRequest("Redirect", ["https://client.example.test/second"]),
                     appRegistrations,
                     unitOfWork,
-                    auditService,
+                    auditWriter,
                     ProductionEnvironment(),
                     cancellation.Token),
                 "add-trust" => await controller.AddExchangeTrust(
@@ -250,7 +254,7 @@ public sealed class AdminOidcConfigurationCancellationTests
                     new AdminAddExchangeTrustRequest(SourceAppId),
                     appRegistrations,
                     trustRepository,
-                    auditService,
+                    auditWriter,
                     unitOfWork,
                     cancellation.Token),
                 _ => await controller.RemoveExchangeTrust(
@@ -258,7 +262,7 @@ public sealed class AdminOidcConfigurationCancellationTests
                     SourceAppId,
                     appRegistrations,
                     trustRepository,
-                    auditService,
+                    auditWriter,
                     unitOfWork,
                     database.Context,
                     cancellation.Token)
@@ -287,32 +291,22 @@ public sealed class AdminOidcConfigurationCancellationTests
                 break;
         }
 
-        var audits = await database.Context.AuditLogs
-            .AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken);
+        var audits = await SharedAuditTable.ReadAsync(database.Context, TestContext.Current.CancellationToken);
         if (committed) Assert.Single(audits);
         else Assert.Empty(audits);
     }
 
-    private static Mock<IAuditService> CreateAuditMock(CancellationToken expectedToken)
-    {
-        var audit = new Mock<IAuditService>(MockBehavior.Strict);
-        audit.Setup(service => service.RecordActionAsync(
-                It.IsAny<string>(), "AppRegistration", AppId, It.IsAny<Guid?>(), It.IsAny<string?>(),
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(),
-                It.IsAny<object?>(), expectedToken))
-            .Returns(Task.CompletedTask);
-        return audit;
-    }
+    private static Mock<IManagementAuditWriter> CreateAuditMock(CancellationToken expectedToken) =>
+        CreateAuditMock(expectedToken, action: null);
 
-    private static Mock<IAuditService> CreateAuditMock(CancellationToken expectedToken, string action)
+    private static Mock<IManagementAuditWriter> CreateAuditMock(CancellationToken expectedToken, string? action)
     {
-        var audit = new Mock<IAuditService>(MockBehavior.Strict);
-        audit.Setup(service => service.RecordActionAsync(
-                action, "AppRegistration", AppId, It.IsAny<Guid?>(), It.IsAny<string?>(),
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(),
-                It.IsAny<object?>(), expectedToken))
-            .Returns(Task.CompletedTask);
+        var audit = new Mock<IManagementAuditWriter>(MockBehavior.Strict);
+        audit.Setup(service => service.RecordAsync(
+                It.Is<ManagementAuditEvent>(auditEvent =>
+                    action == null || auditEvent.Action.Value == action),
+                expectedToken))
+                    .Returns(new ValueTask<ManagementAuditRecord>(default(ManagementAuditRecord)));
         return audit;
     }
 
@@ -323,8 +317,8 @@ public sealed class AdminOidcConfigurationCancellationTests
         return controller;
     }
 
-    private static AuditService CreateAuditService(IdentityDbContext context) =>
-        new(new LoginHistoryRepository(context), new AuditLogRepository(context));
+    private static EfCoreManagementAuditWriter<IdentityDbContext> CreateAuditWriter(
+        IdentityDbContext context) => new(context);
 
     private static IWebHostEnvironment ProductionEnvironment()
     {
@@ -448,42 +442,16 @@ public sealed class AdminOidcConfigurationCancellationTests
     /// Cancels while the audit entry is being staged, which is the last boundary before the single
     /// commit that carries the change and its audit entry.
     /// </summary>
-    private sealed class CancelingActionAuditService(IAuditService inner, CancellationTokenSource cancellation)
-        : IAuditService
+    private sealed class CancelingActionAuditWriter(
+        IManagementAuditWriter inner, CancellationTokenSource cancellation) : IManagementAuditWriter
     {
-        public Task RecordLoginAsync(
-            Guid? accountId,
-            string username,
-            string authMethod,
-            string eventType,
-            string? clientIp,
-            string? userAgent,
-            string? failureReason = null,
-            string? appId = null,
-            string? correlationId = null,
-            CancellationToken cancellationToken = default) =>
-            inner.RecordLoginAsync(
-                accountId, username, authMethod, eventType, clientIp, userAgent, failureReason, appId,
-                correlationId, cancellationToken);
-
-        public Task RecordActionAsync(
-            string action,
-            string targetType,
-            string targetId,
-            Guid? actorId,
-            string? actorName,
-            string? description,
-            string? clientIp = null,
-            string? correlationId = null,
-            object? before = null,
-            object? after = null,
+        public ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
             CancellationToken cancellationToken = default)
         {
             Assert.Equal(cancellation.Token, cancellationToken);
             cancellation.Cancel();
-            return inner.RecordActionAsync(
-                action, targetType, targetId, actorId, actorName, description, clientIp, correlationId,
-                before, after, cancellationToken);
+            return inner.RecordAsync(auditEvent, cancellationToken);
         }
     }
 

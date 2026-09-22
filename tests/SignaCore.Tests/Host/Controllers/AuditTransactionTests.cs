@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using ServiceMantle.Audit;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -29,6 +30,8 @@ using SignaCore.Host.Models;
 using SignaCore.Host.Services;
 using Xunit;
 
+using SignaCore.Tests.TestSupport;
+
 namespace SignaCore.Tests.Host.Controllers;
 
 public sealed class AuditTransactionTests
@@ -40,7 +43,7 @@ public sealed class AuditTransactionTests
         await database.Context.Database.ExecuteSqlRawAsync(
             """
             CREATE TRIGGER fail_audit_insert
-            BEFORE INSERT ON audit_logs
+            BEFORE INSERT ON service_audit_logs
             BEGIN
                 SELECT RAISE(ABORT, 'audit insert failed');
             END;
@@ -54,12 +57,12 @@ public sealed class AuditTransactionTests
             new AppRegistrationRepository(database.Context),
             new CallbackUrlValidator(),
             new EfCoreUnitOfWork(database.Context),
-            CreateAuditService(database.Context),
+            CreateAuditWriter(database.Context),
             TestContext.Current.CancellationToken));
 
         database.Context.ChangeTracker.Clear();
         Assert.False(await database.Context.AppRegistrations.AnyAsync(TestContext.Current.CancellationToken));
-        Assert.False(await database.Context.AuditLogs.AnyAsync(TestContext.Current.CancellationToken));
+        Assert.False(await SharedAuditTable.AnyAsync(database.Context, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -83,12 +86,12 @@ public sealed class AuditTransactionTests
             new AppRegistrationRepository(database.Context),
             new CallbackUrlValidator(),
             new EfCoreUnitOfWork(database.Context),
-            CreateAuditService(database.Context),
+            CreateAuditWriter(database.Context),
             TestContext.Current.CancellationToken));
 
         database.Context.ChangeTracker.Clear();
         Assert.False(await database.Context.AppRegistrations.AnyAsync(TestContext.Current.CancellationToken));
-        Assert.False(await database.Context.AuditLogs.AnyAsync(TestContext.Current.CancellationToken));
+        Assert.False(await SharedAuditTable.AnyAsync(database.Context, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -917,7 +920,7 @@ public sealed class AuditTransactionTests
             sourceApp.AppId,
             new AppRegistrationRepository(firstContext),
             new CoordinatedExchangeTrustRepository(firstContext, bothDeletesStaged),
-            CreateAuditService(firstContext),
+            CreateAuditWriter(firstContext),
             new OrderedUnitOfWork(firstContext, Task.CompletedTask, firstSaveCompleted),
             firstContext,
             TestContext.Current.CancellationToken);
@@ -926,7 +929,7 @@ public sealed class AuditTransactionTests
             sourceApp.AppId,
             new AppRegistrationRepository(secondContext),
             new CoordinatedExchangeTrustRepository(secondContext, bothDeletesStaged),
-            CreateAuditService(secondContext),
+            CreateAuditWriter(secondContext),
             new OrderedUnitOfWork(secondContext, firstSaveCompleted.Task),
             secondContext,
             TestContext.Current.CancellationToken);
@@ -940,11 +943,11 @@ public sealed class AuditTransactionTests
         await using var verificationContext = database.CreateContext();
         Assert.False(await verificationContext.AppExchangeTrusts
             .AnyAsync(TestContext.Current.CancellationToken));
-        var audit = await verificationContext.AuditLogs
-            .SingleAsync(TestContext.Current.CancellationToken);
+        var audit = Assert.Single(await SharedAuditTable.ReadAsync(
+            verificationContext, TestContext.Current.CancellationToken));
         Assert.Equal("app_exchange_trust_removed", audit.Action);
         Assert.Equal(acceptingApp.AppId, audit.TargetId);
-        Assert.Contains(sourceApp.AppId, audit.BeforeSnapshot, StringComparison.Ordinal);
+        Assert.Contains(sourceApp.AppId, audit.SecurityDescription, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -956,7 +959,7 @@ public sealed class AuditTransactionTests
         await using var database = await SqliteTestDatabase.CreateAsync(interceptor);
         var targets = await SeedRevocationTargetsAsync(database.Context);
 
-        var auditService = CreateTokenAssertingAuditService(database.Context);
+        var auditService = CreateTokenAssertingAuditWriter(database.Context);
         var result = await CreateAdminController().RevokeSmsUser(
             targets.App.AppId,
             targets.UserLoginId,
@@ -978,7 +981,8 @@ public sealed class AuditTransactionTests
             .Where(token => token.Id == targets.ActiveSmsTokenId)
             .Select(token => token.IsRevoked)
             .SingleAsync(TestContext.Current.CancellationToken));
-        var audit = await database.Context.AuditLogs.SingleAsync(TestContext.Current.CancellationToken);
+        var audit = Assert.Single(await SharedAuditTable.ReadAsync(
+            database.Context, TestContext.Current.CancellationToken));
         Assert.Equal("app_sms_user_revoked", audit.Action);
         Assert.Equal(targets.App.AppId, audit.TargetId);
     }
@@ -990,7 +994,7 @@ public sealed class AuditTransactionTests
         var targets = await SeedRevocationTargetsAsync(database.Context);
         await FailAuditLogInsertAsync(database.Context);
 
-        var audit = CreateTokenAssertingAuditService(database.Context);
+        var audit = CreateTokenAssertingAuditWriter(database.Context);
         await Assert.ThrowsAsync<DbUpdateException>(() => CreateAdminController().RevokeSmsUser(
             targets.App.AppId,
             targets.UserLoginId,
@@ -1013,7 +1017,7 @@ public sealed class AuditTransactionTests
         var targets = await SeedRevocationTargetsAsync(database.Context);
         await FailAuditLogInsertAsync(database.Context);
 
-        var audit = CreateTokenAssertingAuditService(database.Context);
+        var audit = CreateTokenAssertingAuditWriter(database.Context);
         await Assert.ThrowsAsync<DbUpdateException>(() => CreateAdminController().RevokeWechatUser(
             targets.App.AppId,
             targets.UserLoginId,
@@ -1036,7 +1040,7 @@ public sealed class AuditTransactionTests
         var targets = await SeedRevocationTargetsAsync(database.Context);
         await FailAuditLogInsertAsync(database.Context);
 
-        var audit = CreateTokenAssertingAuditService(database.Context);
+        var audit = CreateTokenAssertingAuditWriter(database.Context);
         await Assert.ThrowsAsync<DbUpdateException>(() => CreateAdminController().RevokeLdapUser(
             targets.App.AppId,
             targets.LdapCredentialId,
@@ -1070,7 +1074,7 @@ public sealed class AuditTransactionTests
             configureProvider: options => options.ExecutionStrategy(
                 dependencies => new RecordingExecutionStrategy(dependencies, observedTokens)));
         var targets = await SeedRevocationTargetsAsync(database.Context);
-        var audit = CreateTokenAssertingAuditService(database.Context, cancellation.Token);
+        var audit = CreateTokenAssertingAuditWriter(database.Context, cancellation.Token);
         observedTokens.Clear();
 
         var result = await InvokeRevocationAsync(
@@ -1081,7 +1085,8 @@ public sealed class AuditTransactionTests
         Assert.NotEmpty(observedTokens);
         Assert.All(observedTokens, token => Assert.Equal(cancellation.Token, token));
         database.Context.ChangeTracker.Clear();
-        var audited = await database.Context.AuditLogs.SingleAsync(TestContext.Current.CancellationToken);
+        var audited = Assert.Single(await SharedAuditTable.ReadAsync(
+            database.Context, TestContext.Current.CancellationToken));
         Assert.Equal($"app_{provider}_user_revoked", audited.Action);
     }
 
@@ -1107,7 +1112,7 @@ public sealed class AuditTransactionTests
                 targets.App.AppId,
                 targets.UserLoginId,
                 database.Context,
-                CreateTokenAssertingAuditService(database.Context, cancellation.Token),
+                CreateTokenAssertingAuditWriter(database.Context, cancellation.Token),
                 cancellation.Token));
 
         Assert.Equal(cancellation.Token, exception.CancellationToken);
@@ -1123,22 +1128,22 @@ public sealed class AuditTransactionTests
     private static Task<IActionResult> InvokeRevocationAsync(
         string provider,
         IdentityDbContext context,
-        IAuditService auditService,
+        IManagementAuditWriter auditWriter,
         RevocationTargets targets,
         CancellationToken cancellationToken) => provider switch
         {
             "sms" => CreateAdminController().RevokeSmsUser(
-                targets.App.AppId, targets.UserLoginId, context, auditService, cancellationToken),
+                targets.App.AppId, targets.UserLoginId, context, auditWriter, cancellationToken),
             "wechat" => CreateAdminController().RevokeWechatUser(
-                targets.App.AppId, targets.UserLoginId, context, auditService, cancellationToken),
+                targets.App.AppId, targets.UserLoginId, context, auditWriter, cancellationToken),
             "ldap" => CreateAdminController().RevokeLdapUser(
-                targets.App.AppId, targets.LdapCredentialId, context, auditService, cancellationToken),
+                targets.App.AppId, targets.LdapCredentialId, context, auditWriter, cancellationToken),
             _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unknown revocation provider.")
         };
 
-    private static TokenAssertingAuditService CreateTokenAssertingAuditService(
+    private static TokenAssertingAuditWriter CreateTokenAssertingAuditWriter(
         IdentityDbContext context, CancellationToken? expectedToken = null) =>
-        new(CreateAuditService(context), expectedToken ?? TestContext.Current.CancellationToken);
+        new(CreateAuditWriter(context), expectedToken ?? TestContext.Current.CancellationToken);
 
     private static async Task AssertRevocationRolledBackAsync(IdentityDbContext context, Guid tokenId)
     {
@@ -1147,14 +1152,14 @@ public sealed class AuditTransactionTests
             .Where(token => token.Id == tokenId)
             .Select(token => token.IsRevoked)
             .SingleAsync(TestContext.Current.CancellationToken));
-        Assert.False(await context.AuditLogs.AnyAsync(TestContext.Current.CancellationToken));
+        Assert.False(await SharedAuditTable.AnyAsync(context, TestContext.Current.CancellationToken));
     }
 
     private static Task FailAuditLogInsertAsync(IdentityDbContext context) =>
         context.Database.ExecuteSqlRawAsync(
             """
             CREATE TRIGGER fail_audit_insert
-            BEFORE INSERT ON audit_logs
+            BEFORE INSERT ON service_audit_logs
             BEGIN
                 SELECT RAISE(ABORT, 'audit insert failed');
             END;
@@ -1264,47 +1269,18 @@ public sealed class AuditTransactionTests
     /// Fails the test when an audit write observes anything other than the token the caller passed
     /// in, so a revocation path falling back to the default token cannot pass unnoticed.
     /// </summary>
-    private sealed class TokenAssertingAuditService(IAuditService inner, CancellationToken expectedToken)
-        : IAuditService
+    private sealed class TokenAssertingAuditWriter(
+        IManagementAuditWriter inner, CancellationToken expectedToken) : IManagementAuditWriter
     {
         public int ActionCalls { get; private set; }
 
-        public Task RecordLoginAsync(
-            Guid? accountId,
-            string username,
-            string authMethod,
-            string eventType,
-            string? clientIp,
-            string? userAgent,
-            string? failureReason = null,
-            string? appId = null,
-            string? correlationId = null,
-            CancellationToken cancellationToken = default)
-        {
-            Assert.Equal(expectedToken, cancellationToken);
-            return inner.RecordLoginAsync(
-                accountId, username, authMethod, eventType, clientIp, userAgent, failureReason, appId,
-                correlationId, cancellationToken);
-        }
-
-        public Task RecordActionAsync(
-            string action,
-            string targetType,
-            string targetId,
-            Guid? actorId,
-            string? actorName,
-            string? description,
-            string? clientIp = null,
-            string? correlationId = null,
-            object? before = null,
-            object? after = null,
+        public ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
             CancellationToken cancellationToken = default)
         {
             Assert.Equal(expectedToken, cancellationToken);
             ActionCalls++;
-            return inner.RecordActionAsync(
-                action, targetType, targetId, actorId, actorName, description, clientIp, correlationId,
-                before, after, cancellationToken);
+            return inner.RecordAsync(auditEvent, cancellationToken);
         }
     }
 
@@ -1454,7 +1430,10 @@ public sealed class AuditTransactionTests
     }
 
     private static AuditService CreateAuditService(IdentityDbContext context) =>
-        new(new LoginHistoryRepository(context), new AuditLogRepository(context));
+        new(new LoginHistoryRepository(context));
+
+    private static EfCoreManagementAuditWriter<IdentityDbContext> CreateAuditWriter(
+        IdentityDbContext context) => new(context);
 
     private static AppRegistrationEntity CreateSmsApp()
     {
@@ -1760,30 +1739,6 @@ public sealed class AuditTransactionTests
                 cancellationToken);
         }
 
-        public Task RecordActionAsync(
-            string action,
-            string targetType,
-            string targetId,
-            Guid? actorId,
-            string? actorName,
-            string? description,
-            string? clientIp = null,
-            string? correlationId = null,
-            object? before = null,
-            object? after = null,
-            CancellationToken cancellationToken = default) =>
-            inner.RecordActionAsync(
-                action,
-                targetType,
-                targetId,
-                actorId,
-                actorName,
-                description,
-                clientIp,
-                correlationId,
-                before,
-                after,
-                cancellationToken);
     }
 
     private static AppRegistrationEntity CreateApp(string appId) => new()

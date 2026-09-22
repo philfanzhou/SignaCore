@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Audit;
 using SignaCore.Database;
+using SignaCore.Host.Audit;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
@@ -28,7 +30,7 @@ public sealed class OidcAuthorizationSessionReuseService(
     IIdentitySessionStore identitySessions,
     IAuthorizationCodeStore authorizationCodes,
     IAccountRepository accounts,
-    IAuditService auditService,
+    IManagementAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
     IdentityDbContext dbContext)
 {
@@ -109,7 +111,9 @@ public sealed class OidcAuthorizationSessionReuseService(
                 now,
                 operationToken);
 
-            await auditService.RecordActionAsync(
+            await ManagementActionAudit.RecordAsync(
+                auditWriter,
+                ManagementActionAudit.SystemSource,
                 AuditAction,
                 AuditTargetType,
                 accepted.ApplicationId.ToString("D"),

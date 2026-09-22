@@ -12,6 +12,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
 using Npgsql;
+using ServiceMantle.Audit;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -21,6 +23,8 @@ using SignaCore.Domain.Services;
 using SignaCore.Host.Services;
 using Testcontainers.PostgreSql;
 using Xunit;
+
+using SignaCore.Tests.Integration;
 
 namespace SignaCore.IntegrationTests.Integration;
 
@@ -69,7 +73,7 @@ public sealed class LogoutPreparationDatabaseContractTests
     public async Task Prepare_ActualInsertAndPrecommitFailuresRollbackExecutedSql(string provider)
     {
         await using var harness = await Harness.Create(provider);
-        foreach (var target in new[] { "audit_logs", "logout_requests", "precommit", "precommit-cancel" })
+        foreach (var target in new[] { "service_audit_logs", "logout_requests", "precommit", "precommit-cancel" })
         {
             await harness.Clear();
             using var caller = new CancellationTokenSource();
@@ -98,7 +102,7 @@ public sealed class LogoutPreparationDatabaseContractTests
             await harness.AssertPairs(0);
             // A completely new successful operation cannot flush the failed graph from its scope.
             harness.Fault.Configure("", "return", null);
-            if (target is "audit_logs" or "logout_requests")
+            if (target is "service_audit_logs" or "logout_requests")
             {
                 await using var context = harness.Context();
                 await context.Database.ExecuteSqlRawAsync(provider == "SQLite" ? "DROP TRIGGER fail_insert" : $"DROP TRIGGER fail_insert ON {target}", TestContext.Current.CancellationToken);
@@ -139,7 +143,11 @@ public sealed class LogoutPreparationDatabaseContractTests
         await using var harness = await Harness.Create(provider);
         using var outerScope = harness.Services.CreateScope();
         var unrelated = outerScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-        unrelated.AuditLogs.Add(new AuditLogEntity { Id = Guid.NewGuid(), Action = "unrelated", TargetType = "other", TargetId = "other", CreatedAt = DateTimeOffset.UtcNow });
+        await new EfCoreManagementAuditWriter<IdentityDbContext>(unrelated).RecordAsync(
+            ManagementAuditEvent.Create(
+                ManagementAuditOperator.Create(WellKnownManagementAuditOperatorSources.System),
+                ManagementAuditAction.Parse("unrelated"),
+                ManagementAuditTarget.Create(ManagementAuditTargetType.Parse("other"), "other")));
         foreach (var mixed in new[] { false, true })
         {
             await harness.Clear();
@@ -195,20 +203,11 @@ public sealed class LogoutPreparationDatabaseContractTests
                     });
                 return mock.Object;
             });
-            services.AddScoped<IAuditService>(provider =>
+            services.AddScoped<IManagementAuditWriter>(provider =>
             {
                 var context = provider.GetRequiredService<IdentityDbContext>();
-                var real = new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context));
-                var mock = new Mock<IAuditService>(MockBehavior.Strict);
-                mock.Setup(audit => audit.RecordActionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
-                    .Returns(async (string action, string type, string id, Guid? actor, string? name, string? description, string? ip, string? correlation, object? before, object? after, CancellationToken token) =>
-                    {
-                        Interlocked.Increment(ref Fault.AuditCalls);
-                        await real.RecordActionAsync(action, type, id, actor, name, description, ip, correlation, before, after, token);
-                        Fault.AuditIds.TryAdd(context.AuditLogs.Local.Single().Id, 0);
-                        Fault.Complete("audit");
-                    });
-                return mock.Object;
+                var real = new EfCoreManagementAuditWriter<IdentityDbContext>(context);
+                return new FaultedAuditWriter(real, Fault);
             });
             services.AddScoped<IUnitOfWork>(provider => new ObservedSave(provider.GetRequiredService<IdentityDbContext>(), Fault));
             Services = services.BuildServiceProvider();
@@ -252,18 +251,20 @@ public sealed class LogoutPreparationDatabaseContractTests
             Fault.Configure("", "return", null); Log.Entries.Clear();
             await using var context = Context();
             await context.LogoutRequests.ExecuteDeleteAsync(TestContext.Current.CancellationToken);
-            await context.AuditLogs.ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+            await context.Database.ExecuteSqlRawAsync("DELETE FROM service_audit_logs", TestContext.Current.CancellationToken);
         }
         public async Task AssertPairs(int count)
         {
             await using var context = Context();
             var requests = await context.LogoutRequests.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken);
-            var audits = await context.AuditLogs.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken);
+            var audits = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken))
+                .Where(audit => audit.Action == "oidc.logout.prepared")
+                .ToList();
             Assert.Equal(count, requests.Count); Assert.Equal(count, audits.Count);
             foreach (var request in requests)
             {
                 var audit = Assert.Single(audits, audit => audit.TargetId == request.Id.ToString("D"));
-                Assert.Equal("oidc.logout.prepared", audit.Action); Assert.Equal("LogoutRequest", audit.TargetType);
+                Assert.Equal("oidc.logout.prepared", audit.Action); Assert.Equal("logoutrequest", audit.TargetType);
             }
             var dump = JsonSerializer.Serialize(audits) + string.Join("\n", Log.Entries);
             foreach (var secret in new[] { hint, Redirect, State, Canary }) Assert.False(dump.Contains(secret, StringComparison.Ordinal));
@@ -395,5 +396,24 @@ public sealed class LogoutPreparationDatabaseContractTests
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => Entries.Enqueue(formatter(state, exception) + exception);
+    }
+
+    /// <summary>
+    /// Counts each staged shared event, delegates to the real writer, records the staged row's id,
+    /// and reports the fault boundary.
+    /// </summary>
+    private sealed class FaultedAuditWriter(
+        EfCoreManagementAuditWriter<IdentityDbContext> inner, FaultPlan fault) : IManagementAuditWriter
+    {
+        public async ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref fault.AuditCalls);
+            var record = await inner.RecordAsync(auditEvent, cancellationToken);
+            fault.AuditIds.TryAdd(record.Id, 0);
+            fault.Complete("audit");
+            return record;
+        }
     }
 }

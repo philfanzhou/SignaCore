@@ -79,6 +79,57 @@ internal static class SharedSettingTestDatabase
     /// Loads one value-free text projection per shared audit row (action and key metadata), so
     /// tests can count rows and assert no submitted value reached the audit store.
     /// </summary>
+    /// <summary>One row of the shared service_audit_logs table, read through provider-neutral SQL.</summary>
+    public sealed class SharedAuditRow
+    {
+        public string Id { get; set; } = string.Empty;
+
+        public string Action { get; set; } = string.Empty;
+
+        public string TargetType { get; set; } = string.Empty;
+
+        public string TargetId { get; set; } = string.Empty;
+
+        public string? OperatorId { get; set; }
+
+        public string? OperatorDisplayName { get; set; }
+
+        public string OperatorSource { get; set; } = string.Empty;
+
+        public string Outcome { get; set; } = string.Empty;
+
+        public string? SecurityDescription { get; set; }
+
+        public string? ClientIp { get; set; }
+
+        public string? CorrelationId { get; set; }
+    }
+
+    /// <summary>
+    /// Reads the shared audit rows whose entity type is internal to the library. Filters are
+    /// applied in memory so both the SQLite and the PostgreSQL provider paths share one projection.
+    /// </summary>
+    public static async Task<List<SharedAuditRow>> LoadSharedAuditRowsAsync(
+        IdentityDbContext context,
+        CancellationToken cancellationToken = default) =>
+        await context.Database
+            .SqlQuery<SharedAuditRow>($"""
+                SELECT "id" AS "Id",
+                       "action" AS "Action",
+                       "target_type" AS "TargetType",
+                       "target_id" AS "TargetId",
+                       "operator_id" AS "OperatorId",
+                       "operator_display_name" AS "OperatorDisplayName",
+                       "operator_source" AS "OperatorSource",
+                       CASE "outcome" WHEN 0 THEN 'unknown' WHEN 1 THEN 'success'
+                            WHEN 2 THEN 'failure' WHEN 3 THEN 'denied' ELSE 'unknown' END AS "Outcome",
+                       "security_description" AS "SecurityDescription",
+                       "client_ip" AS "ClientIp",
+                       "correlation_id" AS "CorrelationId"
+                FROM service_audit_logs
+                """)
+            .ToListAsync(cancellationToken);
+
     public static async Task<List<string>> LoadSharedAuditJsonAsync(
         IdentityDbContext context,
         CancellationToken cancellationToken = default) =>

@@ -19,7 +19,6 @@ public class CleanupWorkerTests
         Mock<ISecurityKeyRepository>? securityKeyRepoMock = null,
         Mock<ILoginAttemptRepository>? loginAttemptRepoMock = null,
         Mock<ILoginHistoryRepository>? loginHistoryRepoMock = null,
-        Mock<IAuditLogRepository>? auditLogRepoMock = null,
         Mock<IAuthorizationRequestStore>? authorizationRequestStoreMock = null,
         Mock<IIdentitySessionStore>? identitySessionStoreMock = null,
         Mock<IAuthorizationCodeStore>? authorizationCodeStoreMock = null,
@@ -43,9 +42,6 @@ public class CleanupWorkerTests
         serviceProviderMock
             .Setup(sp => sp.GetService(typeof(ILoginHistoryRepository)))
             .Returns((loginHistoryRepoMock ?? new Mock<ILoginHistoryRepository>()).Object);
-        serviceProviderMock
-            .Setup(sp => sp.GetService(typeof(IAuditLogRepository)))
-            .Returns((auditLogRepoMock ?? new Mock<IAuditLogRepository>()).Object);
         serviceProviderMock
             .Setup(sp => sp.GetService(typeof(IAuthorizationRequestStore)))
             .Returns((authorizationRequestStoreMock ?? new Mock<IAuthorizationRequestStore>()).Object);

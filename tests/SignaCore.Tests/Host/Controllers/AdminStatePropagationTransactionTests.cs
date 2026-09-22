@@ -15,6 +15,12 @@ using SignaCore.Host.Controllers;
 using SignaCore.Host.Models;
 using Xunit;
 
+using ServiceMantle.Audit;
+using System.Diagnostics;
+using ServiceMantle.Persistence.EntityFrameworkCore;
+
+using SignaCore.Tests.TestSupport;
+
 namespace SignaCore.Tests.Host.Controllers;
 
 /// <summary>
@@ -80,8 +86,7 @@ public sealed class AdminStatePropagationTransactionTests
         var now = DateTimeOffset.UtcNow;
 
         var result = await InvokeAsync(
-            "user-status", database.Context, new AuditService(
-                new LoginHistoryRepository(database.Context), new AuditLogRepository(database.Context)),
+            "user-status", database.Context, new EfCoreManagementAuditWriter<IdentityDbContext>(database.Context),
             seed, TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
@@ -96,16 +101,16 @@ public sealed class AdminStatePropagationTransactionTests
         var account = await database.Context.Accounts.AsNoTracking()
             .SingleAsync(row => row.Id == seed.AccountId, TestContext.Current.CancellationToken);
         Assert.False(account.IsActive);
-        var audit = await database.Context.AuditLogs.AsNoTracking()
-            .SingleAsync(row => row.Action == "account_disabled", TestContext.Current.CancellationToken);
-        Assert.Contains("\"revokedSessions\":1", audit.AfterSnapshot, StringComparison.Ordinal);
-        Assert.Contains("\"revokedFamilyMembers\":1", audit.AfterSnapshot, StringComparison.Ordinal);
+        var audit = Assert.Single(
+            (await SharedAuditTable.ReadAsync(database.Context, TestContext.Current.CancellationToken))
+            .Where(row => row.Action == "account_disabled"));
+        Assert.Contains("revoked sessions: 1", audit.SecurityDescription, StringComparison.Ordinal);
+        Assert.Contains("revoked family members: 1", audit.SecurityDescription, StringComparison.Ordinal);
 
         // The idempotent repeat disable keeps the first revocation facts.
         var firstRevokedAt = session.RevokedAt;
         var repeat = await InvokeAsync(
-            "user-status", database.Context, new AuditService(
-                new LoginHistoryRepository(database.Context), new AuditLogRepository(database.Context)),
+            "user-status", database.Context, new EfCoreManagementAuditWriter<IdentityDbContext>(database.Context),
             seed, TestContext.Current.CancellationToken);
         Assert.IsType<OkObjectResult>(repeat);
         database.Context.ChangeTracker.Clear();
@@ -137,8 +142,7 @@ public sealed class AdminStatePropagationTransactionTests
         database.Context.ChangeTracker.Clear();
 
         var result = await InvokeAsync(
-            "user-status", database.Context, new AuditService(
-                new LoginHistoryRepository(database.Context), new AuditLogRepository(database.Context)),
+            "user-status", database.Context, new EfCoreManagementAuditWriter<IdentityDbContext>(database.Context),
             seed, TestContext.Current.CancellationToken);
 
         Assert.IsType<OkObjectResult>(result);
@@ -153,7 +157,7 @@ public sealed class AdminStatePropagationTransactionTests
     private static async Task<IActionResult> InvokeAsync(
         string endpoint,
         IdentityDbContext context,
-        IAuditService audit,
+        IManagementAuditWriter audit,
         Seed seed,
         CancellationToken cancellationToken)
     {
@@ -296,46 +300,30 @@ public sealed class AdminStatePropagationTransactionTests
             .SingleAsync(row => row.Id == seed.AppRowId, TestContext.Current.CancellationToken);
         Assert.True(application.IsActive);
         Assert.True(application.AllowRefreshToken);
-        Assert.Empty(await context.AuditLogs.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedAuditTable.ReadAsync(context, TestContext.Current.CancellationToken));
     }
 
-    private sealed class ThrowingAuditService : IAuditService
+    private sealed class ThrowingAuditService : IManagementAuditWriter
     {
         public bool Completed { get; private set; }
 
-        public Task RecordLoginAsync(
-            Guid? accountId, string username, string authMethod, string eventType,
-            string? clientIp, string? userAgent, string? failureReason = null, string? appId = null,
-            string? correlationId = null, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public Task RecordActionAsync(
-            string action, string targetType, string targetId, Guid? actorId, string? actorName,
-            string? description, string? clientIp = null, string? correlationId = null,
-            object? before = null, object? after = null,
+        public ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Injected audit write failure.");
     }
 
-    private sealed class CancelingAuditService(CancellationTokenSource cancellation) : IAuditService
+    private sealed class CancelingAuditService(CancellationTokenSource cancellation) : IManagementAuditWriter
     {
         public bool Completed { get; private set; }
 
-        public Task RecordLoginAsync(
-            Guid? accountId, string username, string authMethod, string eventType,
-            string? clientIp, string? userAgent, string? failureReason = null, string? appId = null,
-            string? correlationId = null, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public async Task RecordActionAsync(
-            string action, string targetType, string targetId, Guid? actorId, string? actorName,
-            string? description, string? clientIp = null, string? correlationId = null,
-            object? before = null, object? after = null,
+        public async ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
             CancellationToken cancellationToken = default)
         {
             await cancellation.CancelAsync();
             cancellationToken.ThrowIfCancellationRequested();
+            throw new UnreachableException("The cancellation check above must have thrown.");
         }
     }
 

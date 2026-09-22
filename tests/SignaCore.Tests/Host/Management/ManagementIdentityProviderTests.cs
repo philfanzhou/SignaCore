@@ -78,7 +78,7 @@ public sealed class SignaCoreManagementIdentityProviderTests : IAsyncDisposable
             new AdminIdentityOptions { Username = adminUsername },
             new AdminLoginStateRecorder(
                 new LoginAttemptRepository(_context),
-                new AuditService(new LoginHistoryRepository(_context), new AuditLogRepository(_context)),
+                new AuditService(new LoginHistoryRepository(_context)),
                 new EfCoreUnitOfWork(_context),
                 _context,
                 NullLogger<AdminLoginStateRecorder>.Instance),

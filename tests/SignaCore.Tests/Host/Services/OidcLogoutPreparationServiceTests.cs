@@ -5,7 +5,9 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
+using ServiceMantle.Audit;
 using Microsoft.IdentityModel.Tokens;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -14,6 +16,8 @@ using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Services;
 using Xunit;
+
+using SignaCore.Tests.TestSupport;
 
 namespace SignaCore.Tests.Host.Services;
 
@@ -97,9 +101,9 @@ public sealed class OidcLogoutPreparationServiceTests
         services.AddScoped<ILogoutRequestRepository, LogoutRequestRepository>();
         services.AddScoped<IUnitOfWork, EfCoreUnitOfWork>();
         services.AddScoped<ILogoutRequestStore, LogoutRequestStore>();
-        services.AddScoped<IAuditLogRepository, AuditLogRepository>();
-        services.AddScoped<ILoginHistoryRepository, LoginHistoryRepository>();
-        services.AddScoped<IAuditService, AuditService>();
+        services.AddScoped<IManagementAuditWriter>(
+            provider => new EfCoreManagementAuditWriter<IdentityDbContext>(
+                provider.GetRequiredService<IdentityDbContext>()));
         var provider = services.BuildServiceProvider();
         var keys = new StaticKeyManager();
         var service = new OidcLogoutPreparationService(provider.GetRequiredService<IServiceScopeFactory>(), keys,
@@ -167,7 +171,7 @@ public sealed class OidcLogoutPreparationServiceTests
 
         Assert.NotNull(result);
         var request = await harness.Context.LogoutRequests.SingleAsync(TestContext.Current.CancellationToken);
-        var audit = await harness.Context.AuditLogs.SingleAsync(TestContext.Current.CancellationToken);
+        var audit = Assert.Single(await SharedAuditTable.ReadAsync(harness.Context));
         Assert.Equal("oidc.logout.prepared", audit.Action);
         Assert.Equal(request.Id.ToString("D"), audit.TargetId);
         Assert.StartsWith("/oauth2/logout?logout_handle=", result.LogoutUri, StringComparison.Ordinal);

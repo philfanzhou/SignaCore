@@ -514,17 +514,15 @@ public sealed class ServiceSettingsDatabaseContractTests
                 {
                     Id = Guid.NewGuid(), IsActive = true, CreatedAt = DateTimeOffset.UtcNow
                 });
-                context.AuditLogs.Add(new AuditLogEntity
-                {
-                    Id = Guid.NewGuid(),
-                    Action = "settings_updated",
-                    TargetType = "Settings",
-                    TargetId = "1",
-                    ActorName = "legacy-admin",
-                    Description = "Legacy update",
-                    CreatedAt = DateTimeOffset.UtcNow
-                });
-                await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+                // The legacy audit row exactly like a pre-change deployment would carry it — no
+                // entity type exists for it anymore.
+                await context.Database.ExecuteSqlRawAsync(
+                    """
+                    INSERT INTO audit_logs (id, action, target_type, target_id, actor_name, description, created_at)
+                    VALUES ('0d1f9a16-2f4e-4d8f-8e52-7a1f97a6a101', 'settings_updated', 'Settings', '1',
+                            'legacy-admin', 'Legacy update', 0)
+                    """,
+                    TestContext.Current.CancellationToken);
                 // The raw legacy row exactly like a deployment that never ran a bridge build —
                 // no entity type exists for it anymore.
                 await context.Database.ExecuteSqlRawAsync(
@@ -544,13 +542,14 @@ public sealed class ServiceSettingsDatabaseContractTests
                 var legacyRows = await context.Database.SqlQuery<long>($"""
                         SELECT COUNT(*) AS "Value" FROM system_settings
                         """).ToListAsync(TestContext.Current.CancellationToken);
-                var legacyAuditAction = await context.AuditLogs.AsNoTracking()
-                    .SingleAsync(TestContext.Current.CancellationToken);
+                var legacyAuditAction = await context.Database.SqlQuery<string>($"""
+                        SELECT action AS "Value" FROM audit_logs
+                        """).SingleAsync(TestContext.Current.CancellationToken);
                 var aggregates = await context.Database.SqlQuery<int>(
                         $"""SELECT COUNT(*) AS "Value" FROM service_settings""")
                     .ToListAsync(TestContext.Current.CancellationToken);
                 Assert.Equal(1, legacyRows.Single());
-                Assert.Equal("settings_updated", legacyAuditAction.Action);
+                Assert.Equal("settings_updated", legacyAuditAction);
                 Assert.Equal(0, aggregates.Single());
             }
         }
@@ -593,21 +592,17 @@ public sealed class ServiceSettingsDatabaseContractTests
                 {
                     Id = accountId, IsActive = true, CreatedAt = DateTimeOffset.UtcNow
                 });
-                context.AuditLogs.Add(new AuditLogEntity
-                {
-                    Id = Guid.NewGuid(),
-                    Action = "settings_updated",
-                    TargetType = "Settings",
-                    TargetId = "1",
-                    ActorId = accountId,
-                    ActorName = "legacy-admin",
-                    Description = "Legacy update",
-                    CreatedAt = DateTimeOffset.UtcNow
-                });
                 await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+                await context.Database.ExecuteSqlRawAsync(
+                    $"""
+                    INSERT INTO audit_logs (id, action, target_type, target_id, actor_id, actor_name, description, created_at)
+                    VALUES ('0d1f9a16-2f4e-4d8f-8e52-7a1f97a6a102', 'settings_updated', 'Settings', '1',
+                            '{accountId}', 'legacy-admin', 'Legacy update', 0)
+                    """,
+                    TestContext.Current.CancellationToken);
             }
 
-            string legacyAuditAction;
+            bool legacyAuditTableRetired;
             await using (var context = new IdentityDbContext(options))
             {
                 await new SignaCore.Host.Migration.SignaCoreMigrationExecutor(context, databaseOptions)
@@ -617,9 +612,12 @@ public sealed class ServiceSettingsDatabaseContractTests
                         SELECT COUNT(*) AS "Value" FROM sqlite_master
                         WHERE type = 'table' AND name = 'system_settings'
                         """).ToListAsync(TestContext.Current.CancellationToken);
-                legacyAuditAction = await context.AuditLogs.AsNoTracking()
-                    .SingleAsync(TestContext.Current.CancellationToken)
-                    .ContinueWith(task => task.Result.Action, TestContext.Current.CancellationToken);
+                // The forward drop migration removes the legacy audit table with its rows: the
+                // deployment keeps that history only through its own pre-upgrade backups.
+                legacyAuditTableRetired = (await context.Database.SqlQuery<long>($"""
+                        SELECT COUNT(*) AS "Value" FROM sqlite_master
+                        WHERE type = 'table' AND name = 'audit_logs'
+                        """).SingleAsync(TestContext.Current.CancellationToken)) == 0;
                 var newSettings = await context.Database.SqlQuery<int>(
                         $"""SELECT COUNT(*) AS "Value" FROM service_settings""")
                     .ToListAsync(TestContext.Current.CancellationToken);
@@ -627,7 +625,7 @@ public sealed class ServiceSettingsDatabaseContractTests
                 Assert.Equal(0, newSettings.Single());
             }
 
-            Assert.Equal("settings_updated", legacyAuditAction);
+            Assert.True(legacyAuditTableRetired);
 
             // The fresh aggregate starts at version 0 and accepts its first update.
             var first = await UpdateAsync(options, 0, SeedChanges());

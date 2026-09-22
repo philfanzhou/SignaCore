@@ -502,6 +502,85 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
+    /// The shared restricted audit query replaces the retired <c>/api/admin/audit-logs</c>
+    /// endpoint: it is readable only with an admin management session, its closed parameter set
+    /// rejects invalid paging before any query runs, and no credential material from the fixture's
+    /// installation appears anywhere in the response.
+    /// </summary>
+    [Fact]
+    public async Task AuditApi_RequiresAnAdminSessionAndNeverReturnsSecretValues()
+    {
+        // Authorization runs before the handler, so even malformed paging is unreachable
+        // anonymously: the shared group answers 401, never a fixed 400.
+        using var anonymous = _fixture.CreateHttpClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/management/v1/audit",
+            TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(
+            "/management/v1/audit?pageSize=9999",
+            TestContext.Current.CancellationToken)).StatusCode);
+
+        using var admin = await _fixture.CreateAdminHttpClientAsync();
+
+        // The closed parameter contract: an oversized page, a page beyond one without its cursor,
+        // and page one carrying a cursor are all rejected with the fixed management 400.
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync(
+            "/management/v1/audit?pageSize=500",
+            TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync(
+            "/management/v1/audit?page=2",
+            TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync(
+            "/management/v1/audit?page=1&cursor=anything",
+            TestContext.Current.CancellationToken)).StatusCode);
+
+        // The first page answers with the closed projection; the fixture's installation wrote
+        // audit rows, so the page is non-empty.
+        var response = await admin.GetAsync("/management/v1/audit", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken);
+        foreach (var property in new[] { "items", "page", "pageSize", "totalCount", "continuationCursor", "hasNextPage" })
+        {
+            Assert.True(body.TryGetProperty(property, out _), $"missing property {property}");
+        }
+
+        Assert.NotEmpty(body.GetProperty("items").EnumerateArray().ToList());
+        Assert.Equal(1, body.GetProperty("page").GetInt32());
+        Assert.True(body.GetProperty("pageSize").GetInt32() <= 200);
+        var items = body.GetProperty("items").EnumerateArray().ToList();
+
+        // The closed item shape: no entity, no exception, no raw metadata json.
+        Assert.All(items, item =>
+        {
+            foreach (var property in new[]
+                     {
+                         "id", "operator", "action", "target", "outcome", "occurredAtUtc",
+                         "clientIp", "correlationId", "securityDescription", "metadata"
+                     })
+            {
+                Assert.True(item.TryGetProperty(property, out _), $"missing item property {property}");
+            }
+        });
+
+        // Keyset continuation: when a next page exists, its cursor is returned and page two with
+        // that cursor answers 200 with the same closed shape.
+        if (body.GetProperty("hasNextPage").GetBoolean())
+        {
+            var cursor = body.GetProperty("continuationCursor").GetString();
+            Assert.False(string.IsNullOrEmpty(cursor));
+            var second = await admin.GetAsync(
+                "/management/v1/audit?page=2&cursor=" + Uri.EscapeDataString(cursor!),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        }
+
+        // No credential material of the fixture's installation ever reaches the audit response.
+        var raw = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(IdentityServerFixture.AdminPassword, raw, StringComparison.Ordinal);
+        Assert.DoesNotContain(IdentityServerFixture.GatewayAppSecret, raw, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The definitions catalog is the shared safe projection: the fixed six fields per item,
     /// lowercase value types, ordinal-sorted normalized keys, and no default values.
     /// </summary>

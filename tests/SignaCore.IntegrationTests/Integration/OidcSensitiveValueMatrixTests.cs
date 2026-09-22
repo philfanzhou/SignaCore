@@ -414,9 +414,10 @@ public sealed partial class OidcSensitiveValueMatrixTests : IClassFixture<Identi
     {
         using var scope = services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-        var audits = await context.AuditLogs.AsNoTracking()
+        var audits = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                context, TestContext.Current.CancellationToken))
             .OrderBy(row => row.Id)
-            .ToListAsync(TestContext.Current.CancellationToken);
+            .ToList();
         var histories = await context.LoginHistories.AsNoTracking()
             .OrderBy(row => row.Id)
             .ToListAsync(TestContext.Current.CancellationToken);
@@ -424,8 +425,8 @@ public sealed partial class OidcSensitiveValueMatrixTests : IClassFixture<Identi
         foreach (var row in audits)
         {
             builder.Append("audit:").Append(row.Action).Append('|').Append(row.TargetType)
-                .Append('|').Append(row.TargetId).Append('|').Append(row.Description)
-                .Append('|').Append(row.BeforeSnapshot).Append('|').Append(row.AfterSnapshot)
+                .Append('|').Append(row.TargetId).Append('|').Append(row.SecurityDescription)
+                .Append('|').Append(row.OperatorDisplayName)
                 .AppendLine();
         }
 

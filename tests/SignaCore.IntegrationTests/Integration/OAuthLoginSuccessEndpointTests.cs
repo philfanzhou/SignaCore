@@ -523,9 +523,7 @@ public sealed class OAuthLoginSuccessEndpointTests : IClassFixture<IdentityServe
         {
             services.RemoveAll<IAuditService>();
             services.AddScoped<IAuditService>(scope => new FailingSuccessAuditService(
-                new AuditService(
-                    scope.GetRequiredService<ILoginHistoryRepository>(),
-                    scope.GetRequiredService<IAuditLogRepository>())));
+                new AuditService(scope.GetRequiredService<ILoginHistoryRepository>())));
         });
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -823,20 +821,5 @@ public sealed class OAuthLoginSuccessEndpointTests : IClassFixture<IdentityServe
                     accountId, username, authMethod, eventType, clientIp, userAgent,
                     failureReason, appId, correlationId, cancellationToken);
 
-        public Task RecordActionAsync(
-            string action,
-            string targetType,
-            string targetId,
-            Guid? actorId,
-            string? actorName,
-            string? description,
-            string? clientIp = null,
-            string? correlationId = null,
-            object? before = null,
-            object? after = null,
-            CancellationToken cancellationToken = default) =>
-            inner.RecordActionAsync(
-                action, targetType, targetId, actorId, actorName, description,
-                clientIp, correlationId, before, after, cancellationToken);
     }
 }

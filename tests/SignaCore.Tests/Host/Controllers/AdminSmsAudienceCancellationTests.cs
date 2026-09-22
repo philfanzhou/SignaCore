@@ -18,6 +18,10 @@ using SignaCore.Host.Controllers;
 using SignaCore.Host.Models;
 using Xunit;
 
+using ServiceMantle.Audit;
+using ServiceMantle.Persistence.EntityFrameworkCore;
+using SignaCore.Tests.TestSupport;
+
 namespace SignaCore.Tests.Host.Controllers;
 
 /// <summary>
@@ -37,12 +41,11 @@ public sealed class AdminSmsAudienceCancellationTests
         var appRegistrations = new Mock<IAppRegistrationRepository>(MockBehavior.Strict);
         appRegistrations.Setup(repository => repository.GetByAppIdAsync(AppId, cancellation.Token))
             .ReturnsAsync(app);
-        var audit = new Mock<IAuditService>(MockBehavior.Strict);
-        audit.Setup(service => service.RecordActionAsync(
-                "app_sms_policy_updated", "AppRegistration", AppId, It.IsAny<Guid?>(), It.IsAny<string?>(),
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(),
-                It.IsAny<object?>(), cancellation.Token))
-            .Returns(Task.CompletedTask);
+        var audit = new Mock<IManagementAuditWriter>(MockBehavior.Strict);
+        audit.Setup(service => service.RecordAsync(
+                It.Is<ManagementAuditEvent>(auditEvent => auditEvent.Action.Value == "app_sms_policy_updated"),
+                It.IsAny<CancellationToken>()))
+                    .Returns(new ValueTask<ManagementAuditRecord>(default(ManagementAuditRecord)));
         var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
         unitOfWork.Setup(unit => unit.SaveChangesAsync(cancellation.Token)).ReturnsAsync(1);
 
@@ -70,12 +73,11 @@ public sealed class AdminSmsAudienceCancellationTests
         var appRegistrations = new Mock<IAppRegistrationRepository>(MockBehavior.Strict);
         appRegistrations.Setup(repository => repository.GetByAppIdAsync(AppId, cancellation.Token))
             .ReturnsAsync(app);
-        var audit = new Mock<IAuditService>(MockBehavior.Strict);
-        audit.Setup(service => service.RecordActionAsync(
-                "app_audience_mode_updated", "AppRegistration", AppId, It.IsAny<Guid?>(), It.IsAny<string?>(),
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(),
-                It.IsAny<object?>(), cancellation.Token))
-            .Returns(Task.CompletedTask);
+        var audit = new Mock<IManagementAuditWriter>(MockBehavior.Strict);
+        audit.Setup(service => service.RecordAsync(
+                It.Is<ManagementAuditEvent>(auditEvent => auditEvent.Action.Value == "app_audience_mode_updated"),
+                It.IsAny<CancellationToken>()))
+                    .Returns(new ValueTask<ManagementAuditRecord>(default(ManagementAuditRecord)));
         var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
         unitOfWork.Setup(unit => unit.SaveChangesAsync(cancellation.Token)).ReturnsAsync(1);
 
@@ -103,12 +105,11 @@ public sealed class AdminSmsAudienceCancellationTests
         var appRegistrations = new Mock<IAppRegistrationRepository>(MockBehavior.Strict);
         appRegistrations.Setup(repository => repository.GetByAppIdAsync(AppId, cancellation.Token))
             .ReturnsAsync(app);
-        var audit = new Mock<IAuditService>(MockBehavior.Strict);
-        audit.Setup(service => service.RecordActionAsync(
-                "app_sms_user_approved", "AppRegistration", AppId, It.IsAny<Guid?>(), It.IsAny<string?>(),
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<object?>(),
-                It.IsAny<object?>(), cancellation.Token))
-            .Returns(Task.CompletedTask);
+        var audit = new Mock<IManagementAuditWriter>(MockBehavior.Strict);
+        audit.Setup(service => service.RecordAsync(
+                It.Is<ManagementAuditEvent>(auditEvent => auditEvent.Action.Value == "app_sms_user_approved"),
+                It.IsAny<CancellationToken>()))
+                    .Returns(new ValueTask<ManagementAuditRecord>(default(ManagementAuditRecord)));
         var admission = CreateAdmission(app);
         var admissionService = new Mock<ISmsAdmissionService>(MockBehavior.Strict);
         admissionService.Setup(service => service.ProvisionAsync(
@@ -202,9 +203,9 @@ public sealed class AdminSmsAudienceCancellationTests
         var interceptor = boundary == "after-commit" ? new CancelAfterSaveInterceptor(cancellation) : null;
         await using var database = await MigratedSqliteTestDatabase.CreateAsync(interceptor);
         await SeedAppAsync(database.Context);
-        IAuditService auditService = boundary == "before-commit"
-            ? new CancelingActionAuditService(CreateAuditService(database.Context), cancellation)
-            : CreateAuditService(database.Context);
+        IManagementAuditWriter auditWriter = boundary == "before-commit"
+            ? new CancelingActionAuditWriter(CreateAuditWriter(database.Context), cancellation)
+            : CreateAuditWriter(database.Context);
         var appRegistrations = new AppRegistrationRepository(database.Context);
         var unitOfWork = new EfCoreUnitOfWork(database.Context);
         if (interceptor != null) interceptor.Armed = true;
@@ -218,7 +219,7 @@ public sealed class AdminSmsAudienceCancellationTests
                     appRegistrations,
                     CreateSmsOptions("primary"),
                     unitOfWork,
-                    auditService,
+                    auditWriter,
                     cancellation.Token)
                 : await CreateController().UpdateAudienceMode(
                     AppId,
@@ -226,7 +227,7 @@ public sealed class AdminSmsAudienceCancellationTests
                     appRegistrations,
                     new JwtOptions(),
                     unitOfWork,
-                    auditService,
+                    auditWriter,
                     cancellation.Token));
 
         Assert.Equal(cancellation.Token, exception.CancellationToken);
@@ -246,9 +247,7 @@ public sealed class AdminSmsAudienceCancellationTests
             Assert.Equal(committed ? AudienceMode.PerApplication : AudienceMode.Shared, stored.AudienceMode);
         }
 
-        var audits = await database.Context.AuditLogs
-            .AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken);
+        var audits = await SharedAuditTable.ReadAsync(database.Context, TestContext.Current.CancellationToken);
         if (committed)
         {
             var expected = endpoint == "sms-policy" ? "app_sms_policy_updated" : "app_audience_mode_updated";
@@ -267,8 +266,8 @@ public sealed class AdminSmsAudienceCancellationTests
         return controller;
     }
 
-    private static AuditService CreateAuditService(IdentityDbContext context) =>
-        new(new LoginHistoryRepository(context), new AuditLogRepository(context));
+    private static EfCoreManagementAuditWriter<IdentityDbContext> CreateAuditWriter(
+        IdentityDbContext context) => new(context);
 
     private static SmsOptions CreateSmsOptions(params string[] profileKeys)
     {
@@ -397,42 +396,16 @@ public sealed class AdminSmsAudienceCancellationTests
     /// Cancels while the audit entry is being staged, which is the last boundary before the single
     /// commit that carries both the policy change and the audit entry.
     /// </summary>
-    private sealed class CancelingActionAuditService(IAuditService inner, CancellationTokenSource cancellation)
-        : IAuditService
+    private sealed class CancelingActionAuditWriter(
+        IManagementAuditWriter inner, CancellationTokenSource cancellation) : IManagementAuditWriter
     {
-        public Task RecordLoginAsync(
-            Guid? accountId,
-            string username,
-            string authMethod,
-            string eventType,
-            string? clientIp,
-            string? userAgent,
-            string? failureReason = null,
-            string? appId = null,
-            string? correlationId = null,
-            CancellationToken cancellationToken = default) =>
-            inner.RecordLoginAsync(
-                accountId, username, authMethod, eventType, clientIp, userAgent, failureReason, appId,
-                correlationId, cancellationToken);
-
-        public Task RecordActionAsync(
-            string action,
-            string targetType,
-            string targetId,
-            Guid? actorId,
-            string? actorName,
-            string? description,
-            string? clientIp = null,
-            string? correlationId = null,
-            object? before = null,
-            object? after = null,
+        public ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
             CancellationToken cancellationToken = default)
         {
             Assert.Equal(cancellation.Token, cancellationToken);
             cancellation.Cancel();
-            return inner.RecordActionAsync(
-                action, targetType, targetId, actorId, actorName, description, clientIp, correlationId,
-                before, after, cancellationToken);
+            return inner.RecordAsync(auditEvent, cancellationToken);
         }
     }
 

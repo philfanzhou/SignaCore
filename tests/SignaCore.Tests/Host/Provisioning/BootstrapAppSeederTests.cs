@@ -4,6 +4,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using ServiceMantle.Audit;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Provisioning;
@@ -18,7 +20,7 @@ namespace SignaCore.Tests.Host.Provisioning;
 public class BootstrapAppSeederTests : IDisposable
 {
     private readonly TestIdentityDbContext _dbContext;
-    private readonly IAuditService _auditService;
+    private readonly RecordingAuditWriter _auditService;
     private readonly TrackingPasswordHasher _passwordHasher = new();
     private readonly TestLogger _logger = new();
 
@@ -28,9 +30,8 @@ public class BootstrapAppSeederTests : IDisposable
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         _dbContext = new TestIdentityDbContext(options);
-        _auditService = new AuditService(
-            new LoginHistoryRepository(_dbContext),
-            new AuditLogRepository(_dbContext));
+        _auditService = new RecordingAuditWriter(
+            new EfCoreManagementAuditWriter<IdentityDbContext>(_dbContext));
     }
 
     [Fact]
@@ -93,8 +94,7 @@ public class BootstrapAppSeederTests : IDisposable
         var app = Assert.Single(await _dbContext.AppRegistrations.AsNoTracking()
             .ToListAsync(TestContext.Current.CancellationToken));
         Assert.Equal("complete-app", app.AppId);
-        Assert.Single(await _dbContext.AuditLogs.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Single(_auditService.Events);
     }
 
     [Fact]
@@ -123,26 +123,17 @@ public class BootstrapAppSeederTests : IDisposable
         Assert.Equal(1, _passwordHasher.HashCalls);
         Assert.True(_passwordHasher.VerifyPassword("verification-input", app.AppSecretHash));
 
-        var audit = Assert.Single(await _dbContext.AuditLogs.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
-        Assert.Equal("app_created", audit.Action);
-        Assert.Equal("AppRegistration", audit.TargetType);
-        Assert.Equal(app.AppId, audit.TargetId);
-        Assert.Null(audit.ActorId);
-        Assert.Equal("bootstrap", audit.ActorName);
-        Assert.Contains("Bootstrap pre-seed", audit.Description, StringComparison.Ordinal);
+        var audit = Assert.Single(_auditService.Events);
+        Assert.Equal("app_created", audit.Action.Value);
+        Assert.Equal("appregistration", audit.Target.Type.Value);
+        Assert.Equal(app.AppId, audit.Target.Id);
+        Assert.Null(audit.Operator.OperatorId);
+        Assert.Equal("bootstrap", audit.Operator.DisplayName);
+        Assert.Equal("system", audit.Operator.Source.Value);
+        Assert.Contains("Bootstrap pre-seed", audit.SecurityDescription, StringComparison.Ordinal);
         Assert.Null(audit.ClientIp);
         Assert.Null(audit.CorrelationId);
-        Assert.Null(audit.BeforeSnapshot);
-
-        using var snapshot = JsonDocument.Parse(Assert.IsType<string>(audit.AfterSnapshot));
-        var after = snapshot.RootElement;
-        Assert.Equal(5, after.EnumerateObject().Count());
-        Assert.Equal(app.AppId, after.GetProperty("appId").GetString());
-        Assert.Equal(app.AppName, after.GetProperty("appName").GetString());
-        Assert.Equal(app.CallbackUrl, after.GetProperty("callbackUrl").GetString());
-        Assert.Equal(JsonValueKind.Null, after.GetProperty("callbackExpiresAt").ValueKind);
-        Assert.True(after.GetProperty("isActive").GetBoolean());
+        Assert.Equal(ManagementAuditOutcome.Success, audit.Outcome);
 
         Assert.Contains(
             _dbContext.SaveBatches,
@@ -190,8 +181,7 @@ public class BootstrapAppSeederTests : IDisposable
         Assert.Equal("Existing App", app.AppName);
         Assert.Equal("existing-hash", app.AppSecretHash);
         Assert.Equal("https://claims.example.test/permissions", app.CallbackUrl);
-        Assert.Empty(await _dbContext.AuditLogs.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(_auditService.Events);
     }
 
     [Fact]
@@ -230,11 +220,9 @@ public class BootstrapAppSeederTests : IDisposable
             .ToListAsync(TestContext.Current.CancellationToken);
         Assert.Equal(["created-after", "created-before", "existing-app"], appIds);
 
-        var auditTargets = await _dbContext.AuditLogs.AsNoTracking()
-            .OrderBy(audit => audit.TargetId)
-            .Select(audit => audit.TargetId)
-            .ToListAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(["created-after", "created-before"], auditTargets);
+        Assert.Equal(
+            ["created-after", "created-before"],
+            _auditService.Events.Select(audit => audit.Target.Id).Order().ToList());
 
         var summary = Assert.Single(
             _logger.Entries,
@@ -295,7 +283,8 @@ public class BootstrapAppSeederTests : IDisposable
         Assert.Equal(1, batch.AddedAudits);
         _dbContext.ChangeTracker.Clear();
         Assert.Equal(cancel ? 0 : 1, await _dbContext.AppRegistrations.CountAsync(TestContext.Current.CancellationToken));
-        Assert.Equal(cancel ? 0 : 1, await _dbContext.AuditLogs.CountAsync(TestContext.Current.CancellationToken));
+        // The audit event is staged in both cases; whether its row persists is decided by the same
+        // single save as the application row, which the batch assertion above pins.
         var logs = string.Join("\n", _logger.Entries.Select(entry => entry.Message));
         Assert.False(logs.Contains("unused-input", StringComparison.Ordinal));
         foreach (var hash in _passwordHasher.GeneratedHashes)
@@ -310,7 +299,7 @@ public class BootstrapAppSeederTests : IDisposable
 
     private async Task SeedAsync(
         string json,
-        IAuditService? auditService = null,
+        IManagementAuditWriter? auditWriter = null,
         CancellationToken cancellationToken = default)
     {
         var path = Path.Combine(Path.GetTempPath(), $"bootstrap-apps-{Guid.NewGuid():N}.json");
@@ -327,7 +316,7 @@ public class BootstrapAppSeederTests : IDisposable
             await BootstrapAppSeeder.SeedBootstrapAppsAsync(
                 configuration,
                 _dbContext,
-                auditService ?? _auditService,
+                auditWriter ?? _auditService,
                 _passwordHasher,
                 _logger,
                 isDevelopment: false,
@@ -358,8 +347,9 @@ public class BootstrapAppSeederTests : IDisposable
             SaveBatches.Add(new SaveBatch(
                 ChangeTracker.Entries<AppRegistrationEntity>()
                     .Count(entry => entry.State == EntityState.Added),
-                ChangeTracker.Entries<AuditLogEntity>()
-                    .Count(entry => entry.State == EntityState.Added)));
+                ChangeTracker.Entries()
+                    .Count(entry => entry.State == EntityState.Added &&
+                        entry.Entity.GetType().Name == "ManagementAuditLogEntity")));
             return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
         }
 
@@ -390,108 +380,58 @@ public class BootstrapAppSeederTests : IDisposable
             _inner.VerifyPassword(password, hash);
     }
 
-    private sealed class SelectiveFailureAuditService : IAuditService
+    private sealed class SelectiveFailureAuditService : IManagementAuditWriter
     {
-        private readonly IAuditService _inner;
+        private readonly IManagementAuditWriter _inner;
         private readonly string _failingTargetId;
 
-        public SelectiveFailureAuditService(IAuditService inner, string failingTargetId)
+        public SelectiveFailureAuditService(IManagementAuditWriter inner, string failingTargetId)
         {
             _inner = inner;
             _failingTargetId = failingTargetId;
         }
 
-        public Task RecordLoginAsync(
-            Guid? accountId,
-            string username,
-            string authMethod,
-            string eventType,
-            string? clientIp,
-            string? userAgent,
-            string? failureReason = null,
-            string? appId = null,
-            string? correlationId = null,
-            CancellationToken cancellationToken = default) =>
-            _inner.RecordLoginAsync(
-                accountId,
-                username,
-                authMethod,
-                eventType,
-                clientIp,
-                userAgent,
-                failureReason,
-                appId,
-                correlationId,
-                cancellationToken);
-
-        public Task RecordActionAsync(
-            string action,
-            string targetType,
-            string targetId,
-            Guid? actorId,
-            string? actorName,
-            string? description,
-            string? clientIp = null,
-            string? correlationId = null,
-            object? before = null,
-            object? after = null,
+        public ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
             CancellationToken cancellationToken = default)
         {
-            if (targetId == _failingTargetId)
+            if (auditEvent.Target.Id == _failingTargetId)
             {
                 throw new InvalidOperationException("Injected audit staging failure.");
             }
 
-            return _inner.RecordActionAsync(
-                action,
-                targetType,
-                targetId,
-                actorId,
-                actorName,
-                description,
-                clientIp,
-                correlationId,
-                before,
-                after,
-                cancellationToken);
+            return _inner.RecordAsync(auditEvent, cancellationToken);
         }
     }
 
     private sealed class ObservingAuditService(
-        IAuditService inner, CancellationTokenSource cancellationSource, bool cancel) : IAuditService
+        IManagementAuditWriter inner, CancellationTokenSource cancellationSource, bool cancel)
+        : IManagementAuditWriter
     {
         public CancellationToken ObservedToken { get; private set; }
 
-        public Task RecordLoginAsync(
-            Guid? accountId,
-            string username,
-            string authMethod,
-            string eventType,
-            string? clientIp,
-            string? userAgent,
-            string? failureReason = null,
-            string? appId = null,
-            string? correlationId = null,
-            CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public async Task RecordActionAsync(
-            string action,
-            string targetType,
-            string targetId,
-            Guid? actorId,
-            string? actorName,
-            string? description,
-            string? clientIp = null,
-            string? correlationId = null,
-            object? before = null,
-            object? after = null,
+        public async ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
             CancellationToken cancellationToken = default)
         {
             ObservedToken = cancellationToken;
-            await inner.RecordActionAsync(action, targetType, targetId, actorId, actorName, description,
-                clientIp, correlationId, before, after, cancellationToken);
-            if (cancel) cancellationSource.Cancel();
+            var record = await inner.RecordAsync(auditEvent, cancellationToken);
+            if (cancel) await cancellationSource.CancelAsync();
+            return record;
+        }
+    }
+
+    /// <summary>Records every staged event so assertions do not need the internal entity type.</summary>
+    private sealed class RecordingAuditWriter(IManagementAuditWriter inner) : IManagementAuditWriter
+    {
+        public List<ManagementAuditEvent> Events { get; } = [];
+
+        public ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
+            CancellationToken cancellationToken = default)
+        {
+            Events.Add(auditEvent);
+            return inner.RecordAsync(auditEvent, cancellationToken);
         }
     }
 

@@ -15,6 +15,8 @@ using SignaCore.Host;
 using SignaCore.Host.Security;
 using Xunit;
 
+using SignaCore.Tests.Integration;
+
 namespace SignaCore.Tests.Integration;
 
 /// <summary>
@@ -137,13 +139,13 @@ public sealed class AdminIdentitySessionEndpointTests : IClassFixture<IdentitySe
 
         // One bounded audit row names the session and the account.
         var audits = await QueryAsync(async dbContext =>
-            await dbContext.AuditLogs.AsNoTracking()
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(dbContext, TestContext.Current.CancellationToken))
                 .Where(log => log.Action == "identity_session_revoked"
                     && log.TargetId == sessionId.ToString("D"))
-                .ToListAsync(TestContext.Current.CancellationToken));
+                .ToList());
         var audit = Assert.Single(audits);
-        Assert.Equal("IdentitySession", audit.TargetType);
-        Assert.Contains($"account:{accountId}", audit.Description, StringComparison.Ordinal);
+        Assert.Equal("identitysession", audit.TargetType);
+        Assert.Contains($"account:{accountId}", audit.SecurityDescription, StringComparison.Ordinal);
 
         // The idempotent retry succeeds, keeps the first revocation fact, and is itself audited
         // with the already_revoked result classification — one row per admin action.
@@ -153,13 +155,13 @@ public sealed class AdminIdentitySessionEndpointTests : IClassFixture<IdentitySe
         var revisted = await GetSessionAsync(sessionId);
         Assert.Equal(session.RevokedAt, revisted.RevokedAt);
         var auditRows = await QueryAsync(async dbContext =>
-            await dbContext.AuditLogs.AsNoTracking()
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(dbContext, TestContext.Current.CancellationToken))
                 .Where(log => log.Action == "identity_session_revoked"
                     && log.TargetId == sessionId.ToString("D"))
-                .ToListAsync(TestContext.Current.CancellationToken));
+                .ToList());
         Assert.Equal(2, auditRows.Count);
-        Assert.Single(auditRows, row => row.Description.Contains("already_revoked", StringComparison.Ordinal));
-        Assert.Single(auditRows, row => !row.Description.Contains("already_revoked", StringComparison.Ordinal));
+        Assert.Single(auditRows, row => row.SecurityDescription.Contains("already_revoked", StringComparison.Ordinal));
+        Assert.Single(auditRows, row => !row.SecurityDescription.Contains("already_revoked", StringComparison.Ordinal));
     }
 
     [Fact]

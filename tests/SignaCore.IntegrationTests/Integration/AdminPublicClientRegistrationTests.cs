@@ -47,11 +47,10 @@ public sealed class AdminPublicClientRegistrationTests : IClassFixture<IdentityS
         Assert.Equal(string.Empty, app.AppSecretHash);
 
         // The creation audit exists and carries no secret or hash material.
-        var audit = await QueryAsync(context => context.AuditLogs.AsNoTracking()
-            .SingleAsync(row => row.Action == "app_created" && row.TargetId == appId,
-                TestContext.Current.CancellationToken));
-        Assert.DoesNotContain("secret", audit.AfterSnapshot ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("secret", audit.Description ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        var audit = await QueryAsync(async context => Assert.Single(
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken))
+            .Where(row => row.Action == "app_created" && row.TargetId == appId)));
+        Assert.DoesNotContain("secret", audit.SecurityDescription ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -70,12 +69,11 @@ public sealed class AdminPublicClientRegistrationTests : IClassFixture<IdentityS
         Assert.True(BCrypt.Net.BCrypt.Verify(secret, app.AppSecretHash));
 
         // The audit shape is unchanged: the same five fields, and still no secret or hash.
-        var audit = await QueryAsync(context => context.AuditLogs.AsNoTracking()
-            .SingleAsync(row => row.Action == "app_created" && row.TargetId == appId,
-                TestContext.Current.CancellationToken));
-        Assert.DoesNotContain("clientType", audit.AfterSnapshot ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(secret, audit.AfterSnapshot ?? string.Empty, StringComparison.Ordinal);
-        Assert.DoesNotContain(app.AppSecretHash, audit.AfterSnapshot ?? string.Empty, StringComparison.Ordinal);
+        var audit = await QueryAsync(async context => Assert.Single(
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken))
+            .Where(row => row.Action == "app_created" && row.TargetId == appId)));
+        Assert.DoesNotContain(secret, audit.SecurityDescription ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain(app.AppSecretHash, audit.SecurityDescription ?? string.Empty, StringComparison.Ordinal);
     }
 
     // ---- Acceptance 3: reads expose no secret surface ----
@@ -198,14 +196,13 @@ public sealed class AdminPublicClientRegistrationTests : IClassFixture<IdentityS
         Assert.True(BCrypt.Net.BCrypt.Verify(issued, app.AppSecretHash));
 
         // The conversion is audited through the existing policy event, and neither the secret
-        // nor the hash appears in the snapshots.
-        var audit = await QueryAsync(context => context.AuditLogs.AsNoTracking()
-            .SingleAsync(row => row.Action == "app_oidc_policy_updated" && row.TargetId == appId,
-                TestContext.Current.CancellationToken));
-        Assert.Contains("\"clientType\":\"Public\"", audit.BeforeSnapshot ?? string.Empty, StringComparison.Ordinal);
-        Assert.Contains("\"clientType\":\"Confidential\"", audit.AfterSnapshot ?? string.Empty, StringComparison.Ordinal);
-        Assert.DoesNotContain(issued, audit.AfterSnapshot ?? string.Empty, StringComparison.Ordinal);
-        Assert.DoesNotContain(app.AppSecretHash, audit.AfterSnapshot ?? string.Empty, StringComparison.Ordinal);
+        // nor the hash appears in the closed description.
+        var audit = await QueryAsync(async context => Assert.Single(
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken))
+            .Where(row => row.Action == "app_oidc_policy_updated" && row.TargetId == appId)));
+        Assert.Contains("client=Confidential", audit.SecurityDescription ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain(issued, audit.SecurityDescription ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain(app.AppSecretHash, audit.SecurityDescription ?? string.Empty, StringComparison.Ordinal);
     }
 
     // ---- Acceptance 7: reset-secret is refused for a Public app ----

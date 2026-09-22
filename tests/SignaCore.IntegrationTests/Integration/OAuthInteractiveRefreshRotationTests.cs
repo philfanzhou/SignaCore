@@ -127,13 +127,13 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
         Assert.Null(session.RevokedAt);
 
         var audit = Assert.Single(await GetReplayAuditsAsync(seeded.RootId));
-        Assert.Equal("RefreshTokenFamily", audit.TargetType);
+        Assert.Equal("refreshtokenfamily", audit.TargetType);
         Assert.Equal(seeded.RootId.ToString("D"), audit.TargetId);
-        Assert.Equal(seeded.AccountId, audit.ActorId);
-        Assert.Equal($"family:{seeded.RootId:D};member:{seeded.RootId:D};revoked:1;app:{AppId}", audit.Description);
+        Assert.Equal(seeded.AccountId.ToString(), audit.OperatorId);
+        Assert.Equal($"family:{seeded.RootId:D};member:{seeded.RootId:D};revoked:1;app:{AppId}", audit.SecurityDescription);
         // DF-09 canary: neither the presented nor the issued plaintext ever reaches the audit.
-        Assert.DoesNotContain(seeded.RefreshToken, audit.Description, StringComparison.Ordinal);
-        Assert.DoesNotContain(firstBody.RefreshToken, audit.Description, StringComparison.Ordinal);
+        Assert.DoesNotContain(seeded.RefreshToken, audit.SecurityDescription, StringComparison.Ordinal);
+        Assert.DoesNotContain(firstBody.RefreshToken, audit.SecurityDescription, StringComparison.Ordinal);
 
         // The revoked child is unusable too: an explicitly revoked member adds no write and no
         // second audit.
@@ -659,10 +659,12 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
             .OrderBy(row => row.CreatedAt)
             .ToListAsync(TestContext.Current.CancellationToken));
 
-    private Task<List<AuditLogEntity>> GetReplayAuditsAsync(Guid rootId) =>
-        QueryAsync(async context => await context.AuditLogs.AsNoTracking()
-            .Where(row => row.TargetId == rootId.ToString("D") && row.Action == ReplayedAction)
-            .ToListAsync(TestContext.Current.CancellationToken));
+    private Task<List<SharedSettingTestDatabase.SharedAuditRow>> GetReplayAuditsAsync(Guid rootId) =>
+        QueryAsync(async context =>
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    context, TestContext.Current.CancellationToken))
+                .Where(row => row.TargetId == rootId.ToString("D") && row.Action == ReplayedAction)
+                .ToList());
 
     private async Task<TResult> QueryAsync<TResult>(Func<IdentityDbContext, Task<TResult>> query)
     {

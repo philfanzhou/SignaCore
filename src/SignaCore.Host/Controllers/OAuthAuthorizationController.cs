@@ -6,6 +6,8 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
+using ServiceMantle.Audit;
+using SignaCore.Host.Audit;
 using SignaCore.Host.Http;
 using SignaCore.Host.Security;
 using SignaCore.Host.Services;
@@ -62,7 +64,7 @@ public sealed class OAuthAuthorizationController : ControllerBase
     private readonly IAuthorizationRequestStore _authorizationRequestStore;
     private readonly IIdentitySessionCookieReader _identitySessionCookieReader;
     private readonly OidcAuthorizationSessionReuseService _sessionReuse;
-    private readonly IAuditService _auditService;
+    private readonly IManagementAuditWriter _auditWriter;
     private readonly IUnitOfWork _unitOfWork;
     private readonly AuthMetrics _metrics;
     private readonly JwtOptions _jwtOptions;
@@ -73,7 +75,7 @@ public sealed class OAuthAuthorizationController : ControllerBase
         IAuthorizationRequestStore authorizationRequestStore,
         IIdentitySessionCookieReader identitySessionCookieReader,
         OidcAuthorizationSessionReuseService sessionReuse,
-        IAuditService auditService,
+        IManagementAuditWriter auditWriter,
         IUnitOfWork unitOfWork,
         AuthMetrics metrics,
         JwtOptions jwtOptions,
@@ -83,7 +85,7 @@ public sealed class OAuthAuthorizationController : ControllerBase
         _authorizationRequestStore = authorizationRequestStore;
         _identitySessionCookieReader = identitySessionCookieReader;
         _sessionReuse = sessionReuse;
-        _auditService = auditService;
+        _auditWriter = auditWriter;
         _unitOfWork = unitOfWork;
         _metrics = metrics;
         _jwtOptions = jwtOptions;
@@ -238,7 +240,9 @@ public sealed class OAuthAuthorizationController : ControllerBase
     private async Task StageAuditAsync(Guid applicationId, string outcome, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        await _auditService.RecordActionAsync(
+        await ManagementActionAudit.RecordAsync(
+            _auditWriter,
+            ManagementActionAudit.SystemSource,
             AuditAction,
             AuditTargetType,
             applicationId.ToString("D"),
@@ -247,6 +251,9 @@ public sealed class OAuthAuthorizationController : ControllerBase
             description: outcome,
             clientIp: HttpContext.GetClientIp(),
             correlationId: HttpContext.GetCorrelationId(),
+            outcome: AcceptedOutcome.Equals(outcome, StringComparison.Ordinal)
+                ? ManagementAuditOutcome.Success
+                : ManagementAuditOutcome.Denied,
             cancellationToken: cancellationToken);
     }
 

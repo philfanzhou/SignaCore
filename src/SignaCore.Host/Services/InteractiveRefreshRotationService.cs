@@ -4,7 +4,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
+using ServiceMantle.Audit;
 using SignaCore.Database;
+using SignaCore.Host.Audit;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
@@ -136,7 +138,7 @@ public sealed class InteractiveRefreshRotationService(
     IInteractiveAccessTokenFactory tokenFactory,
     IInteractiveIdTokenFactory idTokenFactory,
     IKeyManager keyManager,
-    IAuditService auditService,
+    IManagementAuditWriter auditWriter,
     AuthMetrics authMetrics,
     IUnitOfWork unitOfWork,
     IdentityDbContext dbContext,
@@ -605,15 +607,17 @@ public sealed class InteractiveRefreshRotationService(
     {
         var revoked = await refreshFamilies.RevokeLiveDescendantsAsync(
             lockedRoot.Id, lockedMember.Id, RefreshFamilyRevocationReason.RefreshReuse, operationToken);
-        await auditService.RecordActionAsync(
+        await ManagementActionAudit.RecordAsync(
+            auditWriter,
+            ManagementActionAudit.AccountSource,
             ReplayedAuditAction,
             FamilyAuditTargetType,
             lockedRoot.Id.ToString("D"),
-            actorId: lockedMember.AccountId,
-            actorName: null,
-            description: $"family:{lockedRoot.Id:D};member:{lockedMember.Id:D};revoked:{revoked};app:{app.AppId}",
-            clientIp: clientIp,
-            correlationId: correlationId,
+            lockedMember.AccountId,
+            null,
+            $"family:{lockedRoot.Id:D};member:{lockedMember.Id:D};revoked:{revoked};app:{app.AppId}",
+            clientIp,
+            correlationId,
             cancellationToken: operationToken);
         await unitOfWork.SaveChangesAsync(operationToken);
         await transaction.CommitAsync(operationToken);

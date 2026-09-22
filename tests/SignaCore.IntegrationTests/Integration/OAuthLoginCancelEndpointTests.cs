@@ -272,14 +272,14 @@ public sealed class OAuthLoginCancelEndpointTests : IClassFixture<IdentityServer
         using (var scope = _fixture.Services.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-            Assert.Empty(await dbContext.AuditLogs.AsNoTracking()
-                .Where(log => log.Action.StartsWith("oidc.login") || log.Action.StartsWith("oidc.cancel"))
-                .ToListAsync(TestContext.Current.CancellationToken));
+            var allAuditRows = await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                dbContext, TestContext.Current.CancellationToken);
+            Assert.Empty(allAuditRows
+                .Where(log => log.Action.StartsWith("oidc.login") || log.Action.StartsWith("oidc.cancel")));
             var serializedAudit = string.Join(
                 ' ',
-                (await dbContext.AuditLogs.AsNoTracking()
-                    .ToListAsync(TestContext.Current.CancellationToken))
-                .Select(log => $"{log.Action}|{log.Description}|{log.TargetId}|{log.CorrelationId}"));
+                allAuditRows
+                .Select(log => $"{log.Action}|{log.SecurityDescription}|{log.TargetId}|{log.CorrelationId}"));
             Assert.DoesNotContain(session.Handle, serializedAudit, StringComparison.Ordinal);
             Assert.DoesNotContain(LegalNonce, serializedAudit, StringComparison.Ordinal);
             Assert.DoesNotContain(LegalChallenge, serializedAudit, StringComparison.Ordinal);
@@ -308,7 +308,7 @@ public sealed class OAuthLoginCancelEndpointTests : IClassFixture<IdentityServer
             await dbContext.IdentitySessions.AsNoTracking().CountAsync(cancellationToken),
             await dbContext.LoginAttempts.AsNoTracking().CountAsync(cancellationToken),
             await dbContext.LoginHistories.AsNoTracking().CountAsync(cancellationToken),
-            await dbContext.AuditLogs.AsNoTracking().CountAsync(cancellationToken));
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(dbContext, cancellationToken)).Count);
     }
 
     private async Task MutateLegalAppAsync(Action<AppRegistrationEntity> mutate)

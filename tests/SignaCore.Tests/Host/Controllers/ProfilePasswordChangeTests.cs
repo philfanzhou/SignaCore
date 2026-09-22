@@ -14,6 +14,11 @@ using SignaCore.Host.Models;
 using SignaCore.Tests.Host;
 using Xunit;
 
+using ServiceMantle.Audit;
+using System.Diagnostics;
+using ServiceMantle.Persistence.EntityFrameworkCore;
+using SignaCore.Tests.TestSupport;
+
 namespace SignaCore.Tests.Host.Controllers;
 
 /// <summary>
@@ -39,8 +44,7 @@ public sealed class ProfilePasswordChangeTests
         var hasher = FastHasher();
 
         var result = await InvokeAsync(database.Context, seed.AccountId, hasher,
-            new AuditService(
-                new LoginHistoryRepository(database.Context), new AuditLogRepository(database.Context)),
+            new EfCoreManagementAuditWriter<IdentityDbContext>(database.Context),
             new ChangePasswordRequest(CurrentPassword, NewPassword),
             TestContext.Current.CancellationToken);
 
@@ -71,19 +75,18 @@ public sealed class ProfilePasswordChangeTests
             .SingleAsync(row => row.Id == seed.LegacyTokenId, TestContext.Current.CancellationToken);
         Assert.True(legacy.IsRevoked);
 
-        // The audit row committed with the state, carrying only bounded counts.
-        var audit = await database.Context.AuditLogs.AsNoTracking()
-            .SingleAsync(row => row.Action == "password_changed", TestContext.Current.CancellationToken);
-        Assert.Contains("\"revokedSessions\":1", audit.AfterSnapshot, StringComparison.Ordinal);
-        Assert.Contains("\"revokedFamilyMembers\":1", audit.AfterSnapshot, StringComparison.Ordinal);
-        Assert.Contains("\"revokedLegacyTokens\":1", audit.AfterSnapshot, StringComparison.Ordinal);
+        // The audit row committed with the state, carrying only bounded counts in the description.
+        var audit = Assert.Single(await SharedAuditTable.ReadAsync(
+            database.Context, TestContext.Current.CancellationToken));
+        Assert.Equal("password_changed", audit.Action);
+        Assert.Contains("revoked sessions: 1", audit.SecurityDescription, StringComparison.Ordinal);
+        Assert.Contains("revoked family members: 1", audit.SecurityDescription, StringComparison.Ordinal);
+        Assert.Contains("revoked legacy tokens: 1", audit.SecurityDescription, StringComparison.Ordinal);
 
         // Canary: no plaintext password and no hash in the audit row or the response.
         foreach (var canary in new[] { CurrentPassword, NewPassword, credential.PasswordHash })
         {
-            Assert.DoesNotContain(canary, audit.AfterSnapshot ?? string.Empty, StringComparison.Ordinal);
-            Assert.DoesNotContain(canary, audit.BeforeSnapshot ?? string.Empty, StringComparison.Ordinal);
-            Assert.DoesNotContain(canary, audit.Description ?? string.Empty, StringComparison.Ordinal);
+            Assert.DoesNotContain(canary, audit.SecurityDescription ?? string.Empty, StringComparison.Ordinal);
             Assert.DoesNotContain(canary, operation.Message ?? string.Empty, StringComparison.Ordinal);
         }
     }
@@ -132,8 +135,7 @@ public sealed class ProfilePasswordChangeTests
         var hasher = FastHasher();
 
         var result = await InvokeAsync(database.Context, seed.AccountId, hasher,
-            new AuditService(
-                new LoginHistoryRepository(database.Context), new AuditLogRepository(database.Context)),
+            new EfCoreManagementAuditWriter<IdentityDbContext>(database.Context),
             new ChangePasswordRequest(WrongPassword, NewPassword),
             TestContext.Current.CancellationToken);
 
@@ -167,8 +169,7 @@ public sealed class ProfilePasswordChangeTests
         var hasher = FastHasher();
 
         var result = await InvokeAsync(database.Context, bareAccountId, hasher,
-            new AuditService(
-                new LoginHistoryRepository(database.Context), new AuditLogRepository(database.Context)),
+            new EfCoreManagementAuditWriter<IdentityDbContext>(database.Context),
             new ChangePasswordRequest(WrongPassword, NewPassword),
             TestContext.Current.CancellationToken);
 
@@ -178,8 +179,7 @@ public sealed class ProfilePasswordChangeTests
         Assert.Equal("Wrong current password.", Assert.IsType<ErrorResponse>(bad.Value).Message);
         Assert.Empty(await database.Context.LoginAttempts.AsNoTracking()
             .ToListAsync(TestContext.Current.CancellationToken));
-        Assert.Empty(await database.Context.AuditLogs.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedAuditTable.ReadAsync(database.Context, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -190,8 +190,7 @@ public sealed class ProfilePasswordChangeTests
         var hasher = FastHasher();
 
         var result = await InvokeAsync(database.Context, seed.AccountId, hasher,
-            new AuditService(
-                new LoginHistoryRepository(database.Context), new AuditLogRepository(database.Context)),
+            new EfCoreManagementAuditWriter<IdentityDbContext>(database.Context),
             new ChangePasswordRequest(CurrentPassword, "weak"),
             TestContext.Current.CancellationToken);
 
@@ -209,8 +208,7 @@ public sealed class ProfilePasswordChangeTests
         var seed = await SeedAsync(database.Context);
 
         var result = await InvokeAsync(database.Context, seed.AccountId, FastHasher(),
-            new AuditService(
-                new LoginHistoryRepository(database.Context), new AuditLogRepository(database.Context)),
+            new EfCoreManagementAuditWriter<IdentityDbContext>(database.Context),
             new ChangePasswordRequest(CurrentPassword, string.Empty),
             TestContext.Current.CancellationToken);
 
@@ -240,7 +238,7 @@ public sealed class ProfilePasswordChangeTests
         IdentityDbContext context,
         Guid accountId,
         IPasswordHasher hasher,
-        IAuditService audit,
+        IManagementAuditWriter audit,
         ChangePasswordRequest request,
         CancellationToken cancellationToken)
     {
@@ -382,9 +380,7 @@ public sealed class ProfilePasswordChangeTests
             .SingleAsync(row => row.Id == seed.LegacyTokenId, TestContext.Current.CancellationToken);
         Assert.False(legacy.IsRevoked);
 
-        var audits = await context.AuditLogs.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken);
-        Assert.Empty(audits);
+        Assert.Empty(await SharedAuditTable.ReadAsync(context, TestContext.Current.CancellationToken));
 
         var attempts = await context.LoginAttempts.AsNoTracking()
             .ToListAsync(TestContext.Current.CancellationToken);
@@ -398,38 +394,23 @@ public sealed class ProfilePasswordChangeTests
         }
     }
 
-    private sealed class ThrowingAuditService : IAuditService
+    private sealed class ThrowingAuditService : IManagementAuditWriter
     {
-        public Task RecordLoginAsync(
-            Guid? accountId, string username, string authMethod, string eventType,
-            string? clientIp, string? userAgent, string? failureReason = null, string? appId = null,
-            string? correlationId = null, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public Task RecordActionAsync(
-            string action, string targetType, string targetId, Guid? actorId, string? actorName,
-            string? description, string? clientIp = null, string? correlationId = null,
-            object? before = null, object? after = null,
+        public ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("Injected audit write failure.");
     }
 
-    private sealed class CancelingAuditService(CancellationTokenSource cancellation) : IAuditService
+    private sealed class CancelingAuditService(CancellationTokenSource cancellation) : IManagementAuditWriter
     {
-        public Task RecordLoginAsync(
-            Guid? accountId, string username, string authMethod, string eventType,
-            string? clientIp, string? userAgent, string? failureReason = null, string? appId = null,
-            string? correlationId = null, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public async Task RecordActionAsync(
-            string action, string targetType, string targetId, Guid? actorId, string? actorName,
-            string? description, string? clientIp = null, string? correlationId = null,
-            object? before = null, object? after = null,
+        public async ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
             CancellationToken cancellationToken = default)
         {
             await cancellation.CancelAsync();
             cancellationToken.ThrowIfCancellationRequested();
+            throw new UnreachableException("The cancellation check above must have thrown.");
         }
     }
 
