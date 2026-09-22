@@ -39,6 +39,41 @@ dotnet ef migrations add <Name> \
 
 The host provisions the database where supported and applies the selected provider's migrations at startup. Production deployments should back up data, use a database principal with the required migration permissions, serialize schema upgrades, and verify the EF migrations history after rollout. Upgrades that cross the `RetireSystemSettings` migration must follow the staged bridge procedure in [System settings retirement](./system-settings-retirement.md).
 
+## Management key ring on PostgreSQL (0.1.9 regression)
+
+Release 0.1.9 ships ServiceMantle `0.1.0-alpha.7`, whose EF Core Data Protection key repository
+opened a user-initiated transaction directly. On PostgreSQL the identity database keeps Npgsql's
+retrying execution strategy enabled (`EnableRetryOnFailure`, the production default this project
+does not turn off), and that strategy rejects user-initiated transactions, so a 0.1.9 deployment
+on PostgreSQL cannot persist the management Data Protection key ring: `service_data_protection_keys`
+stays empty, every management login fails with `data_protection_keys.storage_error`, and the
+admin console has no usable session. SQLite deployments are unaffected.
+
+The fix consumes ServiceMantle `0.1.0-alpha.10` (ServiceMantle issue #559), which runs the whole
+store transaction inside the execution strategy. The first release pinning `0.1.0-alpha.10` is the
+first fixed version; its release notes must mark 0.1.9 as affected. Until that release is out,
+0.1.8 → 0.1.9 PostgreSQL upgrades must not be treated as smooth.
+
+Upgrade and rollback boundaries for the fixed version:
+
+- No key-ring schema change is involved: `service_data_protection_keys` and its lineage are the
+  same as 0.1.9's. An upgrade from 0.1.9 does cross the later `RetireSystemSettings` migration;
+  when legacy `system_settings` rows remain, follow the staged bridge procedure in
+  [System settings retirement](./system-settings-retirement.md).
+- The first management login after the upgrade writes the initial encrypted key row. A failed or
+  cancelled write leaves no partial row and reports only the fixed `data_protection_keys.storage_error`
+  category; root key material, plaintext key XML, ciphertext, connection strings, passwords, and
+  cookies never reach logs, diagnostics, or HTTP responses.
+- Rolling the application version back never executes `Down` migrations and never deletes
+  `service_data_protection_keys` rows: startup only migrates forward, and the ring survives a
+  version rollback intact. To actually run an older version again, restore the pre-upgrade backup
+  of the database together with the root key and bootstrap file, per
+  [System settings retirement](./system-settings-retirement.md).
+- Cookies issued before an upgrade from 0.1.8 are not carried over: 0.1.9 drops the legacy
+  `data_protection_keys` store instead of migrating it, so administrators sign in again after the
+  upgrade. Cookies issued by a fixed version stay valid across rebuilds and version changes that
+  read the same ring.
+
 ## Startup migration gate
 
 At startup, `InstallationStartup` runs the shared ServiceMantle migration orchestration (`DatabaseMigrationOrchestrator`) through an internal executor before any installation-state resolution, legacy configuration import, or snapshot loading happens. The orchestration applies a limited, read-only observation to the target and only allows migration to proceed from an `Empty` or `PendingMigration` state:
