@@ -29,10 +29,9 @@ internal sealed record InstallationResolution(
 /// installation.
 /// <para>
 /// A database whose installation row is missing but that already owns business data, or whose
-/// completed row was adopted by the <c>AddServiceInstallations</c> backfill while both
-/// <c>system_settings</c> and the shared <c>service_settings</c> aggregate are still empty, is an
-/// upgrade of a pre-change deployment: it takes the protected legacy import, never anonymous
-/// setup.
+/// completed row was adopted by the <c>AddServiceInstallations</c> backfill while the shared
+/// <c>service_settings</c> aggregate is still empty, is an upgrade of a pre-change deployment: it
+/// takes the protected legacy import, never anonymous setup.
 /// </para>
 /// </summary>
 internal static class InstallationStateResolver
@@ -64,14 +63,12 @@ internal static class InstallationStateResolver
 
         if (sharedPhase == ServiceStartupPhase.Completed)
         {
-            // A completed row adopted by the backfill with neither stored settings nor a shared
-            // aggregate is a real legacy upgrade that still has to run the import; a genuinely
-            // completed installation always wrote its snapshot transactionally — into the shared
-            // aggregate since the runtime switch, and into system_settings before it. A completed
-            // installation of the switched era owns accounts but no legacy rows, so the aggregate
-            // check is what keeps it out of the import path.
-            if (!await db.SystemSettings.AnyAsync(cancellationToken) &&
-                await SharedSettingAggregate.ReadVersionAsync(db, cancellationToken) is null &&
+            // A completed row adopted by the backfill with no shared aggregate is a real legacy
+            // upgrade that still has to run the import; a genuinely completed installation always
+            // wrote its snapshot transactionally into the shared aggregate. A completed
+            // installation of the switched era owns accounts and the aggregate, so the aggregate
+            // check alone keeps it out of the import path.
+            if (await SharedSettingAggregate.ReadVersionAsync(db, cancellationToken) is null &&
                 await HasBusinessDataAsync(db, cancellationToken))
             {
                 return new InstallationResolution(InstallationPhase.LegacyImportRequired, 0, null);

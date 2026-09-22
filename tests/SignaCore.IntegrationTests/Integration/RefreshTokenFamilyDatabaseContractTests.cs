@@ -27,6 +27,7 @@ namespace SignaCore.IntegrationTests.Integration;
 public sealed class RefreshTokenFamilyDatabaseContractTests
 {
     private const string CodeMigration = "20260916160633_AddAuthorizationCodes";
+    private const string FamilyMigration = "20260917030735_AddRefreshTokenFamilies";
     private const string AppId = "family-contract-app";
     private const string CanonicalScope = "openid profile";
 
@@ -696,7 +697,10 @@ public sealed class RefreshTokenFamilyDatabaseContractTests
         await using var context = new IdentityDbContext(options);
         var cancellationToken = TestContext.Current.CancellationToken;
         var migrator = context.GetService<IMigrator>();
-        await migrator.MigrateAsync(cancellationToken: cancellationToken);
+        // Staged at the family migration, not the latest: the retirement Down refuses every
+        // walk from the current version, so the family gate and the round trip are exercised
+        // inside the pre-retirement window where they live.
+        await migrator.MigrateAsync(FamilyMigration, cancellationToken);
 
         var (accountId, _, appId, sessionId) = await SeedBasicsAsync(context);
         var authTime = DateTimeOffset.UtcNow.AddMinutes(-5);

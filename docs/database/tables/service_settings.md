@@ -21,9 +21,9 @@ per-instance drift. See [Shared settings stack](../../development/SharedSettings
 - The aggregate is loaded, validated, and activated as one complete snapshot; a partially valid
   configuration never becomes the running configuration, and an incomplete, damaged, or
   undecryptable aggregate fails startup closed without replacing an existing snapshot.
-- Version numbering restarts at 1 when a legacy deployment is migrated: the version is monotonic
-  from there and identical across instances observing the same persisted state, but it is not
-  aligned with the legacy `system_settings` `MAX(version)`.
+- The version is monotonic and identical across instances observing the same persisted state.
+  Legacy-row migrations of the bridge era renumbered a bridged deployment back to 1, so the
+  version is not aligned with the retired `system_settings` `MAX(version)`.
 - Secret values are `sm:v1:` envelopes (HKDF-SHA-256 + AES-256-GCM) bound to the service id and the
   normalized setting key under the external root key. Plaintext never reaches the table, and secret
   values are never returned from general settings-list APIs.

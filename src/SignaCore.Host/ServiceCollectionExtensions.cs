@@ -93,7 +93,6 @@ public static class ServiceCollectionExtensions
         // concerns; KeyManager only orchestrates the key lifecycle.
         services.AddSingleton(masterKeyProvider);
         services.AddSingleton<IPrivateKeyProtector, AesGcmPrivateKeyProtector>();
-        services.AddSingleton<IConfigurationProtector, AesGcmConfigurationProtector>();
         services.AddSingleton<IKeyManager, KeyManager>();
 
         // ---- JWT Options ----

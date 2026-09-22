@@ -3,11 +3,13 @@ using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using ServiceMantle.Configuration;
 using ServiceMantle.Installation;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Keys;
+using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
 
 namespace SignaCore.Host.Bootstrap;
@@ -257,8 +259,8 @@ internal static class BootstrapTargetInspector
     }
 
     /// <summary>
-    /// A completed installation whose settings snapshot was never written is a backfill-adopted
-    /// legacy database, not a working install.
+    /// A completed installation whose shared settings aggregate was never written is a
+    /// backfill-adopted legacy database, not a working install.
     /// </summary>
     private static async Task<bool> IsAdoptedWithoutImportAsync(
         IdentityDbContext db,
@@ -266,7 +268,7 @@ internal static class BootstrapTargetInspector
     {
         try
         {
-            return !await db.SystemSettings.AnyAsync(cancellationToken) &&
+            return await SharedSettingAggregate.ReadVersionAsync(db, cancellationToken) is null &&
                 await HasAnyBusinessDataAsync(db, cancellationToken);
         }
         catch (DbException)
@@ -290,7 +292,71 @@ internal static class BootstrapTargetInspector
     }
 
     /// <summary>
-    /// Decrypts one already-protected value with the candidate key. Both protected data classes are
+    /// One sensitive shared-settings envelope of this service, with the normalized key it is
+    /// protected under.
+    /// </summary>
+    private sealed record SharedSensitiveEnvelope(string Key, string Envelope);
+
+    /// <summary>
+    /// The sensitive configuration envelopes this service persisted in its shared
+    /// <c>service_settings</c> aggregate. The aggregate row's metadata alone proves nothing: only
+    /// values under defined sensitive keys are envelopes, and a row whose values cannot even be
+    /// enumerated is reported as unreadable so the caller refuses instead of guessing.
+    /// </summary>
+    private static async Task<(List<SharedSensitiveEnvelope> Envelopes, bool AggregateUnreadable)>
+        LoadSharedSensitiveEnvelopesAsync(
+            IdentityDbContext db,
+            CancellationToken cancellationToken)
+    {
+        try
+        {
+            var valuesJson = await db.Database
+                .SqlQuery<string>($"""
+                    SELECT "values_json" AS "Value" FROM service_settings
+                    WHERE service_id = {InstallationStores.ServiceIdValue}
+                    """)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (valuesJson is null)
+            {
+                return ([], AggregateUnreadable: false);
+            }
+
+            Dictionary<string, string> values;
+            try
+            {
+                values = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(
+                    valuesJson) ?? [];
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return ([], AggregateUnreadable: true);
+            }
+
+            var envelopes = new List<SharedSensitiveEnvelope>();
+            foreach (var definition in SharedSettingComposition
+                         .CreateRegistry(isDevelopment: false)
+                         .Definitions
+                         .Where(definition => definition.IsSensitive))
+            {
+                if (values.TryGetValue(definition.Key, out var envelope) &&
+                    !string.IsNullOrEmpty(envelope))
+                {
+                    envelopes.Add(new SharedSensitiveEnvelope(definition.Key, envelope));
+                }
+            }
+
+            return (envelopes, AggregateUnreadable: false);
+        }
+        catch (DbException)
+        {
+            // The shared table does not exist: either an empty database or a schema predating it,
+            // so this protected-data class holds nothing here.
+            return ([], AggregateUnreadable: false);
+        }
+    }
+
+    /// <summary>
+    /// Verifies one already-protected value with the candidate key. Both protected data classes are
     /// tried because a database can hold signing keys before it holds any secret setting.
     /// </summary>
     private static async Task<MasterKeyCompatibility> EvaluateKeyCompatibilityAsync(
@@ -298,20 +364,8 @@ internal static class BootstrapTargetInspector
         string? candidateRootSecret,
         CancellationToken cancellationToken)
     {
-        List<SystemSettingEntity> secretSettings;
-        try
-        {
-            secretSettings = await db.SystemSettings
-                .AsNoTracking()
-                .Where(setting => setting.IsSecret && setting.Value != "")
-                .OrderBy(setting => setting.Key)
-                .Take(1)
-                .ToListAsync(cancellationToken);
-        }
-        catch (DbException)
-        {
-            secretSettings = [];
-        }
+        var (sensitiveEnvelopes, aggregateUnreadable) =
+            await LoadSharedSensitiveEnvelopesAsync(db, cancellationToken);
 
         List<SecurityKeyEntity> signingKeys;
         try
@@ -327,7 +381,15 @@ internal static class BootstrapTargetInspector
             signingKeys = [];
         }
 
-        if (secretSettings.Count == 0 && signingKeys.Count == 0)
+        if (aggregateUnreadable)
+        {
+            // An aggregate row exists but its persisted values cannot be enumerated: treat it as
+            // protected data no key may be blessed for, rather than silently falling back to
+            // "no protected data".
+            return MasterKeyCompatibility.Incompatible;
+        }
+
+        if (sensitiveEnvelopes.Count == 0 && signingKeys.Count == 0)
         {
             return MasterKeyCompatibility.NoProtectedData;
         }
@@ -338,15 +400,21 @@ internal static class BootstrapTargetInspector
         }
 
         var masterKeyProvider = new BootstrapMasterKeyProvider(candidateRootSecret);
+        var rootKeySource = SharedSettingComposition.CreateRootKeySource(masterKeyProvider);
 
-        foreach (var setting in secretSettings)
+        foreach (var envelope in sensitiveEnvelopes)
         {
             try
             {
-                _ = new AesGcmConfigurationProtector(masterKeyProvider).Unprotect(setting.Key, setting.Value);
+                _ = new SensitiveValueProtector(InstallationStores.ServiceId, envelope.Key)
+                    .Unprotect(
+                        envelope.Envelope,
+                        await rootKeySource.GetRootKeyAsync(cancellationToken),
+                        cancellationToken);
                 return MasterKeyCompatibility.Compatible;
             }
-            catch (CryptographicException)
+            catch (Exception exception)
+                when (exception is SensitiveValueProtectionException or ArgumentException)
             {
                 return MasterKeyCompatibility.Incompatible;
             }

@@ -680,9 +680,9 @@ public sealed class SetupContributorDatabaseContractTests
             Assert.StartsWith("sm:v1:", aggregateValues[sensitiveKey], StringComparison.Ordinal);
         }
 
-        // The legacy table is never written by the switched completion.
-        Assert.False(await context.SystemSettings.AnyAsync(
-            cancellationToken: TestContext.Current.CancellationToken));
+        // The retired legacy table is gone; the switched completion wrote the aggregate only.
+        Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(
+            context, TestContext.Current.CancellationToken));
 
         // The aggregate write also produced its value-free shared audit projection, one row per
         // changed key, without any submitted value.
@@ -739,8 +739,8 @@ public sealed class SetupContributorDatabaseContractTests
             cancellationToken: TestContext.Current.CancellationToken));
         Assert.Null(await SharedSettingTestDatabase.LoadAggregateAsync(context));
         Assert.Empty(await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(context));
-        Assert.False(await context.SystemSettings.AnyAsync(
-            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(
+            context, TestContext.Current.CancellationToken));
         Assert.False(await context.AuditLogs.AnyAsync(
             cancellationToken: TestContext.Current.CancellationToken));
     }

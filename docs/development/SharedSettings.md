@@ -5,12 +5,14 @@ the runtime switch, this stack is the configuration authority: the bootstrap pha
 shared snapshot, `IConfiguration` is fed through the reverse projection onto the legacy colon
 keys, first-run setup writes the shared aggregate, the admin console's settings page reads and
 writes the shared aggregate through the shared management endpoints, and the protected legacy
-configuration import writes the aggregate's first version directly, without ever writing the
-legacy `system_settings` table. That table stays as read-only legacy data.
+configuration import writes the aggregate's first version directly. The legacy
+`system_settings` table — together with its store, snapshot, one-shot migration, and legacy
+configuration protector — was removed by the guarded `RetireSystemSettings` drop (ServiceMantle
+issue #556); see [System settings retirement](../database/system-settings-retirement.md).
 
 > Status: implemented (ServiceMantle tasks #101 and #547, runtime switch #548, admin console
 > switch #145, import switch #146; the legacy `SettingsSnapshotValidator` was retired by
-> ServiceMantle task #555). Removing the remaining old types is tracked after those.
+> ServiceMantle task #555, and the legacy storage was retired by task #556).
 
 ## What is registered
 
@@ -77,12 +79,7 @@ inputs with pinned verdicts captured from the retired validator's baseline, and 
 
 ## Runtime activation (#548)
 
-- During the bootstrap phase, inside the startup initialization lock, a database whose aggregate is
-  still empty while legacy `system_settings` rows exist runs the one-shot migration (#547): every
-  legacy row is decrypted with the legacy protector and re-protected into the shared aggregate as
-  its first version, inside one caller-owned transaction. A migration refusal fails startup with
-  key names and a classification code only; the installation is never rolled back to `Pending`.
-- The bootstrap phase then activates the snapshot with a bootstrap-owned
+- The bootstrap phase activates the snapshot with a bootstrap-owned
   `ServiceSettingSnapshotLoader` and publishes it on one `ServiceSettingCurrentSnapshotAccessor`
   instance, which is pre-registered with DI so the composed snapshot services observe the same
   process-local snapshot instead of building a second, empty one.
@@ -92,10 +89,11 @@ inputs with pinned verdicts captured from the retired validator's baseline, and 
   snapshot path, and no consumer of `IConfiguration` had to change. Equivalence against the legacy
   path is asserted key by key, including the JSON sub-keys.
 - The configuration-version authority is the aggregate version (a `long`, narrowed once at the
-  bootstrap boundary). **The version is renumbered by the migration**: a deployment that just
-  migrated reports version 1 again, regardless of what the legacy `MAX(version)` used to be. The
-  guarantee is that the version is monotonic from there and that every instance observing the same
-  persisted state observes the same version and the same complete snapshot.
+  bootstrap boundary). The legacy-row migration renumbered a bridged deployment back to version 1
+  regardless of the legacy `MAX(version)`; since the retirement there is no migration path at all —
+  the aggregate is created by first-run setup or the protected import at version 1. The guarantee
+  is that the version is monotonic from there and that every instance observing the same persisted
+  state observes the same version and the same complete snapshot.
 - Fail-closed discipline is unchanged in shape: an incomplete, damaged, or undecryptable aggregate
   refuses activation without replacing an existing snapshot, reports key names and closed
   classification codes only, and never rolls a `Completed` installation back to `Pending`.
@@ -117,8 +115,8 @@ inputs with pinned verdicts captured from the retired validator's baseline, and 
   of the completion transaction, together with the administrator, the installation audit
   projection, and the code consumption. The admin console reaches the aggregate through the
   shared management endpoints, and the protected legacy configuration import writes the same
-  aggregate the same way (both below). The legacy `system_settings` table is no longer written
-  by the runtime; it is read-only legacy data.
+  aggregate the same way (both below). The legacy `system_settings` table no longer exists in
+  the retired schema; nothing reads or writes it.
 
 ## Admin console endpoints (#145)
 
@@ -151,7 +149,8 @@ inputs with pinned verdicts captured from the retired validator's baseline, and 
   `LegacyConfigurationInput`, the thin product input adapter that owns the historical reading
   rules (catalog defaults, trimming, the `AdminBootstrap:Username` alias with canonical-key
   precedence, JSON section/scalar shapes, the plain-HTTP compatibility opt-in, and the
-  required-key completeness check with key names only).
+  required-key completeness check with key names only). This import is the configuration
+  authority's only upgrade entry point since the legacy table was removed.
 - The complete candidate is mapped through `SharedSettingKeys` and written with one
   `ServiceSettingUpdateCommand(expectedVersion: 0, full batch, legacy-import operator)` inside one
   caller-owned serializable transaction, followed by the completed installation row it requires
@@ -169,7 +168,8 @@ inputs with pinned verdicts captured from the retired validator's baseline, and 
 
 ## Operators
 
-- The shared aggregate is the configuration authority. Changes land through the shared update path
+- The shared aggregate is the configuration authority — the only persisted configuration since
+  the legacy table was retired. Changes land through the shared update path
   and take effect on the next restart (all keys are `requiresRestart`); the admin console edits
   the shared aggregate directly, with the version it loaded as `expectedVersion` and a fixed 409
   conflict answer when another session moved ahead.

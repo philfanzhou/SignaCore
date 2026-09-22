@@ -1,5 +1,7 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Bootstrap;
+using ServiceMantle.Configuration;
 using ServiceMantle.Installation;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
@@ -26,6 +28,30 @@ namespace SignaCore.Host.Startup;
 internal static class InstallationTestSupport
 {
     /// <summary>
+    /// The exact legacy-keyed values <see cref="PrepareCompletedInstallationAsync"/> seeds without
+    /// overrides, exposed so tests can compare an activated projection against the seeded corpus.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> BuildCompletedInstallationValues(
+        string adminUsername,
+        IReadOnlyDictionary<string, string>? settingOverrides = null)
+    {
+        var values = SystemSettingsCatalog.BuildDefaults();
+        // TestServer serves plain HTTP on http://localhost, so the snapshot has to permit a
+        // non-HTTPS issuer the way a deliberate legacy migration would.
+        values[SystemSettingKeys.PublicBaseUrl] = "http://localhost";
+        values[SystemSettingKeys.JwtIssuer] = "http://localhost";
+        values[SystemSettingKeys.SecurityAllowNonHttpsIssuer] = "true";
+        values[SystemSettingKeys.AdminUsername] = adminUsername;
+
+        foreach (var (key, value) in settingOverrides ?? new Dictionary<string, string>())
+        {
+            values[key] = value;
+        }
+
+        return values;
+    }
+
+    /// <summary>
     /// Prepares a completed installation and returns the path of the bootstrap file that names it.
     /// Pass that path as the <c>Bootstrap:FilePath</c> host setting.
     /// </summary>
@@ -47,18 +73,7 @@ internal static class InstallationTestSupport
         await StartupDatabase.EnsureDatabaseExistsAsync(database, cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
 
-        var values = SystemSettingsCatalog.BuildDefaults();
-        // TestServer serves plain HTTP on http://localhost, so the snapshot has to permit a
-        // non-HTTPS issuer the way a deliberate legacy migration would.
-        values[SystemSettingKeys.PublicBaseUrl] = "http://localhost";
-        values[SystemSettingKeys.JwtIssuer] = "http://localhost";
-        values[SystemSettingKeys.SecurityAllowNonHttpsIssuer] = "true";
-        values[SystemSettingKeys.AdminUsername] = adminUsername;
-
-        foreach (var (key, value) in settingOverrides ?? new Dictionary<string, string>())
-        {
-            values[key] = value;
-        }
+        var values = BuildCompletedInstallationValues(adminUsername, settingOverrides);
 
         var candidateErrors = SharedSettingComposition.ValidateCompleteCandidate(values);
         if (candidateErrors.Count > 0)
@@ -76,9 +91,44 @@ internal static class InstallationTestSupport
                     .ToList()!);
         }
 
-        var protector = new AesGcmConfigurationProtector(new BootstrapMasterKeyProvider(rootSecret));
-        var store = new SystemSettingsStore(protector);
-        await store.WriteAsync(db, values, configurationVersion: 1, adminUsername, cancellationToken);
+        // The shared aggregate is seeded through the real shared update service — the same write
+        // path first-run setup and the legacy import use — with a clean change tracker inside its
+        // own transaction, so a test host never depends on startup migrating legacy rows.
+        var changes = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var (legacyKey, value) in values)
+        {
+            changes[SharedSettingKeys.NormalizedByLegacyKey[legacyKey]] = value;
+        }
+
+        var masterKeyProvider = new BootstrapMasterKeyProvider(rootSecret);
+        var updateService = new ServiceSettingUpdateService(
+            InstallationStores.ServiceId,
+            SharedSettingComposition.CreateRegistry(isDevelopment: false),
+            new EfCoreServiceSettingUpdateTransaction<IdentityDbContext>(db),
+            SharedSettingComposition.CreateRootKeySource(masterKeyProvider));
+
+        db.ChangeTracker.Clear();
+        await using (var transaction = await db.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable, cancellationToken))
+        {
+            var update = await updateService.UpdateAsync(
+                new ServiceSettingUpdateCommand(
+                    expectedVersion: 0,
+                    changes,
+                    SharedSettingComposition.LegacyImportOperator),
+                cancellationToken);
+            if (!update.Succeeded || update.Version is not > 0)
+            {
+                throw new SettingsSnapshotException(
+                    "The prepared configuration snapshot could not be written into the shared " +
+                    $"aggregate ({update.Status}).",
+                    update.Errors.Select(error => error.Key ?? error.ErrorCode).ToList());
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        db.ChangeTracker.Clear();
 
         var now = DateTimeOffset.UtcNow;
         var accountId = Guid.NewGuid();

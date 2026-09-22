@@ -6,7 +6,7 @@ const sidebarOpen = ref(false)
 const viewLeaving = ref(false)
 
 /* nav 配置 - 与样稿的 4 个 Tab 对应（系统切换器、概览、审计 不实现，见 spec），
-   外加全局配置：首次配置之后，system_settings 由这里维护 */
+   外加全局配置：首次配置之后，共享配置聚合（service_settings）由这里维护 */
 const navItems = [
   { key: 'users',    label: '用户管理', icon: 'users' },
   { key: 'apps',     label: '应用注册', icon: 'app' },

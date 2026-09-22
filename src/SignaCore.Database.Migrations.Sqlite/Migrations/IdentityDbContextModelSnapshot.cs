@@ -1417,46 +1417,6 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                     b.ToTable("security_keys", (string)null);
                 });
 
-            modelBuilder.Entity("SignaCore.Database.Entity.SystemSettingEntity", b =>
-                {
-                    b.Property<string>("Key")
-                        .HasMaxLength(200)
-                        .HasColumnType("TEXT")
-                        .HasColumnName("key");
-
-                    b.Property<bool>("IsSecret")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("is_secret");
-
-                    b.Property<long>("UpdatedAt")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT")
-                        .HasColumnName("updated_by");
-
-                    b.Property<string>("Value")
-                        .IsRequired()
-                        .HasColumnType("TEXT")
-                        .HasColumnName("value");
-
-                    b.Property<string>("ValueType")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT")
-                        .HasColumnName("value_type");
-
-                    b.Property<int>("Version")
-                        .HasColumnType("INTEGER")
-                        .HasColumnName("version");
-
-                    b.HasKey("Key");
-
-                    b.ToTable("system_settings", (string)null);
-                });
-
             modelBuilder.Entity("SignaCore.Database.Entity.UserLoginEntity", b =>
                 {
                     b.Property<Guid>("Id")

@@ -232,9 +232,9 @@ var hasLegacyDatabaseSection = LegacyConfigurationGuard.HasDatabaseSectionOverri
 
 // ---- Activate the configuration snapshot ----
 // Layered last so the database wins over every deployment-provided source.
-if (bootstrapResult.Snapshot is not null)
+if (bootstrapResult.ConfigurationEntries is not null)
 {
-    builder.Configuration.AddInMemoryCollection(bootstrapResult.Snapshot.ConfigurationEntries);
+    builder.Configuration.AddInMemoryCollection(bootstrapResult.ConfigurationEntries);
 }
 
 // ---- Serilog (Console + Grafana Loki) ----
@@ -296,8 +296,6 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
 
     builder.Services.AddSingleton(setupDatabaseOptions);
     builder.Services.AddSingleton(bootstrapResult.MasterKeyProvider);
-    builder.Services.AddSingleton(bootstrapResult.ConfigurationProtector);
-    builder.Services.AddSingleton(bootstrapResult.SettingsStore);
 
     // The setup completion transaction must run exactly once per request: a retrying execution
     // strategy would replay the whole user transaction, which the shared entry contract forbids.
@@ -457,7 +455,6 @@ builder.Services.AddSingleton<IBootstrapCredentialStore>(
     BootstrapCredentialProvisioner.CreateStore(bootstrapFilePath));
 
 builder.Services.AddSingleton(bootstrapResult.RuntimeState);
-builder.Services.AddSingleton(bootstrapResult.SettingsStore);
 
 // The bootstrap phase activated the runtime snapshot on this exact accessor instance. Registering
 // it before the shared setting stack lets the stack's TryAdd adoption keep the activated snapshot

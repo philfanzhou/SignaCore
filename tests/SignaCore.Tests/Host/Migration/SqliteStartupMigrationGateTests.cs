@@ -438,11 +438,14 @@ public sealed class SqliteStartupMigrationGateTests
 
             Assert.Equal(InstallationPhase.PendingSetup, result.Phase);
             Assert.NotNull(result.PlaintextSetupCode);
-            Assert.Null(result.Snapshot);
+            Assert.Null(result.SharedSnapshot);
+            Assert.Null(result.ConfigurationEntries);
 
-            // The legacy installation_state table is dropped by the forward migration; the pending
-            // installation and its hashed setup code live in service_installations.
+            // The legacy installation_state and system_settings tables are dropped by the forward
+            // chain; the pending installation and its hashed setup code live in
+            // service_installations.
             Assert.False(TableExists(databasePath, "installation_state"));
+            Assert.False(TableExists(databasePath, "system_settings"));
             Assert.True(TableExists(databasePath, "service_installations"));
             Assert.Equal(1, Scalar(databasePath, "SELECT COUNT(*) FROM service_installations"));
             var storedDigest = await StoredSetupCodeDigestAsync(databasePath);
@@ -494,11 +497,17 @@ public sealed class SqliteStartupMigrationGateTests
 
             Assert.Equal(InstallationPhase.Completed, result.Phase);
             Assert.Null(result.PlaintextSetupCode);
-            Assert.NotNull(result.Snapshot);
-            Assert.Equal("administrator", result.Snapshot!.Values[SystemSettingKeys.AdminUsername]);
+            Assert.NotNull(result.SharedSnapshot);
+            Assert.Equal(
+                "administrator",
+                result.SharedSnapshot!.Values["admin.username"].GetString());
+            Assert.NotNull(result.ConfigurationEntries);
+            Assert.Equal(
+                "administrator",
+                result.ConfigurationEntries![SystemSettingKeys.AdminUsername]);
 
-            // The database held only legacy system_settings rows: the startup migration created the
-            // shared aggregate as its first version and the snapshot was activated from it.
+            // The test installation wrote the shared aggregate directly through the shared update
+            // path (no legacy rows ever existed), and the snapshot was activated from it.
             var verificationBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
             verificationBuilder.UseIdentityDatabase(options);
             using (var verification = new IdentityDbContext(verificationBuilder.Options))
@@ -557,13 +566,15 @@ public sealed class SqliteStartupMigrationGateTests
 
             Assert.Equal(InstallationPhase.Completed, result.Phase);
             Assert.Null(result.PlaintextSetupCode);
-            Assert.NotNull(result.Snapshot);
-            Assert.Equal("http://localhost", result.Snapshot!.Values[SystemSettingKeys.PublicBaseUrl]);
+            Assert.NotNull(result.SharedSnapshot);
+            Assert.Equal(
+                "http://localhost",
+                result.SharedSnapshot!.Values["endpoints.public_base_url"].GetString());
 
             // The business data made the backfill adopt a completed service_installations row; the
-            // import filled system_settings, and the same boot migrated those rows into the shared
-            // aggregate, which the activated snapshot was loaded from. The legacy
-            // installation_state table is gone.
+            // protected import wrote the deployment configuration into the shared aggregate, which
+            // the activated snapshot was loaded from. Both legacy tables — installation_state and
+            // the empty system_settings — are gone after the guarded drop.
             var importVerificationBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
             importVerificationBuilder.UseIdentityDatabase(options);
             using (var verification = new IdentityDbContext(importVerificationBuilder.Options))

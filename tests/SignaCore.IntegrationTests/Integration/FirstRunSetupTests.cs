@@ -184,7 +184,8 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(InstallationStatus.PendingSetup, (await db.ServiceInstallations.SingleAsync(
             cancellationToken: TestContext.Current.CancellationToken)).Status);
         Assert.False(await db.Accounts.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
-        Assert.False(await db.SystemSettings.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(
+            db, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -353,8 +354,9 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(PublicBaseUrl, aggregateValues["endpoints.public_base_url"]);
         Assert.Equal(PublicBaseUrl, aggregateValues["jwt.issuer"]);
         Assert.Equal(AdminUsername, aggregateValues["admin.username"]);
-        // The switched completion writes the shared aggregate only; the legacy table stays empty.
-        Assert.False(await db.SystemSettings.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
+        // The switched completion writes the shared aggregate only; the retired table is gone.
+        Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(
+            db, TestContext.Current.CancellationToken));
 
         var audit = await db.AuditLogs.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("installation.setup.completed", audit.Action);
@@ -523,7 +525,8 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(
             "legacy_admin",
             SharedSettingTestDatabase.ParseValues(aggregate)["admin.username"]);
-        Assert.Equal(0, await db.SystemSettings.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(
+            db, TestContext.Current.CancellationToken));
 
         // The shared per-key audits and the one product import audit are the only audit records of
         // the import; neither carries any value.
@@ -614,7 +617,8 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Equal(0, await db.AuditLogs.AsNoTracking()
             .CountAsync(entry => entry.Action == "installation.legacy_import.completed",
                 cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Equal(0, await db.SystemSettings.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(
+            db, TestContext.Current.CancellationToken));
 
         // The failure names keys or classification codes, never the submitted values.
         var flattened = Flatten(exception);
@@ -734,7 +738,8 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         await using var db = OpenDatabase();
         Assert.Equal(existingAccounts, await db.Accounts.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(existingCredentials, await db.PasswordCredentials.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
-        Assert.False(await db.SystemSettings.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
+        Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(
+            db, TestContext.Current.CancellationToken));
         Assert.Null(await SharedSettingTestDatabase.LoadAggregateAsync(
             db, TestContext.Current.CancellationToken));
         Assert.False(await db.AuditLogs.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));

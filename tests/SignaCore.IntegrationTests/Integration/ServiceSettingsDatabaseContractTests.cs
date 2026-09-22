@@ -480,10 +480,16 @@ public sealed class ServiceSettingsDatabaseContractTests
         Assert.DoesNotContain("CANARY-sk", settingsRow + auditRows, StringComparison.Ordinal);
     }
 
-    // ---- A7: upgrade of an existing database ----
+    // ---- A7: upgrade of an existing database across the retirement ----
 
+    /// <summary>
+    /// The retirement guard on the upgrade path: an existing database whose legacy
+    /// <c>system_settings</c> table still holds rows and that never wrote a shared aggregate is
+    /// refused by the guarded drop — the rows survive byte-for-byte and the aggregate stays empty —
+    /// so a drop-then-check ordering cannot pass unnoticed.
+    /// </summary>
     [Fact]
-    public async Task ExistingDatabaseUpgrade_LeavesLegacyTablesUntouchedAndStartsEmpty()
+    public async Task ExistingDatabaseUpgradeWithUnmigratedLegacyRows_IsRefusedAndKeepsTheRows()
     {
         var path = Path.Combine(
             Path.GetTempPath(), $"signacore-shared-upgrade-{Guid.NewGuid():N}.db");
@@ -494,77 +500,147 @@ public sealed class ServiceSettingsDatabaseContractTests
             ConnectionString = new SqliteConnectionStringBuilder { DataSource = path }.ConnectionString
         };
 
-        await using (var context = new IdentityDbContext(options))
+        try
         {
-            var migrator = context.GetService<IMigrator>();
-            // The last migration before the shared setting stack.
-            await migrator.MigrateAsync(
-                "20260913104314_DropInstallationState", TestContext.Current.CancellationToken);
+            await using (var context = new IdentityDbContext(options))
+            {
+                var migrator = context.GetService<IMigrator>();
+                // The last migration before the shared setting stack: the fixed historical schema
+                // a pre-change deployment would be on.
+                await migrator.MigrateAsync(
+                    "20260913104314_DropInstallationState", TestContext.Current.CancellationToken);
 
-            // A pre-existing deployment: one account, one settings row, one audit row.
-            var accountId = Guid.NewGuid();
-            context.Accounts.Add(new AccountEntity
+                context.Accounts.Add(new AccountEntity
+                {
+                    Id = Guid.NewGuid(), IsActive = true, CreatedAt = DateTimeOffset.UtcNow
+                });
+                context.AuditLogs.Add(new AuditLogEntity
+                {
+                    Id = Guid.NewGuid(),
+                    Action = "settings_updated",
+                    TargetType = "Settings",
+                    TargetId = "1",
+                    ActorName = "legacy-admin",
+                    Description = "Legacy update",
+                    CreatedAt = DateTimeOffset.UtcNow
+                });
+                await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+                // The raw legacy row exactly like a deployment that never ran a bridge build —
+                // no entity type exists for it anymore.
+                await context.Database.ExecuteSqlRawAsync(
+                    """
+                    INSERT INTO system_settings (key, value, value_type, is_secret, version, updated_at, updated_by)
+                    VALUES ('Jwt:Issuer', 'https://legacy.example.com', 'String', 0, 1, 0, 'legacy-admin')
+                    """,
+                    TestContext.Current.CancellationToken);
+            }
+
+            await using (var context = new IdentityDbContext(options))
             {
-                Id = accountId, IsActive = true, CreatedAt = DateTimeOffset.UtcNow
-            });
-            context.SystemSettings.Add(new SystemSettingEntity
-            {
-                Key = SystemSettingKeys.JwtIssuer,
-                Value = "https://legacy.example.com",
-                ValueType = "String",
-                IsSecret = false,
-                Version = 1,
-                UpdatedAt = DateTimeOffset.UtcNow,
-                UpdatedBy = "legacy-admin"
-            });
-            context.AuditLogs.Add(new AuditLogEntity
-            {
-                Id = Guid.NewGuid(),
-                Action = "settings_updated",
-                TargetType = "Settings",
-                TargetId = "1",
-                ActorId = accountId,
-                ActorName = "legacy-admin",
-                Description = "Legacy update",
-                CreatedAt = DateTimeOffset.UtcNow
-            });
-            await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+                await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(
+                    async () => await new SignaCore.Host.Migration.SignaCoreMigrationExecutor(context, databaseOptions)
+                        .ExecuteAsync(TestContext.Current.CancellationToken));
+
+                var legacyRows = await context.Database.SqlQuery<long>($"""
+                        SELECT COUNT(*) AS "Value" FROM system_settings
+                        """).ToListAsync(TestContext.Current.CancellationToken);
+                var legacyAuditAction = await context.AuditLogs.AsNoTracking()
+                    .SingleAsync(TestContext.Current.CancellationToken);
+                var aggregates = await context.Database.SqlQuery<int>(
+                        $"""SELECT COUNT(*) AS "Value" FROM service_settings""")
+                    .ToListAsync(TestContext.Current.CancellationToken);
+                Assert.Equal(1, legacyRows.Single());
+                Assert.Equal("settings_updated", legacyAuditAction.Action);
+                Assert.Equal(0, aggregates.Single());
+            }
         }
-
-        long legacySettingsRows;
-        string legacyAuditAction;
-        await using (var context = new IdentityDbContext(options))
+        finally
         {
-            await new SignaCore.Host.Migration.SignaCoreMigrationExecutor(context, databaseOptions)
-                .ExecuteAsync(TestContext.Current.CancellationToken);
-
-            legacySettingsRows = await context.SystemSettings.LongCountAsync(
-                TestContext.Current.CancellationToken);
-            legacyAuditAction = await context.AuditLogs.AsNoTracking()
-                .SingleAsync(TestContext.Current.CancellationToken)
-                .ContinueWith(task => task.Result.Action, TestContext.Current.CancellationToken);
-            var newSettings = await context.Database.SqlQuery<int>(
-                    $"""SELECT COUNT(*) AS "Value" FROM service_settings""")
-                .ToListAsync(TestContext.Current.CancellationToken);
-            var newAudits = await context.Database.SqlQuery<int>(
-                    $"""SELECT COUNT(*) AS "Value" FROM service_audit_logs""")
-                .ToListAsync(TestContext.Current.CancellationToken);
-            Assert.Equal(0, newSettings.Single());
-            Assert.Equal(0, newAudits.Single());
+            TestSqlitePools.ClearAll();
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
         }
+    }
 
-        Assert.Equal(1, legacySettingsRows);
-        Assert.Equal("settings_updated", legacyAuditAction);
-
-        // The fresh aggregate starts at version 0 and accepts its first update.
-        var first = await UpdateAsync(options, 0, SeedChanges());
-        Assert.Equal(ServiceSettingUpdateStatus.Applied, first.Status);
-        Assert.Equal(1, first.Version);
-
-        TestSqlitePools.ClearAll();
-        if (File.Exists(path))
+    /// <summary>
+    /// The empty-legacy-table upgrade continues: the guarded drop removes the retired table, the
+    /// existing business data stays, and the fresh aggregate starts at version 0.
+    /// </summary>
+    [Fact]
+    public async Task ExistingDatabaseUpgradeWithAnEmptyLegacyTable_DropsItAndStartsEmpty()
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(), $"signacore-shared-upgrade-{Guid.NewGuid():N}.db");
+        var options = CreateSqliteOptions(path);
+        var databaseOptions = new DatabaseOptions
         {
-            File.Delete(path);
+            Provider = "SQLite",
+            ConnectionString = new SqliteConnectionStringBuilder { DataSource = path }.ConnectionString
+        };
+
+        try
+        {
+            await using (var context = new IdentityDbContext(options))
+            {
+                var migrator = context.GetService<IMigrator>();
+                await migrator.MigrateAsync(
+                    "20260913104314_DropInstallationState", TestContext.Current.CancellationToken);
+
+                var accountId = Guid.NewGuid();
+                context.Accounts.Add(new AccountEntity
+                {
+                    Id = accountId, IsActive = true, CreatedAt = DateTimeOffset.UtcNow
+                });
+                context.AuditLogs.Add(new AuditLogEntity
+                {
+                    Id = Guid.NewGuid(),
+                    Action = "settings_updated",
+                    TargetType = "Settings",
+                    TargetId = "1",
+                    ActorId = accountId,
+                    ActorName = "legacy-admin",
+                    Description = "Legacy update",
+                    CreatedAt = DateTimeOffset.UtcNow
+                });
+                await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+            }
+
+            string legacyAuditAction;
+            await using (var context = new IdentityDbContext(options))
+            {
+                await new SignaCore.Host.Migration.SignaCoreMigrationExecutor(context, databaseOptions)
+                    .ExecuteAsync(TestContext.Current.CancellationToken);
+
+                var retiredTable = await context.Database.SqlQuery<long>($"""
+                        SELECT COUNT(*) AS "Value" FROM sqlite_master
+                        WHERE type = 'table' AND name = 'system_settings'
+                        """).ToListAsync(TestContext.Current.CancellationToken);
+                legacyAuditAction = await context.AuditLogs.AsNoTracking()
+                    .SingleAsync(TestContext.Current.CancellationToken)
+                    .ContinueWith(task => task.Result.Action, TestContext.Current.CancellationToken);
+                var newSettings = await context.Database.SqlQuery<int>(
+                        $"""SELECT COUNT(*) AS "Value" FROM service_settings""")
+                    .ToListAsync(TestContext.Current.CancellationToken);
+                Assert.Equal(0, retiredTable.Single());
+                Assert.Equal(0, newSettings.Single());
+            }
+
+            Assert.Equal("settings_updated", legacyAuditAction);
+
+            // The fresh aggregate starts at version 0 and accepts its first update.
+            var first = await UpdateAsync(options, 0, SeedChanges());
+            Assert.Equal(ServiceSettingUpdateStatus.Applied, first.Status);
+            Assert.Equal(1, first.Version);
+        }
+        finally
+        {
+            TestSqlitePools.ClearAll();
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
         }
     }
 

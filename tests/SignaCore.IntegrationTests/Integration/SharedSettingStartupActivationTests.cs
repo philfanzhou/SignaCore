@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ServiceMantle.Audit;
 using ServiceMantle.Configuration;
 using SignaCore.Database;
+using SignaCore.Database.Entity;
 using SignaCore.Domain.Keys;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
@@ -13,24 +14,21 @@ using Xunit;
 namespace SignaCore.Tests.Integration;
 
 /// <summary>
-/// The #548 runtime switch on the real composed host: a deployment whose database holds only
-/// legacy <c>system_settings</c> rows is migrated by the startup inside the initialization lock,
-/// the activated shared snapshot is projected back onto the legacy colon-keyed configuration shape
-/// byte-for-byte, and every host booted against the same persisted state observes the same
-/// aggregate version and the same complete snapshot, with the version strictly monotonic across
-/// updates.
+/// The retirement-era activation guarantees on the real composed host: the activated shared
+/// snapshot's projection is equivalent entry-for-entry to what the retired legacy snapshot path
+/// produced from the same corpus, every host booted against the same persisted state observes the
+/// same aggregate version and the same complete snapshot, versions advance strictly monotonically
+/// across shared updates, and the retired legacy table no longer exists in the fixture schema.
 /// </summary>
 /// <remarks>
-/// The three cases share one class-level <see cref="IdentityServerFixture"/> and therefore one
-/// SQLite database, and <see cref="TwoHosts_ObserveTheSameVersionAndSnapshot_AndVersionsAdvanceMonotonically"/>
-/// advances the persisted aggregate from v1 to v2. Every case that needs the pristine
-/// post-migration state re-establishes it first (<see cref="BootFreshlyMigratedHostAsync"/>), so
-/// no case depends on the intra-class execution order. The orderer of issue #320 cannot provide
-/// that inside this class anymore: the class must run in the
-/// <see cref="SqliteProcessState.CollectionName"/> collection (its fixture clears the process-wide
-/// SQLite pools at disposal, issue #321), and xUnit applies class-level test-case orderers only to
-/// classes of their own implicit collection — inside an explicit collection the attribute is
-/// ignored and the discovery order, which differs per platform and build artifact, decides.
+/// The class shares one <see cref="IdentityServerFixture"/> and therefore one SQLite database
+/// seeded directly through the shared update path (no startup migration of legacy rows).
+/// <see cref="TwoHosts_ObserveTheSameVersionAndSnapshot_AndVersionsAdvanceMonotonically"/>
+/// advances the persisted aggregate version, so every case states its expectations relative to the
+/// observed snapshot instead of a pristine version. The orderer of issue #320 cannot provide
+/// intra-class ordering here: the class must run in the
+/// <see cref="SqliteProcessState.CollectionName"/> collection, and xUnit applies class-level
+/// test-case orderers only to classes of their own implicit collection.
 /// </remarks>
 [Collection(SqliteProcessState.CollectionName)]
 [UsesProcessWideSqlitePoolClearing]
@@ -48,73 +46,93 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
     }
 
     /// <summary>
-    /// Boots a host against a freshly re-migrated aggregate: the shared class-fixture database is
-    /// first reset to the not-yet-migrated state (the legacy rows stay byte-for-byte), so the
-    /// booted host's startup performs the one-shot migration again and the aggregate is pristine
-    /// v1 no matter which sibling cases ran before. Each case is thereby independent of the
-    /// intra-class execution order.
+    /// The exact values the fixture seeded through the shared update path, in the legacy keyed
+    /// form the projection must render.
     /// </summary>
-    private async Task<WebApplicationFactory<Program>> BootFreshlyMigratedHostAsync()
+    private static Dictionary<string, string> SeededCorpus() =>
+        new(IdentityServerFixture.SeededSettingValues, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Expands the seeded corpus into configuration entries exactly the way the retired legacy
+    /// snapshot loader did — scalars verbatim, JSON settings flattened — so the comparison keeps
+    /// proving the projection preserves the legacy configuration shape.
+    /// </summary>
+    private static Dictionary<string, string?> ExpectedEntries()
     {
-        using (var scope = _fixture.Services.CreateScope())
+        var entries = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (legacyKey, value) in SeededCorpus())
         {
-            var database = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-            await SharedSettingTestDatabase.DeleteAggregateAsync(
-                database, TestContext.Current.CancellationToken);
+            var definition = SystemSettingsCatalog.Find(legacyKey)!;
+            if (definition.ValueType == SettingValueTypes.Json)
+            {
+                JsonSettingFlattener.Flatten(legacyKey, value, entries);
+            }
+            else
+            {
+                entries[legacyKey] = value;
+            }
         }
 
-        var host = _fixture.WithTestServices(_ => { });
-        _ = host.CreateClient();
-        return host;
+        return entries;
     }
 
     /// <summary>
     /// Acceptance: for every registered key (including the JSON-expanded sub-keys), the activated
-    /// shared snapshot's reverse projection yields exactly the configuration entries the legacy
-    /// snapshot path produced from the same stored corpus, and both render the same values through
+    /// shared snapshot's projection yields exactly the configuration entries the retired legacy
+    /// snapshot path produced from the same corpus, and both render the same values through
     /// <c>IConfiguration</c>.
     /// </summary>
     [Fact]
-    public async Task ActivatedProjection_IsEquivalentToTheLegacySnapshotPath()
+    public async Task ActivatedProjection_IsEquivalentToTheRetiredLegacySnapshotPath()
     {
-        using var host = await BootFreshlyMigratedHostAsync();
-
-        // The legacy path over the fixture's original system_settings corpus.
-        SystemSettingsSnapshot legacy;
+        // The version-advancing sibling may have run first and moved jwt.token_expiration_hours
+        // off the seeded corpus; restore the seeded value so the comparison below is exactly the
+        // seeded corpus.
         using (var scope = _fixture.Services.CreateScope())
         {
             var database = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-            var protector = scope.ServiceProvider.GetRequiredService<IConfigurationProtector>();
-            legacy = await new SystemSettingsStore(protector).LoadAsync(
-                database, configurationVersion: 1, TestContext.Current.CancellationToken);
+            var update = scope.ServiceProvider.GetRequiredService<ServiceSettingUpdateService>();
+            var current = await SharedSettingTestDatabase.LoadAggregateAsync(
+                database, TestContext.Current.CancellationToken);
+            Assert.NotNull(current);
+            await using var transaction = await database.Database.BeginTransactionAsync(
+                TestContext.Current.CancellationToken);
+            var restored = await update.UpdateAsync(
+                new ServiceSettingUpdateCommand(
+                    current!.Version,
+                    new Dictionary<string, string?> { ["jwt.token_expiration_hours"] = "2" },
+                    UpdateOperator),
+                TestContext.Current.CancellationToken);
+            Assert.True(restored.Succeeded);
+            await transaction.CommitAsync(TestContext.Current.CancellationToken);
         }
 
-        // The activated shared snapshot, projected back onto legacy keys. Resolving the accessor
-        // of the freshly migrated host also proves the bootstrap-activated instance is the one the
-        // composed hosts observe, not a second empty one.
+        using var host = _fixture.WithTestServices(_ => { });
+        _ = host.CreateClient();
+
+        // Resolving the accessor of the booted host proves the bootstrap-activated instance is
+        // the one the composed hosts observe, not a second empty one.
         var accessor = host.Services.GetRequiredService<IServiceSettingCurrentSnapshotAccessor>();
         Assert.True(accessor.TryGetCurrent(out var shared));
         var (_, projectedEntries) = SharedSettingConfigurationProjection.Project(shared!);
 
+        var expected = ExpectedEntries();
         Assert.Equal(
-            legacy.ConfigurationEntries.Keys.Order(StringComparer.OrdinalIgnoreCase),
+            expected.Keys.Order(StringComparer.OrdinalIgnoreCase),
             projectedEntries.Keys.Order(StringComparer.OrdinalIgnoreCase));
-        foreach (var key in legacy.ConfigurationEntries.Keys)
+        foreach (var key in expected.Keys)
         {
-            Assert.Equal(
-                legacy.ConfigurationEntries[key],
-                projectedEntries[key],
-                StringComparer.OrdinalIgnoreCase);
+            Assert.Equal(expected[key], projectedEntries[key], StringComparer.OrdinalIgnoreCase);
         }
 
         // The same equivalence through the IConfiguration surface every consumer reads.
         var legacyConfiguration = new ConfigurationBuilder()
-            .AddInMemoryCollection(legacy.ConfigurationEntries)
+            .AddInMemoryCollection(expected!)
             .Build();
         var projectedConfiguration = new ConfigurationBuilder()
             .AddInMemoryCollection(projectedEntries)
             .Build();
-        foreach (var key in legacy.ConfigurationEntries.Keys)
+        foreach (var key in expected.Keys)
         {
             Assert.Equal(legacyConfiguration[key], projectedConfiguration[key]);
         }
@@ -128,14 +146,13 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
     [Fact]
     public async Task TwoHosts_ObserveTheSameVersionAndSnapshot_AndVersionsAdvanceMonotonically()
     {
-        // First instance on the freshly re-migrated database; its startup performed the one-shot
-        // migration again, so the aggregate is pristine v1.
-        using var firstHost = await BootFreshlyMigratedHostAsync();
+        using var firstHost = _fixture.WithTestServices(_ => { });
+        _ = firstHost.CreateClient();
         var firstAccessor = firstHost.Services.GetRequiredService<IServiceSettingCurrentSnapshotAccessor>();
         Assert.True(firstAccessor.TryGetCurrent(out var firstSnapshot));
 
-        // Second instance on the same database: the aggregate already exists, so its startup skips
-        // the migration and activates the same persisted version.
+        // Second instance on the same database: the aggregate already exists, so its startup
+        // activates the same persisted version without touching any retired table.
         using var secondHost = _fixture.WithTestServices(_ => { });
         _ = secondHost.CreateClient();
         var secondAccessor = secondHost.Services.GetRequiredService<IServiceSettingCurrentSnapshotAccessor>();
@@ -186,34 +203,28 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
     }
 
     /// <summary>
-    /// The fixture database keeps its legacy rows untouched: the startup migration re-protects
-    /// into the shared aggregate and never modifies, deletes, or re-versions the legacy table.
-    /// The pristine aggregate state is re-established first, so the case also holds when it runs
-    /// after the version-advancing sibling.
+    /// The retired table is gone from the fixture schema and nothing recreates it: the hosts of
+    /// this class booted repeatedly against the same database while this case ran, proving the
+    /// normal startup path never reads or writes <c>system_settings</c> after the retirement.
     /// </summary>
     [Fact]
-    public async Task StartupMigration_LeavesTheLegacyRowsUntouched()
+    public async Task RetiredLegacyTable_IsAbsentAndStaysAbsentAcrossBoots()
     {
-        using var host = await BootFreshlyMigratedHostAsync();
+        using var host = _fixture.WithTestServices(_ => { });
+        _ = host.CreateClient();
 
         using var scope = _fixture.Services.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-        var rows = await database.SystemSettings
-            .AsNoTracking()
-            .OrderBy(setting => setting.Key)
-            .ToListAsync(TestContext.Current.CancellationToken);
+        var table = await database.Database.SqlQuery<long>($"""
+            SELECT COUNT(*) AS "Value" FROM sqlite_master
+            WHERE type = 'table' AND name = 'system_settings'
+            """).ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0, table.Single());
 
-        Assert.Equal(43, rows.Count);
-        Assert.All(rows, row => Assert.Equal(1, row.Version));
-        Assert.Contains(rows, row => row.Key == SystemSettingKeys.AdminUsername);
-
+        // The persisted authority is the shared aggregate the fixture seeded directly.
         var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
             database, TestContext.Current.CancellationToken);
         Assert.NotNull(aggregate);
-        Assert.Equal(1, aggregate!.Version);
-        Assert.Equal("settings-migration", aggregate.UpdatedBy);
-        Assert.Equal(
-            SharedSettingKeys.NormalizedByLegacyKey.Values.Order(StringComparer.Ordinal),
-            SharedSettingTestDatabase.ParseValues(aggregate).Keys.Order(StringComparer.Ordinal));
+        Assert.True(aggregate!.Version >= 1);
     }
 }

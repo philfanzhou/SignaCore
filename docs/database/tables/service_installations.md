@@ -39,16 +39,17 @@ SignaCore `DateTimeOffset`/Unix-microsecond convention used elsewhere.
   stayed empty so anonymous setup remains open for a not-yet-completed install.
 - The legacy `installation_state.setup_code_hash` was not carried over: a `Completed` row holds no
   setup-code material, and the legacy hash format was not migratable.
-- Startup resolution: a missing row with business data, or a backfill-adopted `Completed` row with
-  an empty `system_settings` table and business data, is an upgrade of a pre-change deployment — it
-  takes the protected legacy import, never anonymous setup. A genuinely completed installation
-  always wrote its full settings snapshot transactionally.
+- Startup resolution: a missing row with business data, or a backfill-adopted `Completed` row
+  with no shared `service_settings` aggregate and business data, is an upgrade of a pre-change
+  deployment — it takes the protected legacy import, never anonymous setup. A genuinely completed
+  installation always wrote its full settings snapshot transactionally.
 - Setup completion, settings changes, and the rotate command serialize on this row (`FOR UPDATE` on
   PostgreSQL); `setup_code_digest` and `setup_code_expires_at_utc` are cleared in the same
   transaction that sets `status` to `Completed`, so a consumed code cannot be replayed.
-- The configuration version reported in startup diagnostics and the admin settings API is derived
-  from `MAX(system_settings.version)`; every version publisher writes at least one settings row
-  stamped with the new version under this row's writer lock.
+- The configuration version reported in startup diagnostics and the admin settings API is the
+  shared `service_settings` aggregate version, activated once at startup. (Before the legacy
+  storage was retired, it was derived from `MAX(system_settings.version)` under this row's writer
+  lock.)
 - Setup codes keep SignaCore's documented 24-hour validity (the shared store's maximum lifetime);
   only the `sha256-v1:` digest is stored, never the plaintext.
 

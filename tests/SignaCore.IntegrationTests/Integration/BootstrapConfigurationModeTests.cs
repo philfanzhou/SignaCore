@@ -589,8 +589,9 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// A SQLite database holding one protected setting no candidate key can read, so key
-    /// compatibility is Incompatible rather than NoProtectedData.
+    /// A SQLite database holding one shared sensitive envelope really protected with an unrelated
+    /// root key, so key compatibility of any candidate key is Incompatible rather than
+    /// NoProtectedData.
     /// </summary>
     private async Task<string> CreateProtectedSqliteTargetAsync()
     {
@@ -603,17 +604,20 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
         });
         await using var context = new IdentityDbContext(optionsBuilder.Options);
         await context.Database.MigrateAsync(TestContext.Current.CancellationToken);
-        context.SystemSettings.Add(new SystemSettingEntity
-        {
-            Key = "smtp.password",
-            Value = "definitely-not-a-readable-envelope",
-            ValueType = "string",
-            IsSecret = true,
-            Version = 1,
-            UpdatedAt = DateTimeOffset.UtcNow,
-            UpdatedBy = "seed"
-        });
-        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var rootKey = Convert.ToBase64String(
+            new SignaCore.Domain.Keys.BootstrapMasterKeyProvider("the-protected-target-root-secret")
+                .GetMasterKey());
+        var envelope = new ServiceMantle.Configuration.SensitiveValueProtector(
+                SignaCore.Host.Installation.InstallationStores.ServiceId,
+                "sms.otp_hmac_key")
+            .Protect("the-protected-value", rootKey);
+        var valuesJson = "{\"sms.otp_hmac_key\":\"" + envelope + "\"}";
+        await context.Database.ExecuteSqlAsync(
+            $"""
+            INSERT INTO service_settings (service_id, values_json, version, updated_at_utc, updated_by, restart_required)
+            VALUES ('signacore', {valuesJson}, 1, {DateTime.UtcNow}, 'seed', 0)
+            """,
+            TestContext.Current.CancellationToken);
         await context.DisposeAsync();
         TestSqlitePools.ClearAll();
         foreach (var sidecar in new[] { "-journal", "-wal", "-shm" })
