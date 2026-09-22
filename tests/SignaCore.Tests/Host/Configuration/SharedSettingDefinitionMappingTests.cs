@@ -7,9 +7,10 @@ using Xunit;
 namespace SignaCore.Tests.Host.Configuration;
 
 /// <summary>
-/// The full old-key → normalized-key mapping table, pinned entry by entry, and its equivalence
-/// with the legacy catalog. This is the reviewed comparison list task #101 requires: any change to
-/// either side must show up here.
+/// The full old-key → normalized-key mapping table and the registered product definitions, pinned
+/// entry by entry against fixed expected values. This is the reviewed comparison list task #101
+/// requires plus the task #143 catalog retirement: any change to the mapping, the definition
+/// table, or the registered projection must show up here against a literal expectation.
 /// </summary>
 public sealed partial class SharedSettingDefinitionMappingTests
 {
@@ -69,6 +70,67 @@ public sealed partial class SharedSettingDefinitionMappingTests
         { "Consul:Discovery:Port", "consul.discovery.port" }
     };
 
+    /// <summary>
+    /// The fixed expectation of every product definition: the normalized key, its shared value
+    /// type, sensitivity, requirement, and shared default. This is the retired catalog's content
+    /// as a reviewed literal list — the "no silent key loss" evidence of task #143.
+    /// </summary>
+    public static TheoryData<string, string, bool, bool, string?> PinnedDefinitions => new()
+    {
+        // ---- Public identity of the deployment ----
+        { "endpoints.public_base_url", "String", false, true, null },
+        { "jwt.issuer", "String", false, true, null },
+        // ---- Token policy ----
+        { "jwt.audience", "String", false, true, "SignaCore.Services" },
+        { "jwt.token_expiration_hours", "Number", false, true, "2" },
+        { "refresh_token.expiration_days", "Number", false, true, "7" },
+        { "password_hasher.work_factor", "Number", false, true, "11" },
+        { "security.allow_non_https_issuer", "Boolean", false, true, "false" },
+        // ---- Administrative console ----
+        { "admin_web.allowed_origins", "Json", false, false, null },
+        { "admin.username", "String", false, false, null },
+        // ---- Callback policy ----
+        { "callback.allowed_domains", "Json", false, false, null },
+        { "callback.allow_private_addresses", "Boolean", false, true, "false" },
+        { "callback.require_https", "Boolean", false, true, "true" },
+        { "reverse_proxy.known_proxies", "Json", false, false, null },
+        // ---- SMS ----
+        { "sms.otp_ttl_seconds", "Number", false, true, "300" },
+        { "sms.max_attempts", "Number", false, true, "5" },
+        { "sms.lockout_seconds", "Number", false, true, "600" },
+        { "sms.min_send_interval_seconds", "Number", false, true, "60" },
+        { "sms.max_sends_per_hour", "Number", false, true, "5" },
+        { "sms.max_sends_per_day", "Number", false, true, "10" },
+        { "sms.otp_hmac_key", "String", true, false, null },
+        { "sms.bypass_code", "String", true, false, null },
+        { "sms.bypass_phones", "Json", false, false, null },
+        { "sms.profiles", "Json", true, false, null },
+        // ---- WeChat ----
+        { "wechat.app_id", "String", false, false, null },
+        { "wechat.app_secret", "String", true, false, null },
+        { "wechat.api_base_url", "String", false, true, "https://api.weixin.qq.com" },
+        // ---- LDAP ----
+        { "ldap.enabled", "Boolean", false, true, "false" },
+        { "ldap.default_directory_key", "String", false, false, null },
+        { "ldap.max_concurrent_operations", "Number", false, true, "20" },
+        { "ldap.directories", "Json", true, false, null },
+        // ---- Observability ----
+        { "loki.uri", "String", false, false, null },
+        { "opentelemetry.otlp_endpoint", "String", false, false, null },
+        // ---- Consul service discovery ----
+        { "consul.host", "String", false, true, "host.docker.internal" },
+        { "consul.port", "Number", false, true, "8500" },
+        { "consul.token", "String", true, false, null },
+        { "consul.discovery.enabled", "Boolean", false, true, "false" },
+        { "consul.discovery.register", "Boolean", false, true, "false" },
+        { "consul.discovery.deregister", "Boolean", false, true, "false" },
+        { "consul.discovery.service_name", "String", false, true, "SignaCore" },
+        { "consul.discovery.health_check_path", "String", false, true, "/health/ready" },
+        { "consul.discovery.prefer_ip_address", "Boolean", false, true, "false" },
+        { "consul.discovery.ip_address", "String", false, false, null },
+        { "consul.discovery.port", "Number", false, true, "0" }
+    };
+
     private static readonly Dictionary<string, ServiceSettingDefinition> SharedDefinitions =
         new ServiceSettingDefinitions().GetDefinitions().ToDictionary(
             definition => definition.Key, StringComparer.Ordinal);
@@ -85,40 +147,40 @@ public sealed partial class SharedSettingDefinitionMappingTests
     }
 
     [Fact]
-    public void TheMapping_CoversTheWholeCatalogExactlyOnce()
+    public void TheMapping_CoversTheDefinitionTableExactlyOnce()
     {
-        Assert.Equal(
-            SystemSettingsCatalog.Definitions.Count,
-            SharedSettingKeys.NormalizedByLegacyKey.Count);
-        foreach (var legacy in SystemSettingsCatalog.Definitions)
+        // The per-pair theory above pins every entry of the mapping, so equal counts plus
+        // containment of every table row prove the bijection with no uncovered key.
+        Assert.Equal(PinnedPairs.Count, SharedSettingKeys.NormalizedByLegacyKey.Count);
+        Assert.Equal(PinnedPairs.Count, ServiceSettingDefinitions.Table.Count);
+
+        foreach (var definition in ServiceSettingDefinitions.Table)
         {
-            Assert.Contains(legacy.Key, SharedSettingKeys.NormalizedByLegacyKey.Keys);
+            Assert.Contains(definition.Key, SharedSettingKeys.LegacyByNormalizedKey.Keys);
         }
     }
 
-    [Fact]
-    public void EveryRegisteredDefinition_MatchesItsLegacyCatalogEntry()
+    /// <summary>
+    /// The registered projection matches the pinned expectation for every key, and the count is
+    /// exactly the pinned count: no key is silently dropped, added, or reconfigured.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(PinnedDefinitions))]
+    public void EveryRegisteredDefinition_MatchesThePinnedExpectation(
+        string key,
+        string valueType,
+        bool isSensitive,
+        bool isRequired,
+        string? defaultValue)
     {
-        Assert.Equal(SystemSettingsCatalog.Definitions.Count, SharedDefinitions.Count);
+        Assert.Equal(PinnedDefinitions.Count, SharedDefinitions.Count);
 
-        foreach (var legacy in SystemSettingsCatalog.Definitions)
-        {
-            var shared = SharedDefinitions[SharedSettingKeys.NormalizedByLegacyKey[legacy.Key]];
-            Assert.Equal(MapValueType(legacy.ValueType), shared.ValueType);
-            Assert.Equal(legacy.IsSecret, shared.IsSensitive);
-            Assert.Equal(legacy.RestartRequired, shared.RequiresRestart);
-            Assert.Equal(IsOptional(legacy), !shared.IsRequired);
-
-            if (legacy.IsSecret || legacy.DefaultValue is not { } legacyDefault ||
-                ServiceSettingDefinitions.IsEmptyDefault(legacy.ValueType, legacyDefault))
-            {
-                Assert.Null(shared.DefaultValue);
-            }
-            else
-            {
-                Assert.Equal(legacy.DefaultValue, shared.DefaultValue);
-            }
-        }
+        var shared = SharedDefinitions[key];
+        Assert.Equal(valueType, shared.ValueType.ToString());
+        Assert.Equal(isSensitive, shared.IsSensitive);
+        Assert.Equal(isRequired, shared.IsRequired);
+        Assert.Equal(defaultValue, shared.DefaultValue);
+        Assert.True(shared.RequiresRestart);
     }
 
     [Theory]
@@ -159,8 +221,8 @@ public sealed partial class SharedSettingDefinitionMappingTests
     [InlineData("sms.bypass_phones", "[]")]
     public void EmptyLegacyDefaults_AreNotMigratedAndStayOptional(string normalizedKey, string legacyDefault)
     {
-        var legacy = SystemSettingsCatalog.Find(SharedSettingKeys.LegacyByNormalizedKey[normalizedKey])!;
-        Assert.Equal(legacyDefault, legacy.DefaultValue);
+        var product = ServiceSettingDefinitions.Find(normalizedKey)!;
+        Assert.Equal(legacyDefault, product.LegacyDefault);
 
         var shared = SharedDefinitions[normalizedKey];
         Assert.Null(shared.DefaultValue);
@@ -234,17 +296,4 @@ public sealed partial class SharedSettingDefinitionMappingTests
         Assert.Throws<ServiceSettingDefinitionException>(() => new ServiceSettingDefinitionRegistry(
             [new ServiceSettingDefinitions(), new ServiceSettingDefinitions()]));
     }
-
-    private static ServiceSettingValueType MapValueType(string valueType) => valueType switch
-    {
-        "String" => ServiceSettingValueType.String,
-        "Number" => ServiceSettingValueType.Number,
-        "Boolean" => ServiceSettingValueType.Boolean,
-        "Json" => ServiceSettingValueType.Json,
-        _ => throw new InvalidOperationException(valueType)
-    };
-
-    private static bool IsOptional(SystemSettingDefinition legacy) =>
-        legacy.IsSecret ||
-        (legacy.DefaultValue is { } value && ServiceSettingDefinitions.IsEmptyDefault(legacy.ValueType, value));
 }

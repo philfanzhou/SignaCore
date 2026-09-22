@@ -404,9 +404,9 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Null(audit.AfterSnapshot);
 
         var aggregateValues = await ReadAggregateValuesAsync(db);
-        var sensitiveKeys = SystemSettingsCatalog.Definitions
-            .Where(definition => definition.IsSecret)
-            .Select(definition => SharedSettingKeys.NormalizedByLegacyKey[definition.Key])
+        var sensitiveKeys = ServiceSettingDefinitions.Table
+            .Where(definition => definition.IsSensitive)
+            .Select(definition => definition.Key)
             .ToList();
         Assert.NotEmpty(sensitiveKeys);
         foreach (var sensitiveKey in sensitiveKeys)

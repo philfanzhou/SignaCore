@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using ServiceMantle.Configuration;
-using SignaCore.Database.Entity;
 using SignaCore.Domain.Services.Ldap;
 using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.WeChat;
@@ -56,24 +55,24 @@ internal sealed class SignaCoreSettingCompositeValidator(bool isDevelopment)
     private static Dictionary<string, string> BuildLegacySnapshot(ServiceSettingValidationContext context)
     {
         var snapshot = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var definition in SystemSettingsCatalog.Definitions)
+        foreach (var definition in ServiceSettingDefinitions.Table)
         {
-            var normalizedKey = SharedSettingKeys.NormalizedByLegacyKey[definition.Key];
-            if (context.TryGetValue(normalizedKey, out var value) && value.HasValue)
+            var legacyKey = ServiceSettingDefinitions.LegacyKeyOf(definition);
+            if (context.TryGetValue(definition.Key, out var value) && value.HasValue)
             {
-                snapshot[definition.Key] = definition.ValueType switch
+                snapshot[legacyKey] = definition.ValueType switch
                 {
-                    SettingValueTypes.String => value.GetString(),
-                    SettingValueTypes.Number => value.GetNumber().ToString("G29", CultureInfo.InvariantCulture),
-                    SettingValueTypes.Boolean => value.GetBoolean() ? "true" : "false",
-                    SettingValueTypes.Json => JsonSerializer.Serialize(value.GetJson()),
+                    ServiceSettingValueType.String => value.GetString(),
+                    ServiceSettingValueType.Number => value.GetNumber().ToString("G29", CultureInfo.InvariantCulture),
+                    ServiceSettingValueType.Boolean => value.GetBoolean() ? "true" : "false",
+                    ServiceSettingValueType.Json => JsonSerializer.Serialize(value.GetJson()),
                     _ => throw new InvalidOperationException(
-                        $"Unsupported legacy value type: {definition.ValueType}")
+                        $"Unsupported setting value type: {definition.ValueType}")
                 };
             }
             else
             {
-                snapshot[definition.Key] = definition.DefaultValue ?? string.Empty;
+                snapshot[legacyKey] = definition.LegacyDefault ?? string.Empty;
             }
         }
 
@@ -148,16 +147,17 @@ internal sealed class SignaCoreSettingCompositeValidator(bool isDevelopment)
         var entries = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            foreach (var definition in SystemSettingsCatalog.Definitions)
+            foreach (var definition in ServiceSettingDefinitions.Table)
             {
-                var value = values[definition.Key];
-                if (definition.ValueType == SettingValueTypes.Json)
+                var legacyKey = ServiceSettingDefinitions.LegacyKeyOf(definition);
+                var value = values[legacyKey];
+                if (definition.ValueType == ServiceSettingValueType.Json)
                 {
-                    JsonSettingFlattener.Flatten(definition.Key, value, entries);
+                    JsonSettingFlattener.Flatten(legacyKey, value, entries);
                 }
                 else
                 {
-                    entries[definition.Key] = value;
+                    entries[legacyKey] = value;
                 }
             }
         }

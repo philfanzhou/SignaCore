@@ -30,7 +30,7 @@ public sealed class SharedSettingContractTests
                 bool isDevelopment,
                 bool expectedValid)
             {
-                var snapshot = SystemSettingsCatalog.BuildDefaults();
+                var snapshot = ServiceSettingDefinitions.BuildLegacyDefaults();
                 // The setup-collected pair has no default, and the blank administrator default is
                 // rejected, so a valid baseline names both explicitly.
                 snapshot[SystemSettingKeys.PublicBaseUrl] = "https://accounts.example.com";
@@ -244,7 +244,7 @@ public sealed class SharedSettingContractTests
     [Fact]
     public void MissingSetupKeys_AreRejectedBeforeTheRegistryFillsDefaults()
     {
-        var legacy = SystemSettingsCatalog.BuildDefaults();
+        var legacy = ServiceSettingDefinitions.BuildLegacyDefaults();
         legacy[SystemSettingKeys.PublicBaseUrl] = "https://accounts.example.com";
         legacy[SystemSettingKeys.JwtIssuer] = "https://accounts.example.com";
         legacy.Remove(SystemSettingKeys.JwtIssuer);
@@ -258,7 +258,7 @@ public sealed class SharedSettingContractTests
     [Fact]
     public void MissingSensitiveKeys_ValidateLikeTheLegacyEmptyDefaults()
     {
-        var legacy = SystemSettingsCatalog.BuildDefaults();
+        var legacy = ServiceSettingDefinitions.BuildLegacyDefaults();
         legacy[SystemSettingKeys.PublicBaseUrl] = "https://accounts.example.com";
         legacy[SystemSettingKeys.JwtIssuer] = "https://accounts.example.com";
         // The legacy default leaves the administrator username blank; a valid snapshot has one.
@@ -267,9 +267,9 @@ public sealed class SharedSettingContractTests
         // A shared-stack snapshot with the sensitive keys entirely unset (missing means unset)
         // must reach the same verdict the legacy empty defaults produced.
         var sharedInput = ToSharedInput(legacy);
-        foreach (var sensitiveKey in SystemSettingsCatalog.Definitions.Where(d => d.IsSecret))
+        foreach (var sensitiveKey in ServiceSettingDefinitions.Table.Where(d => d.IsSensitive))
         {
-            sharedInput.Remove(SharedSettingKeys.NormalizedByLegacyKey[sensitiveKey.Key]);
+            sharedInput.Remove(sensitiveKey.Key);
         }
 
         var result = SharedSettingComposition.CreateRegistry(isDevelopment: false).Validate(sharedInput);
@@ -279,7 +279,7 @@ public sealed class SharedSettingContractTests
     [Fact]
     public void CompositeErrors_AreClosedKeyScopedCodes()
     {
-        var legacy = SystemSettingsCatalog.BuildDefaults();
+        var legacy = ServiceSettingDefinitions.BuildLegacyDefaults();
         legacy[SystemSettingKeys.PublicBaseUrl] = "http://accounts.example.com";
         legacy[SystemSettingKeys.JwtIssuer] = "http://accounts.example.com";
 
@@ -300,7 +300,7 @@ public sealed class SharedSettingContractTests
     [Fact]
     public void UnknownKeys_AreRejectedByTheRegistry()
     {
-        var legacy = SystemSettingsCatalog.BuildDefaults();
+        var legacy = ServiceSettingDefinitions.BuildLegacyDefaults();
         legacy[SystemSettingKeys.PublicBaseUrl] = "https://accounts.example.com";
         legacy[SystemSettingKeys.JwtIssuer] = "https://accounts.example.com";
         var sharedInput = ToSharedInput(legacy);
