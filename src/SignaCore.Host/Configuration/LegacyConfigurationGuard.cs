@@ -16,8 +16,8 @@ internal static class LegacyConfigurationGuard
     /// </summary>
     public static IReadOnlyList<string> FindManagedOverrides(IConfiguration preSnapshotConfiguration)
     {
-        return SystemSettingsCatalog.Definitions
-            .Select(definition => definition.Key)
+        return ServiceSettingDefinitions.Table
+            .Select(ServiceSettingDefinitions.LegacyKeyOf)
             .Where(key =>
                 preSnapshotConfiguration[key] is not null ||
                 preSnapshotConfiguration.GetSection(key).GetChildren().Any())

@@ -35,7 +35,7 @@ internal static class InstallationTestSupport
         string adminUsername,
         IReadOnlyDictionary<string, string>? settingOverrides = null)
     {
-        var values = SystemSettingsCatalog.BuildDefaults();
+        var values = ServiceSettingDefinitions.BuildLegacyDefaults();
         // TestServer serves plain HTTP on http://localhost, so the snapshot has to permit a
         // non-HTTPS issuer the way a deliberate legacy migration would.
         values[SystemSettingKeys.PublicBaseUrl] = "http://localhost";

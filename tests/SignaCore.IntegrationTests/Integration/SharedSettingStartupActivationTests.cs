@@ -62,8 +62,9 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
         var entries = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (legacyKey, value) in SeededCorpus())
         {
-            var definition = SystemSettingsCatalog.Find(legacyKey)!;
-            if (definition.ValueType == SettingValueTypes.Json)
+            var definition = ServiceSettingDefinitions.Find(
+                SharedSettingKeys.NormalizedByLegacyKey[legacyKey])!;
+            if (definition.ValueType == ServiceSettingValueType.Json)
             {
                 JsonSettingFlattener.Flatten(legacyKey, value, entries);
             }

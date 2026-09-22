@@ -663,16 +663,16 @@ public sealed class SetupContributorDatabaseContractTests
         Assert.Equal(1, aggregate!.Version);
         Assert.Equal(username, aggregate.UpdatedBy);
         var aggregateValues = SharedSettingTestDatabase.ParseValues(aggregate);
-        var expectedKeys = SystemSettingsCatalog.Definitions
-            .Select(definition => SharedSettingKeys.NormalizedByLegacyKey[definition.Key])
+        var expectedKeys = ServiceSettingDefinitions.Table
+            .Select(definition => definition.Key)
             .ToHashSet(StringComparer.Ordinal);
         Assert.Equal(expectedKeys, aggregateValues.Keys.ToHashSet(StringComparer.Ordinal));
         Assert.Equal(PublicBaseUrl, aggregateValues["endpoints.public_base_url"]);
         Assert.Equal(PublicBaseUrl, aggregateValues["jwt.issuer"]);
         Assert.Equal(username, aggregateValues["admin.username"]);
-        var sensitiveKeys = SystemSettingsCatalog.Definitions
-            .Where(definition => definition.IsSecret)
-            .Select(definition => SharedSettingKeys.NormalizedByLegacyKey[definition.Key])
+        var sensitiveKeys = ServiceSettingDefinitions.Table
+            .Where(definition => definition.IsSensitive)
+            .Select(definition => definition.Key)
             .ToHashSet(StringComparer.Ordinal);
         Assert.NotEmpty(sensitiveKeys);
         foreach (var sensitiveKey in sensitiveKeys)

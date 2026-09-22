@@ -42,19 +42,16 @@ public class LegacyConfigurationInputTests
             [SystemSettingKeys.LegacyAdminBootstrapUsername] = "legacy_admin"
         });
 
-        // Exactly the four required keys came from the deployment; the other 39 keep their catalog
-        // defaults, so the complete candidate always covers the whole 43-key catalog.
+        // Exactly the four required keys came from the deployment; the other 39 keep the definition
+        // table's legacy defaults, so the complete candidate always covers all 43 keys.
         Assert.Equal(4, importedCount);
-        Assert.Equal(SystemSettingsCatalog.Definitions.Count, values.Count);
+        Assert.Equal(ServiceSettingDefinitions.Table.Count, values.Count);
         Assert.Equal(43, values.Count);
 
         // Deployment values are trimmed; defaults are untouched.
         Assert.Equal(BaseUrl, values[SystemSettingKeys.PublicBaseUrl]);
         Assert.Equal("Services", values[SystemSettingKeys.JwtAudience]);
-        Assert.Equal(
-            SystemSettingsCatalog.Definitions.Single(d => d.Key == SystemSettingKeys.JwtTokenExpirationHours)
-                .DefaultValue,
-            values[SystemSettingKeys.JwtTokenExpirationHours]);
+        Assert.Equal("2", values[SystemSettingKeys.JwtTokenExpirationHours]);
 
         // The historical alias resolved onto the canonical key.
         Assert.Equal("legacy_admin", values[SystemSettingKeys.AdminUsername]);

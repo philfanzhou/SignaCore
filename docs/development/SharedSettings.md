@@ -18,7 +18,7 @@ issue #556); see [System settings retirement](../database/system-settings-retire
 
 | Capability | Registration |
 | --- | --- |
-| Product definitions (43 keys) | `ServiceSettingDefinitions : IServiceSettingDefinitionProvider` |
+| Product definitions (43 keys) | `ServiceSettingDefinitions : IServiceSettingDefinitionProvider` (the authoritative `Table` of `ProductSettingDefinition` rows) |
 | Cross-key rules | `SignaCoreSettingCompositeValidator : IServiceSettingCompositeValidator` |
 | Integer Number semantics | `IntegerSettingConstraint : IServiceSettingValueConstraint` |
 | Store (single aggregate per service) | `EfCoreServiceSettingStore<IdentityDbContext>` over `IDbContextFactory<IdentityDbContext>` |
@@ -38,8 +38,10 @@ Every legacy database-backed key maps to exactly one normalized key: `:` becomes
 PascalCase segments become snake_case, for example `Endpoints:PublicBaseUrl` →
 `endpoints.public_base_url`, `Consul:Discovery:PreferIPAddress` →
 `consul.discovery.prefer_ip_address`. The full pinned table lives in `SharedSettingKeys.cs` and is
-asserted entry by entry against `SystemSettingsCatalog` in
-`SharedSettingDefinitionMappingTests`.
+asserted entry by entry against fixed expected values in
+`SharedSettingDefinitionMappingTests`, together with the authoritative definition table in
+`ServiceSettingDefinitions` (the legacy catalog it replaced was removed by ServiceMantle task
+#143).
 
 ## Declared differences from the legacy catalog
 
@@ -64,8 +66,8 @@ second rule set:
 
 - `SettingCandidateValidation` (entry: `SharedSettingComposition.ValidateCompleteCandidate`) is
   the pre-validation used by first-run setup, the legacy import, and the test installation
-  fixtures. It checks that the complete legacy-keyed candidate carries every one of the 43 catalog
-  keys — completeness precedes defaults, so a missing key is never silently filled in by the
+  fixtures. It checks that the complete legacy-keyed candidate carries every one of the 43
+  definition-table keys — completeness precedes defaults, so a missing key is never silently filled in by the
   registry — and that every Number value is integer text (`IntegerSettingConstraint.IsIntegerText`,
   the legacy `NumberStyles.Integer` form), then maps through `SharedSettingKeys` onto the shared
   registry. All failures are closed, key-scoped codes.

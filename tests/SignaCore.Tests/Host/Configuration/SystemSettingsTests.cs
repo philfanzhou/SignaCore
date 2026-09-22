@@ -1,69 +1,61 @@
 using Microsoft.Extensions.Configuration;
-using SignaCore.Database.Entity;
+using ServiceMantle.Configuration;
 using SignaCore.Host.Configuration;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Configuration;
 
-public class SystemSettingsCatalogTests
+public class ProductSettingDefinitionTableTests
 {
     /// <summary>
-    /// Only values that first-run setup collects may lack a default. Anything else without one would
-    /// make a fresh installation fail validation immediately after setup wrote it.
+    /// Only values that first-run setup collects may lack a legacy default. Anything else without
+    /// one would make a fresh installation fail validation immediately after setup wrote it.
     /// </summary>
     [Fact]
-    public void OnlyTheSetupCollectedValues_LackADefault()
+    public void OnlyTheSetupCollectedValues_LackALegacyDefault()
     {
-        var withoutDefault = SystemSettingsCatalog.Definitions
-            .Where(definition => !definition.HasDefault)
+        var withoutDefault = ServiceSettingDefinitions.Table
+            .Where(definition => !definition.HasLegacyDefault)
             .Select(definition => definition.Key)
             .OrderBy(key => key, StringComparer.Ordinal)
             .ToArray();
 
         Assert.Equal(
-            new[] { SystemSettingKeys.PublicBaseUrl, SystemSettingKeys.JwtIssuer }
+            new[] { "endpoints.public_base_url", "jwt.issuer" }
                 .OrderBy(key => key, StringComparer.Ordinal),
             withoutDefault);
     }
 
     [Fact]
-    public void EveryDefinition_UsesASupportedValueType()
+    public void JsonLegacyDefaults_AreValidJson()
     {
-        Assert.All(
-            SystemSettingsCatalog.Definitions,
-            definition => Assert.True(SettingValueTypes.IsSupported(definition.ValueType)));
-    }
-
-    [Fact]
-    public void JsonDefaults_AreValidJson()
-    {
-        foreach (var definition in SystemSettingsCatalog.Definitions
-                     .Where(item => item.ValueType == SettingValueTypes.Json && item.HasDefault))
+        foreach (var definition in ServiceSettingDefinitions.Table
+                     .Where(item => item.ValueType == ServiceSettingValueType.Json && item.HasLegacyDefault))
         {
-            JsonSettingFlattener.Canonicalize(definition.DefaultValue!);
+            JsonSettingFlattener.Canonicalize(definition.LegacyDefault!);
         }
     }
 
     /// <summary>
-    /// Anything carrying a credential has to be marked secret, or it is stored in clear and returned
-    /// by settings-list APIs.
+    /// Anything carrying a credential has to be marked sensitive, or it is stored in clear and
+    /// returned by settings-list APIs.
     /// </summary>
     [Theory]
-    [InlineData(SystemSettingKeys.SmsOtpHmacKey)]
-    [InlineData(SystemSettingKeys.SmsBypassCode)]
-    [InlineData(SystemSettingKeys.SmsProfiles)]
-    [InlineData(SystemSettingKeys.WechatAppSecret)]
-    [InlineData(SystemSettingKeys.LdapDirectories)]
-    [InlineData(SystemSettingKeys.ConsulToken)]
-    public void CredentialBearingSettings_AreMarkedSecret(string key)
+    [InlineData("sms.otp_hmac_key")]
+    [InlineData("sms.bypass_code")]
+    [InlineData("sms.profiles")]
+    [InlineData("wechat.app_secret")]
+    [InlineData("ldap.directories")]
+    [InlineData("consul.token")]
+    public void CredentialBearingSettings_AreMarkedSensitive(string normalizedKey)
     {
-        Assert.True(SystemSettingsCatalog.Find(key)?.IsSecret);
+        Assert.True(ServiceSettingDefinitions.Find(normalizedKey)?.IsSensitive);
     }
 
     [Fact]
-    public void Defaults_ShipOptionalProvidersDisabled()
+    public void LegacyDefaults_ShipOptionalProvidersDisabled()
     {
-        var defaults = SystemSettingsCatalog.BuildDefaults();
+        var defaults = ServiceSettingDefinitions.BuildLegacyDefaults();
 
         Assert.Equal("false", defaults[SystemSettingKeys.LdapEnabled]);
         Assert.Equal("false", defaults[SystemSettingKeys.ConsulDiscoveryEnabled]);
@@ -260,7 +252,7 @@ public class SettingCandidateValidationTests
 
     private static Dictionary<string, string> CompleteSnapshot()
     {
-        var values = SystemSettingsCatalog.BuildDefaults();
+        var values = ServiceSettingDefinitions.BuildLegacyDefaults();
         values[SystemSettingKeys.PublicBaseUrl] = "https://identity.example.test";
         values[SystemSettingKeys.JwtIssuer] = "https://identity.example.test";
         values[SystemSettingKeys.AdminUsername] = "admin";

@@ -7,7 +7,7 @@ namespace SignaCore.Host.Configuration;
 /// <remarks>
 /// The mapping is written out entry by entry instead of being derived by a text converter, so the
 /// new key of every product setting is a reviewed, pinned fact. The definition and equivalence
-/// tests assert this table against <see cref="SystemSettingsCatalog"/> in both directions.
+/// tests assert this table against fixed expected values in both directions.
 /// </remarks>
 internal static class SharedSettingKeys
 {

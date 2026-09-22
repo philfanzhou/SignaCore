@@ -380,7 +380,7 @@ internal static class SetupCompletionExecutor
         string jwtAudience,
         string username)
     {
-        var values = SystemSettingsCatalog.BuildDefaults();
+        var values = ServiceSettingDefinitions.BuildLegacyDefaults();
         values[SystemSettingKeys.PublicBaseUrl] = publicBaseUrl;
         // The issuer is not a duplicate field on the form: a discovery document served from one URL
         // and an `iss` claim naming another is rejected by every conforming client.
