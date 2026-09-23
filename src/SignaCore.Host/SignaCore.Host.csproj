@@ -24,6 +24,7 @@
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="ServiceMantle" />
     <PackageReference Include="ServiceMantle.AspNetCore" />
+    <PackageReference Include="ServiceMantle.Consul" />
     <PackageReference Include="ServiceMantle.Database.PostgreSql" />
     <PackageReference Include="ServiceMantle.Database.Sqlite" />
     <PackageReference Include="ServiceMantle.Persistence.EntityFrameworkCore" />

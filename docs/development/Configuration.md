@@ -191,12 +191,22 @@ shared settings aggregate.
 | `Consul:Token` | empty | yes |
 | `Consul:Discovery:Enabled` | `false` | |
 | `Consul:Discovery:Register` | `false` | |
-| `Consul:Discovery:Deregister` | `false` | |
+| `Consul:Discovery:Deregister` | `false` | must be `true` when registering |
 | `Consul:Discovery:ServiceName` | `SignaCore` | |
 | `Consul:Discovery:HealthCheckPath` | `/health/ready` | |
-| `Consul:Discovery:PreferIPAddress` | `false` | |
-| `Consul:Discovery:IPAddress` | empty | |
-| `Consul:Discovery:Port` | `0` | |
+| `Consul:Discovery:PreferIPAddress` | `false` | ignored (no auto-detection) |
+| `Consul:Discovery:IPAddress` | empty | legacy fallback, ignored when registering |
+| `Consul:Discovery:Port` | `0` | legacy fallback, ignored when registering |
+
+Registration is driven by the shared ServiceMantle Consul lifecycle, and each instance must state
+its own advertised endpoint through the process configuration (the usual double-underscore
+environment-variable form works); the values are required whenever registration is enabled:
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `ServiceDiscovery:Address` | none | This instance's advertised address (IP or DNS name) |
+| `ServiceDiscovery:Port` | none | This instance's advertised port (1-65535) |
+| `ServiceDiscovery:HealthScheme` | `http` | Advertised health URL scheme, `http` or `https` |
 
 See [Consul integration](./ConsulIntegration.md).
 
