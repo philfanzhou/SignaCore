@@ -43,8 +43,10 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         using var http = _fixture.CreateHttpClient();
         var response = await http.GetAsync("/health", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        Assert.Equal("Healthy", content);
+        using var body = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Equal("ready", body.RootElement.GetProperty("status").GetString());
+        Assert.Null(body.RootElement.GetProperty("errorCode").GetString());
     }
 
     /// <summary>
@@ -1069,7 +1071,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
 
     /// <summary>
     /// Liveness and readiness are distinct endpoints, and /health remains an alias for readiness so
-    /// existing launchers and Consul checks keep working.
+    /// existing launchers and Consul checks keep working. The shared contract answers liveness with
+    /// process-alive and both readiness routes with the shared readiness JSON.
     /// </summary>
     [Theory]
     [InlineData("/health")]
@@ -1082,16 +1085,23 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         var response = await http.GetAsync(path, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("Healthy", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        using var body = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(
+            path == "/health/live" ? "live" : "ready",
+            body.RootElement.GetProperty("status").GetString());
+        if (path != "/health/live")
+        {
+            Assert.Null(body.RootElement.GetProperty("errorCode").GetString());
+        }
     }
 
     /// <summary>
-    /// The shared ServiceMantle health capability is registered but deliberately never mapped, so
-    /// the health route table keeps exactly the three ASP.NET Core health-check endpoints. Mapping
-    /// the shared endpoints as well would duplicate these very routes and make the host ambiguous.
+    /// The shared ServiceMantle health endpoints own the health route table: exactly the three
+    /// mapped routes exist, with no duplicate health-check registrations beside them.
     /// </summary>
     [Fact]
-    public void HealthRouteTable_WithTheSharedRegistration_KeepsExactlyTheThreeMappedRoutes()
+    public void HealthRouteTable_WithTheSharedEndpoints_KeepsExactlyTheThreeMappedRoutes()
     {
         using var factory = _fixture.WithTestServices(_ => { });
 

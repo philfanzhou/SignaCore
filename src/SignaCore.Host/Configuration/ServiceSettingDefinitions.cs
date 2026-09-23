@@ -154,7 +154,9 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
         new("consul.discovery.register", ServiceSettingValueType.Boolean, IsSensitive: false, LegacyDefault: "false"),
         new("consul.discovery.deregister", ServiceSettingValueType.Boolean, IsSensitive: false, LegacyDefault: "false"),
         new("consul.discovery.service_name", ServiceSettingValueType.String, IsSensitive: false, LegacyDefault: "SignaCore"),
-        new("consul.discovery.health_check_path", ServiceSettingValueType.String, IsSensitive: false, LegacyDefault: HealthEndpoints.Ready),
+        // The persisted default is the deployed readiness probe path the shared health endpoints
+        // own; the literal is the contract, pinned by SharedSettingDefinitionMappingTests.
+        new("consul.discovery.health_check_path", ServiceSettingValueType.String, IsSensitive: false, LegacyDefault: "/health/ready"),
         new("consul.discovery.prefer_ip_address", ServiceSettingValueType.Boolean, IsSensitive: false, LegacyDefault: "false"),
         new("consul.discovery.ip_address", ServiceSettingValueType.String, IsSensitive: false, LegacyDefault: ""),
         new("consul.discovery.port", ServiceSettingValueType.Number, IsSensitive: false, LegacyDefault: "0")
