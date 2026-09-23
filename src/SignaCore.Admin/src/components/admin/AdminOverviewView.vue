@@ -121,15 +121,15 @@ const disabledApps = computed(
         <div v-if="auditLogs.length" class="activity-list">
           <div
             v-for="item in auditLogs.slice(0, 5)"
-            :key="`${item.createdAt}-${item.action}`"
+            :key="item.id"
             class="activity-row"
           >
             <span class="activity-dot"></span>
             <div>
-              <b>{{ item.description || item.action }}</b>
+              <b>{{ item.securityDescription || item.action }}</b>
               <p>
-                {{ item.actorName || "系统" }} ·
-                {{ formatDate(item.createdAt) }}
+                {{ item.operator.displayName || item.operator.source }} ·
+                {{ formatDate(item.occurredAtUtc) }}
               </p>
             </div>
           </div>

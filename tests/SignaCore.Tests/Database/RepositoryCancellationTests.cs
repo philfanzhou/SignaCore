@@ -60,28 +60,6 @@ public sealed class RepositoryCancellationTests
     }
 
     [Fact]
-    public async Task AuditLogRepository_PreCanceledAdd_DoesNotStageAudit()
-    {
-        await using var database = await TestDatabase.CreateAsync();
-        var repository = new AuditLogRepository(database.Context);
-        var audit = new AuditLogEntity
-        {
-            Id = Guid.NewGuid(),
-            Action = "repository_cancellation_test",
-            TargetType = "TestArtifact",
-            TargetId = Guid.NewGuid().ToString(),
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            async () => await repository.AddAsync(audit, CanceledToken));
-
-        Assert.Empty(database.Context.AuditLogs.Local);
-        Assert.Empty(await database.Context.AuditLogs.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
-    }
-
-    [Fact]
     public async Task AuthorizationRequestRepository_PreCanceledAdd_DoesNotStageRequest()
     {
         await using var database = await TestDatabase.CreateAsync();

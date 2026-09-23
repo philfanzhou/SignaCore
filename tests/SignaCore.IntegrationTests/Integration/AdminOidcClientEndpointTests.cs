@@ -276,9 +276,9 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
             var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
             Assert.True(await dbContext.AppRedirectUris.AsNoTracking()
                 .AnyAsync(uri => uri.AppRegistrationId == applicationRowId, TestContext.Current.CancellationToken));
-            Assert.False(await dbContext.AuditLogs.AsNoTracking()
-                .AnyAsync(log => log.Action == "app_deleted" && log.TargetId == appId,
-                    TestContext.Current.CancellationToken));
+            Assert.False((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    dbContext, TestContext.Current.CancellationToken))
+                .Any(log => log.Action == "app_deleted" && log.TargetId == appId));
         }
 
         // Retention cleanup removes the last reference; the unchanged delete succeeds and takes
@@ -304,9 +304,9 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
                 .AnyAsync(app => app.Id == applicationRowId, TestContext.Current.CancellationToken));
             Assert.False(await dbContext.AppRedirectUris.AsNoTracking()
                 .AnyAsync(uri => uri.AppRegistrationId == applicationRowId, TestContext.Current.CancellationToken));
-            Assert.True(await dbContext.AuditLogs.AsNoTracking()
-                .AnyAsync(log => log.Action == "app_deleted" && log.TargetId == appId,
-                    TestContext.Current.CancellationToken));
+            Assert.True((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    dbContext, TestContext.Current.CancellationToken))
+                .Any(log => log.Action == "app_deleted" && log.TargetId == appId));
         }
     }
 

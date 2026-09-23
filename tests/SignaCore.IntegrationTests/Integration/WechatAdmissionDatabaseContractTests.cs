@@ -3,6 +3,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
+using ServiceMantle.Audit;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -12,6 +14,8 @@ using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.WeChat;
 using Xunit;
 using SignaCore.Tests.Integration;
+
+using SignaCore.Host.Audit;
 
 namespace SignaCore.IntegrationTests.Integration;
 
@@ -88,15 +92,13 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
             await context.Database.ExecuteSqlRawAsync(
                 """
                 CREATE TRIGGER fail_wechat_bind_audit
-                BEFORE INSERT ON audit_logs
+                BEFORE INSERT ON service_audit_logs
                 BEGIN
                     SELECT RAISE(ABORT, 'audit insert failed');
                 END;
                 """,
                 TestContext.Current.CancellationToken);
-            var auditService = new AuditService(
-                new LoginHistoryRepository(context),
-                new AuditLogRepository(context));
+            var auditWriter = new EfCoreManagementAuditWriter<IdentityDbContext>(context);
 
             await Assert.ThrowsAsync<DbUpdateException>(() =>
                 new WechatAdmissionService(context).BindAsync(
@@ -104,14 +106,16 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
                     accountId,
                     OpenId,
                     TestContext.Current.CancellationToken,
-                    _ => auditService.RecordActionAsync(
+                    _ => ManagementActionAudit.RecordAsync(
+                        auditWriter,
+                        ManagementActionAudit.AccountSource,
                         "wechat_bound",
                         "Account",
                         accountId.ToString(),
                         accountId,
                         null,
                         $"WeChat identity bound for application {app.AppId}",
-                        cancellationToken: TestContext.Current.CancellationToken)));
+                        cancellationToken: TestContext.Current.CancellationToken).AsTask()));
         }
 
         await using var verify = CreateContext();
@@ -119,8 +123,7 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
             cancellationToken: TestContext.Current.CancellationToken));
         Assert.Empty(await verify.AppWechatAccesses.AsNoTracking().ToListAsync(
             cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Empty(await verify.AuditLogs.AsNoTracking().ToListAsync(
-            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(verify, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -132,10 +135,8 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
 
         await using (var context = CreateContext())
         {
-            var auditRepository = new CapturingAuditLogRepository(new AuditLogRepository(context));
-            var auditService = new AuditService(
-                new LoginHistoryRepository(context),
-                auditRepository);
+            var auditWriter = new CapturingManagementAuditWriter(
+                new EfCoreManagementAuditWriter<IdentityDbContext>(context));
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
                 new WechatAdmissionService(context).BindAsync(
@@ -145,7 +146,9 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
                     cancellation.Token,
                     async _ =>
                     {
-                        await auditService.RecordActionAsync(
+                        await ManagementActionAudit.RecordAsync(
+                            auditWriter,
+                            ManagementActionAudit.AccountSource,
                             "wechat_bound",
                             "Account",
                             accountId.ToString(),
@@ -156,7 +159,7 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
                         cancellation.Cancel();
                     }));
 
-            Assert.Equal(cancellation.Token, auditRepository.ObservedCancellationToken);
+            Assert.Equal(cancellation.Token, auditWriter.ObservedCancellationToken);
         }
 
         await using var verify = CreateContext();
@@ -164,8 +167,7 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
             cancellationToken: TestContext.Current.CancellationToken));
         Assert.Empty(await verify.AppWechatAccesses.AsNoTracking().ToListAsync(
             cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Empty(await verify.AuditLogs.AsNoTracking().ToListAsync(
-            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(verify, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -308,10 +310,8 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
 
         await using (var context = CreateContext())
         {
-            var auditRepository = new CapturingAuditLogRepository(new AuditLogRepository(context));
-            var auditService = new AuditService(
-                new LoginHistoryRepository(context),
-                auditRepository);
+            var auditWriter = new CapturingManagementAuditWriter(
+                new EfCoreManagementAuditWriter<IdentityDbContext>(context));
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
                 new WechatAdmissionService(context).UnbindAsync(
@@ -319,7 +319,8 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
                     cancellation.Token,
                     async () =>
                     {
-                        await auditService.RecordActionAsync(
+                        await ManagementActionAudit.RecordAsync(
+                            auditWriter, ManagementActionAudit.AccountSource,
                             "wechat_unbound",
                             "Account",
                             accountId.ToString(),
@@ -330,7 +331,7 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
                         cancellation.Cancel();
                     }));
 
-            Assert.Equal(cancellation.Token, auditRepository.ObservedCancellationToken);
+            Assert.Equal(cancellation.Token, auditWriter.ObservedCancellationToken);
         }
 
         await using var verify = CreateContext();
@@ -338,8 +339,7 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
             cancellationToken: TestContext.Current.CancellationToken));
         Assert.NotNull(await verify.AppWechatAccesses.AsNoTracking().SingleOrDefaultAsync(
             cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Empty(await verify.AuditLogs.AsNoTracking().ToListAsync(
-            cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(verify, cancellationToken: TestContext.Current.CancellationToken));
     }
 
     public static TheoryData<string, string, bool> CancellationCases => new(
@@ -482,38 +482,18 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
         return account.Id;
     }
 
-    private sealed class CapturingAuditLogRepository(IAuditLogRepository inner) : IAuditLogRepository
+    private sealed class CapturingManagementAuditWriter(
+        IManagementAuditWriter inner) : IManagementAuditWriter
     {
         public CancellationToken ObservedCancellationToken { get; private set; }
 
-        public Task AddAsync(AuditLogEntity auditLog, CancellationToken cancellationToken = default)
+        public ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
+            CancellationToken cancellationToken = default)
         {
             ObservedCancellationToken = cancellationToken;
-            return inner.AddAsync(auditLog, cancellationToken);
+            return inner.RecordAsync(auditEvent, cancellationToken);
         }
-
-        public Task<List<AuditLogEntity>> QueryAsync(
-            string? action,
-            string? targetType,
-            string? targetId,
-            Guid? actorId,
-            int pageSize,
-            int skip,
-            CancellationToken cancellationToken = default) =>
-            inner.QueryAsync(action, targetType, targetId, actorId, pageSize, skip, cancellationToken);
-
-        public Task<int> CountAsync(
-            string? action,
-            string? targetType,
-            string? targetId,
-            Guid? actorId,
-            CancellationToken cancellationToken = default) =>
-            inner.CountAsync(action, targetType, targetId, actorId, cancellationToken);
-
-        public Task<int> RemoveOlderThanAsync(
-            DateTimeOffset cutoff,
-            CancellationToken cancellationToken = default) =>
-            inner.RemoveOlderThanAsync(cutoff, cancellationToken);
     }
 
     public void Dispose()

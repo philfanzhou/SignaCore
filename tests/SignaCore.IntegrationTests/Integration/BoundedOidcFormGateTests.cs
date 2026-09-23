@@ -19,6 +19,8 @@ using SignaCore.Host.Startup;
 using Xunit;
 using SignaCoreDatabase = SignaCore.Database;
 
+using SignaCore.Tests.Integration;
+
 namespace SignaCore.Tests.Integration;
 
 /// <summary>
@@ -281,7 +283,7 @@ public sealed partial class BoundedOidcFormGateTests : IClassFixture<IdentitySer
         {
             var database = scope.ServiceProvider.GetRequiredService<SignaCoreDatabase.IdentityDbContext>();
             loginHistoryRows = await database.LoginHistories.CountAsync(TestContext.Current.CancellationToken);
-            auditRows = await database.AuditLogs.CountAsync(TestContext.Current.CancellationToken);
+            auditRows = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(database, TestContext.Current.CancellationToken)).Count;
         }
 
         var payload = Encoding.UTF8.GetBytes(
@@ -303,7 +305,7 @@ public sealed partial class BoundedOidcFormGateTests : IClassFixture<IdentitySer
                 await database.LoginHistories.CountAsync(TestContext.Current.CancellationToken));
             Assert.Equal(
                 auditRows,
-                await database.AuditLogs.CountAsync(TestContext.Current.CancellationToken));
+                (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(database, TestContext.Current.CancellationToken)).Count);
         }
     }
 

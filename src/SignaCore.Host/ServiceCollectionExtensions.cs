@@ -9,8 +9,10 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+using ServiceMantle.Audit;
 using ServiceMantle.AspNetCore.Management;
 using ServiceMantle.Management;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
@@ -219,11 +221,15 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IOtpRepository, OtpRepository>();
         services.AddScoped<ILoginAttemptRepository, LoginAttemptRepository>();
         services.AddScoped<ILoginHistoryRepository, LoginHistoryRepository>();
-        services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IAuthorizationRequestRepository, AuthorizationRequestRepository>();
         services.AddScoped<IIdentitySessionRepository, IdentitySessionRepository>();
         services.AddScoped<IAuthorizationCodeRepository, AuthorizationCodeRepository>();
         services.AddScoped<IAuditService, AuditService>();
+        // The shared management-audit writer and query service stage onto (and read from) the same
+        // scoped IdentityDbContext as the repositories and the unit of work above, so a staged
+        // audit row commits with the caller's single SaveChanges.
+        services.AddScoped<IManagementAuditWriter, EfCoreManagementAuditWriter<IdentityDbContext>>();
+        services.AddScoped<IManagementAuditQueryService, EfCoreManagementAuditQueryService<IdentityDbContext>>();
         services.AddScoped<IOidcAuthorizationRequestValidator, OidcAuthorizationRequestValidator>();
         services.AddScoped<IAuthorizationRequestStore, AuthorizationRequestStore>();
         services.AddScoped<IIdentitySessionStore, IdentitySessionStore>();

@@ -203,12 +203,12 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
     private async Task<string> ReadBootstrapAsync() =>
         await File.ReadAllTextAsync(_bootstrapPath, Token);
 
-    private async Task<List<AuditLogEntity>> ReadAuditRowsAsync()
+    private async Task<List<SharedSettingTestDatabase.SharedAuditRow>> ReadAuditRowsAsync()
     {
         await using var db = OpenDatabase();
-        return await db.AuditLogs.AsNoTracking()
+        return (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, Token))
             .Where(row => row.Action == "bootstrap_updated")
-            .ToListAsync(Token);
+            .ToList();
     }
 
     private static async Task<bool> WaitForStopAsync(CancellationToken stopping)
@@ -279,11 +279,11 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
         var audit = await WaitForAuditRowAsync();
         Assert.Single(audit);
         Assert.Equal(_bootstrapPath, audit[0].TargetId);
-        Assert.Equal(_adminAccountId, audit[0].ActorId);
-        Assert.Equal(AdminUsername, audit[0].ActorName);
-        Assert.Contains("SQLite", audit[0].Description, StringComparison.Ordinal);
-        Assert.DoesNotContain(RootSecret, audit[0].Description, StringComparison.Ordinal);
-        Assert.DoesNotContain(replacementPath, audit[0].Description, StringComparison.Ordinal);
+        Assert.Equal(_adminAccountId.ToString(), audit[0].OperatorId);
+        Assert.Equal(AdminUsername, audit[0].OperatorDisplayName);
+        Assert.Contains("SQLite", audit[0].SecurityDescription, StringComparison.Ordinal);
+        Assert.DoesNotContain(RootSecret, audit[0].SecurityDescription, StringComparison.Ordinal);
+        Assert.DoesNotContain(replacementPath, audit[0].SecurityDescription, StringComparison.Ordinal);
 
         Assert.True(await WaitForStopAsync(stopping));
     }
@@ -562,8 +562,8 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
         var capture = new LogCapture();
         using var factory = StartHost(services =>
         {
-            services.RemoveAll<IAuditService>();
-            services.AddScoped<IAuditService, ThrowingAuditService>();
+            services.RemoveAll<IManagementAuditWriter>();
+            services.AddScoped<IManagementAuditWriter, ThrowingAuditWriter>();
             services.RemoveAll<ILoggerFactory>();
             services.AddSingleton<ILoggerFactory>(_ => LoggerFactory.Create(logging =>
                 logging.AddProvider(capture)));
@@ -592,7 +592,7 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
         Assert.DoesNotContain(_databaseConnectionString, logged, StringComparison.Ordinal);
     }
 
-    private async Task<List<AuditLogEntity>> WaitForAuditRowAsync()
+    private async Task<List<SharedSettingTestDatabase.SharedAuditRow>> WaitForAuditRowAsync()
     {
         using var waiter = CancellationTokenSource.CreateLinkedTokenSource(Token);
         waiter.CancelAfter(TimeSpan.FromSeconds(15));
@@ -737,32 +737,10 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
                     "Read Only")));
     }
 
-    private sealed class ThrowingAuditService : IAuditService
+    private sealed class ThrowingAuditWriter : IManagementAuditWriter
     {
-        public Task RecordLoginAsync(
-            Guid? accountId,
-            string username,
-            string authMethod,
-            string eventType,
-            string? clientIp,
-            string? userAgent,
-            string? failureReason = null,
-            string? appId = null,
-            string? correlationId = null,
-            CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public Task RecordActionAsync(
-            string action,
-            string targetType,
-            string targetId,
-            Guid? actorId,
-            string? actorName,
-            string? description,
-            string? clientIp = null,
-            string? correlationId = null,
-            object? before = null,
-            object? after = null,
+        public ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("simulated audit save failure");
     }

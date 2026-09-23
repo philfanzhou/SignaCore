@@ -77,14 +77,13 @@ public sealed class ProfilePasswordChangeTests : IClassFixture<IdentityServerFix
                 .SingleAsync(row => row.Id == seed.LegacyTokenId, TestContext.Current.CancellationToken);
             Assert.True(legacy.IsRevoked);
 
-            var audit = await context.AuditLogs.AsNoTracking()
-                .SingleAsync(row => row.Action == "password_changed"
-                    && row.TargetId == seed.AccountId.ToString(),
-                    TestContext.Current.CancellationToken);
-            using var snapshot = JsonDocument.Parse(audit.AfterSnapshot!);
-            Assert.Equal(2, snapshot.RootElement.GetProperty("revokedSessions").GetInt32());
-            Assert.Equal(1, snapshot.RootElement.GetProperty("revokedFamilyMembers").GetInt32());
-            Assert.True(snapshot.RootElement.GetProperty("revokedLegacyTokens").GetInt32() >= 1);
+            var audit = Assert.Single(
+                (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken))
+                .Where(row => row.Action == "password_changed"
+                    && row.TargetId == seed.AccountId.ToString()));
+            Assert.Contains("revoked sessions: 2", audit.SecurityDescription, StringComparison.Ordinal);
+            Assert.Contains("revoked family members: 1", audit.SecurityDescription, StringComparison.Ordinal);
+            Assert.Contains("revoked legacy tokens: ", audit.SecurityDescription, StringComparison.Ordinal);
         });
     }
 
@@ -129,10 +128,10 @@ public sealed class ProfilePasswordChangeTests : IClassFixture<IdentityServerFix
             Assert.Equal(2, sessions.Count);
             Assert.All(sessions, session => Assert.Null(session.RevokedAt));
 
-            Assert.Empty(await context.AuditLogs.AsNoTracking()
+            Assert.Empty((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    context, TestContext.Current.CancellationToken))
                 .Where(row => row.Action == "password_changed"
-                    && row.TargetId == seed.AccountId.ToString())
-                .ToListAsync(TestContext.Current.CancellationToken));
+                    && row.TargetId == seed.AccountId.ToString()));
         });
     }
 
@@ -161,10 +160,10 @@ public sealed class ProfilePasswordChangeTests : IClassFixture<IdentityServerFix
                 .Where(row => row.AccountId == seed.AccountId)
                 .ToListAsync(TestContext.Current.CancellationToken);
             Assert.All(sessions, session => Assert.Null(session.RevokedAt));
-            Assert.Empty(await context.AuditLogs.AsNoTracking()
+            Assert.Empty((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    context, TestContext.Current.CancellationToken))
                 .Where(row => row.Action == "password_changed"
-                    && row.TargetId == seed.AccountId.ToString())
-                .ToListAsync(TestContext.Current.CancellationToken));
+                    && row.TargetId == seed.AccountId.ToString()));
         });
     }
 
@@ -243,15 +242,13 @@ public sealed class ProfilePasswordChangeTests : IClassFixture<IdentityServerFix
 
         await AssertDbAsync(async context =>
         {
-            var audit = await context.AuditLogs.AsNoTracking()
-                .SingleAsync(row => row.Action == "password_changed"
-                    && row.TargetId == seed.AccountId.ToString(),
-                    TestContext.Current.CancellationToken);
+            var audit = Assert.Single(
+                (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken))
+                .Where(row => row.Action == "password_changed"
+                    && row.TargetId == seed.AccountId.ToString()));
             foreach (var canary in canaries)
             {
-                Assert.DoesNotContain(canary, audit.AfterSnapshot ?? string.Empty, StringComparison.Ordinal);
-                Assert.DoesNotContain(canary, audit.BeforeSnapshot ?? string.Empty, StringComparison.Ordinal);
-                Assert.DoesNotContain(canary, audit.Description ?? string.Empty, StringComparison.Ordinal);
+                Assert.DoesNotContain(canary, audit.SecurityDescription ?? string.Empty, StringComparison.Ordinal);
             }
         });
     }

@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Audit;
 using SignaCore.Database;
+using SignaCore.Host.Audit;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Services;
@@ -51,7 +53,7 @@ public sealed class OidcLogoutCompletionService(
     ILogoutRequestStore logoutRequests,
     IIdentitySessionStore identitySessions,
     IRefreshTokenRepository refreshTokens,
-    IAuditService auditService,
+    IManagementAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
     IdentityDbContext dbContext,
     ILogger<OidcLogoutCompletionService> logger)
@@ -149,15 +151,17 @@ public sealed class OidcLogoutCompletionService(
                 result = ResultNoSessionWrite;
             }
 
-            await auditService.RecordActionAsync(
+            await ManagementActionAudit.RecordAsync(
+                auditWriter,
+                ManagementActionAudit.AccountSource,
                 CompletedAuditAction,
                 LogoutRequestAuditTargetType,
                 lockedRequest.Id.ToString("D"),
-                actorId: lockedRequest.AccountId,
-                actorName: null,
-                description: $"session:{lockedRequest.IdentitySessionId};result:{result}",
-                clientIp: clientIp,
-                correlationId: correlationId,
+                lockedRequest.AccountId,
+                null,
+                $"session:{lockedRequest.IdentitySessionId};result:{result}",
+                clientIp,
+                correlationId,
                 cancellationToken: operationToken);
             await unitOfWork.SaveChangesAsync(operationToken);
             await transaction.CommitAsync(operationToken);

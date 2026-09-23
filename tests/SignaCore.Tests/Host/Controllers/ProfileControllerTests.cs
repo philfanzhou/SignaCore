@@ -13,6 +13,8 @@ using SignaCore.Host.Controllers;
 using SignaCore.Host.Models;
 using Xunit;
 
+using ServiceMantle.Audit;
+
 namespace SignaCore.Tests.Host.Controllers;
 
 public class ProfileControllerTests
@@ -349,13 +351,14 @@ public class ProfileControllerTests
         appRepository.Setup(r => r.GetByAppIdAsync(app.AppId, cancellation.Token)).ReturnsAsync(app);
         var apiClient = new Mock<IWechatApiClient>();
         apiClient.Setup(client => client.CodeToSessionAsync("code", cancellation.Token)).ReturnsAsync("open-id");
-        var auditService = new Mock<IAuditService>();
+        var auditService = new Mock<IManagementAuditWriter>();
         auditService
-            .Setup(service => service.RecordActionAsync(
-                "wechat_bound", "Account", AccountId.ToString(), AccountId, null,
-                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), null, null,
+            .Setup(service => service.RecordAsync(
+                It.Is<ManagementAuditEvent>(auditEvent =>
+                    auditEvent.Action.Value == "wechat_bound" &&
+                    auditEvent.Operator.OperatorId == AccountId.ToString("D")),
                 cancellation.Token))
-            .Returns(Task.CompletedTask);
+                    .Returns(new ValueTask<ManagementAuditRecord>(default(ManagementAuditRecord)));
         var admissionService = new Mock<IWechatAdmissionService>();
         admissionService
             .Setup(service => service.BindAsync(
@@ -384,23 +387,23 @@ public class ProfileControllerTests
         admissionService.Verify(service => service.BindAsync(
             app, AccountId, "open-id", cancellation.Token,
             It.IsAny<Func<WechatBindResult, Task>>()), Times.Once);
-        auditService.Verify(service => service.RecordActionAsync(
-            "wechat_bound", "Account", AccountId.ToString(), AccountId, null,
-            It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), null, null,
-            cancellation.Token), Times.Once);
+        auditService.Verify(service => service.RecordAsync(
+            It.Is<ManagementAuditEvent>(auditEvent => auditEvent.Action.Value == "wechat_bound"),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task UnbindWechat_PropagatesSameActionTokenThroughAdmissionAndAudit()
     {
         using var cancellation = new CancellationTokenSource();
-        var auditService = new Mock<IAuditService>();
+        var auditService = new Mock<IManagementAuditWriter>();
         auditService
-            .Setup(service => service.RecordActionAsync(
-                "wechat_unbound", "Account", AccountId.ToString(), AccountId, null,
-                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), null, null,
+            .Setup(service => service.RecordAsync(
+                It.Is<ManagementAuditEvent>(auditEvent =>
+                    auditEvent.Action.Value == "wechat_unbound" &&
+                    auditEvent.Operator.OperatorId == AccountId.ToString("D")),
                 cancellation.Token))
-            .Returns(Task.CompletedTask);
+                    .Returns(new ValueTask<ManagementAuditRecord>(default(ManagementAuditRecord)));
         var admissionService = new Mock<IWechatAdmissionService>();
         admissionService
             .Setup(service => service.UnbindAsync(
@@ -420,9 +423,8 @@ public class ProfileControllerTests
         Assert.IsType<OkObjectResult>(result);
         admissionService.Verify(service => service.UnbindAsync(
             AccountId, cancellation.Token, It.IsAny<Func<Task>>()), Times.Once);
-        auditService.Verify(service => service.RecordActionAsync(
-            "wechat_unbound", "Account", AccountId.ToString(), AccountId, null,
-            It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), null, null,
-            cancellation.Token), Times.Once);
+        auditService.Verify(service => service.RecordAsync(
+            It.Is<ManagementAuditEvent>(auditEvent => auditEvent.Action.Value == "wechat_unbound"),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 }

@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -8,6 +9,8 @@ using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Services;
 using Xunit;
+
+using SignaCore.Tests.TestSupport;
 
 namespace SignaCore.Tests.Host.Services;
 
@@ -297,9 +300,7 @@ public sealed class OidcLoginCompletionServiceTests
             new AuthorizationCodeStore(new AuthorizationCodeRepository(context), unitOfWork),
             new LoginAttemptRepository(context),
             new AccountLoginInfoService(accountRepository),
-            new AuditService(
-                new LoginHistoryRepository(context),
-                new AuditLogRepository(context)),
+            new AuditService(new LoginHistoryRepository(context)),
             unitOfWork,
             context);
         return new CompletionDatabase(connection, context, service, continuations);
@@ -376,7 +377,7 @@ public sealed class OidcLoginCompletionServiceTests
         Assert.Empty(await context.IdentitySessions.AsNoTracking().ToListAsync(cancellationToken));
         Assert.Empty(await context.AuthorizationCodes.AsNoTracking().ToListAsync(cancellationToken));
         Assert.Empty(await context.LoginHistories.AsNoTracking().ToListAsync(cancellationToken));
-        Assert.Empty(await context.AuditLogs.AsNoTracking().ToListAsync(cancellationToken));
+        Assert.Empty(await SharedAuditTable.ReadAsync(context, cancellationToken));
         var account = await context.Accounts.AsNoTracking()
             .SingleAsync(row => row.Id == seed.AccountId, cancellationToken);
         Assert.Equal(0, account.TotalLoginCount);

@@ -2,7 +2,9 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using ServiceMantle.Audit;
 using SignaCore.Database;
+using SignaCore.Host.Audit;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
@@ -173,10 +175,12 @@ public sealed class OidcLogoutPreparationService(
         var creation = await scope.ServiceProvider.GetRequiredService<ILogoutRequestStore>().StageCreateAsync(
             new LogoutRequestDescriptor(app.Id, subject, sessionId, verifiedPostLogoutUri, state), now, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        await scope.ServiceProvider.GetRequiredService<IAuditService>().RecordActionAsync(
+        await ManagementActionAudit.RecordAsync(
+            scope.ServiceProvider.GetRequiredService<IManagementAuditWriter>(),
+            ManagementActionAudit.AccountSource,
             PreparedAuditAction, LogoutRequestAuditTargetType, creation.Id.ToString("D"),
-            actorId: subject, actorName: null, description: $"session:{sessionId};client:{app.Id}",
-            clientIp: clientIp, correlationId: correlationId, cancellationToken: cancellationToken);
+            subject, null, $"session:{sessionId};client:{app.Id}",
+            clientIp, correlationId, cancellationToken: cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         // EF's single Save owns the automatic transaction and provider execution strategy. A
         // transient retry reuses this fixed entity graph: no new handle, id or audit is generated.

@@ -16,7 +16,7 @@ namespace SignaCore.Tests.Integration;
 /// handle, both antiforgery values, and the full success-flow snapshot (state, nonce, challenge,
 /// redirect URI), every local path plus the committed <c>EV-01</c> success is exercised under the
 /// default log configuration, and none of the secrets may appear in the captured SignaCore logs,
-/// in the full <c>audit_logs</c> / <c>login_histories</c> dump, or in an error body. The handle
+/// in the full <c>service_audit_logs</c> / <c>login_histories</c> dump, or in an error body. The handle
 /// and the request token appear only where the contract puts them — the login URL, the hidden form
 /// fields of the two form renders, and the <c>Set-Cookie</c> of the first render — the plaintext
 /// code appears only in the success redirect's <c>Location</c>, and the password never appears in

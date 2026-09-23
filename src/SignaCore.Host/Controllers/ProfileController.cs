@@ -6,9 +6,11 @@ using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
-using SignaCore.Domain.Services;
+using ServiceMantle.Audit;
 using SignaCore.Domain.Services.WeChat;
+using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
+using SignaCore.Host.Audit;
 using SignaCore.Host.Http;
 using SignaCore.Host.Models;
 
@@ -97,7 +99,7 @@ public class ProfileController : ControllerBase
         [FromServices] IRefreshTokenRepository refreshTokenRepository,
         [FromServices] IdentityDbContext dbContext,
         [FromServices] IUnitOfWork unitOfWork,
-        [FromServices] IAuditService auditService,
+        [FromServices] IManagementAuditWriter auditWriter,
         CancellationToken cancellationToken = default)
     {
         var accountId = GetAccountId();
@@ -165,17 +167,15 @@ public class ProfileController : ControllerBase
             var revokedLegacyTokens = await refreshTokenRepository.RevokeLegacyByAccountAsync(
                 accountId.Value, operationToken);
 
-            await auditService.RecordActionAsync(
+            await ManagementActionAudit.RecordAsync(
+                auditWriter, ManagementActionAudit.AccountSource,
                 "password_changed", "Account", accountId.Value.ToString(),
                 accountId, null,
-                "User changed password", HttpContext.GetClientIp(),
-                after: new
-                {
-                    RevokedSessions = revokedSessions,
-                    RevokedFamilyMembers = revokedFamilyMembers,
-                    RevokedLegacyTokens = revokedLegacyTokens
-                },
-                correlationId: HttpContext.GetCorrelationId(),
+                $"User changed password; revoked sessions: {revokedSessions}; " +
+                $"revoked family members: {revokedFamilyMembers}; " +
+                $"revoked legacy tokens: {revokedLegacyTokens}",
+                HttpContext.GetClientIp(),
+                HttpContext.GetCorrelationId(),
                 cancellationToken: operationToken);
             await unitOfWork.SaveChangesAsync(operationToken);
             await transaction.CommitAsync(operationToken);
@@ -222,7 +222,7 @@ public class ProfileController : ControllerBase
         [FromServices] IWechatApiClient wechatApiClient,
         [FromServices] IWechatAdmissionService admissionService,
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
-        [FromServices] IAuditService auditService,
+        [FromServices] IManagementAuditWriter auditWriter,
         CancellationToken cancellationToken)
     {
         var accountId = GetAccountId();
@@ -267,10 +267,11 @@ public class ProfileController : ControllerBase
             {
                 if (bindResult.IsSuccess)
                 {
-                    await auditService.RecordActionAsync(
+                    await ManagementActionAudit.RecordAsync(
+                        auditWriter, ManagementActionAudit.AccountSource,
                         "wechat_bound", "Account", accountId.Value.ToString(), accountId, null,
                         $"WeChat identity bound for application {app.AppId}", HttpContext.GetClientIp(),
-                        correlationId: HttpContext.GetCorrelationId(),
+                        HttpContext.GetCorrelationId(),
                         cancellationToken: cancellationToken);
                 }
             });
@@ -301,7 +302,7 @@ public class ProfileController : ControllerBase
     [HttpDelete("wechat")]
     public async Task<IActionResult> UnbindWechat(
         [FromServices] IWechatAdmissionService admissionService,
-        [FromServices] IAuditService auditService,
+        [FromServices] IManagementAuditWriter auditWriter,
         CancellationToken cancellationToken)
     {
         var accountId = GetAccountId();
@@ -313,11 +314,12 @@ public class ProfileController : ControllerBase
         var removed = await admissionService.UnbindAsync(
             accountId.Value,
             cancellationToken,
-            () => auditService.RecordActionAsync(
+            () => ManagementActionAudit.RecordAsync(
+                auditWriter, ManagementActionAudit.AccountSource,
                 "wechat_unbound", "Account", accountId.Value.ToString(), accountId, null,
                 "WeChat identity unbound", HttpContext.GetClientIp(),
-                correlationId: HttpContext.GetCorrelationId(),
-                cancellationToken: cancellationToken));
+                HttpContext.GetCorrelationId(),
+                cancellationToken: cancellationToken).AsTask());
 
         return Ok(new OperationResponse(removed, removed ? "WeChat unbound." : "No WeChat binding to remove."));
     }

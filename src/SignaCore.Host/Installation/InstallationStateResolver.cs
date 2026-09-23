@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ServiceMantle;
 using ServiceMantle.Installation;
-using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Host.Configuration;
 
@@ -132,6 +131,9 @@ internal static class InstallationStateResolver
         IdentityDbContext db,
         CancellationToken cancellationToken = default)
     {
+        // The shared audit rows live in service_audit_logs behind an internal library entity, so
+        // the conservative check reads the table directly; the quoted alias works on PostgreSQL and
+        // SQLite alike.
         return await db.Accounts.AnyAsync(cancellationToken)
             || await db.PasswordCredentials.AnyAsync(cancellationToken)
             || await db.UserLogins.AnyAsync(cancellationToken)
@@ -139,7 +141,9 @@ internal static class InstallationStateResolver
             || await db.AppRegistrations.AnyAsync(cancellationToken)
             || await db.SecurityKeys.AnyAsync(cancellationToken)
             || await db.RefreshTokens.AnyAsync(cancellationToken)
-            || await db.AuditLogs.AnyAsync(cancellationToken)
+            || await db.Database.SqlQuery<int>($"""
+                SELECT (CASE WHEN EXISTS (SELECT 1 FROM service_audit_logs) THEN 1 ELSE 0 END) AS "Value"
+                """).SingleAsync(cancellationToken) == 1
             || await db.LoginHistories.AnyAsync(cancellationToken);
     }
 }

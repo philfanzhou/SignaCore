@@ -176,16 +176,38 @@ export interface AdminLoginHistoryItem {
   createdAt: number
 }
 
+/**
+ * 共享受限审计查询（GET /management/v1/audit）的一条记录。字段是共享端点的封闭投影：
+ * 没有旧 audit_logs 的 before/after 快照，操作者带来源，outcome 是封闭枚举。
+ */
 export interface AdminAuditLogItem {
+  id: string
+  operator: {
+    operatorId: string | null
+    displayName: string | null
+    source: string
+  }
   action: string
-  targetType: string
-  targetId: string
-  actorId: string | null
-  actorName: string | null
-  description: string | null
+  target: { type: string; id: string }
+  outcome: 'unknown' | 'success' | 'failure' | 'denied'
+  occurredAtUtc: string
   clientIp: string | null
   correlationId: string | null
-  createdAt: number
+  securityDescription: string | null
+  metadata: Record<string, string>
+}
+
+/**
+ * 共享审计查询的分页响应。keyset 分页：page>1 必须携带上一页返回的 continuationCursor，
+ * 因此前端翻页要自己记住每页的游标；totalCount 只是展示值，不代表快照一致性。
+ */
+export interface AdminAuditLogPage {
+  items: AdminAuditLogItem[]
+  page: number
+  pageSize: number
+  totalCount: number
+  continuationCursor: string | null
+  hasNextPage: boolean
 }
 
 class AdminApiClient {
@@ -415,12 +437,13 @@ class AdminApiClient {
     action?: string
     targetType?: string
     targetId?: string
-    actorId?: string
+    operatorId?: string
     page?: number
     pageSize?: number
+    cursor?: string
   } = {}) {
-    const response = await this.client.get<PagedResponse<AdminAuditLogItem>>(
-      '/api/admin/audit-logs', { params })
+    const response = await this.client.get<AdminAuditLogPage>(
+      '/management/v1/audit', { params })
     return response.data
   }
 

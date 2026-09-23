@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Primitives;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -18,6 +19,8 @@ using SignaCore.Domain.Services;
 using SignaCore.Host;
 using SignaCore.Host.Services;
 using Xunit;
+
+using SignaCore.Tests.TestSupport;
 
 namespace SignaCore.Tests.Host.Services;
 
@@ -80,7 +83,7 @@ public sealed class InteractiveRefreshRotationServiceTests
         // DF-09: only the digest is persisted; the plaintext never touches any row or audit.
         Assert.Equal(RefreshTokenDigest.Compute(outcome.RefreshToken), childRow.TokenValue);
         Assert.All(rows, row => Assert.DoesNotContain(outcome.RefreshToken, row.TokenValue, StringComparison.Ordinal));
-        Assert.Empty(await harness.Context.AuditLogs.AsNoTracking().ToListAsync(cancellationToken));
+        Assert.Empty(await SharedAuditTable.ReadAsync(harness.Context, cancellationToken));
         Assert.Null((await harness.Context.IdentitySessions.AsNoTracking()
             .SingleAsync(row => row.Id == seed.SessionId, cancellationToken)).RevokedAt);
 
@@ -151,14 +154,15 @@ public sealed class InteractiveRefreshRotationServiceTests
         Assert.Null((await harness.Context.IdentitySessions.AsNoTracking()
             .SingleAsync(row => row.Id == seed.SessionId, cancellationToken)).RevokedAt);
 
-        var audit = Assert.Single(await harness.Context.AuditLogs.AsNoTracking().ToListAsync(cancellationToken));
+        var audit = Assert.Single(await SharedAuditTable.ReadAsync(harness.Context, cancellationToken));
         Assert.Equal("oidc.refresh.replayed", audit.Action);
-        Assert.Equal("RefreshTokenFamily", audit.TargetType);
+        Assert.Equal("refreshtokenfamily", audit.TargetType);
         Assert.Equal(root.Id.ToString("D"), audit.TargetId);
-        Assert.Equal(seed.AccountId, audit.ActorId);
-        Assert.Equal($"family:{root.Id:D};member:{root.Id:D};revoked:1;app:{ClientId}", audit.Description);
+        Assert.Equal(seed.AccountId.ToString("D"), audit.OperatorId);
+        Assert.Equal("signacore.account", audit.OperatorSource);
+        Assert.Equal($"family:{root.Id:D};member:{root.Id:D};revoked:1;app:{ClientId}", audit.SecurityDescription);
         Assert.Equal(CorrelationId, audit.CorrelationId);
-        Assert.DoesNotContain(root.Plaintext, audit.Description, StringComparison.Ordinal);
+        Assert.DoesNotContain(root.Plaintext, audit.SecurityDescription, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -382,8 +386,8 @@ public sealed class InteractiveRefreshRotationServiceTests
             CreateForm("rotation-no-such-token"),
             clientCredentialMixPresent: false, clientIp: null, null, TestContext.Current.CancellationToken);
         Assert.False(missing.Handled);
-        Assert.Empty(await harness.Context.AuditLogs.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedAuditTable.ReadAsync(
+            harness.Context, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -633,7 +637,7 @@ public sealed class InteractiveRefreshRotationServiceTests
                     NullLogger<InteractiveAccessTokenFactory>.Instance),
                 new InteractiveIdTokenFactory(new JwtOptions { Issuer = "https://rotation-unit.test" }),
                 new StaticKeyManager(),
-                new AuditService(new LoginHistoryRepository(Context), new AuditLogRepository(Context)),
+                new EfCoreManagementAuditWriter<IdentityDbContext>(Context),
                 CreateMetrics(),
                 unitOfWork,
                 Context,

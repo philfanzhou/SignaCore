@@ -124,6 +124,15 @@ function user(overrides: Partial<AdminUser> = {}): AdminUser {
 }
 
 const emptyPage = { items: [], total: 0, page: 1, pageSize: 12 }
+// 共享审计查询的分页形状：keyset 游标 + totalCount 展示值。
+const emptyAuditPage = {
+  items: [],
+  page: 1,
+  pageSize: 15,
+  totalCount: 0,
+  continuationCursor: null,
+  hasNextPage: false,
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -147,7 +156,7 @@ beforeEach(() => {
     success: true,
     message: 'Identity session revoked.',
   })
-  mocks.api.getAuditLogs.mockResolvedValue(emptyPage)
+  mocks.api.getAuditLogs.mockResolvedValue(emptyAuditPage)
   mocks.api.getSettings.mockResolvedValue({
     configurationVersion: 1,
     runningConfigurationVersion: 1,
@@ -513,19 +522,47 @@ describe('admin user directory', () => {
 })
 
 describe('admin security and runtime settings', () => {
-  it('queries audit logs and revokes refresh tokens', async () => {
+  it('queries shared audit logs, pages by cursor, and revokes refresh tokens', async () => {
     const state = useAdminSecurity()
-    state.auditFilters.action = ' UserDisabled '
-    state.auditFilters.targetType = 'User'
+    state.auditFilters.action = ' account_created '
+    state.auditFilters.targetType = 'account'
     state.auditFilters.targetId = 'user-1'
-    mocks.api.getAuditLogs.mockResolvedValue({ items: [{ action: 'UserDisabled' }], total: 1, page: 1, pageSize: 15 })
+    mocks.api.getAuditLogs.mockResolvedValue({
+      items: [{ id: 'a1', action: 'account_created' }],
+      page: 1,
+      pageSize: 15,
+      totalCount: 20,
+      continuationCursor: 'cursor-1',
+      hasNextPage: true,
+    })
     await state.loadAuditLogs()
     expect(mocks.api.getAuditLogs).toHaveBeenCalledWith({
-      action: 'UserDisabled',
-      targetType: 'User',
+      action: 'account_created',
+      targetType: 'account',
       targetId: 'user-1',
       page: 1,
       pageSize: 15,
+      cursor: undefined,
+    })
+
+    // 翻到第 2 页必须携带第 1 页返回的游标；返回第 1 页则不带。
+    await state.auditNextPage()
+    expect(mocks.api.getAuditLogs).toHaveBeenLastCalledWith({
+      action: 'account_created',
+      targetType: 'account',
+      targetId: 'user-1',
+      page: 2,
+      pageSize: 15,
+      cursor: 'cursor-1',
+    })
+    await state.auditPrevPage()
+    expect(mocks.api.getAuditLogs).toHaveBeenLastCalledWith({
+      action: 'account_created',
+      targetType: 'account',
+      targetId: 'user-1',
+      page: 1,
+      pageSize: 15,
+      cursor: undefined,
     })
 
     await state.revokeToken()

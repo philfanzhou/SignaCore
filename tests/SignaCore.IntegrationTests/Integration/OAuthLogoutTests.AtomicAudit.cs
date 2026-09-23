@@ -7,6 +7,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Moq;
+using ServiceMantle.Audit;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -32,18 +34,11 @@ public sealed partial class OAuthLogoutTests
             services.AddDbContext<IdentityDbContext>(options => options.AddInterceptors(fault), optionsLifetime: ServiceLifetime.Singleton);
             if (boundary == "stage")
             {
-                services.AddScoped<IAuditService>(provider =>
+                services.AddScoped<IManagementAuditWriter>(provider =>
                 {
                     var context = provider.GetRequiredService<IdentityDbContext>();
-                    var repository = new AuditLogRepository(context);
-                    var mock = new Mock<IAuditLogRepository>();
-                    mock.Setup(repo => repo.AddAsync(It.IsAny<AuditLogEntity>(), It.IsAny<CancellationToken>()))
-                        .Returns(async (AuditLogEntity row, CancellationToken token) =>
-                        {
-                            await repository.AddAsync(row, token);
-                            if (row.Action == "oidc.logout.prepared") throw new InvalidOperationException(fault.Text, new Exception(fault.Text));
-                        });
-                    return new AuditService(new LoginHistoryRepository(context), mock.Object);
+                    var inner = new EfCoreManagementAuditWriter<IdentityDbContext>(context);
+                    return new FaultingLogoutAuditWriter(inner, fault);
                 });
             }
         });
@@ -53,7 +48,7 @@ public sealed partial class OAuthLogoutTests
         fault.Text = string.Join("|", canaries);
         fault.Enabled = boundary == "sql";
         var beforeRows = await QueryAsync(context => context.LogoutRequests.CountAsync(TestContext.Current.CancellationToken));
-        var beforeAudit = await QueryAsync(context => context.AuditLogs.CountAsync(TestContext.Current.CancellationToken));
+        var beforeAudit = await QueryAsync(context => SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken));
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = BasicHeader();
         using var response = await client.PostAsync("/oauth2/logout/requests", new FormUrlEncodedContent(new Dictionary<string, string>
@@ -67,7 +62,7 @@ public sealed partial class OAuthLogoutTests
         Assert.All(canaries, canary => Assert.False(dump.Contains(canary, StringComparison.Ordinal)));
         Assert.DoesNotContain(capture.Messages, message => message.Contains("Logout request prepared", StringComparison.Ordinal));
         Assert.Equal(beforeRows, await QueryAsync(context => context.LogoutRequests.CountAsync(TestContext.Current.CancellationToken)));
-        Assert.Equal(beforeAudit, await QueryAsync(context => context.AuditLogs.CountAsync(TestContext.Current.CancellationToken)));
+        Assert.Equal(beforeAudit.Count, (await QueryAsync(context => SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken))).Count);
         if (boundary == "sql") Assert.True(fault.Observed);
     }
 
@@ -83,6 +78,27 @@ public sealed partial class OAuthLogoutTests
                 throw new InvalidOperationException(Text, new Exception(Text));
             }
             return ValueTask.FromResult(result);
+        }
+    }
+
+    /// <summary>
+    /// Stages through the shared writer, then fails once the logout-preparation event was staged so
+    /// the whole logout transaction rolls back with nothing persisted.
+    /// </summary>
+    private sealed class FaultingLogoutAuditWriter(
+        IManagementAuditWriter inner, LogoutCanarySqlFault fault) : IManagementAuditWriter
+    {
+        public ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
+            CancellationToken cancellationToken = default)
+        {
+            var staged = inner.RecordAsync(auditEvent, cancellationToken);
+            if (auditEvent.Action.Value == "oidc.logout.prepared")
+            {
+                throw new InvalidOperationException(fault.Text, new Exception(fault.Text));
+            }
+
+            return staged;
         }
     }
 }

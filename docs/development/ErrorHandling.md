@@ -38,8 +38,9 @@ Sensitive request headers are redacted by middleware. Tests cover correlation pr
 
 ## Current audit commit evidence
 
-[AuditService](../../src/SignaCore.Domain/Services/AuditService.cs) stages login-history and audit-log
-rows through repositories; the caller owns the save or explicit transaction. The current
+[AuditService](../../src/SignaCore.Domain/Services/AuditService.cs) stages login-history rows
+through its repository, and administrative action audits are staged by the shared ServiceMantle
+writer into `service_audit_logs`; the caller owns the save or explicit transaction. The current
 [setup completion contract](./FirstRunSetup.md#completion-is-atomic) and
 [WeChat binding design](../modules/Profile/WechatBinding/03-DESIGN.md#request-flow) document their
 operation-specific transaction boundaries. Use those contracts and the implementation/test sources

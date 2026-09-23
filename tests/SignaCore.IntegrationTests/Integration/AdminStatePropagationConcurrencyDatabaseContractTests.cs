@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -102,9 +103,10 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
         var family = await verification.RefreshTokens.AsNoTracking()
             .Where(row => row.IdentitySessionId == seed.SessionId)
             .ToListAsync(TestContext.Current.CancellationToken);
-        var replayAudits = await verification.AuditLogs.AsNoTracking()
+        var replayAudits = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                verification, TestContext.Current.CancellationToken))
             .Where(row => row.Action == "oidc.refresh.replayed" || row.Action == "oidc.code.replayed")
-            .ToListAsync(TestContext.Current.CancellationToken);
+            .ToList();
         var codeRow = await verification.AuthorizationCodes.AsNoTracking()
             .SingleAsync(row => row.Id == code.Id, TestContext.Current.CancellationToken);
 
@@ -194,9 +196,10 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
         var family = await verification.RefreshTokens.AsNoTracking()
             .Where(row => row.IdentitySessionId == seed.SessionId)
             .ToListAsync(TestContext.Current.CancellationToken);
-        var replayAudits = await verification.AuditLogs.AsNoTracking()
+        var replayAudits = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                verification, TestContext.Current.CancellationToken))
             .Where(row => row.Action == "oidc.refresh.replayed" || row.Action == "oidc.code.replayed")
-            .ToListAsync(TestContext.Current.CancellationToken);
+            .ToList();
         var codeRow = await verification.AuthorizationCodes.AsNoTracking()
             .SingleAsync(row => row.Id == code.Id, TestContext.Current.CancellationToken);
 
@@ -295,9 +298,10 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
             var family = await verification.RefreshTokens.AsNoTracking()
                 .Where(row => row.IdentitySessionId == seed.SessionId)
                 .ToListAsync(TestContext.Current.CancellationToken);
-            var replayAudits = await verification.AuditLogs.AsNoTracking()
+            var replayAudits = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    verification, TestContext.Current.CancellationToken))
                 .Where(row => row.Action == "oidc.refresh.replayed" || row.Action == "oidc.code.replayed")
-                .ToListAsync(TestContext.Current.CancellationToken);
+                .ToList();
             var codeRow = await verification.AuthorizationCodes.AsNoTracking()
                 .SingleAsync(row => row.Id == code.Id, TestContext.Current.CancellationToken);
 
@@ -396,9 +400,10 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
             var family = await verification.RefreshTokens.AsNoTracking()
                 .Where(row => row.IdentitySessionId == seed.SessionId)
                 .ToListAsync(TestContext.Current.CancellationToken);
-            var replayAudits = await verification.AuditLogs.AsNoTracking()
+            var replayAudits = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    verification, TestContext.Current.CancellationToken))
                 .Where(row => row.Action == "oidc.refresh.replayed" || row.Action == "oidc.code.replayed")
-                .ToListAsync(TestContext.Current.CancellationToken);
+                .ToList();
             var codeRow = await verification.AuthorizationCodes.AsNoTracking()
                 .SingleAsync(row => row.Id == code.Id, TestContext.Current.CancellationToken);
 
@@ -535,7 +540,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
             new AdminUpdateStatusRequest(false),
             new AccountRepository(context),
             unitOfWork,
-            new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             context,
             new IdentitySessionRepository(context),
             new RefreshTokenFamilyStore(
@@ -583,7 +588,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
             refreshTokens,
             context,
             unitOfWork,
-            new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             TestContext.Current.CancellationToken);
     }
 
@@ -663,7 +668,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
                     NullLogger<InteractiveAccessTokenFactory>.Instance),
                 new InteractiveIdTokenFactory(new JwtOptions { Issuer = "https://state-concurrency.test" }),
                 new StaticKeyManager(),
-                new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+                new EfCoreManagementAuditWriter<IdentityDbContext>(context),
                 new AuthMetrics(StubMeterFactory()),
                 unitOfWork,
                 context,
@@ -688,7 +693,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
                 new RefreshTokenFamilyStore(refreshTokens, unitOfWork, NullLogger<RefreshTokenFamilyStore>.Instance),
                 callbackService: null,
                 new StaticKeyManager(),
-                new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+                new EfCoreManagementAuditWriter<IdentityDbContext>(context),
                 new AuthMetrics(StubMeterFactory()),
                 unitOfWork,
                 context,

@@ -112,9 +112,9 @@ public sealed partial class OAuthRateLimitTests : IClassFixture<IdentityServerFi
         var codeRow = await QueryAsync(async context => await context.AuthorizationCodes.AsNoTracking()
             .SingleAsync(row => row.Id == seeded.CodeId, TestContext.Current.CancellationToken));
         Assert.Null(codeRow.ConsumedAt);
-        Assert.Empty(await QueryAsync(async context => await context.AuditLogs.AsNoTracking()
+        Assert.Empty(await QueryAsync(async context => (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context))
             .Where(row => row.TargetId == seeded.CodeId.ToString("D"))
-            .ToListAsync(TestContext.Current.CancellationToken)));
+            .ToList()));
     }
 
     [Fact]

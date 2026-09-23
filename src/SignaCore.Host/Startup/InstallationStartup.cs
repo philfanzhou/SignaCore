@@ -341,18 +341,24 @@ internal static class InstallationStartup
                 });
             }
 
-            db.AuditLogs.Add(new AuditLogEntity
-            {
-                Id = Guid.NewGuid(),
-                Action = "installation.legacy_import.completed",
-                TargetType = "Installation",
-                TargetId = InstallationStores.ServiceIdValue,
-                ActorName = "legacy-import",
-                Description =
-                    $"Imported {importedKeyCount} legacy settings into the shared aggregate. " +
-                    $"ConfigurationVersion={configurationVersion}.",
-                CreatedAt = now
-            });
+            // The import audit is expressed with the shared audit model and staged by the shared
+            // EF Core writer into service_audit_logs, inside the same transaction as the aggregate
+            // and the installation row. It still carries no setting value.
+            await new EfCoreManagementAuditWriter<IdentityDbContext>(db).RecordAsync(
+                ManagementAuditEvent.Create(
+                    ManagementAuditOperator.Create(
+                        WellKnownManagementAuditOperatorSources.System,
+                        displayName: "legacy-import"),
+                    ManagementAuditAction.Parse("installation.legacy_import.completed"),
+                    ManagementAuditTarget.Create(
+                        ManagementAuditTargetType.Parse("Installation"),
+                        InstallationStores.ServiceIdValue),
+                    ManagementAuditOutcome.Success,
+                    occurredAtUtc: now,
+                    securityDescription:
+                        $"Imported {importedKeyCount} legacy settings into the shared aggregate. " +
+                        $"ConfigurationVersion={configurationVersion}."),
+                cancellationToken);
 
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);

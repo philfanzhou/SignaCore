@@ -56,7 +56,6 @@ public class CleanupWorker : BackgroundService
         var securityKeyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
         var loginAttemptRepo = scope.ServiceProvider.GetRequiredService<ILoginAttemptRepository>();
         var loginHistoryRepo = scope.ServiceProvider.GetRequiredService<ILoginHistoryRepository>();
-        var auditLogRepo = scope.ServiceProvider.GetRequiredService<IAuditLogRepository>();
         var authorizationRequestStore = scope.ServiceProvider.GetRequiredService<IAuthorizationRequestStore>();
         var identitySessionStore = scope.ServiceProvider.GetRequiredService<IIdentitySessionStore>();
         var otpRepo = scope.ServiceProvider.GetService<IOtpRepository>();
@@ -164,14 +163,6 @@ public class CleanupWorker : BackgroundService
         if (deletedHistories > 0)
         {
             _logger.LogInformation("Deleted {Count} old login history records", deletedHistories);
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        var auditLogCutoff = DateTimeOffset.UtcNow.AddDays(-IdentityConstants.AuditLogRetentionDays);
-        var deletedLogs = await auditLogRepo.RemoveOlderThanAsync(auditLogCutoff, cancellationToken);
-        if (deletedLogs > 0)
-        {
-            _logger.LogInformation("Deleted {Count} old audit log records", deletedLogs);
         }
 
         cancellationToken.ThrowIfCancellationRequested();

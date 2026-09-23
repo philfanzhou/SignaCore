@@ -19,6 +19,8 @@ using SignaCore.Host.Models;
 using SignaCore.Host.Provisioning;
 using Xunit;
 
+using ServiceMantle.Audit;
+
 namespace SignaCore.Tests.Host.Controllers;
 
 /// <summary>
@@ -41,7 +43,7 @@ public class AdminOidcClientTests : IDisposable
     private readonly AdminController _controller;
     private readonly IAppRegistrationRepository _repository;
     private readonly IUnitOfWork _unitOfWork;
-    private readonly Mock<IAuditService> _auditServiceMock = new();
+    private readonly Mock<IManagementAuditWriter> _auditServiceMock = new();
     private readonly Mock<IRefreshTokenFamilyStore> _familyStoreMock = new();
     private readonly IRefreshTokenFamilyStore _familyStore;
     private readonly IPasswordHasher _passwordHasher = new BCryptPasswordHasher(
@@ -191,10 +193,11 @@ public class AdminOidcClientTests : IDisposable
         Assert.Equal("openid profile offline_access", app.AllowedScopes);
 
         _auditServiceMock.Verify(
-            audit => audit.RecordActionAsync(
-                "app_oidc_policy_updated", "AppRegistration", AppId, AdminId, "admin",
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                It.IsAny<object?>(), It.IsAny<object?>(), TestContext.Current.CancellationToken),
+            audit => audit.RecordAsync(
+                It.Is<ManagementAuditEvent>(auditEvent =>
+                    auditEvent.Action.Value == "app_oidc_policy_updated" &&
+                    auditEvent.Target.Type.Value == "appregistration"),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -275,14 +278,10 @@ public class AdminOidcClientTests : IDisposable
             .Setup(store => store.RevokeByApplicationAsync(
                 AppId, RefreshFamilyRevocationReason.RefreshCapabilityDisabled, TestContext.Current.CancellationToken))
             .ReturnsAsync(5);
-        var snapshots = new List<(object? Before, object? After)>();
-        _auditServiceMock.Setup(a => a.RecordActionAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                It.IsAny<object?>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, string, string, Guid?, string?, string?, string?, string?, object?, object?, CancellationToken>(
-                (_, _, _, _, _, _, _, _, before, after, _) => snapshots.Add((before, after)))
-            .Returns(Task.CompletedTask);
+        var events = new List<ManagementAuditEvent>();
+        _auditServiceMock.Setup(writer => writer.RecordAsync(
+                It.IsAny<ManagementAuditEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<ManagementAuditEvent, CancellationToken>((e, _) => events.Add(e));
 
         var result = await UpdatePolicyAsync(new AdminUpdateOidcPolicyRequest(
             "Confidential", true, ["openid", "profile"], false, null));
@@ -292,8 +291,10 @@ public class AdminOidcClientTests : IDisposable
             store => store.RevokeByApplicationAsync(
                 AppId, RefreshFamilyRevocationReason.RefreshCapabilityDisabled, TestContext.Current.CancellationToken),
             Times.Once);
-        var afterJson = Serialize(Assert.Single(snapshots).After);
-        Assert.Contains("\"RevokedFamilyMembers\":5", afterJson, StringComparison.Ordinal);
+        Assert.Contains(
+            "revoked family members: 5",
+            Assert.Single(events).SecurityDescription,
+            StringComparison.Ordinal);
 
         // Staying off performs no further revocation writes.
         var unchanged = await UpdatePolicyAsync(new AdminUpdateOidcPolicyRequest(
@@ -419,19 +420,12 @@ public class AdminOidcClientTests : IDisposable
     public async Task RecognisableSensitiveValues_ReachNeitherAnErrorBodyNorAnAuditRecord()
     {
         const string canaryUri = "https://attacker.example.test/cb?api_key=CANARY-SECRET-VALUE";
-        var snapshots = new List<string>();
+        var events = new List<ManagementAuditEvent>();
         _auditServiceMock
-            .Setup(audit => audit.RecordActionAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                It.IsAny<object?>(), It.IsAny<object?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, string, string, Guid?, string?, string?, string?, string?, object?, object?, CancellationToken>(
-                (action, targetType, targetId, _, actorName, description, _, _, before, after, _) =>
-                    snapshots.Add(string.Join(
-                        "|",
-                        action, targetType, targetId, actorName, description,
-                        Serialize(before), Serialize(after))))
-            .Returns(Task.CompletedTask);
+            .Setup(writer => writer.RecordAsync(
+                It.IsAny<ManagementAuditEvent>(), It.IsAny<CancellationToken>()))
+            .Callback<ManagementAuditEvent, CancellationToken>((e, _) =>
+                events.Add(e));
 
         await SeedAsync();
         var app = await LoadAsync();
@@ -450,12 +444,17 @@ public class AdminOidcClientTests : IDisposable
         Assert.DoesNotContain("attacker.example.test", body, StringComparison.Ordinal);
 
         await AddUrisAsync(RedirectUriKind.Redirect, "https://bff.example.test/callback");
-        Assert.NotEmpty(snapshots);
-        foreach (var snapshot in snapshots)
+        Assert.NotEmpty(events);
+        foreach (var auditEvent in events)
         {
-            Assert.DoesNotContain("CANARY-SECRET-VALUE", snapshot, StringComparison.Ordinal);
-            Assert.DoesNotContain(app.AppSecretHash, snapshot, StringComparison.Ordinal);
-            Assert.DoesNotContain("AppSecretHash", snapshot, StringComparison.OrdinalIgnoreCase);
+            // The staged shared event is sanitized before it is built: a recognizable secret shape
+            // is redacted in place, and the stored hash never travels with the event at all.
+            Assert.DoesNotContain("CANARY-SECRET-VALUE", auditEvent.SecurityDescription, StringComparison.Ordinal);
+            Assert.DoesNotContain(app.AppSecretHash, auditEvent.SecurityDescription, StringComparison.Ordinal);
+            foreach (var value in auditEvent.Metadata.Values)
+            {
+                Assert.DoesNotContain("CANARY-SECRET-VALUE", value, StringComparison.Ordinal);
+            }
         }
     }
 

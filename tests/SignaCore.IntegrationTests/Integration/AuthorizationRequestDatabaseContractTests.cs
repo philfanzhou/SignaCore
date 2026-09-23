@@ -227,7 +227,7 @@ public sealed class AuthorizationRequestDatabaseContractTests
             Assert.Equal(beforeDump, afterDumps[table]);
         }
 
-        Assert.Equal(string.Empty, afterDumps["audit_logs"]);
+        Assert.Equal(string.Empty, afterDumps["service_audit_logs"]);
         Assert.Equal(string.Empty, afterDumps["login_histories"]);
 
         await using var verification = new IdentityDbContext(options);
@@ -528,8 +528,8 @@ public sealed class AuthorizationRequestDatabaseContractTests
         Assert.DoesNotContain(handle, wholeDatabase);
         Assert.Contains(StateCanary, dumps["authorization_requests"]);
         Assert.Contains(NonceCanary, dumps["authorization_requests"]);
-        Assert.DoesNotContain(StateCanary, dumps["audit_logs"] + dumps["login_histories"]);
-        Assert.Equal(string.Empty, dumps["audit_logs"]);
+        Assert.DoesNotContain(StateCanary, dumps["service_audit_logs"] + dumps["login_histories"]);
+        Assert.Equal(string.Empty, dumps["service_audit_logs"]);
         Assert.Equal(string.Empty, dumps["login_histories"]);
         foreach (var (table, dump) in dumps)
         {

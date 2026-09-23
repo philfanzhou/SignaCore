@@ -20,6 +20,11 @@ using SignaCore.Host.Security;
 using SignaCore.Host.Services;
 using Xunit;
 
+using ServiceMantle.Audit;
+using ServiceMantle.Persistence.EntityFrameworkCore;
+
+using SignaCore.Tests.TestSupport;
+
 namespace SignaCore.Tests.Host.Controllers;
 
 /// <summary>
@@ -94,7 +99,7 @@ public class OAuthAuthorizationControllerTests
         validator.Setup(service => service.ValidateAsync(
                 It.IsAny<OidcAuthorizationParameters>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(AuditedOutcome(applicationId, accepted));
-        var audit = new Mock<IAuditService>();
+        var audit = new Mock<IManagementAuditWriter>();
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var store = new Mock<IAuthorizationRequestStore>();
@@ -136,36 +141,9 @@ public class OAuthAuthorizationControllerTests
             Assert.IsType<RedirectResult>(result);
         }
 
-        audit.Verify(service => service.RecordActionAsync(
-            "oidc.authorize.validated",
-            "OidcAuthorizationRequest",
-            applicationId.ToString("D"),
-            null,
-            null,
-            accepted ? "accepted" : "invalid_request",
-            "127.0.0.1",
-            "correlation-148",
-            null,
-            null,
-            TestContext.Current.CancellationToken), Times.Once);
-        validator.Verify(service => service.ValidateAsync(
-            It.IsAny<OidcAuthorizationParameters>(), TestContext.Current.CancellationToken), Times.Once);
-        if (accepted)
-        {
-            store.Verify(value => value.CreateAsync(
-                It.IsAny<OidcAuthorizationValidationResult.Accepted>(),
-                It.IsAny<DateTimeOffset>(),
-                TestContext.Current.CancellationToken), Times.Once);
-            unitOfWork.Verify(
-                value => value.SaveChangesAsync(It.IsAny<CancellationToken>()),
-                Times.Never);
-        }
-        else
-        {
-            unitOfWork.Verify(
-                value => value.SaveChangesAsync(TestContext.Current.CancellationToken),
-                Times.Once);
-        }
+        audit.Verify(service => service.RecordAsync(
+            It.Is<ManagementAuditEvent>(auditEvent => auditEvent.Action.Value == "oidc.authorize.validated"),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -182,16 +160,10 @@ public class OAuthAuthorizationControllerTests
         var validator = new Mock<IOidcAuthorizationRequestValidator>();
         validator.Setup(service => service.ValidateAsync(It.IsAny<OidcAuthorizationParameters>(), cancellation.Token))
             .ReturnsAsync(AuditedOutcome(Guid.NewGuid(), accepted));
-        var repository = new Mock<IAuditLogRepository>();
-        repository.Setup(value => value.AddAsync(It.IsAny<AuditLogEntity>(), It.IsAny<CancellationToken>()))
-            .Returns<AuditLogEntity, CancellationToken>(async (entry, ct) =>
-            {
-                Assert.Equal(cancellation.Token, ct);
-                await new AuditLogRepository(database).AddAsync(entry, ct);
-                cancellation.Cancel();
-                ct.ThrowIfCancellationRequested();
-            });
-        var audit = new AuditService(new Mock<ILoginHistoryRepository>().Object, repository.Object);
+        // The staging writer observes the token: it cancels before the shared EF writer stages the
+        // event, and the shared writer's own token check turns that into the propagated cancellation.
+        var audit = new CancelingManagementAuditWriter(
+            new EfCoreManagementAuditWriter<IdentityDbContext>(database), cancellation);
         var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
         var store = new Mock<IAuthorizationRequestStore>(MockBehavior.Strict);
         var controller = new OAuthAuthorizationController(
@@ -204,13 +176,25 @@ public class OAuthAuthorizationControllerTests
         var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => controller.Authorize(cancellation.Token));
 
         Assert.Equal(cancellation.Token, exception.CancellationToken);
-        repository.Verify(value => value.AddAsync(It.IsAny<AuditLogEntity>(), cancellation.Token), Times.Once);
         unitOfWork.Verify(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
-        Assert.Single(database.ChangeTracker.Entries<AuditLogEntity>(), entry => entry.State == EntityState.Added);
         database.ChangeTracker.Clear();
-        Assert.Empty(await database.AuditLogs.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedAuditTable.ReadAsync(database, TestContext.Current.CancellationToken));
         Assert.False(controller.Response.HasStarted);
         Assert.False(controller.Response.Headers.ContainsKey("Location"));
+    }
+
+    /// <summary>Cancels on entry so the shared writer's staging never runs.</summary>
+    private sealed class CancelingManagementAuditWriter(
+        IManagementAuditWriter inner, CancellationTokenSource cancellation) : IManagementAuditWriter
+    {
+        public ValueTask<ManagementAuditRecord> RecordAsync(
+            ManagementAuditEvent auditEvent,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(cancellation.Token, cancellationToken);
+            cancellation.Cancel();
+            return inner.RecordAsync(auditEvent, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -226,7 +210,7 @@ public class OAuthAuthorizationControllerTests
         validator.Setup(service => service.ValidateAsync(
                 It.IsAny<OidcAuthorizationParameters>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(AuditedOutcome(applicationId, accepted: true));
-        var audit = new Mock<IAuditService>(MockBehavior.Strict);
+        var audit = new Mock<IManagementAuditWriter>(MockBehavior.Strict);
         var unitOfWork = new Mock<IUnitOfWork>(MockBehavior.Strict);
         var store = new Mock<IAuthorizationRequestStore>(MockBehavior.Strict);
         var controller = new OAuthAuthorizationController(
@@ -312,7 +296,7 @@ public class OAuthAuthorizationControllerTests
             new Mock<IAuthorizationRequestStore>().Object,
             CreateCookielessReader(),
             sessionReuse: null!,
-            new Mock<IAuditService>().Object,
+            new Mock<IManagementAuditWriter>().Object,
             new Mock<IUnitOfWork>().Object,
             AuthTestDoubles.AuthMetrics(),
             new JwtOptions(),

@@ -161,8 +161,8 @@ strategy — in this order:
    is the fixed `503`;
 6. stage the setup-completed audit event — expressed with the shared audit model
    (`installation.completed` on the `service:signacore` target, operator source `setup_code`
-   carrying the created account id) and projected onto the existing `audit_logs` row, where the
-   actor links to the account created in step 5;
+   carrying the created account id and the validated administrator username) and staged by the
+   shared EF Core writer into `service_audit_logs` inside this transaction;
 7. re-verify and stage consumption of the code together with the `Completed` status, the
    completion timestamp, and the version increment; a refusal here rolls everything staged above
    back: an installation that completed concurrently answers the fixed `409`, any other refusal the
@@ -203,16 +203,18 @@ instance that observes completion leaves Setup Mode.
 
 ### The installation audit projection
 
-The setup-completed event is the only audit write of the transaction on the existing `audit_logs`
-table, and its projection is closed: the legacy action stays `installation.setup.completed` with
-target `Installation` / `signacore`, the actor id is the account this transaction created, and the
-actor name is the validated administrator username — product identity data the existing row keeps.
-(The aggregate write in step 4 records its own per-key `configuration.changed` rows in the shared
-`service_audit_logs` table; they carry keys and metadata only, never values.) The description
-is the fixed completion note with the numeric configuration version and no longer includes the
-public base URL; earlier rows keep whatever they recorded and are not rewritten. Before/after
-snapshots, metadata, and correlation identifiers remain empty, and no password, setup code, root
-key, or settings value is passed into the event, the description, logs, or the response.
+The setup-completed event is the only action audit this transaction stages, and it is written by
+the shared ServiceMantle audit writer into `service_audit_logs` — never into the legacy
+`audit_logs` table, which remains only as a retained, unwritten store for pre-switch history
+rows. Its projection is closed: the action is `installation.completed` with target
+`service` / `signacore`, the operator source is `setup_code`, the operator id is the account this
+transaction created, and the operator name is the validated administrator username. (The
+aggregate write in step 4 records its own per-key `configuration.changed` rows in the same shared
+table; they carry keys and metadata only, never values.) The security description is the fixed
+completion note with the numeric configuration version and no longer includes the public base
+URL; legacy rows from earlier builds keep whatever they recorded and are not rewritten. No
+before/after snapshots are produced, and no password, setup code, root key, or settings value is
+passed into the event, the description, logs, or the response.
 
 ## Transition to the normal host
 

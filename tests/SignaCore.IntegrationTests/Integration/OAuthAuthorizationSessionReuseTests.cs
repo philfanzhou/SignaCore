@@ -62,8 +62,9 @@ public sealed class OAuthAuthorizationSessionReuseTests : IClassFixture<Identity
         var codeCount = await CountRowsAsync(db => db.AuthorizationCodes
             .CountAsync(row => row.IdentitySessionId == session.Id));
         var continuationCount = await CountRowsAsync(db => db.AuthorizationRequests.CountAsync());
-        var acceptedAudits = await CountRowsAsync(db => db.AuditLogs
-            .CountAsync(row => row.Action == "oidc.authorize.validated"));
+        var acceptedAudits = await CountRowsAsync(async db =>
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db))
+                .Count(row => row.Action == "oidc.authorize.validated"));
 
         using var response = await client.SendAsync(
             AuthorizeRequest(BuildSuccessAuthorizeUrl(), cookieValue),
@@ -89,8 +90,9 @@ public sealed class OAuthAuthorizationSessionReuseTests : IClassFixture<Identity
             Assert.Equal(codeCount + 1, await db.AuthorizationCodes
                 .CountAsync(row => row.IdentitySessionId == session.Id));
         });
-        Assert.Equal(acceptedAudits + 1, await CountRowsAsync(db => db.AuditLogs
-            .CountAsync(row => row.Action == "oidc.authorize.validated")));
+        Assert.Equal(acceptedAudits + 1, await CountRowsAsync(db =>
+            SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db)
+                .ContinueWith(task => task.Result.Count(row => row.Action == "oidc.authorize.validated"))));
     }
 
     [Fact]
@@ -423,12 +425,13 @@ public sealed class OAuthAuthorizationSessionReuseTests : IClassFixture<Identity
             dump.AppendLine(message);
         }
 
-        foreach (var audit in await QueryAsync(db => db.AuditLogs.AsNoTracking()
+        foreach (var audit in await QueryAsync(async db =>
+                     (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db))
                      .Where(row => row.Action == "oidc.authorize.validated")
-                     .ToListAsync()))
+                     .ToList()))
         {
             dump.Append("audit|").Append(audit.Action).Append('|').Append(audit.TargetType).Append('|')
-                .Append(audit.TargetId).Append('|').Append(audit.Description).AppendLine();
+                .Append(audit.TargetId).Append('|').Append(audit.SecurityDescription).AppendLine();
         }
 
         var dumpText = dump.ToString();

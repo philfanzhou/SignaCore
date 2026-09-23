@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
@@ -8,6 +9,8 @@ using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Services;
 using Xunit;
+
+using SignaCore.Tests.TestSupport;
 
 namespace SignaCore.Tests.Host.Services;
 
@@ -52,12 +55,12 @@ public sealed class OidcAuthorizationSessionReuseServiceTests
         Assert.Equal(RedirectUri, lookup.Entity.RedirectUri);
         Assert.Equal("openid profile", lookup.Entity.Scope);
 
-        var audit = Assert.Single(await database.Context.AuditLogs.AsNoTracking()
-            .ToListAsync(cancellationToken));
+        var audit = Assert.Single(await SharedAuditTable.ReadAsync(database.Context, cancellationToken));
         Assert.Equal("oidc.authorize.validated", audit.Action);
-        Assert.Equal("OidcAuthorizationRequest", audit.TargetType);
+        Assert.Equal("oidcauthorizationrequest", audit.TargetType);
         Assert.Equal(seed.ApplicationId.ToString("D"), audit.TargetId);
-        Assert.Equal("accepted", audit.Description);
+        Assert.Equal("accepted", audit.SecurityDescription);
+        Assert.Equal("system", audit.OperatorSource);
 
         // A fresh session is under the one-minute write threshold: no activity write.
         var session = await database.Context.IdentitySessions.AsNoTracking()
@@ -88,8 +91,8 @@ public sealed class OidcAuthorizationSessionReuseServiceTests
         Assert.Null(code);
         Assert.Empty(await database.Context.AuthorizationCodes.AsNoTracking()
             .ToListAsync(TestContext.Current.CancellationToken));
-        Assert.Empty(await database.Context.AuditLogs.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedAuditTable.ReadAsync(
+            database.Context, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -111,8 +114,8 @@ public sealed class OidcAuthorizationSessionReuseServiceTests
 
         Assert.Empty(await database.Context.AuthorizationCodes.AsNoTracking()
             .ToListAsync(TestContext.Current.CancellationToken));
-        Assert.Empty(await database.Context.AuditLogs.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedAuditTable.ReadAsync(
+            database.Context, TestContext.Current.CancellationToken));
         var session = await database.Context.IdentitySessions.AsNoTracking()
             .SingleAsync(row => row.Id == seed.SessionId, TestContext.Current.CancellationToken);
         Assert.Equal(seed.AuthTime.UtcTicks / 10, session.LastSeenAt.UtcTicks / 10);
@@ -161,7 +164,7 @@ public sealed class OidcAuthorizationSessionReuseServiceTests
             sessions,
             codes,
             accountRepository,
-            new AuditService(new LoginHistoryRepository(context), new AuditLogRepository(context)),
+            new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             unitOfWork,
             context);
         return new ReuseDatabase(connection, context, service, sessions, codes);

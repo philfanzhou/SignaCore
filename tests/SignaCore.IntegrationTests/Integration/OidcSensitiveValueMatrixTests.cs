@@ -78,7 +78,7 @@ internal sealed class CarrierScan
 /// refresh grant. Each DF-named sensitive value gets a unique synthetic canary, is carried
 /// through the real endpoints, and then must not appear — raw — in any tested carrier: the
 /// captured structured logs and exception messages, the response bodies and headers outside
-/// their contracted surfaces, the <c>audit_logs</c>/<c>login_histories</c> dump, or any metric
+/// their contracted surfaces, the <c>service_audit_logs</c>/<c>login_histories</c> dump, or any metric
 /// label value. The browser boundary headers and the login page's final framing value are
 /// asserted centrally, and the matrix's detection power is proven by an injected violation.
 /// </summary>
@@ -414,9 +414,10 @@ public sealed partial class OidcSensitiveValueMatrixTests : IClassFixture<Identi
     {
         using var scope = services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-        var audits = await context.AuditLogs.AsNoTracking()
+        var audits = (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                context, TestContext.Current.CancellationToken))
             .OrderBy(row => row.Id)
-            .ToListAsync(TestContext.Current.CancellationToken);
+            .ToList();
         var histories = await context.LoginHistories.AsNoTracking()
             .OrderBy(row => row.Id)
             .ToListAsync(TestContext.Current.CancellationToken);
@@ -424,8 +425,8 @@ public sealed partial class OidcSensitiveValueMatrixTests : IClassFixture<Identi
         foreach (var row in audits)
         {
             builder.Append("audit:").Append(row.Action).Append('|').Append(row.TargetType)
-                .Append('|').Append(row.TargetId).Append('|').Append(row.Description)
-                .Append('|').Append(row.BeforeSnapshot).Append('|').Append(row.AfterSnapshot)
+                .Append('|').Append(row.TargetId).Append('|').Append(row.SecurityDescription)
+                .Append('|').Append(row.OperatorDisplayName)
                 .AppendLine();
         }
 

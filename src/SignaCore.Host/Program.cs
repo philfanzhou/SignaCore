@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using ServiceMantle;
+using ServiceMantle.Audit;
 using ServiceMantle.AspNetCore.Health;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
@@ -530,7 +531,7 @@ using (var seedScope = app.Services.CreateScope())
     await BootstrapAppSeeder.SeedBootstrapAppsAsync(
         builder.Configuration,
         seedScope.ServiceProvider.GetRequiredService<IdentityDbContext>(),
-        seedScope.ServiceProvider.GetRequiredService<IAuditService>(),
+        seedScope.ServiceProvider.GetRequiredService<IManagementAuditWriter>(),
         seedScope.ServiceProvider.GetRequiredService<IPasswordHasher>(),
         app.Services
             .GetRequiredService<ILoggerFactory>()
@@ -732,6 +733,10 @@ app.MapSignaCoreManagementSession();
 var managementApi = app.MapServiceMantleManagementApiV1();
 managementApi.MapServiceMantleSettingQueries();
 managementApi.MapServiceMantleSettingUpdates(ManagementSettingUpdateExecutor.ExecuteAsync);
+// The admin console's audit page reads the shared restricted query from here on; the legacy
+// /api/admin/audit-logs endpoint is gone. The audit_logs table stays as a retained, unwritten
+// legacy store for pre-switch history rows.
+managementApi.MapServiceMantleAuditQueries();
 
 // ---- Shared setup entries (status read + the completion replay boundary) ----
 app.MapServiceMantleSetup(SetupCompletionExecutor.ExecuteAsync);

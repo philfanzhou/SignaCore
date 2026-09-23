@@ -489,10 +489,9 @@ public sealed class SystemSettingsRetirementTests
             Assert.Equal(1, await CountAggregateAsync(verification));
             Assert.Equal(
                 1,
-                await verification.AuditLogs.AsNoTracking()
-                    .CountAsync(
-                        log => log.Action == "installation.legacy_import.completed",
-                        TestContext.Current.CancellationToken));
+                (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                        verification, TestContext.Current.CancellationToken))
+                    .Count(log => log.Action == "installation.legacy_import.completed"));
         }
     }
 

@@ -12,6 +12,8 @@ const {
   auditPages,
   loadAuditLogs,
   searchAudit,
+  auditPrevPage,
+  auditNextPage,
   tokenModalOpen,
 } = useAdminSecurity();
 </script>
@@ -32,7 +34,7 @@ const {
         <div>
           <h2>审计日志</h2>
         </div>
-        <span class="panel-note">后端默认保留 365 天</span>
+        <span class="panel-note">读取共享管理审计（/management/v1/audit）</span>
       </div>
       <div class="filter-bar">
         <div class="console-search">
@@ -49,10 +51,12 @@ const {
           aria-label="目标类型"
         >
           <option value="">所有目标类型</option>
-          <option value="Account">账户</option>
-          <option value="AppRegistration">应用</option>
-          <option value="RefreshToken">Refresh token</option>
-          <option value="Bootstrap">引导配置</option>
+          <option value="account">账户</option>
+          <option value="appregistration">应用</option>
+          <option value="refreshtoken">Refresh token</option>
+          <option value="bootstrap">引导配置</option>
+          <option value="installation">安装</option>
+          <option value="identitysession">身份会话</option>
         </select>
         <div class="console-search">
           <span>#</span
@@ -90,22 +94,21 @@ const {
             </tr>
           </thead>
           <tbody>
-            <tr
-              v-for="item in auditLogs"
-              :key="`${item.createdAt}-${item.correlationId}`"
-            >
-              <td>{{ formatDate(item.createdAt) }}</td>
+            <tr v-for="item in auditLogs" :key="item.id">
+              <td>{{ formatDate(item.occurredAtUtc) }}</td>
               <td>
                 <b>{{ item.action }}</b
                 ><small class="table-secondary">{{
-                  item.description || "—"
+                  item.securityDescription || "—"
                 }}</small>
               </td>
               <td>
-                <span class="mono">{{ item.targetType }}</span
-                ><small class="table-secondary mono">{{ item.targetId }}</small>
+                <span class="mono">{{ item.target.type }}</span
+                ><small class="table-secondary mono">{{ item.target.id }}</small>
               </td>
-              <td>{{ item.actorName || "系统" }}</td>
+              <td>
+                {{ item.operator.displayName || item.operator.source }}
+              </td>
               <td class="mono">{{ item.clientIp || "—" }}</td>
               <td class="mono">{{ item.correlationId || "—" }}</td>
             </tr>
@@ -114,20 +117,11 @@ const {
       </div>
       <div class="console-pager">
         <span>共 {{ auditTotal }} 条记录</span
-        ><button
-          :disabled="auditPage <= 1"
-          @click="
-            auditPage--;
-            loadAuditLogs();
-          "
-        >
+        ><button :disabled="auditPage <= 1" @click="auditPrevPage">
           ←</button
         ><button
           :disabled="auditPage >= auditPages"
-          @click="
-            auditPage++;
-            loadAuditLogs();
-          "
+          @click="auditNextPage"
         >
           →
         </button>

@@ -158,13 +158,7 @@ public static class IdentityConstants
     public const int MaxEventTypeLength = 50;
     public const int MaxUserAgentLength = 512;
     public const int MaxFailureReasonLength = 500;
-    public const int MaxAuditActionLength = 100;
-    public const int MaxAuditTargetTypeLength = 100;
-    public const int MaxAuditDescriptionLength = 1000;
-    public const int MaxSnapshotLength = 4096;
-
     public const int LoginHistoryRetentionDays = 90;
-    public const int AuditLogRetentionDays = 365;
 
     // ---- OIDC interactive rate limits ----
     // Fixed single-process budgets per interactive endpoint class (issue #304): deliberately

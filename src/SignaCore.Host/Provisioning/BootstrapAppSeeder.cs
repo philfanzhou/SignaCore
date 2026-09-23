@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Audit;
 using SignaCore.Database;
+using SignaCore.Host.Audit;
 using SignaCore.Database.Entity;
 using SignaCore.Domain;
 using SignaCore.Domain.Services;
@@ -30,7 +32,7 @@ internal static class BootstrapAppSeeder
     internal static async Task SeedBootstrapAppsAsync(
         IConfiguration configuration,
         IdentityDbContext db,
-        IAuditService auditService,
+        IManagementAuditWriter auditWriter,
         IPasswordHasher passwordHasher,
         ILogger logger,
         bool isDevelopment,
@@ -89,7 +91,7 @@ internal static class BootstrapAppSeeder
                 var result = await SeedBootstrapAppAsync(
                     entry,
                     db,
-                    auditService,
+                    auditWriter,
                     passwordHasher,
                     logger,
                     isDevelopment,
@@ -133,7 +135,7 @@ internal static class BootstrapAppSeeder
     private static async Task<BootstrapAppSeedResult> SeedBootstrapAppAsync(
         BootstrapAppEntry entry,
         IdentityDbContext db,
-        IAuditService auditService,
+        IManagementAuditWriter auditWriter,
         IPasswordHasher passwordHasher,
         ILogger logger,
         bool isDevelopment,
@@ -192,7 +194,9 @@ internal static class BootstrapAppSeeder
         }
 
         db.AppRegistrations.Add(app);
-        await auditService.RecordActionAsync(
+        await ManagementActionAudit.RecordAsync(
+            auditWriter,
+            ManagementActionAudit.SystemSource,
             "app_created",
             "AppRegistration",
             app.AppId,
@@ -200,14 +204,6 @@ internal static class BootstrapAppSeeder
             actorName: "bootstrap",
             description: $"Bootstrap pre-seed created app: {app.AppName}",
             clientIp: null,
-            after: new
-            {
-                app.AppId,
-                app.AppName,
-                app.CallbackUrl,
-                CallbackExpiresAt = app.CallbackExpiresAt?.ToUnixTimeSeconds(),
-                app.IsActive
-            },
             cancellationToken: cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 

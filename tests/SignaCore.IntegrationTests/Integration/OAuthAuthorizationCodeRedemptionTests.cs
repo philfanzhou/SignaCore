@@ -525,7 +525,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
 
         var audits = await GetCodeAuditsAsync(seeded.CodeId);
         var replayed = Assert.Single(audits, audit => audit.Action == ReplayedAction);
-        Assert.Equal($"session:{seeded.SessionId};family:{rootId}", replayed.Description);
+        Assert.Equal($"session:{seeded.SessionId};family:{rootId}", replayed.SecurityDescription);
     }
 
     [Fact]
@@ -723,7 +723,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         foreach (var audit in await GetCodeAuditsAsync(seeded.CodeId))
         {
             dump.Append("audit|").Append(audit.Action).Append('|').Append(audit.TargetType).Append('|')
-                .Append(audit.TargetId).Append('|').Append(audit.ActorId).Append('|').Append(audit.Description)
+                .Append(audit.TargetId).Append('|').Append(audit.OperatorId).Append('|').Append(audit.SecurityDescription)
                 .AppendLine();
         }
 
@@ -1026,10 +1026,10 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
 
         var audits = await GetCodeAuditsAsync(seeded.CodeId);
         var redeemed = Assert.Single(audits, audit => audit.Action == RedeemedAction);
-        Assert.Equal("AuthorizationCode", redeemed.TargetType);
+        Assert.Equal("authorizationcode", redeemed.TargetType);
         Assert.Equal(seeded.CodeId.ToString("D"), redeemed.TargetId);
-        Assert.Equal(seeded.AccountId, redeemed.ActorId);
-        Assert.Equal($"session:{seeded.SessionId}", redeemed.Description);
+        Assert.Equal(seeded.AccountId.ToString(), redeemed.OperatorId);
+        Assert.Equal($"session:{seeded.SessionId}", redeemed.SecurityDescription);
         return new SuccessOutcome(accessToken, refreshToken);
     }
 
@@ -1046,10 +1046,10 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
 
         var audits = await GetCodeAuditsAsync(seeded.CodeId);
         var replayed = Assert.Single(audits, audit => audit.Action == ReplayedAction);
-        Assert.Equal("AuthorizationCode", replayed.TargetType);
+        Assert.Equal("authorizationcode", replayed.TargetType);
         Assert.Equal(seeded.CodeId.ToString("D"), replayed.TargetId);
-        Assert.Equal(seeded.AccountId, replayed.ActorId);
-        Assert.Equal($"session:{seeded.SessionId};family:none", replayed.Description);
+        Assert.Equal(seeded.AccountId.ToString(), replayed.OperatorId);
+        Assert.Equal($"session:{seeded.SessionId};family:none", replayed.SecurityDescription);
         Assert.Single(audits, audit => audit.Action == RedeemedAction);
     }
 
@@ -1112,12 +1112,14 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         QueryAsync(async dbContext => await dbContext.IdentitySessions.AsNoTracking()
             .SingleAsync(row => row.Id == sessionId, TestContext.Current.CancellationToken));
 
-    private Task<List<AuditLogEntity>> GetCodeAuditsAsync(Guid codeId) =>
-        QueryAsync(async dbContext => await dbContext.AuditLogs.AsNoTracking()
-            .Where(row => row.TargetId == codeId.ToString("D")
-                && (row.Action == RedeemedAction || row.Action == ReplayedAction))
-            .OrderBy(row => row.Id)
-            .ToListAsync(TestContext.Current.CancellationToken));
+    private Task<List<SharedSettingTestDatabase.SharedAuditRow>> GetCodeAuditsAsync(Guid codeId) =>
+        QueryAsync(async dbContext =>
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    dbContext, TestContext.Current.CancellationToken))
+                .Where(row => row.TargetId == codeId.ToString("D")
+                    && (row.Action == RedeemedAction || row.Action == ReplayedAction))
+                .OrderBy(row => row.Id)
+                .ToList());
 
     private async Task RevokeSessionAsync(Guid sessionId, string reason) =>
         await ExecuteAsync(async dbContext =>

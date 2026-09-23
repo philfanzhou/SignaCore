@@ -358,26 +358,19 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(
             db, TestContext.Current.CancellationToken));
 
-        var audit = await db.AuditLogs.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal("installation.setup.completed", audit.Action);
-        // The audit row is the closed projection of the shared installation event: it links to the
-        // account this same transaction created and to the installation target.
-        Assert.Equal("Installation", audit.TargetType);
+        var audit = Assert.Single(
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken))
+            .Where(row => row.Action == "installation.completed"));
+        // The audit row is the shared installation event itself, staged by the shared EF writer
+        // into service_audit_logs: it links to the account this same transaction created and to
+        // the service target, and the operator was authorized by the one-time setup code.
+        Assert.Equal("service", audit.TargetType);
         Assert.Equal("signacore", audit.TargetId);
-        Assert.Equal(credential.AccountId, audit.ActorId);
-        Assert.Equal(AdminUsername, audit.ActorName);
-        Assert.Contains("ConfigurationVersion=1", audit.Description, StringComparison.Ordinal);
-        Assert.Null(audit.BeforeSnapshot);
-        Assert.Null(audit.AfterSnapshot);
-        var viaRepository = await new AuditLogRepository(db).QueryAsync(
-            "installation.setup.completed",
-            "Installation",
-            "signacore",
-            credential.AccountId,
-            pageSize: 10,
-            skip: 0,
-            cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Single(viaRepository);
+        Assert.Equal(credential.AccountId.ToString(), audit.OperatorId);
+        Assert.Equal(AdminUsername, audit.OperatorDisplayName);
+        Assert.Equal("setup_code", audit.OperatorSource);
+        Assert.Equal("success", audit.Outcome);
+        Assert.Contains("ConfigurationVersion=1", audit.SecurityDescription, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -398,10 +391,10 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             (await db.PasswordCredentials.SingleAsync(cancellationToken: TestContext.Current.CancellationToken)).PasswordHash,
             StringComparison.Ordinal);
 
-        var audit = await db.AuditLogs.SingleAsync(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.DoesNotContain(AdminPassword, audit.Description ?? string.Empty, StringComparison.Ordinal);
-        Assert.Null(audit.BeforeSnapshot);
-        Assert.Null(audit.AfterSnapshot);
+        var audit = Assert.Single(
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken))
+            .Where(row => row.Action == "installation.completed"));
+        Assert.DoesNotContain(AdminPassword, audit.SecurityDescription ?? string.Empty, StringComparison.Ordinal);
 
         var aggregateValues = await ReadAggregateValuesAsync(db);
         var sensitiveKeys = ServiceSettingDefinitions.Table
@@ -532,15 +525,17 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         // the import; neither carries any value.
         var sharedAudits = await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
             db, TestContext.Current.CancellationToken);
-        Assert.Equal(43, sharedAudits.Count);
-        var importAudit = Assert.Single(await db.AuditLogs.AsNoTracking()
-            .Where(entry => entry.Action == "installation.legacy_import.completed")
-            .ToListAsync(cancellationToken: TestContext.Current.CancellationToken));
+        // 43 per-key configuration audits plus the import event itself, which now also lives in
+        // the shared table instead of the retired legacy audit row.
+        Assert.Equal(44, sharedAudits.Count);
+        var importAudit = Assert.Single(
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken))
+            .Where(entry => entry.Action == "installation.legacy_import.completed"));
         // The product audit carries the deployment-supplied key count and the version, never a
         // value: three keys came from the launcher, the whole 43-key candidate was committed.
-        Assert.Contains("Imported 3 legacy settings", importAudit.Description, StringComparison.Ordinal);
-        Assert.Contains("ConfigurationVersion=1", importAudit.Description, StringComparison.Ordinal);
-        Assert.DoesNotContain("legacy_admin", importAudit.Description, StringComparison.Ordinal);
+        Assert.Contains("Imported 3 legacy settings", importAudit.SecurityDescription, StringComparison.Ordinal);
+        Assert.Contains("ConfigurationVersion=1", importAudit.SecurityDescription, StringComparison.Ordinal);
+        Assert.DoesNotContain("legacy_admin", importAudit.SecurityDescription, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -581,11 +576,12 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
             db, TestContext.Current.CancellationToken);
         Assert.Equal(1, aggregate!.Version);
-        Assert.Equal(43, (await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
+        // 43 per-key configuration audits plus the single import event in the shared table.
+        Assert.Equal(44, (await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
             db, TestContext.Current.CancellationToken)).Count);
-        Assert.Equal(1, await db.AuditLogs.AsNoTracking()
-            .CountAsync(entry => entry.Action == "installation.legacy_import.completed",
-                cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                db, TestContext.Current.CancellationToken))
+            .Count(entry => entry.Action == "installation.legacy_import.completed"));
     }
 
     /// <summary>
@@ -614,9 +610,9 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         Assert.Null(await SharedSettingTestDatabase.LoadAggregateAsync(
             db, TestContext.Current.CancellationToken));
         Assert.Equal(0, await db.ServiceInstallations.CountAsync(cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Equal(0, await db.AuditLogs.AsNoTracking()
-            .CountAsync(entry => entry.Action == "installation.legacy_import.completed",
-                cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(0, (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                db, TestContext.Current.CancellationToken))
+            .Count(entry => entry.Action == "installation.legacy_import.completed"));
         Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(
             db, TestContext.Current.CancellationToken));
 
@@ -742,7 +738,11 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             db, TestContext.Current.CancellationToken));
         Assert.Null(await SharedSettingTestDatabase.LoadAggregateAsync(
             db, TestContext.Current.CancellationToken));
-        Assert.False(await db.AuditLogs.AnyAsync(cancellationToken: TestContext.Current.CancellationToken));
+        // The shared table may carry legacy-import rows from the seeded deployment; what must not
+        // exist is any installation-completion event.
+        Assert.Empty((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                db, TestContext.Current.CancellationToken))
+            .Where(row => row.Action.StartsWith("installation.", StringComparison.Ordinal)));
         await AssertInstallationStillPendingAsync();
     }
 

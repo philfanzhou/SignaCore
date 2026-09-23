@@ -282,14 +282,14 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
 
         // EV-06 committed exactly one completion audit with bounded ids only.
         var audits = await QueryAsync(async dbContext =>
-            await dbContext.AuditLogs.AsNoTracking()
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(dbContext, TestContext.Current.CancellationToken))
                 .Where(log => log.Action == "oidc.logout.completed"
-                    && log.Description.Contains(sessionId.ToString("D")))
-                .ToListAsync(TestContext.Current.CancellationToken));
+                    && log.SecurityDescription != null && log.SecurityDescription.Contains(sessionId.ToString("D")))
+                .ToList());
         var audit = Assert.Single(audits);
-        Assert.Contains("result:revoked", audit.Description, StringComparison.Ordinal);
-        Assert.DoesNotContain(handle, audit.Description, StringComparison.Ordinal);
-        Assert.DoesNotContain(State, audit.Description, StringComparison.Ordinal);
+        Assert.Contains("result:revoked", audit.SecurityDescription, StringComparison.Ordinal);
+        Assert.DoesNotContain(handle, audit.SecurityDescription, StringComparison.Ordinal);
+        Assert.DoesNotContain(State, audit.SecurityDescription, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -360,15 +360,15 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         Assert.NotNull(session.RevokedAt);
 
         var audits = await QueryAsync(async dbContext =>
-            await dbContext.AuditLogs.AsNoTracking()
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(dbContext, TestContext.Current.CancellationToken))
                 .Where(log => log.Action == "oidc.logout.completed"
-                    && log.Description.Contains(sessionId.ToString("D")))
-                .ToListAsync(TestContext.Current.CancellationToken));
+                    && log.SecurityDescription != null && log.SecurityDescription.Contains(sessionId.ToString("D")))
+                .ToList());
         Assert.Equal(2, audits.Count);
         Assert.Contains(audits, audit =>
-            audit.Description.Contains("result:revoked", StringComparison.Ordinal));
+            audit.SecurityDescription != null && audit.SecurityDescription.Contains("result:revoked", StringComparison.Ordinal));
         Assert.Contains(audits, audit =>
-            audit.Description.Contains("result:no_session_write", StringComparison.Ordinal));
+            audit.SecurityDescription != null && audit.SecurityDescription.Contains("result:no_session_write", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -535,9 +535,9 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
             await dbContext.AuthorizationCodes.AsNoTracking()
                 .SingleAsync(row => row.CodeDigest == AuthorizationCodeDigest.Compute(code), TestContext.Current.CancellationToken));
         Assert.Null(codeRow.ConsumedAt);
-        Assert.False(await QueryAsync(async dbContext =>
-            await dbContext.AuditLogs.AsNoTracking()
-                .AnyAsync(log => log.Action == "oidc.code.replayed", TestContext.Current.CancellationToken)));
+        Assert.False((await QueryAsync(async dbContext =>
+                await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(dbContext, TestContext.Current.CancellationToken)))
+            .Any(log => log.Action == "oidc.code.replayed"));
     }
 
     [Fact]
@@ -645,9 +645,10 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
             message.Contains("Logout request prepared", StringComparison.Ordinal)
             || message.Contains("Logout completed", StringComparison.Ordinal));
 
-        var audits = await QueryAsync(db => db.AuditLogs.AsNoTracking()
+        var audits = await QueryAsync(async db =>
+            (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken))
             .Where(row => row.Action == "oidc.logout.prepared" || row.Action == "oidc.logout.completed")
-            .ToListAsync(TestContext.Current.CancellationToken));
+            .ToList());
         Assert.Contains(audits, row => row.Action == "oidc.logout.prepared");
         var dump = string.Join(Environment.NewLine, capture.Messages) + JsonSerializer.Serialize(audits);
         Assert.DoesNotContain(idToken, dump, StringComparison.Ordinal);

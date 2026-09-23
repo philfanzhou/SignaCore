@@ -368,8 +368,9 @@ public sealed class ManagementSessionContractTests : IClassFixture<IdentityServe
 
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-        Assert.False(await db.AuditLogs.AsNoTracking()
-            .AnyAsync(entry => entry.Action == "admin_logout", TestContext.Current.CancellationToken));
+        Assert.False((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                db, TestContext.Current.CancellationToken))
+            .Any(entry => entry.Action == "admin_logout"));
     }
 
     [Fact]
