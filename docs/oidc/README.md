@@ -30,6 +30,7 @@ is corrected before implementation.
 | [Discovery Activation](./Discovery.md) | Current metadata facts, real implementation dependencies, and staged publication |
 | [Ownership](./Ownership.md) | SignaCore, ServiceMantle, BFF, resource-service, and operator boundaries |
 | [Integration Audit](./IntegrationAudit.md) | Final semantic replay of every canonical end-to-end scenario |
+| [Multi-Instance Acceptance](./MultiInstanceAcceptance.md) | Two-instance OIDC acceptance base: A/B routing, per-dependency negative self-checks, and secret discipline |
 
 The architectural choice and rejected alternatives are recorded in
 [ADR 0005](../adr/0005-interactive-oidc-confidential-bff.md). Together these documents complete the
