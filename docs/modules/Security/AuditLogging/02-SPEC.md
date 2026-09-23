@@ -23,7 +23,7 @@ All logs and errors must redact passwords, application secrets, refresh tokens, 
 
 ## Data
 
-The feature owns or reads login_histories and audit_logs. Database access remains behind repository interfaces and the unit-of-work/IdentityDbContext boundaries.
+The feature records authentication events into `login_histories` (product-owned) and stages administrative action audits through the shared ServiceMantle writer into `service_audit_logs`, inside the caller's unit of work. The legacy `audit_logs` table is retained read-only for pre-switch history rows: it is no longer written, read, or surfaced by the restricted query. Database access remains behind repository interfaces and the unit-of-work/IdentityDbContext boundaries.
 
 ## Compatibility
 

@@ -1,6 +1,16 @@
-# audit_logs
+# audit_logs (legacy, retained)
 
-Administrative and security-relevant change records.
+`audit_logs` was SignaCore's own administrative and security-relevant change record table. New
+action audits are staged by the shared ServiceMantle writer into the shared `service_audit_logs`
+table inside the caller's unit of work, and the admin console reads them through the restricted
+shared query (ServiceMantle issue #132).
+
+The table itself is **retained, not dropped**: existing history rows stay as-is across upgrades
+(no migration, backfill, or format conversion is performed), and nothing writes to, reads from,
+or cleans the table anymore. The legacy rows are not surfaced by the restricted query. Fresh
+installations still create the empty table through the historical migrations.
+
+Historical notes, kept for operators reading older databases:
 
 ## Columns
 
@@ -19,4 +29,5 @@ Administrative and security-relevant change records.
 
 ## Ownership
 
-SignaCore owns all writes to this table. Other services must use the HTTP API rather than direct database access.
+SignaCore owned all writes to this table while it was live. Other services must use the HTTP API
+rather than direct database access.

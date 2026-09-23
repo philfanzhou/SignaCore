@@ -78,7 +78,7 @@ internal sealed class CarrierScan
 /// refresh grant. Each DF-named sensitive value gets a unique synthetic canary, is carried
 /// through the real endpoints, and then must not appear — raw — in any tested carrier: the
 /// captured structured logs and exception messages, the response bodies and headers outside
-/// their contracted surfaces, the <c>audit_logs</c>/<c>login_histories</c> dump, or any metric
+/// their contracted surfaces, the <c>service_audit_logs</c>/<c>login_histories</c> dump, or any metric
 /// label value. The browser boundary headers and the login page's final framing value are
 /// asserted centrally, and the matrix's detection power is proven by an injected violation.
 /// </summary>

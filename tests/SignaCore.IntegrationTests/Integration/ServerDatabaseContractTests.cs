@@ -3084,7 +3084,9 @@ public sealed class ServerDatabaseContractTests
     /// <summary>
     /// The #269 in-place upgrade: from the pre-alignment history with overlong rows already
     /// stored, the alignment migration succeeds, changes no byte, and the empty <c>Down</c> runs
-    /// cleanly and also changes neither bytes nor the physical <c>text</c> type.
+    /// cleanly and also changes neither bytes nor the physical <c>text</c> type. The legacy
+    /// <c>audit_logs</c> row seeded before the upgrade survives the full walk to the current
+    /// migration untouched, with its table retained by the unmapping migration.
     /// </summary>
     [Fact]
     public async Task PostgreSqlLegacyTextAlignment_UpgradesInPlaceWithOverlongData()
@@ -3117,6 +3119,7 @@ public sealed class ServerDatabaseContractTests
                 await migrator.MigrateAsync(preAlignmentMigration, TestContext.Current.CancellationToken);
 
                 var userAgent = new string('U', 600) + "-upgrade-tail";
+                var description = new string('D', 1500) + "-upgrade-tail";
                 var remark = new string('R', 800) + "-upgrade-tail";
                 var accountId = Guid.NewGuid();
                 await context.Database.ExecuteSqlInterpolatedAsync($"""
@@ -3131,6 +3134,11 @@ public sealed class ServerDatabaseContractTests
                          {"Wrong username or password"}, {userAgent}, {"upgrade-app"},
                          {DateTimeOffset.UtcNow});
 
+                    INSERT INTO audit_logs
+                        (id, action, target_type, target_id, description, created_at)
+                    VALUES
+                        ({Guid.NewGuid()}, {"login.failed"}, {"LoginHistory"}, {"overlong-upgrade-target"},
+                         {description}, {DateTimeOffset.UtcNow});
                     """, cancellationToken: TestContext.Current.CancellationToken);
 
                 await migrator.MigrateAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -3141,17 +3149,21 @@ public sealed class ServerDatabaseContractTests
                 var historyAgent = await context.Database.SqlQuery<string>(
                     $"SELECT user_agent AS \"Value\" FROM login_histories WHERE username = {"overlong-upgrade-user"}")
                     .SingleAsync(TestContext.Current.CancellationToken);
+                var auditDescription = await context.Database.SqlQuery<string>(
+                    $"SELECT description AS \"Value\" FROM audit_logs WHERE action = {"login.failed"}")
+                    .SingleAsync(TestContext.Current.CancellationToken);
                 Assert.Equal(remark, accountRemark);
                 Assert.Equal(userAgent, historyAgent);
-                // The forward drop migration removed the legacy audit table with the alignment's
-                // audit columns; its history survives only in deployment backups.
+                Assert.Equal(description, auditDescription);
+                // The unmap migration removes the model mapping only: the physical legacy audit
+                // table and its history rows stay as-is across the upgrade (ServiceMantle #132).
                 await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);
                 await using (var auditTableCommand = context.Database.GetDbConnection().CreateCommand())
                 {
                     auditTableCommand.CommandText =
                         "SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public' AND tablename = 'audit_logs'";
                     Assert.Equal(
-                        0L,
+                        1L,
                         Convert.ToInt64(await auditTableCommand.ExecuteScalarAsync(
                             TestContext.Current.CancellationToken)));
                 }

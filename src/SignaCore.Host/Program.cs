@@ -734,7 +734,8 @@ var managementApi = app.MapServiceMantleManagementApiV1();
 managementApi.MapServiceMantleSettingQueries();
 managementApi.MapServiceMantleSettingUpdates(ManagementSettingUpdateExecutor.ExecuteAsync);
 // The admin console's audit page reads the shared restricted query from here on; the legacy
-// /api/admin/audit-logs endpoint and the audit_logs table are gone.
+// /api/admin/audit-logs endpoint is gone. The audit_logs table stays as a retained, unwritten
+// legacy store for pre-switch history rows.
 managementApi.MapServiceMantleAuditQueries();
 
 // ---- Shared setup entries (status read + the completion replay boundary) ----

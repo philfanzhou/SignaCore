@@ -19,7 +19,9 @@ app_registrations
   +-- disabled-by-default interactive OIDC policy
   +-- app_exchange_trusts >-- app_registrations (directed: target accepts source's refresh tokens)
 
-security_keys, login_attempts, and audit_logs are security-owned supporting tables
+security_keys and login_attempts are security-owned supporting tables; audit_logs is a retained
+legacy table (pre-switch history only, no longer written); shared-table action audits live in
+service_audit_logs
 ```
 
 Foreign keys are used where lifecycle ownership is explicit. Some external or historical identifiers, including refresh-token app IDs and audit targets, remain logical references to preserve history and avoid unsafe cascades.

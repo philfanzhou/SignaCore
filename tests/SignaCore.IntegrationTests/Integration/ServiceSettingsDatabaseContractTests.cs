@@ -565,10 +565,12 @@ public sealed class ServiceSettingsDatabaseContractTests
 
     /// <summary>
     /// The empty-legacy-table upgrade continues: the guarded drop removes the retired table, the
-    /// existing business data stays, and the fresh aggregate starts at version 0.
+    /// existing business data stays, and the fresh aggregate starts at version 0. The legacy
+    /// <c>audit_logs</c> table is not part of the retirement: the unmapping migration keeps it
+    /// with its history rows byte-for-byte (ServiceMantle #132).
     /// </summary>
     [Fact]
-    public async Task ExistingDatabaseUpgradeWithAnEmptyLegacyTable_DropsItAndStartsEmpty()
+    public async Task ExistingDatabaseUpgradeWithAnEmptyLegacyTable_RetainsTheAuditHistoryRows()
     {
         var path = Path.Combine(
             Path.GetTempPath(), $"signacore-shared-upgrade-{Guid.NewGuid():N}.db");
@@ -602,7 +604,6 @@ public sealed class ServiceSettingsDatabaseContractTests
                     TestContext.Current.CancellationToken);
             }
 
-            bool legacyAuditTableRetired;
             await using (var context = new IdentityDbContext(options))
             {
                 await new SignaCore.Host.Migration.SignaCoreMigrationExecutor(context, databaseOptions)
@@ -612,20 +613,23 @@ public sealed class ServiceSettingsDatabaseContractTests
                         SELECT COUNT(*) AS "Value" FROM sqlite_master
                         WHERE type = 'table' AND name = 'system_settings'
                         """).ToListAsync(TestContext.Current.CancellationToken);
-                // The forward drop migration removes the legacy audit table with its rows: the
-                // deployment keeps that history only through its own pre-upgrade backups.
-                legacyAuditTableRetired = (await context.Database.SqlQuery<long>($"""
+                // The unmapping migration removes the model mapping only: the physical legacy
+                // audit table and its rows stay as-is across the upgrade.
+                var retainedAuditTable = await context.Database.SqlQuery<long>($"""
                         SELECT COUNT(*) AS "Value" FROM sqlite_master
                         WHERE type = 'table' AND name = 'audit_logs'
-                        """).SingleAsync(TestContext.Current.CancellationToken)) == 0;
+                        """).SingleAsync(TestContext.Current.CancellationToken);
+                var legacyAuditRow = await context.Database.SqlQuery<string>($"""
+                        SELECT action || '|' || description || '|' || actor_name AS "Value" FROM audit_logs
+                        """).SingleAsync(TestContext.Current.CancellationToken);
                 var newSettings = await context.Database.SqlQuery<int>(
                         $"""SELECT COUNT(*) AS "Value" FROM service_settings""")
                     .ToListAsync(TestContext.Current.CancellationToken);
                 Assert.Equal(0, retiredTable.Single());
+                Assert.Equal(1, retainedAuditTable);
+                Assert.Equal("settings_updated|Legacy update|legacy-admin", legacyAuditRow);
                 Assert.Equal(0, newSettings.Single());
             }
-
-            Assert.True(legacyAuditTableRetired);
 
             // The fresh aggregate starts at version 0 and accepts its first update.
             var first = await UpdateAsync(options, 0, SeedChanges());

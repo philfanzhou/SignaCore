@@ -10,7 +10,7 @@ SignaCore uses one EF Core model with provider-specific migrations for PostgreSQ
 | [app_exchange_trusts](./tables/app_exchange_trusts.md) | Directed trust edges allowing a refresh token to be exchanged across applications. |
 | [app_registrations](./tables/app_registrations.md) | Registered client applications and their authentication policies. |
 | [app_redirect_uris](./tables/app_redirect_uris.md) | Canonical interactive OIDC redirect and post-logout registrations. |
-| [audit_logs](./tables/audit_logs.md) | Administrative and security-relevant change records. |
+| [audit_logs](./tables/audit_logs.md) | Retained legacy audit table kept as-is for pre-switch history rows; new audit records are staged into the shared `service_audit_logs` table. |
 | [authorization_requests](./tables/authorization_requests.md) | Shared OIDC login continuations resolved by one-time handle digest. |
 | [authorization_codes](./tables/authorization_codes.md) | Short-lived OIDC authorization codes resolved by one-time code digest. |
 | [identity_sessions](./tables/identity_sessions.md) | Shared server-side identity session authority behind the browser identity cookie. |

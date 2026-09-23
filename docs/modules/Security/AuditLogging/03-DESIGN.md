@@ -2,7 +2,7 @@
 
 ## Components
 
-AuditService, LoginHistoryRepository, AuditLogRepository, and request middleware.
+AuditService (login-history recording), LoginHistoryRepository, the shared ServiceMantle management audit writer, and request middleware.
 
 ## Request flow
 
@@ -18,7 +18,7 @@ Primary interface: internal domain service.
 
 ## Persistence
 
-Relevant tables: login_histories and audit_logs. PostgreSQL migrations live in Database, while SQLite uses its provider-specific migration assembly.
+Relevant tables: `login_histories` and the shared `service_audit_logs`. The legacy `audit_logs` table is retained untouched for pre-switch history rows and is mapped by no entity. PostgreSQL migrations live in Database, while SQLite uses its provider-specific migration assembly.
 
 ## Design constraints
 

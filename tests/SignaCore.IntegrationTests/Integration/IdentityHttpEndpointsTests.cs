@@ -581,6 +581,42 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
+    /// The restricted query tolerates the retained legacy audit history: with old-format
+    /// <c>audit_logs</c> rows present in the same database, the shared endpoint keeps answering
+    /// from <c>service_audit_logs</c> only — the legacy rows are never migrated into the
+    /// projection (ServiceMantle #132 non-guarantee) and their presence breaks nothing.
+    /// </summary>
+    [Fact]
+    public async Task AuditApi_WithRetainedLegacyAuditRows_KeepsAnsweringFromTheSharedTableOnly()
+    {
+        const string legacyDescription = "legacy-audit-row-kept-but-never-projected";
+        const string legacyActorName = "legacy-admin";
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO audit_logs (id, action, target_type, target_id, actor_name, description, created_at)
+                VALUES ({Guid.NewGuid()}, {"settings_updated"}, {"Settings"}, {"1"},
+                        {legacyActorName}, {legacyDescription}, {DateTimeOffset.UtcNow.ToUnixTimeSeconds()})
+                """, TestContext.Current.CancellationToken);
+        }
+
+        using var admin = await _fixture.CreateAdminHttpClientAsync();
+
+        var response = await admin.GetAsync("/management/v1/audit", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var raw = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.DoesNotContain(legacyDescription, raw, StringComparison.Ordinal);
+        Assert.DoesNotContain(legacyActorName, raw, StringComparison.Ordinal);
+
+        // The shared rows still answer: the legacy table neither shadows nor empties the
+        // projection while sitting in the same database.
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotEmpty(body.GetProperty("items").EnumerateArray().ToList());
+    }
+
+    /// <summary>
     /// The definitions catalog is the shared safe projection: the fixed six fields per item,
     /// lowercase value types, ordinal-sorted normalized keys, and no default values.
     /// </summary>
