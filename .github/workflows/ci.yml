@@ -328,12 +328,13 @@ jobs:
       - name: Wait for readiness after the restart
         run: |
           # The host stops itself after the response completes; Docker's restart policy brings it
-          # back as the normal host.
+          # back as the normal host. The shared ServiceMantle readiness contract answers 200 with
+          # the shared JSON body; -f fails the request while the endpoint answers 503.
           for i in $(seq 1 120); do
-            if [ "$(curl -fsS --max-time 3 http://localhost:5002/health/ready 2>/dev/null)" = 'Healthy' ]; then
+            if curl -fsS --max-time 3 http://localhost:5002/health/ready 2>/dev/null | grep -q '"status":"ready"'; then
               echo "SignaCore ready after ${i}s"
               # /health remains a compatibility alias for readiness.
-              [ "$(curl -fsS --max-time 3 http://localhost:5002/health)" = 'Healthy' ] \
+              curl -fsS --max-time 3 http://localhost:5002/health 2>/dev/null | grep -q '"status":"ready"' \
                 || { echo '/health is not an alias for readiness'; exit 1; }
               exit 0
             fi
