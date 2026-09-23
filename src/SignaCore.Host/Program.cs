@@ -14,7 +14,6 @@ using SignaCore.Host;
 using ServiceMantle.Bootstrap;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Configuration;
-using SignaCore.Host.HealthChecks;
 using SignaCore.Host.Installation;
 using SignaCore.Host.Management;
 using SignaCore.Host.Middleware;
@@ -614,19 +613,10 @@ app.UseMiddleware<BootstrapUpdateGuardMiddleware>();
 app.UseMiddleware<RunningConfigurationVersionHeaderMiddleware>();
 
 // ---- Health ----
-app.MapHealthChecks(HealthEndpoints.Live, new()
-{
-    Predicate = registration => registration.Tags.Contains(HealthCheckTags.Live)
-});
-app.MapHealthChecks(HealthEndpoints.Ready, new()
-{
-    Predicate = registration => registration.Tags.Contains(HealthCheckTags.Ready)
-});
-// Compatibility alias: existing launchers and Consul checks poll /health for readiness.
-app.MapHealthChecks(HealthEndpoints.Legacy, new()
-{
-    Predicate = registration => registration.Tags.Contains(HealthCheckTags.Ready)
-});
+// The shared phase-aware endpoints own all three health routes: liveness answers process-alive
+// only, while readiness fail-closes with 503 on any snapshot, database, or signing-key failure.
+// Existing launchers and Consul checks keep polling the /health readiness alias.
+app.MapServiceMantleHealthEndpoints();
 
 // A completed installation must never re-enter setup. Browser navigation goes to the console; the
 // setup entry itself answers the fixed management conflict for a completed installation without

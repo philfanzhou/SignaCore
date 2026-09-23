@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Moq;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
@@ -9,8 +8,9 @@ using Xunit;
 namespace SignaCore.Tests.Host.HealthChecks;
 
 /// <summary>
-/// Pins the signing-key readiness gate: it decides exactly what <see cref="SigningKeysHealthCheck"/>
-/// decides, and the only thing that may leave it is a stable safe code.
+/// Pins the signing-key readiness gate: it is the live readiness authority behind
+/// <c>/health/ready</c> and the <c>/health</c> alias, and the only thing that may leave it is a
+/// stable safe code.
 /// </summary>
 public sealed class SigningKeyReadinessContributorTests
 {
@@ -62,46 +62,6 @@ public sealed class SigningKeyReadinessContributorTests
         Assert.False(result.IsReady);
         Assert.Equal(SigningKeyReadinessContributor.SigningKeysUnavailableErrorCode, result.ErrorCode);
         pending.SetResult(true);
-    }
-
-    /// <summary>
-    /// The contributor replaces nothing today: it has to reach the same verdict the mapped
-    /// <c>/health/ready</c> check reaches, state by state.
-    /// </summary>
-    [Theory]
-    [InlineData("completed")]
-    [InlineData("faulted")]
-    [InlineData("pending")]
-    public async Task EvaluateAsync_AgreesWithSigningKeysHealthCheck_OnEveryInitializationState(string state)
-    {
-        var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var initialization = state switch
-        {
-            "completed" => Task.CompletedTask,
-            "faulted" => Task.FromException(new InvalidOperationException(Secret)),
-            _ => pending.Task,
-        };
-        var keyManager = KeyManager(initialization);
-        var contributor = new SigningKeyReadinessContributor(keyManager.Object);
-        var healthCheck = new SigningKeysHealthCheck(keyManager.Object);
-
-        var result = await contributor.EvaluateAsync(ReadySnapshot, Token);
-        var check = await healthCheck.CheckHealthAsync(new HealthCheckContext(), Token);
-        pending.TrySetResult(true);
-
-        Assert.Equal(check.Status == HealthStatus.Healthy, result.IsReady);
-        if (check.Status == HealthStatus.Healthy)
-        {
-            Assert.Null(result.ErrorCode);
-            return;
-        }
-
-        Assert.Equal(SigningKeyReadinessContributor.SigningKeysUnavailableErrorCode, result.ErrorCode);
-        // The existing check hands the faulting exception to the health report; the shared result
-        // type structurally cannot, which is the whole point of the safe-code contract.
-        Assert.Equal(state == "faulted", check.Exception is not null);
-        Assert.DoesNotContain(Secret, result.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("initialization", result.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

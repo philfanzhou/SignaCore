@@ -205,15 +205,6 @@ public sealed class ServiceMantleSharedHttpCapabilitiesTests
         Assert.Contains("projection-request", serialized, StringComparison.Ordinal);
     }
 
-    /// <summary>The mapped health routes are a deployment contract; the shared registration adds none.</summary>
-    [Fact]
-    public void HealthRouteConstants_AreUnchanged()
-    {
-        Assert.Equal("/health/live", HealthEndpoints.Live);
-        Assert.Equal("/health/ready", HealthEndpoints.Ready);
-        Assert.Equal("/health", HealthEndpoints.Legacy);
-    }
-
     private static Mock<IKeyManager> ReadyKeyManager()
     {
         var mock = new Mock<IKeyManager>();

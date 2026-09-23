@@ -61,18 +61,16 @@ internal static class ServiceMantleComposition
     /// request Header set, the security response headers, and the shared rate-limit policies.
     /// </summary>
     /// <remarks>
-    /// This is a parallel addition that maps no route: the <c>/health/live</c>,
-    /// <c>/health/ready</c>, and <c>/health</c> endpoints stay owned by
-    /// <see cref="SigningKeysHealthCheck"/> and the ASP.NET Core health-check stack, so the
-    /// contributor stays dormant until the endpoint switch replaces them. The startup validators the
-    /// registrations add still run, which is what proves the contributor and the Header set are
-    /// wired correctly. This must run before <c>AddIdentityInfrastructure</c>: the host composes its
-    /// own rate limiter afterwards, and the host's rejection contract — the JSON body locked by
-    /// <c>HostRejectionWriteCancellationTests</c> — stays the effective one for every policy,
-    /// including the ServiceMantle-named policies the session entries reference. The Bootstrap and
-    /// Setup hosts deliberately do not call this: neither registers <see cref="IKeyManager"/> nor
-    /// serves an <c>X-Admin-AppSecret</c> endpoint, and the readiness validator resolves every
-    /// contributor when the host starts.
+    /// The health endpoints this registers are mapped once by the normal host through
+    /// <c>MapServiceMantleHealthEndpoints</c>, which owns <c>/health/live</c>, <c>/health/ready</c>,
+    /// and the <c>/health</c> readiness alias; the signing-key contributor is the live readiness
+    /// authority behind both readiness routes. This must run before
+    /// <c>AddIdentityInfrastructure</c>: the host composes its own rate limiter afterwards, and the
+    /// host's rejection contract — the JSON body locked by <c>HostRejectionWriteCancellationTests</c>
+    /// — stays the effective one for every policy, including the ServiceMantle-named policies the
+    /// session entries reference. The Bootstrap and Setup hosts deliberately do not call this:
+    /// neither registers <see cref="IKeyManager"/> nor serves an <c>X-Admin-AppSecret</c> endpoint,
+    /// and the readiness validator resolves every contributor when the host starts.
     /// </remarks>
     internal static ServiceMantleBuilder AddSignaCoreSharedHttpCapabilities(
         this ServiceMantleBuilder builder)

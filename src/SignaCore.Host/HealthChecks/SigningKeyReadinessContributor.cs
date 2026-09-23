@@ -8,10 +8,10 @@ namespace SignaCore.Host.HealthChecks;
 /// serve discovery and JWKS shells but cannot issue a usable token, so it must not receive traffic.
 /// </summary>
 /// <remarks>
-/// The decision mirrors <see cref="SigningKeysHealthCheck"/>, which stays the authority behind the
-/// currently mapped <c>/health/ready</c> route until the endpoint switch lands. Only a stable safe
-/// code leaves this contributor: the shared result type structurally cannot carry the initialization
-/// exception, so neither its text nor any key material can reach a response, log, or metric.
+/// This contributor is the readiness authority for token issuance behind <c>/health/ready</c> and
+/// the <c>/health</c> alias. Only a stable safe code leaves it: the shared result type structurally
+/// cannot carry the initialization exception, so neither its text nor any key material can reach a
+/// response, log, or metric.
 /// </remarks>
 internal sealed class SigningKeyReadinessContributor(IKeyManager keyManager) : IServiceReadinessContributor
 {

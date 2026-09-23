@@ -23,7 +23,6 @@ using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.WeChat;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Configuration;
-using SignaCore.Host.HealthChecks;
 using SignaCore.Host.Http;
 using SignaCore.Host.Management;
 using SignaCore.Host.Security;
@@ -341,9 +340,11 @@ public static class ServiceCollectionExtensions
                 string>(httpContext =>
             {
                 var path = httpContext.Request.Path.Value ?? string.Empty;
-                // Exempt infrastructure endpoints from global rate limiting
-                if (path == HealthEndpoints.Legacy || path == HealthEndpoints.Live ||
-                    path == HealthEndpoints.Ready || path == "/metrics" ||
+                // Exempt infrastructure endpoints from global rate limiting. The health paths are
+                // the deployed probe contract, spelled literally because the shared ServiceMantle
+                // endpoints own them now.
+                if (path == "/health" || path == "/health/live" ||
+                    path == "/health/ready" || path == "/metrics" ||
                     WellKnownEndpoints.IsJwks(path))
                 {
                     return System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter(
@@ -403,18 +404,6 @@ public static class ServiceCollectionExtensions
 
         // ---- Background Cleanup Service ----
         services.AddHostedService<CleanupWorker>();
-
-        // ---- Health Checks ----
-        // Liveness answers "is this process able to reach its database"; readiness additionally
-        // requires that signing keys are loaded, so a starting instance never receives traffic it
-        // cannot serve.
-        services.AddHealthChecks()
-            .AddDbContextCheck<IdentityDbContext>(
-                "database",
-                tags: [HealthCheckTags.Live, HealthCheckTags.Ready])
-            .AddCheck<SigningKeysHealthCheck>(
-                "signing-keys",
-                tags: [HealthCheckTags.Ready]);
 
         var adminWebOrigins = configuration.GetSection(SystemSettingKeys.AdminWebAllowedOrigins)
             .Get<string[]>() ?? Array.Empty<string>();
