@@ -398,8 +398,14 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
     return 0;
 }
 
-// ---- Consul Service Discovery (optional) ----
-builder.Services.AddConsulDiscoveryIfEnabled(builder.Configuration);
+// ---- Consul Service Discovery (optional, snapshot-driven shared lifecycle) ----
+// The product snapshot activated by the bootstrap phase is projected in memory onto the shared
+// discovery catalog and drives one shared Consul lifecycle owner. Registration changes of every
+// kind take effect after a restart; the Bootstrap and Setup hosts above compose nothing here.
+await builder.Services.AddConsulDiscoveryLifecycleAsync(
+    builder.Configuration,
+    bootstrapResult.SharedSnapshot!,
+    bootstrapResult.MasterKeyProvider);
 
 // ---- ServiceMantle host identity, readiness, sensitive Headers and shared HTTP capabilities ----
 // The shared health capability, the signing-key readiness contributor, the product sensitive

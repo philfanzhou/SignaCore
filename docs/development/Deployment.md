@@ -167,6 +167,11 @@ A pending-setup instance is live but not ready, so it never receives authenticat
 - Set the JWT audience expected by downstream services; the issuer follows the public base URL.
 - Publish `/.well-known/openid-configuration` and JWKS through the public base URL.
 - Point orchestrator and Consul health checks at `/health/ready`.
+- When Consul registration is enabled, set `Consul:Discovery:Deregister=true` and give every
+  instance its own `ServiceDiscovery:Address` / `ServiceDiscovery:Port` (environment variables
+  `ServiceDiscovery__Address` / `ServiceDiscovery__Port`); a non-loopback Consul agent must be
+  reached over HTTPS. Registration changes take effect after a restart — see
+  [Consul integration](./ConsulIntegration.md).
 - Scrape `/metrics` and connect logs/traces to the chosen observability backend.
 - Remove legacy application-setting environment variables from the launcher; startup logs any that
   remain.
