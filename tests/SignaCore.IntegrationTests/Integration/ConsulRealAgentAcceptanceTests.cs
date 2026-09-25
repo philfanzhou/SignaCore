@@ -594,7 +594,7 @@ public sealed class ConsulRealAgentAcceptanceTests
             {
                 using var message = new HttpRequestMessage(new HttpMethod(request.HttpMethod), path);
                 message.Headers.TryAddWithoutValidation("X-Consul-Token", request.Headers["X-Consul-Token"]);
-                if (body.Length > 0) message.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                if (body.Length > 0) message.Content = JsonContent.Create(payload, options: JsonSerializerOptions.Default);
                 using var response = await upstream.SendAsync(message, lifetime.Token);
                 forwarded = response.IsSuccessStatusCode;
                 if (kind == "register" && forwarded && DropNextRegisterResponse)
