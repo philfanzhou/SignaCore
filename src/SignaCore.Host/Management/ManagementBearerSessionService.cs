@@ -102,11 +102,11 @@ internal sealed class ManagementBearerSessionService : IManagementBearerSessionC
         }
         catch (Exception exception) when (IsStorageFailure(exception))
         {
-            _logger.LogWarning("Management bearer issuance unavailable for account {AccountId}", accountId);
+            _logger.LogWarning("Management bearer issuance unavailable");
             return ManagementBearerIssueResult.Unavailable;
         }
 
-        _logger.LogInformation("Management bearer session issued for account {AccountId}", accountId);
+        _logger.LogInformation("Management bearer session issued");
         return ManagementBearerIssueResult.Issued(token, session.ExpiresAt);
     }
 
