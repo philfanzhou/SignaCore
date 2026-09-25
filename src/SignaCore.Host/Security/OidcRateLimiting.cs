@@ -10,7 +10,9 @@ namespace SignaCore.Host.Security;
 /// partition-key resolution they share.
 /// <para>
 /// The budgets are the <c>IdentityConstants.Oidc*RateLimitPerMinute</c> constants — fixed
-/// single-process windows, no queue. Partitioning follows the contract: a resolved registered
+/// windows, no queue. On PostgreSQL every replica counts them in the one shared PS-24 budget
+/// (<see cref="SharedOidcBudgetRateLimiter"/>); SQLite, a single-instance topology, counts them in
+/// process. Partitioning follows the contract: a resolved registered
 /// client gets its own bounded <c>client:{appId}</c> partition; everything else — unknown
 /// clients, malformed traffic, endpoints without a client identity — falls into the bounded
 /// source-network partition <c>ip:{remote address}</c>. No attacker-controlled raw value
@@ -22,7 +24,7 @@ namespace SignaCore.Host.Security;
 /// The limiter middleware runs before client authentication and before any controller work, so
 /// the expensive parts (client secret verification, BCrypt password checks, one-time-artifact
 /// consumption) sit behind the budget: a rejected request consumes nothing and counts no
-/// failure. Enforcement is per process; the cross-replica budget stays with the #71 tracker.
+/// failure. A shared budget store that cannot decide refuses the request with 503 instead.
 /// </para>
 /// </summary>
 public static class OidcRateLimitPolicies

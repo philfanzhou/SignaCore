@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
 using SignaCore.Database;
+using SignaCore.Database.RateLimiting;
 using SignaCore.Database.Repositories;
 
 namespace SignaCore.Domain;
@@ -148,6 +149,37 @@ public class CleanupWorker : BackgroundService
             _logger.LogInformation(
                 "Deleted {Count} expired management bearer sessions",
                 deletedManagementBearerSessions);
+        }
+
+        // The shared OIDC rate-limit budget exists only on PostgreSQL. The store keeps every row
+        // whose window expired less than the retention period ago, so a live window is never
+        // deleted. An unavailable store ends this segment for the round; the failure itself is
+        // never logged, because it can name the database host.
+        var oidcRateLimitStore = scope.ServiceProvider.GetService<IOidcRateLimitStore>();
+        if (oidcRateLimitStore is not null)
+        {
+            var deletedBuckets = 0;
+            for (var batch = 0; batch < IdentityConstants.OidcRateLimitCleanupMaxBatchesPerRound; batch++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var deleted = await oidcRateLimitStore.DeleteExpiredAsync(cancellationToken);
+                if (deleted is null)
+                {
+                    _logger.LogWarning("OIDC rate-limit bucket cleanup skipped: the budget store is unavailable");
+                    break;
+                }
+
+                deletedBuckets += deleted.Value;
+                if (deleted.Value == 0)
+                {
+                    break;
+                }
+            }
+
+            if (deletedBuckets > 0)
+            {
+                _logger.LogInformation("Deleted {Count} expired OIDC rate-limit buckets", deletedBuckets);
+            }
         }
 
         cancellationToken.ThrowIfCancellationRequested();

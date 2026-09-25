@@ -15,6 +15,7 @@ using ServiceMantle.AspNetCore.Management;
 using ServiceMantle.Management;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
+using SignaCore.Database.RateLimiting;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
@@ -279,6 +280,16 @@ public static class ServiceCollectionExtensions
         // ---- Rate Limiting (ASP.NET Core built-in) ----
         // The size-bounded cache behind the interactive OIDC partition resolver (#304).
         services.AddMemoryCache();
+        // PostgreSQL replicas count the six interactive OIDC policies in one shared PS-24 budget
+        // (#71). The store owns a private data source outside every EF retry strategy; the
+        // container disposes it. SQLite registers neither and keeps the in-process windows.
+        var sharedOidcBudget = SharedOidcRateLimiting.IsEnabled(databaseOptions);
+        if (sharedOidcBudget)
+        {
+            services.AddSingleton<IOidcRateLimitStore>(_ => new PostgreSqlOidcRateLimitStore(databaseOptions));
+            services.AddSingleton(_ => new OidcRateLimitPartitioner(masterKeyProvider));
+        }
+
         // Per-IP fixed window limiter: 100 requests per 60 seconds per client IP.
         // /health, /metrics and both JWKS routes are exempt (have their own limits or are infra).
         services.AddRateLimiter(options =>
@@ -299,6 +310,26 @@ public static class ServiceCollectionExtensions
                          (OidcRateLimitPolicies.Revoke, IdentityConstants.OidcRevokeRateLimitPerMinute)
                      })
             {
+                if (sharedOidcBudget)
+                {
+                    // One lightweight limiter per policy and partition: the raw partition key is
+                    // turned into its digest once, and each admission is one store call. The
+                    // budget itself is the fixed PS-24 table, not a limiter option. The partition
+                    // factory captures only the singletons, never the request.
+                    options.AddPolicy(policy, httpContext =>
+                    {
+                        var store = httpContext.RequestServices.GetRequiredService<IOidcRateLimitStore>();
+                        var partitioner = httpContext.RequestServices.GetRequiredService<OidcRateLimitPartitioner>();
+                        return System.Threading.RateLimiting.RateLimitPartition.Get(
+                            OidcRateLimitPolicies.PartitionKey(httpContext),
+                            partitionKey => new SharedOidcBudgetRateLimiter(
+                                store,
+                                policy,
+                                partitioner.Digest(partitionKey)));
+                    });
+                    continue;
+                }
+
                 options.AddPolicy(policy, httpContext =>
                     System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                         OidcRateLimitPolicies.PartitionKey(httpContext),
@@ -336,7 +367,7 @@ public static class ServiceCollectionExtensions
                 opt.PermitLimit = 100;
                 opt.Window = TimeSpan.FromSeconds(60);
             });
-            options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<
+            var globalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<
                 Microsoft.AspNetCore.Http.HttpContext,
                 string>(httpContext =>
             {
@@ -362,14 +393,26 @@ public static class ServiceCollectionExtensions
                         Window = TimeSpan.FromSeconds(60)
                     });
             });
+            // The shared budget only decides asynchronously; the wrapper keeps the global limiter
+            // at one permit per request on those endpoints (see SharedOidcBudgetAwareGlobalLimiter).
+            options.GlobalLimiter = sharedOidcBudget
+                ? new SharedOidcBudgetAwareGlobalLimiter(globalLimiter)
+                : globalLimiter;
             options.OnRejected = async (context, cancellationToken) =>
             {
-                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                // A shared budget store that could not decide answers 503: the request is refused
+                // like an overload, but it is not a budget verdict. Nothing about the failure is
+                // written to the response.
+                var storeUnavailable = SharedOidcRateLimiting.IsStoreUnavailable(context.Lease);
+                context.HttpContext.Response.StatusCode = storeUnavailable
+                    ? StatusCodes.Status503ServiceUnavailable
+                    : StatusCodes.Status429TooManyRequests;
                 context.HttpContext.Response.ContentType = "application/json";
                 // The interactive OIDC endpoint classes answer with their own fixed shape: no
                 // redirect, no partition key, no request value (issue #304). Whichever limiter
                 // fired on one of those endpoints, the answer is the same fixed body.
-                if (OidcRateLimitPolicies.IsInteractiveEndpoint(context.HttpContext.Request.Path))
+                if (storeUnavailable
+                    || OidcRateLimitPolicies.IsInteractiveEndpoint(context.HttpContext.Request.Path))
                 {
                     context.HttpContext.Response.Headers.CacheControl = "no-store";
                     await context.HttpContext.Response.WriteAsync(

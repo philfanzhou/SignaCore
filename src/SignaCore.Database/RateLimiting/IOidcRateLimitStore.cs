@@ -21,7 +21,8 @@ public enum OidcRateLimitAcquireResult
 /// counted atomically by the database clock. Each call is its own unit of work on its own
 /// connection and never shares a transaction with request-scoped persistence.
 /// <para>
-/// Not registered in DI and not wired into any HTTP pipeline yet (#381 enables it).
+/// Registered only for PostgreSQL, where it admits the six interactive OIDC policies of every
+/// replica; SQLite registers no store.
 /// </para>
 /// </summary>
 public interface IOidcRateLimitStore
