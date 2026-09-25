@@ -23,6 +23,15 @@ Lifecycle services will enforce those rules as defined by the authoritative mode
 There is no new handler, writer, route, DI registration, setting, or frontend activation in
 this schema delivery. Existing Cookie, OIDC, and business JWT behavior is unchanged.
 
+## Lifecycle service
+
+[Task #383](https://github.com/philfanzhou/SignaCore/issues/383) adds an internal
+`ManagementBearerSessionService` that issues, validates, revokes, and cleans up these rows,
+registered in DI but not consumed by any endpoint, authentication scheme, or UI yet, so it enables
+nothing. Each operation uses its own non-retrying `IdentityDbContext`; `CleanupWorker` deletes
+rows expired for at least 24 hours in batches of at most 1000. Its contract suite is
+`ManagementBearerSessionDatabaseContractTests`.
+
 ## Upgrade and rollback
 
 Apply the provider's incremental `AddManagementBearerSessions` migration through the

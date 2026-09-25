@@ -23,7 +23,8 @@ public class CleanupWorkerTests
         Mock<IIdentitySessionStore>? identitySessionStoreMock = null,
         Mock<IAuthorizationCodeStore>? authorizationCodeStoreMock = null,
         Mock<IRefreshTokenFamilyStore>? refreshTokenFamilyStoreMock = null,
-        Mock<ILogoutRequestStore>? logoutRequestStoreMock = null)
+        Mock<ILogoutRequestStore>? logoutRequestStoreMock = null,
+        Mock<IManagementBearerSessionCleanup>? managementBearerCleanupMock = null)
     {
         var serviceProviderMock = new Mock<IServiceProvider>();
 
@@ -57,6 +58,9 @@ public class CleanupWorkerTests
         serviceProviderMock
             .Setup(sp => sp.GetService(typeof(ILogoutRequestStore)))
             .Returns((logoutRequestStoreMock ?? new Mock<ILogoutRequestStore>()).Object);
+        serviceProviderMock
+            .Setup(sp => sp.GetService(typeof(IManagementBearerSessionCleanup)))
+            .Returns((managementBearerCleanupMock ?? new Mock<IManagementBearerSessionCleanup>()).Object);
 
         return serviceProviderMock;
     }
@@ -338,6 +342,107 @@ public class CleanupWorkerTests
         Assert.Equal(
             new[] { "codes", "families", "sessions" },
             sequence.Where(step => step is "codes" or "families" or "sessions").Take(3));
+    }
+
+    [Fact]
+    public async Task CleanupExpiredDataAsync_DeletesManagementBearerBatchesUntilOneIsEmpty()
+    {
+        var sequence = new List<string>();
+        var instants = new List<DateTimeOffset>();
+        var batches = new Queue<int>([1000, 1000, 500, 0, 1000]);
+        var bearerCleanupMock = new Mock<IManagementBearerSessionCleanup>();
+        bearerCleanupMock
+            .Setup(c => c.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback<DateTimeOffset, CancellationToken>((now, _) => { sequence.Add("bearer"); instants.Add(now); })
+            .ReturnsAsync(() => batches.Dequeue());
+        var sessionStoreMock = new Mock<IIdentitySessionStore>();
+        sessionStoreMock
+            .Setup(s => s.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback(() => sequence.Add("sessions"))
+            .ReturnsAsync(0);
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+        appRegRepoMock
+            .Setup(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback(() => sequence.Add("apps"))
+            .ReturnsAsync(0);
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            appRegRepoMock: appRegRepoMock,
+            identitySessionStoreMock: sessionStoreMock,
+            managementBearerCleanupMock: bearerCleanupMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var keyManagerMock = new Mock<IKeyManager>();
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
+
+        await RunWorkerUntilAsync(worker, () => sequence.Contains("apps"));
+
+        Assert.Equal(
+            new[] { "sessions", "bearer", "bearer", "bearer", "bearer", "apps" },
+            sequence.Take(6));
+        Assert.Single(instants.Distinct());
+        bearerCleanupMock.Verify(
+            c => c.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(4));
+    }
+
+    [Fact]
+    public async Task CleanupExpiredDataAsync_StopsManagementBearerBatchesAtTheRoundCap()
+    {
+        var bearerCleanupMock = new Mock<IManagementBearerSessionCleanup>();
+        bearerCleanupMock
+            .Setup(c => c.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(IdentityConstants.ManagementBearerCleanupBatchSize);
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+        appRegRepoMock
+            .Setup(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            appRegRepoMock: appRegRepoMock,
+            managementBearerCleanupMock: bearerCleanupMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var keyManagerMock = new Mock<IKeyManager>();
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
+
+        await RunWorkerUntilAsync(worker, () => appRegRepoMock.Invocations.Count > 0);
+
+        bearerCleanupMock.Verify(
+            c => c.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(IdentityConstants.ManagementBearerCleanupMaxBatchesPerRound));
+    }
+
+    [Fact]
+    public async Task CleanupExpiredDataAsync_ManagementBearerCancellationStopsTheRound()
+    {
+        using var stopping = new CancellationTokenSource();
+        var bearerCleanupMock = new Mock<IManagementBearerSessionCleanup>();
+        bearerCleanupMock
+            .Setup(c => c.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback(() => stopping.Cancel())
+            .ReturnsAsync(IdentityConstants.ManagementBearerCleanupBatchSize);
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            appRegRepoMock: appRegRepoMock,
+            managementBearerCleanupMock: bearerCleanupMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var worker = new TestableCleanupWorker(
+            serviceProviderMock.Object,
+            new Mock<IKeyManager>().Object,
+            NullLogger<CleanupWorker>.Instance);
+
+        await worker.RunAsync(stopping.Token);
+
+        bearerCleanupMock.Verify(
+            c => c.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), stopping.Token),
+            Times.Once);
+        appRegRepoMock.Verify(
+            r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]

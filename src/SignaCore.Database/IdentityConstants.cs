@@ -196,4 +196,18 @@ public static class IdentityConstants
     /// Changing this value changes every digest, which resets every shared budget.
     /// </summary>
     public const string OidcRateLimitPartitionHkdfInfo = "SignaCore.OidcRateLimit.Partition.v1";
+
+    // ---- Management bearer sessions (#360) ----
+    // A management-only opaque credential with a fixed lifetime: no sliding and no refresh.
+
+    public const int ManagementBearerLifetimeMinutes = 15;
+
+    /// <summary>An expired session row is removable only this many hours after it expired.</summary>
+    public const int ManagementBearerRetentionHours = 24;
+
+    /// <summary>The upper bound of rows one cleanup batch deletes.</summary>
+    public const int ManagementBearerCleanupBatchSize = 1000;
+
+    /// <summary>The upper bound of cleanup batches one CleanupWorker round runs.</summary>
+    public const int ManagementBearerCleanupMaxBatchesPerRound = 100;
 }
