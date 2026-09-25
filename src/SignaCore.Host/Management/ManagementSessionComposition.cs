@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using ServiceMantle.AspNetCore;
 using ServiceMantle.AspNetCore.Health;
@@ -12,8 +13,9 @@ namespace SignaCore.Host.Management;
 
 /// <summary>
 /// Composes the shared ServiceMantle management session in the normal host: the fixed management
-/// cookie scheme, the phase-gated management API v1, the three session entries, and the Data
-/// Protection key ring persisted through the shared EF Core store.
+/// cookie scheme, the management bearer scheme and its selector, the phase-gated management API
+/// v1, the three session entries, and the Data Protection key ring persisted through the shared
+/// EF Core store.
 /// </summary>
 internal static class ManagementSessionComposition
 {
@@ -36,6 +38,26 @@ internal static class ManagementSessionComposition
         // session length of 12 sliding hours, so operators see no lifetime change in the switch.
         builder.AddManagementCookieAuthentication(options =>
             options.ExpireTimeSpan = TimeSpan.FromHours(12));
+
+        // The management bearer (#360, stage 3). The selector becomes the default authenticate,
+        // challenge, and forbid scheme, overriding the shared cookie defaults registered just
+        // above; sign-in and sign-out stay on the cookie. The shared ServiceMantle.ManagementAdmin
+        // policy names no scheme, so it follows the selector, while the session-pinned entries
+        // (session, bootstrap) keep resolving through the cookie alone.
+        builder.Services.AddAuthentication()
+            .AddScheme<AuthenticationSchemeOptions, ManagementBearerAuthenticationHandler>(
+                ManagementBearerAuthenticationDefaults.AuthenticationScheme,
+                _ => { })
+            .AddPolicyScheme(
+                ManagementBearerAuthenticationDefaults.SelectorScheme,
+                displayName: null,
+                options => options.ForwardDefaultSelector = ManagementBearerAuthenticationDefaults.SelectScheme);
+        builder.Services.Configure<AuthenticationOptions>(options =>
+        {
+            options.DefaultAuthenticateScheme = ManagementBearerAuthenticationDefaults.SelectorScheme;
+            options.DefaultChallengeScheme = ManagementBearerAuthenticationDefaults.SelectorScheme;
+            options.DefaultForbidScheme = ManagementBearerAuthenticationDefaults.SelectorScheme;
+        });
         builder.AddServiceMantleManagementApiV1();
         builder.AddServiceMantleManagementEntries();
 

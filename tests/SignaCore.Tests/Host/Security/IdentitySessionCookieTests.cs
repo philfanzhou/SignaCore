@@ -134,20 +134,39 @@ public sealed class IdentitySessionCookieTests(SqliteKeyStoreFixture fixture)
 
         var authentication = provider.GetRequiredService<IOptions<AuthenticationOptions>>().Value;
 
-        // The shared ServiceMantle package keeps owning every default; the identity scheme only
-        // contributes a non-interactive scheme that identity paths must name explicitly.
+        // The management selector owns authenticate, challenge, and forbid; the shared management
+        // cookie keeps sign-in and sign-out. The identity scheme only contributes a
+        // non-interactive scheme that identity paths must name explicitly.
         Assert.Equal(
-            ManagementSessionDefaults.AuthenticationScheme, authentication.DefaultAuthenticateScheme);
+            ManagementBearerAuthenticationDefaults.SelectorScheme, authentication.DefaultAuthenticateScheme);
         Assert.Equal(
-            ManagementSessionDefaults.AuthenticationScheme, authentication.DefaultChallengeScheme);
+            ManagementBearerAuthenticationDefaults.SelectorScheme, authentication.DefaultChallengeScheme);
         Assert.Equal(
-            ManagementSessionDefaults.AuthenticationScheme, authentication.DefaultForbidScheme);
+            ManagementBearerAuthenticationDefaults.SelectorScheme, authentication.DefaultForbidScheme);
         Assert.Equal(
             ManagementSessionDefaults.AuthenticationScheme, authentication.DefaultSignInScheme);
         Assert.Equal(
             ManagementSessionDefaults.AuthenticationScheme, authentication.DefaultSignOutScheme);
         Assert.NotEqual(
             IdentitySessionDefaults.AuthenticationScheme, authentication.DefaultScheme);
+
+        // The selector never forwards to the identity scheme, on any path.
+        foreach (var path in new[] { "/oauth2/authorize", "/oauth2/login", "/api/admin/users", "/management/v1/settings" })
+        {
+            foreach (var withHeader in new[] { false, true })
+            {
+                var context = new DefaultHttpContext();
+                context.Request.Path = path;
+                if (withHeader)
+                {
+                    context.Request.Headers.Authorization = "Bearer x";
+                }
+
+                Assert.NotEqual(
+                    IdentitySessionDefaults.AuthenticationScheme,
+                    ManagementBearerAuthenticationDefaults.SelectScheme(context));
+            }
+        }
     }
 
     [Fact]

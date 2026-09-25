@@ -9,7 +9,8 @@ namespace SignaCore.Host.Management;
 
 /// <summary>
 /// Issues, validates, revokes, and cleans up management-only opaque bearer credentials
-/// (#360, stage 2). Not consumed by any endpoint or authentication scheme yet (#384).
+/// (#360, stage 2). The management bearer authentication scheme validates through it; no
+/// endpoint issues or revokes a credential yet (#392).
 /// <para>
 /// Every operation runs on a fresh <see cref="IdentityDbContext"/> built without the retrying
 /// execution strategy, never on the request-scoped business context: an issuance or revocation
