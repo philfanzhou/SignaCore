@@ -534,6 +534,44 @@ jobs:
           path: signacore-image.spdx.json
           if-no-files-found: ignore
 
+  consul-acceptance:
+    name: Real Consul Acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUN_SIGNACORE_CONSUL_TESTS: 'true'
+      CONSUL_TEST_IMAGE: hashicorp/consul:1.21.5@sha256:6126c30072690cb3173a450ff5bde120c3a01e11c9dccab83b1b2314d4c828bd
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - name: Pre-pull pinned Consul agent
+        run: .github/scripts/docker-pull.sh "$CONSUL_TEST_IMAGE"
+      - name: Real agent lifecycle acceptance
+        run: |
+          dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj \
+            -c Release --filter FullyQualifiedName~ConsulRealAgentAcceptanceTests \
+            --report-xunit-trx --report-xunit-trx-filename consul-acceptance.trx \
+            --results-directory reports
+          python3 - <<'PYTHON'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          reports = list(Path('reports').rglob('consul-acceptance.trx'))
+          assert reports, 'Consul acceptance TRX missing'
+          results = [r for p in reports for r in ET.parse(p).iter()
+                     if r.tag.endswith('UnitTestResult')]
+          assert len(results) == 10, 'Expected all ten Consul acceptance cases'
+          assert all(r.attrib.get('outcome') == 'Passed' for r in results), 'Consul acceptance failed or skipped'
+          PYTHON
+      - name: Upload acceptance results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: consul-acceptance-results
+          path: reports/
+          if-no-files-found: error
+
   database-contracts:
     name: Database Contract Matrix
     needs: build-test
