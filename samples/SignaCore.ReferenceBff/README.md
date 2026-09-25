@@ -368,6 +368,36 @@ and form antiforgery tokens are intentional browser outputs; the session-cookie 
 reflected by later pages. Canary assertion failures name only the carrier, never the sensitive value.
 These checks retain the single-instance and controlled-output limits documented above.
 
+### Two upstream SignaCore hosts
+
+```sh
+dotnet test tests/SignaCore.ReferenceBff.Tests/SignaCore.ReferenceBff.Tests.csproj -c Release --filter FullyQualifiedName~ReferenceBffMultiInstanceTests
+```
+
+This normal-path acceptance keeps **one BFF and one in-memory ticket store**. Two independent
+SignaCore hosts share the installed database, bootstrap, signing material and Data Protection
+key ring. Explicit test transports send the password login and code exchange to A, authorization,
+Discovery/JWKS and UserInfo to B, then swap A/B and repeat the session-reuse flow twice in each
+direction. It checks both token signatures, matching subjects, audience rejection, and the local
+403-before-binding / 200-after-binding decision. A separate aborted UserInfo request exercises
+cancellation and fixture cleanup. These tests do not certify a multi-instance BFF, PostgreSQL
+atomic races, or the AC-13 production activation gate.
+
+The [canonical model](../../docs/oidc/CanonicalSemanticModel.md) remains the protocol authority.
+The finite output checks use these carrier-specific rules:
+
+| Carrier | Scan boundary and required protocol output |
+| --- | --- |
+| BFF-owned logs | A tee for the exact `BffOperationLog` emitter captures every complete message, scope/state property and exception before forwarding unchanged to the shared Console pipeline. Expected operation/outcome events must exist. Injected message/property/exception canaries must fail the same scanner. Events are never selected by canary content. |
+| Final `/`, `/bff/me`, `/bff/admin`, `/bff/diagnostics` | Body, headers and URL exclude credentials, code/verifier, tokens, cookies, state and nonce. Only the exact home-form CSRF value is required in its hidden field, with its antiforgery cookie in Set-Cookie. |
+| Login challenge | State, nonce and PKCE challenge are required only in their named Location query fields. OIDC nonce/correlation cookies are required only in their Set-Cookie carrier. |
+| Callback | Code/state are necessary callback request query inputs; the server-side-ticket session cookie and OIDC-cookie deletion are necessary Set-Cookie outputs. Later display pages may not reflect those values. |
+
+No global canary allowlist is used. Failure artifacts report safe stages/results, never raw
+Console output, protocol URLs or credential values. The existing `ReferenceBffLoggingTests`
+controlled-output regressions still run unchanged; arbitrary third-party Console text and external
+collectors remain outside the BFF-owned log guarantee. CI Build & Test runs this test assembly.
+
 ## Scope
 
 This is a sample consumer of SignaCore, not a product. The ticket store is single-instance
