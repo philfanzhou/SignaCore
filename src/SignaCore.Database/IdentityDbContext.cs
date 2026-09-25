@@ -36,6 +36,7 @@ public class IdentityDbContext : DbContext, IServiceDbContext
     public DbSet<AuthorizationCodeEntity> AuthorizationCodes => Set<AuthorizationCodeEntity>();
     public DbSet<LogoutRequestEntity> LogoutRequests => Set<LogoutRequestEntity>();
     public DbSet<OidcRateLimitBucketEntity> OidcRateLimitBuckets => Set<OidcRateLimitBucketEntity>();
+    public DbSet<ManagementBearerSessionEntity> ManagementBearerSessions => Set<ManagementBearerSessionEntity>();
 
     // ServiceMantle shared installation state (service_installations): the runtime authority for
     // installation status and the one-time setup code. The consumer owns this mapping, its
@@ -75,6 +76,26 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.Property(e => e.LastLoginIp).HasColumnName("last_login_ip").HasMaxLength(IdentityConstants.MaxClientIpLength);
             entity.Property(e => e.LastLoginMethod).HasColumnName("last_login_method").HasMaxLength(IdentityConstants.MaxAuthMethodLength);
             entity.Property(e => e.TotalLoginCount).HasColumnName("total_login_count");
+        });
+
+        modelBuilder.Entity<ManagementBearerSessionEntity>(entity =>
+        {
+            entity.ToTable("management_bearer_sessions", table =>
+            {
+                table.HasCheckConstraint("CK_management_bearer_sessions_digest_length", "length(token_digest) = 71");
+                table.HasCheckConstraint("CK_management_bearer_sessions_expiry", "expires_at > created_at");
+                table.HasCheckConstraint("CK_management_bearer_sessions_revocation", "revoked_at IS NULL OR revoked_at >= created_at");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.TokenDigest).HasColumnName("token_digest").HasMaxLength(71).IsRequired();
+            entity.Property(e => e.AccountId).HasColumnName("account_id");
+            ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
+            ConfigureInstant(entity.Property(e => e.ExpiresAt).HasColumnName("expires_at"));
+            ConfigureInstant(entity.Property(e => e.RevokedAt).HasColumnName("revoked_at"));
+            entity.HasIndex(e => e.TokenDigest).IsUnique();
+            entity.HasIndex(e => e.ExpiresAt);
+            entity.HasOne<AccountEntity>().WithMany().HasForeignKey(e => e.AccountId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<PasswordCredentialEntity>(entity =>
