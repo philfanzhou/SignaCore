@@ -177,6 +177,20 @@ A pending-setup instance is live but not ready, so it never receives authenticat
   remain.
 - Run the verification steps after deployment.
 
+## Shared OIDC rate limits
+
+On PostgreSQL, every replica counts the interactive OIDC rate limits in one shared database budget
+(see the [OIDC security contract](../oidc/Security.md#rate-limit-contract)). All replicas must use
+the same database, the same bootstrap root key, and the same release:
+
+- Upgrade and roll back all replicas together. A replica of an older release keeps a per-process
+  budget, so while versions are mixed the cross-replica budget does not hold.
+- Changing the root key resets every shared budget.
+- Each protected OIDC request runs one short database statement. Size the database connection
+  capacity for it; when the database cannot answer within 2 seconds those requests receive `503`.
+
+SQLite deployments are single-instance and keep an in-process budget.
+
 ## Backup and recovery
 
 Two artifacts must be backed up together, because they are only useful as a set:

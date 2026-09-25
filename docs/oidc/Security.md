@@ -71,19 +71,37 @@ may receive a bounded client partition; unresolved traffic remains in a bounded 
 trusted-gateway partition. Login defense must preserve the generic credential result and existing account
 lockout semantics.
 
-Exact budgets, windows, queue behavior, shared-store or gateway enforcement, and overload response
-shape belong to SignaCore #71 and must be fixed as testable product policy before that task is ready.
-They are intentionally not invented by this design integration task. A multi-instance PostgreSQL
-deployment must demonstrate one effective protection budget across replicas, whether enforced by
-SignaCore shared state or the trusted ingress. Single-process in-memory limits alone do not satisfy
-that gate. SQLite remains a single-instance topology under
-[PS-22](./CanonicalSemanticModel.md#artifact--persistence-relationship).
+The six interactive endpoint classes (`oidc-authorize`, `oidc-login`, `oidc-token`,
+`oidc-userinfo`, `oidc-logout` for both `/oauth2/logout` and `/oauth2/logout/requests`, and
+`oidc-revoke`) each allow 90 requests per 60-second window per partition, with no queue. The
+host-wide limit of 100 requests per source address per 60 seconds applies in addition and counts
+every request exactly once.
+
+On PostgreSQL every replica counts these budgets in the one shared
+[PS-24](./CanonicalSemanticModel.md#artifact--persistence-relationship) table, so a partition gets
+one 90-request window across all replicas. The table stores only an HMAC digest of the partition,
+keyed from the root key; every replica must share the database, the root key, and the release. One
+short auto-committed statement admits each protected request, outside the request's own persistence.
+If that statement cannot decide — the database is unreachable or does not answer within 2 seconds —
+the request is refused with `503 Service Unavailable`; SignaCore never falls back to a local budget.
+A permit whose commit outcome is unknown is not refunded. SQLite remains a single-instance topology
+under [PS-22](./CanonicalSemanticModel.md#artifact--persistence-relationship) and counts the same
+budgets in process.
+
+An over-budget request answers `429 Too Many Requests` and an undecided one `503`, both with
+`Cache-Control: no-store` and the same fixed body:
+`{"error":"temporarily_unavailable","error_description":"The service is temporarily busy. Please try again later."}`.
+A request whose caller disconnects while it waits for the budget is abandoned without either answer.
+Rate-limit metrics carry the policy name only; logs name no client id, address, digest, or database
+failure detail.
 
 Rate rejection must not redirect to an untrusted URI, consume one-time protocol artifacts, increment
 the password failed-attempt counter, or echo the partition key. Production activation remains held by
 [AC-13](./CanonicalSemanticModel.md#implementation-task--capability-activation) and the
 [#129](https://github.com/philfanzhou/SignaCore/issues/129) / [#134](https://github.com/philfanzhou/SignaCore/issues/134)
-design chain until #71 proves these properties.
+design chain until the remaining attack and log matrix
+([#108](https://github.com/philfanzhou/SignaCore/issues/108), [#80](https://github.com/philfanzhou/SignaCore/issues/80))
+proves these properties.
 
 ## Sensitive-value verification
 

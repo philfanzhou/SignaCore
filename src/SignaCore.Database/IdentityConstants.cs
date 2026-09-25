@@ -191,6 +191,9 @@ public static class IdentityConstants
     /// <summary>The upper bound of rows one cleanup call deletes.</summary>
     public const int OidcRateLimitCleanupBatchSize = 1000;
 
+    /// <summary>The upper bound of cleanup batches one CleanupWorker round runs.</summary>
+    public const int OidcRateLimitCleanupMaxBatchesPerRound = 100;
+
     /// <summary>
     /// HKDF info of the key that turns a raw rate-limit partition key into its stored digest.
     /// Changing this value changes every digest, which resets every shared budget.

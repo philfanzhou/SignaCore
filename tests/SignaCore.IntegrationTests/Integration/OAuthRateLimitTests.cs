@@ -273,6 +273,48 @@ public sealed partial class OAuthRateLimitTests : IClassFixture<IdentityServerFi
             .GetProperty("error").GetString());
     }
 
+    [Fact]
+    public async Task OnSqlite_ThePoliciesStayInProcess_AndTheGlobalLimiterChargesSynchronously()
+    {
+        using var host = CreateHost();
+        using var http = host.CreateClient();
+        http.DefaultRequestHeaders.Authorization = BasicHeader("unknown-client", "wrong-secret");
+
+        // No shared store, no partitioner, and no deferral of the global permit (#381).
+        Assert.Null(host.Services.GetService<SignaCore.Database.RateLimiting.IOidcRateLimitStore>());
+        Assert.Null(host.Services.GetService<OidcRateLimitPartitioner>());
+        var options = host.Services
+            .GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>>()
+            .Value;
+        Assert.IsNotType<SignaCore.Host.Security.SharedOidcBudgetAwareGlobalLimiter>(options.GlobalLimiter);
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.81");
+        Microsoft.AspNetCore.Http.EndpointHttpContextExtensions.SetEndpoint(context, new Microsoft.AspNetCore.Http.Endpoint(
+            _ => Task.CompletedTask,
+            new Microsoft.AspNetCore.Http.EndpointMetadataCollection(
+                new Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute(
+                    SignaCore.Host.Security.OidcRateLimitPolicies.Token)),
+            "token"));
+        var before = options.GlobalLimiter!.GetStatistics(context)?.CurrentAvailablePermits ?? 100;
+        using (var lease = options.GlobalLimiter.AttemptAcquire(context))
+        {
+            Assert.True(lease.IsAcquired);
+        }
+
+        Assert.Equal(before - 1, options.GlobalLimiter.GetStatistics(context)!.CurrentAvailablePermits);
+
+        for (var i = 0; i < SignaCore.Database.IdentityConstants.OidcTokenRateLimitPerMinute; i++)
+        {
+            using var within = await http.PostAsync("/oauth2/token", InvalidGrantForm(), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, within.StatusCode);
+        }
+
+        using var rejected = await http.PostAsync("/oauth2/token", InvalidGrantForm(), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        // The in-process windows decided: the SQLite budget table was never written.
+        Assert.Equal(0, await QueryAsync(context => context.OidcRateLimitBuckets.CountAsync(TestContext.Current.CancellationToken)));
+    }
+
     // ---- Helpers ----
 
     [System.Text.RegularExpressions.GeneratedRegex("name=\"__RequestVerificationToken\" value=\"([^\"]*)\"")]

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SignaCore.Database;
+using SignaCore.Database.RateLimiting;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
@@ -24,7 +25,8 @@ public class CleanupWorkerTests
         Mock<IAuthorizationCodeStore>? authorizationCodeStoreMock = null,
         Mock<IRefreshTokenFamilyStore>? refreshTokenFamilyStoreMock = null,
         Mock<ILogoutRequestStore>? logoutRequestStoreMock = null,
-        Mock<IManagementBearerSessionCleanup>? managementBearerCleanupMock = null)
+        Mock<IManagementBearerSessionCleanup>? managementBearerCleanupMock = null,
+        Mock<IOidcRateLimitStore>? oidcRateLimitStoreMock = null)
     {
         var serviceProviderMock = new Mock<IServiceProvider>();
 
@@ -61,6 +63,10 @@ public class CleanupWorkerTests
         serviceProviderMock
             .Setup(sp => sp.GetService(typeof(IManagementBearerSessionCleanup)))
             .Returns((managementBearerCleanupMock ?? new Mock<IManagementBearerSessionCleanup>()).Object);
+        // Only PostgreSQL registers the shared OIDC rate-limit store; absent, the segment is skipped.
+        serviceProviderMock
+            .Setup(sp => sp.GetService(typeof(IOidcRateLimitStore)))
+            .Returns(oidcRateLimitStoreMock?.Object);
 
         return serviceProviderMock;
     }
@@ -440,6 +446,149 @@ public class CleanupWorkerTests
         bearerCleanupMock.Verify(
             c => c.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), stopping.Token),
             Times.Once);
+        appRegRepoMock.Verify(
+            r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task CleanupExpiredDataAsync_DeletesOidcRateLimitBatchesUntilOneIsEmpty()
+    {
+        var logMessages = new List<string>();
+        var sequence = new List<string>();
+        var batches = new Queue<int?>([1000, 1000, 500, 0, 1000]);
+        var storeMock = new Mock<IOidcRateLimitStore>();
+        storeMock
+            .Setup(s => s.DeleteExpiredAsync(It.IsAny<CancellationToken>()))
+            .Callback(() => sequence.Add("buckets"))
+            .ReturnsAsync(() => batches.Dequeue());
+        var bearerCleanupMock = new Mock<IManagementBearerSessionCleanup>();
+        bearerCleanupMock
+            .Setup(c => c.CleanupExpiredAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback(() => sequence.Add("bearer"))
+            .ReturnsAsync(0);
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+        appRegRepoMock
+            .Setup(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback(() => sequence.Add("apps"))
+            .ReturnsAsync(0);
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            appRegRepoMock: appRegRepoMock,
+            managementBearerCleanupMock: bearerCleanupMock,
+            oidcRateLimitStoreMock: storeMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var keyManagerMock = new Mock<IKeyManager>();
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var worker = new CleanupWorker(
+            serviceProviderMock.Object,
+            keyManagerMock.Object,
+            new ListLogger<CleanupWorker>(logMessages));
+
+        await RunWorkerUntilAsync(worker, () => sequence.Contains("apps"));
+
+        Assert.Equal(
+            new[] { "bearer", "buckets", "buckets", "buckets", "buckets", "apps" },
+            sequence.Take(6));
+        storeMock.Verify(s => s.DeleteExpiredAsync(It.IsAny<CancellationToken>()), Times.Exactly(4));
+        lock (logMessages)
+        {
+            Assert.Contains("Deleted 2500 expired OIDC rate-limit buckets", logMessages);
+        }
+    }
+
+    [Fact]
+    public async Task CleanupExpiredDataAsync_StopsOidcRateLimitBatchesAtTheRoundCap()
+    {
+        var storeMock = new Mock<IOidcRateLimitStore>();
+        storeMock
+            .Setup(s => s.DeleteExpiredAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(IdentityConstants.OidcRateLimitCleanupBatchSize);
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+        appRegRepoMock
+            .Setup(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            appRegRepoMock: appRegRepoMock,
+            oidcRateLimitStoreMock: storeMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var keyManagerMock = new Mock<IKeyManager>();
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var worker = new CleanupWorker(serviceProviderMock.Object, keyManagerMock.Object, NullLogger<CleanupWorker>.Instance);
+
+        await RunWorkerUntilAsync(worker, () => appRegRepoMock.Invocations.Count > 0);
+
+        storeMock.Verify(
+            s => s.DeleteExpiredAsync(It.IsAny<CancellationToken>()),
+            Times.Exactly(IdentityConstants.OidcRateLimitCleanupMaxBatchesPerRound));
+    }
+
+    [Fact]
+    public async Task CleanupExpiredDataAsync_AnUnavailableOidcRateLimitStoreEndsTheSegmentWithAFixedMessage()
+    {
+        var logMessages = new List<string>();
+        var storeMock = new Mock<IOidcRateLimitStore>();
+        storeMock
+            .Setup(s => s.DeleteExpiredAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int?)null);
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+        appRegRepoMock
+            .Setup(r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            appRegRepoMock: appRegRepoMock,
+            oidcRateLimitStoreMock: storeMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var keyManagerMock = new Mock<IKeyManager>();
+        keyManagerMock.Setup(k => k.NeedsKeyRotationAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var worker = new CleanupWorker(
+            serviceProviderMock.Object,
+            keyManagerMock.Object,
+            new ListLogger<CleanupWorker>(logMessages));
+
+        await RunWorkerUntilAsync(worker, () => appRegRepoMock.Invocations.Count > 0);
+
+        // One attempt, then the rest of the round goes on; the log names no failure detail.
+        storeMock.Verify(s => s.DeleteExpiredAsync(It.IsAny<CancellationToken>()), Times.Once);
+        lock (logMessages)
+        {
+            var message = Assert.Single(logMessages, line => line.Contains("rate-limit", StringComparison.Ordinal));
+            Assert.Equal("OIDC rate-limit bucket cleanup skipped: the budget store is unavailable", message);
+        }
+    }
+
+    [Fact]
+    public async Task CleanupExpiredDataAsync_OidcRateLimitCancellationStopsTheRound()
+    {
+        using var stopping = new CancellationTokenSource();
+        var storeMock = new Mock<IOidcRateLimitStore>();
+        storeMock
+            .Setup(s => s.DeleteExpiredAsync(It.IsAny<CancellationToken>()))
+            .Returns<CancellationToken>(async token =>
+            {
+                await stopping.CancelAsync();
+                await Task.Delay(Timeout.Infinite, token);
+                return 0;
+            });
+        var appRegRepoMock = new Mock<IAppRegistrationRepository>();
+
+        var serviceProviderMock = CreateMockServiceProvider(
+            appRegRepoMock: appRegRepoMock,
+            oidcRateLimitStoreMock: storeMock);
+        CreateMockScopeFactory(serviceProviderMock);
+        var worker = new TestableCleanupWorker(
+            serviceProviderMock.Object,
+            new Mock<IKeyManager>().Object,
+            NullLogger<CleanupWorker>.Instance);
+
+        await worker.RunAsync(stopping.Token);
+
+        storeMock.Verify(s => s.DeleteExpiredAsync(stopping.Token), Times.Once);
         appRegRepoMock.Verify(
             r => r.DeactivateExpiredCallbacksAsync(It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
             Times.Never);

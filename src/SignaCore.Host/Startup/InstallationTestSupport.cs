@@ -66,8 +66,10 @@ internal static class InstallationTestSupport
     {
         var bootstrapFilePath = WriteBootstrapFile(bootstrapDirectory, database, rootSecret);
 
+        // The seeding below runs in its own explicit transaction, which a retrying PostgreSQL
+        // execution strategy refuses; this preparation context never retries.
         var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
-        optionsBuilder.UseIdentityDatabase(database);
+        optionsBuilder.UseIdentityDatabase(database, enableRetryOnFailure: false);
         await using var db = new IdentityDbContext(optionsBuilder.Options);
 
         await StartupDatabase.EnsureDatabaseExistsAsync(database, cancellationToken);
