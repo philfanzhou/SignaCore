@@ -35,6 +35,7 @@ public class IdentityDbContext : DbContext, IServiceDbContext
     public DbSet<IdentitySessionEntity> IdentitySessions => Set<IdentitySessionEntity>();
     public DbSet<AuthorizationCodeEntity> AuthorizationCodes => Set<AuthorizationCodeEntity>();
     public DbSet<LogoutRequestEntity> LogoutRequests => Set<LogoutRequestEntity>();
+    public DbSet<OidcRateLimitBucketEntity> OidcRateLimitBuckets => Set<OidcRateLimitBucketEntity>();
     public DbSet<ManagementBearerSessionEntity> ManagementBearerSessions => Set<ManagementBearerSessionEntity>();
 
     // ServiceMantle shared installation state (service_installations): the runtime authority for
@@ -532,6 +533,23 @@ public class IdentityDbContext : DbContext, IServiceDbContext
                 .WithMany()
                 .HasForeignKey(e => e.AppRegistrationId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OidcRateLimitBucketEntity>(entity =>
+        {
+            entity.ToTable("oidc_rate_limit_buckets", table =>
+            {
+                table.HasCheckConstraint("CK_oidc_rate_limit_buckets_policy",
+                    "policy IN ('oidc-authorize', 'oidc-login', 'oidc-token', 'oidc-userinfo', 'oidc-logout', 'oidc-revoke')");
+                table.HasCheckConstraint("CK_oidc_rate_limit_buckets_digest_length", "length(partition_digest) = 64");
+                table.HasCheckConstraint("CK_oidc_rate_limit_buckets_permit_count", "permit_count BETWEEN 1 AND 90");
+            });
+            entity.HasKey(e => new { e.Policy, e.PartitionDigest });
+            entity.Property(e => e.Policy).HasColumnName("policy").HasMaxLength(32);
+            entity.Property(e => e.PartitionDigest).HasColumnName("partition_digest").HasMaxLength(64);
+            ConfigureInstant(entity.Property(e => e.WindowExpiresAt).HasColumnName("window_expires_at"));
+            entity.Property(e => e.PermitCount).HasColumnName("permit_count");
+            entity.HasIndex(e => e.WindowExpiresAt);
         });
 
         modelBuilder.Entity<SecurityKeyEntity>(entity =>

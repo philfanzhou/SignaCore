@@ -12,8 +12,8 @@ using SignaCore.Database;
 namespace SignaCore.Database.Migrations
 {
     [DbContext(typeof(IdentityDbContext))]
-    [Migration("20260925035549_AddManagementBearerSessions")]
-    partial class AddManagementBearerSessions
+    [Migration("20260925033310_AddOidcRateLimitBuckets")]
+    partial class AddOidcRateLimitBuckets
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -1051,51 +1051,37 @@ namespace SignaCore.Database.Migrations
                     b.ToTable("logout_requests", (string)null);
                 });
 
-            modelBuilder.Entity("SignaCore.Database.Entity.ManagementBearerSessionEntity", b =>
+            modelBuilder.Entity("SignaCore.Database.Entity.OidcRateLimitBucketEntity", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
+                    b.Property<string>("Policy")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("policy");
 
-                    b.Property<Guid>("AccountId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("account_id");
+                    b.Property<string>("PartitionDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("partition_digest");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
+                    b.Property<int>("PermitCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("permit_count");
+
+                    b.Property<DateTimeOffset>("WindowExpiresAt")
                         .HasColumnType("timestamptz")
-                        .HasColumnName("created_at");
+                        .HasColumnName("window_expires_at");
 
-                    b.Property<DateTimeOffset>("ExpiresAt")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("expires_at");
+                    b.HasKey("Policy", "PartitionDigest");
 
-                    b.Property<DateTimeOffset?>("RevokedAt")
-                        .HasColumnType("timestamptz")
-                        .HasColumnName("revoked_at");
+                    b.HasIndex("WindowExpiresAt");
 
-                    b.Property<string>("TokenDigest")
-                        .IsRequired()
-                        .HasMaxLength(71)
-                        .HasColumnType("character varying(71)")
-                        .HasColumnName("token_digest");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AccountId");
-
-                    b.HasIndex("ExpiresAt");
-
-                    b.HasIndex("TokenDigest")
-                        .IsUnique();
-
-                    b.ToTable("management_bearer_sessions", null, t =>
+                    b.ToTable("oidc_rate_limit_buckets", null, t =>
                         {
-                            t.HasCheckConstraint("CK_management_bearer_sessions_digest_length", "length(token_digest) = 71");
+                            t.HasCheckConstraint("CK_oidc_rate_limit_buckets_digest_length", "length(partition_digest) = 64");
 
-                            t.HasCheckConstraint("CK_management_bearer_sessions_expiry", "expires_at > created_at");
+                            t.HasCheckConstraint("CK_oidc_rate_limit_buckets_permit_count", "permit_count BETWEEN 1 AND 90");
 
-                            t.HasCheckConstraint("CK_management_bearer_sessions_revocation", "revoked_at IS NULL OR revoked_at >= created_at");
+                            t.HasCheckConstraint("CK_oidc_rate_limit_buckets_policy", "policy IN ('oidc-authorize', 'oidc-login', 'oidc-token', 'oidc-userinfo', 'oidc-logout', 'oidc-revoke')");
                         });
                 });
 
@@ -1572,15 +1558,6 @@ namespace SignaCore.Database.Migrations
                         .WithMany()
                         .HasForeignKey("AppRegistrationId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("SignaCore.Database.Entity.ManagementBearerSessionEntity", b =>
-                {
-                    b.HasOne("SignaCore.Database.Entity.AccountEntity", null)
-                        .WithMany()
-                        .HasForeignKey("AccountId")
-                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

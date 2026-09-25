@@ -104,3 +104,31 @@ anywhere: the one-time legacy import reads the effective configuration of the ru
 stores it in the database. Supply the former KV values through appsettings or environment variables
 for that single start if they are not otherwise present, then delete the KV documents — leaving them
 in place has no effect and only invites confusion.
+
+## Real agent acceptance
+
+On Linux with Docker, run:
+
+```sh
+RUN_SIGNACORE_CONSUL_TESTS=true dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj -c Release --filter FullyQualifiedName~ConsulRealAgentAcceptanceTests
+```
+
+The PR/main `Real Consul Acceptance` job pre-pulls the digest pinned in the fixture and runs
+all cases; a missing Docker daemon or agent fails an enabled run. Ordinary runs explicitly skip
+the six agent cases and still execute the four canary scanner self-checks.
+
+Two real Program hosts use Kestrel on separate loopback ports and one installed SQLite database.
+An isolated Consul agent uses Linux host networking with random HTTP/serf/server ports and no
+DNS/gRPC listeners. A transparent loopback proxy forwards the production client's requests to
+that agent, recording only safe metadata and token equality. It also exercises initial
+unavailability and one lost response after a real registration. The fixture owns and releases
+hosts, clients, proxy, agent and temporary database, including failed runs.
+
+Assertions instantiate the [shared lifecycle model](https://github.com/philfanzhou/ServiceMantle/blob/main/docs/contracts/consul-registration-lifecycle.md):
+Ready gating, independent identities, actual passing HTTP checks, repeated Ready, readiness loss
+and recovery, both stop orders, restart-bound settings, disabled/query-only zero-client behavior,
+and caller cancellation with an unknown remote result. Observation deadlines only prevent hung
+tests; they are not recovery-time guarantees. The token scan covers captured host log messages,
+structured properties and exceptions, available metrics, management projections, and transport
+JSON/URLs. Agent logs, process memory, arbitrary external collectors, partitions, SIGKILL cleanup,
+DNS/catalog propagation and traffic draining remain outside this acceptance boundary.
