@@ -41,8 +41,8 @@ namespace SignaCore.Tests.Integration;
 /// <c>docs/development/ConsulIntegration.md</c>: the instance id is the host identity's
 /// (<c>signacore:signacore-{guid}</c>), the health check is an HTTP readiness probe instead of a
 /// TTL heartbeat, the address and port are explicit per-instance configuration instead of
-/// auto-detection, and an unreachable agent retries instead of failing host startup. The
-/// pre-switch Steeltoe payload remains pinned by <c>ConsulDiscoveryCharacterizationTests</c>.
+/// auto-detection, and an unreachable agent retries instead of failing host startup. Product
+/// catalog defaults remain pinned by <c>ProductSettingDefinitionTableTests</c>.
 /// </para>
 /// </summary>
 [Collection(SqliteProcessState.CollectionName)]
@@ -137,9 +137,8 @@ public sealed class ConsulDiscoveryRegistrationTests : IAsyncLifetime
         Assert.All(logs.Messages, message =>
             Assert.DoesNotContain(ConsulToken, message, StringComparison.Ordinal));
 
-        // Exactly one registration owner: the shared lifecycle is the only one, and no Steeltoe
-        // discovery client is composed any more.
-        Assert.Null(_factories[^1].Services.GetService<Steeltoe.Common.Discovery.IDiscoveryClient>());
+        // The shared lifecycle is the sole registration owner; the retired client and its
+        // package have been removed from the host.
     }
 
     [Fact]
@@ -165,7 +164,7 @@ public sealed class ConsulDiscoveryRegistrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task NotReadyHost_StaysUnregistered_ThenRegistersWhenReadinessReturns()
+    public async Task ReadinessTransitions_RegisterOnlyWhileReady_AndDeregisterOnReadinessLoss()
     {
         var toggle = new ToggleReadinessContributor();
         using var http = await StartHostAsync(
@@ -185,6 +184,10 @@ public sealed class ConsulDiscoveryRegistrationTests : IAsyncLifetime
         toggle.SetReady();
         var registration = await _agent.WaitForRegistrationAsync(TestContext.Current.CancellationToken);
         Assert.Equal(AdvertisementAddress, registration.Body.Address);
+
+        toggle.SetNotReady();
+        var deregistration = await _agent.WaitForDeregistrationAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(registration.Body.Id, ExtractId(deregistration.Path));
     }
 
     [Fact]
@@ -500,6 +503,8 @@ public sealed class ConsulDiscoveryRegistrationTests : IAsyncLifetime
         public int Order => 200;
 
         public void SetReady() => _ready = true;
+
+        public void SetNotReady() => _ready = false;
 
         public ValueTask<ServiceReadinessContributorResult> EvaluateAsync(
             ServiceHealthSnapshot snapshot, CancellationToken cancellationToken = default) =>

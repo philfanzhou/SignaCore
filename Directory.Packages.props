@@ -45,7 +45,6 @@
     <PackageVersion Include="Serilog.Sinks.Grafana.Loki" Version="9.0.2" />
     <!-- Overrides the 2.1.12 that EF Core Sqlite resolves transitively. -->
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
-    <PackageVersion Include="Steeltoe.Discovery.Consul" Version="4.3.0" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.3" />
     <PackageVersion Include="System.DirectoryServices.Protocols" Version="10.0.12" />
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.23.0" />

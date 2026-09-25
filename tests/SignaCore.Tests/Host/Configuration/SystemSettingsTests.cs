@@ -53,6 +53,21 @@ public class ProductSettingDefinitionTableTests
     }
 
     [Fact]
+    public void LegacyDefaults_PreserveTheConsulProductSettings()
+    {
+        var defaults = ServiceSettingDefinitions.BuildLegacyDefaults();
+
+        Assert.Equal("false", defaults[SystemSettingKeys.ConsulDiscoveryEnabled]);
+        Assert.Equal("false", defaults[SystemSettingKeys.ConsulDiscoveryRegister]);
+        Assert.Equal("false", defaults[SystemSettingKeys.ConsulDiscoveryDeregister]);
+        Assert.Equal("SignaCore", defaults[SystemSettingKeys.ConsulDiscoveryServiceName]);
+        Assert.Equal("/health/ready", defaults[SystemSettingKeys.ConsulDiscoveryHealthCheckPath]);
+        Assert.Equal("host.docker.internal", defaults[SystemSettingKeys.ConsulHost]);
+        Assert.Equal("8500", defaults[SystemSettingKeys.ConsulPort]);
+        Assert.Equal(string.Empty, defaults[SystemSettingKeys.ConsulToken]);
+    }
+
+    [Fact]
     public void LegacyDefaults_ShipOptionalProvidersDisabled()
     {
         var defaults = ServiceSettingDefinitions.BuildLegacyDefaults();
