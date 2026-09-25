@@ -613,7 +613,10 @@ public sealed class ConsulRealAgentAcceptanceTests
                     await ReleaseDeregister.Task.WaitAsync(lifetime.Token);
                 }
                 context.Response.StatusCode = (int)response.StatusCode;
-                await response.Content.CopyToAsync(context.Response.OutputStream, lifetime.Token);
+                // The production adapter consumes only the real agent's status. Never reflect
+                // arbitrary upstream text into an HTTP response owned by this test listener.
+                context.Response.ContentType = "application/json";
+                context.Response.ContentLength64 = 0;
                 context.Response.Close();
             }
             catch (Exception e) when (e is HttpRequestException or OperationCanceledException or HttpListenerException or IOException or ObjectDisposedException)
