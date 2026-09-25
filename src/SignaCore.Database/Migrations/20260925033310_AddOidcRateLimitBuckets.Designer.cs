@@ -2,36 +2,44 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SignaCore.Database;
 
 #nullable disable
 
-namespace SignaCore.Database.Migrations.Sqlite.Migrations
+namespace SignaCore.Database.Migrations
 {
     [DbContext(typeof(IdentityDbContext))]
-    partial class IdentityDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260925033310_AddOidcRateLimitBuckets")]
+    partial class AddOidcRateLimitBuckets
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
+            modelBuilder
+                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("Relational:MaxIdentifierLength", 63);
+
+            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("ServiceMantle.Persistence.EntityFrameworkCore.DataProtectionKeyEntity", b =>
                 {
                     b.Property<string>("ServiceId")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(128)")
                         .HasColumnName("service_id");
 
                     b.Property<string>("KeyId")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(64)")
                         .HasColumnName("key_id");
 
                     b.Property<string>("EncryptedXml")
                         .IsRequired()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("encrypted_xml");
 
                     b.HasKey("ServiceId", "KeyId");
@@ -43,69 +51,69 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<string>("Id")
                         .HasMaxLength(36)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(36)")
                         .HasColumnName("id");
 
                     b.Property<string>("Action")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(200)")
                         .HasColumnName("action");
 
                     b.Property<string>("ClientIp")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(64)")
                         .HasColumnName("client_ip");
 
                     b.Property<string>("CorrelationId")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(128)")
                         .HasColumnName("correlation_id");
 
                     b.Property<string>("MetadataJson")
                         .HasMaxLength(262144)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(262144)")
                         .HasColumnName("metadata_json");
 
                     b.Property<DateTime>("OccurredAtUtc")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("occurred_at_utc");
 
                     b.Property<string>("OperatorDisplayName")
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(256)")
                         .HasColumnName("operator_display_name");
 
                     b.Property<string>("OperatorId")
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(256)")
                         .HasColumnName("operator_id");
 
                     b.Property<string>("OperatorSource")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("operator_source");
 
                     b.Property<int>("Outcome")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("outcome");
 
                     b.Property<string>("SecurityDescription")
                         .HasMaxLength(4000)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(4000)")
                         .HasColumnName("security_description");
 
                     b.Property<string>("TargetId")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(256)")
                         .HasColumnName("target_id");
 
                     b.Property<string>("TargetType")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(200)")
                         .HasColumnName("target_type");
 
                     b.HasKey("Id");
@@ -160,43 +168,43 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<string>("ServiceId")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(128)")
                         .HasColumnName("service_id");
 
                     b.Property<DateTime?>("CompletedAtUtc")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("completed_at_utc");
 
                     b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
                     b.Property<string>("SetupCodeDigest")
                         .HasMaxLength(74)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(74)")
                         .HasColumnName("setup_code_digest");
 
                     b.Property<DateTime?>("SetupCodeExpiresAtUtc")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("setup_code_expires_at_utc");
 
                     b.Property<int>("SetupCodeGeneration")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasDefaultValue(0)
                         .HasColumnName("setup_code_generation");
 
                     b.Property<DateTime?>("SetupCodeIssuedAtUtc")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("setup_code_issued_at_utc");
 
                     b.Property<int>("Status")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("status");
 
                     b.Property<int>("Version")
                         .IsConcurrencyToken()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("version");
 
                     b.HasKey("ServiceId");
@@ -208,31 +216,31 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<string>("ServiceId")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(128)")
                         .HasColumnName("service_id");
 
                     b.Property<bool>("RestartRequired")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasColumnName("restart_required");
 
                     b.Property<DateTime>("UpdatedAtUtc")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at_utc");
 
                     b.Property<string>("UpdatedBy")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(256)")
                         .HasColumnName("updated_by");
 
                     b.Property<string>("ValuesJson")
                         .IsRequired()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("values_json");
 
                     b.Property<long>("Version")
                         .IsConcurrencyToken()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("bigint")
                         .HasColumnName("version");
 
                     b.HasKey("ServiceId");
@@ -247,53 +255,53 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasColumnName("is_active");
 
-                    b.Property<long?>("LastLoginAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset?>("LastLoginAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("last_login_at");
 
                     b.Property<string>("LastLoginIp")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("last_login_ip");
 
                     b.Property<string>("LastLoginMethod")
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("last_login_method");
 
                     b.Property<string>("Nickname")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("nickname");
 
                     b.Property<string>("NicknameNormalized")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("nickname_normalized");
 
                     b.Property<string>("Remark")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("remark");
 
                     b.Property<string>("RemarkNormalized")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(500)")
                         .HasColumnName("remark_normalized");
 
                     b.Property<int>("TotalLoginCount")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("total_login_count");
 
                     b.HasKey("Id");
@@ -305,23 +313,23 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AppRegistrationId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("app_registration_id");
 
                     b.Property<Guid?>("ApprovedBy")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("approved_by");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
                     b.Property<Guid>("SourceAppRegistrationId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("source_app_registration_id");
 
                     b.HasKey("Id");
@@ -341,31 +349,31 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AppRegistrationId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("app_registration_id");
 
                     b.Property<int>("ApprovalSource")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("approval_source");
 
                     b.Property<Guid?>("ApprovedBy")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("approved_by");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasColumnName("is_active");
 
                     b.Property<Guid>("LdapCredentialId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("ldap_credential_id");
 
                     b.HasKey("Id");
@@ -382,21 +390,21 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AppRegistrationId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("app_registration_id");
 
                     b.Property<string>("CanonicalUri")
                         .IsRequired()
                         .HasMaxLength(501)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(501)")
                         .HasColumnName("canonical_uri");
 
                     b.Property<int>("Kind")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("kind");
 
                     b.HasKey("Id");
@@ -411,18 +419,18 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<bool>("AllowAuthorizationCode")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasDefaultValue(false)
                         .HasColumnName("allow_authorization_code");
 
                     b.Property<bool>("AllowRefreshToken")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasDefaultValue(false)
                         .HasColumnName("allow_refresh_token");
 
@@ -430,80 +438,80 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(32)")
                         .HasDefaultValue("openid")
                         .HasColumnName("allowed_scopes");
 
                     b.Property<string>("AppId")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("app_id");
 
                     b.Property<string>("AppIdNormalized")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("app_id_normalized");
 
                     b.Property<string>("AppName")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("app_name");
 
                     b.Property<string>("AppSecretHash")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("app_secret_hash");
 
                     b.Property<int>("AudienceMode")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("audience_mode");
 
-                    b.Property<long?>("CallbackExpiresAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset?>("CallbackExpiresAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("callback_expires_at");
 
                     b.Property<string>("CallbackUrl")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("callback_url");
 
                     b.Property<int>("ClientType")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasDefaultValue(0)
                         .HasColumnName("client_type");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
                     b.Property<int?>("IdentitySessionMaxAgeSeconds")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("identity_session_max_age_seconds");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasColumnName("is_active");
 
                     b.Property<int>("LdapLoginMode")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("ldap_login_mode");
 
                     b.Property<int>("SmsLoginMode")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("sms_login_mode");
 
                     b.Property<string>("SmsProfileKey")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(64)")
                         .HasColumnName("sms_profile_key");
 
                     b.Property<int>("WechatLoginMode")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("wechat_login_mode");
 
                     b.HasKey("Id");
@@ -518,31 +526,31 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AppRegistrationId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("app_registration_id");
 
                     b.Property<int>("ApprovalSource")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("approval_source");
 
                     b.Property<Guid?>("ApprovedBy")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("approved_by");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasColumnName("is_active");
 
                     b.Property<Guid>("UserLoginId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("user_login_id");
 
                     b.HasKey("Id");
@@ -559,27 +567,27 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AppRegistrationId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("app_registration_id");
 
                     b.Property<int>("ApprovalSource")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("approval_source");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasColumnName("is_active");
 
                     b.Property<Guid>("UserLoginId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("user_login_id");
 
                     b.HasKey("Id");
@@ -596,69 +604,69 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AccountId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("account_id");
 
                     b.Property<Guid>("AppRegistrationId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("app_registration_id");
 
-                    b.Property<long>("AuthTime")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("AuthTime")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("auth_time");
 
                     b.Property<string>("CodeChallenge")
                         .IsRequired()
                         .HasMaxLength(43)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(43)")
                         .HasColumnName("code_challenge");
 
                     b.Property<string>("CodeDigest")
                         .IsRequired()
                         .HasMaxLength(71)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(71)")
                         .HasColumnName("code_digest");
 
-                    b.Property<long?>("ConsumedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("consumed_at");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
-                    b.Property<long>("ExpiresAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("expires_at");
 
                     b.Property<Guid>("IdentitySessionId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("identity_session_id");
 
                     b.Property<string>("Nonce")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(128)")
                         .HasColumnName("nonce");
 
                     b.Property<string>("RedirectUri")
                         .IsRequired()
                         .HasMaxLength(501)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(501)")
                         .HasColumnName("redirect_uri");
 
                     b.Property<Guid?>("RefreshFamilyId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("refresh_family_id");
 
                     b.Property<string>("Scope")
                         .IsRequired()
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(32)")
                         .HasColumnName("scope");
 
                     b.HasKey("Id");
@@ -684,59 +692,59 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AppRegistrationId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("app_registration_id");
 
                     b.Property<string>("CodeChallenge")
                         .IsRequired()
                         .HasMaxLength(43)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(43)")
                         .HasColumnName("code_challenge");
 
-                    b.Property<long?>("ConsumedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("consumed_at");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
-                    b.Property<long>("ExpiresAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("expires_at");
 
                     b.Property<string>("HandleDigest")
                         .IsRequired()
                         .HasMaxLength(71)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(71)")
                         .HasColumnName("handle_digest");
 
                     b.Property<string>("Nonce")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(128)")
                         .HasColumnName("nonce");
 
                     b.Property<string>("RedirectUri")
                         .IsRequired()
                         .HasMaxLength(501)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(501)")
                         .HasColumnName("redirect_uri");
 
                     b.Property<string>("Scope")
                         .IsRequired()
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(32)")
                         .HasColumnName("scope");
 
                     b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(128)")
                         .HasColumnName("state");
 
                     b.HasKey("Id");
@@ -753,46 +761,46 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<long>("AbsoluteExpiresAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("AbsoluteExpiresAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("absolute_expires_at");
 
                     b.Property<Guid>("AccountId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("account_id");
 
                     b.Property<string>("AuthMethod")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(50)")
                         .HasColumnName("auth_method");
 
-                    b.Property<long>("AuthTime")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("AuthTime")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("auth_time");
 
-                    b.Property<long>("IdleExpiresAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("IdleExpiresAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("idle_expires_at");
 
-                    b.Property<long>("LastSeenAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("last_seen_at");
 
                     b.Property<Guid>("PasswordCredentialId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("password_credential_id");
 
                     b.Property<string>("RevocationReason")
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(32)")
                         .HasColumnName("revocation_reason");
 
-                    b.Property<long?>("RevokedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("revoked_at");
 
                     b.HasKey("Id");
@@ -811,55 +819,55 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AccountId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("account_id");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
                     b.Property<string>("DirectoryKey")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(64)")
                         .HasColumnName("directory_key");
 
                     b.Property<string>("DirectoryKeyNormalized")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(64)")
                         .HasColumnName("directory_key_normalized");
 
                     b.Property<Guid>("ObjectGuid")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("object_guid");
 
                     b.Property<string>("SamAccountName")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("sam_account_name");
 
                     b.Property<string>("SamAccountNameNormalized")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("sam_account_name_normalized");
 
                     b.Property<string>("UserPrincipalName")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(256)")
                         .HasColumnName("user_principal_name");
 
                     b.Property<string>("UserPrincipalNameNormalized")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(256)")
                         .HasColumnName("user_principal_name_normalized");
 
                     b.HasKey("Id");
@@ -882,31 +890,31 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<int>("FailedAttempts")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("failed_attempts");
 
-                    b.Property<long>("LastAttemptAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("LastAttemptAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("last_attempt_at");
 
-                    b.Property<long?>("LockoutUntil")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset?>("LockoutUntil")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("lockout_until");
 
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("username");
 
                     b.Property<string>("UsernameNormalized")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("username_normalized");
 
                     b.HasKey("Id");
@@ -921,58 +929,58 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid?>("AccountId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("account_id");
 
                     b.Property<string>("AppId")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("app_id");
 
                     b.Property<string>("AuthMethod")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("auth_method");
 
                     b.Property<string>("ClientIp")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("client_ip");
 
                     b.Property<string>("CorrelationId")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("correlation_id");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
                     b.Property<string>("EventType")
                         .IsRequired()
                         .HasMaxLength(50)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("event_type");
 
                     b.Property<string>("FailureReason")
                         .HasMaxLength(500)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("failure_reason");
 
                     b.Property<string>("UserAgent")
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("user_agent");
 
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("username");
 
                     b.HasKey("Id");
@@ -990,47 +998,47 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AccountId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("account_id");
 
                     b.Property<Guid>("AppRegistrationId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("app_registration_id");
 
-                    b.Property<long?>("ConsumedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("consumed_at");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
-                    b.Property<long>("ExpiresAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("expires_at");
 
                     b.Property<string>("HandleDigest")
                         .IsRequired()
                         .HasMaxLength(71)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(71)")
                         .HasColumnName("handle_digest");
 
                     b.Property<Guid>("IdentitySessionId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("identity_session_id");
 
                     b.Property<string>("PostLogoutRedirectUri")
                         .HasMaxLength(501)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(501)")
                         .HasColumnName("post_logout_redirect_uri");
 
                     b.Property<string>("State")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(128)")
                         .HasColumnName("state");
 
                     b.HasKey("Id");
@@ -1047,20 +1055,20 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<string>("Policy")
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(32)")
                         .HasColumnName("policy");
 
                     b.Property<string>("PartitionDigest")
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(64)")
                         .HasColumnName("partition_digest");
 
                     b.Property<int>("PermitCount")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("permit_count");
 
-                    b.Property<long>("WindowExpiresAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("WindowExpiresAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("window_expires_at");
 
                     b.HasKey("Policy", "PartitionDigest");
@@ -1081,85 +1089,85 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AppRegistrationId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("app_registration_id");
 
                     b.Property<int>("Attempts")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("attempts");
 
                     b.Property<string>("CodeMac")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(64)")
                         .HasColumnName("code_mac");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
                     b.Property<int>("DaySendCount")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("day_send_count");
 
-                    b.Property<long>("DayWindowStartedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("DayWindowStartedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("day_window_started_at");
 
-                    b.Property<long>("ExpiresAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("expires_at");
 
                     b.Property<int>("HourSendCount")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("hour_send_count");
 
-                    b.Property<long>("HourWindowStartedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("HourWindowStartedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("hour_window_started_at");
 
-                    b.Property<long>("LockoutUntil")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("LockoutUntil")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("lockout_until");
 
                     b.Property<string>("Phone")
                         .IsRequired()
                         .HasMaxLength(20)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("phone");
 
                     b.Property<string>("ProfileKey")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(64)")
                         .HasColumnName("profile_key");
 
                     b.Property<string>("Provider")
                         .IsRequired()
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(32)")
                         .HasColumnName("provider");
 
                     b.Property<string>("ProviderMessageId")
                         .HasMaxLength(128)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(128)")
                         .HasColumnName("provider_message_id");
 
-                    b.Property<long?>("SentAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset?>("SentAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("sent_at");
 
                     b.Property<int>("Status")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("status");
 
                     b.Property<int>("Version")
                         .IsConcurrencyToken()
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("integer")
                         .HasColumnName("version");
 
                     b.HasKey("Id");
@@ -1174,33 +1182,33 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AccountId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("account_id");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("password_hash");
 
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("username");
 
                     b.Property<string>("UsernameNormalized")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("username_normalized");
 
                     b.HasKey("Id");
@@ -1217,77 +1225,77 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AccountId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("account_id");
 
                     b.Property<string>("AppId")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("app_id");
 
-                    b.Property<long?>("AuthTime")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset?>("AuthTime")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("auth_time");
 
-                    b.Property<long?>("ConsumedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("consumed_at");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
-                    b.Property<long>("ExpiresAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("expires_at");
 
                     b.Property<Guid>("FamilyId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("family_id");
 
                     b.Property<Guid?>("IdentitySessionId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("identity_session_id");
 
                     b.Property<bool>("IsRevoked")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasColumnName("is_revoked");
 
                     b.Property<Guid?>("LdapCredentialId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("ldap_credential_id");
 
                     b.Property<Guid?>("ParentId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("parent_id");
 
                     b.Property<string>("Scope")
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(32)")
                         .HasColumnName("scope");
 
                     b.Property<Guid?>("SmsUserLoginId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("sms_user_login_id");
 
                     b.Property<string>("SourceAppId")
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("source_app_id");
 
                     b.Property<string>("TokenValue")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("token_value");
 
                     b.Property<Guid?>("WechatUserLoginId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("wechat_user_login_id");
 
                     b.HasKey("Id");
@@ -1322,49 +1330,49 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("created_at");
 
                     b.Property<string>("EncryptedPrivateKeyParams")
                         .IsRequired()
                         .HasMaxLength(4096)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("encrypted_private_key_params");
 
                     b.Property<string>("EncryptionSalt")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("encryption_salt");
 
-                    b.Property<long>("ExpiresAt")
-                        .HasColumnType("INTEGER")
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamptz")
                         .HasColumnName("expires_at");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER")
+                        .HasColumnType("boolean")
                         .HasColumnName("is_active");
 
                     b.Property<string>("KeyId")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("key_id");
 
                     b.Property<string>("PublicKeyExponent")
                         .IsRequired()
                         .HasMaxLength(4096)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("public_key_exponent");
 
                     b.Property<string>("PublicKeyModulus")
                         .IsRequired()
                         .HasMaxLength(2048)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("public_key_modulus");
 
                     b.HasKey("Id");
@@ -1379,29 +1387,29 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("id");
 
                     b.Property<Guid>("AccountId")
-                        .HasColumnType("TEXT")
+                        .HasColumnType("uuid")
                         .HasColumnName("account_id");
 
                     b.Property<string>("ProviderName")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("provider_name");
 
                     b.Property<string>("ProviderNameNormalized")
                         .IsRequired()
                         .HasMaxLength(100)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("character varying(100)")
                         .HasColumnName("provider_name_normalized");
 
                     b.Property<string>("ProviderUserId")
                         .IsRequired()
                         .HasMaxLength(256)
-                        .HasColumnType("TEXT")
+                        .HasColumnType("text")
                         .HasColumnName("provider_user_id");
 
                     b.HasKey("Id");

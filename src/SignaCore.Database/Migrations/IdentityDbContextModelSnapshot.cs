@@ -1048,6 +1048,40 @@ namespace SignaCore.Database.Migrations
                     b.ToTable("logout_requests", (string)null);
                 });
 
+            modelBuilder.Entity("SignaCore.Database.Entity.OidcRateLimitBucketEntity", b =>
+                {
+                    b.Property<string>("Policy")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("policy");
+
+                    b.Property<string>("PartitionDigest")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("partition_digest");
+
+                    b.Property<int>("PermitCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("permit_count");
+
+                    b.Property<DateTimeOffset>("WindowExpiresAt")
+                        .HasColumnType("timestamptz")
+                        .HasColumnName("window_expires_at");
+
+                    b.HasKey("Policy", "PartitionDigest");
+
+                    b.HasIndex("WindowExpiresAt");
+
+                    b.ToTable("oidc_rate_limit_buckets", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_oidc_rate_limit_buckets_digest_length", "length(partition_digest) = 64");
+
+                            t.HasCheckConstraint("CK_oidc_rate_limit_buckets_permit_count", "permit_count BETWEEN 1 AND 90");
+
+                            t.HasCheckConstraint("CK_oidc_rate_limit_buckets_policy", "policy IN ('oidc-authorize', 'oidc-login', 'oidc-token', 'oidc-userinfo', 'oidc-logout', 'oidc-revoke')");
+                        });
+                });
+
             modelBuilder.Entity("SignaCore.Database.Entity.OtpEntity", b =>
                 {
                     b.Property<Guid>("Id")
