@@ -193,7 +193,7 @@ public sealed class ReferenceBffMultiInstanceTests
             foreach (var output in outputs) { phase.Name = output.Stage + " browser scans"; output.Scan(allSecrets); }
             phase.Name = "owned-event scans";
             Assert.NotNull(events);
-            events.AssertCompleteAndScan(allSecrets);
+            AssertCompleteAndScan(events.Events, allSecrets);
             phase.Name = "cleanup";
         }
         finally { File.Delete(databasePath); }
@@ -361,17 +361,6 @@ public sealed class ReferenceBffMultiInstanceTests
                     foreach (var field in fields) properties.TryAdd(field.Key, field.Value);
             }
         }
-        public void AssertCompleteAndScan(IEnumerable<string> canaries)
-        {
-            Assert.NotEmpty(Events);
-            foreach (var (operation, outcome) in new[] { ("WebHost", "Started"), ("Login", "Succeeded"), ("UserInfo", "Confirmed"), ("Authorization", "Forbidden"), ("Authorization", "Authorized") })
-                Assert.True(Events.Any(e => Equals(e.Properties.GetValueOrDefault("Operation"), operation)
-                    && Equals(e.Properties.GetValueOrDefault("Outcome"), outcome)), "Missing expected owned operation/outcome: " + operation + "/" + outcome);
-            Assert.True(Events.Count(e => Equals(e.Properties.GetValueOrDefault("Operation"), "Login")) >= 3);
-            foreach (var entry in Events) Scan(entry, canaries);
-        }
-        public static void Scan(OwnedEvent entry, IEnumerable<string> canaries) =>
-            BffCanaryAssertions.Absent(JsonSerializer.Serialize(entry), canaries, "BffOperationLog complete event");
         private sealed class Scope(OperationLogCapture owner, Scope? parent, object state, IDisposable? inner) : IDisposable
         {
             public Scope? Parent { get; } = parent;
@@ -379,6 +368,19 @@ public sealed class ReferenceBffMultiInstanceTests
             public void Dispose() { owner.scope.Value = Parent; inner?.Dispose(); }
         }
     }
+    // Canary comparisons are test assertions, separate from the ILogger capture/forwarding API.
+    private static void AssertCompleteAndScan(IEnumerable<OwnedEvent> events, IEnumerable<string> canaries)
+    {
+        Assert.NotEmpty(events);
+        foreach (var (operation, outcome) in new[] { ("WebHost", "Started"), ("Login", "Succeeded"), ("UserInfo", "Confirmed"), ("Authorization", "Forbidden"), ("Authorization", "Authorized") })
+            Assert.True(events.Any(e => Equals(e.Properties.GetValueOrDefault("Operation"), operation)
+                && Equals(e.Properties.GetValueOrDefault("Outcome"), outcome)), "Missing expected owned operation/outcome: " + operation + "/" + outcome);
+        Assert.True(events.Count(e => Equals(e.Properties.GetValueOrDefault("Operation"), "Login")) >= 3);
+        foreach (var entry in events) ScanOwnedEvent(entry, canaries);
+    }
+    private static void ScanOwnedEvent(OwnedEvent entry, IEnumerable<string> canaries) =>
+        BffCanaryAssertions.Absent(JsonSerializer.Serialize(entry), canaries, "BffOperationLog complete event");
+
     private sealed record OwnedEvent(string Emitter, string Level, int EventId, string Message, Dictionary<string, object?> Properties, string? Exception);
 
     [Theory]
@@ -393,7 +395,7 @@ public sealed class ReferenceBffMultiInstanceTests
         capture.Log(LogLevel.Information, new EventId(1), "state", carrier == "exception" ? new Exception(canary) : null,
             (_, _) => carrier == "message" ? canary : "Reference BFF operation completed.");
         var entry = Assert.Single(capture.Events);
-        var failure = Assert.Throws<Xunit.Sdk.FalseException>(() => OperationLogCapture.Scan(entry, [canary]));
+        var failure = Assert.Throws<Xunit.Sdk.FalseException>(() => ScanOwnedEvent(entry, [canary]));
         Assert.False(failure.Message.Contains(canary, StringComparison.Ordinal));
     }
 
