@@ -33,7 +33,6 @@
     <PackageReference Include="Serilog.Settings.Configuration" />
     <PackageReference Include="Serilog.Sinks.Console" />
     <PackageReference Include="Serilog.Sinks.Grafana.Loki" />
-    <PackageReference Include="Steeltoe.Discovery.Consul" />
   </ItemGroup>
 
   <ItemGroup>

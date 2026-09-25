@@ -89,9 +89,11 @@ restart of the process. There is no hot reload.
 
 ## Rollback
 
-To roll back to the retired Steeltoe wiring: stop **every** instance of the service first — two
-registration owners for the same service must never run concurrently — then deploy the previous
-build with the configuration it accepted (including the auto-detected address form). Registrations
+The Steeltoe wiring and package are removed; there is no in-process switch back to that client.
+Rollback requires redeploying a previous image that still contains it. Stop **every** instance of
+the service first — two registration owners for the same service must never run concurrently —
+then deploy that image with the configuration it accepted (including the auto-detected address
+form). This removal changes no database schema or persisted settings. Registrations
 left behind by an abnormally terminated instance are cleaned by ordinary Consul operations
 tooling; the service does not delete them itself.
 
