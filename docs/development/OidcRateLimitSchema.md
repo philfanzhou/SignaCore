@@ -10,7 +10,12 @@ Both provider histories add `AddOidcRateLimitBuckets` after their current predec
 installation or upgrade produces an empty budget table and expiry index; existing accounts,
 applications, identity sessions, tokens, settings, installation, audit and key-ring rows are not
 rewritten. Digest length is enforced by both databases; lowercase hex and HMAC correctness are
-future store responsibilities. No raw partition identifier is stored.
+store responsibilities. No raw partition identifier is stored.
+
+A PostgreSQL-only budget store (`PostgreSqlOidcRateLimitStore`) and its HMAC partitioner
+(`OidcRateLimitPartitioner`) exist but are not registered or wired into any HTTP pipeline yet, so
+they enable nothing. Each call runs one auto-committed statement on its own connection, outside
+every EF retry strategy. Its contract suite is `OidcRateLimitStoreDatabaseContractTests`.
 
 Code rollback can leave the unused table in place. Down to this migration's **direct predecessor**
 drops only the temporary budget table. Stop every future budget writer before doing so; operators
