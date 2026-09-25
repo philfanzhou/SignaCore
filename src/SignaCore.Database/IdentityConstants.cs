@@ -172,4 +172,28 @@ public static class IdentityConstants
     public const int OidcUserInfoRateLimitPerMinute = 90;
     public const int OidcLogoutRateLimitPerMinute = 90;
     public const int OidcRevokeRateLimitPerMinute = 90;
+
+    // ---- OIDC shared rate-limit budget store (PS-24) ----
+    // The window every Oidc*RateLimitPerMinute budget is counted in. The database clock decides
+    // when a window starts and expires; the application clock never takes part.
+
+    public const int OidcRateLimitWindowSeconds = 60;
+
+    /// <summary>
+    /// The total budget of one store call — opening the connection plus executing its single
+    /// statement. A call exceeding it answers Unavailable; the statement is never replayed.
+    /// </summary>
+    public const int OidcRateLimitStoreTimeoutMilliseconds = 2000;
+
+    /// <summary>A budget row is removable only this many hours after its window expired.</summary>
+    public const int OidcRateLimitBucketRetentionHours = 24;
+
+    /// <summary>The upper bound of rows one cleanup call deletes.</summary>
+    public const int OidcRateLimitCleanupBatchSize = 1000;
+
+    /// <summary>
+    /// HKDF info of the key that turns a raw rate-limit partition key into its stored digest.
+    /// Changing this value changes every digest, which resets every shared budget.
+    /// </summary>
+    public const string OidcRateLimitPartitionHkdfInfo = "SignaCore.OidcRateLimit.Partition.v1";
 }
