@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Metrics;
@@ -411,6 +412,17 @@ public static class ServiceCollectionExtensions
         {
             Username = configuration[SystemSettingKeys.AdminUsername]?.Trim() ?? string.Empty
         });
+
+        // ---- Management bearer session lifecycle (#360 stage 2) ----
+        // No endpoint, authentication scheme, or UI consumes the service yet (#384), so this
+        // enables nothing; CleanupWorker runs its expiry segment. Each operation uses its own
+        // non-retrying context, never the request-scoped one.
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<IManagementBearerSessionRepository, ManagementBearerSessionRepository>();
+        services.AddSingleton<ManagementBearerSessionService>();
+        services.AddSingleton<IManagementBearerSessionCleanup>(
+            serviceProvider => serviceProvider.GetRequiredService<ManagementBearerSessionService>());
+
         services.AddCors(options =>
         {
             options.AddPolicy("AdminWeb", policy =>

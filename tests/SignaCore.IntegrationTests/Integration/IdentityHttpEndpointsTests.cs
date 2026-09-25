@@ -1116,6 +1116,26 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(["/health", "/health/live", "/health/ready"], healthRoutes);
     }
 
+    /// <summary>
+    /// The management bearer lifecycle service is composed for CleanupWorker, but nothing exposes
+    /// it yet: no route mentions a bearer session (#384 adds the HTTP surface).
+    /// </summary>
+    [Fact]
+    public void ManagementBearerLifecycle_IsRegisteredWithoutAnyHttpSurface()
+    {
+        using var factory = _fixture.WithTestServices(_ => { });
+
+        var service = factory.Services.GetRequiredService<SignaCore.Host.Management.ManagementBearerSessionService>();
+        Assert.Same(service, factory.Services.GetRequiredService<SignaCore.Domain.Services.IManagementBearerSessionCleanup>());
+        Assert.Same(TimeProvider.System, factory.Services.GetRequiredService<TimeProvider>());
+        Assert.DoesNotContain(
+            factory.Services.GetServices<EndpointDataSource>()
+                .SelectMany(source => source.Endpoints)
+                .OfType<RouteEndpoint>()
+                .Select(endpoint => endpoint.RoutePattern.RawText ?? string.Empty),
+            text => text.Contains("bearer", StringComparison.OrdinalIgnoreCase));
+    }
+
     [Fact]
     public async Task GatewayUserQueries_SearchAndBatchReturnSameUsers()
     {

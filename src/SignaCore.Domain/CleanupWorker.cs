@@ -127,6 +127,29 @@ public class CleanupWorker : BackgroundService
                 deletedIdentitySessions);
         }
 
+        // Bounded batches until one deletes nothing or the per-round cap is reached; whatever is
+        // left waits for the next round. Never swept on a request path.
+        var managementBearerCleanup = scope.ServiceProvider.GetRequiredService<IManagementBearerSessionCleanup>();
+        var managementBearerNow = DateTimeOffset.UtcNow;
+        var deletedManagementBearerSessions = 0;
+        for (var batch = 0; batch < IdentityConstants.ManagementBearerCleanupMaxBatchesPerRound; batch++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var deleted = await managementBearerCleanup.CleanupExpiredAsync(managementBearerNow, cancellationToken);
+            deletedManagementBearerSessions += deleted;
+            if (deleted == 0)
+            {
+                break;
+            }
+        }
+
+        if (deletedManagementBearerSessions > 0)
+        {
+            _logger.LogInformation(
+                "Deleted {Count} expired management bearer sessions",
+                deletedManagementBearerSessions);
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
         var deactivatedApps = await appRegRepo.DeactivateExpiredCallbacksAsync(
             DateTimeOffset.UtcNow,
