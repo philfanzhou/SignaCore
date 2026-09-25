@@ -162,6 +162,10 @@ A pending-setup instance is live but not ready, so it never receives authenticat
   restrict the resulting file to mode `0600`, and back it up.
 - Set `ReverseProxy:KnownProxies` when TLS terminates at a non-loopback proxy so forwarded scheme and
   client IP are accepted only from that proxy.
+- Do not let a proxy add or forward an `Authorization` header to `/api/admin` or `/management/v1`
+  for console users: a management request that carries one is authenticated as a management bearer
+  and the session cookie is ignored (see
+  [Management bearer authentication](./ManagementBearerSessionSchema.md#authentication-scheme)).
 - Use a production database and verify the selected provider's migrations.
 - Complete first-run setup and record the administrator credentials in your secret manager.
 - Set the JWT audience expected by downstream services; the issuer follows the public base URL.

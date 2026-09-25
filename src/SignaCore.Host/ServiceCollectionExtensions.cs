@@ -414,9 +414,9 @@ public static class ServiceCollectionExtensions
         });
 
         // ---- Management bearer session lifecycle (#360 stage 2) ----
-        // No endpoint, authentication scheme, or UI consumes the service yet (#384), so this
-        // enables nothing; CleanupWorker runs its expiry segment. Each operation uses its own
-        // non-retrying context, never the request-scoped one.
+        // The management bearer scheme validates through it; nothing issues a credential yet
+        // (#392), so no request can present one. CleanupWorker runs its expiry segment. Each
+        // operation uses its own non-retrying context, never the request-scoped one.
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IManagementBearerSessionRepository, ManagementBearerSessionRepository>();
         services.AddSingleton<ManagementBearerSessionService>();
@@ -619,10 +619,11 @@ public static class ServiceCollectionExtensions
             })
             .AddPolicy("AdminSession", policy =>
             {
-                // The admin console rides the shared ServiceMantle management cookie: the fixed
-                // management scheme plus the shared requirement that the principal resolves to one
-                // legitimate operator holding the Admin permission.
-                policy.AddAuthenticationSchemes(ManagementSessionDefaults.AuthenticationScheme);
+                // The admin console rides the management selector: the shared ServiceMantle
+                // management cookie, or the management bearer when the request carries an
+                // Authorization header, plus the shared requirement that the principal resolves to
+                // one legitimate operator holding the Admin permission.
+                policy.AddAuthenticationSchemes(ManagementBearerAuthenticationDefaults.SelectorScheme);
                 policy.RequireAuthenticatedUser();
                 policy.AddRequirements(new ManagementPermissionRequirement(ManagementPermission.Admin));
             })
@@ -638,7 +639,7 @@ public static class ServiceCollectionExtensions
             })
             .AddPolicy(GatewayAppAuthenticationDefaults.OpsPolicy, policy =>
             {
-                policy.AddAuthenticationSchemes(ManagementSessionDefaults.AuthenticationScheme);
+                policy.AddAuthenticationSchemes(ManagementBearerAuthenticationDefaults.SelectorScheme);
                 policy.RequireAuthenticatedUser();
                 policy.AddRequirements(new ManagementPermissionRequirement(ManagementPermission.Admin));
             })

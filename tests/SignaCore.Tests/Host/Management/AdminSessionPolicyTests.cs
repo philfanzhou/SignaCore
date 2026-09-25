@@ -20,8 +20,9 @@ using Xunit;
 namespace SignaCore.Tests.Host.Management;
 
 /// <summary>
-/// The AdminSession and Ops policies as composed by the normal host: both ride the fixed shared
-/// management cookie scheme and admit only a principal that resolves to exactly one legitimate
+/// The AdminSession and Ops policies as composed by the normal host: both ride the management
+/// selector — the shared management cookie, or the management bearer when the request carries an
+/// Authorization header — and admit only a principal that resolves to exactly one legitimate
 /// operator holding the Admin permission.
 /// </summary>
 public sealed class AdminSessionPolicyTests
@@ -138,15 +139,54 @@ public sealed class AdminSessionPolicyTests
 
     [Theory]
     [MemberData(nameof(PolicyNames))]
-    public async Task BothPolicies_RideTheFixedManagementScheme(string policyName)
+    public async Task BothPolicies_RideTheManagementSelector(string policyName)
     {
         using var provider = BuildServices();
 
         var policy = await GetPolicyAsync(provider, policyName);
 
         Assert.Equal(
-            ManagementSessionDefaults.AuthenticationScheme,
+            ManagementBearerAuthenticationDefaults.SelectorScheme,
             Assert.Single(policy.AuthenticationSchemes));
+    }
+
+    [Theory]
+    [InlineData("/api/admin/users", true, ManagementBearerAuthenticationDefaults.AuthenticationScheme)]
+    [InlineData("/API/Admin/session/me", true, ManagementBearerAuthenticationDefaults.AuthenticationScheme)]
+    [InlineData("/management/v1/settings", true, ManagementBearerAuthenticationDefaults.AuthenticationScheme)]
+    [InlineData("/management/v1/session", true, ManagementBearerAuthenticationDefaults.AuthenticationScheme)]
+    [InlineData("/api/admin/users", false, ManagementSessionDefaults.AuthenticationScheme)]
+    [InlineData("/management/v1/settings", false, ManagementSessionDefaults.AuthenticationScheme)]
+    [InlineData("/api/administrator", true, ManagementSessionDefaults.AuthenticationScheme)]
+    [InlineData("/management/v2/settings", true, ManagementSessionDefaults.AuthenticationScheme)]
+    [InlineData("/api/profile/me", true, ManagementSessionDefaults.AuthenticationScheme)]
+    [InlineData("/oauth2/userinfo", true, ManagementSessionDefaults.AuthenticationScheme)]
+    public void TheSelector_ChoosesTheBearerOnlyForManagementRoutesWithAnAuthorizationHeader(
+        string path,
+        bool withHeader,
+        string expected)
+    {
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.Request.Path = path;
+        if (withHeader)
+        {
+            // Presence decides, whatever the value: an empty header selects the bearer too.
+            context.Request.Headers.Authorization = string.Empty;
+        }
+
+        Assert.Equal(expected, ManagementBearerAuthenticationDefaults.SelectScheme(context));
+    }
+
+    [Fact]
+    public async Task TheSharedAdminPolicy_NamesNoSchemeOfItsOwn()
+    {
+        using var provider = BuildServices();
+
+        var policy = await GetPolicyAsync(provider, ManagementAuthorizationDefaults.AdminPolicyName);
+
+        // It follows the host default (the selector); naming a scheme would widen the pinned
+        // bootstrap entry and fail the ServiceMantle startup validation.
+        Assert.Empty(policy.AuthenticationSchemes);
     }
 
     private sealed class StubHostEnvironment : IHostEnvironment

@@ -2,8 +2,9 @@
 
 The [management bearer model in issue #360](https://github.com/philfanzhou/SignaCore/issues/360)
 is the authority for credentials, lifecycle, trust boundaries, and activation stages.
-This document covers only the additive schema delivered by
-[task #382](https://github.com/philfanzhou/SignaCore/issues/382).
+This document covers the additive schema delivered by
+[task #382](https://github.com/philfanzhou/SignaCore/issues/382), the lifecycle service, and the
+authentication scheme.
 
 ## Persistence contract
 
@@ -26,11 +27,50 @@ this schema delivery. Existing Cookie, OIDC, and business JWT behavior is unchan
 ## Lifecycle service
 
 [Task #383](https://github.com/philfanzhou/SignaCore/issues/383) adds an internal
-`ManagementBearerSessionService` that issues, validates, revokes, and cleans up these rows,
-registered in DI but not consumed by any endpoint, authentication scheme, or UI yet, so it enables
-nothing. Each operation uses its own non-retrying `IdentityDbContext`; `CleanupWorker` deletes
-rows expired for at least 24 hours in batches of at most 1000. Its contract suite is
+`ManagementBearerSessionService` that issues, validates, revokes, and cleans up these rows.
+Each operation uses its own non-retrying `IdentityDbContext`; `CleanupWorker` deletes rows
+expired for at least 24 hours in batches of at most 1000. Its contract suite is
 `ManagementBearerSessionDatabaseContractTests`.
+
+## Authentication scheme
+
+[Task #384](https://github.com/philfanzhou/SignaCore/issues/384) adds the management bearer
+authentication scheme. No endpoint issues or revokes a credential yet (that is
+[#392](https://github.com/philfanzhou/SignaCore/issues/392)), so no client can obtain one and the
+capability is not available to callers.
+
+The host's default authenticate, challenge, and forbid scheme is a selector:
+
+- A request whose path is under `/api/admin` or `/management/v1` **and** that carries an
+  `Authorization` header — any value, including an empty value or several values — is
+  authenticated by the management bearer only. The management cookie is not consulted, so a
+  rejected header is never rescued by a valid cookie.
+- Every other request uses the shared ServiceMantle management cookie exactly as before. Sign-in and
+  sign-out always use the cookie.
+
+The bearer accepts exactly one `Authorization: Bearer <credential>` value and validates it live on
+every request: revocation, expiry, account activity, and whether the account is still the
+configured bootstrap administrator. A valid credential produces the same operator identity as a
+cookie login, so `/api/admin/session/me` and audit operators do not change. Any rejection answers
+`401` with `Cache-Control: no-store` and `{"errorCode":"management.bearer.unauthenticated"}`; a
+database that cannot answer yields `503` with `{"errorCode":"management.bearer.unavailable"}`.
+Neither response echoes the header, and no log, audit row, or metric carries the credential.
+
+These routes stay cookie-only and ignore the `Authorization` header entirely: the shared
+`/management/v1/session` entries, `PUT /management/v1/bootstrap`, `GET /api/admin/bootstrap`, and
+`POST /api/admin/bootstrap/test`. ServiceMantle pins the bootstrap update to the local management
+cookie, so bootstrap editing is not available with a bearer. The business JWT (`/api/profile/*`),
+OIDC (`/oauth2/*`), and gateway routes keep their own schemes and reject a management bearer.
+
+A reverse proxy in front of SignaCore must not add or forward an `Authorization` header to
+`/api/admin` or `/management/v1` for cookie-based console users: such requests are now authenticated
+by the bearer and answer `401`. Rolling back the code restores cookie-only management
+authentication; there is no data change.
+
+`ManagementBearerAuthenticationTests` covers the route matrix, strict dispatch with server-injected
+header forms, the `503` mapping, caller cancellation, the ServiceMantle startup constraint, and a
+sensitive-carrier scan. `ManagementBearerAuthenticationDatabaseContractTests` shows a revocation on
+one PostgreSQL replica rejecting the next authentication on another.
 
 ## Upgrade and rollback
 
