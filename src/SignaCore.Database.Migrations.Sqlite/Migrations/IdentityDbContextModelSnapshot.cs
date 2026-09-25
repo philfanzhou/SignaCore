@@ -1043,6 +1043,54 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                     b.ToTable("logout_requests", (string)null);
                 });
 
+            modelBuilder.Entity("SignaCore.Database.Entity.ManagementBearerSessionEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("account_id");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.Property<long>("ExpiresAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("expires_at");
+
+                    b.Property<long?>("RevokedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("revoked_at");
+
+                    b.Property<string>("TokenDigest")
+                        .IsRequired()
+                        .HasMaxLength(71)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("token_digest");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("TokenDigest")
+                        .IsUnique();
+
+                    b.ToTable("management_bearer_sessions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_management_bearer_sessions_digest_length", "length(token_digest) = 71");
+
+                            t.HasCheckConstraint("CK_management_bearer_sessions_expiry", "expires_at > created_at");
+
+                            t.HasCheckConstraint("CK_management_bearer_sessions_revocation", "revoked_at IS NULL OR revoked_at >= created_at");
+                        });
+                });
+
             modelBuilder.Entity("SignaCore.Database.Entity.OidcRateLimitBucketEntity", b =>
                 {
                     b.Property<string>("Policy")
@@ -1550,6 +1598,15 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                         .WithMany()
                         .HasForeignKey("AppRegistrationId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SignaCore.Database.Entity.ManagementBearerSessionEntity", b =>
+                {
+                    b.HasOne("SignaCore.Database.Entity.AccountEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 
