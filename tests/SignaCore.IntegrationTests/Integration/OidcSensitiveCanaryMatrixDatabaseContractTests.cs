@@ -57,8 +57,8 @@ public sealed partial class OidcSensitiveCanaryMatrixDatabaseContractTests
             AssertArchitecture(a);
             AssertArchitecture(b);
             using var signals = new OidcSignalCapture(a, b);
-            WriteProbe(a.Factory.Services, marker, scan.New("password"));
-            WriteProbe(b.Factory.Services, marker, scan.New("secret"));
+            WriteCanaryProbe(a, scan, marker);
+            WriteCanaryProbe(b, scan, marker);
             CaptureHeaderProjection(a, scan, scan.New("header"));
             CaptureHeaderProjection(b, scan, scan.New("header"));
 
@@ -177,6 +177,15 @@ public sealed partial class OidcSensitiveCanaryMatrixDatabaseContractTests
         scan.AssertClean();
     }
 
+    private static void WriteCanaryProbe(TestHost host, OidcCanaryScan scan, string marker)
+    {
+        // Deliberately exercise sensitive field names with an independent, non-credential
+        // marker. Never send a value from an authentication flow into a logging probe.
+        var probe = "logging-probe-" + Guid.NewGuid().ToString("N");
+        scan.Add("logging-probe", probe);
+        WriteProbe(host.Factory.Services, marker, probe);
+    }
+
     [Fact]
     public async Task NegativeWiringVariants_DetectArchitectureRawLoggingAndMissingHeaderRegistration()
     {
@@ -194,8 +203,7 @@ public sealed partial class OidcSensitiveCanaryMatrixDatabaseContractTests
         using (var raw = harness.CreateHost())
         {
             var scan = new OidcCanaryScan();
-            var canary = scan.New("password");
-            WriteProbe(raw.Factory.Services, "raw-probe", canary);
+            WriteCanaryProbe(raw, scan, "raw-probe");
             foreach (var line in raw.Probe.Logs) scan.Capture("raw-log", line);
             Assert.NotNull(Record.Exception(scan.AssertClean));
         }
