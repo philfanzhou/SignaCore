@@ -5,7 +5,7 @@ namespace SignaCore.Host.Configuration;
 /// <summary>
 /// The thin product input adapter of the protected legacy upgrade import: it reads the deployment
 /// <see cref="IConfiguration"/> of a pre-change deployment once and forms one unique, complete,
-/// legacy-keyed candidate for all 43 definition-table keys.
+/// legacy-keyed candidate for all 44 definition-table keys.
 /// </summary>
 /// <remarks>
 /// <para>

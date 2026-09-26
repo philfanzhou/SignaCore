@@ -24,3 +24,4 @@ Users and administrators
 - Gateway endpoints require gateway application authentication.
 - Downstream services do not reference SignaCore assemblies; they validate JWTs using standard HTTP discovery and JWKS.
 - Private signing keys and application secrets never cross the service boundary.
+- Logs leave the process only after ServiceMantle structured-field sanitization; Loki receives them over HTTPS with the stored `Authorization` credential.

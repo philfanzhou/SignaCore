@@ -171,12 +171,64 @@ requests to WeChat with an empty appid.
 
 ### Observability
 
-| Key | Default | Notes |
-| --- | --- | --- |
-| `Loki:Uri` | empty | Enables the Loki sink |
-| `OpenTelemetry:OtlpEndpoint` | empty | Enables OTLP export |
+| Key | Default | Secret | Notes |
+| --- | --- | --- | --- |
+| `Loki:Uri` | empty | | Loki base URL; must be an absolute `https` URL without user info, query, or fragment |
+| `Loki:Authorization` | empty | yes | The complete `Authorization` header value sent to Loki, for example `Basic ...` or `Bearer ...` |
+| `OpenTelemetry:OtlpEndpoint` | empty | | Enables OTLP export |
 
 Prometheus metrics are available at `/metrics`. The service/resource name is `SignaCore`.
+
+#### Logging and Loki
+
+Every host phase (Bootstrap Configuration Mode, Setup Mode, and the normal host) logs through the
+shared ServiceMantle Serilog pipeline. Structured log fields are sanitized by ServiceMantle before
+they reach the Console or Loki, and the sanitization cannot be turned off. Request-scoped entries
+carry the `ServiceName`, `ServiceVersion`, and `InstanceId` fields of the ServiceMantle log scope.
+The Console uses the ServiceMantle default output template.
+
+Loki export is enabled only on the normal host and only when both `Loki:Uri` (an absolute `https`
+URL) and `Loki:Authorization` are set; the credential is stored encrypted with the root key like
+every other secret setting and is never returned by the settings API. The management API rejects an
+`http` URL, a URL with user info, a query, or a fragment, and a URL or authorization value saved
+without the other. Changes take effect after a restart. Bootstrap Configuration Mode and Setup Mode
+have no settings yet and only write to the Console.
+
+Loki streams carry only the level label of the shared sink (the former `service=SignaCore` label is
+gone); the service identity is in the log properties. Loki being unreachable or rejecting a batch
+never affects requests or the Console.
+
+Category levels come from the standard `Logging:LogLevel` section of `appsettings.json` (the former
+`Serilog` section is no longer read). The shipped values keep `Microsoft.AspNetCore` and
+`Microsoft.EntityFrameworkCore` at `Warning` (`Error` for EF Core in Production); do not lower the
+framework categories in production, because framework log lines may then contain request URLs and
+query values that structured-field sanitization does not cover.
+
+**Upgrading.** A stored `http` Loki URL or a Loki URL without `Loki:Authorization` does not stop
+the service: Loki stays off and the start writes one Console warning naming only the problem
+category (`endpoint_not_https`, `endpoint_missing`, `authorization_missing`, or
+`authorization_invalid`). Sign in, set an `https` URL and the `Authorization` value, and restart.
+Until the Loki pair is corrected, saving any other setting is also refused, because every update
+validates the complete candidate.
+
+**Rolling back.** An older release refuses to load a settings aggregate that contains the unknown
+`loki.authorization` key. Before starting the older binary, stop every instance and remove the key
+from the stored aggregate (new installations and imports store it even when it is empty):
+
+```sql
+-- PostgreSQL
+UPDATE service_settings
+SET values_json = (values_json::jsonb - 'loki.authorization')::text
+WHERE service_id = 'signacore';
+
+-- SQLite
+UPDATE service_settings
+SET values_json = json_remove(values_json, '$."loki.authorization"')
+WHERE service_id = 'signacore';
+```
+
+The older release then ships to Loki again with its own `Serilog` appsettings section and
+`Loki:Uri`; the logging pipeline itself keeps no persistent state.
 
 ### Consul service discovery
 
@@ -218,7 +270,7 @@ See [Consul integration](./ConsulIntegration.md).
 | `APP_TITLE` | launcher | Admin console and document title |
 | `Bootstrap:FilePath` | launcher | Optional bootstrap file override |
 | `BootstrapApps:FilePath` | appsettings | Optional application pre-seed file |
-| `Logging`, `Serilog` | appsettings | Log pipeline shape; the Loki address comes from `Loki:Uri` |
+| `Logging:LogLevel` | appsettings | Log category levels; the Loki address and credential come from the database settings |
 
 Image name, container name, host port, bind mounts, restart policy, timezone, and .NET runtime
 switches are deployment concerns owned by the launcher or orchestrator.

@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using Serilog;
 using ServiceMantle;
 using ServiceMantle.Audit;
 using ServiceMantle.AspNetCore.Health;
@@ -15,6 +14,7 @@ using ServiceMantle.Bootstrap;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
+using SignaCore.Host.Logging;
 using SignaCore.Host.Management;
 using SignaCore.Host.Middleware;
 using SignaCore.Host.Provisioning;
@@ -106,7 +106,8 @@ if (bootstrap is null)
     }
     else
     {
-        builder.Host.UseAgentSerilog("SignaCore");
+        // No setting snapshot exists in this mode, so the shared pipeline writes to the Console only.
+        builder.AddSignaCoreConsoleLogging();
         ConfigureKestrel(builder);
 
         // ---- Bootstrap Configuration Mode composition ----
@@ -237,33 +238,21 @@ if (bootstrapResult.ConfigurationEntries is not null)
     builder.Configuration.AddInMemoryCollection(bootstrapResult.ConfigurationEntries);
 }
 
-// ---- Serilog (Console + Grafana Loki) ----
-// The Loki sink throws on a null uri, so the address is only patched in when the snapshot supplies
-// one. Loki being unreachable is not fatal: the sink retries asynchronously.
-var lokiUri = builder.Configuration[SystemSettingKeys.LokiUri];
-if (!string.IsNullOrWhiteSpace(lokiUri))
+// ---- Logging (ServiceMantle Serilog: Console, plus Grafana Loki on the normal host) ----
+// Setup Mode has no setting snapshot yet and writes to the Console only. The normal host takes the
+// Loki endpoint and Authorization value from the activated snapshot; values an older release
+// stored that Loki can no longer use switch Loki off with a startup warning instead of failing the
+// start, so an administrator can still sign in and correct them. The ServiceMantle lifecycle
+// flushes the pipeline once on shutdown and on an unhandled exception after the host started.
+LokiSettingState? lokiSettings = null;
+if (bootstrapResult.Phase == InstallationPhase.Completed)
 {
-    builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
-    {
-        ["Serilog:WriteTo:1:Args:uri"] = lokiUri
-    });
+    lokiSettings = builder.AddSignaCoreLogging(bootstrapResult.SharedSnapshot!);
 }
-
-builder.Host.UseAgentSerilog("SignaCore");
-
-// An unhandled exception terminates the process immediately, while the Loki sink sends batches
-// asynchronously. Without this handler, its buffered logs, including the fatal exception itself,
-// may be lost and appear only in container stdout. Normal host shutdown flushes the logger; this
-// covers the crash path so startup failures can also reach Loki.
-AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+else
 {
-    if (eventArgs.ExceptionObject is Exception unhandled)
-    {
-        Log.Fatal(unhandled, "Application terminated unexpectedly");
-    }
-
-    Log.CloseAndFlush();
-};
+    builder.AddSignaCoreConsoleLogging();
+}
 
 ConfigureKestrel(builder);
 
@@ -480,6 +469,7 @@ builder.Services.AddSingleton<BootstrapConfigurationService>();
 
 var app = builder.Build();
 
+SignaCoreLogging.WriteLokiWarning(app.Logger, lokiSettings!);
 app.Logger.LogInformation("Service endpoints configured: HTTP={HttpPort}", httpPort);
 app.Logger.LogInformation(
     "Database: {Provider} at {Endpoint}",

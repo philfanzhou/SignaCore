@@ -24,10 +24,10 @@ namespace SignaCore.Host;
 /// bootstrap providers registered so the store resolves both. The Correlation ID middleware
 /// remains the only ServiceMantle HTTP capability activated in the Bootstrap and Setup hosts; the
 /// normal host composes the full ServiceMantle pipeline (<c>UseServiceMantlePipeline</c>) with the
-/// shared management session capabilities. The installation state, the business database,
-/// authentication, and Serilog remain owned by SignaCore. The ServiceMantle request log scope adds
-/// its own ServiceName, ServiceVersion, and InstanceId fields; the existing global Serilog
-/// enrichment is intentionally left unchanged.
+/// shared management session capabilities. The installation state, the business database, and
+/// authentication remain owned by SignaCore. Logging is the ServiceMantle Serilog pipeline
+/// composed by <see cref="Logging.SignaCoreLogging"/>; the ServiceMantle request log scope adds the
+/// ServiceName, ServiceVersion, and InstanceId fields.
 /// </remarks>
 internal static class ServiceMantleComposition
 {
@@ -138,8 +138,10 @@ internal static class ServiceMantleComposition
         bool isDevelopment)
     {
         services.AddSingleton<IServiceSettingDefinitionProvider, ServiceSettingDefinitions>();
+        // The update registry also enforces the Loki rules; the snapshot load does not (see the
+        // validator remarks), so values an older release stored never block a start.
         services.AddSingleton<IServiceSettingCompositeValidator>(_ =>
-            new SignaCoreSettingCompositeValidator(isDevelopment));
+            new SignaCoreSettingCompositeValidator(isDevelopment, validateRemoteLogSettings: true));
         services.AddSingleton<IServiceSettingRootKeySource, MasterKeyRootKeySource>();
         services.TryAddSingleton(serviceProvider => new ServiceSettingDefinitionRegistry(
             serviceProvider.GetServices<IServiceSettingDefinitionProvider>(),

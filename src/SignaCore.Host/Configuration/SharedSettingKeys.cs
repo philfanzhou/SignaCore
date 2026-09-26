@@ -60,6 +60,7 @@ internal static class SharedSettingKeys
 
             // ---- Observability ----
             [SystemSettingKeys.LokiUri] = "loki.uri",
+            [SystemSettingKeys.LokiAuthorization] = "loki.authorization",
             [SystemSettingKeys.OpenTelemetryOtlpEndpoint] = "opentelemetry.otlp_endpoint",
 
             // ---- Consul service discovery ----
