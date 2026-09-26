@@ -721,6 +721,9 @@ app.MapControllers();
 // ---- Shared ServiceMantle management session (login / current session / logout) ----
 app.MapSignaCoreManagementSession();
 
+// ---- Explicit management bearer sessions (issue / revoke) ----
+ManagementBearerSessionEndpoints.Map(app);
+
 // ---- Shared management settings (definitions / current values / transactional update) ----
 // The admin console's settings page rides the shared group from here on: the queries read the
 // shared aggregate the runtime itself loads, and the update runs in the executor's own

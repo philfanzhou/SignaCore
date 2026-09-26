@@ -1117,23 +1117,25 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     }
 
     /// <summary>
-    /// The management bearer lifecycle service is composed for CleanupWorker, but nothing exposes
-    /// it yet: no route mentions a bearer session (#384 adds the HTTP surface).
+    /// The management bearer lifecycle service is composed for CleanupWorker, and its only HTTP
+    /// surface is the two explicit bearer session entries (#392).
     /// </summary>
     [Fact]
-    public void ManagementBearerLifecycle_IsRegisteredWithoutAnyHttpSurface()
+    public void ManagementBearerLifecycle_IsExposedOnlyByTheBearerSessionEntries()
     {
         using var factory = _fixture.WithTestServices(_ => { });
 
         var service = factory.Services.GetRequiredService<SignaCore.Host.Management.ManagementBearerSessionService>();
         Assert.Same(service, factory.Services.GetRequiredService<SignaCore.Domain.Services.IManagementBearerSessionCleanup>());
         Assert.Same(TimeProvider.System, factory.Services.GetRequiredService<TimeProvider>());
-        Assert.DoesNotContain(
+        Assert.Equal(
+            ["/api/admin/session/bearer/login", "/api/admin/session/bearer/logout"],
             factory.Services.GetServices<EndpointDataSource>()
                 .SelectMany(source => source.Endpoints)
                 .OfType<RouteEndpoint>()
-                .Select(endpoint => endpoint.RoutePattern.RawText ?? string.Empty),
-            text => text.Contains("bearer", StringComparison.OrdinalIgnoreCase));
+                .Select(endpoint => endpoint.RoutePattern.RawText ?? string.Empty)
+                .Where(text => text.Contains("bearer", StringComparison.OrdinalIgnoreCase))
+                .Order(StringComparer.Ordinal));
     }
 
     [Fact]

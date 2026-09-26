@@ -680,6 +680,12 @@ public static class ServiceCollectionExtensions
                 policy.RequireAuthenticatedUser();
                 policy.AddRequirements(new IdentitySessionRequirement());
             })
+            .AddPolicy(ManagementBearerAuthenticationDefaults.Policy, policy =>
+            {
+                policy.AddAuthenticationSchemes(ManagementBearerAuthenticationDefaults.AuthenticationScheme);
+                policy.RequireAuthenticatedUser();
+                policy.AddRequirements(new ManagementPermissionRequirement(ManagementPermission.Admin));
+            })
             .AddPolicy(GatewayAppAuthenticationDefaults.OpsPolicy, policy =>
             {
                 policy.AddAuthenticationSchemes(ManagementBearerAuthenticationDefaults.SelectorScheme);
