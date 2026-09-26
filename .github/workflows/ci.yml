@@ -596,6 +596,9 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: OIDC result gate self-tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_verify_oidc_matrix.py' -v
+
       - name: Pre-pull database images
         run: |
           .github/scripts/docker-pull.sh "$SIGNACORE_POSTGRES_IMAGE"
@@ -634,6 +637,10 @@ jobs:
             --output Detailed \
             --results-directory reports \
             --no-restore
+
+      - name: Verify OIDC matrix results
+        if: ${{ !cancelled() }}
+        run: python3 .github/scripts/verify_oidc_matrix.py reports
 
       - name: Upload test results
         if: always()
