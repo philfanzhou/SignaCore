@@ -83,13 +83,15 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         CancellationToken cancellationToken = default)
     {
         var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
-        // Legacy-only revocation (EV-33), same defense as TryRevokeAsync: the identity-session
-        // predicate keeps a family member out of the legacy single-row revocation path.
+        var now = DateTimeOffset.UtcNow;
+        // EV-14 revokes only the named live interactive member, never its family or session.
+        // Consumed members remain replay evidence; legacy revocation keeps its EV-33 behavior.
         var affectedRows = await _dbContext.RefreshTokens
             .Where(token => token.TokenValue == tokenDigest
                 && !token.IsRevoked
                 && token.AppId == appId
-                && token.IdentitySessionId == null)
+                && (token.IdentitySessionId == null
+                    || (token.ConsumedAt == null && token.ExpiresAt > now)))
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(token => token.IsRevoked, true), cancellationToken);
         return affectedRows == 1;

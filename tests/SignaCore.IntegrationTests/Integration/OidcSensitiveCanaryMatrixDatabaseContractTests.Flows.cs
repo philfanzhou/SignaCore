@@ -192,6 +192,7 @@ public sealed partial class OidcSensitiveCanaryMatrixDatabaseContractTests
             using var document = JsonDocument.Parse(body);
             foreach (var property in document.RootElement.EnumerateObject())
             {
+                scan.Capture("http", property.Name);
                 if (json.TryGetValue(property.Name, out var allowed))
                     Assert.True(property.Value.GetString() == allowed, "Contracted JSON value differed.");
                 else scan.Capture("http", property.Value.ToString());

@@ -580,11 +580,10 @@ public sealed class RefreshTokenFamilyDatabaseContractTests
 
         var repository = new RefreshTokenRepository(context);
 
-        // The legacy revocation paths never touch a live interactive member: presenting the
-        // sibling root's actual digest to the app-scoped legacy revoke matches no row — the
-        // identity-session predicate structurally excludes interactive rows (EV-33).
-        Assert.False(await repository.TryRevokeForAppAsync(
-            "family-contract-token-" + siblingId.ToString("N"), AppId, cancellationToken));
+        // The unscoped legacy revocation path never touches an interactive member (EV-33).
+        // Client-authenticated named revocation has its separate EV-14 contract.
+        Assert.False(await repository.TryRevokeAsync(
+            "family-contract-token-" + siblingId.ToString("N"), cancellationToken));
         var liveSibling = await context.RefreshTokens.AsNoTracking()
             .SingleAsync(row => row.Id == siblingId, cancellationToken);
         Assert.False(liveSibling.IsRevoked);

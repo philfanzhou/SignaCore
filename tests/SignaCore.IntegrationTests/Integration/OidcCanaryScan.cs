@@ -142,7 +142,7 @@ internal sealed class OidcSignalCapture : IDisposable
     public void VerifyAndCopy(OidcCanaryScan scan, params string[] clients)
     {
         _meter.RecordObservableInstruments();
-        Assert.Contains(_tags, tag => tag.Meter == "SignaCore");
+        Assert.True(_tags.Any(tag => tag.Meter == "SignaCore"), "No product metric was captured.");
         Assert.NotEmpty(_spans);
         foreach (var tag in _tags)
         {

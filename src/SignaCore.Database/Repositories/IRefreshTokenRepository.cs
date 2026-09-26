@@ -14,7 +14,9 @@ public interface IRefreshTokenRepository
     /// <summary>
     /// Revokes the token only when it was issued to <paramref name="appId"/>. RFC 7009 §2.1 requires
     /// the server to verify the token belongs to the client making the request, so that possession of
-    /// another client's token is not by itself enough to end that client's session.
+    /// another client's token is not by itself enough to revoke it. Interactive tokens must also
+    /// be unconsumed and unexpired; only the named row changes, never its family or session
+    /// (EV-14). Legacy token behavior is unchanged (EV-33).
     /// </summary>
     Task<bool> TryRevokeForAppAsync(
         string tokenValue,
