@@ -20,8 +20,17 @@ namespace SignaCore.Host.Configuration;
 /// inputs keep equivalent outcomes. Errors are closed, key-scoped codes; they never contain values.
 /// The <c>isDevelopment</c> flag is fixed at composition time and, as before, only affects the
 /// development-only SMS logging profile.
+/// <para>
+/// The <c>validateTelemetrySettings</c> flag adds the OTLP endpoint rule (empty, or an absolute
+/// HTTPS URL without user info, query, or fragment). Only the management update registry sets it:
+/// the startup snapshot load, the legacy import, and the bootstrap target probe must keep accepting
+/// a plain-HTTP endpoint an older release stored, which the normal host then switches off with a
+/// warning instead of failing.
+/// </para>
 /// </remarks>
-internal sealed class SignaCoreSettingCompositeValidator(bool isDevelopment)
+internal sealed class SignaCoreSettingCompositeValidator(
+    bool isDevelopment,
+    bool validateTelemetrySettings = false)
     : IServiceSettingCompositeValidator
 {
     internal const string RequiredCode = "signacore.setting.required";
@@ -42,6 +51,10 @@ internal sealed class SignaCoreSettingCompositeValidator(bool isDevelopment)
         RequireNonBlank(legacy, SystemSettingKeys.JwtAudience, errors);
         RequireNonBlank(legacy, SystemSettingKeys.AdminUsername, errors);
         ValidateRuntimeOptions(legacy, errors);
+        if (validateTelemetrySettings)
+        {
+            ValidateOtlpEndpoint(legacy, errors);
+        }
 
         return errors;
     }
@@ -121,6 +134,25 @@ internal sealed class SignaCoreSettingCompositeValidator(bool isDevelopment)
         {
             errors.Add(new ServiceSettingValidationError(JwtIssuerKey, IssuerMismatchCode));
         }
+    }
+
+    /// <summary>The same endpoint rule the normal host applies before it enables OTLP.</summary>
+    private static void ValidateOtlpEndpoint(
+        IReadOnlyDictionary<string, string> values,
+        List<ServiceSettingValidationError> errors)
+    {
+        if (!values.TryGetValue(SystemSettingKeys.OpenTelemetryOtlpEndpoint, out var endpoint) ||
+            string.IsNullOrWhiteSpace(endpoint) ||
+            Telemetry.OtlpEndpointState.TryParse(endpoint, out _))
+        {
+            return;
+        }
+
+        var isHttp = Uri.TryCreate(endpoint.Trim(), UriKind.Absolute, out var parsed) &&
+                     parsed.Scheme == Uri.UriSchemeHttp;
+        errors.Add(new ServiceSettingValidationError(
+            SharedSettingKeys.NormalizedByLegacyKey[SystemSettingKeys.OpenTelemetryOtlpEndpoint],
+            isHttp ? HttpsRequiredCode : RuntimeInvalidCode));
     }
 
     private static void RequireNonBlank(

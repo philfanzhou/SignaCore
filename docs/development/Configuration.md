@@ -174,9 +174,52 @@ requests to WeChat with an empty appid.
 | Key | Default | Notes |
 | --- | --- | --- |
 | `Loki:Uri` | empty | Enables the Loki sink |
-| `OpenTelemetry:OtlpEndpoint` | empty | Enables OTLP export |
+| `OpenTelemetry:OtlpEndpoint` | empty | OTLP trace export (gRPC); must be an absolute `https` URL without user info, query, or fragment |
 
-Prometheus metrics are available at `/metrics`. The service/resource name is `SignaCore`.
+#### Metrics and traces
+
+Telemetry is registered only on the normal host, through the shared ServiceMantle OpenTelemetry
+package: ASP.NET Core and `HttpClient` tracing, .NET runtime metrics, the Prometheus scrape
+endpoint, and the optional OTLP trace exporter. SignaCore adds only its own signals: the product
+meter and activity source `SignaCore` (for example `auth_login_*` and `oidc_endpoint_*`, exported
+for the first time by this release) and the ASP.NET Core meters (`http_server_request_duration`,
+Kestrel, routing, rate limiting, and the other `Microsoft.AspNetCore.*` meters). The OpenTelemetry
+resource carries `service.name=signacore`, `service.version`, and `service.instance.id`.
+
+`GET /metrics` (and `HEAD`) requires the credentials of a registered, active confidential
+application in `X-Admin-AppId` and `X-Admin-AppSecret`, validated exactly like the gateway
+endpoints; a missing or wrong credential, an unknown application, and a public client all get
+`401`. Responses are limited to 4 MiB and four concurrent scrapes (a fifth concurrent scrape gets a
+fixed `503`). Bootstrap Configuration Mode and Setup Mode expose no `/metrics`. Register a dedicated
+application for Prometheus and send its credentials over HTTPS or a trusted network:
+
+```yaml
+scrape_configs:
+  - job_name: signacore
+    scheme: https
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["signacore.example.com"]
+    http_headers:
+      X-Admin-AppId:
+        values: ["prometheus-scraper"]
+      X-Admin-AppSecret:
+        secrets: ["<the scraper application's secret>"]
+```
+
+OTLP export is enabled only for an absolute `https` endpoint; traces are exported over gRPC without
+an authentication header, and metrics are never pushed through OTLP. The management API rejects an
+`http` endpoint and one with user info, a query, or a fragment. Changes take effect after a restart.
+
+**Upgrading.** A plain-HTTP `OpenTelemetry:OtlpEndpoint` stored by an older release does not stop
+the service: OTLP stays off and the start writes one warning that does not contain the address.
+Set an `https` endpoint and restart. Until it is corrected, saving any other setting is also
+refused, because every update validates the complete candidate. Existing Prometheus jobs must add
+the credential headers above; anonymous scrapes now get `401`.
+
+**Rolling back.** Roll back the binary: nothing is persisted by this change and no setting key was
+added, so the older release serves the anonymous `/metrics` endpoint again. A Prometheus job can
+keep sending the credential headers.
 
 ### Consul service discovery
 

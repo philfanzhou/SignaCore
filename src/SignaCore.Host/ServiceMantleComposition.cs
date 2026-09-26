@@ -138,8 +138,10 @@ internal static class ServiceMantleComposition
         bool isDevelopment)
     {
         services.AddSingleton<IServiceSettingDefinitionProvider, ServiceSettingDefinitions>();
+        // The update registry also enforces the OTLP endpoint rule; the snapshot load does not (see
+        // the validator remarks), so an endpoint an older release stored never blocks a start.
         services.AddSingleton<IServiceSettingCompositeValidator>(_ =>
-            new SignaCoreSettingCompositeValidator(isDevelopment));
+            new SignaCoreSettingCompositeValidator(isDevelopment, validateTelemetrySettings: true));
         services.AddSingleton<IServiceSettingRootKeySource, MasterKeyRootKeySource>();
         services.TryAddSingleton(serviceProvider => new ServiceSettingDefinitionRegistry(
             serviceProvider.GetServices<IServiceSettingDefinitionProvider>(),

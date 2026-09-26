@@ -176,7 +176,9 @@ A pending-setup instance is live but not ready, so it never receives authenticat
   `ServiceDiscovery__Address` / `ServiceDiscovery__Port`); a non-loopback Consul agent must be
   reached over HTTPS. Registration changes take effect after a restart — see
   [Consul integration](./ConsulIntegration.md).
-- Scrape `/metrics` and connect logs/traces to the chosen observability backend.
+- Scrape `/metrics` with a dedicated registered application's `X-Admin-AppId` / `X-Admin-AppSecret`
+  headers (see [Configuration](./Configuration.md#metrics-and-traces)) and connect logs/traces to
+  the chosen observability backend; an OTLP collector must be reached over HTTPS.
 - Remove legacy application-setting environment variables from the launcher; startup logs any that
   remain.
 - Run the verification steps after deployment.

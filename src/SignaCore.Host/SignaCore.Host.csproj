@@ -15,16 +15,11 @@
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
-    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="ServiceMantle" />
     <PackageReference Include="ServiceMantle.AspNetCore" />
     <PackageReference Include="ServiceMantle.Consul" />
+    <PackageReference Include="ServiceMantle.OpenTelemetry" />
     <PackageReference Include="ServiceMantle.Database.PostgreSql" />
     <PackageReference Include="ServiceMantle.Database.Sqlite" />
     <PackageReference Include="ServiceMantle.Persistence.EntityFrameworkCore" />

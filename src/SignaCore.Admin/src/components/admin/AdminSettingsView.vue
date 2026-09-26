@@ -68,7 +68,7 @@ const settingLabels: Record<string, string> = {
   "ldap.max_concurrent_operations": "最大并发操作数",
   "ldap.directories": "LDAP 目录",
   "loki.uri": "Loki 地址",
-  "opentelemetry.otlp_endpoint": "OpenTelemetry 地址",
+  "opentelemetry.otlp_endpoint": "OpenTelemetry 地址（HTTPS）",
   "consul.host": "Consul 主机",
   "consul.port": "Consul 端口",
   "consul.token": "Consul 令牌",
