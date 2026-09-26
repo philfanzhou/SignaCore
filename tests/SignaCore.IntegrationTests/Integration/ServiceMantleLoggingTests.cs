@@ -408,7 +408,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     /// Every registered logger provider and the sanitizer must be ServiceMantle's own instances;
     /// a SignaCore or test type in front of them is a locally owned logging boundary.
     /// </summary>
-    private static IReadOnlyList<string> LoggingPipelineViolations(IServiceProvider services)
+    internal static IReadOnlyList<string> LoggingPipelineViolations(IServiceProvider services)
     {
         var violations = new List<string>();
         var providers = services.GetServices<ILoggerProvider>().ToList();
@@ -519,7 +519,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     /// record is internal to ServiceMantle; its options object is the public, mutable one the
     /// product configured, read before ServiceMantle normalizes it when the host starts.
     /// </summary>
-    private static GrafanaLokiOptions RegisteredLokiOptions(IServiceCollection services)
+    internal static GrafanaLokiOptions RegisteredLokiOptions(IServiceCollection services)
     {
         var registration = Assert.Single(services, descriptor =>
             descriptor.ServiceType.FullName == "ServiceMantle.Serilog.GrafanaLoki.GrafanaLokiRegistration");
@@ -539,7 +539,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     /// Writes one event through the host's own <see cref="ILogger"/> inside the ServiceMantle
     /// identity scope, with the canary in fields the shared sanitizer must redact.
     /// </summary>
-    private static void WriteProbe(IServiceProvider services, string marker, string canary)
+    internal static void WriteProbe(IServiceProvider services, string marker, string canary)
     {
         var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("SignaCore.Host.LoggingProbe");
         using (services.GetRequiredService<ServiceLogContext>().BeginScope(logger))
@@ -599,7 +599,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
             },
             TestContext.Current.CancellationToken);
 
-    private static string RepositoryRoot()
+    internal static string RepositoryRoot()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
@@ -613,14 +613,14 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     }
 
     /// <summary>A local provider wrapping the shared one: exactly what the pipeline check forbids.</summary>
-    private sealed class TransparentLoggerProvider(ILoggerProvider inner) : ILoggerProvider
+    internal sealed class TransparentLoggerProvider(ILoggerProvider inner) : ILoggerProvider
     {
         public ILogger CreateLogger(string categoryName) => inner.CreateLogger(categoryName);
 
         public void Dispose() => inner.Dispose();
     }
 
-    private sealed class ConsoleCapture : IDisposable
+    internal sealed class ConsoleCapture : IDisposable
     {
         private readonly TextWriter _original = Console.Out;
         private readonly StringWriter _buffer = new();
@@ -648,7 +648,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     }
 
     /// <summary>A loopback Loki push endpoint recording each batch and its Authorization header.</summary>
-    private sealed class FakeLoki : IAsyncDisposable
+    internal sealed class FakeLoki : IAsyncDisposable
     {
         private readonly WebApplication _app;
         private readonly ConcurrentQueue<(string Authorization, string Body)> _batches = new();

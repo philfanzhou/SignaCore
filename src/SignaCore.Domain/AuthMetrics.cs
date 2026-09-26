@@ -33,18 +33,24 @@ public class AuthMetrics
 
     /// <summary>
     /// One authorization-request validation outcome. Both labels are bounded on purpose (DF-13):
-    /// <paramref name="outcome"/> comes from the closed local-reason and OAuth error-code sets, and
-    /// <paramref name="clientId"/> is a registered application id or the fixed
-    /// <see cref="UnregisteredClient"/> placeholder. No request value is ever a label, because the
-    /// request supplies unbounded attacker-controlled text.
+    /// <paramref name="outcome"/> comes from the closed local-reason and OAuth error-code sets;
+    /// <paramref name="clientId"/> is included only when a registered application was resolved.
     /// </summary>
-    public void RecordOidcAuthorizeOutcome(string outcome, string clientId) =>
-        _oidcAuthorizeCounter.Add(
-            1,
-            new KeyValuePair<string, object?>("outcome", outcome),
-            new KeyValuePair<string, object?>("client_id", clientId));
+    public void RecordOidcAuthorizeOutcome(string outcome, string? clientId = null)
+    {
+        if (clientId is null)
+        {
+            _oidcAuthorizeCounter.Add(1, new KeyValuePair<string, object?>("outcome", outcome));
+        }
+        else
+        {
+            _oidcAuthorizeCounter.Add(1,
+                new KeyValuePair<string, object?>("outcome", outcome),
+                new KeyValuePair<string, object?>("client_id", clientId));
+        }
+    }
 
-    /// <summary>Metric label used when no registered application was resolved.</summary>
+    /// <summary>Legacy placeholder retained for source compatibility; unresolved requests omit the client label.</summary>
     public const string UnregisteredClient = "unregistered";
 
     /// <summary>

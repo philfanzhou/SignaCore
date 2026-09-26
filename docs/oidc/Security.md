@@ -103,6 +103,12 @@ design chain until the remaining attack and log matrix
 ([#108](https://github.com/philfanzhou/SignaCore/issues/108), [#80](https://github.com/philfanzhou/SignaCore/issues/80))
 proves these properties.
 
+The PostgreSQL two-host attack evidence is
+[`OidcAttackRateLimitDatabaseContractTests`](../../tests/SignaCore.IntegrationTests/Integration/OidcAttackRateLimitDatabaseContractTests.cs):
+rotated inputs, authentication short circuits, independent client/IP budgets, replica switching,
+store lock timeouts and cancellation, with disconnected-store and disabled-policy negative controls.
+The suite runs under `RUN_SIGNACORE_DATABASE_CONTRACTS=true`; it does not activate production OIDC.
+
 ## Sensitive-value verification
 
 Implementation and tests consume [DF-01..15](./CanonicalSemanticModel.md#sensitive-value--trust-boundary-and-data-flow)
@@ -118,6 +124,15 @@ redacted from access logging. These requirements come from the canonical data-fl
 closed endpoint designs in [#130](https://github.com/philfanzhou/SignaCore/issues/130),
 [#131](https://github.com/philfanzhou/SignaCore/issues/131), and
 [#132](https://github.com/philfanzhou/SignaCore/issues/132).
+
+The two-host carrier evidence is
+[`OidcSensitiveCanaryMatrixDatabaseContractTests`](../../tests/SignaCore.IntegrationTests/Integration/OidcSensitiveCanaryMatrixDatabaseContractTests.cs),
+using the actual ServiceMantle Console/Loki pipeline, authorized Prometheus scraping, meter/span tags,
+and in-memory database/HTTP inspection. Its exact snapshot and response-field exceptions follow
+DF-01..15 and PS-03/05/08; negative controls exercise each scanner carrier and the logging/header
+wiring. The host ownership checks complement `ServiceMantleLoggingTests` (#396) and
+`ServiceMantleTelemetryTests` (#397). These tests assume the shipped framework logging levels and
+run under `RUN_SIGNACORE_DATABASE_CONTRACTS=true` without changing the release gate.
 
 ## Release gate
 

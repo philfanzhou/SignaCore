@@ -43,26 +43,27 @@ internal sealed class CarrierScan
     public List<string> FindViolations()
     {
         var violations = new List<string>();
-        foreach (var canary in _canaries)
+        for (var index = 0; index < _canaries.Length; index++)
         {
+            var canary = _canaries[index];
             if (Logs.Any(text => text.Contains(canary, StringComparison.Ordinal)))
             {
-                violations.Add($"{canary}: logs");
+                violations.Add($"canary #{index}: logs");
             }
 
             if (HttpSurfaces.Any(surface => surface.BodyOrHeader.Contains(canary, StringComparison.Ordinal)))
             {
-                violations.Add($"{canary}: http");
+                violations.Add($"canary #{index}: http");
             }
 
             if (DatabaseDump.Contains(canary, StringComparison.Ordinal))
             {
-                violations.Add($"{canary}: database");
+                violations.Add($"canary #{index}: database");
             }
 
             if (MetricLabelValues.Any(value => value.Contains(canary, StringComparison.Ordinal)))
             {
-                violations.Add($"{canary}: metric-labels");
+                violations.Add($"canary #{index}: metric-labels");
             }
         }
 
@@ -282,19 +283,19 @@ public sealed partial class OidcSensitiveValueMatrixTests : IClassFixture<Identi
         // so a green matrix is evidence of absence, not of a blind assertion.
         var scan = new CarrierScan(CanaryPassword);
         scan.Logs.Add($"info: login failed with {CanaryPassword}");
-        Assert.Contains($"{CanaryPassword}: logs", scan.FindViolations());
+        Assert.Contains("canary #0: logs", scan.FindViolations());
 
         scan = new CarrierScan(CanaryCode);
         scan.HttpSurfaces.Add(("body", $"error: {CanaryCode}"));
-        Assert.Contains($"{CanaryCode}: http", scan.FindViolations());
+        Assert.Contains("canary #0: http", scan.FindViolations());
 
         scan = new CarrierScan(CanaryNonce);
         scan.DatabaseDump = $"nonce={CanaryNonce}";
-        Assert.Contains($"{CanaryNonce}: database", scan.FindViolations());
+        Assert.Contains("canary #0: database", scan.FindViolations());
 
         scan = new CarrierScan(CanaryBearer);
         scan.MetricLabelValues.Add(CanaryBearer);
-        Assert.Contains($"{CanaryBearer}: metric-labels", scan.FindViolations());
+        Assert.Contains("canary #0: metric-labels", scan.FindViolations());
 
         // And the untouched harness stays clean.
         Assert.Empty(new CarrierScan(CanaryPassword).FindViolations());
@@ -333,20 +334,26 @@ public sealed partial class OidcSensitiveValueMatrixTests : IClassFixture<Identi
             extra(services);
         });
 
-    private sealed class ThrowingAuditService : IAuditService
+    internal sealed class ThrowingAuditService(Action<Exception>? capture = null, bool failLogin = false) : IAuditService
     {
         public Task RecordLoginAsync(
             Guid? accountId, string username, string authMethod, string eventType,
             string? clientIp, string? userAgent, string? failureReason = null, string? appId = null,
             string? correlationId = null, CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
+            failLogin ? Fail() : Task.CompletedTask;
 
         public Task RecordActionAsync(
             string action, string targetType, string targetId, Guid? actorId, string? actorName,
             string? description, string? clientIp = null, string? correlationId = null,
             object? before = null, object? after = null,
-            CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Injected persistence failure.");
+            CancellationToken cancellationToken = default) => Fail();
+
+        private Task Fail()
+        {
+            var exception = new InvalidOperationException("Injected persistence failure.");
+            capture?.Invoke(exception);
+            throw exception;
+        }
     }
 
     private async Task SeedAsync()
