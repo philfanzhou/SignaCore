@@ -107,6 +107,31 @@ public sealed class OidcEndpointMetricsTests
         Assert.Equal(ClosedEndpointVocabulary.Length * ClosedOutcomeVocabulary.Length * 2, distinct);
     }
 
+    [Fact]
+    public void AuthorizationOutcome_OnlyLabelsResolvedRegisteredClients()
+    {
+        using var meter = new Meter("SignaCore");
+        var factory = new Mock<IMeterFactory>();
+        factory.Setup(value => value.Create(It.IsAny<MeterOptions>())).Returns(meter);
+        var metrics = new AuthMetrics(factory.Object);
+        var observations = new List<KeyValuePair<string, object?>[]>();
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, observer) =>
+            {
+                if (ReferenceEquals(instrument.Meter, meter) && instrument.Name == "oidc.authorize.validation")
+                    observer.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<int>((_, _, tags, _) => observations.Add(tags.ToArray()));
+        listener.Start();
+        metrics.RecordOidcAuthorizeOutcome("unknown_client");
+        metrics.RecordOidcAuthorizeOutcome("accepted", "registered-app");
+        Assert.Equal(new[] { "outcome" }, observations[0].Select(tag => tag.Key));
+        Assert.Equal(new[] { "outcome", "client_id" }, observations[1].Select(tag => tag.Key));
+        Assert.Equal("registered-app", observations[1][1].Value);
+    }
+
     private static (AuthMetrics Metrics, MeterListener Listener, List<(string Endpoint, string Outcome, string? ClientId, long Value, IEnumerable<string> LabelNames)> Outcomes, List<(string Endpoint, double Value, IEnumerable<string> LabelNames)> Durations) Listen()
     {
         var factory = new MeterFactory();

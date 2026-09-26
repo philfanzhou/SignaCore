@@ -122,7 +122,7 @@ public sealed class OAuthAuthorizationController : ControllerBase
                 // No application was resolved, so there is no bounded subject to audit and no
                 // registered client id that could be a metric label. Unauthenticated traffic must
                 // not be able to grow the audit table; the counter carries the volume instead.
-                _metrics.RecordOidcAuthorizeOutcome(local.Reason, AuthMetrics.UnregisteredClient);
+                _metrics.RecordOidcAuthorizeOutcome(local.Reason);
                 _logger.LogInformation(
                     "Authorization request rejected locally. Reason={Reason}, CorrelationId={CorrelationId}",
                     local.Reason,
