@@ -35,7 +35,7 @@ public sealed class SharedSettingProjectionTests : IClassFixture<IdentityServerF
         var service = _fixture.Services.GetRequiredService<ServiceSettingQueryService>();
         var definitions = service.GetDefinitions();
 
-        Assert.Equal(43, definitions.Count);
+        Assert.Equal(44, definitions.Count);
         Assert.Equal(
             definitions.Select(definition => definition.Key).Order(StringComparer.Ordinal),
             definitions.Select(definition => definition.Key));

@@ -39,7 +39,7 @@ public sealed class OtlpEndpointStateTests
     [InlineData("collector.example.com:4317", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
     public void UpdateValidation_RejectsUnusableEndpointsWithClosedCodes(string endpoint, string code)
     {
-        var error = Assert.Single(Validate(endpoint, validateTelemetrySettings: true));
+        var error = Assert.Single(Validate(endpoint, validateManagementUpdateRules: true));
 
         Assert.Equal("opentelemetry.otlp_endpoint", error.Key);
         Assert.Equal(code, error.ErrorCode);
@@ -50,7 +50,7 @@ public sealed class OtlpEndpointStateTests
     [InlineData("https://collector.example.com:4317")]
     public void UpdateValidation_AcceptsEmptyOrHttpsEndpoints(string? endpoint)
     {
-        Assert.Empty(Validate(endpoint, validateTelemetrySettings: true));
+        Assert.Empty(Validate(endpoint, validateManagementUpdateRules: true));
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public sealed class OtlpEndpointStateTests
     {
         const string endpoint = "http://collector.example.com:4317";
 
-        Assert.Empty(Validate(endpoint, validateTelemetrySettings: false));
+        Assert.Empty(Validate(endpoint, validateManagementUpdateRules: false));
         Assert.Empty(SharedSettingComposition.CreateRegistry(isDevelopment: false)
             .Validate(Candidate(endpoint))
             .Errors);
@@ -66,10 +66,10 @@ public sealed class OtlpEndpointStateTests
 
     private static IReadOnlyList<ServiceSettingValidationError> Validate(
         string? endpoint,
-        bool validateTelemetrySettings) =>
+        bool validateManagementUpdateRules) =>
         new ServiceSettingDefinitionRegistry(
                 [new ServiceSettingDefinitions()],
-                [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateTelemetrySettings)])
+                [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules)])
             .Validate(Candidate(endpoint))
             .Errors;
 

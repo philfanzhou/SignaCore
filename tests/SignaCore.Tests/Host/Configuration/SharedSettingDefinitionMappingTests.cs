@@ -55,6 +55,7 @@ public sealed partial class SharedSettingDefinitionMappingTests
         { "Ldap:Directories", "ldap.directories" },
         // ---- Observability ----
         { "Loki:Uri", "loki.uri" },
+        { "Loki:Authorization", "loki.authorization" },
         { "OpenTelemetry:OtlpEndpoint", "opentelemetry.otlp_endpoint" },
         // ---- Consul service discovery ----
         { "Consul:Host", "consul.host" },
@@ -116,6 +117,7 @@ public sealed partial class SharedSettingDefinitionMappingTests
         { "ldap.directories", "Json", true, false, null },
         // ---- Observability ----
         { "loki.uri", "String", false, false, null },
+        { "loki.authorization", "String", true, false, null },
         { "opentelemetry.otlp_endpoint", "String", false, false, null },
         // ---- Consul service discovery ----
         { "consul.host", "String", false, true, "host.docker.internal" },
@@ -190,6 +192,7 @@ public sealed partial class SharedSettingDefinitionMappingTests
     [InlineData("wechat.app_secret")]
     [InlineData("ldap.directories")]
     [InlineData("consul.token")]
+    [InlineData("loki.authorization")]
     public void SensitiveKeys_AreOptionalAndCarryNoDefault(string normalizedKey)
     {
         var shared = SharedDefinitions[normalizedKey];

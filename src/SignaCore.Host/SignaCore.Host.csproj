@@ -15,7 +15,6 @@
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
-    <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="ServiceMantle" />
     <PackageReference Include="ServiceMantle.AspNetCore" />
     <PackageReference Include="ServiceMantle.Consul" />
@@ -23,11 +22,7 @@
     <PackageReference Include="ServiceMantle.Database.PostgreSql" />
     <PackageReference Include="ServiceMantle.Database.Sqlite" />
     <PackageReference Include="ServiceMantle.Persistence.EntityFrameworkCore" />
-    <PackageReference Include="Serilog.Enrichers.Environment" />
-    <PackageReference Include="Serilog.Enrichers.Thread" />
-    <PackageReference Include="Serilog.Settings.Configuration" />
-    <PackageReference Include="Serilog.Sinks.Console" />
-    <PackageReference Include="Serilog.Sinks.Grafana.Loki" />
+    <PackageReference Include="ServiceMantle.Serilog" />
   </ItemGroup>
 
   <ItemGroup>

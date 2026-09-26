@@ -18,7 +18,7 @@ issue #556); see [System settings retirement](../database/system-settings-retire
 
 | Capability | Registration |
 | --- | --- |
-| Product definitions (43 keys) | `ServiceSettingDefinitions : IServiceSettingDefinitionProvider` (the authoritative `Table` of `ProductSettingDefinition` rows) |
+| Product definitions (44 keys) | `ServiceSettingDefinitions : IServiceSettingDefinitionProvider` (the authoritative `Table` of `ProductSettingDefinition` rows) |
 | Cross-key rules | `SignaCoreSettingCompositeValidator : IServiceSettingCompositeValidator` |
 | Integer Number semantics | `IntegerSettingConstraint : IServiceSettingValueConstraint` |
 | Store (single aggregate per service) | `EfCoreServiceSettingStore<IdentityDbContext>` over `IDbContextFactory<IdentityDbContext>` |
@@ -60,13 +60,17 @@ Everything else lives exactly once, in the shared stack: value types, the "must 
 requirement for keys with real defaults, `requiresRestart` (all keys), the integer semantics of
 every Number key, the three numeric ranges, the fixed JSON root kinds, and every cross-key rule
 (base URL normalization, HTTPS policy, issuer equality, non-blank keys, SMS/LDAP/WeChat binder
-validation, reverse-proxy IP parsing) in `SignaCoreSettingCompositeValidator`. The retired legacy
+validation, reverse-proxy IP parsing) in `SignaCoreSettingCompositeValidator`. The Loki pair rules
+(an absolute `https` `loki.uri` without user info, query, or fragment, set together with
+`loki.authorization`) run only in the management update registry, so a value stored by an older
+release never blocks the startup snapshot load, the legacy import, or the bootstrap target probe;
+the normal host switches Loki off with a warning instead. The retired legacy
 snapshot validator left behind two input-form duties, now carried by a thin adapter instead of a
 second rule set:
 
 - `SettingCandidateValidation` (entry: `SharedSettingComposition.ValidateCompleteCandidate`) is
   the pre-validation used by first-run setup, the legacy import, and the test installation
-  fixtures. It checks that the complete legacy-keyed candidate carries every one of the 43
+  fixtures. It checks that the complete legacy-keyed candidate carries every one of the 44
   definition-table keys — completeness precedes defaults, so a missing key is never silently filled in by the
   registry — and that every Number value is integer text (`IntegerSettingConstraint.IsIntegerText`,
   the legacy `NumberStyles.Integer` form), then maps through `SharedSettingKeys` onto the shared

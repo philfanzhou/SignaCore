@@ -23,6 +23,13 @@ internal static class ManagementBearerAuthenticationDefaults
     /// </summary>
     public const string SelectorScheme = "SignaCore.ManagementCredential";
 
+    /// <summary>
+    /// The policy of the explicit bearer session entries: the management bearer scheme alone (never
+    /// the selector, so a cookie-only request is not authenticated by the cookie), an authenticated
+    /// principal, and the Admin permission.
+    /// </summary>
+    public const string Policy = "ManagementBearer";
+
     private static readonly PathString AdminApiPath = new("/api/admin");
     private static readonly PathString ManagementApiPath = new("/management/v1");
 

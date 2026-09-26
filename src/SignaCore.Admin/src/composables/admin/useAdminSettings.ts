@@ -76,7 +76,7 @@ export const adminSettingsSections: AdminSettingsSection[] = [
   {
     key: "settings-observability",
     label: "日志与监控",
-    description: "配置 Loki 和 OpenTelemetry 的上报地址。",
+    description: "配置 Loki 上报地址与授权头，以及 OpenTelemetry 上报地址。",
     prefixes: ["loki", "opentelemetry"],
   },
   {
