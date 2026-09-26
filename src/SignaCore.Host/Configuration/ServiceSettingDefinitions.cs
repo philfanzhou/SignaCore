@@ -144,6 +144,9 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
 
         // ---- Observability ----
         new("loki.uri", ServiceSettingValueType.String, IsSensitive: false, LegacyDefault: ""),
+        // The complete Authorization header value sent to Loki (for example "Basic ..." or
+        // "Bearer ..."); it is a credential, so it is protected and never returned by queries.
+        new("loki.authorization", ServiceSettingValueType.String, IsSensitive: true, LegacyDefault: ""),
         new("opentelemetry.otlp_endpoint", ServiceSettingValueType.String, IsSensitive: false, LegacyDefault: ""),
 
         // ---- Consul service discovery (optional, disabled by default) ----

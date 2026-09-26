@@ -514,7 +514,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             db, TestContext.Current.CancellationToken);
         Assert.NotNull(aggregate);
         Assert.Equal(1, aggregate!.Version);
-        Assert.Equal(43, SharedSettingTestDatabase.ParseValues(aggregate).Count);
+        Assert.Equal(44, SharedSettingTestDatabase.ParseValues(aggregate).Count);
         Assert.Equal(
             "legacy_admin",
             SharedSettingTestDatabase.ParseValues(aggregate)["admin.username"]);
@@ -525,14 +525,14 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         // the import; neither carries any value.
         var sharedAudits = await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
             db, TestContext.Current.CancellationToken);
-        // 43 per-key configuration audits plus the import event itself, which now also lives in
+        // 44 per-key configuration audits plus the import event itself, which now also lives in
         // the shared table instead of the retired legacy audit row.
-        Assert.Equal(44, sharedAudits.Count);
+        Assert.Equal(45, sharedAudits.Count);
         var importAudit = Assert.Single(
             (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken))
             .Where(entry => entry.Action == "installation.legacy_import.completed"));
         // The product audit carries the deployment-supplied key count and the version, never a
-        // value: three keys came from the launcher, the whole 43-key candidate was committed.
+        // value: three keys came from the launcher, the whole 44-key candidate was committed.
         Assert.Contains("Imported 3 legacy settings", importAudit.SecurityDescription, StringComparison.Ordinal);
         Assert.Contains("ConfigurationVersion=1", importAudit.SecurityDescription, StringComparison.Ordinal);
         Assert.DoesNotContain("legacy_admin", importAudit.SecurityDescription, StringComparison.Ordinal);
@@ -576,8 +576,8 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
             db, TestContext.Current.CancellationToken);
         Assert.Equal(1, aggregate!.Version);
-        // 43 per-key configuration audits plus the single import event in the shared table.
-        Assert.Equal(44, (await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
+        // 44 per-key configuration audits plus the single import event in the shared table.
+        Assert.Equal(45, (await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
             db, TestContext.Current.CancellationToken)).Count);
         Assert.Equal(1, (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
                 db, TestContext.Current.CancellationToken))

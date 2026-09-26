@@ -47,6 +47,7 @@ public class ProductSettingDefinitionTableTests
     [InlineData("wechat.app_secret")]
     [InlineData("ldap.directories")]
     [InlineData("consul.token")]
+    [InlineData("loki.authorization")]
     public void CredentialBearingSettings_AreMarkedSensitive(string normalizedKey)
     {
         Assert.True(ServiceSettingDefinitions.Find(normalizedKey)?.IsSensitive);
