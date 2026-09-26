@@ -101,7 +101,7 @@ public sealed class LokiSettingsTests
         string? expectedKey,
         string? expectedCode)
     {
-        var errors = Validate(uri, authorization, validateRemoteLogSettings: true);
+        var errors = Validate(uri, authorization, validateManagementUpdateRules: true);
 
         var error = Assert.Single(errors);
         Assert.Equal(expectedKey, error.Key);
@@ -114,7 +114,7 @@ public sealed class LokiSettingsTests
     [InlineData(Endpoint, Authorization)]
     public void UpdateValidation_AcceptsEmptyOrUsablePairs(string? uri, string? authorization)
     {
-        Assert.Empty(Validate(uri, authorization, validateRemoteLogSettings: true));
+        Assert.Empty(Validate(uri, authorization, validateManagementUpdateRules: true));
     }
 
     [Theory]
@@ -124,7 +124,7 @@ public sealed class LokiSettingsTests
     {
         // The startup load, the legacy import, and the bootstrap probe build their registry
         // without the Loki rules, so an upgraded installation still starts.
-        Assert.Empty(Validate(uri, authorization, validateRemoteLogSettings: false));
+        Assert.Empty(Validate(uri, authorization, validateManagementUpdateRules: false));
         Assert.Empty(SharedSettingComposition.CreateRegistry(isDevelopment: false)
             .Validate(Candidate(uri, authorization))
             .Errors);
@@ -133,10 +133,10 @@ public sealed class LokiSettingsTests
     private static IReadOnlyList<ServiceSettingValidationError> Validate(
         string? uri,
         string? authorization,
-        bool validateRemoteLogSettings) =>
+        bool validateManagementUpdateRules) =>
         new ServiceSettingDefinitionRegistry(
                 [new ServiceSettingDefinitions()],
-                [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateRemoteLogSettings)])
+                [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules)])
             .Validate(Candidate(uri, authorization))
             .Errors;
 

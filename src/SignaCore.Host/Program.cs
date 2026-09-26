@@ -20,6 +20,7 @@ using SignaCore.Host.Middleware;
 using SignaCore.Host.Provisioning;
 using SignaCore.Host.Security;
 using SignaCore.Host.Startup;
+using SignaCore.Host.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -423,7 +424,13 @@ builder.Services.AddSingleton<BootstrapConfigurationManager>(provider =>
 var mantle = builder.Services.AddSignaCoreServiceMantle(bootstrapFilePath);
 mantle.AddSignaCoreSharedHttpCapabilities();
 
-// ---- Infrastructure (DI, Auth, CORS, Rate Limiting, OpenTelemetry) ----
+// ---- Telemetry (ServiceMantle OpenTelemetry, authorized Prometheus scrape, optional OTLP) ----
+// Only the normal host composes telemetry, so the Bootstrap and Setup hosts keep answering /metrics
+// with their phase-gate results. The OTLP endpoint comes from the activated snapshot; a stored
+// value OTLP cannot use keeps the exporter off with a startup warning instead of failing the start.
+var otlpEndpoint = mantle.AddSignaCoreTelemetry(bootstrapResult.SharedSnapshot!);
+
+// ---- Infrastructure (DI, Auth, CORS, Rate Limiting) ----
 var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(
     builder.Configuration,
     builder.Environment,
@@ -470,6 +477,7 @@ builder.Services.AddSingleton<BootstrapConfigurationService>();
 var app = builder.Build();
 
 SignaCoreLogging.WriteLokiWarning(app.Logger, lokiSettings!);
+SignaCoreTelemetry.WriteOtlpWarning(app.Logger, otlpEndpoint);
 app.Logger.LogInformation("Service endpoints configured: HTTP={HttpPort}", httpPort);
 app.Logger.LogInformation(
     "Database: {Provider} at {Endpoint}",
@@ -737,7 +745,9 @@ app.MapServiceMantleBootstrap();
 AdminBootstrapEndpoints.Map(app);
 
 // ---- Prometheus Metrics Endpoint ----
-app.MapPrometheusScrapingEndpoint();
+// GET/HEAD only, behind the GatewayApp policy (a registered application's X-Admin-AppId and
+// X-Admin-AppSecret), with the ServiceMantle scrape gate's response-size and concurrency bounds.
+app.MapServiceMantlePrometheusEndpoint();
 
 // ---- Static files & SPA for Admin Web (HTTP port only) ----
 // The normal host composes the ServiceMantle pipeline, whose phase gate 404s endpoint-less requests,

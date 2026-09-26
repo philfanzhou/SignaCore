@@ -211,6 +211,9 @@ public sealed class ConsulRealAgentAcceptanceTests
     {
         internal const string Image = "hashicorp/consul:1.21.5@sha256:6126c30072690cb3173a450ff5bde120c3a01e11c9dccab83b1b2314d4c828bd";
         internal const string Token = "synthetic-consul-acceptance-canary";
+        // /metrics is authorized by a registered application's gateway credentials.
+        internal const string ScraperId = "consul-acceptance-scraper";
+        internal const string ScraperSecret = "consul-acceptance-scraper-secret";
         private readonly string directory = Path.Combine(Path.GetTempPath(), "signacore-consul-real-" + Guid.NewGuid().ToString("N"));
         private readonly string container = "signacore-consul-test-" + Guid.NewGuid().ToString("N");
         private readonly int agentPort = FreePort();
@@ -247,6 +250,7 @@ public sealed class ConsulRealAgentAcceptanceTests
                         [SystemSettingKeys.ConsulDiscoveryRegister] = register.ToString().ToLowerInvariant(),
                         [SystemSettingKeys.ConsulDiscoveryDeregister] = deregister.ToString().ToLowerInvariant()
                     }, TestContext.Current.CancellationToken);
+                await fixture.SeedScraperAsync();
                 if (startAgent) await fixture.StartAgentAsync();
                 return fixture;
             }
@@ -255,6 +259,28 @@ public sealed class ConsulRealAgentAcceptanceTests
                 await fixture.DisposeAsync();
                 throw;
             }
+        }
+
+        private async Task SeedScraperAsync()
+        {
+            var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<IdentityDbContext>();
+            options.UseIdentityDatabase(new DatabaseOptions
+            {
+                Provider = "SQLite",
+                ConnectionString = new SqliteConnectionStringBuilder
+                    { DataSource = Path.Combine(directory, "identity.db"), Pooling = false }.ConnectionString
+            });
+            await using var db = new IdentityDbContext(options.Options);
+            db.AppRegistrations.Add(new SignaCore.Database.Entity.AppRegistrationEntity
+            {
+                Id = Guid.NewGuid(),
+                AppId = ScraperId,
+                AppSecretHash = BCrypt.Net.BCrypt.HashPassword(ScraperSecret),
+                AppName = "Consul Acceptance Scraper",
+                IsActive = true,
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         }
 
         public async Task StartAgentAsync()
@@ -390,7 +416,12 @@ public sealed class ConsulRealAgentAcceptanceTests
         {
             using var response = await http.GetAsync("/health/ready", TestContext.Current.CancellationToken);
             Assert.Equal(ready ? HttpStatusCode.OK : HttpStatusCode.ServiceUnavailable, response.StatusCode);
-            using var metrics = await http.GetAsync("/metrics", TestContext.Current.CancellationToken);
+            using var anonymous = await http.GetAsync("/metrics", TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+            using var scrape = new HttpRequestMessage(HttpMethod.Get, "/metrics");
+            scrape.Headers.Add("X-Admin-AppId", AgentFixture.ScraperId);
+            scrape.Headers.Add("X-Admin-AppSecret", AgentFixture.ScraperSecret);
+            using var metrics = await http.SendAsync(scrape, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, metrics.StatusCode);
             ScanToken(await metrics.Content.ReadAsStringAsync(), "metrics");
         }

@@ -138,10 +138,10 @@ internal static class ServiceMantleComposition
         bool isDevelopment)
     {
         services.AddSingleton<IServiceSettingDefinitionProvider, ServiceSettingDefinitions>();
-        // The update registry also enforces the Loki rules; the snapshot load does not (see the
-        // validator remarks), so values an older release stored never block a start.
+        // The update registry also enforces the OTLP and Loki rules; the snapshot load does not (see
+        // the validator remarks), so values an older release stored never block a start.
         services.AddSingleton<IServiceSettingCompositeValidator>(_ =>
-            new SignaCoreSettingCompositeValidator(isDevelopment, validateRemoteLogSettings: true));
+            new SignaCoreSettingCompositeValidator(isDevelopment, validateManagementUpdateRules: true));
         services.AddSingleton<IServiceSettingRootKeySource, MasterKeyRootKeySource>();
         services.TryAddSingleton(serviceProvider => new ServiceSettingDefinitionRegistry(
             serviceProvider.GetServices<IServiceSettingDefinitionProvider>(),

@@ -24,6 +24,6 @@ No SignaCore assembly or private client SDK is required. The former client SDK i
 | LDAP/Active Directory | Validate and bind enterprise identities |
 | Callback endpoint | Add application-owned claims after authentication |
 | Consul | Optional service registration and discovery; not a configuration source |
-| Loki / OTLP / Prometheus | Logs, traces, and metrics; Loki requires an `https` endpoint and an `Authorization` value (see [Configuration](../development/Configuration.md#logging-and-loki)) |
+| Loki / OTLP / Prometheus | Logs, traces, and metrics; Loki requires an `https` endpoint and an `Authorization` value (see [Configuration](../development/Configuration.md#logging-and-loki)), `/metrics` requires registered application credentials, and OTLP requires HTTPS (see [Configuration](../development/Configuration.md#metrics-and-traces)) |
 
 Callbacks must pass the configured allowed-domain policy and should use HTTPS.

@@ -21,16 +21,18 @@ namespace SignaCore.Host.Configuration;
 /// The <c>isDevelopment</c> flag is fixed at composition time and, as before, only affects the
 /// development-only SMS logging profile.
 /// <para>
-/// The <c>validateRemoteLogSettings</c> flag adds the Loki rules (an absolute HTTPS endpoint
-/// without user info, query, or fragment, and an endpoint and Authorization value that are either
-/// both set or both empty). Only the management update registry sets it: the startup snapshot
-/// load, the legacy import, and the bootstrap target probe must keep accepting values an older
-/// release stored, which the normal host then switches off with a warning instead of failing.
+/// The <c>validateManagementUpdateRules</c> flag adds the rules for the remote sinks the normal
+/// host enables from the snapshot: the OTLP endpoint (empty, or an absolute HTTPS URL without user
+/// info, query, or fragment) and the Loki pair (an absolute HTTPS endpoint without user info,
+/// query, or fragment, and an endpoint and Authorization value that are either both set or both
+/// empty). Only the management update registry sets it: the startup snapshot load, the legacy
+/// import, and the bootstrap target probe must keep accepting values an older release stored,
+/// which the normal host then switches off with a warning instead of failing.
 /// </para>
 /// </remarks>
 internal sealed class SignaCoreSettingCompositeValidator(
     bool isDevelopment,
-    bool validateRemoteLogSettings = false)
+    bool validateManagementUpdateRules = false)
     : IServiceSettingCompositeValidator
 {
     internal const string RequiredCode = "signacore.setting.required";
@@ -51,8 +53,9 @@ internal sealed class SignaCoreSettingCompositeValidator(
         RequireNonBlank(legacy, SystemSettingKeys.JwtAudience, errors);
         RequireNonBlank(legacy, SystemSettingKeys.AdminUsername, errors);
         ValidateRuntimeOptions(legacy, errors);
-        if (validateRemoteLogSettings)
+        if (validateManagementUpdateRules)
         {
+            ValidateOtlpEndpoint(legacy, errors);
             ValidateLoki(legacy, errors);
         }
 
@@ -134,6 +137,23 @@ internal sealed class SignaCoreSettingCompositeValidator(
         {
             errors.Add(new ServiceSettingValidationError(JwtIssuerKey, IssuerMismatchCode));
         }
+    }
+
+    /// <summary>The same endpoint rule the normal host applies before it enables OTLP.</summary>
+    private static void ValidateOtlpEndpoint(
+        IReadOnlyDictionary<string, string> values,
+        List<ServiceSettingValidationError> errors)
+    {
+        if (!values.TryGetValue(SystemSettingKeys.OpenTelemetryOtlpEndpoint, out var endpoint) ||
+            string.IsNullOrWhiteSpace(endpoint) ||
+            Telemetry.OtlpEndpointState.TryParse(endpoint, out _))
+        {
+            return;
+        }
+
+        errors.Add(new ServiceSettingValidationError(
+            SharedSettingKeys.NormalizedByLegacyKey[SystemSettingKeys.OpenTelemetryOtlpEndpoint],
+            IsAbsoluteHttp(endpoint) ? HttpsRequiredCode : RuntimeInvalidCode));
     }
 
     /// <summary>

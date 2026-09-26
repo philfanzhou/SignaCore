@@ -49,7 +49,8 @@ curl --fail http://localhost:5002/health
 curl --fail http://localhost:5002/.well-known/openid-configuration
 curl --fail http://localhost:5002/.well-known/jwks
 curl --fail http://localhost:5002/.well-known/jwks.json
-curl --fail http://localhost:5002/metrics
+curl --fail -H "X-Admin-AppId: $SCRAPER_APP_ID" -H "X-Admin-AppSecret: $SCRAPER_APP_SECRET" \
+  http://localhost:5002/metrics
 ```
 
 Issue a token with a test application, confirm `iss` matches the configured HTTPS issuer and

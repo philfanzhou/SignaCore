@@ -402,12 +402,21 @@ jobs:
             fail '<title> still contains the __APP_TITLE__ placeholder'
           fi
 
+          # /metrics is authorized by a registered application's gateway credentials.
           metrics_status="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+            http://localhost:5002/metrics)"
+          [ "$metrics_status" = "401" ] \
+            || fail "anonymous /metrics returned $metrics_status instead of 401"
+          metrics_status="$(curl -sS --max-time 10 -o /tmp/metrics.txt -w '%{http_code}' \
+            -H "X-Admin-AppId: ${APP_ID}" \
+            -H "X-Admin-AppSecret: ${APP_SECRET}" \
             http://localhost:5002/metrics)"
           case "$metrics_status" in
             2*) ;;
-            *) fail "/metrics returned $metrics_status" ;;
+            *) fail "authorized /metrics returned $metrics_status" ;;
           esac
+          grep -q '^http_server_request_duration' /tmp/metrics.txt \
+            || fail '/metrics does not export the ASP.NET Core request series'
 
           applied="$(docker exec -e PGPASSWORD="$PG_PASSWORD" signacore-smoke-pg \
             psql -U postgres -d signacore -tAc \

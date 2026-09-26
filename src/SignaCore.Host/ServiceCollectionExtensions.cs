@@ -8,8 +8,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Trace;
 using ServiceMantle.Audit;
 using ServiceMantle.AspNetCore.Management;
 using ServiceMantle.Management;
@@ -54,29 +52,6 @@ public static class ServiceCollectionExtensions
         DatabaseOptions databaseOptions,
         IMasterKeyProvider masterKeyProvider)
     {
-        // ---- OpenTelemetry & Metrics ----
-        services.AddOpenTelemetry()
-            .WithMetrics(metrics =>
-            {
-                metrics.AddAspNetCoreInstrumentation()
-                       .AddRuntimeInstrumentation()
-                       .AddPrometheusExporter();
-            })
-            .WithTracing(tracing =>
-            {
-                tracing.AddAspNetCoreInstrumentation()
-                       .AddHttpClientInstrumentation()
-                       .AddSource("SignaCore");
-                var otlpEndpoint = configuration["OpenTelemetry:OtlpEndpoint"];
-                if (!string.IsNullOrWhiteSpace(otlpEndpoint))
-                {
-                    tracing.AddOtlpExporter(options =>
-                    {
-                        options.Endpoint = new Uri(otlpEndpoint);
-                    });
-                }
-            });
-
         // ---- Database ----
         services.AddSingleton(databaseOptions);
 
