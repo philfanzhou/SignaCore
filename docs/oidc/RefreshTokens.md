@@ -7,13 +7,13 @@ document remains the semantic reference.** Read the [directory boundary](./READM
 [canonical model](./CanonicalSemanticModel.md), and
 [interactive persistence](./Persistence.md) first.
 
-An interactive refresh token extends one confidential BFF authorization while its original
-identity session and current application policy remain usable. A secretless Public rotation path
-is prepared only for a complete pre-existing Public family; ordinary Public applications cannot
-obtain such a family or request `offline_access` yet. Public management can save a bounded refresh
-policy, but this alone does not activate Public Code issuance. It is an opaque, rotating bearer credential,
-not a portable account credential. A browser-held token is exposed to script compromise; callers
-must isolate scripts, keep it in memory, use HTTPS, and clear it on logout. Existing Password, SMS, LDAP, WeChat,
+An interactive refresh token extends one confidential BFF or explicitly opted-in Public Code
+authorization while its original identity session and current application policy remain usable.
+Public Code + S256 can request `offline_access` only with a bounded refresh policy; Code redemption
+then creates the root in the same transaction as code consumption and audit. It is an opaque,
+rotating bearer credential, not a portable account credential. A browser-held token is exposed
+to script compromise; callers must isolate scripts, keep it in memory, use HTTPS, and clear it on
+logout. Existing Password, SMS, LDAP, WeChat,
 legacy refresh, and cross-application exchange behavior stays on its current path.
 
 This design applies refresh-token rotation and relationship retention in the sense of
@@ -46,8 +46,8 @@ perform no reuse side effect.
 An interactive family is usable only by its exact authenticated confidential client or a verified
 active Public application selected by a single form `client_id`. The Public path requires a complete
 family marker and exact app binding; missing or legacy members fail with a generic error rather
-than falling through to legacy issuance. Public management can save refresh opt-in, but Public
-Code still returns no refresh token. It never enters
+than falling through to legacy issuance. Public Code returns a refresh token only for a
+committed `offline_access` redemption. It never enters
 the cross-application exchange-trust path from ADR 0003. `/api/auth/token` does not gain interactive
 refresh behavior. Legacy rows continue through their current validators, admission checks, rotation,
 error envelopes, token shapes, and cross-application minting (`EV-33`).
@@ -62,12 +62,11 @@ Confidential roots retain their seven-day deadline. Every child copies the root 
 rotation never extends the family. The session's 30-minute idle boundary is still read live and
 is never slid by refresh.
 
-For a future Public root, the store accepts only an absolute deadline later than issuance and no
+For a Public root, the store accepts only an absolute deadline later than issuance and no
 later than seven days. The Code transaction must supply the earliest of that seven-day cap, the
 session absolute expiry, and `auth_time + identitySessionMaxAgeSeconds`. New Public roots and
 descendants use the dedicated `sha256-public:` digest; historical Public families, Confidential
-families, and legacy tokens retain `sha256:`. The present ordinary Public Code path does not
-create a root.
+families, and legacy tokens retain `sha256:`. Codes without `offline_access` create no root.
 
 Member states remain disjoint:
 
@@ -98,12 +97,12 @@ then drives a provider execution-strategy transaction:
    session existence/revocation/idle/absolute expiry, and application max-age. Refresh never slides
    activity and never silently narrows scope.
 
-   A prepared Public family also requires current explicit refresh opt-in, a session maximum age
+   A Public family also requires current explicit refresh opt-in, a session maximum age
    from 1 through 43200 seconds, and `offline_access` in its family snapshot and current allow
    list. The check occurs after consumed-member reuse handling under the session/root/member
    locks. A policy mismatch rejects an unused member without a child; a correctly bound consumed
    member still triggers descendant disposal. Historical complete Public families without opt-in
-   can no longer rotate. Ordinary Public Code still cannot issue a root.
+   can no longer rotate.
 4. Construct one stable request-local child id, raw token and digest, access token, nonce-free ID
    token, and audit result. A fallible signing or construction step must succeed before the parent
    can be consumed.

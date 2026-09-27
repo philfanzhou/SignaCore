@@ -50,7 +50,9 @@ internal static class OidcCurrentAuthorizationPolicy
             || !OidcScopeValidator.TryValidateRequested(
                 accepted.CanonicalScope,
                 OidcScopeValidator.ParseCanonical(application.AllowedScopes),
-                application.AllowRefreshToken && application.ClientType != OidcClientType.Public,
+                application.ClientType == OidcClientType.Public
+                    ? OidcPublicRefreshPolicy.Allows(application)
+                    : application.AllowRefreshToken,
                 out var canonicalScope)
             || !string.Equals(canonicalScope, accepted.CanonicalScope, StringComparison.Ordinal))
         {

@@ -168,6 +168,71 @@ public sealed partial class OidcMultiInstanceAcceptanceTests
         finally { foreach (var result in results) result.Dispose(); }
     }
 
+    [Fact]
+    public async Task PublicCodeDatabaseContractTests_PostgreSql_ConcurrentRedemptionCreatesOneBoundedRoot()
+    {
+        Assert.SkipUnless(Environment.GetEnvironmentVariable("RUN_SIGNACORE_DATABASE_CONTRACTS") == "true",
+            "Set RUN_SIGNACORE_DATABASE_CONTRACTS=true for the PostgreSQL HTTP matrix.");
+        await using var container = new PostgreSqlBuilder(Environment.GetEnvironmentVariable("SIGNACORE_POSTGRES_IMAGE")
+            ?? "public.ecr.aws/docker/library/postgres:15-alpine").Build();
+        await container.StartAsync(TestContext.Current.CancellationToken);
+        var database = new DatabaseOptions
+        { Provider = "PostgreSQL", ServerVersion = "15", ConnectionString = container.GetConnectionString() };
+        var options = new DbContextOptionsBuilder<IdentityDbContext>();
+        options.UseIdentityDatabase(database);
+        await using var setupContext = new IdentityDbContext(options.Options);
+        var bootstrap = await setupContext.Database.CreateExecutionStrategy().ExecuteAsync(() =>
+            InstallationTestSupport.PrepareCompletedInstallationAsync(
+                Path.Combine(_workingDirectory, "public-postgres"), database,
+                RootSecretOf("public-postgres"), AdminUsername, AdminPassword));
+        using var a = CreateInstance(bootstrap);
+        using var b = CreateInstance(bootstrap);
+        var cookie = await LoginOnInstanceAsync(a);
+        var token = TestContext.Current.CancellationToken;
+        using (var scope = a.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var app = await db.AppRegistrations.SingleAsync(row => row.AppId == SuccessAppId, token);
+            app.ClientType = OidcClientType.Public;
+            app.AppSecretHash = string.Empty;
+            app.AllowRefreshToken = true;
+            app.AllowedScopes = "openid profile offline_access";
+            app.IdentitySessionMaxAgeSeconds = 3600;
+            await db.SaveChangesAsync(token);
+        }
+
+        var url = BuildSuccessAuthorizeUrl().Replace(
+            Uri.EscapeDataString(SuccessScope), Uri.EscapeDataString("openid profile offline_access"),
+            StringComparison.Ordinal);
+        var code = ExtractQueryValue(await AuthorizeWithIdentityCookieAsync(b, url, cookie), "code");
+        async Task<HttpResponseMessage> RedeemAsync(WebApplicationFactory<Program> host)
+        {
+            using var http = NonRedirectingClient(host);
+            var fields = CodeFields(code);
+            fields["client_id"] = SuccessAppId;
+            return await http.PostAsync("/oauth2/token", new FormUrlEncodedContent(fields), token);
+        }
+
+        var results = await Task.WhenAll(RedeemAsync(a), RedeemAsync(b));
+        try
+        {
+            Assert.Single(results, result => result.StatusCode == HttpStatusCode.OK);
+            await AssertCodeFailureAsync(results.Single(result => result.StatusCode != HttpStatusCode.OK), "invalid_grant");
+            var issued = await results.Single(result => result.StatusCode == HttpStatusCode.OK)
+                .Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
+            Assert.Equal(300, issued.GetProperty("expires_in").GetInt64());
+            Assert.True(issued.TryGetProperty("refresh_token", out _));
+            await using var verification = new IdentityDbContext(options.Options);
+            var roots = await verification.RefreshTokens.AsNoTracking()
+                .Where(row => row.AppId == SuccessAppId && row.ParentId == null).ToListAsync(token);
+            var root = Assert.Single(roots);
+            Assert.StartsWith("sha256-public:", root.TokenValue, StringComparison.Ordinal);
+            Assert.Equal(root.Id, Assert.Single(await verification.AuthorizationCodes.AsNoTracking()
+                .Where(row => row.RefreshFamilyId == root.Id).ToListAsync(token)).RefreshFamilyId);
+        }
+        finally { foreach (var result in results) result.Dispose(); }
+    }
+
     private static Dictionary<string, string> CodeFields(string code) => new()
     {
         ["grant_type"] = "authorization_code", ["code"] = code,
