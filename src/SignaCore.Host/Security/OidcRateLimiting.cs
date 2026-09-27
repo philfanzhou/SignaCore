@@ -110,8 +110,18 @@ public static class OidcRateLimitPolicies
             return null;
         }
 
+        var path = httpContext.Request.Path.Value ?? string.Empty;
+        if (path == "/oauth2/token"
+            && BoundedOidcFormReadingMiddleware.GetStatus(httpContext) == OidcBoundedFormStatus.Parsed
+            && httpContext.Request.Headers.Authorization.Count == 0)
+        {
+            var values = httpContext.Request.Form["client_id"];
+            return values.Count == 1 && IsPlausibleClientId(values.ToString())
+                ? values.ToString() : null;
+        }
+
         var queryId = httpContext.Request.Query["client_id"].ToString();
-        if (IsPlausibleClientId(queryId))
+        if (path != "/oauth2/token" && IsPlausibleClientId(queryId))
         {
             return queryId;
         }
@@ -123,7 +133,11 @@ public static class OidcRateLimitPolicies
             return basicId;
         }
 
-        var path = httpContext.Request.Path.Value ?? string.Empty;
+        if (IsPlausibleClientId(queryId))
+        {
+            return queryId;
+        }
+
         if (path == "/oauth2/token" || path == "/oauth2/revoke")
         {
             // The bounded-form gate already parsed and cached the body for these POSTs; reusing

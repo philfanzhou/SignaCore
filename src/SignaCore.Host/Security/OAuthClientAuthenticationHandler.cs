@@ -5,13 +5,16 @@ using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 using SignaCore.Database;
+using SignaCore.Database.Entity;
+using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Http;
 
 namespace SignaCore.Host.Security;
 
 /// <summary>
-/// RFC 6749 §2.3.1 client authentication for the <c>/oauth2/*</c> endpoints.
+/// RFC 6749 §2.3.1 client authentication for the <c>/oauth2/*</c> endpoints,
+/// plus the token-only Public authorization-code binding by <c>client_id</c>.
 /// <para>
 /// Accepts <c>client_secret_basic</c> (HTTP Basic, the method the spec says clients SHOULD use) and
 /// <c>client_secret_post</c> (<c>client_id</c>/<c>client_secret</c> form fields). The legacy
@@ -28,15 +31,19 @@ namespace SignaCore.Host.Security;
 public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
     private readonly GatewayValidationService _gatewayValidationService;
+    private readonly IAppRegistrationRepository _applications;
+    private const string PublicFailureItem = "signacore.oauth.public-failure";
 
     public OAuthClientAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
-        GatewayValidationService gatewayValidationService)
+        GatewayValidationService gatewayValidationService,
+        IAppRegistrationRepository applications)
         : base(options, logger, encoder)
     {
         _gatewayValidationService = gatewayValidationService;
+        _applications = applications;
     }
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
@@ -50,6 +57,49 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
                 BoundedOidcFormReadingMiddleware.GetStatus(Context) == OidcBoundedFormStatus.Malformed
                     ? "The form request is invalid."
                     : "The request could not be processed.");
+        }
+
+        if (Request.Path == "/oauth2/token"
+            && Request.HasFormContentType
+            && Request.Headers.Authorization.Count == 0)
+        {
+            var form = await Request.ReadFormAsync(Context.RequestAborted);
+            if (!form.ContainsKey("client_secret")
+                && form["grant_type"].ToString() == "authorization_code")
+            {
+                Context.Items[PublicFailureItem] = "invalid_request";
+                if (form["grant_type"].Count != 1
+                    || form["grant_type"].ToString() != "authorization_code"
+                    || form["client_id"].Count != 1
+                    || form["client_id"].ToString().Length > IdentityConstants.MaxAppIdLength
+                    || !OidcRateLimitPolicies.IsPlausibleClientId(form["client_id"].ToString()))
+                {
+                    return AuthenticateResult.Fail("Invalid public token request.");
+                }
+
+                var app = await _applications.GetByAppIdAsync(
+                    form["client_id"].ToString(), Context.RequestAborted);
+                if (app is null || !app.IsActive || app.ClientType != OidcClientType.Public
+                    || app.AppSecretHash.Length != 0
+                    || (app.CallbackExpiresAt.HasValue && app.CallbackExpiresAt < DateTimeOffset.UtcNow))
+                {
+                    Context.Items[PublicFailureItem] = "invalid_client";
+                    return AuthenticateResult.Fail("Invalid public client.");
+                }
+
+                if (!app.AllowAuthorizationCode || app.AudienceMode != AudienceMode.PerApplication)
+                {
+                    Context.Items[PublicFailureItem] = "unauthorized_client";
+                    return AuthenticateResult.Fail("Public client is not allowed to redeem codes.");
+                }
+
+                Context.Items[IdentityHeaders.ValidatedApp] = app;
+                var publicIdentity = new ClaimsIdentity(
+                    [new Claim(ClaimTypes.NameIdentifier, app.Id.ToString()),
+                     new Claim(IdentityConstants.ClaimClientId, app.AppId)], Scheme.Name);
+                return AuthenticateResult.Success(new AuthenticationTicket(
+                    new ClaimsPrincipal(publicIdentity), Scheme.Name));
+            }
         }
 
         var credentials = ReadBasicCredentials() ?? await ReadFormCredentialsAsync(Context.RequestAborted);
@@ -97,6 +147,20 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
     /// </summary>
     protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
     {
+        if (Context.Items.TryGetValue(PublicFailureItem, out var publicFailure)
+            && publicFailure is string publicError)
+        {
+            Response.StatusCode = publicError == "invalid_client"
+                ? StatusCodes.Status401Unauthorized : StatusCodes.Status400BadRequest;
+            await WriteFixedErrorAsync(publicError, publicError switch
+            {
+                "invalid_client" => "Client authentication failed.",
+                "unauthorized_client" => "This client is not permitted to redeem authorization codes.",
+                _ => "The token request is invalid."
+            });
+            return;
+        }
+
         switch (BoundedOidcFormReadingMiddleware.GetStatus(Context))
         {
             case OidcBoundedFormStatus.Malformed:
@@ -115,6 +179,8 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
         }
 
         Response.StatusCode = StatusCodes.Status401Unauthorized;
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.Pragma = "no-cache";
         Response.Headers.WWWAuthenticate = $"Basic realm=\"{OAuthClientAuthenticationDefaults.Realm}\", charset=\"UTF-8\"";
         await Response.WriteAsJsonAsync(
             new Dictionary<string, string>

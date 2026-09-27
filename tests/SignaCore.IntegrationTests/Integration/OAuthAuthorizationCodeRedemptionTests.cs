@@ -87,6 +87,93 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
     }
 
     [Fact]
+    public async Task Redeem_PublicCodeWithClientIdOnly_CommitsWithoutRefreshFamily()
+    {
+        var seeded = await SeedCodeAsync(clientType: OidcClientType.Public);
+        using var http = _fixture.CreateHttpClient();
+        var response = await http.PostAsync(
+            "/oauth2/token", RedeemForm(seeded.Code, extra: [("client_id", AppId)]),
+            TestContext.Current.CancellationToken);
+
+        await AssertSuccessAsync(response, seeded, "openid");
+    }
+
+    [Theory]
+    [InlineData("", "invalid_request", HttpStatusCode.BadRequest)]
+    [InlineData("&client_id=code-redemption-app&client_id=code-redemption-app", "invalid_request", HttpStatusCode.BadRequest)]
+    [InlineData("&client_id=code-redemption-app&client_secret=anything", "invalid_client", HttpStatusCode.Unauthorized)]
+    [InlineData("&client_id=unknown-public-client", "invalid_client", HttpStatusCode.Unauthorized)]
+    public async Task Redeem_PublicMalformedCredentialSet_DoesNotConsumeCode(
+        string extra, string expectedError, HttpStatusCode expectedStatus)
+    {
+        var seeded = await SeedCodeAsync(clientType: OidcClientType.Public);
+        using var http = _fixture.CreateHttpClient();
+        var body = $"grant_type=authorization_code&code={seeded.Code}&redirect_uri={Uri.EscapeDataString(RedirectUri)}&code_verifier={Verifier}{extra}";
+        using var content = new StringContent(body, Encoding.UTF8, "application/x-www-form-urlencoded");
+        var response = await http.PostAsync("/oauth2/token", content, TestContext.Current.CancellationToken);
+
+        Assert.Equal(expectedStatus, response.StatusCode);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(expectedError, json.GetProperty("error").GetString());
+        await AssertCodeUntouchedAsync(seeded);
+    }
+
+    [Fact]
+    public async Task Redeem_PublicCodeWithWrongVerifier_IsGenericInvalidGrant()
+    {
+        var seeded = await SeedCodeAsync(clientType: OidcClientType.Public);
+        using var http = _fixture.CreateHttpClient();
+        var response = await http.PostAsync(
+            "/oauth2/token",
+            RedeemForm(seeded.Code, verifier: new string('x', 43), extra: [("client_id", AppId)]),
+            TestContext.Current.CancellationToken);
+
+        await AssertErrorAsync(response, seeded, "invalid_grant");
+    }
+
+    [Fact]
+    public async Task Redeem_PublicOfflineCode_CannotCreateRefreshFamily()
+    {
+        var seeded = await SeedCodeAsync(
+            scope: "openid offline_access", allowedScopes: "openid offline_access",
+            allowRefreshToken: true, clientType: OidcClientType.Public);
+        using var http = _fixture.CreateHttpClient();
+        var response = await http.PostAsync(
+            "/oauth2/token", RedeemForm(seeded.Code, extra: [("client_id", AppId)]),
+            TestContext.Current.CancellationToken);
+
+        await AssertErrorAsync(response, seeded, "invalid_grant");
+        Assert.False(await QueryAsync(async db => await db.RefreshTokens.AsNoTracking()
+            .AnyAsync(row => row.IdentitySessionId == seeded.SessionId, TestContext.Current.CancellationToken)));
+    }
+
+    [Fact]
+    public async Task Redeem_OverlongPublicClientId_IsInvalidRequestBeforeCodeLookup()
+    {
+        var seeded = await SeedCodeAsync(clientType: OidcClientType.Public);
+        using var http = _fixture.CreateHttpClient();
+        var response = await http.PostAsync(
+            "/oauth2/token",
+            RedeemForm(seeded.Code, extra: [("client_id", new string('a', IdentityConstants.MaxAppIdLength + 1))]),
+            TestContext.Current.CancellationToken);
+
+        await AssertErrorAsync(response, seeded, "invalid_request");
+    }
+
+    [Fact]
+    public async Task Redeem_DisabledPublicClient_IsUnauthorizedBeforeCodeLookup()
+    {
+        var seeded = await SeedCodeAsync(
+            allowAuthorizationCode: false, clientType: OidcClientType.Public);
+        using var http = _fixture.CreateHttpClient();
+        var response = await http.PostAsync(
+            "/oauth2/token", RedeemForm(seeded.Code, extra: [("client_id", AppId)]),
+            TestContext.Current.CancellationToken);
+
+        await AssertErrorAsync(response, seeded, "unauthorized_client");
+    }
+
+    [Fact]
     public async Task Redeem_IgnoresUnknownFormFields()
     {
         var seeded = await SeedCodeAsync(scope: "openid");
@@ -159,7 +246,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
     // ---- Acceptance 2: client authentication ----
 
     [Fact]
-    public async Task Redeem_WithoutClientCredentials_Returns401AndLeavesTheCodeUnconsumed()
+    public async Task Redeem_WithoutClientIdOrCredentials_ReturnsInvalidRequestAndLeavesTheCodeUnconsumed()
     {
         var seeded = await SeedCodeAsync();
         using var http = _fixture.CreateHttpClient();
@@ -169,8 +256,9 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
             RedeemForm(seeded.Code),
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Contains(response.Headers.WwwAuthenticate, header => header.Scheme == "Basic");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal("invalid_request", body.GetProperty("error").GetString());
         await AssertCodeUntouchedAsync(seeded);
     }
 
@@ -582,16 +670,23 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
 
     // ---- Acceptance 7: the single-instance form of EV-25 ----
 
-    [Fact]
-    public async Task Redeem_ConcurrentlyOnTheSingleInstance_ProducesExactlyOneWinner()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Redeem_ConcurrentlyOnTheSingleInstance_ProducesExactlyOneWinner(bool isPublic)
     {
-        var seeded = await SeedCodeAsync();
+        var seeded = await SeedCodeAsync(clientType: isPublic ? OidcClientType.Public : OidcClientType.Confidential);
         using var http = _fixture.CreateHttpClient();
-        http.DefaultRequestHeaders.Authorization = BasicHeader(AppId, AppSecret);
+        if (!isPublic)
+        {
+            http.DefaultRequestHeaders.Authorization = BasicHeader(AppId, AppSecret);
+        }
 
         var responses = await Task.WhenAll(
-            http.PostAsync("/oauth2/token", RedeemForm(seeded.Code), TestContext.Current.CancellationToken),
-            http.PostAsync("/oauth2/token", RedeemForm(seeded.Code), TestContext.Current.CancellationToken));
+            http.PostAsync("/oauth2/token", RedeemForm(seeded.Code,
+                extra: isPublic ? [("client_id", AppId)] : []), TestContext.Current.CancellationToken),
+            http.PostAsync("/oauth2/token", RedeemForm(seeded.Code,
+                extra: isPublic ? [("client_id", AppId)] : []), TestContext.Current.CancellationToken));
 
         Assert.Equal(1, responses.Count(response => response.StatusCode == HttpStatusCode.OK));
         var loser = Assert.Single(responses, response => response.StatusCode != HttpStatusCode.OK);
@@ -790,7 +885,8 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         AudienceMode audienceMode = AudienceMode.PerApplication,
         int? maxAgeSeconds = null,
         string allowedScopes = "openid profile",
-        bool allowRefreshToken = false)
+        bool allowRefreshToken = false,
+        OidcClientType clientType = OidcClientType.Confidential)
     {
         await SeedInteractiveAppAsync(
             _fixture.Services,
@@ -800,7 +896,8 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
             audienceMode: audienceMode,
             maxAgeSeconds: maxAgeSeconds,
             allowedScopes: allowedScopes,
-            allowRefreshToken: allowRefreshToken);
+            allowRefreshToken: allowRefreshToken,
+            clientType: clientType);
         await SeedInteractiveAppAsync(_fixture.Services, OtherAppId, OtherAppSecret);
         var (accountId, credentialId) = await SeedAccountAsync();
 
@@ -832,7 +929,8 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         AudienceMode audienceMode = AudienceMode.PerApplication,
         int? maxAgeSeconds = null,
         string allowedScopes = "openid profile",
-        bool allowRefreshToken = false)
+        bool allowRefreshToken = false,
+        OidcClientType clientType = OidcClientType.Confidential)
     {
         using var scope = services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
@@ -855,7 +953,9 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
 
         application.IsActive = true;
         application.AudienceMode = audienceMode;
-        application.ClientType = OidcClientType.Confidential;
+        application.ClientType = clientType;
+        application.AppSecretHash = clientType == OidcClientType.Public
+            ? string.Empty : BCrypt.Net.BCrypt.HashPassword(appSecret);
         application.AllowAuthorizationCode = allowAuthorizationCode;
         application.AllowedScopes = allowedScopes;
         application.AllowRefreshToken = allowRefreshToken;

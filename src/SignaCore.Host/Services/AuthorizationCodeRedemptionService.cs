@@ -201,7 +201,8 @@ public sealed class AuthorizationCodeRedemptionService(
     {
         // EV-10/PS-21: the capability decision precedes every code lookup.
         if (!app.AllowAuthorizationCode
-            || app.ClientType != OidcClientType.Confidential
+            || app.ClientType is not (OidcClientType.Confidential or OidcClientType.Public)
+            || (app.ClientType == OidcClientType.Public && app.AppSecretHash.Length != 0)
             || app.AudienceMode != AudienceMode.PerApplication)
         {
             return AuthorizationCodeRedemptionOutcome.Failure(
@@ -287,7 +288,8 @@ public sealed class AuthorizationCodeRedemptionService(
             return InvalidGrant();
         }
 
-        if (FailsApplicationSessionPolicy(app, session, now)
+        if ((app.ClientType == OidcClientType.Public && ContainsOfflineAccess(lookup.Entity.Scope))
+            || FailsApplicationSessionPolicy(app, session, now)
             || !IsScopeStillAllowed(lookup.Entity.Scope, app.AllowedScopes))
         {
             return InvalidGrant();
@@ -342,6 +344,7 @@ public sealed class AuthorizationCodeRedemptionService(
             signingKey,
             lookup.Entity.Id,
             app.Id,
+            app.ClientType,
             clientIp,
             correlationId,
             now,
@@ -412,6 +415,7 @@ public sealed class AuthorizationCodeRedemptionService(
         RsaSecurityKey signingKey,
         Guid codeId,
         Guid applicationRowId,
+        OidcClientType expectedClientType,
         string? clientIp,
         string? correlationId,
         DateTimeOffset now,
@@ -464,6 +468,11 @@ public sealed class AuthorizationCodeRedemptionService(
                 || IdentitySessionStore.Classify(lockedSession, now) != IdentitySessionState.Active
                 || currentApplication is null
                 || !currentApplication.IsActive
+                || (currentApplication.ClientType == OidcClientType.Public
+                    && currentApplication.CallbackExpiresAt is DateTimeOffset expiry && expiry < now)
+                || currentApplication.ClientType != expectedClientType
+                || currentApplication.AudienceMode != AudienceMode.PerApplication
+                || (currentApplication.ClientType == OidcClientType.Public && currentApplication.AppSecretHash.Length != 0)
                 || FailsApplicationSessionPolicy(currentApplication, lockedSession, now))
             {
                 await transaction.RollbackAsync(operationToken);
@@ -497,7 +506,9 @@ public sealed class AuthorizationCodeRedemptionService(
             // whose approved scope carries offline_access is only redeemable while the application
             // still allows refresh tokens. The code stays unconsumed and no family is written.
             var codeCarriesOfflineAccess = ContainsOfflineAccess(lockedCode.Scope);
-            if (codeCarriesOfflineAccess && !currentApplication.AllowRefreshToken)
+            if (codeCarriesOfflineAccess
+                && (currentApplication.ClientType == OidcClientType.Public
+                    || !currentApplication.AllowRefreshToken))
             {
                 await transaction.RollbackAsync(operationToken);
                 return InvalidGrant();
