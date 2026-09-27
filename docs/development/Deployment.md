@@ -235,3 +235,12 @@ startup no longer performs that one-time plaintext-to-digest conversion.
 Before upgrading a deployment older than `0.1.1`, clear all rows from `refresh_tokens`. Existing
 sessions will no longer be refreshable, so users must sign in again after the upgrade. The table
 schema and refresh-token digest format are unchanged.
+
+# Public browser Origins
+
+Administrators register exact Origins on active Public applications through the authenticated
+management API. `POST /oauth2/token` and `GET /oauth2/userinfo` admit only the matching
+application's registered Origin on actual responses. Preflights check the active Public Origin
+union and the endpoint's exact method and header. The AdminWeb allow list does not apply to
+`/oauth2`; no Public Origin permits authorization, refresh, revoke, or logout. Keep browser
+credentials out of cookies and use HTTPS, PKCE, and a suitable script isolation policy.

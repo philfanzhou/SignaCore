@@ -110,7 +110,9 @@ new installation, and live in versioned application code.
 
 Public SPA Origins are per-application policy in `app_allowed_origins`, managed through the
 authenticated admin OIDC endpoint. They are not copied from `AdminWeb:AllowedOrigins`, redirect
-URIs, or the public base URL. Registration currently grants no Public CORS response headers.
+URIs, or the public base URL. Active Public registrations permit exact token and UserInfo browser
+responses only after the request is bound to that application; preflights check the active Public
+Origin union and exact method and header. No new configuration key is required.
 
 ### Reverse proxy
 

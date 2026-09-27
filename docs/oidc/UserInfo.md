@@ -3,9 +3,9 @@
 **Status: target design.** Read the [directory boundary](./README.md) and the
 [canonical model](./CanonicalSemanticModel.md) first.
 
-`GET /oauth2/userinfo` is a server-to-server projection for a confidential BFF holding an
-interactive access token. It is not the existing `/api/profile/*` API, a browser profile endpoint,
-or a general validator for every self-issued access token.
+`GET /oauth2/userinfo` projects a validated interactive access token for a confidential BFF or
+an enabled Public client. It is not the existing `/api/profile/*` API or a general validator for
+every self-issued access token.
 
 ## Request boundary
 
@@ -14,7 +14,7 @@ Canonical `IN-28` accepts exactly one `Authorization` header with an ASCII case-
 body. It rejects multiple authorization values and every query, form, cookie, ID-token,
 refresh-token, or client-secret alternative.
 
-Bearer tokens remain BFF-to-SignaCore secrets under `DF-07`. The authorization header is redacted
+Bearer tokens remain secrets under `DF-07`. The authorization header is redacted
 before application logging, tracing, metrics, exception capture, and audit construction. Responses
 use `Cache-Control: no-store`, `Pragma: no-cache`, and a restrictive referrer policy. They are never
 logged as complete JSON or copied to audit details.
@@ -67,10 +67,15 @@ own browser session (`DF-15`).
 
 ## CORS and transport
 
-The endpoint is intentionally unavailable to browser CORS. It sends no
-`Access-Control-Allow-Origin` or credentials headers and does not handle a UserInfo preflight. The
-runtime implementation must explicitly opt out of the host's current global `AdminWeb` CORS policy;
-merely omitting endpoint-specific CORS is insufficient while that policy is applied globally.
+The endpoint and all other `/oauth2` paths are isolated from the global `AdminWeb` CORS policy.
+A preflight for `GET` with `Authorization` receives an exact Origin permit only when that Origin
+belongs to at least one active Public application. It neither inspects a Bearer token nor grants
+access to an application's response. An actual `GET` response permits the Origin only after the
+Bearer token, exact application audience, account, and session have all passed validation and the
+Origin matches that application's current registration. Invalid tokens and other failures carry
+no Origin permit. No credentials header or preflight cache lifetime is sent. `Vary` covers Origin
+and the preflight method and headers. Registered Origins do not authorize requests or protect
+against script compromise.
 
 TLS is required at the deployment boundary. No browser cookie authenticates UserInfo, so CSRF is
 not its authorization mechanism. The BFF's own browser-facing profile/session behavior remains
@@ -85,7 +90,6 @@ scope removal, and claim omission. `SC-10`–`SC-12` prove time and policy propa
 that missing authority invents no state.
 
 The route is delivered (#55) and `userinfo_endpoint` is advertised in both Discovery documents
-(`AC-08`). The delivered endpoint composes the host's CORS middleware by path so this route is
-never CORS-evaluated — no `Access-Control-Allow-*` header and no useful preflight — because the
-ServiceMantle pipeline rejects endpoint-level CORS metadata on this host. No `/api/profile/*`
+(`AC-08`). The host evaluates Public Origin CORS before the ServiceMantle pipeline because that
+pipeline rejects endpoint-level CORS metadata. No `/api/profile/*`
 route, JWT policy, grant, or other metadata changed (`AC-14`).
