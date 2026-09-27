@@ -71,6 +71,8 @@ public sealed class OidcClientConfigurationValidatorTests
     {
         Assert.Throws<OidcClientConfigurationException>(() =>
             ValidateEnabled(audienceMode: AudienceMode.Shared));
+        Assert.Throws<OidcClientConfigurationException>(() =>
+            ValidateEnabled(clientType: OidcClientType.Public, audienceMode: AudienceMode.Shared));
     }
 
     [Fact]
@@ -78,13 +80,16 @@ public sealed class OidcClientConfigurationValidatorTests
     {
         Assert.Throws<OidcClientConfigurationException>(() =>
             ValidateEnabled(redirectUris: []));
+        Assert.Throws<OidcClientConfigurationException>(() =>
+            ValidateEnabled(clientType: OidcClientType.Public, redirectUris: []));
     }
 
     [Fact]
-    public void Validate_RejectsActionablePublicClient()
+    public void Validate_AllowsPublicCodeButRejectsPublicRefresh()
     {
-        Assert.Throws<OidcClientConfigurationException>(() =>
-            ValidateEnabled(clientType: OidcClientType.Public));
+        var enabled = ValidateEnabled(clientType: OidcClientType.Public);
+        Assert.True(enabled.AllowAuthorizationCode);
+        Assert.False(enabled.AllowRefreshToken);
         Assert.Throws<OidcClientConfigurationException>(() =>
             ValidateDisabled(
                 clientType: OidcClientType.Public,

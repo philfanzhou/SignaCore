@@ -4,10 +4,10 @@
 [canonical model](./CanonicalSemanticModel.md) first.
 
 `POST /oauth2/token` has an `authorization_code` branch for pre-registered confidential BFFs
-and a token-only Public client branch. Public requests use exactly one form `client_id`, no
+and a Public client branch. Public requests use exactly one form `client_id`, no
 `client_secret` field, and no `Authorization` header. The identifier is a binding value, not a
-credential. Public authorization and management enablement are still unavailable, so this branch
-can currently redeem only a synthetically issued Public code; Discovery does not advertise `none`.
+credential. An administrator may explicitly enable Public Code + S256 authorization; Discovery
+does not yet advertise `none`.
 The branch redeems one short-lived code for the response in `PS-14`; it does not reuse a browser
 identity cookie as client authentication and does not add this grant to `/api/auth/token`.
 

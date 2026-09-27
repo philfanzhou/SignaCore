@@ -32,7 +32,7 @@ tasks must preserve the separation in their schema, DTOs, labels, and tests.
 | Policy field | Canonical owner | Implementation consequence |
 | --- | --- | --- |
 | `allow_authorization_code` | `PS-01`, `PS-21` | Gates browser authorization and code redemption; old applications remain fail closed |
-| `client_type` | `PS-21` | Public clients are registrable and never hold a secret or a hash. The token endpoint accepts `none` only for a correctly bound authorization code; management and authorization still reject Public until their later slices, so registration alone is not an operational SPA flow |
+| `client_type` | `PS-21` | Public clients never hold a secret or hash. Administrators may enable Code + S256 after registering an exact redirect and selecting `PerApplication`; the token endpoint accepts `none` only for a correctly bound authorization code. Public refresh remains unavailable and Discovery does not yet advertise `none` |
 | `allowed_scopes` | `PS-21`, `IN-04` | Closed set with canonical ordering; request validation never invents or silently narrows scope |
 | `allow_refresh_token` | `PS-21`, `EV-11` | Controls whether `offline_access` can be configured and what a later state change does |
 | Redirect URI sets | `PS-02`, `PS-20` | Independent ordered registrations, never derived from the claims callback |

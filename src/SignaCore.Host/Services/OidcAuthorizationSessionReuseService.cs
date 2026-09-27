@@ -45,8 +45,8 @@ public sealed class OidcAuthorizationSessionReuseService(
     /// missing, revoked, idle- or absolutely expired (inclusive boundaries, <c>EV-04</c>), the
     /// account is gone or deactivated (<c>EV-08</c>), or this application's session max-age is
     /// reached (<c>EV-05</c>, never a global revocation) — each with the whole unit rolled back.
-    /// The application's active/capability state is not re-decided here; the request's
-    /// <c>Accepted</c> validation already proved it.
+    /// The application's current capability, scope and redirect registration are checked again
+    /// under the issuance transaction.
     /// </summary>
     public async Task<string?> TryIssueAsync(
         OidcAuthorizationValidationResult.Accepted accepted,
@@ -81,9 +81,15 @@ public sealed class OidcAuthorizationSessionReuseService(
                 return null;
             }
 
-            var application = await dbContext.AppRegistrations
-                .AsNoTracking()
-                .SingleOrDefaultAsync(app => app.Id == accepted.ApplicationId, operationToken);
+            if (!await OidcCurrentAuthorizationPolicy.AllowsAsync(
+                    dbContext, accepted, operationToken))
+            {
+                await transaction.RollbackAsync(operationToken);
+                return null;
+            }
+
+            var application = await dbContext.AppRegistrations.AsNoTracking()
+                .SingleAsync(app => app.Id == accepted.ApplicationId, operationToken);
             if (application is null
                 || (application.IdentitySessionMaxAgeSeconds is int maxAgeSeconds
                     && now >= session.AuthTime.AddSeconds(maxAgeSeconds)))

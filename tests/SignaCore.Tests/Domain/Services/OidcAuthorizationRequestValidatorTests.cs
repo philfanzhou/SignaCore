@@ -96,10 +96,21 @@ public class OidcAuthorizationRequestValidatorTests
     }
 
     [Fact]
-    public async Task PublicClient_IsRejectedLocally()
+    public async Task PublicClientWithEmptySecret_IsAccepted()
     {
         var application = InteractiveApplication();
         application.ClientType = OidcClientType.Public;
+        application.AppSecretHash = string.Empty;
+
+        Assert.IsType<OidcAuthorizationValidationResult.Accepted>(await ValidateAsync(Valid(), application));
+    }
+
+    [Fact]
+    public async Task PublicClientWithSecret_IsRejectedBeforeRedirectTrust()
+    {
+        var application = InteractiveApplication();
+        application.ClientType = OidcClientType.Public;
+        application.AppSecretHash = "unexpected";
 
         AssertLocal(await ValidateAsync(Valid(), application), OidcAuthorizationLocalReasons.ClientNotInteractive);
     }

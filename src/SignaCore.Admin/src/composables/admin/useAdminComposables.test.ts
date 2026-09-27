@@ -801,10 +801,15 @@ describe('interactive OIDC client configuration', () => {
     expect(mocks.api.updateOidcPolicy).not.toHaveBeenCalled()
   })
 
-  it('keeps a public client fail closed and never submits it', async () => {
+  it('submits explicit Public code enablement without refresh', async () => {
     const selected = ref<AdminApp | null>(app())
     const state = useAdminAppOidc(selected)
-    mocks.api.getAppOidc.mockResolvedValueOnce(oidc({ clientType: 'Public' }))
+    mocks.api.getAppOidc.mockResolvedValueOnce(oidc({
+      clientType: 'Public', audienceMode: 'PerApplication', allowedScopes: ['openid'],
+    }))
+    mocks.api.getAppOidc.mockResolvedValueOnce(oidc({
+      clientType: 'Public', audienceMode: 'PerApplication', allowAuthorizationCode: true,
+    }))
 
     await state.loadOidc('orders')
     expect(state.isPublicClient.value).toBe(true)
@@ -812,10 +817,14 @@ describe('interactive OIDC client configuration', () => {
     state.oidcPolicyForm.allowAuthorizationCode = true
     await state.saveOidcPolicy()
 
-    expect(mocks.api.updateOidcPolicy).not.toHaveBeenCalled()
-    expect(mocks.notify).toHaveBeenCalledWith(
-      'Public 客户端保持保留状态，当前无法从控制台启用。',
-    )
+    expect(mocks.api.updateOidcPolicy).toHaveBeenCalledWith('orders', {
+      clientType: 'Public',
+      allowAuthorizationCode: true,
+      allowedScopes: ['openid'],
+      allowRefreshToken: false,
+      identitySessionMaxAgeSeconds: null,
+    })
+    expect(state.oidcConfig.value.allowAuthorizationCode).toBe(true)
   })
 
   it('drops uncommitted edits when the administrator cancels', async () => {

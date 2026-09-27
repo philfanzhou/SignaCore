@@ -41,11 +41,10 @@ public static class OidcClientConfigurationValidator
             postLogoutRedirectUris,
             isDevelopment);
 
-        if (clientType == OidcClientType.Public
-            && (allowAuthorizationCode || allowRefreshToken))
+        if (clientType == OidcClientType.Public && allowRefreshToken)
         {
             throw new OidcClientConfigurationException(
-                "Public clients are reserved and must remain fail closed.");
+                "Public clients cannot enable interactive refresh tokens.");
         }
 
         // The conversion policy: an existing Confidential client is never downgraded to Public

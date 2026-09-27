@@ -351,8 +351,8 @@ const { tokenModalOpen } = useAdminSecurity();
                 >
               </div>
               <p v-if="isPublicClient" class="section-description">
-                Public 客户端不持有 Secret，也没有重置入口；授权码与 refresh
-                能力保持关闭（由后续任务开放），控制台不提供启用路径。
+                Public clients have no secret. Register a Redirect URI and use a PerApplication
+                audience before enabling Authorization Code. Refresh tokens remain unavailable.
               </p>
               <p v-if="oidcError" class="inline-error">
                 {{ oidcError }}
@@ -367,13 +367,11 @@ const { tokenModalOpen } = useAdminSecurity();
                 ><input
                   v-model="oidcPolicyForm.allowAuthorizationCode"
                   type="checkbox"
-                  :disabled="isPublicClient"
                 />启用授权码流程</label
               ><label class="drawer-field"
                 >允许的 scope（空格分隔）<input
                   v-model="oidcPolicyForm.allowedScopes"
                   class="console-input"
-                  :disabled="isPublicClient"
                   placeholder="openid profile" /></label
               ><label class="confirm-line"
                 ><input
@@ -387,12 +385,12 @@ const { tokenModalOpen } = useAdminSecurity();
                   class="console-input"
                   type="number"
                   min="1"
-                  :disabled="isPublicClient" /></label
+                /></label
               >
               <div class="drawer-inline-form">
                 <button
                   class="console-button primary compact"
-                  :disabled="oidcSaving || isPublicClient"
+                  :disabled="oidcSaving"
                   @click="saveOidcPolicy"
                 >
                   {{ oidcSaving ? "保存中…" : "保存授权码策略" }}</button

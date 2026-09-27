@@ -149,6 +149,32 @@ public sealed class OidcLoginCompletionServiceTests
     }
 
     [Fact]
+    public async Task CompleteAsync_WhenCodeCapabilityWasDisabled_RollsBackContinuationAndSession()
+    {
+        await using var database = await CreateDatabaseAsync();
+        var seed = await SeedAsync(database.Context);
+        var app = await database.Context.AppRegistrations.SingleAsync(
+            row => row.Id == seed.ApplicationId, TestContext.Current.CancellationToken);
+        app.AllowAuthorizationCode = false;
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        database.Context.ChangeTracker.Clear();
+
+        var result = await database.Service.CompleteAsync(
+            seed.Handle, CreateAccepted(seed.ApplicationId), CreateSuccess(seed, withCounterClear: false),
+            ClientId, null, null, CorrelationId, DateTimeOffset.UtcNow,
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(result);
+        Assert.Empty(await database.Context.AuthorizationCodes.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await database.Context.IdentitySessions.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+        var continuation = await database.Context.AuthorizationRequests.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.ContinuationId, TestContext.Current.CancellationToken);
+        Assert.Null(continuation.ConsumedAt);
+    }
+
+    [Fact]
     public async Task CompleteAsync_WhenTheAccountWasDeactivated_RollsTheConsumptionBack()
     {
         await using var database = await CreateDatabaseAsync();
@@ -324,7 +350,13 @@ public sealed class OidcLoginCompletionServiceTests
             ClientType = OidcClientType.Confidential,
             AllowAuthorizationCode = true,
             AllowedScopes = Scope,
-            AllowRefreshToken = false
+            AllowRefreshToken = false,
+            RedirectUris = [new AppRedirectUriEntity
+            {
+                Id = Guid.NewGuid(),
+                Kind = RedirectUriKind.Redirect,
+                CanonicalUri = RedirectUri
+            }]
         });
         context.Accounts.Add(new AccountEntity
         {

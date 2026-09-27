@@ -140,16 +140,21 @@ public class OidcClientConfigurationApplierTests
     }
 
     [Fact]
-    public void Apply_RejectsAPublicClientWithACapability()
+    public void Apply_AllowsPublicCodeWithCompletePolicy()
     {
-        AssertRejected(new OidcClientConfigurationInput
+        var app = Application();
+        app.ClientType = OidcClientType.Public;
+        app.AppSecretHash = string.Empty;
+        OidcClientConfigurationApplier.Apply(app, new OidcClientConfigurationInput
         {
             ClientType = "Public",
             AllowAuthorizationCode = true,
             AllowedScopes = ["openid"],
             AudienceMode = "PerApplication",
             RedirectUris = ["https://bff.example.test/cb"]
-        });
+        }, isDevelopment: false);
+        Assert.True(app.AllowAuthorizationCode);
+        Assert.Equal(string.Empty, app.AppSecretHash);
     }
 
     [Fact]

@@ -49,7 +49,7 @@ public class AppRegistrationEntity
     /// </summary>
     public AudienceMode AudienceMode { get; set; } = AudienceMode.Shared;
 
-    /// <summary>Interactive OIDC client type. Public authorization remains disabled.</summary>
+    /// <summary>Interactive OIDC client type. Public code flow requires explicit enablement.</summary>
     public OidcClientType ClientType { get; set; } = OidcClientType.Confidential;
 
     /// <summary>Whether the interactive Authorization Code flow is enabled.</summary>

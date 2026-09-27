@@ -114,6 +114,13 @@ public sealed class OidcLoginCompletionService(
                 return null;
             }
 
+            if (!await OidcCurrentAuthorizationPolicy.AllowsAsync(
+                    dbContext, accepted, operationCancellationToken))
+            {
+                await transaction.RollbackAsync(operationCancellationToken);
+                return null;
+            }
+
             var session = await identitySessions.CreateAsync(
                 account.Id, passwordCredentialId, now, operationCancellationToken);
             var code = await authorizationCodes.CreateAsync(

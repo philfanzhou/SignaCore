@@ -33,8 +33,8 @@ its live descendants, and `offline_access` is advertised in Discovery.
   rejected request consumes nothing. A `charset=utf-8` declaration is accepted bare or quoted,
   in either casing.
 - Client authentication: `client_secret_basic` (HTTP Basic) or `client_secret_post`;
-  token-only Public authorization-code redemption accepts `none` with a form `client_id`,
-  while Public authorization remains disabled and Discovery does not advertise `none` yet.
+  Public authorization-code redemption accepts `none` with a form `client_id` after explicit
+  management enablement; Discovery does not advertise `none` yet.
   (`client_id`/`client_secret` form fields). The legacy `X-Admin-AppId`/`X-Admin-AppSecret` headers are
   **not** accepted here.
 - Success: HTTP 200, `Cache-Control: no-store`, body with `access_token`, `token_type: "Bearer"`,
@@ -132,7 +132,7 @@ are made from the `client_id` claim, not from `aud`.
 | Access-token claims | `iss`, `aud`, `sub`, `exp`, `nbf`, `iat`, `jti`, `client_id` with standard names |
 | Access-token type (RFC 9068) | `typ: at+jwt` |
 | Token endpoint (RFC 6749 §3.2) | Conforms at `/oauth2/token` |
-| Client authentication (RFC 6749 §2.3.1) | `client_secret_basic`, `client_secret_post`; token-only Public authorization-code `none` is implemented but not yet advertised |
+| Client authentication (RFC 6749 §2.3.1) | `client_secret_basic`, `client_secret_post`; Public authorization-code `none` is implemented but not yet advertised |
 | Error responses (RFC 6749 §5.2) | Conforms at `/oauth2/*` |
 | Extension grant naming (RFC 6749 §4.5) | Absolute URIs |
 | Authorization Code + PKCE (RFC 6749 §4.1, RFC 7636) | Confidential-BFF interactive flow with mandatory S256; code redemption is atomic with replay detection |

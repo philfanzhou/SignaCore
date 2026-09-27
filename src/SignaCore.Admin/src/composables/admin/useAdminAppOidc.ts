@@ -19,7 +19,7 @@ import { notify } from "./useAdminFeedback";
  * 两条固定不变量：
  * - Redirect URI 与 claims callback（AdminApp.callbackUrl）是两套独立注册，任何一侧都不会
  *   被复制、预填或写入另一侧。
- * - Public 客户端保持 fail closed：界面把它呈现为不可启用，也不提供提交 Public 的路径。
+ * - Public clients can explicitly enable code flow; the server always rejects Public refresh.
  */
 
 /** 未配置过交互式 OIDC 的应用在服务端就是这套值，界面按「未启用」展示而不是空白。 */
@@ -94,13 +94,6 @@ export function useAdminAppOidc(selectedApp: Ref<AdminApp | null>) {
 
   async function saveOidcPolicy() {
     if (!selectedApp.value) return;
-    // #81 opened Public registration, not Public capability: a Public client stays fail closed
-    // with no code/refresh path, so the console offers no Public policy submission and does not
-    // probe the server. Capability activation belongs to the later code-flow task (#82).
-    if (isPublicClient.value) {
-      return notify("Public 客户端保持保留状态，当前无法从控制台启用。");
-    }
-
     const maxAge = oidcPolicyForm.identitySessionMaxAgeSeconds;
     oidcSaving.value = true;
     oidcError.value = "";
