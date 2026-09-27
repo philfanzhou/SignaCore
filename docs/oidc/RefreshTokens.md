@@ -10,7 +10,8 @@ document remains the semantic reference.** Read the [directory boundary](./READM
 An interactive refresh token extends one confidential BFF authorization while its original
 identity session and current application policy remain usable. A secretless Public rotation path
 is prepared only for a complete pre-existing Public family; ordinary Public applications cannot
-obtain such a family or enable `offline_access` yet. It is an opaque, rotating bearer credential,
+obtain such a family or request `offline_access` yet. Public management can save a bounded refresh
+policy, but this alone does not activate Public Code issuance. It is an opaque, rotating bearer credential,
 not a portable account credential. A browser-held token is exposed to script compromise; callers
 must isolate scripts, keep it in memory, use HTTPS, and clear it on logout. Existing Password, SMS, LDAP, WeChat,
 legacy refresh, and cross-application exchange behavior stays on its current path.
@@ -45,7 +46,7 @@ perform no reuse side effect.
 An interactive family is usable only by its exact authenticated confidential client or a verified
 active Public application selected by a single form `client_id`. The Public path requires a complete
 family marker and exact app binding; missing or legacy members fail with a generic error rather
-than falling through to legacy issuance. Public management still refuses refresh opt-in and Public
+than falling through to legacy issuance. Public management can save refresh opt-in, but Public
 Code still returns no refresh token. It never enters
 the cross-application exchange-trust path from ADR 0003. `/api/auth/token` does not gain interactive
 refresh behavior. Legacy rows continue through their current validators, admission checks, rotation,
@@ -57,10 +58,16 @@ Every member carries the same family id, account, application, identity session,
 and original `auth_time`. A root has `family_id=id` and no parent. Each rotation appends exactly one
 child whose parent is the presented member (`PS-06`).
 
-The root fixes the family deadline to the earliest of the existing configured refresh-token duration,
-seven days after root issue, and the session's absolute expiry. Every child copies that exact
-deadline; rotation never extends the family. The session's 30-minute idle boundary is still read
-live and is never slid by refresh.
+Confidential roots retain their seven-day deadline. Every child copies the root deadline exactly;
+rotation never extends the family. The session's 30-minute idle boundary is still read live and
+is never slid by refresh.
+
+For a future Public root, the store accepts only an absolute deadline later than issuance and no
+later than seven days. The Code transaction must supply the earliest of that seven-day cap, the
+session absolute expiry, and `auth_time + identitySessionMaxAgeSeconds`. New Public roots and
+descendants use the dedicated `sha256-public:` digest; historical Public families, Confidential
+families, and legacy tokens retain `sha256:`. The present ordinary Public Code path does not
+create a root.
 
 Member states remain disjoint:
 

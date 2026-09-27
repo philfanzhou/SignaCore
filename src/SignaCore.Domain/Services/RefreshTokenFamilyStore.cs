@@ -61,7 +61,11 @@ public sealed record InteractiveRefreshFamilyRootDescriptor(
     string AppId,
     Guid IdentitySessionId,
     string Scope,
-    DateTimeOffset AuthTime);
+    DateTimeOffset AuthTime)
+{
+    public bool IsPublicFamily { get; init; }
+    public DateTimeOffset? AbsoluteDeadline { get; init; }
+}
 
 /// <summary>
 /// The single creation outcome of <see cref="IRefreshTokenFamilyStore.CreateRootAsync"/>.
@@ -125,7 +129,8 @@ public interface IRefreshTokenFamilyStore
     /// SHA-256 digest stored, <c>family_id = id</c> with <c>parent_id</c> null, the complete
     /// interactive marker (account/application/session/scope/auth time), and
     /// <c>expires_at = now + <see cref="IdentityConstants.InteractiveRefreshFamilyLifetimeDays"/></c>
-    /// days — the session bound is enforced at use time, never by the column. Inside a caller-owned
+    /// days for confidential families. A Public family requires a bounded absolute deadline
+    /// supplied by the caller after locking the session and policy. Inside a caller-owned
     /// transaction the staged row commits or rolls back with it.
     /// </summary>
     /// <exception cref="ArgumentException">An empty id, client, or non-canonical scope. The message never carries an input value.</exception>
@@ -267,9 +272,17 @@ public sealed class RefreshTokenFamilyStore(
             throw new ArgumentException("The scope must be the canonical interactive scope value.", nameof(descriptor));
         }
 
+        var maximumDeadline = now.AddDays(IdentityConstants.InteractiveRefreshFamilyLifetimeDays);
+        if (descriptor.IsPublicFamily != descriptor.AbsoluteDeadline.HasValue
+            || descriptor.AbsoluteDeadline is DateTimeOffset deadline
+                && (deadline <= now || deadline > maximumDeadline))
+        {
+            throw new ArgumentException("The family deadline must be valid for its client type.", nameof(descriptor));
+        }
+
         var refreshToken = GenerateRefreshToken();
         var rootId = Guid.NewGuid();
-        var expiresAt = now.AddDays(IdentityConstants.InteractiveRefreshFamilyLifetimeDays);
+        var expiresAt = descriptor.AbsoluteDeadline ?? maximumDeadline;
         await refreshTokens.AddAsync(new RefreshTokenEntity
         {
             Id = rootId,
@@ -277,7 +290,9 @@ public sealed class RefreshTokenFamilyStore(
             FamilyId = rootId,
             ParentId = null,
             AccountId = descriptor.AccountId,
-            TokenValue = RefreshTokenDigest.Compute(refreshToken),
+            TokenValue = descriptor.IsPublicFamily
+                ? RefreshTokenDigest.ComputePublic(refreshToken)
+                : RefreshTokenDigest.Compute(refreshToken),
             CreatedAt = now,
             ExpiresAt = expiresAt,
             IsRevoked = false,

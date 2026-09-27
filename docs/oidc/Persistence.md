@@ -15,6 +15,13 @@ The existing `refresh_tokens` table and every current column remain in place. In
 facts, `is_revoked` stays explicit named-token revocation state, and the account, application,
 LDAP/SMS/WeChat, and `source_app_id` bindings keep their current meanings.
 
+The existing 256-character `token_value` column also holds `sha256-public:` followed by 64
+lowercase hex digits (78 characters) for a new Public family. Existing Confidential, legacy, and
+historical Public families retain `sha256:`. Lookup checks both exact digests; a duplicate bearer
+under both prefixes fails closed. No migration or index change is needed. A binary rolled back to
+the old digest reader cannot find a new Public bearer; already issued JWTs retain their own `exp`.
+Keep Public Code issuance disabled during such a rollback.
+
 #97 adds these columns symmetrically:
 
 | Column | Shape | Relationship |
