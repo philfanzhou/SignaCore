@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using SignaCore.Database;
+using SignaCore.Database.Entity;
 using SignaCore.Domain.Validators;
 
 namespace SignaCore.Domain.Services;
@@ -23,7 +24,8 @@ public sealed record InteractiveAccessTokenDescriptor(
     string Scope,
     string? DisplayName,
     string? Nickname,
-    IReadOnlyList<Claim> EnrichmentClaims);
+    IReadOnlyList<Claim> EnrichmentClaims,
+    OidcClientType ClientType = OidcClientType.Confidential);
 
 /// <summary>
 /// The unique two-way outcome of <see cref="IInteractiveAccessTokenFactory.Create"/>: either the
@@ -68,7 +70,8 @@ public interface IInteractiveAccessTokenFactory
     /// Creates one interactive access token signed with <paramref name="signingKey"/> under the
     /// caller-captured instant <paramref name="now"/> (<c>PS-22</c>): header exactly
     /// <c>alg: RS256</c>, <c>kid</c>, <c>typ: at+jwt</c>; audience always the application AppId,
-    /// never the deployment-wide shared audience; a fixed 15-minute lifetime; a fresh
+    /// never the deployment-wide shared audience; a fixed five-minute Public or fifteen-minute
+    /// Confidential lifetime; a fresh
     /// <c>jti</c>; and the enrichment claims appended in input order after every reserved claim
     /// type was dropped. The only failure is the serialized-length bound; precondition violations
     /// are programming errors and throw.
@@ -170,8 +173,10 @@ public sealed class InteractiveAccessTokenFactory : IInteractiveAccessTokenFacto
 
         var tokenId = Guid.NewGuid();
         var issuedAtSeconds = now.ToUnixTimeSeconds();
-        var expiresAt = DateTimeOffset.FromUnixTimeSeconds(
-            issuedAtSeconds + IdentityConstants.InteractiveAccessTokenLifetimeSeconds);
+        var lifetimeSeconds = descriptor.ClientType == OidcClientType.Public
+            ? IdentityConstants.PublicInteractiveAccessTokenLifetimeSeconds
+            : IdentityConstants.InteractiveAccessTokenLifetimeSeconds;
+        var expiresAt = DateTimeOffset.FromUnixTimeSeconds(issuedAtSeconds + lifetimeSeconds);
 
         // The bound claims first, then the optional basic claims, then the surviving enrichment
         // in input order. JwtPayload adds iss/aud/nbf/exp/iat from its own parameters, so no

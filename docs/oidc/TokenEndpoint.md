@@ -11,6 +11,13 @@ advertises `none` for the token endpoint only.
 The branch redeems one short-lived code for the response in `PS-14`; it does not reuse a browser
 identity cookie as client authentication and does not add this grant to `/api/auth/token`.
 
+New Public Code access tokens expire 300 seconds after the captured issuance second, while
+Confidential interactive access tokens remain at 900 seconds. `expires_in` is derived from the
+same expiry used in the JWT. A future Public interactive refresh family uses the same constructor;
+ordinary Public refresh issuance is still disabled. Tokens issued before this change keep their
+original `exp`, and downstream services must validate the exact issuer, audience, signature, and
+expiry.
+
 ## Public Origin CORS
 
 The host excludes all `/oauth2` paths from AdminWeb CORS. A token preflight admits only `POST`

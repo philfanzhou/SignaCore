@@ -41,7 +41,8 @@ Identity-session revocation and application/account changes are live inputs to c
 UserInfo. They do not remotely erase or shorten self-contained access or ID tokens: downstream
 validation continues to `exp`, while UserInfo performs its separate current-state read. The
 already-issued-token window is therefore bounded by the interactive access-token lifetime
-(`PS-13`: 15 minutes); downstream services that need an immediate cut must add their own live
+(`PS-13`: 5 minutes for newly issued Public tokens and 15 minutes for Confidential tokens;
+older Public tokens retain their original `exp`); downstream services that need an immediate cut must add their own live
 check, because SignaCore provides no introspection. Application session max-age never becomes a
 global session revocation. Account deletion has no endpoint today; the delete half of `EV-08`
 becomes reachable only when such an endpoint is delivered, and that delivery owns its

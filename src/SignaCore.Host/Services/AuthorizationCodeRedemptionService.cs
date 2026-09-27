@@ -336,7 +336,8 @@ public sealed class AuthorizationCodeRedemptionService(
             lookup.Entity.Scope,
             displayName,
             account.Nickname,
-            enrichment);
+            enrichment,
+            app.ClientType);
 
         return await ExecuteIssuanceTransactionAsync(
             descriptor,
@@ -607,7 +608,7 @@ public sealed class AuthorizationCodeRedemptionService(
             return AuthorizationCodeRedemptionOutcome.Success(
                 issued.AccessToken,
                 issuedIdToken.IdToken,
-                IdentityConstants.InteractiveAccessTokenLifetimeSeconds,
+                issued.ExpiresAt.ToUnixTimeSeconds() - now.ToUnixTimeSeconds(),
                 lockedCode.Scope,
                 familyRoot?.RefreshToken);
         }, cancellationToken);

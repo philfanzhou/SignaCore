@@ -112,10 +112,13 @@ public static class IdentityConstants
     public const int LogoutHintMaximumAgeHours = 24;
 
     /// <summary>
-    /// The fixed 15-minute lifetime of the interactive Authorization Code flow access token
-    /// (<c>PS-13</c>); it never reads <see cref="JwtOptions.TokenExpirationHours"/>.
+    /// The fixed 15-minute Confidential interactive access-token lifetime (<c>PS-13</c>);
+    /// it never reads <see cref="JwtOptions.TokenExpirationHours"/>.
     /// </summary>
     public const int InteractiveAccessTokenLifetimeSeconds = 900;
+
+    /// <summary>The fixed 5-minute Public interactive access-token lifetime.</summary>
+    public const int PublicInteractiveAccessTokenLifetimeSeconds = 300;
 
     /// <summary>
     /// The fixed 5-minute lifetime of the interactive Authorization Code flow ID token

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -159,6 +160,10 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
         Assert.Contains("no-store", exchange.Headers.CacheControl!.ToString());
         var issued = await exchange.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
         Assert.Equal("openid", issued.GetProperty("scope").GetString());
+        Assert.Equal(300, issued.GetProperty("expires_in").GetInt64());
+        var accessToken = new JwtSecurityTokenHandler().ReadJwtToken(issued.GetProperty("access_token").GetString());
+        Assert.Equal(300, accessToken.ValidTo.Subtract(accessToken.ValidFrom).TotalSeconds);
+        Assert.Equal(appId, Assert.Single(accessToken.Audiences));
         Assert.False(issued.TryGetProperty("refresh_token", out _));
         using var userInfoRequest = new HttpRequestMessage(HttpMethod.Get, "/oauth2/userinfo");
         userInfoRequest.Headers.TryAddWithoutValidation("Origin", "https://public.example.test");

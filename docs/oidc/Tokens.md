@@ -47,7 +47,7 @@ downstream authorization decision.
 
 | Claim group | Interactive value |
 | --- | --- |
-| JWT authority | Configured `iss`; application AppId `aud`; 15-minute `exp`; captured `nbf`/`iat`; unique `jti` |
+| JWT authority | Configured `iss`; application AppId `aud`; Public 5-minute or Confidential 15-minute `exp`; captured `nbf`/`iat`; unique `jti` |
 | Subject and client binding | Stable account-id `sub`, `client_id`, and identity-session `sid` |
 | Authentication | Existing `auth_method`, carrying the Password method captured by the identity session |
 | Granted authority | Canonical space-delimited `scope`, byte-for-byte equal to the token response |
@@ -93,7 +93,7 @@ keys remain in JWKS for previously issued tokens.
 ## Code-exchange response
 
 `PS-14` owns the JSON result. Every successful code exchange contains `access_token`,
-`token_type: Bearer`, `expires_in: 900`, `id_token`, and the canonical granted `scope`. A
+`token_type: Bearer`, `expires_in: 300` for Public or `900` for Confidential, `id_token`, and the canonical granted `scope`. A
 `refresh_token` appears only when `offline_access` was granted and the optional family root committed
 in the same transaction. The response has `Cache-Control: no-store` and `Pragma: no-cache` and is
 not exposed before the state described by `EV-20` or `EV-21` commits.

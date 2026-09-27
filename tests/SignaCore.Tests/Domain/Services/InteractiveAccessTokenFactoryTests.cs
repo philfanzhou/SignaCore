@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
 using SignaCore.Database;
+using SignaCore.Database.Entity;
 using SignaCore.Domain.Services;
 using Xunit;
 
@@ -13,7 +14,7 @@ namespace SignaCore.Tests.Domain.Services;
 /// <summary>
 /// The <c>PS-13</c> interactive access token constructor as a pure function: the exact header and
 /// payload shape, the single-string AppId audience with no shared-audience fallback, the captured
-/// instant with the fixed 15-minute lifetime, the reserved-claim policy against enrichment
+/// instant with the fixed Public/Confidential lifetime, the reserved-claim policy against enrichment
 /// injection, the serialized-length bound as the only failure, the precondition programming
 /// errors whose messages carry no input value, and the per-call <c>kid</c> of <c>EV-16</c>.
 /// </summary>
@@ -55,7 +56,8 @@ public sealed class InteractiveAccessTokenFactoryTests
         string? scope = CanonicalScope,
         string? displayName = DisplayName,
         string? nickname = Nickname,
-        IReadOnlyList<Claim>? enrichmentClaims = null) =>
+        IReadOnlyList<Claim>? enrichmentClaims = null,
+        OidcClientType clientType = OidcClientType.Confidential) =>
         new(
             accountId ?? Guid.NewGuid(),
             clientId!,
@@ -64,7 +66,8 @@ public sealed class InteractiveAccessTokenFactoryTests
             scope!,
             displayName,
             nickname,
-            enrichmentClaims ?? []);
+            enrichmentClaims ?? [],
+            clientType);
 
     private static InteractiveAccessTokenResult.Issued CreateIssued(
         InteractiveAccessTokenDescriptor? descriptor = null,
@@ -143,6 +146,17 @@ public sealed class InteractiveAccessTokenFactoryTests
             DateTimeOffset.FromUnixTimeSeconds(
                 expectedIat + IdentityConstants.InteractiveAccessTokenLifetimeSeconds),
             issued.ExpiresAt);
+    }
+
+    [Fact]
+    public void Create_PublicTokenUsesExactly300SecondsAndKeepsPerApplicationAudience()
+    {
+        var issued = CreateIssued(CreateDescriptor(clientType: OidcClientType.Public));
+        var payload = ReadPayload(issued.AccessToken);
+        Assert.Equal(300, payload.GetProperty("exp").GetInt64() - payload.GetProperty("iat").GetInt64());
+        Assert.Equal(ClientId, payload.GetProperty("aud").GetString());
+        Assert.Equal(JsonValueKind.String, payload.GetProperty("aud").ValueKind);
+        Assert.Equal(300, issued.ExpiresAt.ToUnixTimeSeconds() - Now.ToUnixTimeSeconds());
     }
 
     [Fact]
