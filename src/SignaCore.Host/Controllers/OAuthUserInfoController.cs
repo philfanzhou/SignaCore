@@ -4,20 +4,20 @@ using Microsoft.AspNetCore.RateLimiting;
 using SignaCore.Domain;
 using SignaCore.Host.Security;
 using SignaCore.Host.Services;
+using SignaCore.Host.Middleware;
 
 namespace SignaCore.Host.Controllers;
 
 /// <summary>
-/// The scope-controlled OIDC UserInfo endpoint (<c>AC-08</c>/<c>PS-16</c>): a server-to-server
-/// projection for a confidential BFF holding one interactive access token. Only <c>GET</c> with a
+/// The scope-controlled OIDC UserInfo endpoint (<c>AC-08</c>/<c>PS-16</c>): a
+/// projection for one interactive access token. Only <c>GET</c> with a
 /// single <c>Authorization: Bearer</c> header is admitted (<c>IN-28</c>); every validation and
 /// live-state decision belongs to <see cref="OidcUserInfoService"/> (<c>IN-29</c>). The endpoint
 /// is anonymous at the ASP.NET layer on purpose — the Bearer credential is the only
 /// authentication, and the management API's JWT bearer configuration is deliberately not reused.
 /// <para>
-/// The endpoint opts out of the host's global <c>AdminWeb</c> CORS policy explicitly: no
-/// <c>Access-Control-Allow-*</c> header may appear and no preflight is answered, so a browser can
-/// never read a profile directly — the BFF proxy is the only intended consumer (<c>DF-15</c>).
+/// The endpoint opts out of the host's global <c>AdminWeb</c> CORS policy. A Public
+/// application's registered Origin may read only its own successfully validated response.
 /// Every response carries <c>Cache-Control: no-store</c>, <c>Pragma: no-cache</c>, and a
 /// restrictive referrer policy.
 /// </para>
@@ -81,6 +81,7 @@ public sealed class OAuthUserInfoController : ControllerBase
         Response.Headers["Referrer-Policy"] = "no-referrer";
         if (outcome.IsSuccess)
         {
+            PublicOidcCorsMiddleware.BindUserInfo(HttpContext, outcome.AppId!);
             // PS-16: the closed response set — sub always; name/nickname only when profile
             // survived the token-scope/current-allow-list intersection. No invented empty fields.
             var body = new Dictionary<string, string>

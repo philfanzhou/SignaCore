@@ -57,14 +57,18 @@ public sealed class OidcUserInfoOutcome
     /// <summary>The current non-null account nickname, present only when <c>profile</c> survived.</summary>
     public string? Nickname { get; private init; }
 
+    /// <summary>The verified live application binding, available only on success.</summary>
+    public string? AppId { get; private init; }
+
     public OidcUserInfoRejection? Rejection { get; private init; }
 
-    public static OidcUserInfoOutcome Success(string subject, string? name, string? nickname) => new()
+    public static OidcUserInfoOutcome Success(string subject, string? name, string? nickname, string appId) => new()
     {
         IsSuccess = true,
         Subject = subject,
         Name = name,
-        Nickname = nickname
+        Nickname = nickname,
+        AppId = appId
     };
 
     public static OidcUserInfoOutcome Failed(OidcUserInfoRejection rejection) => new()
@@ -271,7 +275,7 @@ public sealed class OidcUserInfoService(
             nickname = account.Nickname;
         }
 
-        return OidcUserInfoOutcome.Success(subject.ToString("D"), name, nickname);
+        return OidcUserInfoOutcome.Success(subject.ToString("D"), name, nickname, application.AppId);
     }
 
     /// <summary>

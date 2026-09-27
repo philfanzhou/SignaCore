@@ -568,14 +568,10 @@ if (app.Environment.IsDevelopment())
 }
 app.UseForwardedHeaders();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
-// UserInfo.md §CORS and transport: the UserInfo endpoint explicitly opts out of the host's
-// AdminWeb CORS policy — no CORS evaluation runs for its path, so no Access-Control-* header
-// can appear and no preflight is ever usefully answered; the BFF proxy stays the only consumer.
-// Every other path keeps the exact named-policy middleware behavior (CorsMiddleware composed
-// directly instead of through UseCors so this branch can skip it by path).
+// Public OIDC CORS owns the exact token and UserInfo routes. No /oauth2 path inherits AdminWeb.
 app.Use((context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments("/oauth2/userinfo", StringComparison.Ordinal))
+    if (context.Request.Path.StartsWithSegments("/oauth2", StringComparison.Ordinal))
     {
         return next(context);
     }
@@ -589,6 +585,7 @@ app.Use((context, next) =>
         context,
         app.Services.GetRequiredService<Microsoft.AspNetCore.Cors.Infrastructure.ICorsPolicyProvider>());
 });
+app.UseMiddleware<PublicOidcCorsMiddleware>();
 // Redaction moves ahead of the composed pipeline: it ran between authentication and authorization
 // before, and the gateway schemes still authenticate on demand deeper in the pipeline through
 // HttpContextExtensions, which prefers the protected Items copy.
