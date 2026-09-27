@@ -19,6 +19,55 @@ dotnet test tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj -
 
 Server database contract tests use environment-supplied connection strings. CI runs the supported provider matrix and uploads test results.
 
+### Required OIDC matrix result gate
+
+The `Database Contract Matrix` job runs for pull requests targeting `main` and pushes to `main`,
+after `Build & Test`. `Protect main` requires this exact check name. The job has a **25-minute hard
+timeout** and enables PostgreSQL contracts with `RUN_SIGNACORE_DATABASE_CONTRACTS=true`. Its existing
+filter includes `DatabaseContractTests` plus the installation-adoption and migration-gate exceptions;
+the reference BFF contracts run in a separate step of the same job.
+
+After the test steps, the Python standard-library
+[result validator](../../.github/scripts/verify_oidc_matrix.py) requires exactly one readable report
+for each of `signacore-database-contracts.trx` and
+`signacore-reference-bff-database-contracts.trx` under `reports/`. It checks result/definition
+correspondence, unique result IDs, successful run summaries and consistent execution counters.
+Every reported test must pass. Missing, duplicate, malformed or incomplete reports fail the job.
+
+The integration report must also contain exactly the checked-in
+[OIDC case inventory](../../.github/scripts/oidc-matrix-cases.json), including theory arguments:
+
+| Test class | Expected passed cases |
+| --- | ---: |
+| `OidcAttackRateLimitDatabaseContractTests` | 30 |
+| `OidcSensitiveCanaryMatrixDatabaseContractTests` | 13 |
+| `OidcNamedRevocationDatabaseContractTests` | 5 |
+
+Missing classes/cases, unexpected or repeated cases, skipped/not-executed cases and failures cannot
+produce a successful gate. Update the inventory in the same PR as any intentional change to these
+tests, after reviewing the changed cases; do not lower expectations just to make a failed run pass.
+Validator diagnostics contain only known class names, counts and fixed statuses, never report test
+output, case arguments, exception details or Canary values.
+
+Run the synthetic positive/negative acceptance tests without containers:
+
+```bash
+python3 -m unittest discover -s .github/scripts -p 'test_verify_oidc_matrix.py' -v
+python3 .github/scripts/verify_oidc_matrix.py reports
+```
+
+CI runs these self-tests before the database tests. The validator runs after a test failure as well
+as after success, but does not run on cancellation. The existing `if: always()` artifact upload
+preserves available reports for diagnosis; it cannot turn a failed or cancelled job into success.
+Only synthetic test data belongs in uploaded reports; never include live credentials or tokens.
+
+There are **zero automatic retries of test assertion failures**. Diagnose the first failed run and
+retain its evidence before any manual rerun. `docker-pull.sh` permits at most three pull attempts
+only for recognized transient registry/network failures; it does not retry tests. Runner, registry
+and PostgreSQL availability are outside the result gate's guarantee. For a gate change, record the
+actual PR job duration and inspect its uploaded TRX, then repeat that verification on the post-merge
+`main` run. Historical green runs and local self-tests do not replace those CI acceptance results.
+
 ## Container smoke test
 
 After starting the container, verify:
