@@ -288,7 +288,10 @@ public sealed class AuthorizationCodeRedemptionService(
             return InvalidGrant();
         }
 
-        if ((app.ClientType == OidcClientType.Public && ContainsOfflineAccess(lookup.Entity.Scope))
+        if ((app.ClientType == OidcClientType.Public
+                && ContainsOfflineAccess(lookup.Entity.Scope)
+                && (!app.AllowRefreshToken
+                    || app.IdentitySessionMaxAgeSeconds is not (> 0 and <= IdentityConstants.MaxIdentitySessionAgeSeconds)))
             || FailsApplicationSessionPolicy(app, session, now)
             || !IsScopeStillAllowed(lookup.Entity.Scope, app.AllowedScopes))
         {
@@ -508,8 +511,9 @@ public sealed class AuthorizationCodeRedemptionService(
             // still allows refresh tokens. The code stays unconsumed and no family is written.
             var codeCarriesOfflineAccess = ContainsOfflineAccess(lockedCode.Scope);
             if (codeCarriesOfflineAccess
-                && (currentApplication.ClientType == OidcClientType.Public
-                    || !currentApplication.AllowRefreshToken))
+                && (!currentApplication.AllowRefreshToken
+                    || (currentApplication.ClientType == OidcClientType.Public
+                        && currentApplication.IdentitySessionMaxAgeSeconds is not (> 0 and <= IdentityConstants.MaxIdentitySessionAgeSeconds))))
             {
                 await transaction.RollbackAsync(operationToken);
                 return InvalidGrant();
@@ -572,7 +576,16 @@ public sealed class AuthorizationCodeRedemptionService(
                         descriptor.ClientId,
                         lockedSession.Id,
                         lockedCode.Scope,
-                        lockedCode.AuthTime),
+                        lockedCode.AuthTime,
+                        currentApplication.ClientType == OidcClientType.Public
+                            ? new[]
+                            {
+                                now.AddDays(IdentityConstants.InteractiveRefreshFamilyLifetimeDays),
+                                lockedSession.AbsoluteExpiresAt,
+                                lockedCode.AuthTime.AddSeconds(currentApplication.IdentitySessionMaxAgeSeconds!.Value)
+                            }.Min()
+                            : null,
+                        currentApplication.ClientType == OidcClientType.Public),
                     now,
                     operationToken);
                 if (!await authorizationCodes.LinkRefreshFamilyAsync(

@@ -242,5 +242,12 @@ Administrators register exact Origins on active Public applications through the 
 management API. `POST /oauth2/token` and `GET /oauth2/userinfo` admit only the matching
 application's registered Origin on actual responses. Preflights check the active Public Origin
 union and the endpoint's exact method and header. The AdminWeb allow list does not apply to
-`/oauth2`; no Public Origin permits authorization, refresh, revoke, or logout. Keep browser
-credentials out of cookies and use HTTPS, PKCE, and a suitable script isolation policy.
+`/oauth2`; no Public Origin permits authorization, refresh, revoke, or logout CORS yet. Public
+refresh can be enabled only through an explicit bounded offline policy, and browser refresh
+response CORS remains tracked by [#421](https://github.com/philfanzhou/SignaCore/issues/421).
+Keep browser refresh credentials in memory for the shortest practical time, clear them on logout,
+and use HTTPS, PKCE, and a strict script isolation policy. A high-privilege console should prefer
+a confidential BFF. New Public family members use the `sha256-public:` digest prefix in the existing
+`refresh_tokens.token_value` column, so an older binary's `sha256:` lookup rejects their rotation
+after rollback; already issued access tokens remain valid until their own expiry. No schema or
+business configuration key changes are required.

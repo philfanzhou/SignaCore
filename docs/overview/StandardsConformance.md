@@ -36,8 +36,9 @@ its live descendants, and `offline_access` is advertised in Discovery.
 - Client authentication: `client_secret_basic` (HTTP Basic) or `client_secret_post`
   (`client_id`/`client_secret` form fields). Public authorization-code redemption also accepts
   `none` with a form `client_id` after explicit management enablement and mandatory S256 PKCE.
-  Discovery advertises all three token methods. `none` does not enable Public refresh, revoke,
-  other grants. Registered Public Origins separately enable exact token and UserInfo CORS.
+  Discovery advertises all three token methods. `none` also permits rotation of an existing
+  Public Code family under explicit offline policy; it does not enable Public revoke or other
+  grants. Registered Public Origins separately enable exact code-token and UserInfo CORS.
   The legacy `X-Admin-AppId`/`X-Admin-AppSecret` headers are
   **not** accepted here.
 - Success: HTTP 200, `Cache-Control: no-store`, body with `access_token`, `token_type: "Bearer"`,

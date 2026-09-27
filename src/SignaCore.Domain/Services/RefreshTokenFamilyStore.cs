@@ -53,15 +53,18 @@ public enum RefreshFamilyRevocationReason
 /// <summary>
 /// The validated server-side inputs of one interactive refresh family root (<c>PS-06</c>/<c>EV-21</c>):
 /// the account, the interactive client's AppId, the live identity session, and the byte-for-byte
-/// authorization-code snapshots of the canonical scope and the original authentication time. The
-/// plaintext token is never part of this shape — it exists only in the creation result.
+/// authorization-code snapshots of the canonical scope and the original authentication time.
+/// Public roots also carry the locked family deadline and select the rollback-safe digest version.
+/// The plaintext token is never part of this shape — it exists only in the creation result.
 /// </summary>
 public sealed record InteractiveRefreshFamilyRootDescriptor(
     Guid AccountId,
     string AppId,
     Guid IdentitySessionId,
     string Scope,
-    DateTimeOffset AuthTime);
+    DateTimeOffset AuthTime,
+    DateTimeOffset? FamilyDeadline = null,
+    bool PublicClient = false);
 
 /// <summary>
 /// The single creation outcome of <see cref="IRefreshTokenFamilyStore.CreateRootAsync"/>.
@@ -125,7 +128,8 @@ public interface IRefreshTokenFamilyStore
     /// SHA-256 digest stored, <c>family_id = id</c> with <c>parent_id</c> null, the complete
     /// interactive marker (account/application/session/scope/auth time), and
     /// <c>expires_at = now + <see cref="IdentityConstants.InteractiveRefreshFamilyLifetimeDays"/></c>
-    /// days — the session bound is enforced at use time, never by the column. Inside a caller-owned
+    /// days for Confidential clients; a Public caller supplies a shorter deadline capped by its
+    /// locked session and application max-age. Inside a caller-owned
     /// transaction the staged row commits or rolls back with it.
     /// </summary>
     /// <exception cref="ArgumentException">An empty id, client, or non-canonical scope. The message never carries an input value.</exception>
@@ -267,9 +271,21 @@ public sealed class RefreshTokenFamilyStore(
             throw new ArgumentException("The scope must be the canonical interactive scope value.", nameof(descriptor));
         }
 
+        var maximumExpiresAt = now.AddDays(IdentityConstants.InteractiveRefreshFamilyLifetimeDays);
+        if (descriptor.PublicClient && descriptor.FamilyDeadline is null)
+        {
+            throw new ArgumentException("A Public family requires a bounded deadline.", nameof(descriptor));
+        }
+
+        if (descriptor.FamilyDeadline is DateTimeOffset deadline
+            && (deadline <= now || deadline > maximumExpiresAt))
+        {
+            throw new ArgumentException("The family deadline must be within the interactive refresh lifetime.", nameof(descriptor));
+        }
+
+        var expiresAt = descriptor.FamilyDeadline ?? maximumExpiresAt;
         var refreshToken = GenerateRefreshToken();
         var rootId = Guid.NewGuid();
-        var expiresAt = now.AddDays(IdentityConstants.InteractiveRefreshFamilyLifetimeDays);
         await refreshTokens.AddAsync(new RefreshTokenEntity
         {
             Id = rootId,
@@ -277,7 +293,9 @@ public sealed class RefreshTokenFamilyStore(
             FamilyId = rootId,
             ParentId = null,
             AccountId = descriptor.AccountId,
-            TokenValue = RefreshTokenDigest.Compute(refreshToken),
+            TokenValue = descriptor.PublicClient
+                ? RefreshTokenDigest.ComputePublicFamily(refreshToken)
+                : RefreshTokenDigest.Compute(refreshToken),
             CreatedAt = now,
             ExpiresAt = expiresAt,
             IsRevoked = false,

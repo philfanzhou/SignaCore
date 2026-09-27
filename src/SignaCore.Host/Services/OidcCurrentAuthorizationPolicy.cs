@@ -45,12 +45,14 @@ internal static class OidcCurrentAuthorizationPolicy
             || application.AudienceMode != AudienceMode.PerApplication
             || !string.Equals(application.AppId, accepted.ClientId, StringComparison.Ordinal)
             || (application.ClientType == OidcClientType.Public
-                ? application.AllowRefreshToken || !string.IsNullOrEmpty(application.AppSecretHash)
+                ? !string.IsNullOrEmpty(application.AppSecretHash)
                 : application.ClientType != OidcClientType.Confidential)
             || !OidcScopeValidator.TryValidateRequested(
                 accepted.CanonicalScope,
                 OidcScopeValidator.ParseCanonical(application.AllowedScopes),
-                application.AllowRefreshToken,
+                application.AllowRefreshToken
+                    && (application.ClientType != OidcClientType.Public
+                        || application.IdentitySessionMaxAgeSeconds is > 0 and <= IdentityConstants.MaxIdentitySessionAgeSeconds),
                 out var canonicalScope)
             || !string.Equals(canonicalScope, accepted.CanonicalScope, StringComparison.Ordinal))
         {

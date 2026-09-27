@@ -127,7 +127,7 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
         if (!application.AllowAuthorizationCode
             || application.AudienceMode != AudienceMode.PerApplication
             || (application.ClientType == OidcClientType.Public
-                ? application.AllowRefreshToken || !string.IsNullOrEmpty(application.AppSecretHash)
+                ? !string.IsNullOrEmpty(application.AppSecretHash)
                 : application.ClientType != OidcClientType.Confidential))
         {
             return Local(OidcAuthorizationLocalReasons.ClientNotInteractive);
@@ -226,7 +226,9 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
         if (!OidcScopeValidator.TryValidateRequested(
                 parameters.Single(Scope),
                 OidcScopeValidator.ParseCanonical(application.AllowedScopes),
-                application.AllowRefreshToken,
+                application.AllowRefreshToken
+                    && (application.ClientType != OidcClientType.Public
+                        || application.IdentitySessionMaxAgeSeconds is > 0 and <= IdentityConstants.MaxIdentitySessionAgeSeconds),
                 out var canonicalScope))
         {
             return Redirect(

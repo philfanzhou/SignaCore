@@ -20,8 +20,10 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         CancellationToken cancellationToken = default)
     {
         var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
+        var publicFamilyDigest = RefreshTokenDigest.ComputePublicFamily(tokenValue);
         return await _dbContext.RefreshTokens
-            .FirstOrDefaultAsync(r => r.TokenValue == tokenDigest, cancellationToken);
+            .FirstOrDefaultAsync(r => r.TokenValue == tokenDigest
+                || r.TokenValue == publicFamilyDigest, cancellationToken);
     }
 
     public Task AddAsync(
@@ -59,10 +61,11 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         CancellationToken cancellationToken = default)
     {
         var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
+        var publicFamilyDigest = RefreshTokenDigest.ComputePublicFamily(tokenValue);
         // Legacy-only revocation (EV-33): an interactive family member never takes family
         // semantics from the legacy paths, so the predicate structurally excludes it.
         var affectedRows = await _dbContext.RefreshTokens
-            .Where(token => token.TokenValue == tokenDigest
+            .Where(token => (token.TokenValue == tokenDigest || token.TokenValue == publicFamilyDigest)
                 && !token.IsRevoked
                 && token.IdentitySessionId == null)
             .ExecuteUpdateAsync(setters => setters
@@ -83,11 +86,12 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         CancellationToken cancellationToken = default)
     {
         var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
+        var publicFamilyDigest = RefreshTokenDigest.ComputePublicFamily(tokenValue);
         var now = DateTimeOffset.UtcNow;
         // EV-14 revokes only the named live interactive member, never its family or session.
         // Consumed members remain replay evidence; legacy revocation keeps its EV-33 behavior.
         var affectedRows = await _dbContext.RefreshTokens
-            .Where(token => token.TokenValue == tokenDigest
+            .Where(token => (token.TokenValue == tokenDigest || token.TokenValue == publicFamilyDigest)
                 && !token.IsRevoked
                 && token.AppId == appId
                 && (token.IdentitySessionId == null

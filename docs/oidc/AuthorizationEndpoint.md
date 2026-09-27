@@ -46,8 +46,9 @@ A submitted redirect URI is data, not a destination, until all first three stage
 error page sets no `Location`, does not turn the submitted URI into a link, does not reveal whether a
 client exists, and contextually encodes any diagnostic text.
 
-Public clients must have no secret hash, use a per-application audience, permit code, and keep
-refresh disabled. The same client and exact-redirect stages run before any safe error redirect.
+Public clients must have no secret hash, use a per-application audience, and permit code. A request
+for `offline_access` additionally requires explicit refresh opt-in, allowed scope, and a bounded
+session max-age. The same client and exact-redirect stages run before any safe error redirect.
 Both session reuse and login completion recheck current capability, audience, scope, and redirect
 registration in the code-issuance transaction. A concurrent policy disable cannot yield a new code
 after the disable commits.

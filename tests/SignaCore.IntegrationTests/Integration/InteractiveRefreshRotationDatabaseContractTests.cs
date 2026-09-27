@@ -362,8 +362,9 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
                 AudienceMode = AudienceMode.PerApplication,
                 ClientType = publicClient ? OidcClientType.Public : OidcClientType.Confidential,
                 AllowAuthorizationCode = true,
-                AllowedScopes = publicClient ? "openid" : CanonicalScope,
-                AllowRefreshToken = !publicClient
+                AllowedScopes = CanonicalScope,
+                AllowRefreshToken = true,
+                IdentitySessionMaxAgeSeconds = publicClient ? 3600 : null
             };
             var accountId = Guid.NewGuid();
             var credentialId = Guid.NewGuid();
@@ -401,11 +402,16 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
         {
             await using var context = new IdentityDbContext(options);
             var unitOfWork = new EfCoreUnitOfWork(context);
+            var publicClient = seed.Application.ClientType == OidcClientType.Public;
             var creation = await new RefreshTokenFamilyStore(
                 new RefreshTokenRepository(context), unitOfWork, NullLogger<RefreshTokenFamilyStore>.Instance)
                 .CreateRootAsync(
                     new InteractiveRefreshFamilyRootDescriptor(
-                        seed.AccountId, ClientId, seed.SessionId, seed.Scope, seed.AuthTime),
+                        seed.AccountId, ClientId, seed.SessionId, seed.Scope, seed.AuthTime,
+                        publicClient
+                            ? seed.AuthTime.AddSeconds(seed.Application.IdentitySessionMaxAgeSeconds!.Value)
+                            : null,
+                        publicClient),
                     DateTimeOffset.UtcNow,
                     TestContext.Current.CancellationToken);
             return (creation.RootId, creation.RefreshToken);

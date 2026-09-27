@@ -7,10 +7,11 @@ document remains the semantic reference.** Read the [directory boundary](./READM
 [canonical model](./CanonicalSemanticModel.md), and
 [interactive persistence](./Persistence.md) first.
 
-An interactive refresh token extends one confidential BFF authorization while its original
-identity session and current application policy remain usable. A secretless Public rotation path
-is prepared only for a complete pre-existing Public family; ordinary Public applications cannot
-obtain such a family or enable `offline_access` yet. It is an opaque, rotating bearer credential,
+An interactive refresh token extends one confidential BFF or explicitly opted-in Public Code
+authorization while its original identity session and current application policy remain usable.
+Public applications default to refresh-disabled and require an active secretless Code + S256 policy,
+`PerApplication` audience, allowed `offline_access`, and a bounded session max-age. It is an opaque,
+rotating bearer credential,
 not a portable account credential. A browser-held token is exposed to script compromise; callers
 must isolate scripts, keep it in memory, use HTTPS, and clear it on logout. Existing Password, SMS, LDAP, WeChat,
 legacy refresh, and cross-application exchange behavior stays on its current path.
@@ -24,7 +25,10 @@ input and no-scope-narrowing choices are the profile fixed by canonical `IN-26` 
 An authorization-code redemption creates a root only when the committed authorization snapshot
 contains `offline_access` and current application policy allows refresh (`EV-21`). The raw root is
 32 CSPRNG bytes encoded as 43 unpadded-base64url characters. Only its versioned SHA-256 digest is
-stored (`DF-09`). The code records the exact root id, so two codes for the same
+stored (`DF-09`): Confidential and legacy tokens retain `sha256:`, while newly issued Public
+family roots and children use `sha256-public:`. The latter is within the existing column width
+and is deliberately invisible to older binaries on rollback. The code records the exact root id,
+so two codes for the same
 account/application/session/scope create distinct families and code replay never guesses one
 (`PS-05`, `SC-07`–`SC-09`).
 
@@ -45,8 +49,9 @@ perform no reuse side effect.
 An interactive family is usable only by its exact authenticated confidential client or a verified
 active Public application selected by a single form `client_id`. The Public path requires a complete
 family marker and exact app binding; missing or legacy members fail with a generic error rather
-than falling through to legacy issuance. Public management still refuses refresh opt-in and Public
-Code still returns no refresh token. It never enters
+than falling through to legacy issuance. Public management requires explicit opt-in and Public
+Code creates a root only after the authorization snapshot and current locked policy both allow
+`offline_access`. It never enters
 the cross-application exchange-trust path from ADR 0003. `/api/auth/token` does not gain interactive
 refresh behavior. Legacy rows continue through their current validators, admission checks, rotation,
 error envelopes, token shapes, and cross-application minting (`EV-33`).
@@ -57,8 +62,9 @@ Every member carries the same family id, account, application, identity session,
 and original `auth_time`. A root has `family_id=id` and no parent. Each rotation appends exactly one
 child whose parent is the presented member (`PS-06`).
 
-The root fixes the family deadline to the earliest of the existing configured refresh-token duration,
-seven days after root issue, and the session's absolute expiry. Every child copies that exact
+The Confidential root keeps its existing seven-day deadline. A Public root fixes its deadline to
+the earliest of seven days after issue, the session's absolute expiry, and the application max-age
+measured from the original authentication time. Every child copies that exact
 deadline; rotation never extends the family. The session's 30-minute idle boundary is still read
 live and is never slid by refresh.
 

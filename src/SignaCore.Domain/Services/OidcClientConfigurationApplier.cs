@@ -53,7 +53,9 @@ public static class OidcClientConfigurationApplier
             input.RedirectUris ?? [],
             input.PostLogoutRedirectUris ?? [],
             isDevelopment,
-            currentClientType);
+            currentClientType,
+            application.IsActive,
+            !string.IsNullOrEmpty(application.AppSecretHash));
 
         application.ClientType = validated.ClientType;
         application.AllowAuthorizationCode = validated.AllowAuthorizationCode;

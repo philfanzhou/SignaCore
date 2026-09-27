@@ -376,7 +376,9 @@ public sealed class InteractiveRefreshRotationService(
         // committed child instead of minting a second one.
         var childId = Guid.NewGuid();
         var childToken = RefreshTokenFamilyStore.GenerateRefreshToken();
-        var childDigest = RefreshTokenDigest.Compute(childToken);
+        var childDigest = app.ClientType == OidcClientType.Public
+            ? RefreshTokenDigest.ComputePublicFamily(childToken)
+            : RefreshTokenDigest.Compute(childToken);
 
         var strategy = dbContext.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async operationToken =>
@@ -442,6 +444,10 @@ public sealed class InteractiveRefreshRotationService(
                     ? !currentApplication.AllowAuthorizationCode
                         || currentApplication.AudienceMode != AudienceMode.PerApplication
                         || currentApplication.AppSecretHash.Length != 0
+                        || !currentApplication.AllowRefreshToken
+                        || currentApplication.IdentitySessionMaxAgeSeconds is not (> 0 and <= IdentityConstants.MaxIdentitySessionAgeSeconds)
+                        || !lockedMember.Scope!.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                            .Contains(OidcScopeValidator.OfflineAccess)
                         || currentApplication.CallbackExpiresAt is DateTimeOffset expiry && expiry < now
                     : !currentApplication.AllowRefreshToken))
             {
