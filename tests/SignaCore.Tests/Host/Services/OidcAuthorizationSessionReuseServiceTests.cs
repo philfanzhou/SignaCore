@@ -95,6 +95,39 @@ public sealed class OidcAuthorizationSessionReuseServiceTests
             database.Context, TestContext.Current.CancellationToken));
     }
 
+    [Theory]
+    [InlineData("disabled")]
+    [InlineData("inactive")]
+    [InlineData("redirect-removed")]
+    [InlineData("scope-removed")]
+    [InlineData("public-with-secret")]
+    public async Task TryIssueAsync_WhenCurrentPolicyChanged_RollsBackWithoutCode(string change)
+    {
+        await using var database = await CreateDatabaseAsync();
+        var seed = await SeedAsync(database.Context);
+        var app = await database.Context.AppRegistrations
+            .Include(row => row.RedirectUris)
+            .SingleAsync(row => row.Id == seed.ApplicationId, TestContext.Current.CancellationToken);
+        switch (change)
+        {
+            case "disabled": app.AllowAuthorizationCode = false; break;
+            case "inactive": app.IsActive = false; break;
+            case "redirect-removed": app.RedirectUris.Clear(); break;
+            case "scope-removed": app.AllowedScopes = "openid"; break;
+            case "public-with-secret": app.ClientType = OidcClientType.Public; break;
+        }
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        database.Context.ChangeTracker.Clear();
+
+        Assert.Null(await database.Service.TryIssueAsync(
+            CreateAccepted(seed.ApplicationId), seed.SessionId, DateTimeOffset.UtcNow,
+            null, null, TestContext.Current.CancellationToken));
+        Assert.Empty(await database.Context.AuthorizationCodes.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedAuditTable.ReadAsync(
+            database.Context, TestContext.Current.CancellationToken));
+    }
+
     [Fact]
     public async Task TryIssueAsync_WithACancelledToken_ThrowsAndWritesNothing()
     {
@@ -186,7 +219,13 @@ public sealed class OidcAuthorizationSessionReuseServiceTests
             ClientType = OidcClientType.Confidential,
             AllowAuthorizationCode = true,
             AllowedScopes = "openid profile",
-            AllowRefreshToken = false
+            AllowRefreshToken = false,
+            RedirectUris = [new AppRedirectUriEntity
+            {
+                Id = Guid.NewGuid(),
+                Kind = RedirectUriKind.Redirect,
+                CanonicalUri = RedirectUri
+            }]
         });
         var accountId = Guid.NewGuid();
         var credentialId = Guid.NewGuid();

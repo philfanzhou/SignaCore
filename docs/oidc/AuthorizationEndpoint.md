@@ -3,7 +3,7 @@
 **Status: target design.** Read the [directory boundary](./README.md) and the
 [canonical model](./CanonicalSemanticModel.md) first.
 
-`GET /oauth2/authorize` is the browser entry point for the confidential-BFF code flow. `POST` is not
+`GET /oauth2/authorize` is the browser entry point for confidential and explicitly enabled Public Code + S256 clients. `POST` is not
 supported in this phase. The endpoint accepts attacker-controlled URL input, so it separates two
 questions: whether SignaCore has a trustworthy redirect destination, and what protocol result can be
 sent there.
@@ -45,6 +45,12 @@ The ordering paragraph after `IN-15` is normative. An implementation can express
 A submitted redirect URI is data, not a destination, until all first three stages succeed. The local
 error page sets no `Location`, does not turn the submitted URI into a link, does not reveal whether a
 client exists, and contextually encodes any diagnostic text.
+
+Public clients must have no secret hash, use a per-application audience, permit code, and keep
+refresh disabled. The same client and exact-redirect stages run before any safe error redirect.
+Both session reuse and login completion recheck current capability, audience, scope, and redirect
+registration in the code-issuance transaction. A concurrent policy disable cannot yield a new code
+after the disable commits.
 
 After redirect trust is established, protocol errors use the exact response boundary in `PS-17`.
 Error descriptions come from a closed English set and never include credentials, account/session

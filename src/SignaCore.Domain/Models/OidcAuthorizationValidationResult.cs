@@ -78,8 +78,8 @@ public abstract record OidcAuthorizationValidationResult
         string? State) : OidcAuthorizationValidationResult;
 
     /// <summary>
-    /// Every protocol field validated. The interactive flow itself is not implemented by this
-    /// slice, so the caller still produces no authorization code and no success redirect.
+    /// Every protocol field validated. The caller still rechecks current policy and session state
+    /// in its issuance transaction before returning a code or success redirect.
     /// </summary>
     public sealed record Accepted(
         string ClientId,

@@ -125,8 +125,10 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
         // are rechecked here so a row written before that policy existed, or by a future path that
         // bypasses the validator, still fails closed.
         if (!application.AllowAuthorizationCode
-            || application.ClientType != OidcClientType.Confidential
-            || application.AudienceMode != AudienceMode.PerApplication)
+            || application.AudienceMode != AudienceMode.PerApplication
+            || (application.ClientType == OidcClientType.Public
+                ? application.AllowRefreshToken || !string.IsNullOrEmpty(application.AppSecretHash)
+                : application.ClientType != OidcClientType.Confidential))
         {
             return Local(OidcAuthorizationLocalReasons.ClientNotInteractive);
         }
