@@ -11,13 +11,11 @@
 `/oauth2/authorize`, `/oauth2/token`, `/oauth2/revoke`, and `/oauth2/userinfo` endpoints,
 `response_types_supported: ["code"]`, the `authorization_code` grant, S256 PKCE, and the supported
 interactive scopes. `token_endpoint_auth_methods_supported` is
-`["client_secret_basic", "client_secret_post", "none"]`; `none` selects an enabled Public
-authorization-code client using S256 or an existing complete Public refresh family while its
-explicit offline policy remains enabled. The form `client_id` is a selector, not a credential.
-The revoke endpoint still supports only `client_secret_basic` and `client_secret_post`;
-`none` does not enable Public revoke or other Public grants. Exact registered Public Origin CORS
-for code and UserInfo is a separate host policy, not inferred from this metadata. It does not
-publish a standard
+`["client_secret_basic", "client_secret_post", "none"]`; `none` applies only to an enabled Public
+authorization-code client using S256 and a form `client_id`. The revoke endpoint still supports only
+`client_secret_basic` and `client_secret_post`. This metadata does not enable Public refresh, Public
+revoke or other Public grants. Exact registered Public Origin CORS for token and UserInfo is a
+separate host policy, not inferred from this metadata. It does not publish a standard
 `end_session_endpoint`.
 
 ## Activation graph

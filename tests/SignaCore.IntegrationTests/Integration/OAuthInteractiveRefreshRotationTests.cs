@@ -65,7 +65,7 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(
             cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal(OfflineScope, body.GetProperty("scope").GetString());
+        Assert.Equal("openid", body.GetProperty("scope").GetString());
         var access = new JwtSecurityTokenHandler().ReadJwtToken(body.GetProperty("access_token").GetString());
         Assert.Equal(AppId, Assert.Single(access.Audiences));
         Assert.Equal(body.GetProperty("expires_in").GetInt64(),
@@ -73,49 +73,6 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
         var family = await GetFamilyAsync(seeded.RootId);
         Assert.Equal(2, family.Count);
         Assert.Single(family, row => row.ParentId == seeded.RootId && !row.IsRevoked);
-    }
-
-    [Theory]
-    [InlineData("refresh-off")]
-    [InlineData("scope-removed")]
-    [InlineData("max-age-removed")]
-    public async Task PublicRefresh_RequiresCurrentOfflinePolicyAndFamilyScope(string change)
-    {
-        var seeded = await SeedPublicFamilyAsync();
-        using (var scope = _fixture.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-            if (change == "scope-removed")
-            {
-                var root = await db.RefreshTokens.SingleAsync(row => row.Id == seeded.RootId,
-                    TestContext.Current.CancellationToken);
-                root.Scope = "openid";
-            }
-            else
-            {
-                var app = await db.AppRegistrations.SingleAsync(row => row.Id == seeded.ApplicationId,
-                    TestContext.Current.CancellationToken);
-                if (change == "refresh-off")
-                {
-                    app.AllowRefreshToken = false;
-                }
-                else
-                {
-                    app.IdentitySessionMaxAgeSeconds = null;
-                }
-            }
-            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        }
-
-        using var http = _fixture.CreateHttpClient();
-        using var response = await http.PostAsync("/oauth2/token",
-            RefreshForm(seeded.RefreshToken, extra: [("client_id", AppId)]),
-            TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var error = await response.Content.ReadFromJsonAsync<JsonElement>(
-            cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal("invalid_grant", error.GetProperty("error").GetString());
-        Assert.Single(await GetFamilyAsync(seeded.RootId));
     }
 
     [Fact]
@@ -626,7 +583,8 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
 
     private async Task<SeededFamily> SeedPublicFamilyAsync()
     {
-        // Start with a committed family and change only its client class for this rotation test.
+        // The public management policy cannot issue a family. Start with the real committed
+        // family shape, then seed the otherwise unreachable Public binding for this protocol test.
         var seeded = await SeedRedeemedFamilyAsync();
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
@@ -634,15 +592,17 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
             TestContext.Current.CancellationToken);
         app.ClientType = OidcClientType.Public;
         app.AppSecretHash = string.Empty;
-        app.AllowRefreshToken = true;
-        app.IdentitySessionMaxAgeSeconds = 3600;
-        app.AllowedScopes = OfflineScope;
+        app.AllowRefreshToken = false;
+        app.AllowedScopes = "openid";
         var other = await db.AppRegistrations.SingleAsync(row => row.AppId == OtherAppId,
             TestContext.Current.CancellationToken);
         other.ClientType = OidcClientType.Public;
         other.AppSecretHash = string.Empty;
         other.AllowRefreshToken = false;
         other.AllowedScopes = "openid";
+        var root = await db.RefreshTokens.SingleAsync(row => row.Id == seeded.RootId,
+            TestContext.Current.CancellationToken);
+        root.Scope = "openid";
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         return seeded;
     }

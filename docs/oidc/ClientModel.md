@@ -32,9 +32,9 @@ tasks must preserve the separation in their schema, DTOs, labels, and tests.
 | Policy field | Canonical owner | Implementation consequence |
 | --- | --- | --- |
 | `allow_authorization_code` | `PS-01`, `PS-21` | Gates browser authorization and code redemption; old applications remain fail closed |
-| `client_type` | `PS-21` | Public clients never hold a secret or hash. Administrators may enable Code + S256 after registering an exact redirect and selecting `PerApplication`; `none` selects a bound code or Public refresh family, never authenticates by itself |
+| `client_type` | `PS-21` | Public clients never hold a secret or hash. Administrators may enable Code + S256 after registering an exact redirect and selecting `PerApplication`; `none` selects a correctly bound code or an existing complete Public refresh family, never authenticates by itself |
 | `allowed_scopes` | `PS-21`, `IN-04` | Closed set with canonical ordering; request validation never invents or silently narrows scope |
-| `allow_refresh_token` | `PS-21`, `EV-11` | Public opt-in additionally requires an active secretless Code client, `PerApplication`, allowed `offline_access`, and a 1–43200 second session max-age; disabling revokes the application's interactive families in the policy transaction |
+| `allow_refresh_token` | `PS-21`, `EV-11` | Public policy staging requires an active secretless Code client, `PerApplication`, allowed `offline_access`, and a 1–43200 second session max-age; disabling revokes the application's interactive families in the policy transaction. Staging alone does not permit Public `offline_access` requests or issue a refresh token |
 | Redirect URI sets | `PS-02`, `PS-20` | Independent ordered registrations, never derived from the claims callback |
 | `identity_session_max_age` | `PS-01`, `PS-21` | Optional application cap, bounded by the global absolute identity-session lifetime |
 | `audience_mode` | `PS-01`, `PS-21` | Interactive code flow requires the existing `PerApplication` access-token audience mode |

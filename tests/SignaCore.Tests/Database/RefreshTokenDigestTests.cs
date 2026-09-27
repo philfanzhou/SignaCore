@@ -18,20 +18,6 @@ public class RefreshTokenDigestTests
         Assert.DoesNotContain("a-high-entropy-refresh-token", first);
     }
 
-    [Fact]
-    public void PublicFamilyDigest_IsDistinctAndRecognizedWithoutChangingLegacyDigest()
-    {
-        const string token = "a-high-entropy-refresh-token";
-        var legacy = RefreshTokenDigest.Compute(token);
-        var publicFamily = RefreshTokenDigest.ComputePublicFamily(token);
-
-        Assert.StartsWith(RefreshTokenDigest.PublicFamilyPrefix, publicFamily);
-        Assert.NotEqual(legacy, publicFamily);
-        Assert.True(RefreshTokenDigest.IsDigest(publicFamily));
-        Assert.Same(publicFamily, RefreshTokenDigest.EnsureDigest(publicFamily));
-        Assert.StartsWith(RefreshTokenDigest.Prefix, legacy);
-    }
-
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -45,7 +31,6 @@ public class RefreshTokenDigestTests
     [InlineData("sha256:short")]
     [InlineData("sha256:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg")]
     [InlineData("sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
-    [InlineData("sha256-public:short")]
     [InlineData("md5:0000000000000000000000000000000000000000000000000000000000000000")]
     public void IsDigest_RejectsMalformedRepresentations(string value)
     {

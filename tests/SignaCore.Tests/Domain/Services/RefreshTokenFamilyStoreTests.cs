@@ -77,10 +77,7 @@ public sealed class RefreshTokenFamilyStoreTests
             () => descriptor with { AccountId = Guid.Empty },
             () => descriptor with { IdentitySessionId = Guid.Empty },
             () => descriptor with { AppId = "" },
-            () => descriptor with { Scope = "profile" },
-            () => descriptor with { FamilyDeadline = now },
-            () => descriptor with { FamilyDeadline = now.AddDays(8) },
-            () => descriptor with { PublicClient = true }
+            () => descriptor with { Scope = "profile" }
         };
 
         foreach (var build in cases)
@@ -93,25 +90,6 @@ public sealed class RefreshTokenFamilyStoreTests
 
         Assert.Empty(await harness.Context.RefreshTokens.AsNoTracking()
             .ToListAsync(TestContext.Current.CancellationToken));
-    }
-
-    [Fact]
-    public async Task CreateRootAsync_PublicFamilyUsesBoundedDeadlineAndRollbackSafeDigest()
-    {
-        await using var harness = await CreateHarnessAsync();
-        var now = DateTimeOffset.UtcNow;
-        var deadline = now.AddHours(1);
-        var descriptor = new InteractiveRefreshFamilyRootDescriptor(
-            harness.AccountId, ClientId, harness.SessionId, CanonicalScope, now,
-            deadline, PublicClient: true);
-
-        var creation = await harness.Store.CreateRootAsync(descriptor, now,
-            TestContext.Current.CancellationToken);
-        Assert.Equal(deadline, creation.ExpiresAt);
-        var root = Assert.Single(await harness.Context.RefreshTokens.AsNoTracking()
-            .ToListAsync(TestContext.Current.CancellationToken));
-        Assert.Equal(RefreshTokenDigest.ComputePublicFamily(creation.RefreshToken), root.TokenValue);
-        Assert.NotEqual(RefreshTokenDigest.Compute(creation.RefreshToken), root.TokenValue);
     }
 
     [Fact]

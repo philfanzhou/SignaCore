@@ -132,7 +132,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
     }
 
     [Fact]
-    public async Task Redeem_PublicOfflineCodeWithoutBoundedSession_CannotCreateRefreshFamily()
+    public async Task Redeem_PublicOfflineCode_CannotCreateRefreshFamily()
     {
         var seeded = await SeedCodeAsync(
             scope: "openid offline_access", allowedScopes: "openid offline_access",
@@ -145,31 +145,6 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         await AssertErrorAsync(response, seeded, "invalid_grant");
         Assert.False(await QueryAsync(async db => await db.RefreshTokens.AsNoTracking()
             .AnyAsync(row => row.IdentitySessionId == seeded.SessionId, TestContext.Current.CancellationToken)));
-    }
-
-    [Fact]
-    public async Task Redeem_PublicOfflineCodeWithExplicitPolicy_CreatesBoundedLinkedFamily()
-    {
-        var seeded = await SeedCodeAsync(
-            scope: "openid offline_access", allowedScopes: "openid offline_access",
-            allowRefreshToken: true, maxAgeSeconds: 3600, clientType: OidcClientType.Public);
-        using var http = _fixture.CreateHttpClient();
-        using var response = await http.PostAsync("/oauth2/token",
-            RedeemForm(seeded.Code, extra: [("client_id", AppId)]), TestContext.Current.CancellationToken);
-        Assert.True(response.StatusCode == HttpStatusCode.OK,
-            await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
-        var issued = await AssertSuccessAsync(response, seeded, "openid offline_access",
-            expectRefreshToken: true, expectedLifetimeSeconds: 300);
-
-        var root = await QueryAsync(db => db.RefreshTokens.AsNoTracking()
-            .SingleAsync(row => row.IdentitySessionId == seeded.SessionId, TestContext.Current.CancellationToken));
-        var session = await QueryAsync(db => db.IdentitySessions.AsNoTracking()
-            .SingleAsync(row => row.Id == seeded.SessionId, TestContext.Current.CancellationToken));
-        Assert.Equal(root.Id, (await GetCodeAsync(seeded.CodeId)).RefreshFamilyId);
-        Assert.Equal(RefreshTokenDigest.ComputePublicFamily(issued.RefreshToken!), root.TokenValue);
-        Assert.NotEqual(RefreshTokenDigest.Compute(issued.RefreshToken!), root.TokenValue);
-        Assert.Equal(session.AuthTime.AddSeconds(3600).UtcTicks / 10, root.ExpiresAt.UtcTicks / 10);
-        Assert.True(root.ExpiresAt <= session.AbsoluteExpiresAt);
     }
 
     [Fact]

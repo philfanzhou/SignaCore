@@ -189,87 +189,41 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
         using var invalidToken = await browser.SendAsync(invalidBearer, token);
         Assert.Equal(HttpStatusCode.Unauthorized, invalidToken.StatusCode);
         Assert.False(invalidToken.Headers.Contains("Access-Control-Allow-Origin"));
-
-        using var refreshEnabled = await admin.PutAsJsonAsync(route + "/oidc-policy",
+        using var refreshPolicyUpdate = await admin.PutAsJsonAsync(route + "/oidc-policy",
             Policy(true, true, 3600), token);
-        Assert.Equal(HttpStatusCode.OK, refreshEnabled.StatusCode);
-        using var refreshPolicy = await admin.GetAsync(route + "/oidc", token);
-        var refreshSettings = await refreshPolicy.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
-        Assert.True(refreshSettings.GetProperty("allowRefreshToken").GetBoolean());
-        Assert.Equal(3600, refreshSettings.GetProperty("identitySessionMaxAgeSeconds").GetInt32());
+        Assert.Equal(HttpStatusCode.OK, refreshPolicyUpdate.StatusCode);
+        using var policyReadback = await admin.GetAsync(route + "/oidc", token);
+        var stagedPolicy = await policyReadback.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
+        Assert.True(stagedPolicy.GetProperty("allowRefreshToken").GetBoolean());
+        Assert.Equal(3600, stagedPolicy.GetProperty("identitySessionMaxAgeSeconds").GetInt32());
 
         var identityCookie = GetSetCookieHeader(completion, IdentitySessionDefaults.CookieName);
         Assert.NotNull(identityCookie);
-        using var offlineAuthorize = new HttpRequestMessage(HttpMethod.Get,
+        using var offlineRequest = new HttpRequestMessage(HttpMethod.Get,
             authorizeUrl.Replace("scope=openid", "scope=openid%20offline_access", StringComparison.Ordinal));
-        offlineAuthorize.Headers.TryAddWithoutValidation("Cookie", identityCookie!.Split(';')[0]);
-        using var offlineCallback = await browser.SendAsync(offlineAuthorize, token);
-        Assert.Equal(HttpStatusCode.Found, offlineCallback.StatusCode);
-        var offlineCode = QueryHelpers.ParseQuery(offlineCallback.Headers.Location!.Query)["code"].ToString();
-        Assert.NotEmpty(offlineCode);
-        using var offlineExchange = await browser.PostAsync("/oauth2/token",
+        offlineRequest.Headers.TryAddWithoutValidation("Cookie", identityCookie!.Split(';')[0]);
+        using var offlineDenied = await browser.SendAsync(offlineRequest, token);
+        Assert.Equal(HttpStatusCode.Found, offlineDenied.StatusCode);
+        var offlineError = QueryHelpers.ParseQuery(offlineDenied.Headers.Location!.Query);
+        Assert.Equal("invalid_scope", offlineError["error"].ToString());
+        Assert.False(offlineError.ContainsKey("code"));
+
+        using var stagedCodeRequest = new HttpRequestMessage(HttpMethod.Get, authorizeUrl);
+        stagedCodeRequest.Headers.TryAddWithoutValidation("Cookie", identityCookie.Split(';')[0]);
+        using var stagedCodeCallback = await browser.SendAsync(stagedCodeRequest, token);
+        Assert.Equal(HttpStatusCode.Found, stagedCodeCallback.StatusCode);
+        var stagedCode = QueryHelpers.ParseQuery(stagedCodeCallback.Headers.Location!.Query)["code"].ToString();
+        Assert.NotEmpty(stagedCode);
+        using var stagedExchange = await browser.PostAsync("/oauth2/token",
             new FormUrlEncodedContent(new Dictionary<string, string>
             {
                 ["grant_type"] = "authorization_code", ["client_id"] = appId,
-                ["code"] = offlineCode, ["redirect_uri"] = RedirectUri,
+                ["code"] = stagedCode, ["redirect_uri"] = RedirectUri,
                 ["code_verifier"] = Verifier
             }), token);
-        Assert.True(offlineExchange.StatusCode == HttpStatusCode.OK,
-            await offlineExchange.Content.ReadAsStringAsync(token));
-        var offlineIssued = await offlineExchange.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
-        Assert.Equal("openid offline_access", offlineIssued.GetProperty("scope").GetString());
-        Assert.Equal(300, offlineIssued.GetProperty("expires_in").GetInt64());
-        Assert.True(offlineIssued.TryGetProperty("id_token", out _));
-        var rootToken = offlineIssued.GetProperty("refresh_token").GetString()!;
-        using var rotated = await browser.PostAsync("/oauth2/token",
-            new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["grant_type"] = "refresh_token", ["client_id"] = appId,
-                ["refresh_token"] = rootToken
-            }), token);
-        Assert.Equal(HttpStatusCode.OK, rotated.StatusCode);
-        var rotatedBody = await rotated.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
-        Assert.Equal("openid offline_access", rotatedBody.GetProperty("scope").GetString());
-        Assert.Equal(300, rotatedBody.GetProperty("expires_in").GetInt64());
-        var childToken = rotatedBody.GetProperty("refresh_token").GetString()!;
-        Assert.NotEqual(rootToken, childToken);
-        Guid rootId;
-        using (var familyScope = fixture.Services.CreateScope())
-        {
-            var familyDb = familyScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-            var root = await familyDb.RefreshTokens.AsNoTracking().SingleAsync(
-                row => row.TokenValue == RefreshTokenDigest.ComputePublicFamily(rootToken), token);
-            var child = await familyDb.RefreshTokens.AsNoTracking().SingleAsync(
-                row => row.TokenValue == RefreshTokenDigest.ComputePublicFamily(childToken), token);
-            rootId = root.Id;
-            Assert.Equal(root.Id, child.FamilyId);
-            Assert.Equal(root.Id, child.ParentId);
-            Assert.Equal(root.ExpiresAt, child.ExpiresAt);
-            Assert.Equal("openid offline_access", root.Scope);
-            Assert.True(root.ExpiresAt <= root.AuthTime!.Value.AddSeconds(3600));
-            Assert.False(await familyDb.RefreshTokens.AsNoTracking().AnyAsync(
-                row => row.TokenValue == RefreshTokenDigest.Compute(rootToken), token));
-        }
-        using var refreshDisabled = await admin.PutAsJsonAsync(route + "/oidc-policy",
-            Policy(true, false), token);
-        Assert.Equal(HttpStatusCode.OK, refreshDisabled.StatusCode);
-        using (var familyScope = fixture.Services.CreateScope())
-        {
-            var familyDb = familyScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-            var family = await familyDb.RefreshTokens.AsNoTracking()
-                .Where(row => row.FamilyId == rootId).ToListAsync(token);
-            Assert.Equal(2, family.Count);
-            Assert.All(family, row => Assert.True(row.IsRevoked));
-        }
-        using var deniedRotation = await browser.PostAsync("/oauth2/token",
-            new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["grant_type"] = "refresh_token", ["client_id"] = appId,
-                ["refresh_token"] = childToken
-            }), token);
-        Assert.Equal(HttpStatusCode.BadRequest, deniedRotation.StatusCode);
-        var deniedBody = await deniedRotation.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
-        Assert.Equal("invalid_grant", deniedBody.GetProperty("error").GetString());
+        Assert.Equal(HttpStatusCode.OK, stagedExchange.StatusCode);
+        var stagedIssued = await stagedExchange.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
+        Assert.False(stagedIssued.TryGetProperty("refresh_token", out _));
 
         using var clearedOrigins = await admin.PutAsJsonAsync(route + "/oidc/allowed-origins",
             new { origins = Array.Empty<string>() }, token);

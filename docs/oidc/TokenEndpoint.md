@@ -13,8 +13,8 @@ identity cookie as client authentication and does not add this grant to `/api/au
 
 New Public Code access tokens expire 300 seconds after the captured issuance second, while
 Confidential interactive access tokens remain at 900 seconds. `expires_in` is derived from the
-same expiry used in the JWT. Public interactive refresh uses the same constructor after explicit
-policy opt-in. Tokens issued before this change keep their
+same expiry used in the JWT. A future Public interactive refresh family uses the same constructor;
+ordinary Public refresh issuance is still disabled. Tokens issued before this change keep their
 original `exp`, and downstream services must validate the exact issuer, audience, signature, and
 expiry.
 
@@ -26,9 +26,7 @@ an application because a preflight has no token form. An actual code response ca
 Origin only when client authentication has selected an active Public application and that Origin
 is still registered to it. No wildcard, credentials header, or preflight cache lifetime is sent;
 `Vary` covers Origin and the preflight method and headers. Authorization, refresh, revoke, and
-logout do not gain Public CORS. Public refresh response CORS is tracked by
-[#421](https://github.com/philfanzhou/SignaCore/issues/421); a cross-Origin browser cannot yet
-read that response. CORS limits browser response access, not token issuance or
+logout do not gain Public CORS. CORS limits browser response access, not token issuance or
 non-browser callers; clients must still use PKCE and avoid cookies.
 
 ## Request boundary
@@ -52,13 +50,12 @@ and a Basic challenge. A valid confidential client that is not allowed to use co
 `unauthorized_client`; malformed branch fields receive `invalid_request`. No response echoes an
 input credential or a raw form value.
 
-The Public `none` method applies to `authorization_code` and to a complete interactive refresh
-family created by a Public code. A current active Public row must have an empty secret hash,
-code permission, `PerApplication` audience, an allowed `offline_access` scope, explicit
-`allowRefreshToken=true`, and a bounded 1–43200 second `identitySessionMaxAgeSeconds` for offline
-access. The code remains bound to that row, its exact redirect URI, and the S256 verifier. Older
-Public applications remain refresh-disabled by default; revoke still requires a confidential
-client. A Public refresh presentation
+The Public `none` method applies to `authorization_code` and to a specially pre-existing complete
+interactive refresh family. A current active Public row must
+have an empty secret hash, code permission, and `PerApplication` audience. The code remains bound
+to that row, its exact redirect URI, and the S256 verifier. Public codes carrying `offline_access`
+cannot create a refresh family. Ordinary Public applications therefore cannot obtain a refresh
+token yet, and revoke continues to require a confidential client. A Public refresh presentation
 must contain exactly one each of `grant_type=refresh_token`, `client_id`, and `refresh_token`, with
 no Authorization header, `client_secret`, or additional form fields. The identifier selects the
 application; only the digest-matched family, exact application binding, current Public policy,
@@ -187,7 +184,8 @@ SQLite as concurrent requests to its single instance. The same suites force both
 Current Password, SMS, LDAP, WeChat, legacy Refresh, cross-application exchange, callback enrichment,
 audience selection, `/api/auth/*`, and their response/audit behavior do not change. Existing grants
 continue rejecting scope at the standards endpoint and return neither `id_token` nor `scope`.
-Interactive refresh uses a distinct family path and does not reinterpret a legacy refresh row.
+Interactive refresh remains a separately identified future family path and does not reinterpret a
+legacy refresh row.
 
 #50 activates storage only (`AC-03`) and runs after #95 so its table carries the session reference
 from creation (`PS-23`); #53 activated internal code redemption (`AC-06`); #54 completed the core

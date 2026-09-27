@@ -226,9 +226,7 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
         if (!OidcScopeValidator.TryValidateRequested(
                 parameters.Single(Scope),
                 OidcScopeValidator.ParseCanonical(application.AllowedScopes),
-                application.AllowRefreshToken
-                    && (application.ClientType != OidcClientType.Public
-                        || application.IdentitySessionMaxAgeSeconds is > 0 and <= IdentityConstants.MaxIdentitySessionAgeSeconds),
+                application.AllowRefreshToken && application.ClientType != OidcClientType.Public,
                 out var canonicalScope))
         {
             return Redirect(

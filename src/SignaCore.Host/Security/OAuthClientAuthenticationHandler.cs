@@ -14,7 +14,7 @@ namespace SignaCore.Host.Security;
 
 /// <summary>
 /// RFC 6749 §2.3.1 client authentication for the <c>/oauth2/*</c> endpoints,
-/// plus token-only Public authorization-code and interactive-refresh binding by
+/// plus token-only Public authorization-code and pre-seeded interactive-refresh binding by
 /// <c>client_id</c>. The identifier selects an application; it is never a credential.
 /// <para>
 /// Accepts <c>client_secret_basic</c> (HTTP Basic, the method the spec says clients SHOULD use) and
