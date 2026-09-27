@@ -11,8 +11,9 @@ Both run the same issuance pipeline (`TokenIssuanceService`), so authentication 
 and lockout behave identically; only the wire format differs.
 
 **This page describes the current runtime.** SignaCore is now an OpenID Connect provider for a
-narrow, first-party profile: a pre-registered confidential BFF can complete the Authorization Code
-flow with mandatory PKCE S256 and receive an ID token. The scope-controlled UserInfo endpoint is
+narrow, first-party profile: a pre-registered confidential BFF or an enabled Public client can
+complete the Authorization Code flow with mandatory PKCE S256 and receive an ID token. The
+scope-controlled UserInfo endpoint is
 delivered, so `userinfo_endpoint` is advertised. The interactive refresh token family is delivered
 too: `offline_access` at the code endpoint creates a rotating refresh family whose replay revokes
 its live descendants, and `offline_access` is advertised in Discovery.
@@ -32,13 +33,14 @@ its live descendants, and `offline_access` is advertised in Discovery.
   Both answers come only after the shared phase and rate-limit budget admit the request; a
   rejected request consumes nothing. A `charset=utf-8` declaration is accepted bare or quoted,
   in either casing.
-- Client authentication: `client_secret_basic` (HTTP Basic) or `client_secret_post`;
-  Public authorization-code redemption accepts `none` with a form `client_id` after explicit
-  management enablement; Discovery does not advertise `none` yet.
-  (`client_id`/`client_secret` form fields). The legacy `X-Admin-AppId`/`X-Admin-AppSecret` headers are
+- Client authentication: `client_secret_basic` (HTTP Basic) or `client_secret_post`
+  (`client_id`/`client_secret` form fields). Public authorization-code redemption also accepts
+  `none` with a form `client_id` after explicit management enablement and mandatory S256 PKCE.
+  Discovery advertises all three token methods. `none` does not enable Public refresh, revoke,
+  other grants, or browser CORS. The legacy `X-Admin-AppId`/`X-Admin-AppSecret` headers are
   **not** accepted here.
 - Success: HTTP 200, `Cache-Control: no-store`, body with `access_token`, `token_type: "Bearer"`,
-  `expires_in`, and `refresh_token`.
+  `expires_in`, and a `refresh_token` only when the grant supports it.
 - Failure: HTTP 400 with `{"error": "...", "error_description": "..."}`, except client-authentication
   failure which is HTTP 401 with `WWW-Authenticate: Basic` and `error=invalid_client`.
 
@@ -76,8 +78,8 @@ whether a token exists or who owns it.
 ## The interactive Authorization Code flow
 
 `GET /oauth2/authorize` and the `authorization_code` grant at `POST /oauth2/token` implement the
-interactive core for a pre-registered confidential BFF (`PerApplication` audience mode, code flow
-enabled) and are advertised in both discovery documents:
+interactive core for a pre-registered confidential BFF or an enabled Public client
+(`PerApplication` audience mode, code flow enabled) and are advertised in both discovery documents:
 
 - `authorization_endpoint`, `response_types_supported: ["code"]`,
   `code_challenge_methods_supported: ["S256"]`, `grant_types_supported` includes
@@ -132,10 +134,10 @@ are made from the `client_id` claim, not from `aud`.
 | Access-token claims | `iss`, `aud`, `sub`, `exp`, `nbf`, `iat`, `jti`, `client_id` with standard names |
 | Access-token type (RFC 9068) | `typ: at+jwt` |
 | Token endpoint (RFC 6749 §3.2) | Conforms at `/oauth2/token` |
-| Client authentication (RFC 6749 §2.3.1) | `client_secret_basic`, `client_secret_post`; Public authorization-code `none` is implemented but not yet advertised |
+| Client authentication (RFC 6749 §2.3.1) | Discovery advertises `client_secret_basic`, `client_secret_post`, and `none`; the latter is limited to enabled Public authorization-code clients with S256 PKCE. Revocation still requires a confidential method |
 | Error responses (RFC 6749 §5.2) | Conforms at `/oauth2/*` |
 | Extension grant naming (RFC 6749 §4.5) | Absolute URIs |
-| Authorization Code + PKCE (RFC 6749 §4.1, RFC 7636) | Confidential-BFF interactive flow with mandatory S256; code redemption is atomic with replay detection |
+| Authorization Code + PKCE (RFC 6749 §4.1, RFC 7636) | Confidential-BFF and enabled Public interactive flows with mandatory S256; code redemption is atomic with replay detection |
 | ID tokens (OIDC Core 1.0 §2) | RS256, 5 minutes, `nonce`/`auth_time`/`sid`/`amr`, closed claim set; `id_token_signing_alg_values_supported: ["RS256"]` |
 | Revocation (RFC 7009) | Conforms at `/oauth2/revoke` |
 | Discovery (RFC 8414) | Served at `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`; advertises only endpoints and grants that exist |
@@ -147,7 +149,7 @@ are made from the `client_id` claim, not from `aud`.
 
 | Gap | Specification | Impact |
 | --- | --- | --- |
-| ID tokens only for the interactive flow | OIDC Core 1.0 §2 | `id_token` exists for the confidential-BFF Authorization Code flow only; the direct credential grants keep returning access tokens alone |
+| ID tokens only for the interactive flow | OIDC Core 1.0 §2 | `id_token` exists for Confidential and enabled Public Authorization Code flows; the direct credential grants keep returning access tokens alone |
 | UserInfo is interactive-flow-only | OIDC Core 1.0 §5.3 | `GET /oauth2/userinfo` serves the closed `PS-16` claim set to a confidential BFF holding a live interactive access token; it is not a browser endpoint (no CORS) and does not serve direct-grant tokens |
 | No `scope` on the direct grants | RFC 6749 §3.3 | The direct credential grants have no way to request or restrict a subset of authority; the interactive flow's scope is fixed by the registration allow list |
 | The `password` grant is the primary flow | OAuth 2.1 draft, BCP 240 | The resource-owner password grant is deprecated in current guidance; it remains here because clients depend on it |

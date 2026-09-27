@@ -860,6 +860,15 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
             ["S256"],
             parsed.RootElement.GetProperty("code_challenge_methods_supported").EnumerateArray()
                 .Select(item => item.GetString()));
+        Assert.Equal(
+            ["client_secret_basic", "client_secret_post", "none"],
+            parsed.RootElement.GetProperty("token_endpoint_auth_methods_supported").EnumerateArray()
+                .Select(item => item.GetString()));
+        Assert.Equal(
+            ["client_secret_basic", "client_secret_post"],
+            parsed.RootElement.GetProperty("revocation_endpoint_auth_methods_supported").EnumerateArray()
+                .Select(item => item.GetString()));
+        Assert.False(parsed.RootElement.TryGetProperty("end_session_endpoint", out _));
     }
 
     [Fact]

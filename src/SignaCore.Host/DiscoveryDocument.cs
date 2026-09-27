@@ -78,7 +78,7 @@ public sealed record DiscoveryDocument(
             ScopesSupported: ["openid", "profile", "offline_access"],
             SubjectTypesSupported: ["public"],
             IdTokenSigningAlgValuesSupported: ["RS256"],
-            TokenEndpointAuthMethodsSupported: ["client_secret_basic", "client_secret_post"],
+            TokenEndpointAuthMethodsSupported: ["client_secret_basic", "client_secret_post", "none"],
             RevocationEndpointAuthMethodsSupported: ["client_secret_basic", "client_secret_post"],
             // Must match the claim names that actually appear in issued tokens. Constants, not
             // literals — these once said sub/name/role while tokens carried ClaimTypes.* long URIs.

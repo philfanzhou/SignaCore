@@ -22,6 +22,19 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
     private const string Challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
     [Fact]
+    public async Task PublicOrigin_DoesNotGainTokenCorsFromDiscoveryAuthenticationMethod()
+    {
+        using var http = fixture.CreateHttpClient();
+        using var preflight = new HttpRequestMessage(HttpMethod.Options, "/oauth2/token");
+        preflight.Headers.TryAddWithoutValidation("Origin", "https://public.example.test");
+        preflight.Headers.TryAddWithoutValidation("Access-Control-Request-Method", "POST");
+
+        using var response = await http.SendAsync(preflight, TestContext.Current.CancellationToken);
+
+        Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
+    }
+
+    [Fact]
     public async Task AdminEnable_AuthorizeLoginExchange_Disable_RejectsNewRequests()
     {
         var token = TestContext.Current.CancellationToken;
