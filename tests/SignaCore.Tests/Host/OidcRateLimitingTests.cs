@@ -119,6 +119,23 @@ public sealed class OidcRateLimitingTests
     }
 
     [Fact]
+    public async Task PublicTokenFormCandidate_CannotBeReplacedByQueryClientId()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/oauth2/token";
+        context.Request.Method = "POST";
+        context.Request.QueryString = new QueryString("?client_id=other-client");
+        context.Items[BoundedOidcFormReadingMiddleware.StatusItemKey] = OidcBoundedFormStatus.Parsed;
+        context.Request.Form = new FormCollection(new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
+        {
+            ["client_id"] = "known-client"
+        });
+
+        Assert.Equal("known-client", await OidcRateLimitPolicies.ReadClientIdCandidateAsync(
+            context, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task TheResolver_UnknownClientsFallToTheSourceNetwork()
     {
         var repository = new Mock<IAppRegistrationRepository>();

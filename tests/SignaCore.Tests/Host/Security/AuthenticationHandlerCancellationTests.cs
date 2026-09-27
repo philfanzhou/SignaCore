@@ -58,7 +58,8 @@ public class AuthenticationHandlerCancellationTests
             CreateOptionsMonitor(),
             NullLoggerFactory.Instance,
             UrlEncoder.Default,
-            service);
+            service,
+            repository.Object);
         await InitializeAsync(handler, context, OAuthClientAuthenticationDefaults.Scheme);
 
         var result = await handler.AuthenticateAsync();
@@ -87,7 +88,8 @@ public class AuthenticationHandlerCancellationTests
             CreateOptionsMonitor(),
             NullLoggerFactory.Instance,
             UrlEncoder.Default,
-            service);
+            service,
+            repository.Object);
         await InitializeAsync(handler, context, OAuthClientAuthenticationDefaults.Scheme);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => handler.AuthenticateAsync());
@@ -159,12 +161,12 @@ public class AuthenticationHandlerCancellationTests
     private static async Task<IAuthenticationHandler> CreateChallengeHandlerAsync(
         string scheme, HttpContext context)
     {
-        var (service, _) = CreateValidationService();
+        var (service, repository) = CreateValidationService();
         IAuthenticationHandler handler = scheme == "gateway"
             ? new GatewayAppAuthenticationHandler(
                 CreateOptionsMonitor(), NullLoggerFactory.Instance, UrlEncoder.Default, service)
             : new OAuthClientAuthenticationHandler(
-                CreateOptionsMonitor(), NullLoggerFactory.Instance, UrlEncoder.Default, service);
+                CreateOptionsMonitor(), NullLoggerFactory.Instance, UrlEncoder.Default, service, repository.Object);
         await InitializeAsync(
             handler,
             context,

@@ -3,7 +3,11 @@
 **Status: target design.** Read the [directory boundary](./README.md) and the
 [canonical model](./CanonicalSemanticModel.md) first.
 
-`POST /oauth2/token` gains an `authorization_code` branch for pre-registered confidential BFFs.
+`POST /oauth2/token` has an `authorization_code` branch for pre-registered confidential BFFs
+and a token-only Public client branch. Public requests use exactly one form `client_id`, no
+`client_secret` field, and no `Authorization` header. The identifier is a binding value, not a
+credential. Public authorization and management enablement are still unavailable, so this branch
+can currently redeem only a synthetically issued Public code; Discovery does not advertise `none`.
 The branch redeems one short-lived code for the response in `PS-14`; it does not reuse a browser
 identity cookie as client authentication and does not add this grant to `/api/auth/token`.
 
@@ -27,6 +31,13 @@ be combined, even when their values match. Authentication failure is `invalid_cl
 and a Basic challenge. A valid confidential client that is not allowed to use code flow receives
 `unauthorized_client`; malformed branch fields receive `invalid_request`. No response echoes an
 input credential or a raw form value.
+
+The Public `none` method applies only to `authorization_code`. A current active Public row must
+have an empty secret hash, code permission, and `PerApplication` audience. The code remains bound
+to that row, its exact redirect URI, and the S256 verifier. Public codes carrying `offline_access`
+cannot create a refresh family. Refresh and revoke continue to require a confidential client.
+A code request without any client identifier or credentials is `400 invalid_request`; the
+confidential authentication failures of other grants remain `401 invalid_client`.
 
 The request `redirect_uri` is compared ordinally with the exact snapshot on the code, not normalized
 and not compared with the client's current registration set. This preserves the `EV-12` decision:

@@ -70,8 +70,9 @@ public sealed partial class OidcMultiInstanceAcceptanceTests
                 await db.SaveChangesAsync(ct);
             }
             using var response = await SendCodeAsync(b, fields, variant == "missing-auth" ? null : clientId, secret);
-            var expected = variant is "wrong-secret" or "mixed-auth" or "missing-auth" ? "invalid_client"
-                : variant is "missing-verifier" or "scope" ? "invalid_request" : "invalid_grant";
+            var expected = variant is "wrong-secret" or "mixed-auth" ? "invalid_client"
+                : variant is "missing-auth" or "missing-verifier" or "scope" ? "invalid_request"
+                : "invalid_grant";
             await AssertCodeFailureAsync(response, expected);
             using (var scope = a.Services.CreateScope())
             {

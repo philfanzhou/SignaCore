@@ -1512,8 +1512,10 @@ public sealed class ServerDatabaseContractTests
     /// their write shapes; and one synthetic SQLSTATE 40001 on the consumption update replays the
     /// whole unit exactly once under <c>EnableRetryOnFailure</c>.
     /// </summary>
-    [Fact]
-    public async Task PostgreSqlAuthorizationCodeRedemption_ConcurrencySerialOutcomesAndRetry()
+    [Theory]
+    [InlineData(OidcClientType.Confidential)]
+    [InlineData(OidcClientType.Public)]
+    public async Task PostgreSqlAuthorizationCodeRedemption_ConcurrencySerialOutcomesAndRetry(OidcClientType clientType)
     {
         Assert.SkipUnless(
             ShouldRunContainerMatrix(),
@@ -1541,7 +1543,7 @@ public sealed class ServerDatabaseContractTests
                 await migration.Database.MigrateAsync(TestContext.Current.CancellationToken);
             }
 
-            var (accountId, credentialId, appId) = await SeedRedemptionPrerequisitesAsync(options);
+            var (accountId, credentialId, appId) = await SeedRedemptionPrerequisitesAsync(options, clientType);
 
             // ---- EV-25/SC-13: two instances race over one code; exactly one winner ----
             var raced = await CreateRedemptionCodeAsync(options, accountId, credentialId, appId);
@@ -1639,7 +1641,9 @@ public sealed class ServerDatabaseContractTests
     }
 
     private static async Task<(Guid AccountId, Guid CredentialId, Guid AppId)>
-        SeedRedemptionPrerequisitesAsync(DbContextOptions<IdentityDbContext> options)
+        SeedRedemptionPrerequisitesAsync(
+            DbContextOptions<IdentityDbContext> options,
+            OidcClientType clientType)
     {
         await using var context = new IdentityDbContext(options);
         var accountId = Guid.NewGuid();
@@ -1656,10 +1660,11 @@ public sealed class ServerDatabaseContractTests
         });
         context.AppRegistrations.Add(new AppRegistrationEntity
         {
-            Id = appId, AppId = "redemption-contract-app", AppSecretHash = "hash",
+            Id = appId, AppId = "redemption-contract-app",
+            AppSecretHash = clientType == OidcClientType.Public ? string.Empty : "hash",
             AppName = "Redemption Contract", IsActive = true, CreatedAt = DateTimeOffset.UtcNow,
             AudienceMode = AudienceMode.PerApplication,
-            ClientType = OidcClientType.Confidential,
+            ClientType = clientType,
             AllowAuthorizationCode = true,
             AllowedScopes = "openid profile",
             AllowRefreshToken = false
