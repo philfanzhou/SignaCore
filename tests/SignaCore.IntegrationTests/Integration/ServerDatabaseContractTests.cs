@@ -2656,7 +2656,20 @@ public sealed class ServerDatabaseContractTests
         context.AppRegistrations.Add(new AppRegistrationEntity
         {
             Id = appId, AppId = "code-contract-app", AppSecretHash = "hash",
-            AppName = "Code Contract", IsActive = true, CreatedAt = DateTimeOffset.UtcNow
+            AppName = "Code Contract", IsActive = true, CreatedAt = DateTimeOffset.UtcNow,
+            AudienceMode = AudienceMode.PerApplication,
+            AllowAuthorizationCode = true,
+            AllowedScopes = "openid profile",
+            RedirectUris =
+            [
+                new AppRedirectUriEntity
+                {
+                    Id = Guid.NewGuid(),
+                    AppRegistrationId = appId,
+                    Kind = RedirectUriKind.Redirect,
+                    CanonicalUri = "https://client.example.com/callback"
+                }
+            ]
         });
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         return (accountId, credentialId, appId);
