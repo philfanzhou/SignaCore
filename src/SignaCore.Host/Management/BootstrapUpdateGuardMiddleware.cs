@@ -23,7 +23,7 @@ namespace SignaCore.Host.Management;
 /// <para>
 /// After the shared handler ran, the response decides the consequences: a published update
 /// (including saving the identical target again) writes the <c>bootstrap_updated</c> audit row
-/// with the operator of the shared management session and stops the process once the response
+/// with the operator of the selected management principal and stops the process once the response
 /// completed; a caller-aborted request audits and stops when the file changed; everything else
 /// — refused, unavailable, or unchanged-and-aborted — leaves no audit row and keeps the process
 /// running. The audit description names the provider and the redacted endpoint only, never the

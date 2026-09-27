@@ -412,3 +412,8 @@ is supplied in full and tested before the local file changes. Blank master key m
 current key. Raw key replacement is rejected once protected data exists. A bootstrap edit changes
 only the instance that served the request, so file distribution and coordinated restart remain
 orchestrator responsibilities.
+The bootstrap overview, target probe, and update accept a management Bearer without a Cookie;
+requests with any `Authorization` header use only Bearer, while requests without one retain Cookie
+compatibility. SignaCore requires `ServiceMantle.AspNetCore` 0.1.1-rc.1 or later on the same
+ServiceMantle package version line for this bootstrap authorization choice. HTTP carries the
+password and Bearer in plaintext; HTTPS is a deployment choice rather than an application gate.
