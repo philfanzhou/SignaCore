@@ -257,13 +257,17 @@ public sealed class InteractiveRefreshRotationService(
         var member = await refreshTokens.GetByTokenValueAsync(refreshToken, cancellationToken);
         if (member is null)
         {
-            return InteractiveRefreshDispatch.NotInteractive;
+            return app.ClientType == OidcClientType.Public
+                ? InteractiveRefreshDispatch.From(InvalidGrant())
+                : InteractiveRefreshDispatch.NotInteractive;
         }
 
         var marker = RefreshTokenFamilyStore.ClassifyMarker(member);
         if (marker == RefreshMemberMarker.Legacy)
         {
-            return InteractiveRefreshDispatch.NotInteractive;
+            return app.ClientType == OidcClientType.Public
+                ? InteractiveRefreshDispatch.From(InvalidGrant())
+                : InteractiveRefreshDispatch.NotInteractive;
         }
 
         if (marker == RefreshMemberMarker.Partial)
@@ -433,7 +437,13 @@ public sealed class InteractiveRefreshRotationService(
             var currentApplication = await ReadApplicationAsync(app.Id, operationToken);
             if (currentApplication is null
                 || !currentApplication.IsActive
-                || !currentApplication.AllowRefreshToken)
+                || currentApplication.ClientType != app.ClientType
+                || (currentApplication.ClientType == OidcClientType.Public
+                    ? !currentApplication.AllowAuthorizationCode
+                        || currentApplication.AudienceMode != AudienceMode.PerApplication
+                        || currentApplication.AppSecretHash.Length != 0
+                        || currentApplication.CallbackExpiresAt is DateTimeOffset expiry && expiry < now
+                    : !currentApplication.AllowRefreshToken))
             {
                 await transaction.RollbackAsync(operationToken);
                 return InvalidGrant();

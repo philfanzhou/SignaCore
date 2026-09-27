@@ -116,6 +116,17 @@ public sealed class OAuthTokenController : ControllerBase
                     stopwatch.Elapsed.TotalMilliseconds);
                 return RespondInteractiveRefresh(rotation);
             }
+
+            // A Public client_id never authorizes the legacy refresh validator. Missing and
+            // legacy digest rows have the same generic answer as a mismatched family.
+            if (app.ClientType == OidcClientType.Public)
+            {
+                return RespondInteractiveRefresh(InteractiveRefreshRotationOutcome.Failure(
+                    StatusCodes.Status400BadRequest,
+                    OAuthErrorCodes.InvalidGrant,
+                    "The refresh token is invalid.",
+                    "invalid_grant"));
+            }
         }
 
         var wireGrantType = form["grant_type"].ToString();

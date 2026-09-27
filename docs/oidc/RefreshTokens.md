@@ -8,8 +8,11 @@ document remains the semantic reference.** Read the [directory boundary](./READM
 [interactive persistence](./Persistence.md) first.
 
 An interactive refresh token extends one confidential BFF authorization while its original
-identity session and current application policy remain usable. It is an opaque, rotating credential,
-not a browser token and not a portable account credential. Existing Password, SMS, LDAP, WeChat,
+identity session and current application policy remain usable. A secretless Public rotation path
+is prepared only for a complete pre-existing Public family; ordinary Public applications cannot
+obtain such a family or enable `offline_access` yet. It is an opaque, rotating bearer credential,
+not a portable account credential. A browser-held token is exposed to script compromise; callers
+must isolate scripts, keep it in memory, use HTTPS, and clear it on logout. Existing Password, SMS, LDAP, WeChat,
 legacy refresh, and cross-application exchange behavior stays on its current path.
 
 This design applies refresh-token rotation and relationship retention in the sense of
@@ -27,7 +30,8 @@ account/application/session/scope create distinct families and code replay never
 
 `POST /oauth2/token` uses the common 16 KiB form and confidential-client authentication from
 `IN-20`. Duplicate supported/rejected parameters are `invalid_request`; unknown fields are ignored
-by this branch. `grant_type` is exactly `refresh_token`. `refresh_token` is one 1–256-character ASCII
+for Confidential clients, while the Public path accepts only its three required fields.
+`grant_type` is exactly `refresh_token`. `refresh_token` is one 1–256-character ASCII
 value: new interactive values are exactly 43 base64url characters, while previously issued legacy
 shapes remain accepted for digest lookup (`IN-26`). `scope` must be absent and is
 `invalid_request`; the family snapshot cannot be narrowed or replaced (`IN-27`).
@@ -38,7 +42,11 @@ cross-family relationship, or inconsistent account/application/session/scope bin
 state: fail closed with generic `invalid_grant`, emit only a non-secret internal diagnostic, and
 perform no reuse side effect.
 
-An interactive family is usable only by its exact authenticated confidential client. It never enters
+An interactive family is usable only by its exact authenticated confidential client or a verified
+active Public application selected by a single form `client_id`. The Public path requires a complete
+family marker and exact app binding; missing or legacy members fail with a generic error rather
+than falling through to legacy issuance. Public management still refuses refresh opt-in and Public
+Code still returns no refresh token. It never enters
 the cross-application exchange-trust path from ADR 0003. `/api/auth/token` does not gain interactive
 refresh behavior. Legacy rows continue through their current validators, admission checks, rotation,
 error envelopes, token shapes, and cross-application minting (`EV-33`).
@@ -79,7 +87,7 @@ then drives a provider execution-strategy transaction:
 2. If the correctly bound member is consumed, execute reuse handling below even when it is now
    expired or its session is missing/revoked. If it is merely missing, expired, or explicitly
    revoked, execute `EV-32` without reuse handling.
-3. Recheck active account/application, refresh capability, the complete current scope allow list,
+3. Recheck active account/application, Confidential refresh capability or Public Code policy, the complete current scope allow list,
    session existence/revocation/idle/absolute expiry, and application max-age. Refresh never slides
    activity and never silently narrows scope.
 4. Construct one stable request-local child id, raw token and digest, access token, nonce-free ID

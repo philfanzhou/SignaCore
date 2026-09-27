@@ -14,7 +14,8 @@ namespace SignaCore.Host.Security;
 
 /// <summary>
 /// RFC 6749 §2.3.1 client authentication for the <c>/oauth2/*</c> endpoints,
-/// plus the token-only Public authorization-code binding by <c>client_id</c>.
+/// plus token-only Public authorization-code and pre-seeded interactive-refresh binding by
+/// <c>client_id</c>. The identifier selects an application; it is never a credential.
 /// <para>
 /// Accepts <c>client_secret_basic</c> (HTTP Basic, the method the spec says clients SHOULD use) and
 /// <c>client_secret_post</c> (<c>client_id</c>/<c>client_secret</c> form fields). The legacy
@@ -64,12 +65,18 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
             && Request.Headers.Authorization.Count == 0)
         {
             var form = await Request.ReadFormAsync(Context.RequestAborted);
+            var publicCode = form["grant_type"].Count == 1
+                && form["grant_type"].ToString() == "authorization_code";
+            var publicRefresh = form["grant_type"].Count > 0
+                && form["grant_type"].All(value => value == "refresh_token");
             if (!form.ContainsKey("client_secret")
-                && form["grant_type"].ToString() == "authorization_code")
+                && (publicCode || publicRefresh))
             {
                 Context.Items[PublicFailureItem] = "invalid_request";
                 if (form["grant_type"].Count != 1
-                    || form["grant_type"].ToString() != "authorization_code"
+                    || (publicRefresh && (form.Count != 3
+                        || form["refresh_token"].Count != 1
+                        || string.IsNullOrEmpty(form["refresh_token"].ToString())))
                     || form["client_id"].Count != 1
                     || form["client_id"].ToString().Length > IdentityConstants.MaxAppIdLength
                     || !OidcRateLimitPolicies.IsPlausibleClientId(form["client_id"].ToString()))
@@ -79,7 +86,13 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
 
                 var app = await _applications.GetByAppIdAsync(
                     form["client_id"].ToString(), Context.RequestAborted);
-                if (app is null || !app.IsActive || app.ClientType != OidcClientType.Public
+                if (publicRefresh && (app is null || app.ClientType != OidcClientType.Public))
+                {
+                    Context.Items.Remove(PublicFailureItem);
+                    return AuthenticateResult.Fail("Missing client credentials.");
+                }
+
+                if (app is null || app.ClientType != OidcClientType.Public || !app.IsActive
                     || app.AppSecretHash.Length != 0
                     || (app.CallbackExpiresAt.HasValue && app.CallbackExpiresAt < DateTimeOffset.UtcNow))
                 {
@@ -89,8 +102,11 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
 
                 if (!app.AllowAuthorizationCode || app.AudienceMode != AudienceMode.PerApplication)
                 {
-                    Context.Items[PublicFailureItem] = "unauthorized_client";
-                    return AuthenticateResult.Fail("Public client is not allowed to redeem codes.");
+                    Context.Items[PublicFailureItem] = publicRefresh
+                        ? "unauthorized_client_refresh" : "unauthorized_client";
+                    return AuthenticateResult.Fail(publicRefresh
+                        ? "Public client is not allowed to refresh."
+                        : "Public client is not allowed to redeem codes.");
                 }
 
                 Context.Items[IdentityHeaders.ValidatedApp] = app;
@@ -152,10 +168,13 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
         {
             Response.StatusCode = publicError == "invalid_client"
                 ? StatusCodes.Status401Unauthorized : StatusCodes.Status400BadRequest;
-            await WriteFixedErrorAsync(publicError, publicError switch
+            await WriteFixedErrorAsync(
+                publicError == "unauthorized_client_refresh" ? "unauthorized_client" : publicError,
+                publicError switch
             {
                 "invalid_client" => "Client authentication failed.",
                 "unauthorized_client" => "This client is not permitted to redeem authorization codes.",
+                "unauthorized_client_refresh" => "This client is not permitted to use this grant.",
                 _ => "The token request is invalid."
             });
             return;

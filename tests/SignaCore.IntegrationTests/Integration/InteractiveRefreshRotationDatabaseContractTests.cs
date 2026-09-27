@@ -44,12 +44,15 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
     private const string CanonicalScope = "openid profile offline_access";
     private const string Username = "rotation_contract_user";
 
-    [Fact]
-    public async Task Rotation_WhenCommitAcknowledgementIsLostOnce_ResumesItsOwnCommittedChild()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Rotation_WhenCommitAcknowledgementIsLostOnce_ResumesItsOwnCommittedChild(
+        bool publicClient)
     {
         var interceptor = new TransientCommitFailureInterceptor(failuresToInject: 1);
         await using var database = new RotationDatabase(interceptor);
-        var seed = await database.SeedAsync();
+        var seed = await database.SeedAsync(publicClient);
         var (_, plaintext) = await database.SeedRootMemberAsync(seed);
 
         var service = RotationDatabase.BuildService(database.BuildOptions(withInterceptor: true));
@@ -91,15 +94,17 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
     public async Task Rotation_CancellationAroundCommit_RollsBackBeforeAndStaysAuthoritativeAfter(
-        bool afterCommit)
+        bool afterCommit, bool publicClient)
     {
         using var cancellation = new CancellationTokenSource();
         var interceptor = new CommitCancellationInterceptor(cancellation, afterCommit);
         await using var database = new RotationDatabase(interceptor);
-        var seed = await database.SeedAsync();
+        var seed = await database.SeedAsync(publicClient);
         var (_, plaintext) = await database.SeedRootMemberAsync(seed);
 
         var service = RotationDatabase.BuildService(database.BuildOptions(withInterceptor: true));
@@ -143,11 +148,13 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
         }
     }
 
-    [Fact]
-    public async Task Rotation_FromTwoInstancesOverOneDatabase_AdmitsExactlyOneWinner()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Rotation_FromTwoInstancesOverOneDatabase_AdmitsExactlyOneWinner(bool publicClient)
     {
         await using var database = new RotationDatabase();
-        var seed = await database.SeedAsync();
+        var seed = await database.SeedAsync(publicClient);
         var (_, plaintext) = await database.SeedRootMemberAsync(seed);
 
         var winner = RotationDatabase.BuildService(database.BuildOptions());
@@ -180,9 +187,10 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
     /// Gated like the rest of the container matrix; the SQLite file form above runs everywhere.
     /// </summary>
     [Theory]
-    [InlineData("PostgreSQL")]
+    [InlineData("PostgreSQL", false)]
+    [InlineData("PostgreSQL", true)]
     public async Task Rotation_FromTwoInstancesOverOneSharedPostgreSql_AdmitsExactlyOneWinner(
-        string provider)
+        string provider, bool publicClient)
     {
         Assert.SkipUnless(
             ShouldRunContainerMatrix(),
@@ -206,7 +214,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
             var options = optionsBuilder.Options;
             await WaitUntilConnectableAsync(options);
 
-            var seed = await RotationDatabase.SeedAsync(options);
+            var seed = await RotationDatabase.SeedAsync(options, publicClient);
             var (_, plaintext) = await RotationDatabase.SeedRootMemberAsync(options, seed);
             var results = await Task.WhenAll(
                 RotationDatabase.BuildService(options).RotateAsync(seed.Application, Form(plaintext), false, null, null, TestContext.Current.CancellationToken),
@@ -264,7 +272,8 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
         Guid AccountId,
         Guid CredentialId,
         Guid SessionId,
-        DateTimeOffset AuthTime);
+        DateTimeOffset AuthTime,
+        string Scope);
 
     /// <summary>
     /// A file-backed SQLite test database on the production migration chain, onto which a
@@ -333,9 +342,11 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
                 NullLogger<InteractiveRefreshRotationService>.Instance);
         }
 
-        public Task<Seed> SeedAsync() => SeedAsync(BuildOptions());
+        public Task<Seed> SeedAsync(bool publicClient = false) => SeedAsync(BuildOptions(), publicClient);
 
-        public static async Task<Seed> SeedAsync(DbContextOptions<IdentityDbContext> options)
+        public static async Task<Seed> SeedAsync(
+            DbContextOptions<IdentityDbContext> options,
+            bool publicClient = false)
         {
             await using var context = new IdentityDbContext(options);
             await context.Database.MigrateAsync(TestContext.Current.CancellationToken);
@@ -344,15 +355,15 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
             {
                 Id = Guid.NewGuid(),
                 AppId = ClientId,
-                AppSecretHash = "hash",
+                AppSecretHash = publicClient ? string.Empty : "hash",
                 AppName = "Rotation Contract Client",
                 IsActive = true,
                 CreatedAt = DateTimeOffset.UtcNow,
                 AudienceMode = AudienceMode.PerApplication,
-                ClientType = OidcClientType.Confidential,
+                ClientType = publicClient ? OidcClientType.Public : OidcClientType.Confidential,
                 AllowAuthorizationCode = true,
-                AllowedScopes = CanonicalScope,
-                AllowRefreshToken = true
+                AllowedScopes = publicClient ? "openid" : CanonicalScope,
+                AllowRefreshToken = !publicClient
             };
             var accountId = Guid.NewGuid();
             var credentialId = Guid.NewGuid();
@@ -372,7 +383,8 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
             var unitOfWork = new EfCoreUnitOfWork(context);
             var session = await new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork)
                 .CreateAsync(accountId, credentialId, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
-            return new Seed(application, accountId, credentialId, session.Id, session.AuthTime);
+            return new Seed(application, accountId, credentialId, session.Id, session.AuthTime,
+                application.AllowedScopes);
         }
 
         /// <summary>
@@ -393,7 +405,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
                 new RefreshTokenRepository(context), unitOfWork, NullLogger<RefreshTokenFamilyStore>.Instance)
                 .CreateRootAsync(
                     new InteractiveRefreshFamilyRootDescriptor(
-                        seed.AccountId, ClientId, seed.SessionId, CanonicalScope, seed.AuthTime),
+                        seed.AccountId, ClientId, seed.SessionId, seed.Scope, seed.AuthTime),
                     DateTimeOffset.UtcNow,
                     TestContext.Current.CancellationToken);
             return (creation.RootId, creation.RefreshToken);
