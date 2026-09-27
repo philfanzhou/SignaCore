@@ -7,9 +7,16 @@
 and a Public client branch. Public requests use exactly one form `client_id`, no
 `client_secret` field, and no `Authorization` header. The identifier is a binding value, not a
 credential. An administrator may explicitly enable Public Code + S256 authorization; Discovery
-does not yet advertise `none`.
+advertises `none` for enabled Public Code only.
 The branch redeems one short-lived code for the response in `PS-14`; it does not reuse a browser
 identity cookie as client authentication and does not add this grant to `/api/auth/token`.
+
+New Public Code access tokens expire 300 seconds after the captured issuance second, while
+Confidential interactive access tokens remain at 900 seconds. `expires_in` is derived from the
+same expiry used in the JWT. A future Public interactive refresh family uses the same constructor;
+ordinary Public refresh issuance is still disabled. Tokens issued before this change keep their
+original `exp`, and downstream services must validate the exact issuer, audience, signature, and
+expiry.
 
 ## Request boundary
 

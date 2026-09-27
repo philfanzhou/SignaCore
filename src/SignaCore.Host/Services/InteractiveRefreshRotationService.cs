@@ -497,7 +497,8 @@ public sealed class InteractiveRefreshRotationService(
                         lockedMember.Scope!,
                         displayName,
                         lockedAccount.Nickname,
-                        EnrichmentClaims: []),
+                        EnrichmentClaims: [],
+                        ClientType: currentApplication.ClientType),
                     signingKey,
                     now)
                 is not InteractiveAccessTokenResult.Issued issued)
@@ -546,7 +547,7 @@ public sealed class InteractiveRefreshRotationService(
                         issued.AccessToken,
                         issuedIdToken.IdToken,
                         childToken,
-                        IdentityConstants.InteractiveAccessTokenLifetimeSeconds,
+                        issued.ExpiresAt.ToUnixTimeSeconds() - now.ToUnixTimeSeconds(),
                         lockedMember.Scope!);
                 }
 
@@ -583,7 +584,7 @@ public sealed class InteractiveRefreshRotationService(
                 issued.AccessToken,
                 issuedIdToken.IdToken,
                 childToken,
-                IdentityConstants.InteractiveAccessTokenLifetimeSeconds,
+                issued.ExpiresAt.ToUnixTimeSeconds() - now.ToUnixTimeSeconds(),
                 lockedMember.Scope!);
         }, cancellationToken);
     }

@@ -95,7 +95,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
             "/oauth2/token", RedeemForm(seeded.Code, extra: [("client_id", AppId)]),
             TestContext.Current.CancellationToken);
 
-        await AssertSuccessAsync(response, seeded, "openid");
+        await AssertSuccessAsync(response, seeded, "openid", expectedLifetimeSeconds: 300);
     }
 
     [Theory]
@@ -1051,7 +1051,8 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         HttpResponseMessage response,
         SeededCode seeded,
         string expectedScope,
-        bool expectRefreshToken = false)
+        bool expectRefreshToken = false,
+        int expectedLifetimeSeconds = 900)
     {
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
@@ -1071,7 +1072,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
 
         Assert.Equal(expectedMembers, memberNames);
         Assert.Equal("Bearer", body.GetProperty("token_type").GetString());
-        Assert.Equal(900, body.GetProperty("expires_in").GetInt64());
+        Assert.Equal(expectedLifetimeSeconds, body.GetProperty("expires_in").GetInt64());
         Assert.Equal(expectedScope, body.GetProperty("scope").GetString());
         var refreshToken = expectRefreshToken ? body.GetProperty("refresh_token").GetString() : null;
         if (expectRefreshToken)
@@ -1091,7 +1092,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
         Assert.Equal(seeded.SessionId.ToString(), token.Claims.Single(claim => claim.Type == JwtRegisteredClaimNames.Sid).Value);
         Assert.Equal(expectedScope, token.Claims.Single(claim => claim.Type == "scope").Value);
         Assert.Equal(
-            IdentityConstants.InteractiveAccessTokenLifetimeSeconds,
+            expectedLifetimeSeconds,
             (token.ValidTo - token.ValidFrom).TotalSeconds);
 
         // The ID token is the PS-12 artifact of the same redemption: typ JWT (never at+jwt), the
