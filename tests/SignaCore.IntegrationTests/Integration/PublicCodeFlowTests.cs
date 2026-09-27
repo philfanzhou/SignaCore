@@ -22,7 +22,7 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
     private const string Challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
     [Fact]
-    public async Task PublicOrigin_DoesNotGainTokenCorsFromDiscoveryAuthenticationMethod()
+    public async Task UnregisteredPublicOrigin_DoesNotGainTokenCorsFromDiscoveryAuthenticationMethod()
     {
         using var http = fixture.CreateHttpClient();
         using var preflight = new HttpRequestMessage(HttpMethod.Options, "/oauth2/token");
@@ -53,6 +53,17 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
         using var registration = await admin.PostAsJsonAsync(route + "/oidc/redirect-uris",
             new { kind = "Redirect", uris = new[] { RedirectUri } }, token);
         Assert.Equal(HttpStatusCode.OK, registration.StatusCode);
+        using var originRegistration = await admin.PutAsJsonAsync(route + "/oidc/allowed-origins",
+            new { origins = new[] { "https://public.example.test" } }, token);
+        Assert.Equal(HttpStatusCode.OK, originRegistration.StatusCode);
+        using var otherCreate = await admin.PostAsJsonAsync("/api/admin/apps",
+            new { appName = $"Other Public {Guid.NewGuid():N}", ttlSeconds = 0, clientType = "Public" }, token);
+        Assert.Equal(HttpStatusCode.OK, otherCreate.StatusCode);
+        var other = await otherCreate.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
+        var otherAppId = other.GetProperty("appId").GetString()!;
+        using var otherOrigin = await admin.PutAsJsonAsync($"/api/admin/apps/{otherAppId}/oidc/allowed-origins",
+            new { origins = new[] { "https://other.example.test" } }, token);
+        Assert.Equal(HttpStatusCode.OK, otherOrigin.StatusCode);
 
         using var invalidRefresh = await admin.PutAsJsonAsync(route + "/oidc-policy",
             Policy(true, true), token);
@@ -71,6 +82,32 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
         Assert.DoesNotContain("ecret", await read.Content.ReadAsStringAsync(token), StringComparison.Ordinal);
 
         using var browser = fixture.CreateNonRedirectingHttpClient(handleCookies: false);
+        foreach (var (path, method, header) in new[]
+                 {
+                     ("/oauth2/token", "POST", "content-type"),
+                     ("/oauth2/userinfo", "GET", "authorization")
+                 })
+        {
+            using var preflight = new HttpRequestMessage(HttpMethod.Options, path);
+            preflight.Headers.TryAddWithoutValidation("Origin", "https://public.example.test");
+            preflight.Headers.TryAddWithoutValidation("Access-Control-Request-Method", method);
+            preflight.Headers.TryAddWithoutValidation("Access-Control-Request-Headers", header);
+            using var permitted = await browser.SendAsync(preflight, token);
+            Assert.Equal(HttpStatusCode.NoContent, permitted.StatusCode);
+            Assert.Equal("https://public.example.test", permitted.Headers.GetValues("Access-Control-Allow-Origin").Single());
+            Assert.False(permitted.Headers.Contains("Access-Control-Allow-Credentials"));
+            Assert.False(permitted.Headers.Contains("Access-Control-Max-Age"));
+            Assert.Contains("no-store", permitted.Headers.CacheControl!.ToString());
+            Assert.Contains("Origin", permitted.Headers.Vary);
+            Assert.Contains("Access-Control-Request-Method", permitted.Headers.Vary);
+            Assert.Contains("Access-Control-Request-Headers", permitted.Headers.Vary);
+            using var wrongHeader = new HttpRequestMessage(HttpMethod.Options, path);
+            wrongHeader.Headers.TryAddWithoutValidation("Origin", "https://public.example.test");
+            wrongHeader.Headers.TryAddWithoutValidation("Access-Control-Request-Method", method);
+            wrongHeader.Headers.TryAddWithoutValidation("Access-Control-Request-Headers", "x-probe");
+            using var deniedPreflight = await browser.SendAsync(wrongHeader, token);
+            Assert.False(deniedPreflight.Headers.Contains("Access-Control-Allow-Origin"));
+        }
         var authorizeUrl = BuildAuthorizeUrl(appId);
         using var invalidRedirect = await browser.GetAsync(
             authorizeUrl.Replace(Uri.EscapeDataString(RedirectUri),
@@ -102,19 +139,60 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
         Assert.Equal("state-0123456789012345", callback["state"].ToString());
         Assert.NotEmpty(callback["iss"].ToString());
 
-        using var exchange = await browser.PostAsync("/oauth2/token",
-            new FormUrlEncodedContent(new Dictionary<string, string>
+        using var exchangeRequest = new HttpRequestMessage(HttpMethod.Post, "/oauth2/token")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
             {
                 ["grant_type"] = "authorization_code",
                 ["client_id"] = appId,
                 ["code"] = code,
                 ["redirect_uri"] = RedirectUri,
                 ["code_verifier"] = Verifier
-            }), token);
+            })
+        };
+        exchangeRequest.Headers.TryAddWithoutValidation("Origin", "https://public.example.test");
+        using var exchange = await browser.SendAsync(exchangeRequest, token);
         Assert.Equal(HttpStatusCode.OK, exchange.StatusCode);
+        Assert.Equal("https://public.example.test", exchange.Headers.GetValues("Access-Control-Allow-Origin").Single());
+        Assert.Contains("Origin", exchange.Headers.Vary);
+        Assert.False(exchange.Headers.Contains("Access-Control-Allow-Credentials"));
+        Assert.Contains("no-store", exchange.Headers.CacheControl!.ToString());
         var issued = await exchange.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
         Assert.Equal("openid", issued.GetProperty("scope").GetString());
         Assert.False(issued.TryGetProperty("refresh_token", out _));
+        using var userInfoRequest = new HttpRequestMessage(HttpMethod.Get, "/oauth2/userinfo");
+        userInfoRequest.Headers.TryAddWithoutValidation("Origin", "https://public.example.test");
+        userInfoRequest.Headers.TryAddWithoutValidation("Authorization", "Bearer " + issued.GetProperty("access_token").GetString());
+        using var userInfo = await browser.SendAsync(userInfoRequest, token);
+        Assert.Equal(HttpStatusCode.OK, userInfo.StatusCode);
+        Assert.Equal("https://public.example.test", userInfo.Headers.GetValues("Access-Control-Allow-Origin").Single());
+        Assert.Contains("no-store", userInfo.Headers.CacheControl!.ToString());
+        using var crossAppRequest = new HttpRequestMessage(HttpMethod.Get, "/oauth2/userinfo");
+        crossAppRequest.Headers.TryAddWithoutValidation("Origin", "https://other.example.test");
+        crossAppRequest.Headers.TryAddWithoutValidation("Authorization", "Bearer " + issued.GetProperty("access_token").GetString());
+        using var crossApp = await browser.SendAsync(crossAppRequest, token);
+        Assert.Equal(HttpStatusCode.OK, crossApp.StatusCode);
+        Assert.False(crossApp.Headers.Contains("Access-Control-Allow-Origin"));
+        using var malformedOriginRequest = new HttpRequestMessage(HttpMethod.Get, "/oauth2/userinfo");
+        malformedOriginRequest.Headers.TryAddWithoutValidation("Origin", new[] { "https://public.example.test", "https://other.example.test" });
+        malformedOriginRequest.Headers.TryAddWithoutValidation("Authorization", "Bearer " + issued.GetProperty("access_token").GetString());
+        using var malformedOrigin = await browser.SendAsync(malformedOriginRequest, token);
+        Assert.False(malformedOrigin.Headers.Contains("Access-Control-Allow-Origin"));
+        using var invalidBearer = new HttpRequestMessage(HttpMethod.Get, "/oauth2/userinfo");
+        invalidBearer.Headers.TryAddWithoutValidation("Origin", "https://public.example.test");
+        invalidBearer.Headers.TryAddWithoutValidation("Authorization", "Bearer invalid");
+        using var invalidToken = await browser.SendAsync(invalidBearer, token);
+        Assert.Equal(HttpStatusCode.Unauthorized, invalidToken.StatusCode);
+        Assert.False(invalidToken.Headers.Contains("Access-Control-Allow-Origin"));
+        using var clearedOrigins = await admin.PutAsJsonAsync(route + "/oidc/allowed-origins",
+            new { origins = Array.Empty<string>() }, token);
+        Assert.Equal(HttpStatusCode.OK, clearedOrigins.StatusCode);
+        using var afterClear = new HttpRequestMessage(HttpMethod.Get, "/oauth2/userinfo");
+        afterClear.Headers.TryAddWithoutValidation("Origin", "https://public.example.test");
+        afterClear.Headers.TryAddWithoutValidation("Authorization", "Bearer " + issued.GetProperty("access_token").GetString());
+        using var noLongerAllowed = await browser.SendAsync(afterClear, token);
+        Assert.Equal(HttpStatusCode.OK, noLongerAllowed.StatusCode);
+        Assert.False(noLongerAllowed.Headers.Contains("Access-Control-Allow-Origin"));
 
         var identityCookie = GetSetCookieHeader(completion, IdentitySessionDefaults.CookieName);
         Assert.NotNull(identityCookie);

@@ -37,7 +37,8 @@ its live descendants, and `offline_access` is advertised in Discovery.
   (`client_id`/`client_secret` form fields). Public authorization-code redemption also accepts
   `none` with a form `client_id` after explicit management enablement and mandatory S256 PKCE.
   Discovery advertises all three token methods. `none` does not enable Public refresh, revoke,
-  other grants, or browser CORS. The legacy `X-Admin-AppId`/`X-Admin-AppSecret` headers are
+  other grants. Registered Public Origins separately enable exact token and UserInfo CORS.
+  The legacy `X-Admin-AppId`/`X-Admin-AppSecret` headers are
   **not** accepted here.
 - Success: HTTP 200, `Cache-Control: no-store`, body with `access_token`, `token_type: "Bearer"`,
   `expires_in`, and a `refresh_token` only when the grant supports it.
@@ -150,7 +151,7 @@ are made from the `client_id` claim, not from `aud`.
 | Gap | Specification | Impact |
 | --- | --- | --- |
 | ID tokens only for the interactive flow | OIDC Core 1.0 §2 | `id_token` exists for Confidential and enabled Public Authorization Code flows; the direct credential grants keep returning access tokens alone |
-| UserInfo is interactive-flow-only | OIDC Core 1.0 §5.3 | `GET /oauth2/userinfo` serves the closed `PS-16` claim set to a confidential BFF holding a live interactive access token; it is not a browser endpoint (no CORS) and does not serve direct-grant tokens |
+| UserInfo is interactive-flow-only | OIDC Core 1.0 §5.3 | `GET /oauth2/userinfo` serves the closed `PS-16` claim set to a confidential BFF or a Public client holding a live interactive access token; only the bound Public application's exact registered Origin may read its browser response, and direct-grant tokens remain excluded |
 | No `scope` on the direct grants | RFC 6749 §3.3 | The direct credential grants have no way to request or restrict a subset of authority; the interactive flow's scope is fixed by the registration allow list |
 | The `password` grant is the primary flow | OAuth 2.1 draft, BCP 240 | The resource-owner password grant is deprecated in current guidance; it remains here because clients depend on it |
 | Legacy grants lack reuse detection | OAuth 2.0 Security BCP §4.14 | Interactive refresh families rotate atomically and revoke live descendants on replay; the legacy `refresh_token` grant keeps its current rotation without that guarantee (`EV-33`) |

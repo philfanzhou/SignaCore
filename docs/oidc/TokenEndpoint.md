@@ -7,9 +7,20 @@
 and a Public client branch. Public requests use exactly one form `client_id`, no
 `client_secret` field, and no `Authorization` header. The identifier is a binding value, not a
 credential. An administrator may explicitly enable Public Code + S256 authorization; Discovery
-does not yet advertise `none`.
+advertises `none` for the token endpoint only.
 The branch redeems one short-lived code for the response in `PS-14`; it does not reuse a browser
 identity cookie as client authentication and does not add this grant to `/api/auth/token`.
+
+## Public Origin CORS
+
+The host excludes all `/oauth2` paths from AdminWeb CORS. A token preflight admits only `POST`
+with `Content-Type` from the current union of active Public application Origins. It cannot bind
+an application because a preflight has no token form. An actual code response carries the exact
+Origin only when client authentication has selected an active Public application and that Origin
+is still registered to it. No wildcard, credentials header, or preflight cache lifetime is sent;
+`Vary` covers Origin and the preflight method and headers. Authorization, refresh, revoke, and
+logout do not gain Public CORS. CORS limits browser response access, not token issuance or
+non-browser callers; clients must still use PKCE and avoid cookies.
 
 ## Request boundary
 
