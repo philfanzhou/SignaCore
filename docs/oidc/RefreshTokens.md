@@ -10,7 +10,8 @@ document remains the semantic reference.** Read the [directory boundary](./READM
 An interactive refresh token extends one confidential BFF authorization while its original
 identity session and current application policy remain usable. A secretless Public rotation path
 is prepared only for a complete pre-existing Public family; ordinary Public applications cannot
-obtain such a family or enable `offline_access` yet. It is an opaque, rotating bearer credential,
+obtain such a family or request `offline_access` yet. Management can save a bounded Public refresh
+policy, but this alone does not activate Code issuance. It is an opaque, rotating bearer credential,
 not a portable account credential. A browser-held token is exposed to script compromise; callers
 must isolate scripts, keep it in memory, use HTTPS, and clear it on logout. Existing Password, SMS, LDAP, WeChat,
 legacy refresh, and cross-application exchange behavior stays on its current path.
@@ -45,7 +46,7 @@ perform no reuse side effect.
 An interactive family is usable only by its exact authenticated confidential client or a verified
 active Public application selected by a single form `client_id`. The Public path requires a complete
 family marker and exact app binding; missing or legacy members fail with a generic error rather
-than falling through to legacy issuance. Public management still refuses refresh opt-in and Public
+than falling through to legacy issuance. Public management can save refresh opt-in, but Public
 Code still returns no refresh token. It never enters
 the cross-application exchange-trust path from ADR 0003. `/api/auth/token` does not gain interactive
 refresh behavior. Legacy rows continue through their current validators, admission checks, rotation,
@@ -90,6 +91,13 @@ then drives a provider execution-strategy transaction:
 3. Recheck active account/application, Confidential refresh capability or Public Code policy, the complete current scope allow list,
    session existence/revocation/idle/absolute expiry, and application max-age. Refresh never slides
    activity and never silently narrows scope.
+
+   A prepared Public family also requires current explicit refresh opt-in, a session maximum age
+   from 1 through 43200 seconds, and `offline_access` in its family snapshot and current allow
+   list. The check occurs after consumed-member reuse handling under the session/root/member
+   locks. A policy mismatch rejects an unused member without a child; a correctly bound consumed
+   member still triggers descendant disposal. Historical complete Public families without opt-in
+   can no longer rotate. Ordinary Public Code still cannot issue a root.
 4. Construct one stable request-local child id, raw token and digest, access token, nonce-free ID
    token, and audit result. A fallible signing or construction step must succeed before the parent
    can be consumed.

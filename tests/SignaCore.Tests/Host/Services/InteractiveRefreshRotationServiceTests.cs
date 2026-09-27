@@ -114,6 +114,53 @@ public sealed class InteractiveRefreshRotationServiceTests
             or IdentityConstants.ClaimAuthMethod or JwtRegisteredClaimNames.Jti);
     }
 
+    [Theory]
+    [InlineData("opt-out")]
+    [InlineData("missing-max-age")]
+    [InlineData("zero-max-age")]
+    [InlineData("excess-max-age")]
+    [InlineData("missing-family-scope")]
+    [InlineData("removed-allow-list")]
+    public async Task PublicRotation_RequiresTheCurrentBoundedPolicyAndFamilyScope(string change)
+    {
+        await using var harness = await CreateHarnessAsync();
+        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        seed.Application.ClientType = OidcClientType.Public;
+        seed.Application.AppSecretHash = string.Empty;
+        seed.Application.AllowRefreshToken = change != "opt-out";
+        seed.Application.IdentitySessionMaxAgeSeconds = change switch
+        {
+            "missing-max-age" => null,
+            "zero-max-age" => 0,
+            "excess-max-age" => IdentityConstants.MaxIdentitySessionAgeSeconds + 1,
+            _ => 3600
+        };
+        seed.Application.AllowedScopes = change == "removed-allow-list"
+            ? "openid profile" : CanonicalScope;
+        harness.Context.AppRegistrations.Update(seed.Application);
+        await harness.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        harness.Context.ChangeTracker.Clear();
+        var root = await InsertInteractiveMemberAsync(harness, seed, consumedAt: null);
+        if (change == "missing-family-scope")
+        {
+            await harness.Context.RefreshTokens.Where(row => row.Id == root.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.Scope, "openid profile"),
+                    TestContext.Current.CancellationToken);
+        }
+
+        var result = await harness.Service.RotateAsync(seed.Application,
+            CreateForm(root.Plaintext, clientId: ClientId), false, null, null,
+            TestContext.Current.CancellationToken);
+
+        AssertInvalidGrantWithoutReuse(result);
+        var members = await harness.Context.RefreshTokens.AsNoTracking()
+            .Where(row => row.FamilyId == root.Id)
+            .ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Single(members);
+        Assert.Null(members[0].ConsumedAt);
+        Assert.Equal(change == "removed-allow-list", members[0].IsRevoked);
+    }
+
     [Fact]
     public async Task RotateAsync_OnReplay_RevokesLiveDescendantsAndCommitsOneIdOnlyAudit()
     {
