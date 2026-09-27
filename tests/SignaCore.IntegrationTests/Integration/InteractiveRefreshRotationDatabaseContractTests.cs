@@ -149,13 +149,15 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Rotation_FromTwoInstancesOverOneDatabase_AdmitsExactlyOneWinner(bool publicClient)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Rotation_FromTwoInstancesOverOneDatabase_AdmitsExactlyOneWinner(
+        bool publicClient, bool dedicatedDigest)
     {
         await using var database = new RotationDatabase();
         var seed = await database.SeedAsync(publicClient);
-        var (_, plaintext) = await database.SeedRootMemberAsync(seed);
+        var (_, plaintext) = await database.SeedRootMemberAsync(seed, dedicatedDigest);
 
         var winner = RotationDatabase.BuildService(database.BuildOptions());
         var loser = RotationDatabase.BuildService(database.BuildOptions());
@@ -176,6 +178,8 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
         // The winner's child was revoked by the loser's reuse disposal: nothing stays usable.
         var child = Assert.Single(family, row => row.ConsumedAt is null);
         Assert.True(child.IsRevoked);
+        Assert.Equal(dedicatedDigest, RefreshTokenDigest.IsPublicDigest(child.TokenValue));
+        Assert.Equal(family.Single(row => row.ParentId is null).ExpiresAt, child.ExpiresAt);
         Assert.Single((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
                 verification, TestContext.Current.CancellationToken))
             .Where(row => row.Action == "oidc.refresh.replayed"));
@@ -187,10 +191,11 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
     /// Gated like the rest of the container matrix; the SQLite file form above runs everywhere.
     /// </summary>
     [Theory]
-    [InlineData("PostgreSQL", false)]
-    [InlineData("PostgreSQL", true)]
+    [InlineData("PostgreSQL", false, false)]
+    [InlineData("PostgreSQL", true, false)]
+    [InlineData("PostgreSQL", true, true)]
     public async Task Rotation_FromTwoInstancesOverOneSharedPostgreSql_AdmitsExactlyOneWinner(
-        string provider, bool publicClient)
+        string provider, bool publicClient, bool dedicatedDigest)
     {
         Assert.SkipUnless(
             ShouldRunContainerMatrix(),
@@ -215,7 +220,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
             await WaitUntilConnectableAsync(options);
 
             var seed = await RotationDatabase.SeedAsync(options, publicClient);
-            var (_, plaintext) = await RotationDatabase.SeedRootMemberAsync(options, seed);
+            var (_, plaintext) = await RotationDatabase.SeedRootMemberAsync(options, seed, dedicatedDigest);
             var results = await Task.WhenAll(
                 RotationDatabase.BuildService(options).RotateAsync(seed.Application, Form(plaintext), false, null, null, TestContext.Current.CancellationToken),
                 RotationDatabase.BuildService(options).RotateAsync(seed.Application, Form(plaintext), false, null, null, TestContext.Current.CancellationToken));
@@ -232,6 +237,8 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
             Assert.Single(family, row => row.ConsumedAt is not null);
             var child = Assert.Single(family, row => row.ConsumedAt is null);
             Assert.True(child.IsRevoked);
+            Assert.Equal(dedicatedDigest, RefreshTokenDigest.IsPublicDigest(child.TokenValue));
+            Assert.Equal(family.Single(row => row.ParentId is null).ExpiresAt, child.ExpiresAt);
             Assert.Single((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
                     verification, TestContext.Current.CancellationToken))
                 .Where(row => row.Action == "oidc.refresh.replayed"));
@@ -393,12 +400,14 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
         /// the one-shot plaintext, exactly the way a committed <c>EV-21</c> redemption would have
         /// left it.
         /// </summary>
-        public Task<(Guid RootId, string Plaintext)> SeedRootMemberAsync(Seed seed) =>
-            SeedRootMemberAsync(BuildOptions(), seed);
+        public Task<(Guid RootId, string Plaintext)> SeedRootMemberAsync(
+            Seed seed, bool dedicatedDigest = false) =>
+            SeedRootMemberAsync(BuildOptions(), seed, dedicatedDigest);
 
         public static async Task<(Guid RootId, string Plaintext)> SeedRootMemberAsync(
             DbContextOptions<IdentityDbContext> options,
-            Seed seed)
+            Seed seed,
+            bool dedicatedDigest = false)
         {
             await using var context = new IdentityDbContext(options);
             var unitOfWork = new EfCoreUnitOfWork(context);
@@ -406,7 +415,11 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
                 new RefreshTokenRepository(context), unitOfWork, NullLogger<RefreshTokenFamilyStore>.Instance)
                 .CreateRootAsync(
                     new InteractiveRefreshFamilyRootDescriptor(
-                        seed.AccountId, ClientId, seed.SessionId, seed.Scope, seed.AuthTime),
+                        seed.AccountId, ClientId, seed.SessionId, seed.Scope, seed.AuthTime)
+                    {
+                        IsPublicFamily = dedicatedDigest,
+                        AbsoluteDeadline = dedicatedDigest ? DateTimeOffset.UtcNow.AddHours(1) : null
+                    },
                     DateTimeOffset.UtcNow,
                     TestContext.Current.CancellationToken);
             return (creation.RootId, creation.RefreshToken);

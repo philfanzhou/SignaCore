@@ -18,6 +18,18 @@ public class RefreshTokenDigestTests
         Assert.DoesNotContain("a-high-entropy-refresh-token", first);
     }
 
+    [Fact]
+    public void PublicDigest_HasDedicatedNamespaceAndIsIdempotent()
+    {
+        var digest = RefreshTokenDigest.ComputePublic("raw-token");
+        Assert.StartsWith(RefreshTokenDigest.PublicPrefix, digest);
+        Assert.Equal(RefreshTokenDigest.PublicEncodedLength, digest.Length);
+        Assert.True(RefreshTokenDigest.IsPublicDigest(digest));
+        Assert.True(RefreshTokenDigest.IsDigest(digest));
+        Assert.Same(digest, RefreshTokenDigest.EnsureDigest(digest));
+        Assert.NotEqual(RefreshTokenDigest.Compute("raw-token"), digest);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -32,6 +44,9 @@ public class RefreshTokenDigestTests
     [InlineData("sha256:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg")]
     [InlineData("sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
     [InlineData("md5:0000000000000000000000000000000000000000000000000000000000000000")]
+    [InlineData("sha256-public:short")]
+    [InlineData("sha256-public:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    [InlineData("sha256-public:000000000000000000000000000000000000000000000000000000000000000g")]
     public void IsDigest_RejectsMalformedRepresentations(string value)
     {
         Assert.False(RefreshTokenDigest.IsDigest(value));

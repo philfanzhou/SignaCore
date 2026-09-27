@@ -19,9 +19,14 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         string tokenValue,
         CancellationToken cancellationToken = default)
     {
-        var tokenDigest = RefreshTokenDigest.Compute(tokenValue);
-        return await _dbContext.RefreshTokens
-            .FirstOrDefaultAsync(r => r.TokenValue == tokenDigest, cancellationToken);
+        var legacyDigest = RefreshTokenDigest.Compute(tokenValue);
+        var publicDigest = RefreshTokenDigest.ComputePublic(tokenValue);
+        var matches = await _dbContext.RefreshTokens
+            .Where(r => r.TokenValue == legacyDigest || r.TokenValue == publicDigest)
+            .Take(2)
+            .ToListAsync(cancellationToken);
+        // An impossible-to-issue duplicate bearer under both namespaces fails closed.
+        return matches.Count == 1 ? matches[0] : null;
     }
 
     public Task AddAsync(

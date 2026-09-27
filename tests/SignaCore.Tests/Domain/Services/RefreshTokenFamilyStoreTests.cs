@@ -93,6 +93,80 @@ public sealed class RefreshTokenFamilyStoreTests
     }
 
     [Fact]
+    public async Task PublicRoot_UsesBoundedDeadlineAndDedicatedDigest()
+    {
+        await using var harness = await CreateHarnessAsync();
+        var now = DateTimeOffset.UtcNow;
+        var deadline = now.AddHours(2);
+        var descriptor = new InteractiveRefreshFamilyRootDescriptor(
+            harness.AccountId, ClientId, harness.SessionId, CanonicalScope, now.AddMinutes(-5))
+        { IsPublicFamily = true, AbsoluteDeadline = deadline };
+
+        var created = await harness.Store.CreateRootAsync(
+            descriptor, now, TestContext.Current.CancellationToken);
+        var row = await harness.Context.RefreshTokens.AsNoTracking().SingleAsync(
+            TestContext.Current.CancellationToken);
+        Assert.Equal(deadline.UtcTicks / 10, row.ExpiresAt.UtcTicks / 10);
+        Assert.Equal(RefreshTokenDigest.ComputePublic(created.RefreshToken), row.TokenValue);
+
+        foreach (var invalid in new DateTimeOffset?[] { null, now, now.AddDays(8) })
+        {
+            var exception = await Assert.ThrowsAnyAsync<ArgumentException>(() =>
+                harness.Store.CreateRootAsync(descriptor with { AbsoluteDeadline = invalid }, now,
+                    TestContext.Current.CancellationToken));
+            Assert.DoesNotContain(ClientId, exception.Message, StringComparison.Ordinal);
+        }
+        Assert.Single(await harness.Context.RefreshTokens.AsNoTracking().ToListAsync(
+            TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Repository_FindsBothNamespacesWithoutChangingLegacyWrites()
+    {
+        await using var harness = await CreateHarnessAsync();
+        var now = DateTimeOffset.UtcNow;
+        var baseDescriptor = new InteractiveRefreshFamilyRootDescriptor(
+            harness.AccountId, ClientId, harness.SessionId, CanonicalScope, now);
+        var legacy = await harness.Store.CreateRootAsync(
+            baseDescriptor, now, TestContext.Current.CancellationToken);
+        var publicRoot = await harness.Store.CreateRootAsync(
+            baseDescriptor with { IsPublicFamily = true, AbsoluteDeadline = now.AddHours(1) },
+            now, TestContext.Current.CancellationToken);
+        var repository = new RefreshTokenRepository(harness.Context);
+
+        Assert.Equal(legacy.RootId, (await repository.GetByTokenValueAsync(
+            legacy.RefreshToken, TestContext.Current.CancellationToken))?.Id);
+        Assert.Equal(publicRoot.RootId, (await repository.GetByTokenValueAsync(
+            publicRoot.RefreshToken, TestContext.Current.CancellationToken))?.Id);
+        Assert.Null(await repository.GetByTokenValueAsync(
+            RefreshTokenFamilyStore.GenerateRefreshToken(), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task PublicChild_KeepsTheRootDeadlineAndDigestNamespace()
+    {
+        await using var harness = await CreateHarnessAsync();
+        var now = DateTimeOffset.UtcNow;
+        var deadline = now.AddHours(1);
+        var root = await harness.Store.CreateRootAsync(
+            new InteractiveRefreshFamilyRootDescriptor(
+                harness.AccountId, ClientId, harness.SessionId, CanonicalScope, now)
+            { IsPublicFamily = true, AbsoluteDeadline = deadline },
+            now, TestContext.Current.CancellationToken);
+        var childToken = RefreshTokenFamilyStore.GenerateRefreshToken();
+        var childId = Guid.NewGuid();
+        await harness.Store.CreateChildAsync(
+            new InteractiveRefreshChildDescriptor(childId, root.RootId, root.RootId,
+                harness.AccountId, ClientId, harness.SessionId, CanonicalScope, now,
+                root.ExpiresAt, RefreshTokenDigest.ComputePublic(childToken)),
+            now, TestContext.Current.CancellationToken);
+        var child = await harness.Context.RefreshTokens.AsNoTracking().SingleAsync(
+            row => row.Id == childId, TestContext.Current.CancellationToken);
+        Assert.Equal(deadline.UtcTicks / 10, child.ExpiresAt.UtcTicks / 10);
+        Assert.Equal(RefreshTokenDigest.ComputePublic(childToken), child.TokenValue);
+    }
+
+    [Fact]
     public async Task RevokeFamilyAsync_RevokesOnlyTheNamedInteractiveFamilyAndKeepsTheFirstFact()
     {
         await using var harness = await CreateHarnessAsync();

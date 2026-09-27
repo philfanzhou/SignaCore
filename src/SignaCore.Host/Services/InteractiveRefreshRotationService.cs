@@ -376,7 +376,8 @@ public sealed class InteractiveRefreshRotationService(
         // committed child instead of minting a second one.
         var childId = Guid.NewGuid();
         var childToken = RefreshTokenFamilyStore.GenerateRefreshToken();
-        var childDigest = RefreshTokenDigest.Compute(childToken);
+        var legacyChildDigest = RefreshTokenDigest.Compute(childToken);
+        var publicChildDigest = RefreshTokenDigest.ComputePublic(childToken);
 
         var strategy = dbContext.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async operationToken =>
@@ -430,6 +431,12 @@ public sealed class InteractiveRefreshRotationService(
                 await transaction.RollbackAsync(operationToken);
                 return InvalidGrant();
             }
+
+            // The locked root fixes the namespace for every descendant, including a historical
+            // Public family that still uses the original sha256: namespace.
+            var childDigest = RefreshTokenDigest.IsPublicDigest(lockedRoot.TokenValue)
+                ? publicChildDigest
+                : legacyChildDigest;
 
             // The current application policy is re-read under the same captured instant; the
             // capability rejections leave the family to their own state transactions
