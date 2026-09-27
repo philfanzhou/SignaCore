@@ -43,13 +43,16 @@ public class DiscoveryDocumentTests
     }
 
     [Fact]
-    public void Create_AdvertisesTheRegisteredClientAuthenticationMethods()
+    public void Create_AdvertisesPublicCodeAuthenticationWithoutChangingRevocation()
     {
         var document = DiscoveryDocument.Create("https://id.example.com", "https://id.example.com", GrantTypes);
 
         Assert.Equal(
-            new[] { "client_secret_basic", "client_secret_post" },
+            new[] { "client_secret_basic", "client_secret_post", "none" },
             document.TokenEndpointAuthMethodsSupported);
+        Assert.Equal(
+            new[] { "client_secret_basic", "client_secret_post" },
+            document.RevocationEndpointAuthMethodsSupported);
     }
 
     /// <summary>

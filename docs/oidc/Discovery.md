@@ -1,23 +1,26 @@
 # Discovery Capability Activation
 
-**Status: target activation contract. This document changes no runtime metadata.** Current behavior
-is recorded in [Standards Conformance](../overview/StandardsConformance.md); the normative activation
-rules are [AC-01..14](./CanonicalSemanticModel.md#implementation-task--capability-activation).
+**Status: activation history and current metadata.** Current behavior is also recorded in
+[Standards Conformance](../overview/StandardsConformance.md); the normative activation rules are
+[AC-01..14](./CanonicalSemanticModel.md#implementation-task--capability-activation).
 
 ## Current fact
 
-`DiscoveryDocument` currently serves the same metadata at
-`/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`. It publishes the
-configured issuer, JWKS, `/oauth2/token`, `/oauth2/revoke`, registered grant types, actual confidential
-client-authentication methods, public subject type, RS256, and claims already issued by the current
-runtime. `response_types_supported` is empty. It does not publish `authorization_endpoint`,
-`userinfo_endpoint`, `end_session_endpoint`, `scopes_supported`, `code`, `authorization_code`, or
-`S256`. This fact is protected by the existing Discovery unit tests.
+`DiscoveryDocument` serves identical metadata at `/.well-known/openid-configuration` and
+`/.well-known/oauth-authorization-server`. It publishes the configured issuer, JWKS, the standards
+`/oauth2/authorize`, `/oauth2/token`, `/oauth2/revoke`, and `/oauth2/userinfo` endpoints,
+`response_types_supported: ["code"]`, the `authorization_code` grant, S256 PKCE, and the supported
+interactive scopes. `token_endpoint_auth_methods_supported` is
+`["client_secret_basic", "client_secret_post", "none"]`; `none` applies only to an enabled Public
+authorization-code client using S256 and a form `client_id`. The revoke endpoint still supports only
+`client_secret_basic` and `client_secret_post`. This metadata does not enable Public refresh, Public
+revoke, other Public grants, or browser CORS. It does not publish a standard `end_session_endpoint`.
 
 ## Activation graph
 
-The graph below is an implementation and release ordering, not a second protocol state model. Every
-runtime result remains defined by the linked canonical rows and closed design task.
+The graph below records the implementation and release ordering at design time, not a second protocol
+state model or a description of current runtime availability. Every runtime result remains defined by
+the linked canonical rows and closed design task.
 
 The prerequisite column is a 2026-08-31 snapshot of GitHub's native dependency graph. It lists only
 direct `Blocked by` edges for every implementation task named in a gate; it never substitutes a
