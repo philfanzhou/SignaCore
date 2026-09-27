@@ -1,11 +1,15 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using SignaCore.Database;
 using SignaCore.Host.Bootstrap;
+using SignaCore.Host.Management;
 using SignaCore.Host.Startup;
 using Xunit;
 
@@ -14,7 +18,7 @@ namespace SignaCore.Tests.Integration;
 /// <summary>
 /// The retained SignaCore-owned bootstrap surface of the installed host: the authenticated
 /// overview <c>GET /api/admin/bootstrap</c> and the target probe
-/// <c>POST /api/admin/bootstrap/test</c>. Both carry the fixed management session and the shared
+/// <c>POST /api/admin/bootstrap/test</c>. Both use the bootstrap management session choice and the shared
 /// unsafe-request guard where required, and neither writes anything.
 /// </summary>
 [Collection(SqliteProcessState.CollectionName)]
@@ -123,7 +127,7 @@ public sealed class AdminBootstrapEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Overview_WithoutTheManagementCookie_Is401()
+    public async Task Overview_WithoutManagementCredentials_Is401()
     {
         using var factory = StartHost();
         using var anonymous = factory.CreateClient();
@@ -131,6 +135,42 @@ public sealed class AdminBootstrapEndpointsTests : IAsyncLifetime
         using var response = await anonymous.GetAsync(OverviewPath, Token);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ManagementBearer_Only_AnswersOverviewAndTargetProbeOverHttp()
+    {
+        using var factory = StartHost();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var accountId = await db.PasswordCredentials
+            .Where(row => row.Username == "endpoints_admin")
+            .Select(row => row.AccountId)
+            .SingleAsync(Token);
+        var issued = await factory.Services.GetRequiredService<ManagementBearerSessionService>()
+            .IssueAsync(accountId, Token);
+        Assert.Equal(ManagementBearerIssueStatus.Issued, issued.Status);
+
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("http://192.0.2.20"),
+            HandleCookies = false
+        });
+        http.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", issued.Token);
+
+        using var overview = await http.GetAsync(OverviewPath, Token);
+        Assert.Equal(HttpStatusCode.OK, overview.StatusCode);
+        using var probe = await http.SendAsync(TestRequest(JsonSerializer.Serialize(new
+        {
+            database = new
+            {
+                provider = "SQLite",
+                filePath = Path.Combine(_directory, "bearer-probe.db")
+            }
+        })), Token);
+        Assert.Equal(HttpStatusCode.OK, probe.StatusCode);
+        Assert.False(File.Exists(Path.Combine(_directory, "bearer-probe.db")));
     }
 
     [Fact]
@@ -176,7 +216,7 @@ public sealed class AdminBootstrapEndpointsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Test_WithoutTheManagementCookie_Is401()
+    public async Task Test_WithoutManagementCredentials_Is401()
     {
         using var factory = StartHost();
         using var anonymous = factory.CreateClient();

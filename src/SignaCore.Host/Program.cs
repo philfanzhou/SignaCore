@@ -452,7 +452,9 @@ builder.Services.AddScoped<ServiceMantle.Installation.IServiceInstallationStore>
 // store is only constructed — never provisioned or issued here — because the shared mapping
 // requires a registered store to start; on this host the creation entry is phase-gated to a
 // 503 anyway, so the credential is never consumed.
-mantle.AddServiceMantleBootstrapManagement();
+mantle.AddServiceMantleBootstrapManagement(options =>
+    options.UpdateBearerAuthenticationScheme =
+        ManagementBearerAuthenticationDefaults.AuthenticationScheme);
 builder.Services.AddSingleton<IBootstrapCredentialStore>(
     BootstrapCredentialProvisioner.CreateStore(bootstrapFilePath));
 

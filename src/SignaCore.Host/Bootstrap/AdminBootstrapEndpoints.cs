@@ -16,12 +16,15 @@ namespace SignaCore.Host.Bootstrap;
 /// The write path moved to the shared update entry <c>PUT {v1}/bootstrap</c>; what remains here is
 /// what that entry deliberately does not offer — the current file's safe overview and the
 /// classification of a candidate target before anything is committed. Both entries keep the fixed
-/// management cookie session plus the administrator permission and the shared management
+/// management bootstrap update session choice plus the administrator permission and the shared management
 /// rate-limit policy, and the probe carries the shared unsafe-request guard header. Neither entry
 /// writes anything: no file, no audit row, no target database.
 /// </remarks>
 internal static class AdminBootstrapEndpoints
 {
+    // ServiceMantle#567 names this narrow policy for the bootstrap update entry. The package
+    // keeps the name internal, so the consumer uses its stable policy string here.
+    private const string BootstrapUpdateSessionPolicy = "ServiceMantle.ManagementBootstrapUpdateSession";
     private const string OverviewPath = "/api/admin/bootstrap";
     private const string TestPath = "/api/admin/bootstrap/test";
 
@@ -54,7 +57,7 @@ internal static class AdminBootstrapEndpoints
         })
         .RequireAuthorization(
             ManagementAuthorizationDefaults.AdminPolicyName,
-            ManagementAuthorizationDefaults.SessionPolicyName)
+            BootstrapUpdateSessionPolicy)
         .RequireRateLimiting(RateLimitingDefaults.ManagementPolicyName);
 
         app.MapPost(TestPath, async (HttpContext context) =>
@@ -106,7 +109,7 @@ internal static class AdminBootstrapEndpoints
         })
         .RequireAuthorization(
             ManagementAuthorizationDefaults.AdminPolicyName,
-            ManagementAuthorizationDefaults.SessionPolicyName)
+            BootstrapUpdateSessionPolicy)
         .RequireRateLimiting(RateLimitingDefaults.ManagementPolicyName);
     }
 }

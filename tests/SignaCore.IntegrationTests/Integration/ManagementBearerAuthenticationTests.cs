@@ -32,7 +32,7 @@ namespace SignaCore.Tests.Integration;
 /// <summary>
 /// The management bearer authentication scheme (#384) over the real host: a request to a management
 /// route that carries an <c>Authorization</c> header is authenticated by the management bearer only
-/// and never falls back to the cookie; the cookie-only routes, the business JWT, OIDC and gateway
+/// and never falls back to the cookie; the cookie-only session route, business JWT, OIDC and gateway
 /// routes are unchanged; failures answer the fixed 401/503 without the credential; and no carrier
 /// ever holds the credential.
 /// </summary>
@@ -96,7 +96,7 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
     }
 
     [Fact]
-    public async Task TheCookieOnlyRoutes_IgnoreTheAuthorizationHeader()
+    public async Task TheManagementSessionRoute_RemainsCookieOnly()
     {
         using var host = CreateHost();
         var cookie = await LoginCookieAsync(host);
@@ -110,7 +110,7 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
         }
 
         // The cookie keeps working on the cookie-only reads, with or without a header next to it.
-        foreach (var path in new[] { "/management/v1/session", "/api/admin/bootstrap" })
+        foreach (var path in new[] { "/management/v1/session" })
         {
             Assert.Equal(HttpStatusCode.OK, (await ReadAsync(host, Get(path, cookie: cookie))).Status);
             Assert.Equal(HttpStatusCode.OK, (await ReadAsync(host, Get(path, cookie: cookie, bearer: "not-a-credential"))).Status);
@@ -145,10 +145,16 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
 
         foreach (var (name, header) in headers)
         {
-            foreach (var path in new[] { "/api/admin/users", "/management/v1/settings", "/api/admin/session/me" })
+            foreach (var path in new[]
+                     {
+                         "/api/admin/users", "/management/v1/settings", "/api/admin/session/me",
+                         "/api/admin/bootstrap", "/api/admin/bootstrap/test", "/management/v1/bootstrap"
+                     })
             {
                 // Injected on the server side: an HttpClient drops empty header values in transit.
-                var context = await SendRawAsync(host, "GET", path, header, cookie);
+                var method = path == "/api/admin/bootstrap/test" ? "POST"
+                    : path == "/management/v1/bootstrap" ? "PUT" : "GET";
+                var context = await SendRawAsync(host, method, path, header, cookie);
                 Assert.True(
                     context.Response.StatusCode == StatusCodes.Status401Unauthorized,
                     $"{name} on {path} answered {context.Response.StatusCode}");
@@ -190,9 +196,21 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
         var cookie = await LoginCookieAsync(host);
         var token = ManagementBearerToken.Generate();
 
-        foreach (var path in new[] { "/api/admin/users", "/management/v1/settings" })
+        foreach (var path in new[]
+                 {
+                     "/api/admin/users", "/management/v1/settings",
+                     "/api/admin/bootstrap", "/api/admin/bootstrap/test", "/management/v1/bootstrap"
+                 })
         {
-            var response = await ReadAsync(host, Get(path, bearer: token, cookie: cookie));
+            var method = path == "/api/admin/bootstrap/test" ? HttpMethod.Post
+                : path == "/management/v1/bootstrap" ? HttpMethod.Put : HttpMethod.Get;
+            var request = Request(method, path, token, cookie);
+            if (method != HttpMethod.Get)
+            {
+                request.Content = JsonContent.Create(new { });
+                request.Headers.TryAddWithoutValidation("X-SignaCore-Confirm-Database-Change", "1");
+            }
+            var response = await ReadAsync(host, request);
             Assert.Equal(HttpStatusCode.ServiceUnavailable, response.Status);
             Assert.Equal("no-store", response.CacheControl);
             Assert.Equal(UnavailableBody, response.Body);
@@ -261,7 +279,7 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
                         .Build());
             }));
 
-        // ServiceMantle pins the bootstrap update entry to the management cookie alone.
+        // Shared management entry mapping still rejects a scheme pinned onto the Admin policy.
         var failure = Assert.ThrowsAny<Exception>(() => host.CreateClient());
         Assert.Contains(
             "management entry mapping is invalid",
@@ -299,11 +317,13 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
 
         // Success, a write with its audit row, a rejected credential, and a revoked one.
         carriers.Add((await ReadAsync(host, Get("/api/admin/users", bearer: token))).Describe());
+        carriers.Add((await ReadAsync(host, Get("/api/admin/bootstrap", bearer: token))).Describe());
         var created = await CreateUserAsync(host, bearer: token);
         carriers.Add((await ReadAsync(host, Get("/api/admin/users", bearer: token + "x"))).Describe());
         Assert.Equal(ManagementBearerRevocationResult.Revoked, await Service(host).RevokeAsync(token, Ct));
         carriers.Add((await ReadAsync(host, Get("/management/v1/settings", bearer: token))).Describe());
         carriers.Add((await ReadAsync(host, Get("/api/admin/session/me", bearer: token))).Describe());
+        carriers.Add((await ReadAsync(host, Get("/api/admin/bootstrap", bearer: token))).Describe());
 
         carriers.AddRange(logs);
         Assert.NotEmpty(tagValues);
@@ -391,23 +411,10 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
         return request;
     }
 
-    /// <summary>The four cookie-only entries, each built for a bearer and/or a cookie.</summary>
+    /// <summary>The session read remains cookie-only even when a Bearer header is present.</summary>
     private static IEnumerable<Func<string?, string?, HttpRequestMessage>> CookieOnlyRequests()
     {
         yield return (bearer, cookie) => Get("/management/v1/session", bearer, cookie);
-        yield return (bearer, cookie) =>
-        {
-            var request = Request(HttpMethod.Put, "/management/v1/bootstrap", bearer, cookie);
-            request.Content = JsonContent.Create(new { });
-            return request;
-        };
-        yield return (bearer, cookie) => Get("/api/admin/bootstrap", bearer, cookie);
-        yield return (bearer, cookie) =>
-        {
-            var request = Request(HttpMethod.Post, "/api/admin/bootstrap/test", bearer, cookie);
-            request.Content = JsonContent.Create(new { });
-            return request;
-        };
     }
 
     private sealed record Answer(HttpStatusCode Status, string Body, string CacheControl, string Headers)
@@ -447,6 +454,14 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
             context.Request.Path = path;
             context.Request.Headers.Authorization = authorization;
             context.Request.Headers.Cookie = cookie;
+            if (method is "POST" or "PUT")
+            {
+                context.Request.Headers["X-ServiceMantle-Request"] = "1";
+                context.Request.Headers["X-SignaCore-Confirm-Database-Change"] = "1";
+                context.Request.ContentType = "application/json";
+                context.Request.Body = new MemoryStream("{}"u8.ToArray());
+                context.Request.ContentLength = 2;
+            }
         }, Ct);
     }
 

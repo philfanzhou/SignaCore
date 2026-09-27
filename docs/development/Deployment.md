@@ -157,7 +157,9 @@ A pending-setup instance is live but not ready, so it never receives authenticat
 
 ## Production checklist
 
-- Terminate TLS at the service or a trusted reverse proxy.
+- Choose HTTPS at the service or a trusted reverse proxy when transport confidentiality is
+  required. HTTP sends management passwords and Bearer credentials in plaintext; SignaCore does
+  not force HTTPS for management routes.
 - Prepare the writable persistent bootstrap directory, complete protected bootstrap configuration,
   restrict the resulting file to mode `0600`, and back it up.
 - Set `ReverseProxy:KnownProxies` when TLS terminates at a non-loopback proxy so forwarded scheme and

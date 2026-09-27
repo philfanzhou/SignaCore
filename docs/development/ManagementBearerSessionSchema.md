@@ -56,11 +56,20 @@ cookie login, so `/api/admin/session/me` and audit operators do not change. Any 
 database that cannot answer yields `503` with `{"errorCode":"management.bearer.unavailable"}`.
 Neither response echoes the header, and no log, audit row, or metric carries the credential.
 
-These routes stay cookie-only and ignore the `Authorization` header entirely: the shared
-`/management/v1/session` entries, `PUT /management/v1/bootstrap`, `GET /api/admin/bootstrap`, and
-`POST /api/admin/bootstrap/test`. ServiceMantle pins the bootstrap update to the local management
-cookie, so bootstrap editing is not available with a bearer. The business JWT (`/api/profile/*`),
-OIDC (`/oauth2/*`), and gateway routes keep their own schemes and reject a management bearer.
+The shared `/management/v1/session` entries remain cookie-only. With
+`ServiceMantle.AspNetCore` **0.1.1-rc.1** or later on the same package version line, SignaCore
+opts the bootstrap update into the narrow `ServiceMantle.ManagementBootstrapUpdateSession`
+policy. `PUT /management/v1/bootstrap`, `GET /api/admin/bootstrap`, and
+`POST /api/admin/bootstrap/test` accept a valid management Bearer without a cookie. Any
+`Authorization` header selects Bearer only; an invalid, expired, revoked, empty, or repeated
+header cannot fall back to a valid cookie. With no header, existing Cookie clients retain their
+access. The original administrator, permission, phase, request validation, and audit rules still
+apply. The business JWT (`/api/profile/*`), OIDC (`/oauth2/*`), and gateway routes keep their own
+schemes and reject a management bearer.
+
+SignaCore does not force HTTPS for these entries. An HTTP deployment sends passwords and Bearer
+credentials in plaintext; the deployer chooses whether to protect transport with HTTPS. The
+built-in console's switch to Bearer-only requests is a separate frontend task.
 
 A reverse proxy in front of SignaCore must not add or forward an `Authorization` header to
 `/api/admin` or `/management/v1` for cookie-based console users: such requests are now authenticated

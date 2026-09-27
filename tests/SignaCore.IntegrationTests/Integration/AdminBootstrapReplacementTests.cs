@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -159,6 +160,21 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
         return http;
     }
 
+    private async Task<HttpClient> CreateBearerClientAsync(WebApplicationFactory<Program> factory)
+    {
+        var issued = await factory.Services.GetRequiredService<ManagementBearerSessionService>()
+            .IssueAsync(_adminAccountId, Token);
+        Assert.Equal(ManagementBearerIssueStatus.Issued, issued.Status);
+        var http = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("http://192.0.2.20"),
+            HandleCookies = false
+        });
+        http.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", issued.Token);
+        return http;
+    }
+
     private static Task<HttpResponseMessage> PutAsync(
         HttpClient client,
         string json,
@@ -244,12 +260,16 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
     private static CancellationToken CaptureStoppingToken(WebApplicationFactory<Program> factory) =>
         factory.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping;
 
-    [Fact]
-    public async Task ConfirmedUpdate_KeepsTheKeyRewritesTheFileAuditsAndStops()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfirmedUpdate_KeepsTheKeyRewritesTheFileAuditsAndStops(bool useBearer)
     {
         using var factory = StartHost();
         var stopping = CaptureStoppingToken(factory);
-        using var admin = await CreateAdminClientAsync(factory);
+        using var admin = useBearer
+            ? await CreateBearerClientAsync(factory)
+            : await CreateAdminClientAsync(factory);
         var replacementPath = Path.Combine(_directory, "replacement.db");
 
         using var response = await PutAsync(
@@ -436,7 +456,7 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WithoutTheManagementCookie_TheUpdateIs401()
+    public async Task WithoutManagementCredentials_TheUpdateIs401()
     {
         using var factory = StartHost();
         var stopping = CaptureStoppingToken(factory);
@@ -444,7 +464,7 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
 
         using var response = await PutAsync(anonymous, ReplacementJson(), confirmed: false);
 
-        // Authorization precedes the confirmation rule: no cookie is rejected as unauthenticated,
+        // Authorization precedes the confirmation rule: no credential is rejected as unauthenticated,
         // not as unconfirmed.
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Empty(await ReadAuditRowsAsync());
@@ -484,8 +504,10 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
             $"the legacy route answered {legacy.StatusCode}");
     }
 
-    [Fact]
-    public async Task CallerCancellation_BeforeTheWrite_ChangesNothing()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CallerCancellation_BeforeTheWrite_ChangesNothing(bool useBearer)
     {
         var validator = CountingValidator.HoldInsideValidation();
         using var factory = StartHost(services =>
@@ -494,7 +516,9 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
             services.AddSingleton<IBootstrapCandidateValidator>(validator);
         });
         var stopping = CaptureStoppingToken(factory);
-        using var admin = await CreateAdminClientAsync(factory);
+        using var admin = useBearer
+            ? await CreateBearerClientAsync(factory)
+            : await CreateAdminClientAsync(factory);
 
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(Token);
         var pending = PutAsync(
