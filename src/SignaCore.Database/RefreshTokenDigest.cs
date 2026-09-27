@@ -12,23 +12,32 @@ public static class RefreshTokenDigest
 {
     public const string Prefix = "sha256:";
     public const int EncodedLength = 71;
+    public const string PublicPrefix = "sha256-public:";
+    public const int PublicEncodedLength = 78;
 
     public static string Compute(string token)
+        => ComputeWithPrefix(token, Prefix);
+
+    public static string ComputePublic(string token)
+        => ComputeWithPrefix(token, PublicPrefix);
+
+    private static string ComputeWithPrefix(string token, string prefix)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
         var digest = SHA256.HashData(Encoding.UTF8.GetBytes(token));
-        return Prefix + Convert.ToHexString(digest).ToLowerInvariant();
+        return prefix + Convert.ToHexString(digest).ToLowerInvariant();
     }
 
     public static bool IsDigest(string value)
     {
-        if (!value.StartsWith(Prefix, StringComparison.Ordinal) ||
-            value.Length != EncodedLength)
+        var prefix = IsPublicDigest(value) ? PublicPrefix : Prefix;
+        if (!value.StartsWith(prefix, StringComparison.Ordinal) ||
+            value.Length != prefix.Length + 64)
         {
             return false;
         }
 
-        foreach (var character in value.AsSpan(Prefix.Length))
+        foreach (var character in value.AsSpan(prefix.Length))
         {
             if (character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f'))
             {
@@ -38,6 +47,11 @@ public static class RefreshTokenDigest
 
         return true;
     }
+
+    public static bool IsPublicDigest(string value) =>
+        value.StartsWith(PublicPrefix, StringComparison.Ordinal)
+        && value.Length == PublicEncodedLength
+        && value.AsSpan(PublicPrefix.Length).IndexOfAnyExcept("0123456789abcdef") < 0;
 
     public static string EnsureDigest(string value) => IsDigest(value) ? value : Compute(value);
 }
