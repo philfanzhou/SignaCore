@@ -447,8 +447,14 @@ public sealed class InteractiveRefreshRotationService(
                 || currentApplication.ClientType != app.ClientType
                 || (currentApplication.ClientType == OidcClientType.Public
                     ? !currentApplication.AllowAuthorizationCode
+                        || !currentApplication.AllowRefreshToken
                         || currentApplication.AudienceMode != AudienceMode.PerApplication
                         || currentApplication.AppSecretHash.Length != 0
+                        || currentApplication.IdentitySessionMaxAgeSeconds is not int maxAgeSeconds
+                        || maxAgeSeconds < 1
+                        || maxAgeSeconds > IdentityConstants.MaxIdentitySessionAgeSeconds
+                        || !OidcScopeValidator.ParseCanonical(lockedMember.Scope!)
+                            .Contains(OidcScopeValidator.OfflineAccess)
                         || currentApplication.CallbackExpiresAt is DateTimeOffset expiry && expiry < now
                     : !currentApplication.AllowRefreshToken))
             {

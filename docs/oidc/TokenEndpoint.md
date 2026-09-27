@@ -60,6 +60,11 @@ must contain exactly one each of `grant_type=refresh_token`, `client_id`, and `r
 no Authorization header, `client_secret`, or additional form fields. The identifier selects the
 application; only the digest-matched family, exact application binding, current Public policy,
 account, and session authorize rotation. Missing and legacy tokens never enter the legacy grant.
+A Public family's current policy must explicitly allow refresh, set a 1–43200-second identity
+session maximum age, and still allow its `offline_access` snapshot. Existing manually seeded
+families without these settings are rejected. A consumed, correctly bound member still triggers
+reuse disposal before the current policy check. This guard does not enable ordinary Public Code
+refresh issuance. Origin and Cookie do not authenticate a refresh bearer.
 A code request without any client identifier or credentials is `400 invalid_request`; the
 confidential authentication failures of other grants remain `401 invalid_client`.
 

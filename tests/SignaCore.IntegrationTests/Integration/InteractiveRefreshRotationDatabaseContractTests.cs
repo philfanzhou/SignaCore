@@ -369,8 +369,9 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
                 AudienceMode = AudienceMode.PerApplication,
                 ClientType = publicClient ? OidcClientType.Public : OidcClientType.Confidential,
                 AllowAuthorizationCode = true,
-                AllowedScopes = publicClient ? "openid" : CanonicalScope,
-                AllowRefreshToken = !publicClient
+                AllowedScopes = CanonicalScope,
+                AllowRefreshToken = true,
+                IdentitySessionMaxAgeSeconds = publicClient ? 3600 : null
             };
             var accountId = Guid.NewGuid();
             var credentialId = Guid.NewGuid();

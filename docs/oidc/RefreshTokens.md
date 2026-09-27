@@ -97,6 +97,13 @@ then drives a provider execution-strategy transaction:
 3. Recheck active account/application, Confidential refresh capability or Public Code policy, the complete current scope allow list,
    session existence/revocation/idle/absolute expiry, and application max-age. Refresh never slides
    activity and never silently narrows scope.
+
+   A prepared Public family also requires current explicit refresh opt-in, a session maximum age
+   from 1 through 43200 seconds, and `offline_access` in its family snapshot and current allow
+   list. The check occurs after consumed-member reuse handling under the session/root/member
+   locks. A policy mismatch rejects an unused member without a child; a correctly bound consumed
+   member still triggers descendant disposal. Historical complete Public families without opt-in
+   can no longer rotate. Ordinary Public Code still cannot issue a root.
 4. Construct one stable request-local child id, raw token and digest, access token, nonce-free ID
    token, and audit result. A fallible signing or construction step must succeed before the parent
    can be consumed.

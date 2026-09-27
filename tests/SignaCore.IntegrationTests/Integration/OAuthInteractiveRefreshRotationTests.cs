@@ -65,7 +65,7 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(
             cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal("openid", body.GetProperty("scope").GetString());
+        Assert.Equal(OfflineScope, body.GetProperty("scope").GetString());
         var access = new JwtSecurityTokenHandler().ReadJwtToken(body.GetProperty("access_token").GetString());
         Assert.Equal(AppId, Assert.Single(access.Audiences));
         Assert.Equal(body.GetProperty("expires_in").GetInt64(),
@@ -73,6 +73,72 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
         var family = await GetFamilyAsync(seeded.RootId);
         Assert.Equal(2, family.Count);
         Assert.Single(family, row => row.ParentId == seeded.RootId && !row.IsRevoked);
+    }
+
+    [Theory]
+    [InlineData("opt-out")]
+    [InlineData("missing-max-age")]
+    [InlineData("excess-max-age")]
+    [InlineData("missing-family-scope")]
+    public async Task PublicRefresh_CurrentPolicyRejectsAnUnusedMemberWithoutAChild(string change)
+    {
+        var seeded = await SeedPublicFamilyAsync();
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var app = await db.AppRegistrations.SingleAsync(row => row.Id == seeded.ApplicationId,
+                TestContext.Current.CancellationToken);
+            if (change == "opt-out") app.AllowRefreshToken = false;
+            if (change == "missing-max-age") app.IdentitySessionMaxAgeSeconds = null;
+            if (change == "excess-max-age") app.IdentitySessionMaxAgeSeconds = 43201;
+            if (change == "missing-family-scope")
+            {
+                var root = await db.RefreshTokens.SingleAsync(row => row.Id == seeded.RootId,
+                    TestContext.Current.CancellationToken);
+                root.Scope = "openid profile";
+            }
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        using var http = _fixture.CreateHttpClient();
+        using var response = await http.PostAsync("/oauth2/token",
+            RefreshForm(seeded.RefreshToken, extra: [("client_id", AppId)]),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal("invalid_grant", body.GetProperty("error").GetString());
+        var family = await GetFamilyAsync(seeded.RootId);
+        Assert.Single(family);
+        Assert.Null(family[0].ConsumedAt);
+    }
+
+    [Fact]
+    public async Task PublicRefresh_ConsumedMemberStillRevokesItsChildAfterPolicyOptOut()
+    {
+        var seeded = await SeedPublicFamilyAsync();
+        using var http = _fixture.CreateHttpClient();
+        using (var first = await http.PostAsync("/oauth2/token",
+            RefreshForm(seeded.RefreshToken, extra: [("client_id", AppId)]),
+            TestContext.Current.CancellationToken))
+        {
+            Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        }
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var app = await db.AppRegistrations.SingleAsync(row => row.Id == seeded.ApplicationId,
+                TestContext.Current.CancellationToken);
+            app.AllowRefreshToken = false;
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        using var replay = await http.PostAsync("/oauth2/token",
+            RefreshForm(seeded.RefreshToken, extra: [("client_id", AppId)]),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, replay.StatusCode);
+        var family = await GetFamilyAsync(seeded.RootId);
+        Assert.Equal(2, family.Count);
+        Assert.Single(family, row => row.ParentId == seeded.RootId && row.IsRevoked);
     }
 
     [Fact]
@@ -583,7 +649,7 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
 
     private async Task<SeededFamily> SeedPublicFamilyAsync()
     {
-        // The public management policy cannot issue a family. Start with the real committed
+        // Ordinary Public Code cannot issue a family. Start with the real committed
         // family shape, then seed the otherwise unreachable Public binding for this protocol test.
         var seeded = await SeedRedeemedFamilyAsync();
         using var scope = _fixture.Services.CreateScope();
@@ -592,8 +658,9 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
             TestContext.Current.CancellationToken);
         app.ClientType = OidcClientType.Public;
         app.AppSecretHash = string.Empty;
-        app.AllowRefreshToken = false;
-        app.AllowedScopes = "openid";
+        app.AllowRefreshToken = true;
+        app.IdentitySessionMaxAgeSeconds = 3600;
+        app.AllowedScopes = OfflineScope;
         var other = await db.AppRegistrations.SingleAsync(row => row.AppId == OtherAppId,
             TestContext.Current.CancellationToken);
         other.ClientType = OidcClientType.Public;
@@ -602,7 +669,7 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
         other.AllowedScopes = "openid";
         var root = await db.RefreshTokens.SingleAsync(row => row.Id == seeded.RootId,
             TestContext.Current.CancellationToken);
-        root.Scope = "openid";
+        root.Scope = OfflineScope;
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         return seeded;
     }
