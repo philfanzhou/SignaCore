@@ -33,6 +33,9 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
     /// depend on which one runs first.
     /// </summary>
     private const string RoundTripAppId = "oidc-endpoint-round-trip-app";
+    private const string OriginAppId = "oidc-endpoint-origin-app";
+    private const string CorsAppId = "oidc-endpoint-cors-app";
+    private const string OriginDeleteAppId = "oidc-endpoint-origin-delete-app";
 
     private readonly IdentityServerFixture _fixture;
 
@@ -64,8 +67,12 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
         var remove = await http.DeleteAsync(
             $"/api/admin/apps/{AppId}/oidc/redirect-uris/{Guid.NewGuid()}",
             TestContext.Current.CancellationToken);
+        var origins = await http.PutAsJsonAsync(
+            $"/api/admin/apps/{AppId}/oidc/allowed-origins",
+            new { origins = new[] { "https://spa.example.test" } },
+            TestContext.Current.CancellationToken);
 
-        foreach (var response in new[] { read, list, policy, add, remove })
+        foreach (var response in new[] { read, list, policy, add, remove, origins })
         {
             Assert.Contains(
                 response.StatusCode,
@@ -80,6 +87,156 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
             .FirstAsync(item => item.AppId == AppId, TestContext.Current.CancellationToken);
         Assert.Empty(app.RedirectUris);
         Assert.False(app.AllowAuthorizationCode);
+    }
+
+    [Fact]
+    public async Task PublicOrigins_ReplaceReadRejectInvalidAndClearAtomically()
+    {
+        await SeedAsync(OriginAppId, OidcClientType.Public);
+        using var http = await _fixture.CreateAdminHttpClientAsync();
+        var route = $"/api/admin/apps/{OriginAppId}/oidc/allowed-origins";
+        var before = await http.GetFromJsonAsync<JsonElement>(
+            $"/api/admin/apps/{OriginAppId}/oidc", TestContext.Current.CancellationToken);
+        Assert.Empty(before.GetProperty("allowedOrigins").EnumerateArray());
+
+        var first = await http.PutAsJsonAsync(route,
+            new { origins = new[] { "HTTPS://SPA.EXAMPLE.TEST:443", "https://spa.example.test:8443" } },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        Assert.Equal(["https://spa.example.test", "https://spa.example.test:8443"],
+            firstBody.GetProperty("allowedOrigins").EnumerateArray().Select(value => value.GetString()));
+
+        var rejected = await http.PutAsJsonAsync(route,
+            new { origins = new[] { "https://new.example.test", "https://spa.example.test/path" } },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        var duplicate = await http.PutAsJsonAsync(route,
+            new { origins = new[] { "HTTPS://SPA.EXAMPLE.TEST:443", "https://spa.example.test" } },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
+
+        var read = await http.GetFromJsonAsync<JsonElement>(
+            $"/api/admin/apps/{OriginAppId}/oidc", TestContext.Current.CancellationToken);
+        Assert.Equal(2, read.GetProperty("allowedOrigins").GetArrayLength());
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            Assert.Equal(2, await db.AppAllowedOrigins.CountAsync(
+                row => row.AppRegistration.AppId == OriginAppId, TestContext.Current.CancellationToken));
+            Assert.Single((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                db, TestContext.Current.CancellationToken)).Where(row =>
+                row.Action == "app_oidc_allowed_origins_replaced" && row.TargetId == OriginAppId));
+        }
+
+        var replaced = await http.PutAsJsonAsync(route,
+            new { origins = new[] { "https://spa.example.test", "https://new.example.test" } },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, replaced.StatusCode);
+        var replacedBody = await replaced.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        Assert.Equal(["https://new.example.test", "https://spa.example.test"],
+            replacedBody.GetProperty("allowedOrigins").EnumerateArray().Select(value => value.GetString()));
+
+        var cleared = await http.PutAsJsonAsync(route, new { origins = Array.Empty<string>() },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+        var clearedBody = await cleared.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        Assert.Empty(clearedBody.GetProperty("allowedOrigins").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task ConfidentialApplication_CannotRegisterPublicOrigins()
+    {
+        await SeedAsync();
+        using var http = await _fixture.CreateAdminHttpClientAsync();
+        var response = await http.PutAsJsonAsync(
+            $"/api/admin/apps/{AppId}/oidc/allowed-origins",
+            new { origins = new[] { "https://spa.example.test" } },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RegisteredPublicOrigin_DoesNotEnableCorsResponses()
+    {
+        await SeedAsync(CorsAppId, OidcClientType.Public);
+        using (var admin = await _fixture.CreateAdminHttpClientAsync())
+        {
+            var registered = await admin.PutAsJsonAsync(
+                $"/api/admin/apps/{CorsAppId}/oidc/allowed-origins",
+                new { origins = new[] { "https://spa-cors.example.test" } },
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, registered.StatusCode);
+        }
+
+        using var http = _fixture.CreateHttpClient();
+        foreach (var (method, path) in new[]
+                 {
+                     (HttpMethod.Get, "/oauth2/authorize"),
+                     (HttpMethod.Post, "/oauth2/token"),
+                     (HttpMethod.Get, "/oauth2/userinfo"),
+                     (HttpMethod.Options, "/oauth2/token"),
+                     (HttpMethod.Options, "/oauth2/userinfo")
+                 })
+        {
+            using var request = new HttpRequestMessage(method, path);
+            request.Headers.Add("Origin", "https://spa-cors.example.test");
+            if (method == HttpMethod.Options)
+            {
+                request.Headers.Add("Access-Control-Request-Method",
+                    path == "/oauth2/token" ? "POST" : "GET");
+            }
+            if (method == HttpMethod.Post)
+            {
+                request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["grant_type"] = "authorization_code",
+                    ["client_id"] = CorsAppId
+                });
+            }
+
+            using var response = await http.SendAsync(request, TestContext.Current.CancellationToken);
+            Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
+            Assert.False(response.Headers.Contains("Access-Control-Allow-Credentials"));
+        }
+    }
+
+    [Fact]
+    public async Task PublicOrigin_RemainsReadableWhenDisabledAndCascadesOnDelete()
+    {
+        await SeedAsync(OriginDeleteAppId, OidcClientType.Public);
+        using var http = await _fixture.CreateAdminHttpClientAsync();
+        var saved = await http.PutAsJsonAsync(
+            $"/api/admin/apps/{OriginDeleteAppId}/oidc/allowed-origins",
+            new { origins = new[] { "https://spa-delete.example.test" } },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+
+        Guid rowId;
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var app = await db.AppRegistrations.SingleAsync(
+                row => row.AppId == OriginDeleteAppId, TestContext.Current.CancellationToken);
+            rowId = app.Id;
+            app.IsActive = false;
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var read = await http.GetFromJsonAsync<JsonElement>(
+            $"/api/admin/apps/{OriginDeleteAppId}/oidc", TestContext.Current.CancellationToken);
+        Assert.Equal("https://spa-delete.example.test",
+            read.GetProperty("allowedOrigins").EnumerateArray().Single().GetString());
+
+        var deleted = await http.DeleteAsync(
+            $"/api/admin/apps/{OriginDeleteAppId}", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, deleted.StatusCode);
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            Assert.False(await db.AppAllowedOrigins.AnyAsync(
+                row => row.AppRegistrationId == rowId, TestContext.Current.CancellationToken));
+        }
     }
 
     /// <summary>
@@ -310,7 +467,9 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
         }
     }
 
-    private async Task SeedAsync(string appId = AppId)
+    private async Task SeedAsync(
+        string appId = AppId,
+        OidcClientType clientType = OidcClientType.Confidential)
     {
         using var scope = _fixture.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
@@ -323,11 +482,13 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
         {
             Id = Guid.NewGuid(),
             AppId = appId,
-            AppSecretHash = BCrypt.Net.BCrypt.HashPassword("oidc-endpoint-test-secret"),
+            AppSecretHash = clientType == OidcClientType.Public
+                ? string.Empty : BCrypt.Net.BCrypt.HashPassword("oidc-endpoint-test-secret"),
             AppName = "OIDC Endpoint Test App",
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,
-            AudienceMode = AudienceMode.PerApplication
+            AudienceMode = AudienceMode.PerApplication,
+            ClientType = clientType
         });
         await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
     }

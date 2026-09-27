@@ -77,6 +77,7 @@ public sealed record AdminAppOidcResponse(
     string AudienceMode,
     IReadOnlyList<AdminAppRedirectUriResponse> RedirectUris,
     IReadOnlyList<AdminAppRedirectUriResponse> PostLogoutRedirectUris,
+    IReadOnlyList<string> AllowedOrigins,
 
     /// <summary>
     /// The one-time plaintext secret of a Public → Confidential upgrade, minted inside the update
@@ -100,6 +101,9 @@ public sealed record AdminUpdateOidcPolicyRequest(
 
 /// <summary>Adds URIs to one kind. Either every value is registered or none is.</summary>
 public sealed record AdminAddRedirectUrisRequest(string Kind, IReadOnlyList<string>? Uris);
+
+/// <summary>Replaces the complete Public SPA Origin registration set.</summary>
+public sealed record AdminReplaceAllowedOriginsRequest(IReadOnlyList<string>? Origins);
 
 /// <summary>
 /// Creates one application registration. <see cref="ClientType"/> is optional and closed-set:

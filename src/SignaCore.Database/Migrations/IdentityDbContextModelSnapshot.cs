@@ -306,6 +306,31 @@ namespace SignaCore.Database.Migrations
                     b.ToTable("accounts", (string)null);
                 });
 
+            modelBuilder.Entity("SignaCore.Database.Entity.AppAllowedOriginEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AppRegistrationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("app_registration_id");
+
+                    b.Property<string>("CanonicalOrigin")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("canonical_origin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppRegistrationId", "CanonicalOrigin")
+                        .IsUnique();
+
+                    b.ToTable("app_allowed_origins", (string)null);
+                });
+
             modelBuilder.Entity("SignaCore.Database.Entity.AppExchangeTrustEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1467,6 +1492,17 @@ namespace SignaCore.Database.Migrations
                     b.ToTable("user_logins", (string)null);
                 });
 
+            modelBuilder.Entity("SignaCore.Database.Entity.AppAllowedOriginEntity", b =>
+                {
+                    b.HasOne("SignaCore.Database.Entity.AppRegistrationEntity", "AppRegistration")
+                        .WithMany("AllowedOrigins")
+                        .HasForeignKey("AppRegistrationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AppRegistration");
+                });
+
             modelBuilder.Entity("SignaCore.Database.Entity.AppExchangeTrustEntity", b =>
                 {
                     b.HasOne("SignaCore.Database.Entity.AppRegistrationEntity", null)
@@ -1645,6 +1681,8 @@ namespace SignaCore.Database.Migrations
 
             modelBuilder.Entity("SignaCore.Database.Entity.AppRegistrationEntity", b =>
                 {
+                    b.Navigation("AllowedOrigins");
+
                     b.Navigation("RedirectUris");
                 });
 #pragma warning restore 612, 618
