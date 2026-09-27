@@ -55,6 +55,129 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
     // ---- Acceptance 1: PS-15 success and the chained rotation ----
 
     [Fact]
+    public async Task PublicRefresh_OnlyASeededCompleteFamilyRotatesWithoutASecret()
+    {
+        var seeded = await SeedPublicFamilyAsync();
+        using var http = _fixture.CreateHttpClient();
+        using var response = await http.PostAsync("/oauth2/token",
+            RefreshForm(seeded.RefreshToken, extra: [("client_id", AppId)]),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal("openid", body.GetProperty("scope").GetString());
+        var access = new JwtSecurityTokenHandler().ReadJwtToken(body.GetProperty("access_token").GetString());
+        Assert.Equal(AppId, Assert.Single(access.Audiences));
+        Assert.Equal(body.GetProperty("expires_in").GetInt64(),
+            (long)(access.ValidTo - access.ValidFrom).TotalSeconds);
+        var family = await GetFamilyAsync(seeded.RootId);
+        Assert.Equal(2, family.Count);
+        Assert.Single(family, row => row.ParentId == seeded.RootId && !row.IsRevoked);
+    }
+
+    [Fact]
+    public async Task PublicRefresh_MissingLegacyAndOtherClientNeverReachLegacyGrant()
+    {
+        var seeded = await SeedPublicFamilyAsync();
+        var legacyToken = RefreshTokenFamilyStore.GenerateRefreshToken();
+        var legacyId = Guid.NewGuid();
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            db.RefreshTokens.Add(new RefreshTokenEntity
+            {
+                Id = legacyId,
+                FamilyId = legacyId,
+                AccountId = seeded.AccountId,
+                AppId = AppId,
+                TokenValue = RefreshTokenDigest.Compute(legacyToken),
+                CreatedAt = DateTimeOffset.UtcNow,
+                ExpiresAt = DateTimeOffset.UtcNow.AddDays(1)
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        using var http = _fixture.CreateHttpClient();
+        foreach (var (refresh, clientId) in new[]
+                 {
+                     ("missing-public-token", AppId),
+                     (legacyToken, AppId),
+                     (seeded.RefreshToken, OtherAppId)
+                 })
+        {
+            using var response = await http.PostAsync("/oauth2/token",
+                RefreshForm(refresh, extra: [("client_id", clientId)]),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var error = await response.Content.ReadFromJsonAsync<JsonElement>(
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal("invalid_grant", error.GetProperty("error").GetString());
+        }
+
+        Assert.Single(await GetFamilyAsync(seeded.RootId));
+        var legacy = await QueryAsync(db => db.RefreshTokens.AsNoTracking()
+            .SingleAsync(row => row.Id == legacyId, TestContext.Current.CancellationToken));
+        Assert.False(legacy.IsRevoked);
+
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var app = await db.AppRegistrations.SingleAsync(row => row.Id == seeded.ApplicationId,
+                TestContext.Current.CancellationToken);
+            app.IsActive = false;
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        using var disabled = await http.PostAsync("/oauth2/token",
+            RefreshForm(seeded.RefreshToken, extra: [("client_id", AppId)]),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, disabled.StatusCode);
+        Assert.Single(await GetFamilyAsync(seeded.RootId));
+    }
+
+    [Fact]
+    public async Task PublicRefresh_DuplicateClientIdAndCredentialMixAreRejected()
+    {
+        var seeded = await SeedPublicFamilyAsync();
+        using var http = _fixture.CreateHttpClient();
+        using var duplicate = await http.PostAsync("/oauth2/token",
+            RefreshForm(seeded.RefreshToken,
+                extra: [("client_id", AppId), ("client_id", AppId)]),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
+
+        using var duplicateGrant = await http.PostAsync("/oauth2/token",
+            RefreshForm(seeded.RefreshToken,
+                extra: [("client_id", AppId), ("grant_type", "refresh_token")]),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, duplicateGrant.StatusCode);
+
+        using var withSecret = await http.PostAsync("/oauth2/token",
+            RefreshForm(seeded.RefreshToken,
+                extra: [("client_id", AppId), ("client_secret", "invalid")]),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, withSecret.StatusCode);
+        Assert.Single(await GetFamilyAsync(seeded.RootId));
+    }
+
+    [Fact]
+    public async Task PublicRefresh_ConcurrentRequestsKeepOneChildAndReuseRevokesIt()
+    {
+        var seeded = await SeedPublicFamilyAsync();
+        using var http = _fixture.CreateHttpClient();
+        var responses = await Task.WhenAll(
+            http.PostAsync("/oauth2/token", RefreshForm(seeded.RefreshToken, extra: [("client_id", AppId)]), TestContext.Current.CancellationToken),
+            http.PostAsync("/oauth2/token", RefreshForm(seeded.RefreshToken, extra: [("client_id", AppId)]), TestContext.Current.CancellationToken));
+        Assert.Single(responses, response => response.StatusCode == HttpStatusCode.OK);
+        Assert.Single(responses, response => response.StatusCode == HttpStatusCode.BadRequest);
+        var family = await GetFamilyAsync(seeded.RootId);
+        Assert.Equal(2, family.Count);
+        Assert.Single(family, row => row.ParentId == seeded.RootId && row.IsRevoked);
+        foreach (var response in responses)
+        {
+            response.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task Rotate_ReturnsThePs15ResponseAndGrowsTheFamily()
     {
         var seeded = await SeedRedeemedFamilyAsync();
@@ -458,6 +581,32 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
 
     private sealed record Ps15Body(string AccessToken, string IdToken, string RefreshToken);
 
+    private async Task<SeededFamily> SeedPublicFamilyAsync()
+    {
+        // The public management policy cannot issue a family. Start with the real committed
+        // family shape, then seed the otherwise unreachable Public binding for this protocol test.
+        var seeded = await SeedRedeemedFamilyAsync();
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var app = await db.AppRegistrations.SingleAsync(row => row.Id == seeded.ApplicationId,
+            TestContext.Current.CancellationToken);
+        app.ClientType = OidcClientType.Public;
+        app.AppSecretHash = string.Empty;
+        app.AllowRefreshToken = false;
+        app.AllowedScopes = "openid";
+        var other = await db.AppRegistrations.SingleAsync(row => row.AppId == OtherAppId,
+            TestContext.Current.CancellationToken);
+        other.ClientType = OidcClientType.Public;
+        other.AppSecretHash = string.Empty;
+        other.AllowRefreshToken = false;
+        other.AllowedScopes = "openid";
+        var root = await db.RefreshTokens.SingleAsync(row => row.Id == seeded.RootId,
+            TestContext.Current.CancellationToken);
+        root.Scope = "openid";
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return seeded;
+    }
+
     /// <summary>
     /// Seeds the full interactive pipeline through the real endpoints: one code with
     /// <c>offline_access</c>, redeemed for the first token set, whose <c>refresh_token</c> names
@@ -553,6 +702,7 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
             }
 
             application.IsActive = true;
+            application.AppSecretHash = BCrypt.Net.BCrypt.HashPassword(appSecret);
             application.AudienceMode = AudienceMode.PerApplication;
             application.ClientType = OidcClientType.Confidential;
             application.AllowAuthorizationCode = true;

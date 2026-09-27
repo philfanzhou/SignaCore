@@ -50,10 +50,16 @@ and a Basic challenge. A valid confidential client that is not allowed to use co
 `unauthorized_client`; malformed branch fields receive `invalid_request`. No response echoes an
 input credential or a raw form value.
 
-The Public `none` method applies only to `authorization_code`. A current active Public row must
+The Public `none` method applies to `authorization_code` and to a specially pre-existing complete
+interactive refresh family. A current active Public row must
 have an empty secret hash, code permission, and `PerApplication` audience. The code remains bound
 to that row, its exact redirect URI, and the S256 verifier. Public codes carrying `offline_access`
-cannot create a refresh family. Refresh and revoke continue to require a confidential client.
+cannot create a refresh family. Ordinary Public applications therefore cannot obtain a refresh
+token yet, and revoke continues to require a confidential client. A Public refresh presentation
+must contain exactly one each of `grant_type=refresh_token`, `client_id`, and `refresh_token`, with
+no Authorization header, `client_secret`, or additional form fields. The identifier selects the
+application; only the digest-matched family, exact application binding, current Public policy,
+account, and session authorize rotation. Missing and legacy tokens never enter the legacy grant.
 A code request without any client identifier or credentials is `400 invalid_request`; the
 confidential authentication failures of other grants remain `401 invalid_client`.
 
