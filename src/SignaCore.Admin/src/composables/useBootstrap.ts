@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { reactive, ref } from 'vue'
+import { credentialFreeClient } from '../services/httpTransport'
 import { buildPostgreSqlConnectionString, buildSqliteConnectionString } from '../utils/bootstrapConnectionString'
 import {
   bootstrapProviderCatalog,
@@ -77,7 +78,7 @@ function saveMessageFrom(status: number | undefined, error: unknown) {
 
 export async function probeBootstrapStatus(): Promise<boolean> {
   try {
-    const response = await axios.get<InstallationStatus>(statusUrl, {
+    const response = await credentialFreeClient.get<InstallationStatus>(statusUrl, {
       timeout: 5000,
       validateStatus: () => true,
     })
@@ -171,7 +172,7 @@ export async function testBootstrap() {
   bootstrapMessage.value = ''
   bootstrapPhase.value = 'testing'
   try {
-    const response = await axios.post<BootstrapInspection>(testUrl, testPayload(), {
+    const response = await credentialFreeClient.post<BootstrapInspection>(testUrl, testPayload(), {
       headers: credentialHeaders(),
     })
     bootstrapMessage.value = response.data.hasProtectedData
@@ -194,7 +195,7 @@ export async function saveBootstrap() {
   bootstrapMessage.value = ''
   bootstrapPhase.value = 'saving'
   try {
-    await axios.post(createUrl, savePayload(), { headers: credentialHeaders() })
+    await credentialFreeClient.post(createUrl, savePayload(), { headers: credentialHeaders() })
     bootstrapMessage.value = 'Bootstrap configuration saved. SignaCore is restarting to load it.'
     bootstrapForm.password = ''
     bootstrapForm.masterKey = ''
@@ -212,7 +213,7 @@ function pollForRestartedHost() {
   const started = Date.now()
   const timer = window.setInterval(async () => {
     try {
-      const response = await axios.get<InstallationStatus>(statusUrl, {
+      const response = await credentialFreeClient.get<InstallationStatus>(statusUrl, {
         timeout: 3000,
         validateStatus: () => true,
       })

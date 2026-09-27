@@ -1,5 +1,6 @@
 import { nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { clearCredential } from '../../services/managementBearer'
 
 const mocks = vi.hoisted(() => ({
   api: {
@@ -56,9 +57,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('axios', () => ({
   default: {
-    get: mocks.healthGet,
     isAxiosError: mocks.isAxiosError,
   },
+}))
+
+vi.mock('../../services/httpTransport', () => ({
+  credentialFreeClient: { get: mocks.healthGet },
 }))
 
 vi.mock('../../services/apiClient', () => ({ adminClient: mocks.api }))
@@ -616,6 +620,7 @@ describe('admin security and runtime settings', () => {
     })
     await state.loadBootstrap()
     expect(state.hasBootstrapForm.value).toBe(true)
+    expect(state.bootstrapForm.filePath).toBe('')
     expect(state.bootstrapProviderList().map(item => item.provider)).toEqual(['PostgreSQL', 'SQLite'])
     await state.testBootstrapSettings()
     expect(mocks.notify).toHaveBeenCalledWith('测试前请确认你理解数据库目标切换影响')
@@ -650,6 +655,54 @@ describe('admin security and runtime settings', () => {
     })
     expect(state.bootstrapRestarting.value).toBe(true)
     vi.unstubAllGlobals()
+  })
+
+  it('does not use the bootstrap configuration file as a SQLite database target', async () => {
+    const state = useAdminSettings()
+    mocks.api.getBootstrapSettings.mockResolvedValue({
+      provider: 'SQLite', serverVersion: null, endpoint: 'signacore.db',
+      filePath: '/tmp/config/signacore.bootstrap.json',
+      masterKeyConfigured: true, editable: true, singleInstanceOnly: true,
+      scopeNotice: 'restart',
+    })
+    await state.loadBootstrap()
+    expect(state.bootstrapForm.filePath).toBe('')
+
+    state.bootstrapForm.filePath = '/tmp/data/signacore.db'
+    state.bootstrapForm.confirm = true
+    mocks.api.testBootstrapSettings.mockResolvedValue({ message: 'ok', endpoint: 'signacore.db' })
+    await state.testBootstrapSettings()
+    expect(mocks.api.testBootstrapSettings).toHaveBeenCalledWith(expect.objectContaining({
+      database: expect.objectContaining({ filePath: '/tmp/data/signacore.db' }),
+    }))
+
+    mocks.api.updateBootstrapSettings.mockResolvedValue({ restartRequired: false })
+    await state.saveBootstrapSettings()
+    expect(mocks.api.updateBootstrapSettings).toHaveBeenCalledWith({
+      database: {
+        provider: 'SQLite', serverVersion: null,
+        connectionString: 'Data Source="/tmp/data/signacore.db"',
+      },
+    })
+  })
+
+  it('ignores an old settings response after a new session loads', async () => {
+    const state = useAdminSettings()
+    let completeOld!: (value: unknown) => void
+    const old = new Promise(resolve => { completeOld = resolve })
+    mocks.api.getSettings.mockReturnValueOnce(old)
+    const oldLoad = state.loadSettings()
+
+    clearCredential()
+    mocks.api.getSettings.mockResolvedValueOnce({
+      snapshot: { version: 7, values: [] }, runningVersion: 7,
+    })
+    await state.loadSettings()
+    completeOld({ snapshot: { version: 2, values: [] }, runningVersion: 2 })
+    await oldLoad
+
+    expect(state.configurationVersion.value).toBe(7)
+    expect(state.settingsError.value).toBe('')
   })
 
   it('maps the closed update rejections to fixed messages', async () => {

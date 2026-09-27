@@ -1,5 +1,7 @@
 import { computed, reactive, ref } from "vue";
 import axios from "axios";
+import { credentialFreeClient } from "../../services/httpTransport";
+import { currentGeneration, isCurrentGeneration } from "../../services/managementBearer";
 import { adminClient } from "../../services/apiClient";
 import {
   getErrorMessage,
@@ -175,10 +177,12 @@ function formatValue(setting: AdminSettingValue) {
 }
 
 async function loadSettings() {
+  const sessionGeneration = currentGeneration();
   settingsLoading.value = true;
   settingsError.value = "";
   try {
     const { snapshot, runningVersion } = await adminClient.getSettings();
+    if (!isCurrentGeneration(sessionGeneration)) return;
     settings.value = snapshot.values;
     configurationVersion.value = snapshot.version;
     runningConfigurationVersion.value = runningVersion;
@@ -186,10 +190,11 @@ async function loadSettings() {
     for (const setting of snapshot.values)
       if (!setting.isSensitive) settingsDraft[setting.key] = setting.value ?? "";
   } catch (error) {
+    if (!isCurrentGeneration(sessionGeneration)) return;
     settingsError.value = getErrorMessage(error);
     handleApiError("加载运行配置失败", error);
   } finally {
-    settingsLoading.value = false;
+    if (isCurrentGeneration(sessionGeneration)) settingsLoading.value = false;
   }
 }
 
@@ -246,20 +251,25 @@ function discardSettings(keys?: string[]) {
 }
 
 async function loadBootstrap() {
+  const sessionGeneration = currentGeneration();
   bootstrapLoading.value = true;
   try {
     const result = await adminClient.getBootstrapSettings();
+    if (!isCurrentGeneration(sessionGeneration)) return;
     bootstrapSettings.value = result;
     Object.assign(bootstrapForm, {
       provider: result.provider,
       serverVersion: result.serverVersion ?? "",
       endpoint: result.endpoint,
-      filePath: result.filePath,
+      // The overview filePath is the bootstrap configuration file, not the SQLite target.
+      // Require the operator to enter the database path explicitly before testing or saving.
+      filePath: "",
     });
   } catch (error) {
+    if (!isCurrentGeneration(sessionGeneration)) return;
     bootstrapError.value = getErrorMessage(error);
   } finally {
-    bootstrapLoading.value = false;
+    if (isCurrentGeneration(sessionGeneration)) bootstrapLoading.value = false;
   }
 }
 
@@ -366,7 +376,7 @@ async function waitForRestartAfterUpdate() {
   let observedDown = false;
   for (;;) {
     try {
-      const response = await axios.get("/health/live", {
+      const response = await credentialFreeClient.get("/health/live", {
         timeout: 3000,
         validateStatus: () => true,
       });

@@ -7,9 +7,15 @@ const mocks = vi.hoisted(() => ({
     put: vi.fn(),
     patch: vi.fn(),
     delete: vi.fn(),
+    interceptors: {
+      request: { use: vi.fn() },
+      response: { use: vi.fn() },
+    },
   },
+  publicHttp: { post: vi.fn() },
   create: vi.fn(),
   isAxiosError: vi.fn(),
+  credential: { token: 'scm1.' + 'a'.repeat(43), generation: 1, expiresAtMs: Date.now() + 900000 },
 }))
 
 vi.mock('axios', () => ({
@@ -17,6 +23,13 @@ vi.mock('axios', () => ({
     create: mocks.create,
     isAxiosError: mocks.isAxiosError,
   },
+}))
+
+vi.mock('./httpTransport', () => ({ credentialFreeClient: mocks.publicHttp }))
+vi.mock('./managementBearer', () => ({
+  currentCredential: () => mocks.credential,
+  isCurrentGeneration: (value: number) => value === mocks.credential.generation,
+  SupersededSessionError: class extends Error {},
 }))
 
 import {
@@ -29,29 +42,79 @@ import {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.create.mockReturnValue(mocks.http)
+  vi.stubGlobal('window', { location: { origin: 'https://admin.example.test' } })
 })
 
 describe('AdminApiClient', () => {
-  it('uses one credentialed client with a bounded timeout', () => {
+  it('uses a cookie-free fetch client with a bounded timeout', () => {
     createAdminApiClient()
 
     expect(mocks.create).toHaveBeenCalledWith({
       timeout: 15000,
-      withCredentials: true,
+      adapter: 'fetch',
+      withCredentials: false,
+      fetchOptions: { redirect: 'manual' },
     })
   })
 
-  it('logs in through the shared management entry with the fixed request header', async () => {
-    mocks.http.post.mockResolvedValue({ status: 204, data: '' })
+  it('attaches one bearer only to supported same-origin management routes', () => {
+    createAdminApiClient()
+    const attach = mocks.http.interceptors.request.use.mock.calls[0][0] as (config: unknown) => unknown
+    function request(url: string) {
+      const headers = new Map<string, string>([['Authorization', 'Bearer stale']])
+      const config = {
+        url,
+        headers: {
+          delete: (name: string) => headers.delete(name),
+          set: (name: string, value: string) => headers.set(name, value),
+        },
+      }
+      return { config, headers }
+    }
 
-    await createAdminApiClient().login({ username: 'admin', password: 'secret-value' })
+    for (const route of [
+      '/api/admin/session/me', '/api/admin/users', '/api/admin/bootstrap/test',
+      '/management/v1/settings', '/management/v1/audit', '/management/v1/bootstrap',
+    ]) {
+      const { config, headers } = request(route)
+      attach(config)
+      expect(headers.get('Authorization')).toBe(`Bearer ${mocks.credential.token}`)
+      expect((config as typeof config & { withCredentials?: boolean }).withCredentials).toBe(false)
+      expect((config as typeof config & { sessionGeneration?: number }).sessionGeneration).toBe(1)
+    }
+    for (const route of [
+      'https://outside.example.test/api/admin/users', '//outside.example.test/api/admin/users',
+      '/oauth2/token', '/api/profile/me', '/api/admin/session/bearer/login',
+      '/management/v1/session/logout', '/api/admin/../oauth2/token',
+    ]) {
+      const { config } = request(route)
+      expect(() => attach(config)).toThrow('Unsupported management endpoint.')
+    }
+  })
 
-    expect(mocks.http.post).toHaveBeenCalledWith('/management/v1/session/login', {
+  it('rejects a response from a superseded session before a domain can render it', () => {
+    createAdminApiClient()
+    const onResponse = mocks.http.interceptors.response.use.mock.calls[0][0] as (response: unknown) => unknown
+    const old = { config: { sessionGeneration: 1 }, data: { items: ['old'] } }
+    expect(onResponse(old)).toBe(old)
+    mocks.credential.generation = 2
+    expect(() => onResponse(old)).toThrow()
+    mocks.credential.generation = 1
+  })
+
+  it('logs in through the bearer entry without attaching a prior credential', async () => {
+    const issued = { tokenType: 'Bearer', accessToken: mocks.credential.token, expiresAtUtc: '2030-01-01T00:00:00Z' }
+    mocks.publicHttp.post.mockResolvedValue({ status: 200, data: issued })
+
+    const result = await createAdminApiClient().login({ username: 'admin', password: 'secret-value' })
+
+    expect(mocks.publicHttp.post).toHaveBeenCalledWith('/api/admin/session/bearer/login', {
       username: 'admin',
       password: 'secret-value',
     }, {
       headers: { 'X-ServiceMantle-Request': '1' },
     })
+    expect(result).toBe(issued)
   })
 
   it('reads the current session from the admin session endpoint', async () => {
@@ -64,14 +127,20 @@ describe('AdminApiClient', () => {
     expect(result).toBe(payload)
   })
 
-  it('logs out through the shared management entry with the fixed request header', async () => {
-    mocks.http.post.mockResolvedValue({ status: 204, data: '' })
+  it('logs out through the bearer revocation entry', async () => {
+    mocks.publicHttp.post.mockResolvedValue({ status: 204, data: '' })
 
-    await createAdminApiClient().logout()
+    await createAdminApiClient().logout(mocks.credential.token)
 
-    expect(mocks.http.post).toHaveBeenCalledWith('/management/v1/session/logout', undefined, {
-      headers: { 'X-ServiceMantle-Request': '1' },
+    expect(mocks.publicHttp.post).toHaveBeenCalledWith('/api/admin/session/bearer/logout', undefined, {
+      headers: { 'X-ServiceMantle-Request': '1', Authorization: `Bearer ${mocks.credential.token}` },
     })
+  })
+
+  it('does not claim server revocation without a 204 response', async () => {
+    mocks.publicHttp.post.mockResolvedValue({ status: 200, data: {} })
+    await expect(createAdminApiClient().logout(mocks.credential.token))
+      .rejects.toThrow('Server revocation could not be confirmed.')
   })
 
   it('reads settings from the shared setting query with the running-version header', async () => {

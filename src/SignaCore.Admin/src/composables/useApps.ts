@@ -5,6 +5,7 @@ import { adminClient } from '../services/apiClient'
 import { normalizeTtlValue } from '../utils/format'
 import { handleApiError } from './useSession'
 import { registerSessionHooks } from './sessionHooks'
+import { currentGeneration, isCurrentGeneration } from '../services/managementBearer'
 
 const loadingApps = ref(false)
 const creatingApp = ref(false)
@@ -90,10 +91,14 @@ function openCreateAppDialog() {
   showCreateAppDialog.value = true
 }
 
-async function loadApps() {
+async function loadApps(isCurrent: () => boolean = () => true) {
+  const sessionGeneration = currentGeneration()
+  const isFresh = () => isCurrentGeneration(sessionGeneration) && isCurrent()
   loadingApps.value = true
   try {
-    apps.value = await adminClient.getApps()
+    const result = await adminClient.getApps()
+    if (!isFresh()) return
+    apps.value = result
     // keep the open app drawer in sync with the refreshed list
     const drawerApp = appDrawerApp.value
     if (drawerApp) {
@@ -101,9 +106,9 @@ async function loadApps() {
       if (fresh) appDrawerApp.value = fresh
     }
   } catch (error) {
-    handleApiError('加载应用列表失败', error)
+    if (isFresh()) handleApiError('加载应用列表失败', error)
   } finally {
-    loadingApps.value = false
+    if (isFresh()) loadingApps.value = false
   }
 }
 
