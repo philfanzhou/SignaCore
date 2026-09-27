@@ -65,7 +65,7 @@ const {
           class="console-input mono"
           disabled /></label
       ><label
-        >SQLite 文件路径<input
+        >Target SQLite database path (enter explicitly)<input
           v-model="bootstrapForm.filePath"
           class="console-input"
           :disabled="!hasBootstrapForm" /></label

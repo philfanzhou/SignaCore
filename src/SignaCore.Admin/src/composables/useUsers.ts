@@ -4,6 +4,7 @@ import { type AdminUser } from '../services/adminApi'
 import { adminClient } from '../services/apiClient'
 import { handleApiError } from './useSession'
 import { registerSessionHooks } from './sessionHooks'
+import { currentGeneration, isCurrentGeneration } from '../services/managementBearer'
 
 const loadingUsers = ref(false)
 const creatingUser = ref(false)
@@ -88,7 +89,9 @@ function openCreatePhoneUserDialog() {
   showCreatePhoneUserDialog.value = true
 }
 
-async function loadUsers() {
+async function loadUsers(isCurrent: () => boolean = () => true) {
+  const sessionGeneration = currentGeneration()
+  const isFresh = () => isCurrentGeneration(sessionGeneration) && isCurrent()
   loadingUsers.value = true
   try {
     const result = await adminClient.getUsers({
@@ -97,6 +100,7 @@ async function loadUsers() {
       page: page.value,
       pageSize: pageSize.value,
     })
+    if (!isFresh()) return
     users.value = result.items
     userTotal.value = result.total
     // keep the open user drawer in sync with the refreshed list
@@ -106,9 +110,9 @@ async function loadUsers() {
       if (fresh) userDrawerUser.value = fresh
     }
   } catch (error) {
-    handleApiError('加载用户列表失败', error)
+    if (isFresh()) handleApiError('加载用户列表失败', error)
   } finally {
-    loadingUsers.value = false
+    if (isFresh()) loadingUsers.value = false
   }
 }
 

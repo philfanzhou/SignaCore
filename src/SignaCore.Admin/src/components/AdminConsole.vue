@@ -256,12 +256,12 @@ onUnmounted(() => {
             }}</span>
             <div>
               <b>{{ session?.username || "管理员" }}</b>
-              <p>AdminSession · Cookie 会话</p>
+              <p>Management Bearer · 15-minute session</p>
             </div>
             <span class="status-pill green"><i></i>有效</span>
           </div>
           <p class="panel-note">
-            退出会话会清理当前浏览器的管理状态，并回到登录页。
+            Signing out clears this page's session and requests server revocation. Reloading also requires a new sign-in.
           </p>
         </div>
         <div class="modal-footer">

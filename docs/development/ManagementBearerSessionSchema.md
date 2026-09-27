@@ -36,8 +36,8 @@ expired for at least 24 hours in batches of at most 1000. Its contract suite is
 
 [Task #384](https://github.com/philfanzhou/SignaCore/issues/384) adds the management bearer
 authentication scheme. Credentials are issued and revoked by the explicit entries described in
-[Issuing and revoking a credential](#issuing-and-revoking-a-credential); the built-in admin console
-still signs in with the cookie until [#385](https://github.com/philfanzhou/SignaCore/issues/385).
+[Issuing and revoking a credential](#issuing-and-revoking-a-credential). The built-in admin console
+uses the Bearer entries exclusively; other clients may continue using the Cookie entries.
 
 The host's default authenticate, challenge, and forbid scheme is a selector:
 
@@ -56,7 +56,7 @@ cookie login, so `/api/admin/session/me` and audit operators do not change. Any 
 database that cannot answer yields `503` with `{"errorCode":"management.bearer.unavailable"}`.
 Neither response echoes the header, and no log, audit row, or metric carries the credential.
 
-The shared `/management/v1/session` entries remain cookie-only. With
+The shared `/management/v1/session` entries remain cookie-only for other clients. With
 `ServiceMantle.AspNetCore` **0.1.1-rc.1** or later on the same package version line, SignaCore
 opts the bootstrap update into the narrow `ServiceMantle.ManagementBootstrapUpdateSession`
 policy. `PUT /management/v1/bootstrap`, `GET /api/admin/bootstrap`, and
@@ -69,12 +69,12 @@ schemes and reject a management bearer.
 
 SignaCore does not force HTTPS for these entries. An HTTP deployment sends passwords and Bearer
 credentials in plaintext; the deployer chooses whether to protect transport with HTTPS. The
-built-in console's switch to Bearer-only requests is a separate frontend task.
+console requests explicitly omit Cookie credentials, including on the same origin.
 
-A reverse proxy in front of SignaCore must not add or forward an `Authorization` header to
-`/api/admin` or `/management/v1` for cookie-based console users: such requests are now authenticated
-by the bearer and answer `401`. Rolling back the code restores cookie-only management
-authentication; there is no data change.
+A reverse proxy in front of SignaCore must preserve the console's single Bearer header for
+supported management routes. It must not add an `Authorization` header to other clients' Cookie
+requests: those requests would select Bearer and answer `401`. Rolling back the authentication
+scheme restores cookie-only management authentication; there is no data change.
 
 `ManagementBearerAuthenticationTests` covers the route matrix, strict dispatch with server-injected
 header forms, the `503` mapping, caller cancellation, the ServiceMantle startup constraint, and a
@@ -140,6 +140,27 @@ HTTPS or behind a TLS-terminating proxy. Keep the credential in memory only, sen
 same origin, and discard it locally when logout fails. The password is only passed to the
 validator and the credential appears only in the `200` login body; neither reaches a URL, log,
 exception, trace, metric, or audit record.
+
+### Built-in console lifecycle
+
+The console calls Bearer login once, validates the returned credential and UTC expiry, then keeps
+the credential only in module memory for the current page lifetime. Every supported same-origin
+management request carries one Bearer header and uses `Request.credentials: omit`; setup, bootstrap
+status, and restart health probes also omit Cookie credentials and carry no management Bearer.
+For a SQLite bootstrap change, the operator enters the target database path explicitly; the
+bootstrap overview's `filePath` identifies the bootstrap configuration file, not the database.
+The console never calls the Cookie session entries. A reload or closed tab loses the credential and
+requires sign-in again; there is no browser storage, refresh token, automatic renewal, or cross-tab
+broadcast. The server remains authoritative at the 15-minute expiry boundary. A `401` clears the
+local session, while a general `503` reports temporary unavailability without treating the credential
+as invalid. Sign-out clears memory immediately; only a `204` from Bearer logout confirms server
+revocation. On failure the credential may remain valid until its original expiry.
+
+Over HTTP, the password and Bearer header are visible on the network. Deploy with HTTPS or a
+trusted TLS-terminating proxy when confidentiality is required; SignaCore does not force HTTPS for
+management routes. To roll back the console, disable its entry and revoke outstanding Bearer
+sessions before reverting the frontend and backend together. Existing Cookie clients remain
+compatible with the server-side scheme selector.
 
 ### Rolling back the entries
 

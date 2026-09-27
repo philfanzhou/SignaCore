@@ -9,10 +9,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('axios', () => ({
   default: {
-    get: mocks.get,
-    post: mocks.post,
     isAxiosError: mocks.isAxiosError,
   },
+}))
+
+vi.mock('../services/httpTransport', () => ({
+  credentialFreeClient: { get: mocks.get, post: mocks.post },
 }))
 
 // The composable polls through window.* like the browser build does; the node test environment

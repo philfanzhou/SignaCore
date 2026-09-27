@@ -1,4 +1,9 @@
-import axios, { type AxiosInstance } from 'axios'
+import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios'
+import { credentialFreeClient } from './httpTransport'
+import {
+  currentCredential, isCurrentGeneration, SupersededSessionError,
+  type ManagementBearerLogin,
+} from './managementBearer'
 
 export interface PagedResponse<T> {
   items: T[]
@@ -210,24 +215,65 @@ export interface AdminAuditLogPage {
   hasNextPage: boolean
 }
 
+function managementRoute(value: string | undefined): boolean {
+  if (!value?.startsWith('/') || value.startsWith('//') || value.includes('\\')) return false
+  const origin = window.location.origin
+  const url = new URL(value, origin)
+  if (url.origin !== origin || url.hash) return false
+  const path = url.pathname
+  if (path === '/api/admin/session/me') return true
+  if (path.startsWith('/api/admin/session/')) return false
+  return path.startsWith('/api/admin/')
+    || /^\/management\/v1\/(?:settings|audit|bootstrap)(?:\/|$)/.test(path)
+}
+
 class AdminApiClient {
   private client: AxiosInstance
 
   constructor() {
     this.client = axios.create({
       timeout: 15000,
-      withCredentials: true,
+      adapter: 'fetch',
+      withCredentials: false,
+      fetchOptions: { redirect: 'manual' },
     })
+    this.client.interceptors.request.use((config) => {
+      config.adapter = 'fetch'
+      config.withCredentials = false
+      config.fetchOptions = { ...config.fetchOptions, redirect: 'manual' }
+      const route = managementRoute(config.url)
+      if (!route) throw new Error('Unsupported management endpoint.')
+      const credential = currentCredential()
+      if (!credential) throw new Error('The management session has expired. Sign in again.')
+      const request = config as InternalAxiosRequestConfig & { sessionGeneration?: number }
+      request.sessionGeneration = credential.generation
+      config.headers.delete('Authorization')
+      config.headers.set('Authorization', `Bearer ${credential.token}`)
+      return config
+    })
+    this.client.interceptors.response.use(
+      (response) => {
+        const request = response.config as InternalAxiosRequestConfig & { sessionGeneration?: number }
+        if (!isCurrentGeneration(request.sessionGeneration ?? -1)) throw new SupersededSessionError()
+        return response
+      },
+      (error: unknown) => {
+        if (axios.isAxiosError(error)) {
+          const request = error.config as (InternalAxiosRequestConfig & { sessionGeneration?: number }) | undefined
+          if (request?.sessionGeneration !== undefined
+            && !isCurrentGeneration(request.sessionGeneration)) throw new SupersededSessionError()
+        }
+        return Promise.reject(error)
+      },
+    )
   }
 
-  /**
-   * 管理会话登录走共享 ServiceMantle 入口：成功返回 204 空 body，会话内容随后由
-   * getCurrentSession 读取。X-ServiceMantle-Request 是共享入口的固定防跨站请求头。
-   */
-  async login(payload: { username: string; password: string }) {
-    await this.client.post('/management/v1/session/login', payload, {
+  async login(payload: { username: string; password: string }): Promise<ManagementBearerLogin> {
+    const response = await credentialFreeClient.post<ManagementBearerLogin>(
+      '/api/admin/session/bearer/login', payload, {
       headers: { 'X-ServiceMantle-Request': '1' },
     })
+    return response.data
   }
 
   async getCurrentSession() {
@@ -235,10 +281,11 @@ class AdminApiClient {
     return response.data
   }
 
-  async logout() {
-    await this.client.post('/management/v1/session/logout', undefined, {
-      headers: { 'X-ServiceMantle-Request': '1' },
+  async logout(token: string) {
+    const response = await credentialFreeClient.post('/api/admin/session/bearer/logout', undefined, {
+      headers: { 'X-ServiceMantle-Request': '1', Authorization: `Bearer ${token}` },
     })
+    if (response.status !== 204) throw new Error('Server revocation could not be confirmed.')
   }
 
   async getUsers(params: { username?: string; phone?: string; page?: number; pageSize?: number }) {
@@ -661,22 +708,25 @@ export function parseRunningVersion(raw: unknown): AdminRunningConfigurationVers
 }
 
 export function getErrorMessage(error: unknown) {
+  const safe = (value: string) => value
+    .replace(/(?:Bearer\s+)?scm1\.[A-Za-z0-9_-]{43}/g, '[redacted]')
+    .slice(0, 500)
   if (axios.isAxiosError(error)) {
     const data = error.response?.data as { message?: string } | undefined
-    if (data?.message) {
-      return data.message
+    if (typeof data?.message === 'string' && data.message) {
+      return safe(data.message)
     }
     if (error.response?.status === 401) {
-      return '登录状态无效，请重新登录。'
+      return 'The management session is invalid. Sign in again.'
     }
     if (error.response?.status === 403) {
-      return '当前账号没有管理后台访问权限。'
+      return 'This account has no management access.'
     }
-    return error.message
+    return safe(error.message)
   }
 
   if (error instanceof Error) {
-    return error.message
+    return safe(error.message)
   }
 
   return 'Unknown error occurred.'

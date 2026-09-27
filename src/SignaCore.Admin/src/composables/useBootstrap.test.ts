@@ -8,10 +8,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('axios', () => ({
   default: {
-    get: mocks.get,
-    post: mocks.post,
     isAxiosError: mocks.isAxiosError,
   },
+}))
+
+vi.mock('../services/httpTransport', () => ({
+  credentialFreeClient: { get: mocks.get, post: mocks.post },
 }))
 
 import {

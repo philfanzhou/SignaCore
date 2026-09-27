@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { reactive, ref } from 'vue'
+import { credentialFreeClient } from '../services/httpTransport'
 
 /**
  * First-run setup state.
@@ -67,7 +68,7 @@ function errorMessage(error: unknown, fallback: string) {
 /** Returns true when the service is pending first-run setup. */
 export async function probeSetupStatus(): Promise<boolean> {
   try {
-    const response = await axios.get<SetupStatus>(statusUrl, { timeout: 5000 })
+    const response = await credentialFreeClient.get<SetupStatus>(statusUrl, { timeout: 5000 })
     return response.data.status === 'pending'
   } catch {
     // A service that cannot answer the status probe is either mid-restart or not a setup-mode host.
@@ -125,7 +126,7 @@ export async function submitSetup() {
 
   setupPhase.value = 'saving'
   try {
-    await axios.post(
+    await credentialFreeClient.post(
       completeUrl,
       {
         code: setupForm.setupCode.trim(),
@@ -172,7 +173,7 @@ function pollUntilAvailable() {
   const started = Date.now()
   const timer = window.setInterval(async () => {
     try {
-      const response = await axios.get('/health/ready', {
+      const response = await credentialFreeClient.get('/health/ready', {
         timeout: 3000,
         validateStatus: () => true,
       })
