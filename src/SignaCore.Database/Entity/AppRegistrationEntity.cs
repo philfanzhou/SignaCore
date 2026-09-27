@@ -66,4 +66,7 @@ public class AppRegistrationEntity
 
     /// <summary>Browser redirect registrations, kept separate from the claims callback.</summary>
     public ICollection<AppRedirectUriEntity> RedirectUris { get; set; } = [];
+
+    /// <summary>Registered Public SPA Origins, independent of redirects and claims callbacks.</summary>
+    public ICollection<AppAllowedOriginEntity> AllowedOrigins { get; set; } = [];
 }

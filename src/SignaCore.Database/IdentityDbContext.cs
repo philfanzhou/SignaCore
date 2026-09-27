@@ -22,6 +22,7 @@ public class IdentityDbContext : DbContext, IServiceDbContext
     public DbSet<RefreshTokenEntity> RefreshTokens => Set<RefreshTokenEntity>();
     public DbSet<AppRegistrationEntity> AppRegistrations => Set<AppRegistrationEntity>();
     public DbSet<AppRedirectUriEntity> AppRedirectUris => Set<AppRedirectUriEntity>();
+    public DbSet<AppAllowedOriginEntity> AppAllowedOrigins => Set<AppAllowedOriginEntity>();
     public DbSet<SecurityKeyEntity> SecurityKeys => Set<SecurityKeyEntity>();
     public DbSet<OtpEntity> Otps => Set<OtpEntity>();
     public DbSet<LoginAttemptEntity> LoginAttempts => Set<LoginAttemptEntity>();
@@ -247,6 +248,23 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.HasIndex(e => new { e.AppRegistrationId, e.Kind, e.CanonicalUri }).IsUnique();
             entity.HasOne(e => e.AppRegistration)
                 .WithMany(e => e.RedirectUris)
+                .HasForeignKey(e => e.AppRegistrationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AppAllowedOriginEntity>(entity =>
+        {
+            entity.ToTable("app_allowed_origins");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.AppRegistrationId).HasColumnName("app_registration_id");
+            entity.Property(e => e.CanonicalOrigin)
+                .HasColumnName("canonical_origin")
+                .HasMaxLength(IdentityConstants.MaxOidcCanonicalOriginLength)
+                .IsRequired();
+            entity.HasIndex(e => new { e.AppRegistrationId, e.CanonicalOrigin }).IsUnique();
+            entity.HasOne(e => e.AppRegistration)
+                .WithMany(e => e.AllowedOrigins)
                 .HasForeignKey(e => e.AppRegistrationId)
                 .OnDelete(DeleteBehavior.Cascade);
         });

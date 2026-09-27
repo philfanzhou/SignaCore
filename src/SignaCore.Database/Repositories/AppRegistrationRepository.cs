@@ -31,6 +31,7 @@ public class AppRegistrationRepository : IAppRegistrationRepository
         var normalizedAppId = IdentityValueNormalizer.Normalize(appId);
         return await _dbContext.AppRegistrations
             .Include(app => app.RedirectUris)
+            .Include(app => app.AllowedOrigins)
             .FirstOrDefaultAsync(
                 app => app.AppIdNormalized == normalizedAppId,
                 cancellationToken);
@@ -60,6 +61,19 @@ public class AppRegistrationRepository : IAppRegistrationRepository
     {
         cancellationToken.ThrowIfCancellationRequested();
         _dbContext.AppRedirectUris.RemoveRange(registrations);
+        return Task.CompletedTask;
+    }
+
+    public Task ReplaceAllowedOriginsAsync(
+        AppRegistrationEntity app,
+        IEnumerable<AppAllowedOriginEntity> registrations,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _dbContext.AppAllowedOrigins.RemoveRange(app.AllowedOrigins);
+        var replacements = registrations.ToList();
+        _dbContext.AppAllowedOrigins.AddRange(replacements);
+        app.AllowedOrigins = replacements;
         return Task.CompletedTask;
     }
 

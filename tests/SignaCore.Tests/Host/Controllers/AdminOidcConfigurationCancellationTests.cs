@@ -296,6 +296,86 @@ public sealed class AdminOidcConfigurationCancellationTests
         else Assert.Empty(audits);
     }
 
+    [Fact]
+    public async Task AllowedOriginReplacement_CancellationBeforeCommitLeavesRowsAndAuditEmpty()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await using var database = await MigratedSqliteTestDatabase.CreateAsync();
+        var app = CreateApp(AppId);
+        app.ClientType = OidcClientType.Public;
+        app.AppSecretHash = string.Empty;
+        database.Context.AppRegistrations.Add(app);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        database.Context.ChangeTracker.Clear();
+
+        var repository = new TokenAssertingAppRegistrationRepository(
+            new AppRegistrationRepository(database.Context), cancellation.Token);
+        var audit = new CancelingActionAuditWriter(
+            CreateAuditWriter(database.Context), cancellation);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            CreateController().ReplaceOidcAllowedOrigins(
+                AppId,
+                new AdminReplaceAllowedOriginsRequest(["https://spa.example.test"]),
+                repository,
+                new EfCoreUnitOfWork(database.Context),
+                audit,
+                ProductionEnvironment(),
+                database.Context,
+                cancellation.Token));
+
+        database.Context.ChangeTracker.Clear();
+        Assert.Empty(await database.Context.AppAllowedOrigins
+            .AsNoTracking().ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedAuditTable.ReadAsync(database.Context, TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AllowedOriginReplacement_AuditOrDatabaseFailureRollsBack(bool databaseFailure)
+    {
+        var failure = new FailingOriginSaveInterceptor();
+        await using var database = await MigratedSqliteTestDatabase.CreateAsync(failure);
+        var app = CreateApp(AppId);
+        app.ClientType = OidcClientType.Public;
+        app.AppSecretHash = string.Empty;
+        database.Context.AppRegistrations.Add(app);
+        await database.Context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        database.Context.ChangeTracker.Clear();
+
+        IManagementAuditWriter audit;
+        if (databaseFailure)
+        {
+            failure.Armed = true;
+            audit = CreateAuditWriter(database.Context);
+        }
+        else
+        {
+            var failingAudit = new Mock<IManagementAuditWriter>();
+            failingAudit.Setup(writer => writer.RecordAsync(
+                    It.IsAny<ManagementAuditEvent>(), It.IsAny<CancellationToken>()))
+                .Throws(new InvalidOperationException("Synthetic audit failure."));
+            audit = failingAudit.Object;
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateController().ReplaceOidcAllowedOrigins(
+                AppId,
+                new AdminReplaceAllowedOriginsRequest(["https://spa.example.test"]),
+                new AppRegistrationRepository(database.Context),
+                new EfCoreUnitOfWork(database.Context),
+                audit,
+                ProductionEnvironment(),
+                database.Context,
+                TestContext.Current.CancellationToken));
+
+        failure.Armed = false;
+        database.Context.ChangeTracker.Clear();
+        Assert.Empty(await database.Context.AppAllowedOrigins.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await SharedAuditTable.ReadAsync(database.Context, TestContext.Current.CancellationToken));
+    }
+
     private static Mock<IManagementAuditWriter> CreateAuditMock(CancellationToken expectedToken) =>
         CreateAuditMock(expectedToken, action: null);
 
@@ -406,6 +486,15 @@ public sealed class AdminOidcConfigurationCancellationTests
             return inner.RemoveRedirectUrisAsync(registrations, cancellationToken);
         }
 
+        public Task ReplaceAllowedOriginsAsync(
+            AppRegistrationEntity app,
+            IEnumerable<AppAllowedOriginEntity> registrations,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(expectedToken, cancellationToken);
+            return inner.ReplaceAllowedOriginsAsync(app, registrations, cancellationToken);
+        }
+
         public Task DeleteAsync(AppRegistrationEntity app, CancellationToken cancellationToken = default)
         {
             Assert.Equal(expectedToken, cancellationToken);
@@ -434,6 +523,20 @@ public sealed class AdminOidcConfigurationCancellationTests
             Assert.Equal(cancellation.Token, cancellationToken);
             cancellation.Cancel();
             cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class FailingOriginSaveInterceptor : SaveChangesInterceptor
+    {
+        public bool Armed { get; set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Armed) throw new InvalidOperationException("Synthetic database failure.");
             return ValueTask.FromResult(result);
         }
     }

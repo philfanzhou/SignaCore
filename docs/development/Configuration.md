@@ -108,6 +108,10 @@ new installation, and live in versioned application code.
 | `Admin:Username` | collected by setup | Username of the administrator account created by first-run setup. Only this account may sign in to the console |
 | `AdminWeb:AllowedOrigins` | `[]` | Setup seeds the public base URL. Production admin cookies are always `Secure` |
 
+Public SPA Origins are per-application policy in `app_allowed_origins`, managed through the
+authenticated admin OIDC endpoint. They are not copied from `AdminWeb:AllowedOrigins`, redirect
+URIs, or the public base URL. Registration currently grants no Public CORS response headers.
+
 ### Reverse proxy
 
 | Key | Default | Notes |

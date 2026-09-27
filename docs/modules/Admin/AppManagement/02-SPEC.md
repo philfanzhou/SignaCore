@@ -79,6 +79,21 @@ Both are disabled and empty for every application that does not explicitly confi
 | Replace the interactive policy | `PUT /api/admin/apps/{appId}/oidc-policy` |
 | Register browser URIs of one kind | `POST /api/admin/apps/{appId}/oidc/redirect-uris` with `{ "kind": "Redirect" \| "PostLogout", "uris": [...] }` |
 | Remove one registration | `DELETE /api/admin/apps/{appId}/oidc/redirect-uris/{registrationId}` |
+| Replace Public SPA Origins | `PUT /api/admin/apps/{appId}/oidc/allowed-origins` with `{ "origins": [...] }` |
+
+The OIDC read response adds `allowedOrigins`, an empty array for existing applications. Only a
+Public application can replace it. Replacement, clearing with `[]`, and its non-sensitive audit
+commit together; a rejected array changes nothing. Each Public application holds at most ten
+unique canonical Origins in `app_allowed_origins`. Registration accepts only a pure
+`https://host[:port]` Origin; Development also accepts `http://127.0.0.1[:port]` and
+`http://[::1][:port]`. Scheme and host case are normalized and default ports removed. Paths,
+trailing slashes, query, fragments, userinfo, wildcards, `null`, non-ASCII and percent encoding
+are rejected. An Origin is never derived from a redirect URI, claims callback, public base URL,
+or `AdminWeb:AllowedOrigins`.
+
+Origin registration does not yet enable Public CORS on authorize, token, userinfo, or OPTIONS.
+Older binaries ignore the new table; rolling back its migration deletes all registered Origins,
+so export them before a Down migration.
 
 `GET /api/admin/apps` reports the same policy fields and both URI sets for every application. The
 members it already returned keep their names, order, and meaning.

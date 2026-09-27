@@ -24,6 +24,10 @@ public interface IAppRegistrationRepository
     Task RemoveRedirectUrisAsync(
         IEnumerable<AppRedirectUriEntity> registrations,
         CancellationToken cancellationToken = default);
+    Task ReplaceAllowedOriginsAsync(
+        AppRegistrationEntity app,
+        IEnumerable<AppAllowedOriginEntity> registrations,
+        CancellationToken cancellationToken = default);
     Task DeleteAsync(AppRegistrationEntity app, CancellationToken cancellationToken = default);
     Task<int> DeactivateExpiredCallbacksAsync(
         DateTimeOffset utcNow,

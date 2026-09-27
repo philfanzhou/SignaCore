@@ -874,6 +874,81 @@ public class AdminController : ControllerBase
     }
 
     /// <summary>
+    /// Replaces one Public application's trusted SPA Origins. Registration alone grants no CORS
+    /// permission; the browser response policy is enabled by a later change.
+    /// </summary>
+    [HttpPut("apps/{appId}/oidc/allowed-origins")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> ReplaceOidcAllowedOrigins(
+        string appId,
+        [FromBody] AdminReplaceAllowedOriginsRequest request,
+        [FromServices] IAppRegistrationRepository appRegistrationRepository,
+        [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IManagementAuditWriter auditWriter,
+        [FromServices] IWebHostEnvironment environment,
+        [FromServices] IdentityDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        if (request.Origins is null)
+        {
+            return BadRequest(new ErrorResponse("An origins array is required."));
+        }
+
+        IReadOnlyList<string> origins;
+        try
+        {
+            origins = OidcAllowedOriginValidator.ValidateAndCanonicalize(
+                request.Origins, environment.IsDevelopment());
+        }
+        catch (OidcClientConfigurationException exception)
+        {
+            return BadRequest(new ErrorResponse(exception.Message));
+        }
+
+        var (actorId, actorName) = GetAdminIdentity();
+        var strategy = dbContext.Database.CreateExecutionStrategy();
+        var result = await strategy.ExecuteAsync<IActionResult?>(async operationToken =>
+        {
+            dbContext.ChangeTracker.Clear();
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(operationToken);
+            var app = await appRegistrationRepository.GetByAppIdWithOidcConfigurationAsync(
+                appId, operationToken);
+            if (app is null)
+            {
+                await transaction.RollbackAsync(operationToken);
+                return null;
+            }
+
+            if (app.ClientType != OidcClientType.Public)
+            {
+                await transaction.RollbackAsync(operationToken);
+                return BadRequest(new ErrorResponse("Allowed Origins require a Public application."));
+            }
+
+            await appRegistrationRepository.ReplaceAllowedOriginsAsync(
+                app,
+                origins.Select(origin => new AppAllowedOriginEntity
+                {
+                    Id = Guid.NewGuid(),
+                    AppRegistrationId = app.Id,
+                    CanonicalOrigin = origin
+                }),
+                operationToken);
+            await ManagementActionAudit.RecordAsync(
+                auditWriter, ManagementActionAudit.AdminSource,
+                "app_oidc_allowed_origins_replaced", "AppRegistration", app.AppId,
+                actorId, actorName,
+                $"Public Origin registrations replaced; count: {origins.Count}",
+                GetClientIp(), cancellationToken: operationToken);
+            await unitOfWork.SaveChangesAsync(operationToken);
+            await transaction.CommitAsync(operationToken);
+            return Ok(Describe(app));
+        }, cancellationToken);
+
+        return result ?? NotFound(new ErrorResponse("App not found."));
+    }
+
+    /// <summary>
     /// PUT /api/admin/apps/{appId}/oidc-policy — replaces the interactive policy fields.
     /// <para>
     /// The whole resulting configuration, including the URI registrations the request does not
@@ -1140,6 +1215,8 @@ public class AdminController : ControllerBase
         app.AudienceMode.ToString(),
         Registrations(app, RedirectUriKind.Redirect),
         Registrations(app, RedirectUriKind.PostLogout),
+        app.AllowedOrigins.Select(item => item.CanonicalOrigin)
+            .OrderBy(origin => origin, StringComparer.Ordinal).ToList(),
         issuedAppSecret);
 
     private static IReadOnlyList<AdminAppRedirectUriResponse> Registrations(
