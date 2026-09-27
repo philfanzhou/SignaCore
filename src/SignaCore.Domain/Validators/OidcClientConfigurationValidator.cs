@@ -16,7 +16,9 @@ public static class OidcClientConfigurationValidator
         IEnumerable<string> redirectUris,
         IEnumerable<string> postLogoutRedirectUris,
         bool isDevelopment,
-        OidcClientType? currentClientType = null)
+        OidcClientType? currentClientType = null,
+        bool applicationIsActive = true,
+        bool hasAppSecret = false)
     {
         if (!Enum.IsDefined(clientType))
         {
@@ -41,10 +43,17 @@ public static class OidcClientConfigurationValidator
             postLogoutRedirectUris,
             isDevelopment);
 
-        if (clientType == OidcClientType.Public && allowRefreshToken)
+        if (clientType == OidcClientType.Public && allowRefreshToken
+            && (!applicationIsActive
+                || hasAppSecret
+                || !allowAuthorizationCode
+                || audienceMode != AudienceMode.PerApplication
+                || identitySessionMaxAgeSeconds is null
+                || !OidcScopeValidator.ParseCanonical(canonicalScopes)
+                    .Contains(OidcScopeValidator.OfflineAccess)))
         {
             throw new OidcClientConfigurationException(
-                "Public clients cannot enable interactive refresh tokens.");
+                "Public refresh requires an active secretless Code client, a per-application audience, offline_access, and a bounded session maximum age.");
         }
 
         // The conversion policy: an existing Confidential client is never downgraded to Public

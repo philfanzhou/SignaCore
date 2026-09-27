@@ -85,7 +85,7 @@ public sealed class OidcClientConfigurationValidatorTests
     }
 
     [Fact]
-    public void Validate_AllowsPublicCodeButRejectsPublicRefresh()
+    public void Validate_AllowsPublicCodeAndRequiresExplicitBoundedPublicRefreshPolicy()
     {
         var enabled = ValidateEnabled(clientType: OidcClientType.Public);
         Assert.True(enabled.AllowAuthorizationCode);
@@ -94,6 +94,29 @@ public sealed class OidcClientConfigurationValidatorTests
             ValidateDisabled(
                 clientType: OidcClientType.Public,
                 allowRefreshToken: true));
+
+        var refresh = OidcClientConfigurationValidator.Validate(
+            OidcClientType.Public, true, ["openid", "offline_access"], true, 3600,
+            AudienceMode.PerApplication, ["https://example.com/callback"], [], false);
+        Assert.True(refresh.AllowRefreshToken);
+        Assert.Equal(3600, refresh.IdentitySessionMaxAgeSeconds);
+
+        foreach (var (active, secret, code, audience, maxAge, scopes) in new[]
+                 {
+                     (false, false, true, AudienceMode.PerApplication, (int?)3600, new[] { "openid", "offline_access" }),
+                     (true, true, true, AudienceMode.PerApplication, (int?)3600, new[] { "openid", "offline_access" }),
+                     (true, false, false, AudienceMode.PerApplication, (int?)3600, new[] { "openid", "offline_access" }),
+                     (true, false, true, AudienceMode.Shared, (int?)3600, new[] { "openid", "offline_access" }),
+                     (true, false, true, AudienceMode.PerApplication, (int?)null, new[] { "openid", "offline_access" }),
+                     (true, false, true, AudienceMode.PerApplication, (int?)3600, new[] { "openid" })
+                 })
+        {
+            Assert.Throws<OidcClientConfigurationException>(() =>
+                OidcClientConfigurationValidator.Validate(
+                    OidcClientType.Public, code, scopes, true, maxAge, audience,
+                    ["https://example.com/callback"], [], false,
+                    applicationIsActive: active, hasAppSecret: secret));
+        }
     }
 
     [Fact]

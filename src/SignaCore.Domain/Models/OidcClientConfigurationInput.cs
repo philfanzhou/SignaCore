@@ -26,7 +26,8 @@ public sealed class OidcClientConfigurationInput
     /// <c>Confidential</c> or <c>Public</c>. Null or empty keeps the application's current type
     /// (a brand-new application defaults to <c>Confidential</c>); an omitted value is never a
     /// silent conversion. A <c>Public</c> client holds no secret; code requires explicit
-    /// enablement and refresh is unavailable. An existing <c>Confidential</c> client cannot be
+    /// enablement; staging the refresh policy requires an explicit bounded offline policy.
+    /// An existing <c>Confidential</c> client cannot be
     /// downgraded to <c>Public</c>.
     /// </summary>
     public string? ClientType { get; set; }

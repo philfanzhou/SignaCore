@@ -189,6 +189,42 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
         using var invalidToken = await browser.SendAsync(invalidBearer, token);
         Assert.Equal(HttpStatusCode.Unauthorized, invalidToken.StatusCode);
         Assert.False(invalidToken.Headers.Contains("Access-Control-Allow-Origin"));
+        using var refreshPolicyUpdate = await admin.PutAsJsonAsync(route + "/oidc-policy",
+            Policy(true, true, 3600), token);
+        Assert.Equal(HttpStatusCode.OK, refreshPolicyUpdate.StatusCode);
+        using var policyReadback = await admin.GetAsync(route + "/oidc", token);
+        var stagedPolicy = await policyReadback.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
+        Assert.True(stagedPolicy.GetProperty("allowRefreshToken").GetBoolean());
+        Assert.Equal(3600, stagedPolicy.GetProperty("identitySessionMaxAgeSeconds").GetInt32());
+
+        var identityCookie = GetSetCookieHeader(completion, IdentitySessionDefaults.CookieName);
+        Assert.NotNull(identityCookie);
+        using var offlineRequest = new HttpRequestMessage(HttpMethod.Get,
+            authorizeUrl.Replace("scope=openid", "scope=openid%20offline_access", StringComparison.Ordinal));
+        offlineRequest.Headers.TryAddWithoutValidation("Cookie", identityCookie!.Split(';')[0]);
+        using var offlineDenied = await browser.SendAsync(offlineRequest, token);
+        Assert.Equal(HttpStatusCode.Found, offlineDenied.StatusCode);
+        var offlineError = QueryHelpers.ParseQuery(offlineDenied.Headers.Location!.Query);
+        Assert.Equal("invalid_scope", offlineError["error"].ToString());
+        Assert.False(offlineError.ContainsKey("code"));
+
+        using var stagedCodeRequest = new HttpRequestMessage(HttpMethod.Get, authorizeUrl);
+        stagedCodeRequest.Headers.TryAddWithoutValidation("Cookie", identityCookie.Split(';')[0]);
+        using var stagedCodeCallback = await browser.SendAsync(stagedCodeRequest, token);
+        Assert.Equal(HttpStatusCode.Found, stagedCodeCallback.StatusCode);
+        var stagedCode = QueryHelpers.ParseQuery(stagedCodeCallback.Headers.Location!.Query)["code"].ToString();
+        Assert.NotEmpty(stagedCode);
+        using var stagedExchange = await browser.PostAsync("/oauth2/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code", ["client_id"] = appId,
+                ["code"] = stagedCode, ["redirect_uri"] = RedirectUri,
+                ["code_verifier"] = Verifier
+            }), token);
+        Assert.Equal(HttpStatusCode.OK, stagedExchange.StatusCode);
+        var stagedIssued = await stagedExchange.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
+        Assert.False(stagedIssued.TryGetProperty("refresh_token", out _));
+
         using var clearedOrigins = await admin.PutAsJsonAsync(route + "/oidc/allowed-origins",
             new { origins = Array.Empty<string>() }, token);
         Assert.Equal(HttpStatusCode.OK, clearedOrigins.StatusCode);
@@ -199,8 +235,6 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
         Assert.Equal(HttpStatusCode.OK, noLongerAllowed.StatusCode);
         Assert.False(noLongerAllowed.Headers.Contains("Access-Control-Allow-Origin"));
 
-        var identityCookie = GetSetCookieHeader(completion, IdentitySessionDefaults.CookieName);
-        Assert.NotNull(identityCookie);
         using var reuseRequest = new HttpRequestMessage(HttpMethod.Get, authorizeUrl);
         reuseRequest.Headers.TryAddWithoutValidation("Cookie", identityCookie!.Split(';')[0]);
         using var reused = await browser.SendAsync(reuseRequest, token);
@@ -231,11 +265,12 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
         Assert.Equal(string.Empty, row.AppSecretHash);
     }
 
-    private static object Policy(bool code, bool refresh) => new
+    private static object Policy(bool code, bool refresh, int? maxAgeSeconds = null) => new
     {
         clientType = "Public", allowAuthorizationCode = code,
-        allowedScopes = new[] { "openid" }, allowRefreshToken = refresh,
-        identitySessionMaxAgeSeconds = (int?)null
+        allowedScopes = refresh ? new[] { "openid", "offline_access" } : new[] { "openid" },
+        allowRefreshToken = refresh,
+        identitySessionMaxAgeSeconds = maxAgeSeconds
     };
 
     private static string BuildAuthorizeUrl(string appId) => "/oauth2/authorize?" + string.Join('&',
