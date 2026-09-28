@@ -1,4 +1,5 @@
 using Moq;
+using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Models;
@@ -263,6 +264,40 @@ public class OidcAuthorizationRequestValidatorTests
         var result = await ValidateAsync(Valid().With("scope", "openid offline_access"), application);
 
         AssertRedirect(result, OAuthErrorCodes.InvalidScope);
+    }
+
+    [Theory]
+    [InlineData("valid", true)]
+    [InlineData("refresh-off", false)]
+    [InlineData("max-age-missing", false)]
+    [InlineData("max-age-over-limit", false)]
+    [InlineData("offline-not-allowed", false)]
+    public async Task PublicOfflineAccess_RequiresCurrentBoundedOptIn(string policy, bool accepted)
+    {
+        var application = InteractiveApplication();
+        application.ClientType = OidcClientType.Public;
+        application.AppSecretHash = string.Empty;
+        application.AllowRefreshToken = policy != "refresh-off";
+        application.IdentitySessionMaxAgeSeconds = policy switch
+        {
+            "max-age-missing" => null,
+            "max-age-over-limit" => IdentityConstants.MaxIdentitySessionAgeSeconds + 1,
+            _ => 3600
+        };
+        application.AllowedScopes = policy == "offline-not-allowed"
+            ? "openid profile" : "openid profile offline_access";
+
+        var result = await ValidateAsync(Valid().With("scope", "openid offline_access"), application);
+
+        if (accepted)
+        {
+            Assert.Equal("openid offline_access",
+                Assert.IsType<OidcAuthorizationValidationResult.Accepted>(result).CanonicalScope);
+        }
+        else
+        {
+            AssertRedirect(result, OAuthErrorCodes.InvalidScope);
+        }
     }
 
     [Theory]

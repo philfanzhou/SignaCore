@@ -6,6 +6,8 @@ namespace SignaCore.Database.Repositories;
 
 public class AppRegistrationRepository : IAppRegistrationRepository
 {
+    private const string PostgreSqlProviderName = "Npgsql.EntityFrameworkCore.PostgreSQL";
+
     private readonly IdentityDbContext _dbContext;
 
     public AppRegistrationRepository(IdentityDbContext dbContext)
@@ -35,6 +37,33 @@ public class AppRegistrationRepository : IAppRegistrationRepository
             .FirstOrDefaultAsync(
                 app => app.AppIdNormalized == normalizedAppId,
                 cancellationToken);
+    }
+
+    public async Task LockByAppIdAsync(string appId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Only PostgreSQL has row locks to take; SQLite serializes writers at the database level.
+        if (!string.Equals(
+                _dbContext.Database.ProviderName,
+                PostgreSqlProviderName,
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (_dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "Locking an application requires a caller-owned ambient transaction; none is active.");
+        }
+
+        var normalizedAppId = IdentityValueNormalizer.Normalize(appId);
+        await _dbContext.AppRegistrations
+            .FromSqlInterpolated(
+                $"SELECT * FROM app_registrations WHERE app_id_normalized = {normalizedAppId} FOR UPDATE")
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
     }
 
     public Task AddAsync(

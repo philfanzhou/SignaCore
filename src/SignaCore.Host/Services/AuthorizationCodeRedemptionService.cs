@@ -288,7 +288,8 @@ public sealed class AuthorizationCodeRedemptionService(
             return InvalidGrant();
         }
 
-        if ((app.ClientType == OidcClientType.Public && ContainsOfflineAccess(lookup.Entity.Scope))
+        if ((app.ClientType == OidcClientType.Public && ContainsOfflineAccess(lookup.Entity.Scope)
+                && !OidcPublicRefreshPolicy.Allows(app))
             || FailsApplicationSessionPolicy(app, session, now)
             || !IsScopeStillAllowed(lookup.Entity.Scope, app.AllowedScopes))
         {
@@ -464,7 +465,8 @@ public sealed class AuthorizationCodeRedemptionService(
             // The authoritative rechecks under the same captured instant: code expiry, session
             // classification, the current application and its session policy, the account, and
             // the current scope allow list (EV-04/05/08/09/10/13).
-            var currentApplication = await ReadApplicationAsync(applicationRowId, operationToken);
+            var currentApplication = await ReadApplicationAsync(
+                applicationRowId, expectedClientType == OidcClientType.Public, operationToken);
             if (now >= lockedCode.ExpiresAt
                 || IdentitySessionStore.Classify(lockedSession, now) != IdentitySessionState.Active
                 || currentApplication is null
@@ -509,7 +511,8 @@ public sealed class AuthorizationCodeRedemptionService(
             var codeCarriesOfflineAccess = ContainsOfflineAccess(lockedCode.Scope);
             if (codeCarriesOfflineAccess
                 && (currentApplication.ClientType == OidcClientType.Public
-                    || !currentApplication.AllowRefreshToken))
+                    ? !OidcPublicRefreshPolicy.Allows(currentApplication)
+                    : !currentApplication.AllowRefreshToken))
             {
                 await transaction.RollbackAsync(operationToken);
                 return InvalidGrant();
@@ -566,13 +569,33 @@ public sealed class AuthorizationCodeRedemptionService(
             InteractiveRefreshFamilyRootCreation? familyRoot = null;
             if (codeCarriesOfflineAccess)
             {
+                DateTimeOffset? publicDeadline = null;
+                if (currentApplication.ClientType == OidcClientType.Public)
+                {
+                    publicDeadline = new[]
+                    {
+                        now.AddDays(IdentityConstants.InteractiveRefreshFamilyLifetimeDays),
+                        lockedSession.AbsoluteExpiresAt,
+                        lockedCode.AuthTime.AddSeconds(currentApplication.IdentitySessionMaxAgeSeconds!.Value)
+                    }.Min();
+                    if (publicDeadline <= now)
+                    {
+                        await transaction.RollbackAsync(operationToken);
+                        return InvalidGrant();
+                    }
+                }
+
                 familyRoot = await refreshFamilies.CreateRootAsync(
                     new InteractiveRefreshFamilyRootDescriptor(
                         lockedAccount.Id,
                         descriptor.ClientId,
                         lockedSession.Id,
                         lockedCode.Scope,
-                        lockedCode.AuthTime),
+                        lockedCode.AuthTime)
+                    {
+                        IsPublicFamily = publicDeadline.HasValue,
+                        AbsoluteDeadline = publicDeadline
+                    },
                     now,
                     operationToken);
                 if (!await authorizationCodes.LinkRefreshFamilyAsync(
@@ -661,10 +684,26 @@ public sealed class AuthorizationCodeRedemptionService(
 
     private async Task<AppRegistrationEntity?> ReadApplicationAsync(
         Guid applicationRowId,
-        CancellationToken cancellationToken) =>
-        await dbContext.AppRegistrations
-            .AsNoTracking()
-            .SingleOrDefaultAsync(application => application.Id == applicationRowId, cancellationToken);
+        bool lockPublicPolicy,
+        CancellationToken cancellationToken)
+    {
+        if (!lockPublicPolicy || string.Equals(dbContext.Database.ProviderName,
+                "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
+        {
+            return await dbContext.AppRegistrations.AsNoTracking()
+                .SingleOrDefaultAsync(application => application.Id == applicationRowId, cancellationToken);
+        }
+
+        // Serialize the policy decision with the administrator's deactivation and refresh
+        // capability updates, which lock this row before they revoke the application's families
+        // (EV-09/EV-11). A change that locked first commits before this read returns and is
+        // observed here; a change that locks after this redemption waits for its commit, so its
+        // revocation statement sees and revokes the new root. The lock order stays session, code,
+        // then application; the administrative transactions take no session or code lock.
+        return (await dbContext.AppRegistrations.FromSqlInterpolated(
+                $"SELECT * FROM app_registrations WHERE id = {applicationRowId} FOR UPDATE")
+            .AsNoTracking().ToListAsync(cancellationToken)).SingleOrDefault();
+    }
 
     /// <summary>
     /// <c>EV-05</c>: the per-application session max-age, evaluated against the re-read

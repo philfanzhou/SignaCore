@@ -13,8 +13,8 @@ identity cookie as client authentication and does not add this grant to `/api/au
 
 New Public Code access tokens expire 300 seconds after the captured issuance second, while
 Confidential interactive access tokens remain at 900 seconds. `expires_in` is derived from the
-same expiry used in the JWT. A future Public interactive refresh family uses the same constructor;
-ordinary Public refresh issuance is still disabled. Tokens issued before this change keep their
+same expiry used in the JWT. Public interactive refresh uses the same constructor after explicit
+refresh opt-in and a committed Code exchange. Tokens issued before this change keep their
 original `exp`, and downstream services must validate the exact issuer, audience, signature, and
 expiry.
 
@@ -50,12 +50,14 @@ and a Basic challenge. A valid confidential client that is not allowed to use co
 `unauthorized_client`; malformed branch fields receive `invalid_request`. No response echoes an
 input credential or a raw form value.
 
-The Public `none` method applies to `authorization_code` and to a specially pre-existing complete
+The Public `none` method applies to `authorization_code` and a complete, correctly bound
 interactive refresh family. A current active Public row must
 have an empty secret hash, code permission, and `PerApplication` audience. The code remains bound
-to that row, its exact redirect URI, and the S256 verifier. Public codes carrying `offline_access`
-cannot create a refresh family. Ordinary Public applications therefore cannot obtain a refresh
-token yet, and revoke continues to require a confidential client. A Public refresh presentation
+to that row, its exact redirect URI, and the S256 verifier. A Public code carrying `offline_access`
+creates one root and code-to-family link in the redemption transaction only while current policy
+still allows it. The root deadline is the earliest of seven days, the session's absolute expiry,
+and the original authentication time plus the application's maximum age. A code without that scope
+creates no root. Revoke continues to require a confidential client. A Public refresh presentation
 must contain exactly one each of `grant_type=refresh_token`, `client_id`, and `refresh_token`, with
 no Authorization header, `client_secret`, or additional form fields. The identifier selects the
 application; only the digest-matched family, exact application binding, current Public policy,
@@ -63,8 +65,7 @@ account, and session authorize rotation. Missing and legacy tokens never enter t
 A Public family's current policy must explicitly allow refresh, set a 1–43200-second identity
 session maximum age, and still allow its `offline_access` snapshot. Existing manually seeded
 families without these settings are rejected. A consumed, correctly bound member still triggers
-reuse disposal before the current policy check. This guard does not enable ordinary Public Code
-refresh issuance. Origin and Cookie do not authenticate a refresh bearer.
+reuse disposal before the current policy check. Origin and Cookie do not authenticate a refresh bearer.
 A code request without any client identifier or credentials is `400 invalid_request`; the
 confidential authentication failures of other grants remain `401 invalid_client`.
 
@@ -179,6 +180,14 @@ auditing replay (`SC-05`). If redemption locks first, one token set commits and 
 revokes the session and any created family (`SC-06`); these are the only `EV-28` outcomes. Signing
 failure and caller cancellation use `SC-16` and `SC-20`; neither can expose a token before the
 matching durable state commits.
+
+A Public `offline_access` redemption locks the application row after the session and code. The
+administrative deactivation (`EV-09`) and refresh-capability-off (`EV-11`) transactions lock the
+same row before they revoke the application's families and take no session or code lock. On
+PostgreSQL, a change that locks first is observed by the redemption, which then rejects without a
+root; a redemption that locks first commits its root before the change proceeds, and the change's
+revocation statement revokes that root. SQLite reaches the same outcomes through its single
+writer.
 
 Provider contract tests run `SC-13` against PostgreSQL across shared-database instances and against
 SQLite as concurrent requests to its single instance. The same suites force both serial outcomes in

@@ -244,3 +244,12 @@ application's registered Origin on actual responses. Preflights check the active
 union and the endpoint's exact method and header. The AdminWeb allow list does not apply to
 `/oauth2`; no Public Origin permits authorization, refresh, revoke, or logout. Keep browser
 credentials out of cookies and use HTTPS, PKCE, and a suitable script isolation policy.
+
+Public Code refresh is an explicit per-application opt-in. It requires a 1–43200-second session
+maximum age and `offline_access`; the family ends at the earliest of seven days, the original
+session absolute expiry, or that application maximum age. Browser applications cannot read
+cross-Origin refresh responses until the separate refresh CORS change is deployed. Use HTTPS,
+isolate scripts, retain bearer tokens in memory for the shortest practical time, and clear them
+on logout; high-privilege administration should prefer a confidential BFF. Rolling back to a
+binary without `sha256-public:` family support requires affected Public clients to sign in again.
+Already-issued self-contained JWTs remain valid until their own `exp`.
