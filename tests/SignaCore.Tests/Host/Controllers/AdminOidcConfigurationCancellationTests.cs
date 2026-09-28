@@ -464,6 +464,12 @@ public sealed class AdminOidcConfigurationCancellationTests
             return inner.GetByAppIdWithOidcConfigurationAsync(appId, cancellationToken);
         }
 
+        public Task LockByAppIdAsync(string appId, CancellationToken cancellationToken)
+        {
+            Assert.Equal(expectedToken, cancellationToken);
+            return inner.LockByAppIdAsync(appId, cancellationToken);
+        }
+
         public Task AddAsync(AppRegistrationEntity app, CancellationToken cancellationToken = default)
         {
             Assert.Equal(expectedToken, cancellationToken);

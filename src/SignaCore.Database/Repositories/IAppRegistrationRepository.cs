@@ -10,6 +10,17 @@ public interface IAppRegistrationRepository
     Task<AppRegistrationEntity?> GetByAppIdWithOidcConfigurationAsync(
         string appId,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Serializes an administrative change of one application with the transactions that decide
+    /// on its current policy. PostgreSQL takes a <c>FOR UPDATE</c> lock on the application row
+    /// that is held until the caller's transaction ends and requires that transaction; SQLite
+    /// relies on its single-writer serialization and takes no lock here. Callers lock
+    /// before any read or write of the application's dependent state, so the lock order stays
+    /// application row first, then its redirect URIs and refresh families.
+    /// </summary>
+    Task LockByAppIdAsync(string appId, CancellationToken cancellationToken);
+
     Task AddAsync(AppRegistrationEntity app, CancellationToken cancellationToken = default);
 
     /// <summary>Stages new browser URI registrations for an already-persisted application.</summary>

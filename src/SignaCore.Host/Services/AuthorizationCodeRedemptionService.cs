@@ -694,8 +694,12 @@ public sealed class AuthorizationCodeRedemptionService(
                 .SingleOrDefaultAsync(application => application.Id == applicationRowId, cancellationToken);
         }
 
-        // Serialize the policy decision with the administrator's update of this row. A policy
-        // change committed first is observed here; one committed later revokes this family.
+        // Serialize the policy decision with the administrator's deactivation and refresh
+        // capability updates, which lock this row before they revoke the application's families
+        // (EV-09/EV-11). A change that locked first commits before this read returns and is
+        // observed here; a change that locks after this redemption waits for its commit, so its
+        // revocation statement sees and revokes the new root. The lock order stays session, code,
+        // then application; the administrative transactions take no session or code lock.
         return (await dbContext.AppRegistrations.FromSqlInterpolated(
                 $"SELECT * FROM app_registrations WHERE id = {applicationRowId} FOR UPDATE")
             .AsNoTracking().ToListAsync(cancellationToken)).SingleOrDefault();
