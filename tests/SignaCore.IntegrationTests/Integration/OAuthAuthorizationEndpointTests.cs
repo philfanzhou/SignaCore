@@ -294,6 +294,9 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
     [Fact]
     public async Task ValidRequest_PersistsTheContinuationAndRedirectsToTheLoginPage()
     {
+        // The seeded application is read before the first request, so this case must not rely on
+        // another case of the class having seeded it first.
+        await SeedAsync();
         using var scope = _fixture.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
         var application = await dbContext.AppRegistrations.AsNoTracking()
