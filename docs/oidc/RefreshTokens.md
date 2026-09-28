@@ -88,8 +88,16 @@ a later event (`EV-31`). Wrong client or corrupt binding never reaches that side
 Digest lookup may identify the member and session without granting authority. One captured UTC time
 then drives a provider execution-strategy transaction:
 
-1. Lock the referenced session when it exists, then the family root and presented member. Re-read
-   the digest, marker, client, account, application, session, scope, parent, and family bindings.
+1. Lock the referenced session when it exists, then read the current application under a shared
+   row lock, then lock the family root and presented member. Re-read the digest, marker, client,
+   account, application, session, scope, parent, and family bindings. The application lock
+   conflicts with the administrative deactivation (`EV-09`) and refresh-capability-off (`EV-11`)
+   transactions, which lock the application row before revoking its families, but not with other
+   rotations or redemptions of the same application. On PostgreSQL a change that locked first
+   commits before the rotation reads its policy, so the rotation rejects; a rotation that locked
+   first commits its child before the change's revocation statement runs, so that statement also
+   revokes the child. Taking the application lock after the root would form a cycle with the
+   change's revocation of the root row. SQLite reaches the same outcomes through its single writer.
 2. If the correctly bound member is consumed, execute reuse handling below even when it is now
    expired or its session is missing/revoked. If it is merely missing, expired, or explicitly
    revoked, execute `EV-32` without reuse handling.
@@ -99,7 +107,7 @@ then drives a provider execution-strategy transaction:
 
    A Public family also requires current explicit refresh opt-in, a session maximum age
    from 1 through 43200 seconds, and `offline_access` in its family snapshot and current allow
-   list. The check occurs after consumed-member reuse handling under the session/root/member
+   list. The check occurs after consumed-member reuse handling under the session/application/root/member
    locks. A policy mismatch rejects an unused member without a child; a correctly bound consumed
    member still triggers descendant disposal. Historical complete Public families without opt-in
    can no longer rotate.

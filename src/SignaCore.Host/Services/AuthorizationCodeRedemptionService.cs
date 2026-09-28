@@ -122,6 +122,7 @@ public sealed class AuthorizationCodeRedemptionService(
     IManagementAuditWriter auditWriter,
     AuthMetrics authMetrics,
     IUnitOfWork unitOfWork,
+    IAppRegistrationRepository applications,
     IdentityDbContext dbContext,
     AdminIdentityOptions adminIdentityOptions,
     ILogger<AuthorizationCodeRedemptionService> logger)
@@ -465,8 +466,11 @@ public sealed class AuthorizationCodeRedemptionService(
             // The authoritative rechecks under the same captured instant: code expiry, session
             // classification, the current application and its session policy, the account, and
             // the current scope allow list (EV-04/05/08/09/10/13).
+            var codeCarriesOfflineAccess = ContainsOfflineAccess(lockedCode.Scope);
             var currentApplication = await ReadApplicationAsync(
-                applicationRowId, expectedClientType == OidcClientType.Public, operationToken);
+                applicationRowId,
+                expectedClientType == OidcClientType.Public || codeCarriesOfflineAccess,
+                operationToken);
             if (now >= lockedCode.ExpiresAt
                 || IdentitySessionStore.Classify(lockedSession, now) != IdentitySessionState.Active
                 || currentApplication is null
@@ -508,7 +512,6 @@ public sealed class AuthorizationCodeRedemptionService(
             // EV-11: the current refresh capability is an authoritative in-lock recheck — a code
             // whose approved scope carries offline_access is only redeemable while the application
             // still allows refresh tokens. The code stays unconsumed and no family is written.
-            var codeCarriesOfflineAccess = ContainsOfflineAccess(lockedCode.Scope);
             if (codeCarriesOfflineAccess
                 && (currentApplication.ClientType == OidcClientType.Public
                     ? !OidcPublicRefreshPolicy.Allows(currentApplication)
@@ -684,12 +687,13 @@ public sealed class AuthorizationCodeRedemptionService(
 
     private async Task<AppRegistrationEntity?> ReadApplicationAsync(
         Guid applicationRowId,
-        bool lockPublicPolicy,
+        bool lockFamilyPolicy,
         CancellationToken cancellationToken)
     {
-        if (!lockPublicPolicy || string.Equals(dbContext.Database.ProviderName,
-                "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal))
+        if (!lockFamilyPolicy)
         {
+            // A Confidential code without offline_access writes no family, so no administrative
+            // revocation can miss what this redemption commits.
             return await dbContext.AppRegistrations.AsNoTracking()
                 .SingleOrDefaultAsync(application => application.Id == applicationRowId, cancellationToken);
         }
@@ -698,11 +702,10 @@ public sealed class AuthorizationCodeRedemptionService(
         // capability updates, which lock this row before they revoke the application's families
         // (EV-09/EV-11). A change that locked first commits before this read returns and is
         // observed here; a change that locks after this redemption waits for its commit, so its
-        // revocation statement sees and revokes the new root. The lock order stays session, code,
-        // then application; the administrative transactions take no session or code lock.
-        return (await dbContext.AppRegistrations.FromSqlInterpolated(
-                $"SELECT * FROM app_registrations WHERE id = {applicationRowId} FOR UPDATE")
-            .AsNoTracking().ToListAsync(cancellationToken)).SingleOrDefault();
+        // revocation statement sees and revokes the new root. The shared lock keeps concurrent
+        // redemptions and rotations of one application independent. The lock order stays session,
+        // code, then application; the administrative transactions take no session or code lock.
+        return await applications.ReadPolicyForFamilyWriteAsync(applicationRowId, cancellationToken);
     }
 
     /// <summary>

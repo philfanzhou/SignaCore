@@ -181,12 +181,15 @@ revokes the session and any created family (`SC-06`); these are the only `EV-28`
 failure and caller cancellation use `SC-16` and `SC-20`; neither can expose a token before the
 matching durable state commits.
 
-A Public `offline_access` redemption locks the application row after the session and code. The
-administrative deactivation (`EV-09`) and refresh-capability-off (`EV-11`) transactions lock the
-same row before they revoke the application's families and take no session or code lock. On
-PostgreSQL, a change that locks first is observed by the redemption, which then rejects without a
-root; a redemption that locks first commits its root before the change proceeds, and the change's
-revocation statement revokes that root. SQLite reaches the same outcomes through its single
+A Public redemption, and a Confidential redemption whose code carries `offline_access`, read the
+application under a shared row lock after the session and code. The administrative deactivation
+(`EV-09`) and refresh-capability-off (`EV-11`) transactions take an exclusive lock on the same row
+before they revoke the application's families and take no session or code lock. On PostgreSQL, a
+change that locks first is observed by the redemption, which then rejects without a root; a
+redemption that locks first commits its root before the change proceeds, and the change's
+revocation statement revokes that root. The shared lock does not serialize concurrent redemptions
+or rotations of one application with each other. A Confidential code without `offline_access`
+writes no family and keeps a plain read. SQLite reaches the same outcomes through its single
 writer.
 
 Provider contract tests run `SC-13` against PostgreSQL across shared-database instances and against

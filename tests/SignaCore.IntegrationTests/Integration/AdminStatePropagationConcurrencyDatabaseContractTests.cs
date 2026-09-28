@@ -671,6 +671,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
                 new EfCoreManagementAuditWriter<IdentityDbContext>(context),
                 new AuthMetrics(StubMeterFactory()),
                 unitOfWork,
+                new AppRegistrationRepository(context),
                 context,
                 NullLogger<InteractiveRefreshRotationService>.Instance);
         }
@@ -696,6 +697,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
                 new EfCoreManagementAuditWriter<IdentityDbContext>(context),
                 new AuthMetrics(StubMeterFactory()),
                 unitOfWork,
+                new AppRegistrationRepository(context),
                 context,
                 new AdminIdentityOptions(),
                 NullLogger<AuthorizationCodeRedemptionService>.Instance);

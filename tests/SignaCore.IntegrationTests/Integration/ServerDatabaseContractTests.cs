@@ -1737,6 +1737,7 @@ public sealed class ServerDatabaseContractTests
             new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             new AuthMetrics(meterFactory.Object),
             unitOfWork,
+            new AppRegistrationRepository(context),
             context,
             new AdminIdentityOptions(),
             NullLogger<SignaCore.Host.Services.AuthorizationCodeRedemptionService>.Instance);
