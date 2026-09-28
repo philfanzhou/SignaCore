@@ -66,6 +66,37 @@ public class AppRegistrationRepository : IAppRegistrationRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<AppRegistrationEntity?> ReadPolicyForFamilyWriteAsync(
+        Guid applicationRowId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!string.Equals(
+                _dbContext.Database.ProviderName,
+                PostgreSqlProviderName,
+                StringComparison.Ordinal))
+        {
+            return await _dbContext.AppRegistrations
+                .AsNoTracking()
+                .SingleOrDefaultAsync(app => app.Id == applicationRowId, cancellationToken);
+        }
+
+        if (_dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "Locking an application policy requires a caller-owned ambient transaction; none is active.");
+        }
+
+        // A shared row lock: family writers of one application do not serialize with each other,
+        // only with the administrative FOR UPDATE that precedes the application's family revocation.
+        return (await _dbContext.AppRegistrations
+                .FromSqlInterpolated(
+                    $"SELECT * FROM app_registrations WHERE id = {applicationRowId} FOR SHARE")
+                .AsNoTracking()
+                .ToListAsync(cancellationToken))
+            .SingleOrDefault();
+    }
+
     public Task AddAsync(
         AppRegistrationEntity app,
         CancellationToken cancellationToken = default)

@@ -141,6 +141,7 @@ public sealed class InteractiveRefreshRotationService(
     IManagementAuditWriter auditWriter,
     AuthMetrics authMetrics,
     IUnitOfWork unitOfWork,
+    IAppRegistrationRepository applications,
     IdentityDbContext dbContext,
     ILogger<InteractiveRefreshRotationService> logger)
 {
@@ -355,9 +356,9 @@ public sealed class InteractiveRefreshRotationService(
     }
 
     /// <summary>
-    /// The <c>EV-29</c>–<c>EV-32</c> transaction: session lock first, then the family root, then
-    /// the presented member; the authoritative binding, state, and live-predicate rechecks under
-    /// the captured instant; both signatures; the conditional consumption; the unique child; and
+    /// The <c>EV-29</c>–<c>EV-32</c> transaction: session lock first, then the application's shared
+    /// policy lock, then the family root, then the presented member; the authoritative binding,
+    /// state, and live-predicate rechecks under the captured instant; both signatures; the conditional consumption; the unique child; and
     /// the commit — after which, and only after which, the token bytes leave this service.
     /// </summary>
     private async Task<InteractiveRefreshRotationOutcome> ExecuteRotationTransactionAsync(
@@ -388,8 +389,15 @@ public sealed class InteractiveRefreshRotationService(
 
             // Persistence.md lock order: the loser of a concurrent rotation observes the
             // committed consumption under these locks and runs the reuse disposal instead.
+            // The application policy row is share-locked between the session and the root so the
+            // administrative deactivation and refresh-off transactions, which lock that row before
+            // revoking the application's families (EV-09/EV-11), either commit before this read or
+            // wait for this commit and then revoke the child. Taking it after the root would close
+            // a cycle with their revocation of the root row.
             var lockedSession = await identitySessions.LockAsync(
                 member.IdentitySessionId!.Value, operationToken);
+            var currentApplication = await applications.ReadPolicyForFamilyWriteAsync(
+                app.Id, operationToken);
             var lockedRoot = await refreshTokens.LockByIdAsync(member.FamilyId, operationToken);
             var lockedMember = member.Id == member.FamilyId
                 ? lockedRoot
@@ -438,10 +446,9 @@ public sealed class InteractiveRefreshRotationService(
                 ? publicChildDigest
                 : legacyChildDigest;
 
-            // The current application policy is re-read under the same captured instant; the
-            // capability rejections leave the family to their own state transactions
-            // (EV-09/EV-11) and only fail closed here.
-            var currentApplication = await ReadApplicationAsync(app.Id, operationToken);
+            // The current application policy, read under its shared lock above, is evaluated under
+            // the same captured instant after the EV-31 reuse check; the capability rejections
+            // leave the family to their own state transactions (EV-09/EV-11) and only fail closed.
             if (currentApplication is null
                 || !currentApplication.IsActive
                 || currentApplication.ClientType != app.ClientType
@@ -707,13 +714,6 @@ public sealed class InteractiveRefreshRotationService(
             && parent.IdentitySessionId == lockedMember.IdentitySessionId
             && HasConsistentFamilyBindings(lockedRoot, parent);
     }
-
-    private async Task<AppRegistrationEntity?> ReadApplicationAsync(
-        Guid applicationRowId,
-        CancellationToken cancellationToken) =>
-        await dbContext.AppRegistrations
-            .AsNoTracking()
-            .SingleOrDefaultAsync(application => application.Id == applicationRowId, cancellationToken);
 
     /// <summary>
     /// <c>EV-05</c>: the per-application session max-age, evaluated against the re-read

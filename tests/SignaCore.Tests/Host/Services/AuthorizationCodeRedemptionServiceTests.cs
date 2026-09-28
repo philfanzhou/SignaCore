@@ -568,6 +568,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             CreateMetrics(),
             unitOfWork,
+            new AppRegistrationRepository(context),
             context,
             new AdminIdentityOptions { Username = Username },
             logger);

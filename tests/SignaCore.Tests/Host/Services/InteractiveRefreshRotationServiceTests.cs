@@ -623,6 +623,41 @@ public sealed class InteractiveRefreshRotationServiceTests
         Assert.False(dispatch.Handled);
     }
 
+    [Fact]
+    public async Task RotateAsync_CancelledAtTheApplicationPolicyLock_LeavesNoHalfCommit()
+    {
+        await using var harness = await CreateHarnessAsync();
+        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var root = await InsertInteractiveMemberAsync(harness, seed, consumedAt: null);
+        using var caller = new CancellationTokenSource();
+        var applications = new Mock<IAppRegistrationRepository>(MockBehavior.Strict);
+        applications
+            .Setup(repo => repo.ReadPolicyForFamilyWriteAsync(seed.Application.Id, It.IsAny<CancellationToken>()))
+            .Returns<Guid, CancellationToken>(async (_, token) =>
+            {
+                await caller.CancelAsync();
+                token.ThrowIfCancellationRequested();
+                return null;
+            });
+        var service = harness.BuildService(applicationsOverride: applications.Object);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.RotateAsync(
+            seed.Application,
+            CreateForm(root.Plaintext),
+            clientCredentialMixPresent: false, clientIp: null, null, caller.Token));
+
+        harness.Context.ChangeTracker.Clear();
+        var rows = await harness.Context.RefreshTokens.AsNoTracking()
+            .ToListAsync(TestContext.Current.CancellationToken);
+        var rootRow = Assert.Single(rows);
+        Assert.Null(rootRow.ConsumedAt);
+        Assert.False(rootRow.IsRevoked);
+        Assert.Empty(await SharedAuditTable.ReadAsync(harness.Context, TestContext.Current.CancellationToken));
+        applications.Verify(
+            repo => repo.ReadPolicyForFamilyWriteAsync(seed.Application.Id, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     private static void AssertInvalidGrantWithoutReuse(InteractiveRefreshDispatch dispatch)
     {
         Assert.True(dispatch.Handled);
@@ -669,7 +704,9 @@ public sealed class InteractiveRefreshRotationServiceTests
 
         public InteractiveRefreshRotationService Service { get; } = service;
 
-        public InteractiveRefreshRotationService BuildService(IRefreshTokenRepository? repositoryOverride = null)
+        public InteractiveRefreshRotationService BuildService(
+            IRefreshTokenRepository? repositoryOverride = null,
+            IAppRegistrationRepository? applicationsOverride = null)
         {
             var unitOfWork = new EfCoreUnitOfWork(Context);
             var refreshTokens = repositoryOverride ?? new RefreshTokenRepository(Context);
@@ -687,6 +724,7 @@ public sealed class InteractiveRefreshRotationServiceTests
                 new EfCoreManagementAuditWriter<IdentityDbContext>(Context),
                 CreateMetrics(),
                 unitOfWork,
+                applicationsOverride ?? new AppRegistrationRepository(Context),
                 Context,
                 NullLogger<InteractiveRefreshRotationService>.Instance);
         }

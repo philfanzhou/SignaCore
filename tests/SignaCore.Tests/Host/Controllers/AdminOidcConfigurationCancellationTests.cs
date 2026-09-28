@@ -470,6 +470,13 @@ public sealed class AdminOidcConfigurationCancellationTests
             return inner.LockByAppIdAsync(appId, cancellationToken);
         }
 
+        public Task<AppRegistrationEntity?> ReadPolicyForFamilyWriteAsync(
+            Guid applicationRowId, CancellationToken cancellationToken)
+        {
+            Assert.Equal(expectedToken, cancellationToken);
+            return inner.ReadPolicyForFamilyWriteAsync(applicationRowId, cancellationToken);
+        }
+
         public Task AddAsync(AppRegistrationEntity app, CancellationToken cancellationToken = default)
         {
             Assert.Equal(expectedToken, cancellationToken);

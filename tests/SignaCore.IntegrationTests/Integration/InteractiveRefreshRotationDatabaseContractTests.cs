@@ -345,6 +345,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
                 new EfCoreManagementAuditWriter<IdentityDbContext>(context),
                 new AuthMetrics(meterFactory.Object),
                 unitOfWork,
+                new AppRegistrationRepository(context),
                 context,
                 NullLogger<InteractiveRefreshRotationService>.Instance);
         }

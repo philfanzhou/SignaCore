@@ -549,9 +549,10 @@ public class AdminController : ControllerBase
             await using var transaction = await dbContext.Database
                 .BeginTransactionAsync(operationToken);
 
-            // EV-09 needs the row lock before the family revocation below: a code issuance or
-            // Public code redemption that decides on this application waits for this transaction,
-            // and one that committed first is visible to the revocation statement.
+            // EV-09 needs the row lock before the family revocation below: a code issuance, a
+            // family-writing code redemption, or a refresh rotation that decides on this
+            // application waits for this transaction, and one that committed first is visible to
+            // the revocation statement.
             await appRegistrationRepository.LockByAppIdAsync(appId, operationToken);
             var app = await appRegistrationRepository.GetByAppIdAsync(appId, operationToken);
             if (app == null)
@@ -989,9 +990,9 @@ public class AdminController : ControllerBase
                 .BeginTransactionAsync(operationToken);
 
             // EV-11 needs the row lock before the family revocation below, with the same
-            // application-then-redirect order as code issuance: a Public code redemption that
-            // decides on this policy waits for this transaction, and one that committed first is
-            // visible to the revocation statement.
+            // application-then-redirect order as code issuance: a family-writing code redemption
+            // or a refresh rotation that decides on this policy waits for this transaction, and
+            // one that committed first is visible to the revocation statement.
             await appRegistrationRepository.LockByAppIdAsync(appId, operationToken);
             var app = await appRegistrationRepository.GetByAppIdWithOidcConfigurationAsync(
                 appId, operationToken);
