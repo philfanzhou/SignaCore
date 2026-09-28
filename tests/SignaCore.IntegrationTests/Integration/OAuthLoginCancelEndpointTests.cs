@@ -11,6 +11,7 @@ using SignaCore.Database.Entity;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Validators;
 using SignaCore.Host;
+using SignaCore.Host.Security;
 using Xunit;
 using static SignaCore.Tests.Integration.OAuthLoginTestSupport;
 
@@ -82,6 +83,42 @@ public sealed class OAuthLoginCancelEndpointTests : IClassFixture<IdentityServer
             CreateLoginPost(fields: CancelFields(session), cookieHeader: CookieHeaderFor(session)),
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, replayPost.StatusCode);
+    }
+
+    [Fact]
+    public async Task Cancel_WithTheEmptyCredentialFieldsABrowserSubmits_RedirectsAccessDenied()
+    {
+        // A formnovalidate Cancel submits every successful control in document order, so the
+        // browser body carries both credential fields empty.
+        var counter = new CountingPasswordValidator();
+        using var factory = _fixture.CreateHostWithCountingValidator(counter);
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var session = await BeginLegalLoginAsync(factory.Services, client);
+
+        using var request = CreateLoginPost(
+            rawBody: BuildEscapedBody(
+            [
+                new("login_handle", session.Handle),
+                new(LoginAntiforgeryDefaults.TokenFieldName, session.Token),
+                new("username", string.Empty),
+                new("password", string.Empty),
+                new(ActionFieldName, CancelActionValue),
+            ]),
+            cookieHeader: CookieHeaderFor(session));
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        AssertLoginRedirectContentSecurityPolicy(response);
+        var issuer = factory.Services.GetRequiredService<JwtOptions>().Issuer;
+        Assert.Equal(
+            $"{LegalRegisteredUri}"
+            + $"&error=access_denied"
+            + $"&error_description={Uri.EscapeDataString(OidcAuthorizationErrorDescriptions.AccessDenied)}"
+            + $"&state={Uri.EscapeDataString(LegalState)}"
+            + $"&iss={Uri.EscapeDataString(issuer)}",
+            response.Headers.Location!.AbsoluteUri);
+        Assert.NotNull(await GetConsumedAtAsync(session.Handle));
+        Assert.Equal(0, counter.Calls);
     }
 
     // ---- Acceptance 3: drift that removes redirect trust is a local error ----
