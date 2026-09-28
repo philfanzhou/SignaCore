@@ -43,6 +43,10 @@ PKCE verifier, and every token server-side. The browser carries the authorizatio
 single-use authorization code, opaque SignaCore login/session handles, and the BFF's own unrelated
 session cookie.
 
-The design adds no public client, consent screen, dynamic registration, MFA, browser SMS/LDAP/WeChat
-login, or new behavior to existing grants. A claims callback remains a server-to-server claims
+A Public browser client is available only through explicit per-application opt-in: Code with S256
+PKCE, exact registered Origins, 300-second access tokens, and optional bounded refresh. The
+[Public SPA sample](../../samples/SignaCore.PublicSpa/README.md) shows that path and its limits; the
+confidential BFF remains the preferred client for high-privilege applications. The design adds no
+consent screen, dynamic registration, MFA, browser SMS/LDAP/WeChat login, or new behavior to
+existing grants. A claims callback remains a server-to-server claims
 source; it is never a browser redirect registration.

@@ -101,6 +101,24 @@ A refresh at `POST /oauth2/token` with `grant_type=refresh_token` rotates the fa
 returns a new access token, a nonce-free ID token, and exactly one new refresh token; replaying a
 consumed member revokes every live descendant of the family and answers `invalid_grant`.
 
+### Public browser clients
+
+The [Public SPA sample](../../samples/SignaCore.PublicSpa/README.md) is the reference for an
+enabled Public client: it uses only Discovery, the authorize endpoint, the `none` code exchange,
+refresh rotation, and UserInfo, keeps tokens in page memory, and checks the callback `state` and
+`iss` and the ID token's issuer, audience, lifetime, and nonce. It does not provide — and no
+browser client that holds tokens can provide — the following:
+
+- protection from script running in the page's Origin (for example through cross-site scripting),
+  which can read the in-memory tokens, or detection of a token stolen before first use;
+- a sign-out that ends access: signing out of the page does not revoke the refresh family,
+  because Public clients cannot use `/oauth2/revoke`, and does not end the SignaCore identity
+  session, because prepared logout is limited to Confidential clients — the family ends at its
+  bounded expiry, and a new sign-in may not prompt while the identity session is valid;
+- early expiry: an issued access token stays valid until its own `exp`.
+
+High-privilege applications should use a confidential BFF.
+
 ## Access-token audience
 
 `aud` is controlled per application by `app_registrations.audience_mode`:

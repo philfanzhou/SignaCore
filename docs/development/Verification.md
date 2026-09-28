@@ -11,6 +11,13 @@ npm --prefix src/SignaCore.Admin run test:coverage
 npm --prefix src/SignaCore.Admin run build
 ```
 
+The Public SPA sample has no npm dependencies. Its client and development-server tests run with
+Node's built-in runner, and CI runs them in the `Public SPA sample tests` step of `Build & Test`:
+
+```bash
+node --test 'samples/SignaCore.PublicSpa/test/*.test.mjs'
+```
+
 ## Integration and database contracts
 
 ```bash

@@ -25,6 +25,7 @@ SignaCore is a .NET 10 identity and authentication service. It centralizes accou
 | `src/SignaCore.Domain` | Authentication, token, key, SMS, LDAP, and audit logic |
 | `src/SignaCore.Host` | ASP.NET Core host, HTTP API, SPA hosting, and Dockerfile |
 | `src/SignaCore.Admin` | Vue 3 administrative console |
+| `samples` | Integration samples: the confidential [Reference BFF](samples/SignaCore.ReferenceBff/README.md) (preferred for high-privilege clients) and the zero-dependency [Public SPA](samples/SignaCore.PublicSpa/README.md) |
 | `tests` | Unit and integration/contract test projects |
 | `docs` | Architecture, operations, schema, and feature documentation |
 | `.github` | GitHub Actions, dependency automation, and contribution templates |
