@@ -39,7 +39,7 @@ its live descendants, and `offline_access` is advertised in Discovery.
   Discovery advertises all three token methods. Public refresh also requires a committed
   `offline_access` Code family and current bounded opt-in policy; `none` grants no authority by
   itself. Revoke and other grants stay confidential. Registered Public Origins separately enable
-  exact Code-token and UserInfo CORS; cross-Origin refresh responses await separate support.
+  exact CORS for Code-token, refresh-token, and UserInfo responses of the bound application.
   The legacy `X-Admin-AppId`/`X-Admin-AppSecret` headers are
   **not** accepted here.
 - Success: HTTP 200, `Cache-Control: no-store`, body with `access_token`, `token_type: "Bearer"`,

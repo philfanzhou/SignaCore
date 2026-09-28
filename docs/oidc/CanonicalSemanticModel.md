@@ -378,8 +378,10 @@ sensitive-data boundaries. These are expected outcomes, not claims about current
 
 The model guarantees a single implementable result for the rows above and enough persisted
 association to execute every promised state change. It does not provide token introspection,
-revoke self-contained access tokens, enable cross-Origin browser refresh responses, MFA, consent,
-dynamic registration, front-channel logout, or back-channel logout.
+revoke self-contained access tokens, MFA, consent, dynamic registration, front-channel logout, or
+back-channel logout. Browser read access to Public Code, refresh, and UserInfo responses is the
+exact registered Origin host policy described in [Public Origin CORS](./TokenEndpoint.md#public-origin-cors);
+it neither authorizes a request nor rolls back a committed rotation.
 
 The BFF must generate and bind high-entropy `state`, `nonce`, and `code_verifier`; validate the
 authorization response issuer; validate ID-token signature, issuer, audience, lifetime, and nonce;

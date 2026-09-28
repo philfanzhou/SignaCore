@@ -170,13 +170,14 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
         }
 
         using var http = _fixture.CreateHttpClient();
-        foreach (var (method, path) in new[]
+        foreach (var (method, path, grantType) in new[]
                  {
-                     (HttpMethod.Get, "/oauth2/authorize"),
-                     (HttpMethod.Post, "/oauth2/token"),
-                     (HttpMethod.Get, "/oauth2/userinfo"),
-                     (HttpMethod.Options, "/oauth2/token"),
-                     (HttpMethod.Options, "/oauth2/userinfo")
+                     (HttpMethod.Get, "/oauth2/authorize", (string?)null),
+                     (HttpMethod.Post, "/oauth2/token", "authorization_code"),
+                     (HttpMethod.Post, "/oauth2/token", "refresh_token"),
+                     (HttpMethod.Get, "/oauth2/userinfo", null),
+                     (HttpMethod.Options, "/oauth2/token", null),
+                     (HttpMethod.Options, "/oauth2/userinfo", null)
                  })
         {
             using var request = new HttpRequestMessage(method, path);
@@ -190,7 +191,7 @@ public class AdminOidcClientEndpointTests : IClassFixture<IdentityServerFixture>
             {
                 request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
                 {
-                    ["grant_type"] = "authorization_code",
+                    ["grant_type"] = grantType!,
                     ["client_id"] = CorsAppId
                 });
             }
