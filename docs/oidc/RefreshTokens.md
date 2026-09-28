@@ -11,7 +11,10 @@ An interactive refresh token extends one confidential BFF or explicitly opted-in
 authorization while its original identity session and current application policy remain usable.
 Public Code + S256 can request `offline_access` only with a bounded refresh policy; Code redemption
 then creates the root in the same transaction as code consumption and audit. It is an opaque,
-rotating bearer credential, not a portable account credential. A browser-held token is exposed
+rotating bearer credential, not a portable account credential. A Public application's exact
+registered Origin can read its cross-Origin refresh responses, including `invalid_grant`, under the
+same condition as Code redemption; see [Public Origin CORS](./TokenEndpoint.md#public-origin-cors).
+CORS does not stop non-browser use of a stolen token. A browser-held token is exposed
 to script compromise; callers must isolate scripts, keep it in memory, use HTTPS, and clear it on
 logout. Existing Password, SMS, LDAP, WeChat,
 legacy refresh, and cross-application exchange behavior stays on its current path.

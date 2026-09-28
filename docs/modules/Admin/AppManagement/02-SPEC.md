@@ -91,7 +91,10 @@ trailing slashes, query, fragments, userinfo, wildcards, `null`, non-ASCII and p
 are rejected. An Origin is never derived from a redirect URI, claims callback, public base URL,
 or `AdminWeb:AllowedOrigins`.
 
-Origin registration does not yet enable Public CORS on authorize, token, userinfo, or OPTIONS.
+A registered Origin lets browsers read the bound application's `/oauth2/token` Code and refresh
+responses and `/oauth2/userinfo` responses, and admits it to those endpoints' preflights; see
+[Public Origin CORS](../../../oidc/TokenEndpoint.md#public-origin-cors). It never enables CORS on
+authorize, revoke, or logout.
 Older binaries ignore the new table; rolling back its migration deletes all registered Origins,
 so export them before a Down migration.
 

@@ -22,12 +22,19 @@ expiry.
 
 The host excludes all `/oauth2` paths from AdminWeb CORS. A token preflight admits only `POST`
 with `Content-Type` from the current union of active Public application Origins. It cannot bind
-an application because a preflight has no token form. An actual code response carries the exact
-Origin only when client authentication has selected an active Public application and that Origin
-is still registered to it. No wildcard, credentials header, or preflight cache lifetime is sent;
-`Vary` covers Origin and the preflight method and headers. Authorization, refresh, revoke, and
-logout do not gain Public CORS. CORS limits browser response access, not token issuance or
-non-browser callers; clients must still use PKCE and avoid cookies.
+an application because a preflight has no token form. An actual response to a single
+`grant_type=authorization_code` or `grant_type=refresh_token` request carries the exact Origin
+only when the bounded form parsed, client authentication has selected an active Public
+application, that Origin is still registered to it, and the request was not cancelled before the
+response started. Code and refresh share this one condition: a successful rotation and a protocol
+error after client authentication, such as reuse or a disabled refresh policy returning
+`invalid_grant`, are readable by that Origin; failures before client authentication selects the
+application (`invalid_request`, `invalid_client`, `unauthorized_client`) and Confidential clients
+are not. No wildcard, credentials header, or preflight cache lifetime is sent; `Vary` covers Origin
+and the preflight method and headers. Authorization, revoke, and logout do not gain Public CORS.
+CORS limits browser response access, not token issuance, rotation, or non-browser callers; a
+rejected Origin does not roll back a committed rotation. Clients must still use PKCE and avoid
+cookies.
 
 ## Request boundary
 

@@ -297,7 +297,7 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
         rotationRequest.Headers.TryAddWithoutValidation("Origin", "https://public.example.test");
         using var rotation = await browser.SendAsync(rotationRequest, token);
         Assert.Equal(HttpStatusCode.OK, rotation.StatusCode);
-        Assert.False(rotation.Headers.Contains("Access-Control-Allow-Origin"));
+        AssertReadableBy(rotation, "https://public.example.test");
         var rotated = await rotation.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
         Assert.Equal(300, rotated.GetProperty("expires_in").GetInt64());
         var childToken = rotated.GetProperty("refresh_token").GetString()!;
@@ -314,13 +314,10 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
             Assert.Equal(root.ExpiresAt, child.ExpiresAt);
             Assert.StartsWith("sha256-public:", child.TokenValue, StringComparison.Ordinal);
         }
-        using var reuse = await browser.PostAsync("/oauth2/token",
-            new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["grant_type"] = "refresh_token", ["client_id"] = appId,
-                ["refresh_token"] = rootToken
-            }), token);
+        using var reuse = await browser.SendAsync(
+            RefreshRequest(appId, rootToken, "https://public.example.test"), token);
         Assert.Equal(HttpStatusCode.BadRequest, reuse.StatusCode);
+        AssertReadableBy(reuse, "https://public.example.test");
         var reuseResult = await reuse.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
         Assert.Equal("invalid_grant", reuseResult.GetProperty("error").GetString());
         using var childAfterReuse = await browser.PostAsync("/oauth2/token",
@@ -414,6 +411,336 @@ public sealed class PublicCodeFlowTests(IdentityServerFixture fixture) : IClassF
         var row = await db.AppRegistrations.AsNoTracking()
             .SingleAsync(app => app.AppId == appId, token);
         Assert.Equal(string.Empty, row.AppSecretHash);
+    }
+
+    [Fact]
+    public async Task PublicRefresh_IsReadableOnlyByTheValidatedApplicationsRegisteredOrigin()
+    {
+        const string origin = "https://refresh.example.test";
+        const string otherOrigin = "https://refresh-other.example.test";
+        var token = TestContext.Current.CancellationToken;
+        using var admin = await fixture.CreateAdminHttpClientAsync();
+        var appId = await CreatePublicAppAsync(admin, origin, token);
+        var route = $"/api/admin/apps/{appId}";
+        _ = await CreatePublicAppAsync(admin, otherOrigin, token);
+        using (var refreshPolicy = await admin.PutAsJsonAsync(route + "/oidc-policy", Policy(true, true, 3600), token))
+        {
+            Assert.Equal(HttpStatusCode.OK, refreshPolicy.StatusCode);
+        }
+
+        using var browser = fixture.CreateNonRedirectingHttpClient(handleCookies: false);
+        var identityCookie = await SignInAsync(browser, appId, token);
+
+        // The preflight admits any active Public Origin and binds no application.
+        using (var preflight = new HttpRequestMessage(HttpMethod.Options, "/oauth2/token"))
+        {
+            preflight.Headers.TryAddWithoutValidation("Origin", otherOrigin);
+            preflight.Headers.TryAddWithoutValidation("Access-Control-Request-Method", "POST");
+            preflight.Headers.TryAddWithoutValidation("Access-Control-Request-Headers", "content-type");
+            using var permitted = await browser.SendAsync(preflight, token);
+            Assert.Equal(otherOrigin, permitted.Headers.GetValues("Access-Control-Allow-Origin").Single());
+            Assert.Equal("POST", permitted.Headers.GetValues("Access-Control-Allow-Methods").Single());
+            Assert.Equal("Content-Type", permitted.Headers.GetValues("Access-Control-Allow-Headers").Single());
+        }
+
+        // Success: the exact registered Origin reads a body identical in shape to the Origin-less rotation.
+        var current = await RedeemOfflineRootAsync(browser, appId, identityCookie, token);
+        using var baseline = await browser.SendAsync(RefreshRequest(appId, current, null), token);
+        Assert.Equal(HttpStatusCode.OK, baseline.StatusCode);
+        Assert.False(baseline.Headers.Contains("Access-Control-Allow-Origin"));
+        var baselineBody = await baseline.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
+        current = baselineBody.GetProperty("refresh_token").GetString()!;
+        using var readable = await browser.SendAsync(RefreshRequest(appId, current, origin), token);
+        Assert.Equal(HttpStatusCode.OK, readable.StatusCode);
+        AssertReadableBy(readable, origin);
+        var readableBody = await readable.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token);
+        Assert.Equal(
+            baselineBody.EnumerateObject().Select(property => property.Name).Order(),
+            readableBody.EnumerateObject().Select(property => property.Name).Order());
+        Assert.Equal(300, readableBody.GetProperty("expires_in").GetInt64());
+        Assert.Equal("openid offline_access", readableBody.GetProperty("scope").GetString());
+        Assert.False(string.IsNullOrEmpty(readableBody.GetProperty("access_token").GetString()));
+        Assert.False(string.IsNullOrEmpty(readableBody.GetProperty("id_token").GetString()));
+        current = readableBody.GetProperty("refresh_token").GetString()!;
+
+        // Rotations that succeed without read permission: the protocol result is unchanged.
+        foreach (var denied in new[]
+                 {
+                     otherOrigin, "https://unregistered.example.test", "HTTPS://refresh.example.test",
+                     "https://Refresh.example.test", origin + "/", null
+                 })
+        {
+            using var response = await browser.SendAsync(RefreshRequest(appId, current, denied), token);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            AssertNotReadable(response);
+            current = (await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token))
+                .GetProperty("refresh_token").GetString()!;
+        }
+
+        using (var duplicate = RefreshRequest(appId, current, null))
+        {
+            duplicate.Headers.TryAddWithoutValidation("Origin", new[] { origin, origin });
+            using var response = await browser.SendAsync(duplicate, token);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            AssertNotReadable(response);
+            current = (await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token))
+                .GetProperty("refresh_token").GetString()!;
+        }
+
+        // Failures before client authentication selects the application never carry read permission.
+        using (var unknownClient = await browser.SendAsync(
+                   RefreshRequest("unknown-public-client", current, origin), token))
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, unknownClient.StatusCode);
+            Assert.Equal("invalid_client", await ErrorCodeAsync(unknownClient, token));
+            AssertNotReadable(unknownClient);
+        }
+
+        foreach (var malformed in new[]
+                 {
+                     new KeyValuePair<string, string>[]
+                     {
+                         new("grant_type", "refresh_token"), new("client_id", appId),
+                         new("refresh_token", current), new("scope", "openid")
+                     },
+                     new KeyValuePair<string, string>[]
+                     {
+                         new("grant_type", "refresh_token"), new("client_id", appId),
+                         new("refresh_token", current), new("refresh_token", current)
+                     },
+                     new KeyValuePair<string, string>[]
+                     {
+                         new("grant_type", "refresh_token"), new("grant_type", "refresh_token"),
+                         new("client_id", appId), new("refresh_token", current)
+                     }
+                 })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/oauth2/token")
+            {
+                Content = new FormUrlEncodedContent(malformed)
+            };
+            request.Headers.TryAddWithoutValidation("Origin", origin);
+            using var response = await browser.SendAsync(request, token);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal("invalid_request", await ErrorCodeAsync(response, token));
+            AssertNotReadable(response);
+        }
+
+        // The rejected requests consumed nothing: the current member still rotates.
+        using (var stillLive = await browser.SendAsync(RefreshRequest(appId, current, origin), token))
+        {
+            Assert.Equal(HttpStatusCode.OK, stillLive.StatusCode);
+            AssertReadableBy(stillLive, origin);
+        }
+
+        // A Confidential client's refresh stays unreadable even with a Public application's Origin.
+        using (var password = new HttpRequestMessage(HttpMethod.Post, "/oauth2/token")
+               {
+                   Content = new FormUrlEncodedContent(new Dictionary<string, string>
+                   {
+                       ["grant_type"] = "password",
+                       ["username"] = IdentityServerFixture.AdminUsername,
+                       ["password"] = IdentityServerFixture.AdminPassword,
+                       ["client_id"] = IdentityServerFixture.GatewayAppId,
+                       ["client_secret"] = IdentityServerFixture.GatewayAppSecret
+                   })
+               })
+        {
+            using var issued = await browser.SendAsync(password, token);
+            Assert.Equal(HttpStatusCode.OK, issued.StatusCode);
+            var legacyRefresh = (await issued.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token))
+                .GetProperty("refresh_token").GetString()!;
+            using var confidential = new HttpRequestMessage(HttpMethod.Post, "/oauth2/token")
+            {
+                Content = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["grant_type"] = "refresh_token",
+                    ["client_id"] = IdentityServerFixture.GatewayAppId,
+                    ["client_secret"] = IdentityServerFixture.GatewayAppSecret,
+                    ["refresh_token"] = legacyRefresh
+                })
+            };
+            confidential.Headers.TryAddWithoutValidation("Origin", origin);
+            using var response = await browser.SendAsync(confidential, token);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            AssertNotReadable(response);
+        }
+
+        // Protocol errors after client authentication are readable: reuse revokes the descendants.
+        var reusedRoot = await RedeemOfflineRootAsync(browser, appId, identityCookie, token);
+        using var reusedRotation = await browser.SendAsync(RefreshRequest(appId, reusedRoot, origin), token);
+        Assert.Equal(HttpStatusCode.OK, reusedRotation.StatusCode);
+        var reusedChild = (await reusedRotation.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token))
+            .GetProperty("refresh_token").GetString()!;
+        using (var reuse = await browser.SendAsync(RefreshRequest(appId, reusedRoot, origin), token))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, reuse.StatusCode);
+            Assert.Equal("invalid_grant", await ErrorCodeAsync(reuse, token));
+            AssertReadableBy(reuse, origin);
+        }
+
+        using (var revokedChild = await browser.SendAsync(RefreshRequest(appId, reusedChild, origin), token))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, revokedChild.StatusCode);
+            Assert.Equal("invalid_grant", await ErrorCodeAsync(revokedChild, token));
+            AssertReadableBy(revokedChild, origin);
+        }
+
+        var disabledRoot = await RedeemOfflineRootAsync(browser, appId, identityCookie, token);
+        using (var refreshDisabled = await admin.PutAsJsonAsync(route + "/oidc-policy", Policy(true, false), token))
+        {
+            Assert.Equal(HttpStatusCode.OK, refreshDisabled.StatusCode);
+        }
+
+        using (var disabled = await browser.SendAsync(RefreshRequest(appId, disabledRoot, origin), token))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, disabled.StatusCode);
+            Assert.Equal("invalid_grant", await ErrorCodeAsync(disabled, token));
+            AssertReadableBy(disabled, origin);
+        }
+
+        using (var refreshEnabled = await admin.PutAsJsonAsync(route + "/oidc-policy", Policy(true, true, 3600), token))
+        {
+            Assert.Equal(HttpStatusCode.OK, refreshEnabled.StatusCode);
+        }
+
+        // Clearing the Origin registration removes read permission without changing the rotation.
+        var clearedRoot = await RedeemOfflineRootAsync(browser, appId, identityCookie, token);
+        using (var cleared = await admin.PutAsJsonAsync(route + "/oidc/allowed-origins",
+                   new { origins = Array.Empty<string>() }, token))
+        {
+            Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+        }
+
+        using (var afterClear = await browser.SendAsync(RefreshRequest(appId, clearedRoot, origin), token))
+        {
+            Assert.Equal(HttpStatusCode.OK, afterClear.StatusCode);
+            AssertNotReadable(afterClear);
+            clearedRoot = (await afterClear.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token))
+                .GetProperty("refresh_token").GetString()!;
+        }
+
+        // A deactivated application keeps its Origin row but fails client authentication unreadably.
+        using (var restored = await admin.PutAsJsonAsync(route + "/oidc/allowed-origins",
+                   new { origins = new[] { origin } }, token))
+        {
+            Assert.Equal(HttpStatusCode.OK, restored.StatusCode);
+        }
+
+        using (var deactivated = await admin.PutAsJsonAsync(route + "/callback",
+                   new { callbackUrl = (string?)null, ttlSeconds = 0, isActive = false }, token))
+        {
+            Assert.Equal(HttpStatusCode.OK, deactivated.StatusCode);
+        }
+
+        using var inactive = await browser.SendAsync(RefreshRequest(appId, clearedRoot, origin), token);
+        Assert.Equal(HttpStatusCode.Unauthorized, inactive.StatusCode);
+        Assert.Equal("invalid_client", await ErrorCodeAsync(inactive, token));
+        AssertNotReadable(inactive);
+    }
+
+    private static void AssertReadableBy(HttpResponseMessage response, string origin)
+    {
+        Assert.Equal(origin, Assert.Single(response.Headers.GetValues("Access-Control-Allow-Origin")));
+        Assert.Contains("Origin", response.Headers.Vary);
+        Assert.False(response.Headers.Contains("Access-Control-Allow-Credentials"));
+        Assert.False(response.Headers.Contains("Access-Control-Max-Age"));
+        Assert.Contains("no-store", response.Headers.CacheControl!.ToString());
+    }
+
+    private static void AssertNotReadable(HttpResponseMessage response)
+    {
+        Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
+        Assert.False(response.Headers.Contains("Access-Control-Allow-Credentials"));
+        Assert.Contains("Origin", response.Headers.Vary);
+        Assert.Contains("no-store", response.Headers.CacheControl!.ToString());
+    }
+
+    private static async Task<string?> ErrorCodeAsync(HttpResponseMessage response, CancellationToken token) =>
+        (await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token))
+        .GetProperty("error").GetString();
+
+    private static HttpRequestMessage RefreshRequest(string clientId, string refreshToken, string? origin)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/oauth2/token")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token", ["client_id"] = clientId, ["refresh_token"] = refreshToken
+            })
+        };
+        if (origin is not null)
+        {
+            request.Headers.TryAddWithoutValidation("Origin", origin);
+        }
+
+        return request;
+    }
+
+    private static async Task<string> CreatePublicAppAsync(HttpClient admin, string origin, CancellationToken token)
+    {
+        using var create = await admin.PostAsJsonAsync("/api/admin/apps",
+            new { appName = $"Public Refresh {Guid.NewGuid():N}", ttlSeconds = 0, clientType = "Public" }, token);
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+        var appId = (await create.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token))
+            .GetProperty("appId").GetString()!;
+        var route = $"/api/admin/apps/{appId}";
+        using var audience = await admin.PutAsJsonAsync(route + "/audience-mode", new { mode = "PerApplication" }, token);
+        Assert.Equal(HttpStatusCode.OK, audience.StatusCode);
+        using var redirect = await admin.PostAsJsonAsync(route + "/oidc/redirect-uris",
+            new { kind = "Redirect", uris = new[] { RedirectUri } }, token);
+        Assert.Equal(HttpStatusCode.OK, redirect.StatusCode);
+        using var origins = await admin.PutAsJsonAsync(route + "/oidc/allowed-origins",
+            new { origins = new[] { origin } }, token);
+        Assert.Equal(HttpStatusCode.OK, origins.StatusCode);
+        using var policy = await admin.PutAsJsonAsync(route + "/oidc-policy", Policy(true, false), token);
+        Assert.Equal(HttpStatusCode.OK, policy.StatusCode);
+        return appId;
+    }
+
+    private async Task<string> SignInAsync(HttpClient browser, string appId, CancellationToken token)
+    {
+        var username = $"public_refresh_{Guid.NewGuid():N}";
+        const string password = "Public-Refresh-Test-123!";
+        await SeedUserAsync(fixture.Services, username, password);
+        using var authorize = await browser.GetAsync(BuildAuthorizeUrl(appId), token);
+        Assert.Equal(HttpStatusCode.Found, authorize.StatusCode);
+        var handle = QueryHelpers.ParseQuery(new Uri(new Uri("https://local.test"), authorize.Headers.Location).Query)
+            ["login_handle"].ToString();
+        using var form = await browser.GetAsync($"/oauth2/login?login_handle={handle}", token);
+        Assert.Equal(HttpStatusCode.OK, form.StatusCode);
+        var html = await form.Content.ReadAsStringAsync(token);
+        var antiforgery = Regex.Match(html, "name=\"__RequestVerificationToken\" value=\"([^\"]*)\"").Groups[1].Value;
+        var cookie = GetSetCookieHeader(form, CookieName);
+        Assert.NotNull(cookie);
+        var login = new LoginSession(handle, CookieValueFromHeader(cookie!, CookieName), antiforgery);
+        using var completion = await browser.SendAsync(CreateLoginPost(
+            fields: LoginFields(login, username, password), cookieHeader: CookieHeaderFor(login)), token);
+        Assert.Equal(HttpStatusCode.Found, completion.StatusCode);
+        var identityCookie = GetSetCookieHeader(completion, IdentitySessionDefaults.CookieName);
+        Assert.NotNull(identityCookie);
+        return identityCookie!.Split(';')[0];
+    }
+
+    private static async Task<string> RedeemOfflineRootAsync(
+        HttpClient browser, string appId, string identityCookie, CancellationToken token)
+    {
+        using var authorize = new HttpRequestMessage(HttpMethod.Get,
+            BuildAuthorizeUrl(appId).Replace("scope=openid", "scope=openid%20offline_access", StringComparison.Ordinal));
+        authorize.Headers.TryAddWithoutValidation("Cookie", identityCookie);
+        using var callback = await browser.SendAsync(authorize, token);
+        Assert.Equal(HttpStatusCode.Found, callback.StatusCode);
+        var code = QueryHelpers.ParseQuery(callback.Headers.Location!.Query)["code"].ToString();
+        Assert.NotEmpty(code);
+        using var exchange = await browser.PostAsync("/oauth2/token",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code", ["client_id"] = appId,
+                ["code"] = code, ["redirect_uri"] = RedirectUri, ["code_verifier"] = Verifier
+            }), token);
+        Assert.Equal(HttpStatusCode.OK, exchange.StatusCode);
+        return (await exchange.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: token))
+            .GetProperty("refresh_token").GetString()!;
     }
 
     private static object Policy(bool code, bool refresh, int? maxAgeSeconds = null) => new

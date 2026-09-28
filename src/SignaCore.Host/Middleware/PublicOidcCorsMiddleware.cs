@@ -71,7 +71,7 @@ public sealed class PublicOidcCorsMiddleware(RequestDelegate next)
                     appId = BoundedOidcFormReadingMiddleware.GetStatus(context) == OidcBoundedFormStatus.Parsed
                         && context.Request.HasFormContentType
                         && context.Request.Form["grant_type"].Count == 1
-                        && context.Request.Form["grant_type"] == "authorization_code"
+                        && IsBrowserReadableGrant(context.Request.Form["grant_type"][0])
                         ? context.GetValidatedApp()?.AppId : null;
                 }
                 else
@@ -119,6 +119,11 @@ public sealed class PublicOidcCorsMiddleware(RequestDelegate next)
             return null;
         }
     }
+
+    // Code redemption and refresh rotation share one read condition: the validated Public app must register the Origin.
+    private static bool IsBrowserReadableGrant(string? grantType) =>
+        string.Equals(grantType, "authorization_code", StringComparison.Ordinal)
+        || string.Equals(grantType, "refresh_token", StringComparison.Ordinal);
 
     private static bool ValidPreflight(HttpRequest request, bool token)
     {

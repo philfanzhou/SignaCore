@@ -16,7 +16,8 @@ authorization-code client using S256 and a form `client_id`. The revoke endpoint
 `client_secret_basic` and `client_secret_post`. Public refresh requires a committed
 `offline_access` Code family and the current explicit bounded policy; `none` alone grants nothing.
 The metadata does not enable Public revoke or other Public grants. Exact registered Public Origin
-CORS for Code-token and UserInfo is a separate host policy, not inferred from this metadata.
+CORS for Code-token, refresh-token, and UserInfo responses is a separate host policy, not inferred
+from this metadata.
 It does not publish a standard
 `end_session_endpoint`.
 
