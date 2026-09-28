@@ -94,6 +94,7 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
         Assert.Contains("type=\"password\"", body, StringComparison.Ordinal);
         Assert.Contains("name=\"action\" value=\"login\"", body, StringComparison.Ordinal);
         Assert.Contains("name=\"action\" value=\"cancel\"", body, StringComparison.Ordinal);
+        AssertLoginFormValidationMarkup(body);
 
         // The stored continuation snapshot never reaches the page (canary values).
         Assert.DoesNotContain(RegisteredUri, body, StringComparison.Ordinal);

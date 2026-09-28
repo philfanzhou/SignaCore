@@ -502,6 +502,35 @@ internal static partial class OAuthLoginTestSupport
 
     // ---- Response inspection ----
 
+    [GeneratedRegex("<button[^>]*>")]
+    private static partial Regex ButtonTagPattern();
+
+    [GeneratedRegex("<input[^>]*>")]
+    private static partial Regex InputTagPattern();
+
+    /// <summary>
+    /// Asserts the client-side validation markup of a rendered login form: both credential inputs
+    /// stay <c>required</c> and only the Cancel button carries <c>formnovalidate</c>, so a browser
+    /// submits a cancel with empty fields while a login still runs its constraint validation.
+    /// </summary>
+    public static void AssertLoginFormValidationMarkup(string body)
+    {
+        var buttons = ButtonTagPattern().Matches(body).Select(match => match.Value).ToList();
+        Assert.Equal(2, buttons.Count);
+        var cancel = Assert.Single(buttons, button => button.Contains("value=\"cancel\"", StringComparison.Ordinal));
+        Assert.Equal("<button type=\"submit\" name=\"action\" value=\"cancel\" formnovalidate>", cancel);
+        var login = Assert.Single(buttons, button => button.Contains("value=\"login\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("formnovalidate", login, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(body, "formnovalidate"));
+
+        var inputs = InputTagPattern().Matches(body).Select(match => match.Value).ToList();
+        foreach (var name in new[] { "username", "password" })
+        {
+            var input = Assert.Single(inputs, tag => tag.Contains($"name=\"{name}\"", StringComparison.Ordinal));
+            Assert.EndsWith(" required>", input, StringComparison.Ordinal);
+        }
+    }
+
     public static string? GetSetCookieHeader(HttpResponseMessage response, string cookieName)
     {
         if (!response.Headers.NonValidated.TryGetValues("Set-Cookie", out var values))

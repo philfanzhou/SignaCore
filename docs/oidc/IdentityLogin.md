@@ -43,9 +43,11 @@ query/form field:
 
 The POST is a bounded UTF-8 form. Handle/action/antiforgery validation precedes conditional
 credential fields, so malformed structure and CSRF never invoke the Password validator or increment
-failed-attempt state. `action=cancel` does not inspect username or password. `action=login` applies
-the canonical username normalization and password opacity/length rules before reusing the existing
-Password validator, shared lockout, account-status, audit, and metric chain.
+failed-attempt state. `action=cancel` does not inspect username or password. The Cancel button
+carries `formnovalidate`, so a browser submits the cancel without client-side validation of the
+required credential fields. `action=login` applies the canonical username normalization and
+password opacity/length rules before reusing the existing Password validator, shared lockout,
+account-status, audit, and metric chain.
 
 Unknown account, wrong password, disabled account, and active lockout produce the same local
 credential failure. This preserves the existing bounded failed-attempt behavior without turning the

@@ -685,7 +685,9 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append(MaxPasswordLength)
             .Append("\" required></p>")
             .Append("<p><button type=\"submit\" name=\"action\" value=\"login\">Sign in</button> ")
-            .Append("<button type=\"submit\" name=\"action\" value=\"cancel\">Cancel</button></p>")
+            // Cancel skips the browser's constraint validation of the required credential fields:
+            // the server leaves on cancel before it reads them (IN-15).
+            .Append("<button type=\"submit\" name=\"action\" value=\"cancel\" formnovalidate>Cancel</button></p>")
             .Append("</form></body></html>");
         return builder.ToString();
     }

@@ -95,6 +95,8 @@ public sealed class OAuthLoginCredentialTests : IClassFixture<IdentityServerFixt
 
         // The generic page carries the fixed notice, the reusable pair, and no submitted value.
         Assert.Contains("Sign-in failed", bodies[0], StringComparison.Ordinal);
+        // The re-render comes from the same page builder: Cancel still skips client validation.
+        AssertLoginFormValidationMarkup(bodies[0]);
         Assert.Contains($"name=\"login_handle\" value=\"{session.Handle}\"", bodies[0], StringComparison.Ordinal);
         Assert.Contains($"value=\"{session.Token}\"", bodies[0], StringComparison.Ordinal);
         foreach (var (username, password) in submissions)
