@@ -57,6 +57,7 @@ public sealed class OAuthLoginCancelEndpointTests : IClassFixture<IdentityServer
         using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        AssertLoginRedirectContentSecurityPolicy(response);
         var issuer = _fixture.Services.GetRequiredService<JwtOptions>().Issuer;
         var expectedLocation =
             $"{LegalRegisteredUri}"

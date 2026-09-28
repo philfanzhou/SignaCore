@@ -87,6 +87,7 @@ public sealed class OAuthLoginSuccessEndpointTests : IClassFixture<IdentityServe
         var after = DateTimeOffset.UtcNow;
 
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        AssertLoginRedirectContentSecurityPolicy(response);
         var code = AssertSuccessLocation(response.Headers.Location!.ToString(), SuccessState);
 
         using var scope = _fixture.Services.CreateScope();

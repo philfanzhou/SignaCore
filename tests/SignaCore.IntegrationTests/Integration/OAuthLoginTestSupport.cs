@@ -56,6 +56,14 @@ internal static partial class OAuthLoginTestSupport
     public const string ExpectedContentSecurityPolicy =
         "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
+    /// <summary>
+    /// The policy of a rendered login form: the fixed set with <c>form-action</c> widened to the
+    /// origin of the continuation's stored redirect URI, so the browser can follow the cancel and
+    /// success redirects that the form submission produces.
+    /// </summary>
+    public static string ExpectedFormContentSecurityPolicy(string origin) =>
+        $"default-src 'none'; form-action 'self' {origin}; frame-ancestors 'none'; base-uri 'none'";
+
     public const string ActionFieldName = "action";
     public const string LoginActionValue = "login";
     public const string CancelActionValue = "cancel";
@@ -74,7 +82,8 @@ internal static partial class OAuthLoginTestSupport
     public static async Task<string> SeedContinuationAsync(
         IServiceProvider services,
         DateTimeOffset? createdAt = null,
-        bool consumed = false)
+        bool consumed = false,
+        string redirectUri = RegisteredUri)
     {
         var applicationId = await SeedApplicationAsync(services);
         using var scope = services.CreateScope();
@@ -83,7 +92,7 @@ internal static partial class OAuthLoginTestSupport
             new OidcAuthorizationValidationResult.Accepted(
                 AppId,
                 applicationId,
-                RegisteredUri,
+                redirectUri,
                 CanaryScope,
                 CanaryState,
                 CanaryNonce,
@@ -507,16 +516,42 @@ internal static partial class OAuthLoginTestSupport
     public static string CookieValueFromHeader(string setCookieHeader, string cookieName) =>
         setCookieHeader.Split(';')[0][(cookieName.Length + 1)..];
 
-    public static void AssertLoginSecurityHeaders(HttpResponseMessage response)
+    /// <summary>
+    /// Asserts the fixed browser security headers of a local answer — a rendered form or the
+    /// local 400 — which never carries a <c>Location</c>. The Content-Security-Policy defaults to
+    /// the fixed policy; a rendered form passes <see cref="ExpectedFormContentSecurityPolicy"/>.
+    /// </summary>
+    public static void AssertLoginSecurityHeaders(
+        HttpResponseMessage response,
+        string expectedContentSecurityPolicy = ExpectedContentSecurityPolicy)
+    {
+        AssertFixedBrowserSecurityHeaders(response, expectedContentSecurityPolicy);
+        Assert.False(response.Headers.Contains("Location"));
+    }
+
+    /// <summary>
+    /// Asserts that a cancel or success redirect keeps the unwidened <c>form-action 'self'</c>
+    /// policy: only a rendered form admits the callback origin.
+    /// </summary>
+    public static void AssertLoginRedirectContentSecurityPolicy(HttpResponseMessage response)
+    {
+        Assert.True(response.Headers.Contains("Location"));
+        Assert.Equal(
+            ExpectedContentSecurityPolicy,
+            response.Headers.GetValues("Content-Security-Policy").Single());
+    }
+
+    private static void AssertFixedBrowserSecurityHeaders(
+        HttpResponseMessage response,
+        string expectedContentSecurityPolicy)
     {
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
         Assert.Contains("no-cache", response.Headers.Pragma.ToString(), StringComparison.Ordinal);
         Assert.Equal("no-referrer", response.Headers.GetValues("Referrer-Policy").Single());
         Assert.Equal("DENY", response.Headers.GetValues("X-Frame-Options").Single());
         Assert.Equal(
-            ExpectedContentSecurityPolicy,
+            expectedContentSecurityPolicy,
             response.Headers.GetValues("Content-Security-Policy").Single());
-        Assert.False(response.Headers.Contains("Location"));
     }
 
     /// <summary>

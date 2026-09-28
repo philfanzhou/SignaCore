@@ -80,7 +80,9 @@ public sealed class OAuthLoginCredentialTests : IClassFixture<IdentityServerFixt
             using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            AssertLoginSecurityHeaders(response);
+            // The re-rendered form admits the same stored callback origin as the first render.
+            AssertLoginSecurityHeaders(
+                response, ExpectedFormContentSecurityPolicy("https://bff.login.test"));
             // EV-17 keeps the browser's existing cookie; no response writes a new one.
             Assert.Null(GetSetCookieHeader(response, CookieName));
             bodies.Add(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));

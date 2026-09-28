@@ -118,7 +118,9 @@ messages, traces, audit snapshots, and metric labels. The test fails if any raw 
 correlation-sensitive value appears. Digests are permitted only in the database relationships named
 by `PS-*`; they are not diagnostic substitutes for correlation ids.
 
-Browser endpoints use `Referrer-Policy: no-referrer`; login pages deny framing; credential and token
+Browser endpoints use `Referrer-Policy: no-referrer`; login pages deny framing; a rendered login
+form's `form-action` admits only its own origin and the origin of the request's stored, exactly
+matched redirect URI (see [Identity login](IdentityLogin.md)); credential and token
 responses use `Cache-Control: no-store`; authorization callbacks and one-time-handle query values are
 redacted from access logging. These requirements come from the canonical data-flow section and the
 closed endpoint designs in [#130](https://github.com/philfanzhou/SignaCore/issues/130),
