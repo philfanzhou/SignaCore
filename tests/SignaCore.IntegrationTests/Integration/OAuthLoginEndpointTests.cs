@@ -78,7 +78,13 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
 
         using var response = await client.GetAsync(url, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        AssertLoginSecurityHeaders(response);
+        AssertLoginSecurityHeaders(
+            response, ExpectedFormContentSecurityPolicy("https://bff.login.test"));
+        // The policy carries only the callback origin: no path, query, or other stored value.
+        var policy = response.Headers.GetValues("Content-Security-Policy").Single();
+        Assert.DoesNotContain("canary", policy, StringComparison.Ordinal);
+        Assert.DoesNotContain("/callback", policy, StringComparison.Ordinal);
+        Assert.DoesNotContain("?", policy, StringComparison.Ordinal);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains("<form action=\"/oauth2/login\" method=\"post\">", body, StringComparison.Ordinal);
@@ -144,6 +150,78 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
             using var legalResponse = await legalClient.SendAsync(
                 legalCancel, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.Found, legalResponse.StatusCode);
+        }
+    }
+
+    // ---- The rendered form admits only its own stored callback origin (form-action) ----
+
+    [Theory]
+    [InlineData("https://client.example.test:8443/cb", "https://client.example.test:8443")]
+    [InlineData("http://127.0.0.1:5173/callback", "http://127.0.0.1:5173")]
+    [InlineData("https://bff.login.test/callback?canary=redirect-uri", "https://bff.login.test")]
+    public async Task GetWithAnActiveHandle_AdmitsTheStoredCallbackOriginInFormAction(
+        string storedRedirectUri,
+        string expectedOrigin)
+    {
+        var handle = await SeedContinuationAsync(_fixture.Services, redirectUri: storedRedirectUri);
+        using var client = _fixture.CreateHttpClient();
+
+        using var response = await client.GetAsync(
+            $"/oauth2/login?login_handle={handle}", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        AssertLoginSecurityHeaders(response, ExpectedFormContentSecurityPolicy(expectedOrigin));
+    }
+
+    [Theory]
+    // An IPv6 literal cannot be expressed as a CSP host-source; the documented development
+    // loopback is 127.0.0.1.
+    [InlineData("http://[::1]:5173/callback")]
+    // Values outside the canonical registered shape never widen the policy: user info, a non-HTTP
+    // scheme, a non-absolute value, and attempted source or directive injection.
+    [InlineData("https://user@client.example.test/cb")]
+    [InlineData("ftp://client.example.test/cb")]
+    [InlineData("urn:client:callback")]
+    [InlineData("/relative/callback")]
+    [InlineData("https://client.example.test;script-src/cb")]
+    [InlineData("https://client.example.test,https://evil.test/cb")]
+    [InlineData("https://client.example.test' 'unsafe-inline/cb")]
+    [InlineData("https://client.example.test https://evil.test/cb")]
+    public async Task GetWithAStoredRedirectUriThatIsNotAnExpressibleOrigin_KeepsTheFixedPolicy(
+        string storedRedirectUri)
+    {
+        var handle = await SeedContinuationAsync(_fixture.Services, redirectUri: storedRedirectUri);
+        using var client = _fixture.CreateHttpClient();
+
+        using var response = await client.GetAsync(
+            $"/oauth2/login?login_handle={handle}", TestContext.Current.CancellationToken);
+
+        // The form still renders; only the form-action widening is withheld.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        AssertLoginSecurityHeaders(response);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("<form action=\"/oauth2/login\" method=\"post\">", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TwoContinuations_EachAdmitOnlyTheirOwnCallbackOrigin()
+    {
+        var loginHandle = await SeedContinuationAsync(_fixture.Services);
+        var cancelHandle = await SeedLegalContinuationAsync(_fixture.Services);
+        using var client = _fixture.CreateHttpClient();
+
+        // Interleaved renders in one browser: each form carries exactly its own stored origin.
+        foreach (var (handle, origin) in new[]
+                 {
+                     (loginHandle, "https://bff.login.test"),
+                     (cancelHandle, "https://bff.cancel.test"),
+                     (loginHandle, "https://bff.login.test"),
+                 })
+        {
+            using var response = await client.GetAsync(
+                $"/oauth2/login?login_handle={handle}", TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            AssertLoginSecurityHeaders(response, ExpectedFormContentSecurityPolicy(origin));
         }
     }
 

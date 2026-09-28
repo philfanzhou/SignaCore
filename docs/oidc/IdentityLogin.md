@@ -63,7 +63,19 @@ choice is load-bearing:
 - missing, expired, and consumed handles follow `EV-03` without recovering stale redirect data.
 
 The GET page renders no redirect URI, scope, state, nonce, challenge, or other stored request value.
-It uses no-store/no-cache/no-referrer headers and denies framing. Passwords, handles, cookie values,
+It uses no-store/no-cache/no-referrer headers and denies framing. A rendered login form (the GET page
+and the credential-failure re-render) sends
+`Content-Security-Policy: default-src 'none'; form-action 'self' <origin>; frame-ancestors 'none'; base-uri 'none'`,
+where `<origin>` is the `scheme://host[:port]` origin of the request's stored, exactly matched
+redirect URI. Browsers enforce the submitting page's `form-action` across the redirect chain of the
+submission, so without that origin the cancel and success redirects to a callback on another origin
+would be blocked. The origin is derived only from the stored redirect URI, never from request input,
+and the header carries no path, query, state, or other stored value. A redirect URI whose origin
+cannot be expressed as a CSP host-source (for example an IPv6 literal such as `http://[::1]:5173`)
+keeps `form-action 'self'`; use `127.0.0.1` for local development callbacks. Every other
+`/oauth2/login` response, including local errors and the cancel and success redirects, keeps
+`form-action 'self'`. The policy is not redirect validation: the exact redirect URI checks and
+revalidation remain the only authority for where a browser is sent. Passwords, handles, cookie values,
 and antiforgery values follow `DF-01`, `DF-05`, and `DF-06` and never enter logs, audit details,
 metrics, traces, exceptions, or error bodies.
 

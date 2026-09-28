@@ -1,10 +1,12 @@
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Net.Http.Headers;
 using SignaCore.Database;
+using SignaCore.Database.Entity;
 using SignaCore.Domain;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
@@ -42,11 +44,13 @@ namespace SignaCore.Host.Controllers;
 /// on the two verified exits — the cancel's <c>access_denied</c> redirect and the success's
 /// <c>code</c> redirect — both to the exact registered URI. The page renders no stored
 /// continuation value — no redirect URI, scope, state, nonce, or challenge — so the login surface
-/// cannot be used to read them back.
+/// cannot be used to read them back. The only stored-derived value on a rendered form is the
+/// callback origin in its <c>form-action</c> directive, which the browser learns from the redirect
+/// anyway.
 /// </para>
 /// </remarks>
 [Route("oauth2/login")]
-public sealed class OAuthLoginController : ControllerBase
+public sealed partial class OAuthLoginController : ControllerBase
 {
     /// <summary>
     /// The single local 400 body. Every structural, handle, action, antiforgery, and
@@ -69,6 +73,13 @@ public sealed class OAuthLoginController : ControllerBase
         "<p role=\"alert\">Sign-in failed. Check your username and password and try again.</p>";
 
     private const string HtmlContentType = "text/html; charset=utf-8";
+
+    /// <summary>
+    /// The fixed Content-Security-Policy of every <c>/oauth2/login</c> response that is not a
+    /// rendered form: the local 400 and the cancel and success redirects.
+    /// </summary>
+    private const string DefaultContentSecurityPolicy =
+        "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
     /// <summary>The canonical 16 KiB bound of the POST form body.</summary>
     private const int MaxRequestBodyBytes = 16 * 1024;
@@ -190,6 +201,7 @@ public sealed class OAuthLoginController : ControllerBase
                 CreateAntiforgeryCookieOptions());
         }
 
+        ApplyLoginFormContentSecurityPolicy(continuation);
         return Content(
             BuildLoginPage(loginHandle, pair.RequestToken, showFailureNotice: false),
             HtmlContentType,
@@ -460,6 +472,7 @@ public sealed class OAuthLoginController : ControllerBase
         // The response is written only after the failure unit has committed. The form reuses the
         // validated handle and request token so the browser can retry against its existing
         // cookie; no cookie is written here and no submitted value is echoed.
+        ApplyLoginFormContentSecurityPolicy(continuation);
         return Content(
             BuildLoginPage(loginHandle, requestToken, showFailureNotice: true),
             HtmlContentType,
@@ -699,7 +712,8 @@ public sealed class OAuthLoginController : ControllerBase
     /// <summary>
     /// Applied before any branch runs, so every <c>/oauth2/login</c> response — 200, 302, and 400
     /// alike — carries the same fixed set. The login page additionally denies framing outright,
-    /// beyond the authorize endpoint's referrer and cache protections.
+    /// beyond the authorize endpoint's referrer and cache protections. A rendered form then
+    /// widens only <c>form-action</c> (<see cref="ApplyLoginFormContentSecurityPolicy"/>).
     /// </summary>
     private void ApplyBrowserSecurityHeaders()
     {
@@ -707,9 +721,55 @@ public sealed class OAuthLoginController : ControllerBase
         Response.Headers.Pragma = "no-cache";
         Response.Headers["Referrer-Policy"] = "no-referrer";
         Response.Headers.XFrameOptions = "DENY";
-        Response.Headers.ContentSecurityPolicy =
-            "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+        Response.Headers.ContentSecurityPolicy = DefaultContentSecurityPolicy;
     }
+
+    /// <summary>
+    /// Replaces the fixed policy on a rendered login form (the GET render and the credential-failure
+    /// re-render). Browsers enforce the submitting document's <c>form-action</c> across the whole
+    /// redirect chain of the submission, so the cancel and success redirects to the verified
+    /// callback would be blocked whenever that callback is not on this origin. The form therefore
+    /// also admits the origin of the continuation's stored, exactly matched redirect URI — never a
+    /// value taken from the request — and nothing else.
+    /// </summary>
+    private void ApplyLoginFormContentSecurityPolicy(AuthorizationRequestEntity continuation)
+    {
+        Response.Headers.ContentSecurityPolicy =
+            BuildLoginFormContentSecurityPolicy(continuation.RedirectUri);
+    }
+
+    /// <summary>
+    /// Builds the form policy from the stored redirect URI. Only the <c>scheme://host[:port]</c>
+    /// origin is emitted, and only when it is an http or https origin expressible as a CSP
+    /// host-source (lower-case DNS name or IPv4 literal, optional explicit port). Anything else —
+    /// for example an IPv6 literal loopback, which host-source syntax cannot express — keeps the
+    /// fixed <c>form-action 'self'</c> policy; the page still renders and nothing is logged.
+    /// </summary>
+    private static string BuildLoginFormContentSecurityPolicy(string storedRedirectUri)
+    {
+        if (!Uri.TryCreate(storedRedirectUri, UriKind.Absolute, out var redirectUri)
+            || (redirectUri.Scheme != Uri.UriSchemeHttp && redirectUri.Scheme != Uri.UriSchemeHttps))
+        {
+            return DefaultContentSecurityPolicy;
+        }
+
+        var origin = redirectUri.GetLeftPart(UriPartial.Authority);
+        if (!FormActionOriginPattern().IsMatch(origin))
+        {
+            return DefaultContentSecurityPolicy;
+        }
+
+        return "default-src 'none'; form-action 'self' " + origin
+            + "; frame-ancestors 'none'; base-uri 'none'";
+    }
+
+    /// <summary>
+    /// The complete shape of an admitted <c>form-action</c> origin. The closed character set rules
+    /// out whitespace, quotes, semicolons, commas, user info, paths, queries, and fragments, so the
+    /// stored value can never inject another source or directive into the policy.
+    /// </summary>
+    [GeneratedRegex(@"\Ahttps?://[a-z0-9.-]+(:[0-9]{1,5})?\z", RegexOptions.CultureInvariant)]
+    private static partial Regex FormActionOriginPattern();
 
     /// <summary>
     /// The <c>PS-19</c> cookie attributes: host-only, secure, strict same-site, root path, no
