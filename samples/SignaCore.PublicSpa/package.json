@@ -1,0 +1,13 @@
+{
+  "name": "signacore-public-spa-sample",
+  "private": true,
+  "type": "module",
+  "description": "Zero-dependency SignaCore Public client sample. Not published.",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "start": "node serve.mjs",
+    "test": "node --test 'test/*.test.mjs'"
+  }
+}

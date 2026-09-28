@@ -256,3 +256,9 @@ binary without `sha256-public:` family support requires affected Public clients 
 Already-issued self-contained JWTs remain valid until their own `exp`. Rolling back to a binary
 without refresh CORS only removes the Origin header from refresh responses; issued tokens and
 family state are unaffected and no data migration is needed.
+
+A Public client's sign-out only clears its own page: it cannot revoke the refresh family or end the
+SignaCore identity session, so the family stays valid until its bounded expiry and a new sign-in may
+not prompt. On shared devices an administrator revokes the identity session, or the browser is
+closed. The [Public SPA sample](../../samples/SignaCore.PublicSpa/README.md) shows the complete
+registration order and these limits.

@@ -79,6 +79,10 @@ jobs:
           npm run test:coverage
           npm run build
 
+      # The Public SPA sample has no npm dependencies; Node's built-in runner executes its tests.
+      - name: Public SPA sample tests
+        run: node --test 'samples/SignaCore.PublicSpa/test/*.test.mjs'
+
       - name: Build image
         run: bash build.sh
 
