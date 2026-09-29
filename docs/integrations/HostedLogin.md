@@ -62,6 +62,7 @@ registered, and neither failure repairs the configuration.
 5. **Public browser clients only:** register the exact browser Origin with
    `PUT /api/admin/apps/{appId}/oidc/allowed-origins`. It only lets that Origin read the token and
    UserInfo responses; see [Public Origin CORS](../oidc/TokenEndpoint.md#public-origin-cors).
+6. **SMS sign-in (optional):** see [SMS sign-in](#sms-sign-in-optional).
 
 Existing SignaCore accounts sign in unchanged; no account needs to be re-created.
 
@@ -131,14 +132,17 @@ a Confidential client, 300 for a Public client), `id_token`, the granted `scope`
 Validate the ID token before creating a local session: RS256 signature through the JWKS key named
 by its `kid`, `typ: JWT`, `iss` equal to the Discovery issuer, `aud` equal to the client id,
 `exp`/`iat`, and `nonce` equal to the pending value. Its claims are `sub` (the stable SignaCore
-account id), `auth_time`, `sid`, and `amr` (`["pwd"]`), plus `name` (the SignaCore username) and
-`nickname` when `profile` was granted. Key the local user by `iss` plus `sub`; the ID token carries
-no roles or permissions, so authorization stays the service's own decision.
+account id), `auth_time`, `sid`, and `amr` (`["pwd"]` for a password sign-in, `["sms"]` for an
+[SMS sign-in](#sms-sign-in-optional)), plus `name` (the SignaCore username) and `nickname` when
+`profile` was granted. After an SMS sign-in, `name` appears only when the account has exactly one
+SignaCore username. Key the local user by `iss` plus `sub`; the ID token carries no roles or
+permissions, so authorization stays the service's own decision.
 
 Call downstream services with the access token as a Bearer credential. They validate it as before —
 signature through JWKS, issuer, audience (the application's `appId`), lifetime, and `typ: at+jwt` —
 without calling SignaCore. `GET userinfo_endpoint` with the access token returns `sub` and, with
-`profile`, `name` and `nickname`.
+`profile`, `name` (under the same rule as the ID token) and `nickname`. No token or UserInfo response
+ever carries the user's phone number.
 
 ## 6. Refresh tokens (optional)
 
@@ -190,6 +194,36 @@ preparing logout do not extend it. This has direct consequences:
   Confidential client, 5 minutes for a Public client), even after sign-out or account
   deactivation. A downstream service that needs an immediate cut-off must check state itself.
 
+## SMS sign-in (optional)
+
+The hosted page can also sign users in with a mainland China mobile number and a one-time code sent
+by SMS. It is enabled per application with `PUT /api/admin/apps/{appId}/sms-policy` and
+`{"mode":"<ManualApproval|AutoProvision>","profileKey":"<profile>"}`, where `profileKey` names a
+configured SMS provider profile (`GET /api/admin/sms/profiles` lists them). The page shows the SMS
+form only while the mode is not `Disabled` and a profile is set; otherwise it offers the password
+form alone.
+
+- `ManualApproval` admits only phones an administrator added to the application
+  (`POST /api/admin/apps/{appId}/sms-users`).
+- `AutoProvision` also admits a new phone: the first successful sign-in creates the SignaCore
+  account and admits it to the application. Requesting a code never creates anything.
+- Revoking a phone (`DELETE /api/admin/apps/{appId}/sms-users/{loginId}`) or setting the mode to
+  `Disabled` stops that application from using the phone's SignaCore session at its next
+  authorization request, code exchange, refresh, or UserInfo call, without affecting other
+  applications.
+
+The page answers every code request with the same notice — "if this phone number can sign in to
+this application, a verification code has been sent" — whether or not a code was actually sent, and
+every failed SMS sign-in with the same failure notice. This prevents the page from revealing which
+numbers are registered or admitted, at a user-experience cost the service should explain in its own
+help text: a user whose number cannot sign in sees the same notice as everyone else and receives no
+code. Code requests are limited per sign-in attempt, per network, and per phone, and the response
+time is not made uniform. The SMS token grant's bypass code never works on the hosted page.
+
+An SMS sign-in issues the same code, tokens, and session as a password sign-in, with
+`amr: ["sms"]` and the `name` rule above. The service must accept both `amr` values and must not
+expect a phone number in any token.
+
 ## Mobile applications
 
 Mobile applications use the system browser component, never an embedded WebView. Custom-scheme
@@ -235,9 +269,12 @@ platform and OS version. SignaCore does not provide a mobile SDK.
 5. Remove the service's calls to the Password grant and any storage of user credentials. The
    grants themselves stay available to other consumers.
 
-The hosted login page accepts SignaCore username-and-password accounts. A service whose users sign
-in only through the SMS grant keeps using that grant until the hosted page accepts a credential
-they hold; this guide is extended when that changes.
+The hosted login page accepts SignaCore username-and-password accounts and, for an application with
+[SMS sign-in](#sms-sign-in-optional) enabled, mainland China mobile numbers with a one-time code. A
+service whose users sign in through the SMS grant enables SMS sign-in for its application and moves
+them to the hosted page: a phone that already signed in through the SMS grant keeps the same
+SignaCore account and therefore the same `sub`. Under `ManualApproval` the phone must be admitted to
+the application; the SMS grant's admissions for that application carry over unchanged.
 
 ## Responsibilities
 

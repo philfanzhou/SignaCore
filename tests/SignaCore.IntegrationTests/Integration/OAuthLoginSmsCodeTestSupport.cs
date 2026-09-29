@@ -19,7 +19,8 @@ using Xunit;
 namespace SignaCore.Tests.Integration;
 
 /// <summary>
-/// Seeding, request, and inspection helpers of the browser SMS send route suites (#444). Every
+/// Seeding, request, and inspection helpers of the browser SMS send route and SMS login suites
+/// (#444, #445). Every
 /// application, continuation, and phone is unique per test, so tests sharing one fixture database
 /// never observe each other's rows.
 /// </summary>
@@ -37,12 +38,34 @@ internal static partial class OAuthLoginSmsCodeTestSupport
 
     public const string EnglishInvalidPhoneNotice = "<p role=\"alert\">Enter a valid mainland China mobile number.</p>";
 
+    public const string EnglishSmsFailureNotice =
+        "<p role=\"alert\">Sign-in failed. Check your mobile number and verification code and try again, or request a new code.</p>";
+
+    public const string ChineseSmsFailureNotice = "<p role=\"alert\">登录失败。请检查手机号和验证码后重试，或重新获取验证码。</p>";
+
+    /// <summary>The always empty one-time-code input of the SMS region (<c>DF-17</c>).</summary>
+    public const string OtpInput =
+        "<input type=\"text\" id=\"otp\" name=\"otp\" inputmode=\"numeric\" autocomplete=\"one-time-code\" maxlength=\"16\" required>";
+
+    /// <summary>The unnamed send button: it posts the SMS form to the send route without validation.</summary>
+    public const string SendButton = "<button type=\"submit\" formaction=\"/oauth2/login/sms-code\" formnovalidate>";
+
+    public const string SmsSubmitButton = "<button type=\"submit\" name=\"action\" value=\"sms_login\">";
+
+    /// <summary>The phone input of the SMS region re-rendered with <paramref name="value"/>.</summary>
+    public static string PhoneInput(string value) =>
+        "<input type=\"tel\" id=\"phone\" name=\"phone\" autocomplete=\"tel\" maxlength=\"32\" value=\"" + value + "\" required>";
+
     public sealed record SmsApp(Guid Id, string AppId);
 
     public sealed record SmsSession(string Handle, string CookieValue, string Token, Guid ContinuationId);
 
     [GeneratedRegex("name=\"__RequestVerificationToken\" value=\"([^\"]*)\"")]
     private static partial Regex TokenPattern();
+
+    /// <summary>Replaces every rendered request token of <paramref name="body"/> with <paramref name="token"/>.</summary>
+    public static string WithRequestToken(string body, string token) =>
+        TokenPattern().Replace(body, "name=\"__RequestVerificationToken\" value=\"" + token + "\"");
 
     /// <summary>A fresh mainland mobile number, unique per call, in its bare 11-digit form.</summary>
     public static string NewPhone() =>
@@ -87,7 +110,8 @@ internal static partial class OAuthLoginSmsCodeTestSupport
     public static async Task<SmsApp> SeedSmsAppAsync(
         IServiceProvider services,
         SmsLoginMode mode,
-        string? profileKey = ProfileKey)
+        string? profileKey = ProfileKey,
+        string? clientSecret = null)
     {
         using var scope = services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
@@ -95,7 +119,7 @@ internal static partial class OAuthLoginSmsCodeTestSupport
         {
             Id = Guid.NewGuid(),
             AppId = "sms-send-" + Guid.NewGuid().ToString("N")[..16],
-            AppSecretHash = "unused-sms-send-hash",
+            AppSecretHash = clientSecret is null ? "unused-sms-send-hash" : BCrypt.Net.BCrypt.HashPassword(clientSecret, 4),
             AppName = "SMS Send App",
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -125,7 +149,8 @@ internal static partial class OAuthLoginSmsCodeTestSupport
     public static async Task<(string Handle, Guid Id)> SeedContinuationAsync(
         IServiceProvider services,
         SmsApp app,
-        DateTimeOffset? createdAt = null)
+        DateTimeOffset? createdAt = null,
+        string scopeValue = "openid")
     {
         using var scope = services.CreateScope();
         var store = scope.ServiceProvider.GetRequiredService<IAuthorizationRequestStore>();
@@ -134,7 +159,7 @@ internal static partial class OAuthLoginSmsCodeTestSupport
                 app.AppId,
                 app.Id,
                 RedirectUri,
-                "openid",
+                scopeValue,
                 "sms-send-state-" + Guid.NewGuid().ToString("N"),
                 "sms-send-nonce-" + Guid.NewGuid().ToString("N"),
                 "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"),
@@ -144,9 +169,10 @@ internal static partial class OAuthLoginSmsCodeTestSupport
     }
 
     /// <summary>Renders the login page for a fresh continuation and returns its form values.</summary>
-    public static async Task<SmsSession> BeginAsync(IServiceProvider services, HttpClient client, SmsApp app)
+    public static async Task<SmsSession> BeginAsync(
+        IServiceProvider services, HttpClient client, SmsApp app, string scope = "openid")
     {
-        var (handle, id) = await SeedContinuationAsync(services, app);
+        var (handle, id) = await SeedContinuationAsync(services, app, scopeValue: scope);
         using var response = await client.GetAsync(
             $"/oauth2/login?login_handle={handle}", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -173,6 +199,21 @@ internal static partial class OAuthLoginSmsCodeTestSupport
         new("phone", phone),
     ];
 
+    /// <summary>The fields the SMS form posts with its <c>sms_login</c> button.</summary>
+    public static IReadOnlyList<KeyValuePair<string, string>> SmsLoginFields(
+        SmsSession session,
+        string phone,
+        string otp,
+        string? handle = null,
+        string? token = null) =>
+    [
+        new("login_handle", handle ?? session.Handle),
+        new(LoginAntiforgeryDefaults.TokenFieldName, token ?? session.Token),
+        new("phone", phone),
+        new("otp", otp),
+        new("action", "sms_login"),
+    ];
+
     public static string CookieHeader(SmsSession session) =>
         $"{LoginAntiforgeryDefaults.CookieName}={session.CookieValue}";
 
@@ -185,9 +226,10 @@ internal static partial class OAuthLoginSmsCodeTestSupport
         string? query = null,
         bool withCookie = true,
         string? acceptLanguage = null,
-        string correlationId = FixedCorrelationId)
+        string correlationId = FixedCorrelationId,
+        string path = SendPath)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, SendPath + (query ?? string.Empty));
+        var request = new HttpRequestMessage(HttpMethod.Post, path + (query ?? string.Empty));
         var bytes = rawBodyBytes ?? Encoding.UTF8.GetBytes(rawBody
             ?? OAuthLoginTestSupport.BuildEscapedBody(fields ?? throw new ArgumentException("A body is required.")));
         var content = new ByteArrayContent(bytes);
@@ -375,17 +417,23 @@ internal sealed class FakeSmsSender : ISmsSender
     }
 }
 
-/// <summary>Collects the <c>login-sms-code</c> outcome and duration observations, and every tag value.</summary>
+/// <summary>
+/// Collects the outcome and duration observations of one browser SMS endpoint label
+/// (<c>login-sms-code</c> by default, or <c>login-sms</c>), and every tag value.
+/// </summary>
 internal sealed class SmsCodeMetricsCollector : IDisposable
 {
+    private readonly string _endpoint;
+
     private readonly MeterListener _listener;
     private readonly ConcurrentQueue<string> _outcomes = new();
     private readonly ConcurrentQueue<double> _durations = new();
     private readonly ConcurrentQueue<string> _tagValues = new();
     private readonly ConcurrentQueue<string> _labelSets = new();
 
-    public SmsCodeMetricsCollector()
+    public SmsCodeMetricsCollector(string endpoint = "login-sms-code")
     {
+        _endpoint = endpoint;
         _listener = new MeterListener
         {
             InstrumentPublished = (instrument, listener) =>
@@ -408,7 +456,7 @@ internal sealed class SmsCodeMetricsCollector : IDisposable
 
     public IReadOnlyCollection<string> TagValues => _tagValues;
 
-    /// <summary>The sorted label keys of every <c>login-sms-code</c> observation.</summary>
+    /// <summary>The sorted label keys of every observation of the collected endpoint.</summary>
     public IReadOnlyCollection<string> LabelSets => _labelSets;
 
     public void Dispose() => _listener.Dispose();
@@ -426,7 +474,7 @@ internal sealed class SmsCodeMetricsCollector : IDisposable
             if (tag.Key == "outcome") outcome = tag.Value?.ToString();
         }
 
-        if (endpoint != "login-sms-code")
+        if (endpoint != _endpoint)
         {
             return;
         }

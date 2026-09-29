@@ -5,8 +5,8 @@
 
 Identity login proves which SignaCore account controls the browser. It does not grant permission to
 administer SignaCore, authorize a downstream business action, or create an OIDC token by itself.
-The Password credential establishes this browser identity today. The target design adds an SMS
-one-time code as the second and only other credential; see
+The Password credential and, for an application whose SMS login is enabled, an SMS one-time code
+(active since `AC-17`) are the only two credentials that establish this browser identity; see
 [SMS one-time-code login](#sms-one-time-code-login) and the activation stages `AC-15`–`AC-17`.
 
 ## Isolation from administration
@@ -41,12 +41,13 @@ query/form field:
 | Request | Fields | Canonical rows |
 | --- | --- | --- |
 | `GET /oauth2/login` | `login_handle` only | `IN-10` |
-| `POST /oauth2/login` | `login_handle`, `username`, `password`, `__RequestVerificationToken`, `action`; from `AC-17` also `phone` and `otp` for `action=sms_login` | `IN-11`–`IN-15`, `IN-17`–`IN-19` |
+| `POST /oauth2/login` | `login_handle`, `username`, `password`, `__RequestVerificationToken`, `action`, `phone`, `otp` (`phone` and `otp` are read only for `action=sms_login`; `username` and `password` only for `action=login`) | `IN-11`–`IN-15`, `IN-17`–`IN-19` |
 | `POST /oauth2/login/sms-code` (active since `AC-16`) | `login_handle`, `__RequestVerificationToken`, `phone`, `otp` (ignored) | `IN-16`, `IN-17`, `IN-19` |
 
 The POST is a bounded UTF-8 form. Handle/action/antiforgery validation precedes conditional
 credential fields, so malformed structure and CSRF never invoke the Password validator or increment
-failed-attempt state. `action=cancel` does not inspect username or password. The Cancel button
+failed-attempt state. `action=cancel` does not inspect username, password, phone, or otp;
+`action=login` ignores phone and otp, and `action=sms_login` ignores username and password. The Cancel button
 carries `formnovalidate`, so a browser submits the cancel without client-side validation of the
 required credential fields. `action=login` applies the canonical username normalization and
 password opacity/length rules before reusing the existing Password validator, shared lockout,
@@ -58,8 +59,8 @@ new public login form into an account oracle.
 
 ## SMS one-time-code login
 
-**Status: the send route is active since `AC-16` (#444); SMS login and the page region remain target
-design until `AC-17` (#445).** This section explains the canonical rows and does not restate them.
+**Status: active. The send route since `AC-16` (#444); SMS login and the page region since `AC-17`
+(#445).** This section explains the canonical rows and does not restate them.
 
 The application comes only from the stored continuation, and its current SMS policy decides every
 result exactly as the SMS grant does: the `IN-19` gate (`SmsLoginMode` not `Disabled` and an SMS
@@ -78,12 +79,31 @@ an invalid phone format is the only other 200 answer and depends only on the typ
 login failure returns the generic SMS failure of `EV-37`, and the Password failed-attempt counter
 is never touched by the SMS path.
 
-Until `AC-17` the login page renders no SMS region, so no rendered page offers a send yet and the
-route is reached only by a direct form post. Its uniform result is the Password login page, re-rendered
-for the submitted handle and request token with the fixed send notice; the invalid-phone answer is the
-same page with the fixed invalid-phone notice. Neither page has a phone input or carries the submitted
-phone in any form; the filled phone input arrives with the SMS region in `AC-17`. Neither page writes
-a cookie: the browser keeps its existing antiforgery pair.
+While the `IN-19` gate is open, every rendered login page — the GET page, the Password failure
+re-render, both send-route answers, and every SMS login answer — carries the SMS region as a second
+form below the Password form. The region has its own hidden handle and request token, a `phone`
+input, an always empty `otp` input, an unnamed send button that posts the same form to
+`/oauth2/login/sms-code` through `formaction` and `formnovalidate`, and a submit button named
+`action` with value `sms_login`. The Password form keeps its five fields. The send route's uniform
+result re-renders the page for the submitted handle and request token with the fixed send notice and
+the phone input filled with the normalized E.164 value; the invalid-phone answer has the fixed
+invalid-phone notice and an empty phone input. No answer writes a cookie except a successful login:
+the browser keeps its existing antiforgery pair.
+
+`action=sms_login` runs, in order, the `IN-19` gate, the `IN-17` phone checks, the `IN-18` code
+checks, send eligibility, the read-only OTP verification, the same current client, exact redirect
+URI, and scope revalidation as a Password login, and only then the `EV-36` transaction. A closed gate
+and a missing or over-long phone or code are the local 400; an empty or unnormalizable phone is the
+invalid-phone page. The configured SMS bypass code (`Sms:BypassCode`/`Sms:BypassPhones`) applies only
+to the SMS token grant, never to this path. `EV-36` commits the continuation consumption, the
+conditional OTP consumption, any `AutoProvision` account/identity/admission creation, a recheck of
+the `PS-04` predicate, the `Sms` session, the code, the login info, and one masked `login_success`
+row together; a concurrent provisioning of the same phone retries the unit once and reuses the
+winner's identity (`SC-23`). Every `EV-37` case — an ineligible phone, no current code, and a wrong,
+expired, or locked code, and a race lost inside `EV-36` — answers one generic page: the fixed SMS
+failure notice, the normalized phone in the phone input, and an empty `otp` input, byte-identical
+for one handle, request token, phone, and page language. The continuation stays usable, so the user
+can request another code or switch to the Password form.
 
 The uniform result has a user-experience cost that integrators should explain to their users: a
 phone that cannot sign in to the application still sees a notice that a code may have been sent.
@@ -185,7 +205,7 @@ state into this document:
 | Invalid CSRF versus valid but wrong credentials | `SC-19` |
 | Cancellation before and after commit | `SC-20` |
 | Independent concurrent authorization requests | `SC-07` |
-| SMS send abuse and send races (active since `AC-16`); SMS login, admission, provisioning, and reuse (target) | `SC-21`–`SC-26` |
+| SMS send abuse and send races (since `AC-16`); SMS login, admission, provisioning, and reuse (since `AC-17`) | `SC-21`–`SC-26` |
 
 Tests additionally assert the `PS-18`/`PS-19` cookie attributes and cross-scheme rejection, the
 `IN-10`–`IN-15` field/error contract, no external redirect from an invalid handle, and the sensitive
@@ -197,7 +217,9 @@ This target document changes no current cookie, principal, Password grant, locko
 management session or management API (`PS-18`), or Data Protection key material. The only browser
 asset is the login stylesheet described above.
 LDAP and WeChat remain token-endpoint grants with no identity-login UI. The SMS token grants and
-`POST /api/auth/sms-code` keep their current behavior. Browser SMS activates through #443–#445
-(`AC-15`–`AC-17`): the storage (#443) and the send route (#444) are active, and SMS login activates
-only with #445. Runtime work for the Password login is divided among #64–#66 and #94;
+`POST /api/auth/sms-code` keep their current behavior. Browser SMS is active through #443–#445
+(`AC-15`–`AC-17`): the storage (#443), the send route (#444), the `Sms` session operation rules
+(#453), and SMS login with the page region (#445). Rolling back #445 alone removes the SMS region and
+makes `sms_login` a local 400 again; existing `Sms` sessions stay subject to the `EV-38` rechecks and
+expire normally. Runtime work for the Password login is divided among #64–#66 and #94;
 documentation completion activates no route or Discovery metadata (`AC-02`, `AC-05`, `AC-14`).

@@ -40,6 +40,31 @@ public interface ISmsAdmissionService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Resolves the SMS identity of a normalized phone for one browser SMS login inside the
+    /// caller's open transaction (<c>EV-36</c>, <c>SC-23</c>), and under
+    /// <see cref="SmsLoginMode.AutoProvision"/> stages what is missing: a new active account with
+    /// its SMS identity when the phone has none, and an <see cref="SmsAccessApprovalSource.AutoProvision"/>
+    /// admission when the identity's active account has no admission row for the application. An
+    /// existing admission row is never reactivated, re-sourced, or otherwise changed, and nothing
+    /// is staged for a disabled account. Under <see cref="SmsLoginMode.ManualApproval"/> nothing is
+    /// ever staged. Returns <c>null</c> when the mode is not enabled or when no identity exists and
+    /// none may be created.
+    /// <para>
+    /// Unlike <see cref="ProvisionAsync"/>, this method opens no transaction and never saves: the
+    /// staged rows commit or roll back with the caller's unit, whose flush is where a concurrent
+    /// provisioning of the same phone surfaces as a unique-key violation. The caller rechecks the
+    /// <c>PS-04</c> predicate and the account after its flush.
+    /// </para>
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No ambient transaction exists.</exception>
+    Task<SmsLoginIdentity?> FindOrStageLoginIdentityAsync(
+        Guid appRegistrationId,
+        SmsLoginMode mode,
+        string phoneE164,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Provisions the admission and invokes <paramref name="beforeCommit"/> after state is staged but
     /// before the service's single transactional commit.
     /// </summary>
@@ -69,6 +94,13 @@ public sealed record SmsAdmission(
     UserLoginEntity Login,
     AppSmsAccessEntity Access,
     bool AccountCreated = false);
+
+/// <summary>
+/// The SMS identity one browser SMS login resolved or staged: the account, the SMS
+/// <c>user_logins</c> row the new <c>Sms</c> session references, and whether the account was
+/// staged by this call (for the <c>auto_register_sms</c> account-creation metric after commit).
+/// </summary>
+public sealed record SmsLoginIdentity(Guid AccountId, Guid UserLoginId, bool AccountCreated);
 
 /// <summary>
 /// The closed browser SMS send eligibility decision. Every value except
@@ -199,6 +231,76 @@ public sealed class SmsAdmissionService : ISmsAdmissionService
                     && (!requireAdminApproval || row.ApprovalSource == SmsAccessApprovalSource.Admin),
                 cancellationToken);
     }
+
+    public async Task<SmsLoginIdentity?> FindOrStageLoginIdentityAsync(
+        Guid appRegistrationId,
+        SmsLoginMode mode,
+        string phoneE164,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("SMS login provisioning requires the caller's transaction.");
+        }
+
+        if (mode is not (SmsLoginMode.ManualApproval or SmsLoginMode.AutoProvision))
+        {
+            return null;
+        }
+
+        var phone = MainlandChinaPhoneNumber.Normalize(phoneE164);
+        var provider = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms);
+        var login = await _dbContext.UserLogins.FirstOrDefaultAsync(
+            item => item.ProviderNameNormalized == provider && item.ProviderUserId == phone,
+            cancellationToken);
+        if (mode != SmsLoginMode.AutoProvision)
+        {
+            return login is null ? null : new SmsLoginIdentity(login.AccountId, login.Id, AccountCreated: false);
+        }
+
+        if (login is null)
+        {
+            var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true, CreatedAt = now };
+            login = new UserLoginEntity
+            {
+                Id = Guid.NewGuid(),
+                AccountId = account.Id,
+                ProviderName = IdentityConstants.AuthMethodSms,
+                ProviderUserId = phone
+            };
+            _dbContext.Accounts.Add(account);
+            _dbContext.UserLogins.Add(login);
+            StageAutoProvisionAdmission(appRegistrationId, login.Id, now);
+            return new SmsLoginIdentity(account.Id, login.Id, AccountCreated: true);
+        }
+
+        var accountActive = await _dbContext.Accounts
+            .Where(item => item.Id == login.AccountId)
+            .Select(item => item.IsActive)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (accountActive && !await _dbContext.AppSmsAccesses.AnyAsync(
+                item => item.AppRegistrationId == appRegistrationId && item.UserLoginId == login.Id,
+                cancellationToken))
+        {
+            StageAutoProvisionAdmission(appRegistrationId, login.Id, now);
+        }
+
+        return new SmsLoginIdentity(login.AccountId, login.Id, AccountCreated: false);
+    }
+
+    private void StageAutoProvisionAdmission(Guid appRegistrationId, Guid userLoginId, DateTimeOffset now) =>
+        _dbContext.AppSmsAccesses.Add(new AppSmsAccessEntity
+        {
+            Id = Guid.NewGuid(),
+            AppRegistrationId = appRegistrationId,
+            UserLoginId = userLoginId,
+            ApprovalSource = SmsAccessApprovalSource.AutoProvision,
+            IsActive = true,
+            ApprovedBy = null,
+            CreatedAt = now
+        });
 
     public async Task<SmsAdmission> ProvisionAsync(
         AppRegistrationEntity app,

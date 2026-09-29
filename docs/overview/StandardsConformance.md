@@ -93,8 +93,11 @@ interactive core for a pre-registered confidential BFF or an enabled Public clie
   redemption additionally returns a one-shot `refresh_token` that names a rotating family.
 
 The ID token carries `iss`, stable `sub`, `aud`, `exp`, `iat`, the session's `auth_time`, `sid`,
-`amr: ["pwd"]`, and the exact authorization-request `nonce`; `name`/`nickname` appear only when
-`profile` was granted. It never carries roles, permissions, or callback claims. A BFF consuming it
+`amr` (`["pwd"]` after a hosted Password login, `["sms"]` after a hosted SMS login for an
+application with SMS login enabled), and the exact authorization-request `nonce`;
+`name`/`nickname` appear only when `profile` was granted, and after an SMS login `name` appears only
+when the account has exactly one Password credential. It never carries roles, permissions, callback
+claims, or a phone number, and Discovery does not advertise `amr` values. A BFF consuming it
 must validate the RS256 signature through the `kid`-selected JWKS key, the exact issuer, its own
 audience, the lifetime, the `typ`, and the one-time `nonce`, and must keep every token server-side.
 A refresh at `POST /oauth2/token` with `grant_type=refresh_token` rotates the family atomically and

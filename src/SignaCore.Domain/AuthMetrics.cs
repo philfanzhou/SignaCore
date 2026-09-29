@@ -76,6 +76,14 @@ public class AuthMetrics
         /// label.
         /// </summary>
         public const string LoginSmsCode = "login-sms-code";
+
+        /// <summary>
+        /// The browser SMS login submission <c>POST /oauth2/login</c> with <c>action=sms_login</c>.
+        /// Its outcomes are the closed <c>success</c> (a committed <c>EV-36</c>), <c>failure</c> (any
+        /// <c>EV-37</c> page), and <c>local_rejected</c> (every other answer after the action was
+        /// read); it never carries a client label.
+        /// </summary>
+        public const string LoginSms = "login-sms";
     }
 
     /// <summary>

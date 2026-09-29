@@ -21,11 +21,13 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace SignaCore.Host.Controllers;
 
 /// <summary>
-/// The browser-side Password identity login of the interactive Authorization Code flow:
+/// The browser-side identity login of the interactive Authorization Code flow:
 /// <c>GET /oauth2/login</c> renders the form for an active continuation (<c>IN-10</c>),
-/// <c>POST /oauth2/login</c> processes the login or cancel submission (<c>IN-11</c>–<c>IN-15</c>),
-/// and <c>POST /oauth2/login/sms-code</c> is the browser SMS send route (<c>IN-16</c>,
-/// <c>IN-17</c>, <c>IN-19</c>, <c>EV-35</c>).
+/// <c>POST /oauth2/login</c> processes the Password login, SMS login, or cancel submission
+/// (<c>IN-11</c>–<c>IN-15</c>, <c>IN-17</c>–<c>IN-19</c>), and <c>POST /oauth2/login/sms-code</c> is
+/// the browser SMS send route (<c>IN-16</c>, <c>IN-17</c>, <c>IN-19</c>, <c>EV-35</c>). While the
+/// <c>IN-19</c> gate of the continuation's application is open, every rendered login page carries
+/// the SMS region as a second form (<c>AC-17</c>).
 /// </summary>
 /// <remarks>
 /// This controller delivers the browser surface, the antiforgery chain (<c>PS-19</c>), the local
@@ -35,7 +37,9 @@ namespace SignaCore.Host.Controllers;
 /// continuation consumption, the new identity session, the new authorization code, the
 /// failure-counter clear, the login-info update, and the success audit as one transaction
 /// (<see cref="OidcLoginCompletionService"/>) before the fresh <c>PS-18</c> identity cookie and the
-/// <c>PS-17</c> success redirect are written. The cancel exit consumes the continuation and
+/// <c>PS-17</c> success redirect are written. The SMS login follows the same shape with its own
+/// generic failure (<c>EV-37</c>, <see cref="OidcSmsLoginFailureRecorder"/>) and success
+/// transaction (<c>EV-36</c>, <see cref="OidcSmsLoginCompletionService"/>). The cancel exit consumes the continuation and
 /// returns the <c>access_denied</c> safe redirect. A missing, malformed, unknown, expired, or
 /// consumed handle shares the single local 400 of <c>EV-03</c>/<c>SC-18</c>: no redirect, no
 /// credential check, no failure count, no replay audit.
@@ -99,6 +103,7 @@ public sealed partial class OAuthLoginController : ControllerBase
     private const string FormFieldNameAction = "action";
     private const string LoginActionValue = "login";
     private const string CancelActionValue = "cancel";
+    private const string SmsLoginActionValue = "sms_login";
     private const string FormFieldNamePhone = "phone";
     private const string FormFieldNameOtp = "otp";
 
@@ -117,14 +122,28 @@ public sealed partial class OAuthLoginController : ControllerBase
     private const string ReasonClientUnavailable = "client_unavailable";
     private const string ReasonSmsCapability = "sms_capability";
     private const string ReasonPhoneField = "phone_field";
+    private const string ReasonOtpField = "otp_field";
     private const string OutcomeCancelRedirected = "cancel_redirected";
     private const string OutcomeCancelRejected = "cancel_rejected";
     private const string OutcomeCredentialFailure = "credential_failure";
     private const string OutcomeLoginCompleted = "login_completed";
     private const string OutcomeLoginRedirectRejected = "login_redirect_rejected";
     private const string OutcomeLoginClientRejected = "login_client_rejected";
+    private const string OutcomeSmsLoginCompleted = "sms_login_completed";
+    private const string OutcomeSmsLoginRedirectRejected = "sms_login_redirect_rejected";
+    private const string OutcomeSmsLoginClientRejected = "sms_login_client_rejected";
 
-    /// <summary>The five admitted POST form fields (<c>IN-11</c>–<c>IN-15</c>), matched ordinally.</summary>
+    // The closed login-sms metric outcomes (canonical "Audit and metrics").
+    private const string SmsLoginMetricSuccess = "success";
+    private const string SmsLoginMetricFailure = "failure";
+    private const string SmsLoginMetricLocalRejected = "local_rejected";
+
+    /// <summary>
+    /// The seven admitted POST form fields (<c>IN-11</c>–<c>IN-15</c>, <c>IN-17</c>, <c>IN-18</c>),
+    /// matched ordinally. The Password form posts the first five and the SMS form posts the handle,
+    /// the request token, the action, <c>phone</c>, and <c>otp</c>; each action ignores the other
+    /// form's fields without validating them.
+    /// </summary>
     private static readonly string[] AdmittedFormFields =
     [
         FormFieldNameLoginHandle,
@@ -132,12 +151,14 @@ public sealed partial class OAuthLoginController : ControllerBase
         FormFieldNamePassword,
         LoginAntiforgeryDefaults.TokenFieldName,
         FormFieldNameAction,
+        FormFieldNamePhone,
+        FormFieldNameOtp,
     ];
 
     /// <summary>
     /// The four admitted fields of the SMS send route (<c>IN-16</c>), matched ordinally. The
-    /// <c>otp</c> field is admitted so the future SMS form can post both buttons' fields, and it is
-    /// ignored without validation.
+    /// <c>otp</c> field is admitted because the SMS form's send button posts every field of that
+    /// form except the unnamed button itself, and it is ignored without validation.
     /// </summary>
     private static readonly string[] AdmittedSmsCodeFormFields =
     [
@@ -157,6 +178,10 @@ public sealed partial class OAuthLoginController : ControllerBase
     private readonly OidcLoginFailureRecorder _failureRecorder;
     private readonly OidcLoginCompletionService _loginCompletion;
     private readonly OidcSmsCodeSendService _smsCodeSend;
+    private readonly OidcSmsLoginFailureRecorder _smsFailureRecorder;
+    private readonly OidcSmsLoginCompletionService _smsLoginCompletion;
+    private readonly ISmsAdmissionService _smsAdmissions;
+    private readonly IOtpService _otpService;
     private readonly IdentityDbContext _dbContext;
     private readonly JwtOptions _jwtOptions;
     private readonly AuthMetrics _metrics;
@@ -170,6 +195,10 @@ public sealed partial class OAuthLoginController : ControllerBase
         OidcLoginFailureRecorder failureRecorder,
         OidcLoginCompletionService loginCompletion,
         OidcSmsCodeSendService smsCodeSend,
+        OidcSmsLoginFailureRecorder smsFailureRecorder,
+        OidcSmsLoginCompletionService smsLoginCompletion,
+        ISmsAdmissionService smsAdmissions,
+        IOtpService otpService,
         IdentityDbContext dbContext,
         JwtOptions jwtOptions,
         AuthMetrics metrics,
@@ -182,6 +211,10 @@ public sealed partial class OAuthLoginController : ControllerBase
         _failureRecorder = failureRecorder;
         _loginCompletion = loginCompletion;
         _smsCodeSend = smsCodeSend;
+        _smsFailureRecorder = smsFailureRecorder;
+        _smsLoginCompletion = smsLoginCompletion;
+        _smsAdmissions = smsAdmissions;
+        _otpService = otpService;
         _dbContext = dbContext;
         _jwtOptions = jwtOptions;
         _metrics = metrics;
@@ -244,9 +277,20 @@ public sealed partial class OAuthLoginController : ControllerBase
                 CreateAntiforgeryCookieOptions());
         }
 
+        // IN-19 is read from the current application row at every render. A missing row cannot
+        // come from a consistent database (PS-23); it renders the Password form alone.
+        var capability = await _dbContext.AppRegistrations
+            .AsNoTracking()
+            .Where(app => app.Id == continuation.AppRegistrationId)
+            .Select(app => new { app.SmsLoginMode, app.SmsProfileKey })
+            .FirstOrDefaultAsync(cancellationToken);
+        var smsRegion = capability is not null && IsSmsCapabilityOpen(capability.SmsLoginMode, capability.SmsProfileKey)
+            ? SmsRegion.Empty
+            : (SmsRegion?)null;
+
         ApplyLoginFormContentSecurityPolicy(continuation);
         return HtmlPage(
-            BuildLoginPage(NegotiatedText(), loginHandle, pair.RequestToken, notice: null),
+            BuildLoginPage(NegotiatedText(), loginHandle, pair.RequestToken, notice: null, smsRegion),
             StatusCodes.Status200OK);
     }
 
@@ -274,6 +318,7 @@ public sealed partial class OAuthLoginController : ControllerBase
     [EnableRateLimiting(OidcRateLimitPolicies.Login)]
     public async Task<IActionResult> SubmitLoginForm()
     {
+        var stopwatch = Stopwatch.StartNew();
         ApplyBrowserSecurityHeaders();
         var cancellationToken = HttpContext.RequestAborted;
 
@@ -314,11 +359,24 @@ public sealed partial class OAuthLoginController : ControllerBase
             return RejectLocally(ReasonContinuationUnavailable);
         }
 
-        // ③ Action (IN-15): ordinal membership in the closed pair; no case folding.
+        // ③ Action (IN-15): ordinal membership in the closed set; no case folding.
         if (!fields.TryGetValue(FormFieldNameAction, out var action)
-            || action is not (LoginActionValue or CancelActionValue))
+            || action is not (LoginActionValue or CancelActionValue or SmsLoginActionValue))
         {
             return RejectLocally(ReasonAction);
+        }
+
+        // The SMS login owns its branch from here on; only it records the login-sms metric, and
+        // only once its action was read.
+        if (action == SmsLoginActionValue)
+        {
+            var (smsResult, smsOutcome) = await ProcessSmsLoginAsync(
+                fields, loginHandle, continuation, now, cancellationToken);
+            _metrics.RecordOidcEndpointOutcome(AuthMetrics.OidcMetricEndpoints.LoginSms, smsOutcome);
+            _metrics.RecordOidcEndpointDuration(
+                AuthMetrics.OidcMetricEndpoints.LoginSms,
+                stopwatch.Elapsed.TotalMilliseconds);
+            return smsResult;
         }
 
         // ④ Antiforgery (IN-14, PS-19): principal-independent pair validation. A failure here
@@ -332,15 +390,17 @@ public sealed partial class OAuthLoginController : ControllerBase
         // client id for its revalidation and the credential exit needs it for the failure audit.
         // The restrictive reference (PS-23) makes a missing row unreachable from a consistent
         // database; the endpoint still fails closed instead of auditing or redirecting a guess.
-        var appId = await _dbContext.AppRegistrations
+        var application = await _dbContext.AppRegistrations
             .AsNoTracking()
             .Where(app => app.Id == continuation.AppRegistrationId)
-            .Select(app => app.AppId)
+            .Select(app => new { app.AppId, app.SmsLoginMode, app.SmsProfileKey })
             .FirstOrDefaultAsync(cancellationToken);
-        if (appId is null)
+        if (application is null)
         {
             return RejectLocally(ReasonClientUnavailable);
         }
+
+        var appId = application.AppId;
 
         // ⑥ Cancel exits before username and password are read (IN-15): revalidate the current
         // client and the exact redirect URI against the stored snapshot, then consume the
@@ -512,9 +572,237 @@ public sealed partial class OAuthLoginController : ControllerBase
         ApplyLoginFormContentSecurityPolicy(continuation);
         var text = NegotiatedText();
         return HtmlPage(
-            BuildLoginPage(text, loginHandle, requestToken, new LoginNotice(AlertRole, text.CredentialFailureNotice)),
+            BuildLoginPage(
+                text,
+                loginHandle,
+                requestToken,
+                new LoginNotice(AlertRole, text.CredentialFailureNotice),
+                IsSmsCapabilityOpen(application.SmsLoginMode, application.SmsProfileKey) ? SmsRegion.Empty : null),
             StatusCodes.Status200OK);
     }
+
+    /// <summary>
+    /// The <c>action=sms_login</c> branch after the shared structure, continuation, and action
+    /// checks, in the canonical order: antiforgery, the <c>IN-19</c> gate, <c>IN-17</c>,
+    /// <c>IN-18</c>, send eligibility, the read-only OTP verification, the <c>EV-01</c> revalidation,
+    /// and only then the <c>EV-36</c> transaction. Username and password are ignored without being
+    /// read (<c>IN-12</c>/<c>IN-13</c>), and the configured SMS bypass never applies: this path calls
+    /// the OTP verifier directly, never the token grant's validator (<c>IN-18</c>).
+    /// <para>
+    /// Every <c>EV-37</c> case — an ineligible phone, no current sent OTP, a wrong, expired, or
+    /// locked code, and a race lost inside <c>EV-36</c> — answers one generic page whose bytes depend
+    /// only on the handle, the request token, the normalized phone, and the page language; the true
+    /// case reaches only the masked audit row, one closed log reason, and nothing else. Returns the
+    /// answer and its closed <c>login-sms</c> metric outcome.
+    /// </para>
+    /// </summary>
+    private async Task<(IActionResult Result, string Outcome)> ProcessSmsLoginAsync(
+        IReadOnlyDictionary<string, string> fields,
+        string loginHandle,
+        AuthorizationRequestEntity continuation,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        // ④ Antiforgery (IN-14, PS-19): no phone lookup, OTP read, or audit without a valid pair.
+        if (!TryValidateAntiforgery(fields, out var requestToken))
+        {
+            return (RejectLocally(ReasonAntiforgery), SmsLoginMetricLocalRejected);
+        }
+
+        // ⑤ The IN-19 gate from the current application row.
+        var application = await _dbContext.AppRegistrations
+            .AsNoTracking()
+            .Where(app => app.Id == continuation.AppRegistrationId)
+            .Select(app => new { app.AppId, app.SmsLoginMode, app.SmsProfileKey })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (application is null)
+        {
+            return (RejectLocally(ReasonClientUnavailable), SmsLoginMetricLocalRejected);
+        }
+
+        if (!IsSmsCapabilityOpen(application.SmsLoginMode, application.SmsProfileKey))
+        {
+            return (RejectLocally(ReasonSmsCapability), SmsLoginMetricLocalRejected);
+        }
+
+        // ⑥ Phone (IN-17): shape is a local 400; a failed normalization is the fixed invalid-phone
+        // page decided by the submitted string alone, with no OTP read and no audit.
+        if (!fields.TryGetValue(FormFieldNamePhone, out var phone)
+            || phone.Length > IdentityConstants.MaxSubmittedPhoneLength)
+        {
+            return (RejectLocally(ReasonPhoneField), SmsLoginMetricLocalRejected);
+        }
+
+        var text = NegotiatedText();
+        if (!MainlandChinaPhoneNumber.TryNormalize(phone, out var phoneE164))
+        {
+            ApplyLoginFormContentSecurityPolicy(continuation);
+            return (
+                HtmlPage(
+                    BuildLoginPage(
+                        text, loginHandle, requestToken, new LoginNotice(AlertRole, text.InvalidPhoneNotice), SmsRegion.Empty),
+                    StatusCodes.Status200OK),
+                SmsLoginMetricLocalRejected);
+        }
+
+        // ⑦ Code (IN-18): opaque, never trimmed; only its presence and bound are request shape.
+        if (!fields.TryGetValue(FormFieldNameOtp, out var otp)
+            || otp.Length > IdentityConstants.MaxSubmittedOtpLength)
+        {
+            return (RejectLocally(ReasonOtpField), SmsLoginMetricLocalRejected);
+        }
+
+        var failure = new SmsLoginFailureContext(
+            loginHandle, requestToken, continuation, application.AppId, phoneE164, text);
+
+        // ⑧ Send eligibility: the same read-only decision as the send route. An ineligible phone
+        // never reaches the OTP verifier, so it writes no OTP state (EV-37).
+        var eligibility = await _smsAdmissions.EvaluateSendEligibilityAsync(
+            continuation.AppRegistrationId, application.SmsLoginMode, phoneE164, cancellationToken);
+        if (eligibility.Decision != SmsSendEligibility.Eligible)
+        {
+            return await FailSmsLoginAsync(
+                failure, otpFailure: null, eligibility.AccountId,
+                OidcSmsCodeSendService.ReasonFor(eligibility.Decision), cancellationToken);
+        }
+
+        // ⑨ The read-only OTP verification. A failure carries the conditional failed-attempt
+        // change only when a current sent OTP exists; nothing is written yet.
+        var verification = await _otpService.VerifyAsync(
+            continuation.AppRegistrationId, phoneE164, otp, cancellationToken);
+        if (verification.IsVerified != (verification.Change?.Kind == OtpVerificationChangeKind.Consume))
+        {
+            throw new InvalidOperationException("The OTP verification decision is inconsistent.");
+        }
+
+        if (!verification.IsVerified)
+        {
+            return await FailSmsLoginAsync(
+                failure, verification.Change, eligibility.AccountId,
+                OidcSmsLoginFailureReasons.OtpRejected, cancellationToken);
+        }
+
+        // ⑩ EV-01 revalidation after the OTP proof and before anything is consumed (SC-21): the
+        // client, the exact redirect URI, and the scope decide exactly as for a Password login.
+        var revalidation = await _revalidator.ValidateAsync(
+            OidcContinuationRevalidation.BuildParameters(continuation, application.AppId),
+            cancellationToken);
+        switch (revalidation)
+        {
+            case OidcAuthorizationValidationResult.Accepted accepted
+                when accepted.ApplicationId == continuation.AppRegistrationId:
+                break;
+
+            case OidcAuthorizationValidationResult.RedirectRejection redirect
+                when redirect.ApplicationId == continuation.AppRegistrationId:
+                LogOutcome(OutcomeSmsLoginRedirectRejected);
+                return (
+                    Redirect(OidcAuthorizationRedirect.BuildError(
+                        redirect.RegisteredRedirectUri,
+                        redirect.Error,
+                        redirect.ErrorDescription,
+                        continuation.State,
+                        _jwtOptions.Issuer)),
+                    SmsLoginMetricLocalRejected);
+
+            default:
+                LogOutcome(OutcomeSmsLoginClientRejected);
+                return (RejectLocally(ReasonClientUnavailable), SmsLoginMetricLocalRejected);
+        }
+
+        // ⑪ EV-36: one transaction; the HTTP outcome is decided only after it.
+        var completion = await _smsLoginCompletion.CompleteAsync(
+            new OidcSmsLoginRequest(
+                loginHandle,
+                (OidcAuthorizationValidationResult.Accepted)revalidation,
+                application.AppId,
+                phoneE164,
+                verification.Change!,
+                HttpContext.GetClientIp(),
+                HttpContext.GetUserAgent(),
+                HttpContext.GetCorrelationId(),
+                now),
+            cancellationToken);
+        switch (completion)
+        {
+            case OidcSmsLoginResult.Completed completed:
+                await HttpContext.SignInAsync(
+                    IdentitySessionDefaults.AuthenticationScheme,
+                    IdentitySessionPrincipal.Create(completed.SessionId),
+                    new AuthenticationProperties { IsPersistent = false });
+                LogOutcome(OutcomeSmsLoginCompleted);
+                return (
+                    Redirect(OidcAuthorizationRedirect.BuildSuccess(
+                        ((OidcAuthorizationValidationResult.Accepted)revalidation).RegisteredRedirectUri,
+                        completed.Code,
+                        continuation.State,
+                        _jwtOptions.Issuer)),
+                    SmsLoginMetricSuccess);
+
+            case OidcSmsLoginResult.ContinuationUnavailable:
+                // A concurrent consumption, an expiry race, or current policy drift: the single
+                // local 400 of EV-03 with nothing committed.
+                return (RejectLocally(ReasonContinuationUnavailable), SmsLoginMetricLocalRejected);
+
+            default:
+                return await FailSmsLoginAsync(
+                    failure, otpFailure: null, eligibility.AccountId,
+                    OidcSmsLoginFailureReasons.OtpRace, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Commits the <c>EV-37</c> failure unit and renders the generic SMS failure page. The page is
+    /// the same whether or not the unit committed; only a closed log reason records a failed
+    /// commit. No cookie is written and the <c>otp</c> input stays empty.
+    /// </summary>
+    private async Task<(IActionResult Result, string Outcome)> FailSmsLoginAsync(
+        SmsLoginFailureContext failure,
+        OtpVerificationChange? otpFailure,
+        Guid? accountId,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        await _smsFailureRecorder.RecordFailureAsync(
+            otpFailure,
+            failure.PhoneE164,
+            accountId,
+            reason,
+            failure.AppId,
+            HttpContext.GetClientIp(),
+            HttpContext.GetUserAgent(),
+            HttpContext.GetCorrelationId(),
+            cancellationToken);
+        ApplyLoginFormContentSecurityPolicy(failure.Continuation);
+        return (
+            HtmlPage(
+                BuildLoginPage(
+                    failure.Text,
+                    failure.LoginHandle,
+                    failure.RequestToken,
+                    new LoginNotice(AlertRole, failure.Text.SmsFailureNotice),
+                    new SmsRegion(failure.PhoneE164)),
+                StatusCodes.Status200OK),
+            SmsLoginMetricFailure);
+    }
+
+    /// <summary>The request values every <c>EV-37</c> page is rendered from.</summary>
+    private sealed record SmsLoginFailureContext(
+        string LoginHandle,
+        string RequestToken,
+        AuthorizationRequestEntity Continuation,
+        string AppId,
+        string PhoneE164,
+        LoginPageText Text);
+
+    /// <summary>
+    /// The <c>IN-19</c> capability gate of one application row: open exactly when SMS login is
+    /// enabled and the SMS profile key is non-blank. The login page, the send route, and
+    /// <c>action=sms_login</c> all decide it here.
+    /// </summary>
+    private static bool IsSmsCapabilityOpen(SmsLoginMode mode, string? profileKey) =>
+        mode is SmsLoginMode.ManualApproval or SmsLoginMode.AutoProvision
+        && !string.IsNullOrWhiteSpace(profileKey);
 
     /// <summary>
     /// The browser SMS send route (<c>AC-16</c>). The checks run in the canonical order — structure,
@@ -527,9 +815,9 @@ public sealed partial class OAuthLoginController : ControllerBase
     /// registration, admission, account, budget, OTP, provider, or persistence state; the true case
     /// reaches only the masked audit row, one closed log reason, and the closed metric outcome.
     /// <para>
-    /// Until <c>AC-17</c> the login page renders no SMS region, so the uniform page is the Password
-    /// login page and carries no phone input or phone value. The action declares no parameters for
-    /// the same reason as the login POST: MVC must never read this body.
+    /// Both pages render the SMS region (<c>AC-17</c>): the uniform page fills the phone input with
+    /// the normalized E.164 value and the invalid-phone page leaves it empty. The action declares no
+    /// parameters for the same reason as the login POST: MVC must never read this body.
     /// </para>
     /// </summary>
     [HttpPost("sms-code")]
@@ -601,8 +889,7 @@ public sealed partial class OAuthLoginController : ControllerBase
             return (RejectLocally(ReasonClientUnavailable), OidcSmsCodeSendOutcomes.LocalRejected);
         }
 
-        if (application.SmsLoginMode is not (SmsLoginMode.ManualApproval or SmsLoginMode.AutoProvision)
-            || string.IsNullOrWhiteSpace(application.SmsProfileKey))
+        if (!IsSmsCapabilityOpen(application.SmsLoginMode, application.SmsProfileKey))
         {
             return (RejectLocally(ReasonSmsCapability), OidcSmsCodeSendOutcomes.LocalRejected);
         }
@@ -621,7 +908,8 @@ public sealed partial class OAuthLoginController : ControllerBase
         {
             return (
                 HtmlPage(
-                    BuildLoginPage(text, loginHandle, requestToken, new LoginNotice(AlertRole, text.InvalidPhoneNotice)),
+                    BuildLoginPage(
+                        text, loginHandle, requestToken, new LoginNotice(AlertRole, text.InvalidPhoneNotice), SmsRegion.Empty),
                     StatusCodes.Status200OK),
                 OidcSmsCodeSendOutcomes.InvalidPhone);
         }
@@ -643,7 +931,8 @@ public sealed partial class OAuthLoginController : ControllerBase
             cancellationToken);
         return (
             HtmlPage(
-                BuildLoginPage(text, loginHandle, requestToken, new LoginNotice(StatusRole, text.SmsCodeSentNotice)),
+                BuildLoginPage(
+                    text, loginHandle, requestToken, new LoginNotice(StatusRole, text.SmsCodeSentNotice), new SmsRegion(phoneE164)),
                 StatusCodes.Status200OK),
             outcome);
     }
@@ -852,13 +1141,23 @@ public sealed partial class OAuthLoginController : ControllerBase
     /// The single generic credential-failure notice (<c>EV-17</c>) renders the same bytes for
     /// unknown, wrong, disabled, and locked credentials, so the form never becomes an account
     /// oracle; the validator's internal reason goes to the audit row only. The SMS send route
-    /// renders the same page with its fixed send or invalid-phone notice.
+    /// renders the same page with its fixed send or invalid-phone notice, and the SMS login with
+    /// its fixed generic failure notice (<c>EV-37</c>).
+    /// <para>
+    /// A non-null <paramref name="smsRegion"/> — the <c>IN-19</c> gate is open — appends the SMS
+    /// region as a second form (<c>AC-17</c>): its own hidden handle and request token, the
+    /// <c>phone</c> input filled with the normalized value (<c>DF-16</c>) or empty, the always empty
+    /// <c>otp</c> input (<c>DF-17</c>), an unnamed send button that posts the same form to the send
+    /// route without constraint validation, and the <c>sms_login</c> submit button. The Password
+    /// form keeps its five fields and the page stays script-free.
+    /// </para>
     /// </summary>
     private static string BuildLoginPage(
         LoginPageText text,
         string loginHandle,
         string requestToken,
-        LoginNotice? notice)
+        LoginNotice? notice,
+        SmsRegion? smsRegion)
     {
         var builder = new StringBuilder(1536);
         builder.Append("<!DOCTYPE html><html lang=\"")
@@ -909,8 +1208,57 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append("<button type=\"submit\" name=\"action\" value=\"cancel\" formnovalidate>")
             .Append(text.CancelButton)
             .Append("</button></p>")
-            .Append("</form></main></body></html>");
+            .Append("</form>");
+        if (smsRegion is { } sms)
+        {
+            AppendSmsRegion(builder, text, loginHandle, requestToken, sms.Phone);
+        }
+
+        builder.Append("</main></body></html>");
         return builder.ToString();
+    }
+
+    private static void AppendSmsRegion(
+        StringBuilder builder,
+        LoginPageText text,
+        string loginHandle,
+        string requestToken,
+        string phone)
+    {
+        builder.Append("<h2>")
+            .Append(text.SmsHeading)
+            .Append("</h2><form action=\"/oauth2/login\" method=\"post\">")
+            .Append("<input type=\"hidden\" name=\"login_handle\" value=\"")
+            .Append(WebUtility.HtmlEncode(loginHandle))
+            .Append("\"><input type=\"hidden\" name=\"")
+            .Append(LoginAntiforgeryDefaults.TokenFieldName)
+            .Append("\" value=\"")
+            .Append(WebUtility.HtmlEncode(requestToken))
+            .Append("\">")
+            .Append("<p><label for=\"phone\">")
+            .Append(text.PhoneLabel)
+            .Append("</label> ")
+            .Append("<input type=\"tel\" id=\"phone\" name=\"phone\" autocomplete=\"tel\" maxlength=\"")
+            .Append(IdentityConstants.MaxSubmittedPhoneLength)
+            .Append("\" value=\"")
+            .Append(WebUtility.HtmlEncode(phone))
+            .Append("\" required></p>")
+            .Append("<p><label for=\"otp\">")
+            .Append(text.OtpLabel)
+            .Append("</label> ")
+            .Append("<input type=\"text\" id=\"otp\" name=\"otp\" inputmode=\"numeric\" ")
+            .Append("autocomplete=\"one-time-code\" maxlength=\"")
+            .Append(IdentityConstants.MaxSubmittedOtpLength)
+            .Append("\" required></p>")
+            // The send button carries no name, so the send route receives exactly this form's
+            // handle, request token, phone, and otp (IN-16); it skips the otp constraint check.
+            .Append("<p><button type=\"submit\" formaction=\"/oauth2/login/sms-code\" formnovalidate>")
+            .Append(text.SendCodeButton)
+            .Append("</button> ")
+            .Append("<button type=\"submit\" name=\"action\" value=\"sms_login\">")
+            .Append(text.SmsSignInButton)
+            .Append("</button></p>")
+            .Append("</form>");
     }
 
     private const string AlertRole = "alert";
@@ -921,6 +1269,15 @@ public sealed partial class OAuthLoginController : ControllerBase
     /// literal, never a request value.
     /// </summary>
     private readonly record struct LoginNotice(string Role, string Text);
+
+    /// <summary>
+    /// The SMS region of an open <c>IN-19</c> gate. <paramref name="Phone"/> is the normalized
+    /// E.164 value the page re-renders into the phone input, or empty.
+    /// </summary>
+    private readonly record struct SmsRegion(string Phone)
+    {
+        public static SmsRegion Empty => new(string.Empty);
+    }
 
     /// <summary>
     /// The local error page of one language. It depends on nothing but the language, so every

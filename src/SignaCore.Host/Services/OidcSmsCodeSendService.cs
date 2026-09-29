@@ -209,7 +209,11 @@ public sealed class OidcSmsCodeSendService(
     private static bool IsCallerCancellation(Exception exception, CancellationToken cancellationToken) =>
         exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
 
-    private static string ReasonFor(SmsSendEligibility decision) => decision switch
+    /// <summary>
+    /// The closed audit reason of an ineligible phone, shared by the send route's
+    /// <c>sms_code_suppressed</c> rows and the SMS login's <c>login_failure</c> rows.
+    /// </summary>
+    internal static string ReasonFor(SmsSendEligibility decision) => decision switch
     {
         SmsSendEligibility.NotRegistered => OidcSmsCodeSendOutcomes.NotRegistered,
         SmsSendEligibility.AccountDisabled => OidcSmsCodeSendOutcomes.AccountDisabled,

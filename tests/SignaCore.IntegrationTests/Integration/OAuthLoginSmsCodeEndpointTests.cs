@@ -21,8 +21,9 @@ namespace SignaCore.Tests.Integration;
 /// <c>AC-16</c>): the <c>IN-16</c>/<c>IN-19</c>/<c>IN-17</c> local answers write nothing, every
 /// counted case answers one uniform result byte-for-byte (<c>SC-22</c>) while only the masked
 /// audit row and the closed metric carry the true case, the three budgets hold (<c>SC-25</c>),
-/// two racing sends call the provider at most once (<c>SC-26</c>), and the login page still offers
-/// no SMS region.
+/// two racing sends call the provider at most once (<c>SC-26</c>), and from <c>AC-17</c> both pages
+/// of the route render the SMS region — the uniform page with the normalized phone, the
+/// invalid-phone page with an empty phone input.
 /// </summary>
 [Collection(SqliteProcessState.CollectionName)]
 [UsesProcessWideSqlitePoolClearing]
@@ -336,10 +337,11 @@ public sealed class OAuthLoginSmsCodeEndpointTests : IClassFixture<IdentityServe
             Assert.Equal(HttpStatusCode.OK, answer.Status);
             AssertRenderedFormHeaders(response);
             Assert.Contains(EnglishSentNotice, answer.Body, StringComparison.Ordinal);
-            foreach (var form in new[] { phone, e164, typed, phone[3..] })
-            {
-                Assert.DoesNotContain(form, answer.Body, StringComparison.Ordinal);
-            }
+            // The phone appears once, normalized, as the value of the page's own phone input
+            // (DF-16); the submitted spelling is never echoed.
+            Assert.Equal(1, CountOccurrences(answer.Body, e164));
+            Assert.Contains(PhoneInput(e164), answer.Body, StringComparison.Ordinal);
+            Assert.DoesNotContain(typed, answer.Body, StringComparison.Ordinal);
 
             reference ??= answer;
             Assert.True(reference.Value.Headers.SequenceEqual(answer.Headers), $"Headers differ for {testCase.Name}.");
@@ -436,7 +438,8 @@ public sealed class OAuthLoginSmsCodeEndpointTests : IClassFixture<IdentityServe
             bodies.Add(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         }
 
-        Assert.Single(bodies.Distinct());
+        // Every body differs from the others only by the normalized phone it re-renders.
+        Assert.Single(bodies.Select((body, index) => body.Replace(E164(phones[index]), "{phone}", StringComparison.Ordinal)).Distinct());
         Assert.Equal(phones.Take(5).Select(E164), sender.Calls.Select(call => call.PhoneE164));
         Assert.Null(await OtpAsync(host.Services, app.Id, E164(phones[^1])));
         Assert.Equal(IdentityConstants.MaxSmsCodeSendsPerContinuation, await CountAsync(host.Services, session.ContinuationId));
@@ -561,7 +564,9 @@ public sealed class OAuthLoginSmsCodeEndpointTests : IClassFixture<IdentityServe
             var bodies = await Task.WhenAll(racers.Select(r => r.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)));
             Assert.All(racers, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
             Assert.Equal(bodies[0], bodies[1]);
-            Assert.Equal(firstAnswer.Body, bodies[0]);
+            Assert.Equal(
+                firstAnswer.Body.Replace(E164(phone), "{phone}", StringComparison.Ordinal),
+                bodies[0].Replace(E164(racePhone), "{phone}", StringComparison.Ordinal));
             Assert.InRange(sender.Calls.Count(call => call.PhoneE164 == E164(racePhone)), 0, 1);
             Assert.Equal(4, await CountAsync(host.Services, session.ContinuationId));
         }
@@ -571,42 +576,63 @@ public sealed class OAuthLoginSmsCodeEndpointTests : IClassFixture<IdentityServe
         }
     }
 
-    // ---- AC-16: no rendered page offers a send yet ----
+    // ---- AC-17: both pages of the route render the SMS region ----
 
     [Fact]
-    public async Task TheLoginPage_OffersNoSmsRegion_AndSmsLoginStaysALocal400()
+    public async Task TheUniformPage_FillsTheNormalizedPhone_AndTheInvalidPhonePage_LeavesItEmpty()
     {
         var sender = new FakeSmsSender();
         using var host = _fixture.CreateSmsHost(sender);
         using var client = host.CreateBrowserClient();
         var app = await SeedSmsAppAsync(host.Services, SmsLoginMode.AutoProvision);
-        var (handle, _) = await SeedContinuationAsync(host.Services, app);
-
-        using var page = await client.GetAsync($"/oauth2/login?login_handle={handle}", TestContext.Current.CancellationToken);
-        var body = await page.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
-        Assert.DoesNotContain("sms-code", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("name=\"phone\"", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("name=\"otp\"", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("sms_login", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("formaction", body, StringComparison.Ordinal);
-
         var session = await BeginAsync(host.Services, client, app);
         var phone = NewPhone();
-        foreach (var fields in new IReadOnlyList<KeyValuePair<string, string>>[]
-                 {
-                     [new("login_handle", session.Handle), new(LoginAntiforgeryDefaults.TokenFieldName, session.Token), new("action", "sms_login")],
-                     [new("login_handle", session.Handle), new(LoginAntiforgeryDefaults.TokenFieldName, session.Token), new("action", "sms_login"),
-                         new("phone", phone), new("otp", "123456")],
-                 })
+
+        using var sent = await client.SendAsync(
+            SendPost(session, fields: SendFields(session, "0086 " + phone)), TestContext.Current.CancellationToken);
+        var sentBody = await sent.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, sent.StatusCode);
+        Assert.Contains(PhoneInput(E164(phone)), sentBody, StringComparison.Ordinal);
+        Assert.Contains(OtpInput, sentBody, StringComparison.Ordinal);
+        Assert.Contains(SmsSubmitButton, sentBody, StringComparison.Ordinal);
+        Assert.Contains(SendButton, sentBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("0086 ", sentBody, StringComparison.Ordinal);
+
+        using var invalid = await client.SendAsync(
+            SendPost(session, fields: SendFields(session, "12345")), TestContext.Current.CancellationToken);
+        var invalidBody = await invalid.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, invalid.StatusCode);
+        Assert.Contains(EnglishInvalidPhoneNotice, invalidBody, StringComparison.Ordinal);
+        Assert.Contains(PhoneInput(string.Empty), invalidBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("12345", invalidBody, StringComparison.Ordinal);
+
+        // Apart from the notice and the phone value, the two pages and the GET page are one form.
+        using var page = await client.SendAsync(
+            new HttpRequestMessage(HttpMethod.Get, $"/oauth2/login?login_handle={session.Handle}")
+            {
+                Headers = { { "Cookie", CookieHeader(session) } }
+            },
+            TestContext.Current.CancellationToken);
+        // The GET render issues a fresh request token for the same cookie; align it with the posted one.
+        var pageBody = OAuthLoginSmsCodeTestSupport.WithRequestToken(
+            await page.Content.ReadAsStringAsync(TestContext.Current.CancellationToken), session.Token);
+        Assert.Equal(
+            pageBody,
+            sentBody.Replace(EnglishSentNotice, string.Empty, StringComparison.Ordinal)
+                .Replace(PhoneInput(E164(phone)), PhoneInput(string.Empty), StringComparison.Ordinal));
+        Assert.Equal(pageBody, invalidBody.Replace(EnglishInvalidPhoneNotice, string.Empty, StringComparison.Ordinal));
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        for (var index = text.IndexOf(value, StringComparison.Ordinal); index >= 0;
+             index = text.IndexOf(value, index + value.Length, StringComparison.Ordinal))
         {
-            using var response = await client.SendAsync(
-                OAuthLoginTestSupport.CreateLoginPost(fields: fields, cookieHeader: CookieHeader(session)),
-                TestContext.Current.CancellationToken);
-            await AssertLocalRejectionAsync(response);
+            count++;
         }
 
-        await AssertNothingHappenedAsync(host.Services, sender, app, session, phone);
+        return count;
     }
 
     // ---- Assertions ----

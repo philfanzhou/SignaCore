@@ -29,9 +29,9 @@ never substitute for the other.
 
 `azp`, `acr`, role, permission, `auth_method`, `client_id`, callback claims, and access-token binding
 claims are absent. No ID-token or access-token claim ever carries a phone number, including for an
-`Sms` session (`DF-16`). The `["sms"]` mapping ships before any production route creates an `Sms`
-session, so a consumer that asserted `amr == ["pwd"]` must accept `["sms"]` once an application
-enables browser SMS login (`AC-17`). Callback output cannot replace a core claim or
+`Sms` session (`DF-16`). The `["sms"]` mapping shipped (#453) before SMS login (#445) created the
+first `Sms` session, so a consumer that asserted `amr == ["pwd"]` must accept `["sms"]` for every
+application that enables browser SMS login (`AC-17`). Callback output cannot replace a core claim or
 inject a second copy. The ID token contains an authentication statement, not downstream
 authorization; consumers must never treat its profile fields as roles or permissions.
 

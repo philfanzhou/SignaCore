@@ -84,7 +84,8 @@ public sealed partial class OidcAttackRateLimitDatabaseContractTests
             bodies.Add(await response.Content.ReadAsStringAsync(Ct));
         }
 
-        Assert.Single(bodies.Distinct());
+        // Every body differs from the others only by the normalized phone it re-renders (AC-17).
+        Assert.Single(bodies.Select((body, index) => body.Replace(E164(phones[index]), "{phone}", StringComparison.Ordinal)).Distinct());
         Assert.Equal(IdentityConstants.MaxSmsCodeSendsPerContinuation, senderA.CallCount + senderB.CallCount);
         Assert.DoesNotContain(senderA.Calls.Concat(senderB.Calls), call => call.PhoneE164 == E164(phones[^1]));
         Assert.Equal(IdentityConstants.MaxSmsCodeSendsPerContinuation, await CountAsync(b.Factory.Services, session.ContinuationId));
