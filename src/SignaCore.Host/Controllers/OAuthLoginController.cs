@@ -39,8 +39,10 @@ namespace SignaCore.Host.Controllers;
 /// The controller is deliberately not an <c>[ApiController]</c> and binds no parameters: the form
 /// is parsed by hand under a strict structure contract, because the automatic model-binding 400
 /// would answer with JSON ProblemDetails and violate the local HTML result contract. Every
-/// rejection returns one identical local page that echoes no request value, and every response
-/// carries the fixed browser security headers and denies framing. A <c>Location</c> appears only
+/// rejection returns one identical local page per negotiated language that echoes no request
+/// value, and every response carries the fixed browser security headers and denies framing. The
+/// page language comes from <c>Accept-Language</c> only (<see cref="LoginPageLanguageNegotiator"/>);
+/// field names, order, and error routing are the same in every language. A <c>Location</c> appears only
 /// on the two verified exits — the cancel's <c>access_denied</c> redirect and the success's
 /// <c>code</c> redirect — both to the exact registered URI. The page renders no stored
 /// continuation value — no redirect URI, scope, state, nonce, or challenge — so the login surface
@@ -53,33 +55,33 @@ namespace SignaCore.Host.Controllers;
 public sealed partial class OAuthLoginController : ControllerBase
 {
     /// <summary>
-    /// The single local 400 body. Every structural, handle, action, antiforgery, and
-    /// credential-field failure returns exactly these bytes and echoes no request value
-    /// (<c>SC-19</c>: an invalid CSRF answer is indistinguishable from any other local rejection).
+    /// The single local 400 body of each page language. Every structural, handle, action,
+    /// antiforgery, and credential-field failure returns exactly these bytes for the negotiated
+    /// language and echoes no request value (<c>SC-19</c>: an invalid CSRF answer is
+    /// indistinguishable from any other local rejection).
     /// </summary>
-    private const string LocalErrorPage =
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-        + "<title>Invalid login request</title></head><body>"
-        + "<h1>Invalid login request</h1>"
-        + "<p>The login request could not be processed. Return to the application that "
-        + "sent you here and start again.</p></body></html>";
+    private static readonly string EnglishLocalErrorPage = BuildLocalErrorPage(LoginPageText.English);
 
-    /// <summary>
-    /// The single generic credential-failure notice (<c>EV-17</c>). Unknown, wrong, disabled, and
-    /// locked credentials render the same page byte for byte, so the form never becomes an account
-    /// oracle; the validator's internal reason goes to the audit row only.
-    /// </summary>
-    private const string FailureNotice =
-        "<p role=\"alert\">Sign-in failed. Check your username and password and try again.</p>";
+    private static readonly string SimplifiedChineseLocalErrorPage =
+        BuildLocalErrorPage(LoginPageText.SimplifiedChinese);
 
     private const string HtmlContentType = "text/html; charset=utf-8";
 
     /// <summary>
     /// The fixed Content-Security-Policy of every <c>/oauth2/login</c> response that is not a
-    /// rendered form: the local 400 and the cancel and success redirects.
+    /// rendered form: the local 400 and the cancel and success redirects. <c>style-src 'self'</c>
+    /// admits only the page's own stylesheet; the page loads no script.
     /// </summary>
     private const string DefaultContentSecurityPolicy =
-        "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+        "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+
+    /// <summary>
+    /// The shared head of every rendered HTML page after its <c>&lt;title&gt;</c>: the mobile
+    /// viewport and the one same-origin stylesheet.
+    /// </summary>
+    private const string HeadTail =
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        + "<link rel=\"stylesheet\" href=\"" + LoginPageStylesheet.Path + "\">";
 
     /// <summary>The canonical 16 KiB bound of the POST form body.</summary>
     private const int MaxRequestBodyBytes = 16 * 1024;
@@ -160,6 +162,20 @@ public sealed partial class OAuthLoginController : ControllerBase
     }
 
     /// <summary>
+    /// Serves the login page stylesheet. The response is the same fixed constant for every request:
+    /// the action reads no query, body, cookie, or header, needs no identity or management
+    /// authentication, writes no cookie, and has no OIDC rate-limit policy (the host-wide limit
+    /// still applies). It declares no parameters so MVC never binds anything on this route.
+    /// </summary>
+    [HttpGet("style.css")]
+    public IActionResult GetStylesheet()
+    {
+        Response.Headers.CacheControl = LoginPageStylesheet.CacheControl;
+        Response.Headers.XContentTypeOptions = "nosniff";
+        return Content(LoginPageStylesheet.Content, LoginPageStylesheet.ContentType);
+    }
+
+    /// <summary>
     /// Renders the login form for an active continuation. The query must carry exactly one
     /// <c>login_handle</c> and nothing else; every other shape shares the local 400 with a
     /// missing, malformed, unknown, expired, or consumed handle (<c>IN-10</c>, <c>EV-03</c>).
@@ -202,10 +218,9 @@ public sealed partial class OAuthLoginController : ControllerBase
         }
 
         ApplyLoginFormContentSecurityPolicy(continuation);
-        return Content(
-            BuildLoginPage(loginHandle, pair.RequestToken, showFailureNotice: false),
-            HtmlContentType,
-            Encoding.UTF8);
+        return HtmlPage(
+            BuildLoginPage(NegotiatedText(), loginHandle, pair.RequestToken, showFailureNotice: false),
+            StatusCodes.Status200OK);
     }
 
     /// <summary>
@@ -473,10 +488,9 @@ public sealed partial class OAuthLoginController : ControllerBase
         // validated handle and request token so the browser can retry against its existing
         // cookie; no cookie is written here and no submitted value is echoed.
         ApplyLoginFormContentSecurityPolicy(continuation);
-        return Content(
-            BuildLoginPage(loginHandle, requestToken, showFailureNotice: true),
-            HtmlContentType,
-            Encoding.UTF8);
+        return HtmlPage(
+            BuildLoginPage(NegotiatedText(), loginHandle, requestToken, showFailureNotice: true),
+            StatusCodes.Status200OK);
     }
 
     private static bool IsAdmittedContentType(string? contentType)
@@ -651,19 +665,36 @@ public sealed partial class OAuthLoginController : ControllerBase
     }
 
     /// <summary>
-    /// The single login form. It carries only the submitted-or-issued handle and request token as
-    /// hidden fields plus the credential inputs and the two action buttons — never a stored
-    /// continuation value such as the redirect URI, scope, state, nonce, or challenge, and never
-    /// an echoed username or password.
+    /// The single login form in the negotiated language. It carries only the submitted-or-issued
+    /// handle and request token as hidden fields plus the credential inputs and the two action
+    /// buttons — never a stored continuation value such as the redirect URI, scope, state, nonce,
+    /// or challenge, and never an echoed username or password. The field names, their order, and
+    /// the button names and values are identical in every language; only the visible text differs.
+    /// The single generic credential-failure notice (<c>EV-17</c>) renders the same bytes for
+    /// unknown, wrong, disabled, and locked credentials, so the form never becomes an account
+    /// oracle; the validator's internal reason goes to the audit row only.
     /// </summary>
-    private static string BuildLoginPage(string loginHandle, string requestToken, bool showFailureNotice)
+    private static string BuildLoginPage(
+        LoginPageText text,
+        string loginHandle,
+        string requestToken,
+        bool showFailureNotice)
     {
-        var builder = new StringBuilder(1024);
-        builder.Append("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">")
-            .Append("<title>Sign in</title></head><body><h1>Sign in</h1>");
+        var builder = new StringBuilder(1536);
+        builder.Append("<!DOCTYPE html><html lang=\"")
+            .Append(text.HtmlLang)
+            .Append("\"><head><meta charset=\"utf-8\"><title>")
+            .Append(text.PageTitle)
+            .Append("</title>")
+            .Append(HeadTail)
+            .Append("</head><body><main><h1>")
+            .Append(text.Heading)
+            .Append("</h1>");
         if (showFailureNotice)
         {
-            builder.Append(FailureNotice);
+            builder.Append("<p role=\"alert\">")
+                .Append(text.CredentialFailureNotice)
+                .Append("</p>");
         }
 
         builder.Append("<form action=\"/oauth2/login\" method=\"post\">")
@@ -674,22 +705,58 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append("\" value=\"")
             .Append(WebUtility.HtmlEncode(requestToken))
             .Append("\">")
-            .Append("<p><label for=\"username\">Username</label> ")
+            .Append("<p><label for=\"username\">")
+            .Append(text.UsernameLabel)
+            .Append("</label> ")
             .Append("<input type=\"text\" id=\"username\" name=\"username\" ")
             .Append("autocomplete=\"username\" maxlength=\"")
             .Append(IdentityConstants.MaxUsernameLength)
             .Append("\" required></p>")
-            .Append("<p><label for=\"password\">Password</label> ")
+            .Append("<p><label for=\"password\">")
+            .Append(text.PasswordLabel)
+            .Append("</label> ")
             .Append("<input type=\"password\" id=\"password\" name=\"password\" ")
             .Append("autocomplete=\"current-password\" maxlength=\"")
             .Append(MaxPasswordLength)
             .Append("\" required></p>")
-            .Append("<p><button type=\"submit\" name=\"action\" value=\"login\">Sign in</button> ")
+            .Append("<p><button type=\"submit\" name=\"action\" value=\"login\">")
+            .Append(text.SignInButton)
+            .Append("</button> ")
             // Cancel skips the browser's constraint validation of the required credential fields:
             // the server leaves on cancel before it reads them (IN-15).
-            .Append("<button type=\"submit\" name=\"action\" value=\"cancel\" formnovalidate>Cancel</button></p>")
-            .Append("</form></body></html>");
+            .Append("<button type=\"submit\" name=\"action\" value=\"cancel\" formnovalidate>")
+            .Append(text.CancelButton)
+            .Append("</button></p>")
+            .Append("</form></main></body></html>");
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// The local error page of one language. It depends on nothing but the language, so every
+    /// rejection reason renders the same bytes, and it echoes no request value.
+    /// </summary>
+    private static string BuildLocalErrorPage(LoginPageText text) =>
+        "<!DOCTYPE html><html lang=\"" + text.HtmlLang + "\"><head><meta charset=\"utf-8\"><title>"
+        + text.ErrorTitle + "</title>" + HeadTail + "</head><body><main><h1>"
+        + text.ErrorHeading + "</h1><p>" + text.ErrorMessage + "</p></main></body></html>";
+
+    /// <summary>
+    /// The text of the language negotiated from this request's <c>Accept-Language</c> header —
+    /// the only input that selects the language.
+    /// </summary>
+    private LoginPageText NegotiatedText() =>
+        LoginPageText.For(LoginPageLanguageNegotiator.Negotiate(Request.Headers.AcceptLanguage));
+
+    /// <summary>
+    /// Writes one HTML page. Its bytes depend on <c>Accept-Language</c>, so every HTML answer of
+    /// this route announces that to caches with <c>Vary</c>.
+    /// </summary>
+    private ContentResult HtmlPage(string html, int statusCode)
+    {
+        Response.Headers.Vary = HeaderNames.AcceptLanguage;
+        var content = Content(html, HtmlContentType, Encoding.UTF8);
+        content.StatusCode = statusCode;
+        return content;
     }
 
     private IActionResult RejectLocally(string reason)
@@ -698,9 +765,11 @@ public sealed partial class OAuthLoginController : ControllerBase
             "Login request rejected locally. Reason={Reason}, CorrelationId={CorrelationId}",
             reason,
             LogValueSanitizer.Sanitize(HttpContext.GetCorrelationId()));
-        var content = Content(LocalErrorPage, HtmlContentType, Encoding.UTF8);
-        content.StatusCode = StatusCodes.Status400BadRequest;
-        return content;
+        var page = LoginPageLanguageNegotiator.Negotiate(Request.Headers.AcceptLanguage)
+            == LoginPageLanguage.SimplifiedChinese
+            ? SimplifiedChineseLocalErrorPage
+            : EnglishLocalErrorPage;
+        return HtmlPage(page, StatusCodes.Status400BadRequest);
     }
 
     private void LogOutcome(string outcome)
@@ -761,7 +830,7 @@ public sealed partial class OAuthLoginController : ControllerBase
             return DefaultContentSecurityPolicy;
         }
 
-        return "default-src 'none'; form-action 'self' " + origin
+        return "default-src 'none'; style-src 'self'; form-action 'self' " + origin
             + "; frame-ancestors 'none'; base-uri 'none'";
     }
 

@@ -53,8 +53,13 @@ internal static partial class OAuthLoginTestSupport
     public const string SuccessState = "success-canary-state-0123456789";
     public const string SuccessNonce = "success-canary-nonce-0123456789";
     public const string SuccessChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+    /// <summary>
+    /// The fixed policy of every <c>/oauth2/login</c> answer that is not a rendered form: the local
+    /// 400 and the cancel and success redirects. <c>style-src 'self'</c> admits only the page's own
+    /// stylesheet; every other directive and its order are unchanged.
+    /// </summary>
     public const string ExpectedContentSecurityPolicy =
-        "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+        "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
     /// <summary>
     /// The policy of a rendered login form: the fixed set with <c>form-action</c> widened to the
@@ -62,7 +67,42 @@ internal static partial class OAuthLoginTestSupport
     /// success redirects that the form submission produces.
     /// </summary>
     public static string ExpectedFormContentSecurityPolicy(string origin) =>
-        $"default-src 'none'; form-action 'self' {origin}; frame-ancestors 'none'; base-uri 'none'";
+        $"default-src 'none'; style-src 'self'; form-action 'self' {origin}; frame-ancestors 'none'; base-uri 'none'";
+
+    /// <summary>The fixed same-origin stylesheet every rendered login page links.</summary>
+    public const string StylesheetPath = "/oauth2/login/style.css";
+
+    private const string PageHeadTail =
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        + "<link rel=\"stylesheet\" href=\"/oauth2/login/style.css\">";
+
+    /// <summary>The exact English local 400 bytes: identical for every rejection reason.</summary>
+    public const string EnglishLocalErrorPage =
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        + "<title>Invalid login request</title>" + PageHeadTail + "</head><body><main>"
+        + "<h1>Invalid login request</h1>"
+        + "<p>The login request could not be processed. Return to the application that "
+        + "sent you here and start again.</p></main></body></html>";
+
+    /// <summary>The exact Simplified Chinese local 400 bytes: identical for every rejection reason.</summary>
+    public const string ChineseLocalErrorPage =
+        "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+        + "<title>登录请求无效</title>" + PageHeadTail + "</head><body><main>"
+        + "<h1>登录请求无效</h1>"
+        + "<p>无法处理此登录请求。请返回将您引导至此处的应用，然后重新开始。</p></main></body></html>";
+
+    /// <summary>
+    /// Asserts that a local error page links nothing but the fixed stylesheet: no form, no
+    /// submitted value, and no other destination.
+    /// </summary>
+    public static void AssertOnlyStylesheetReference(string body)
+    {
+        var references = Regex.Matches(body, "(?:href|src|action)=\"([^\"]*)\"", RegexOptions.IgnoreCase)
+            .Select(match => match.Groups[1].Value)
+            .ToList();
+        Assert.Equal([StylesheetPath], references);
+        Assert.DoesNotContain("<form", body, StringComparison.OrdinalIgnoreCase);
+    }
 
     public const string ActionFieldName = "action";
     public const string LoginActionValue = "login";

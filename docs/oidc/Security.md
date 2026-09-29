@@ -132,7 +132,8 @@ messages, traces, audit snapshots, and metric labels. The test fails if any raw 
 correlation-sensitive value appears. Digests are permitted only in the database relationships named
 by `PS-*`; they are not diagnostic substitutes for correlation ids.
 
-Browser endpoints use `Referrer-Policy: no-referrer`; login pages deny framing; a rendered login
+Browser endpoints use `Referrer-Policy: no-referrer`; login pages deny framing, load no script, and
+admit only their own same-origin stylesheet through `style-src 'self'`; a rendered login
 form's `form-action` admits only its own origin and the origin of the request's stored, exactly
 matched redirect URI (see [Identity login](IdentityLogin.md)); credential and token
 responses use `Cache-Control: no-store`; authorization callbacks and one-time-handle query values are

@@ -106,7 +106,7 @@ choice is load-bearing:
 The GET page renders no redirect URI, scope, state, nonce, challenge, or other stored request value.
 It uses no-store/no-cache/no-referrer headers and denies framing. A rendered login form (the GET page
 and the credential-failure re-render) sends
-`Content-Security-Policy: default-src 'none'; form-action 'self' <origin>; frame-ancestors 'none'; base-uri 'none'`,
+`Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self' <origin>; frame-ancestors 'none'; base-uri 'none'`,
 where `<origin>` is the `scheme://host[:port]` origin of the request's stored, exactly matched
 redirect URI. Browsers enforce the submitting page's `form-action` across the redirect chain of the
 submission, so without that origin the cancel and success redirects to a callback on another origin
@@ -114,11 +114,36 @@ would be blocked. The origin is derived only from the stored redirect URI, never
 and the header carries no path, query, state, or other stored value. A redirect URI whose origin
 cannot be expressed as a CSP host-source (for example an IPv6 literal such as `http://[::1]:5173`)
 keeps `form-action 'self'`; use `127.0.0.1` for local development callbacks. Every other
-`/oauth2/login` response, including local errors and the cancel and success redirects, keeps
-`form-action 'self'`. The policy is not redirect validation: the exact redirect URI checks and
+`/oauth2/login` response, including local errors and the cancel and success redirects, sends
+`default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`. The policy is not redirect validation: the exact redirect URI checks and
 revalidation remain the only authority for where a browser is sent. Passwords, handles, cookie values,
 and antiforgery values follow `DF-01`, `DF-05`, and `DF-06` and never enter logs, audit details,
 metrics, traces, exceptions, or error bodies.
+
+## Page language and style
+
+The login page, the credential-failure re-render, and the local error page are rendered in
+Simplified Chinese (`zh-CN`) or English (`en`). The language comes only from the `Accept-Language`
+request header: the header is parsed strictly, ranges are ordered by quality (header order breaks
+ties) and `q=0` ranges are skipped, the first `zh` or `zh-*` range selects `zh-CN`, and the first
+`en`, `en-*`, or `*` range selects English. A missing header, a header that fails strict parsing, a
+quality outside 0–1, or a header without a matching range selects English. No query or form field,
+cookie, stored continuation value, or configuration key selects the language, and `ui_locales` is
+not supported. `<html lang>` carries the selected language, and every HTML response of the route
+sends `Vary: Accept-Language`.
+
+Only the visible text changes with the language. Field names, their order, hidden fields, button
+names and values, error routing, and the security headers are identical in both languages. Within
+one language, every local rejection still returns the same bytes and every credential failure the
+same page (`SC-19`); neither language echoes a submitted value. API, log, audit, and exception text
+stays English.
+
+The page stays script-free. It links one same-origin stylesheet, `GET /oauth2/login/style.css`,
+admitted by `style-src 'self'`. The stylesheet is a fixed constant served with
+`Content-Type: text/css; charset=utf-8`, `Cache-Control: public, max-age=3600`, and
+`X-Content-Type-Options: nosniff`. The route needs no identity or management authentication, reads
+no query, body, cookie, or header, writes no cookie, has no OIDC rate-limit policy (the host-wide
+limit still applies), and loads no font, image, or other resource.
 
 ## Successful login and current-policy revalidation
 
@@ -162,7 +187,8 @@ boundaries above.
 ## Compatibility
 
 This target document changes no current cookie, principal, Password grant, lockout row, shared
-management session or management API (`PS-18`), Data Protection key material, or browser asset.
+management session or management API (`PS-18`), or Data Protection key material. The only browser
+asset is the login stylesheet described above.
 LDAP and WeChat remain token-endpoint grants with no identity-login UI. The SMS token grants and
 `POST /api/auth/sms-code` keep their current behavior; browser SMS login activates only through
 #443–#445 (`AC-15`–`AC-17`). Runtime work for the Password login is divided among #64–#66 and #94;

@@ -30,12 +30,7 @@ namespace SignaCore.Tests.Integration;
 [UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthLoginCancelEndpointTests : IClassFixture<IdentityServerFixture>
 {
-    private const string LocalErrorPage =
-        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-        + "<title>Invalid login request</title></head><body>"
-        + "<h1>Invalid login request</h1>"
-        + "<p>The login request could not be processed. Return to the application that "
-        + "sent you here and start again.</p></body></html>";
+    private const string LocalErrorPage = OAuthLoginTestSupport.EnglishLocalErrorPage;
 
     private readonly IdentityServerFixture _fixture;
 
