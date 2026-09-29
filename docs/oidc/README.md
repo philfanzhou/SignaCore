@@ -17,7 +17,7 @@ is corrected before implementation.
 | [Canonical Semantic Model](./CanonicalSemanticModel.md) | Normative `EV-*`, `PS-*`, `IN-*`, `DF-*`, `AC-*`, and `SC-*` decisions |
 | [Interactive Client Model](./ClientModel.md) | Confidential-BFF registration, redirect URI ownership, scope policy, and compatibility |
 | [Authorization Endpoint](./AuthorizationEndpoint.md) | Browser request orchestration, validation stages, safe error routing, and response boundary |
-| [Identity Login](./IdentityLogin.md) | Isolated identity cookie, server-side continuation, Password login, CSRF, cancellation, and revalidation |
+| [Identity Login](./IdentityLogin.md) | Isolated identity cookie, server-side continuation, Password login, target SMS one-time-code login, CSRF, cancellation, and revalidation |
 | [Authorization Code Redemption](./TokenEndpoint.md) | Code storage, token request validation, atomic redemption, replay, and transaction boundaries |
 | [Interactive Tokens](./Tokens.md) | ID-token and access-token claims, lifetimes, consumers, validation duties, and response separation |
 | [Identity Sessions](./IdentitySession.md) | Database authority, lifetime, activity, revocation, cleanup, and endpoint projections |
@@ -34,7 +34,7 @@ is corrected before implementation.
 
 The architectural choice and rejected alternatives are recorded in
 [ADR 0005](../adr/0005-interactive-oidc-confidential-bff.md). Together these documents complete the
-design baseline; runtime activation still follows `AC-01..14` and the open implementation tasks.
+design baseline; runtime activation still follows `AC-01..17` and the open implementation tasks.
 
 ## First-phase boundary
 
@@ -47,13 +47,16 @@ A Public browser client is available only through explicit per-application opt-i
 PKCE, exact registered Origins, 300-second access tokens, and optional bounded refresh. The
 [Public SPA sample](../../samples/SignaCore.PublicSpa/README.md) shows that path and its limits; the
 confidential BFF remains the preferred client for high-privilege applications. The design adds no
-consent screen, dynamic registration, MFA, browser SMS/LDAP/WeChat login, or new behavior to
-existing grants. A claims callback remains a server-to-server claims
+consent screen, dynamic registration, MFA, browser LDAP/WeChat login, or new behavior to existing
+grants. Browser SMS login is target design only: its canonical rows (`IN-16`–`IN-19`,
+`EV-35`–`EV-38`, `DF-16`–`DF-17`, `SC-21`–`SC-26`) activate through `AC-15`–`AC-17`, and until then
+the Password credential is the only browser login. A claims callback remains a server-to-server claims
 source; it is never a browser redirect registration.
 
 ## Accepted extension
 
 [ADR 0006](../adr/0006-hosted-login-localization-and-browser-sms.md) accepts browser SMS login and
-a `zh-CN`/`en` localized login page as the next extension of this boundary. It changes no runtime
-behavior by itself: the statements above and the canonical model describe current behavior until
-the follow-up design task adds the corresponding canonical rows.
+a `zh-CN`/`en` localized login page as the next extension of this boundary. The browser SMS
+contract is now fixed by the canonical rows named above
+([#441](https://github.com/philfanzhou/SignaCore/issues/441)); it changes no runtime behavior by
+itself, and each capability waits for its `AC-15`–`AC-17` implementation slice.

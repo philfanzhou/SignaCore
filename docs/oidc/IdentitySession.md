@@ -3,7 +3,7 @@
 **Status: target design.** Read the [directory boundary](./README.md) and the
 [canonical model](./CanonicalSemanticModel.md) first.
 
-An identity session is the database authority for one Password-authenticated browser identity. The
+An identity session is the database authority for one authenticated browser identity. The
 identity cookie is only a protected carrier for its opaque identifier. A successfully unprotected
 cookie is therefore not proof that the session, account, or application-specific authentication
 age is currently usable.
@@ -11,8 +11,10 @@ age is currently usable.
 ## Authority and isolation
 
 Canonical `PS-04` owns the session record and `PS-18` owns the identity cookie. The session binds an
-account and the Password credential that proved it, records `auth_time`, activity, idle and absolute
-expiry, and carries optional revocation facts. The cookie contains none of those facts and never
+account, its auth method, and the one credential that proved it — the Password credential today, or
+in the target design the SMS login identity of an `Sms` session — records `auth_time`, activity, idle
+and absolute expiry, and carries optional revocation facts. Both auth methods share every lifetime,
+activity, revocation, and cleanup rule on this page. The cookie contains none of those facts and never
 becomes a self-contained session ticket.
 
 The identity scheme remains isolated from the shared ServiceMantle management session exactly as
@@ -31,7 +33,9 @@ refresh, UserInfo, logout preparation, and failed authorization do not slide the
 
 Application session max-age is a live, application-specific check against the session's immutable
 `auth_time`. Reaching or reducing that limit does not revoke the global session and cannot affect a
-different application (`EV-05`). It requires fresh identity login for the affected application.
+different application (`EV-05`). It requires fresh identity login for the affected application. In the target design an `Sms` session
+has one more application-specific check of the same kind: the `PS-04` SMS admission predicate. Its
+failure never revokes the session and affects only that application (`EV-38`).
 
 Missing, expired, and revoked are distinct observations. A missing row supplies no authority and
 causes no invented revocation or audit. Idle or absolute expiry is a time result, not a revocation
@@ -90,11 +94,12 @@ strand a retained code fails instead of silently erasing evidence.
 ## Test mapping and compatibility
 
 Tests use `SC-05`, `SC-06`, `SC-08`–`SC-12`, `SC-15`, `SC-18`, and `SC-20` rather than copying their
-expected transitions here. They additionally prove exact-boundary expiry, the one-minute activity
+expected transitions here; the `Sms` auth method adds `SC-21`, `SC-24`, and `SC-26`. They additionally prove exact-boundary expiry, the one-minute activity
 write threshold, absolute-expiry capping, application max-age isolation, cross-scheme cookie
 rejection, provider lock order, and cleanup referential integrity.
 
 This design changes no current cookie, shared management session (`PS-18`), profile API, grant,
 migration, or runtime route. Storage/lifecycle and state propagation activate only through #67 and
 #69 (`AC-09`), whose #95 storage slice precedes the authorization-code table required by `AC-03`.
+The `Sms` auth method is added by #443 (`AC-15`) and first written by #445 (`AC-17`).
 This document itself changes no Discovery metadata (`AC-14`).

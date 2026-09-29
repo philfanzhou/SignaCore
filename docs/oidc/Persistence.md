@@ -4,7 +4,7 @@
 [canonical model](./CanonicalSemanticModel.md), and
 [interactive refresh families](./RefreshTokens.md) first.
 
-Canonical `PS-01` through `PS-23` own artifact relationships. This document projects only the
+Canonical `PS-01` through `PS-24` own artifact relationships. This document projects only the
 refresh-family additions and migration procedure needed by #97; it does not redefine the schemas
 owned by authorization, session, logout, or client-policy implementation tasks.
 
@@ -142,6 +142,22 @@ child-first interactive family cleanup above is the only admissible family delet
 belongs to the family write API (delivered by #294; rotation joins with #98), not to the legacy
 statement. Cleanup cancellation or failure
 rolls back the unit and never nulls a relationship to force deletion.
+
+## Browser SMS additions (target)
+
+#443 adds the storage for browser SMS login (`AC-15`) in one migration per provider, with the same
+shape in both histories. It projects `PS-03`, `PS-04`, and `PS-24` and does not redefine them:
+
+| Change | Shape | Rollback (`Down`) precondition |
+| --- | --- | --- |
+| `authorization_requests.sms_code_send_count` | Non-null integer, default 0, CHECK `>= 0`; written only by the `PS-03` conditional update | None: no other artifact reads the count, and continuations live for 10 minutes |
+| `identity_sessions.sms_user_login_id` and the auth-method CHECK | Nullable restrictive, indexed reference to `user_logins`; `password_credential_id` becomes nullable; a CHECK requires exactly the reference that matches `auth_method` (`Password` or `Sms`). Existing rows already satisfy it as `Password` rows. SQLite rebuilds the table and preserves every row and index | No `Sms` session row remains; `Down` fails closed otherwise, because an old binary cannot read or revoke such a row correctly |
+| `oidc_rate_limit_buckets` policy CHECK | Adds `oidc-sms-code`; `OidcRateLimitBudgets` gains the same name | No `oidc-sms-code` bucket row remains |
+
+Deleting a `user_logins` SMS identity that a session still references fails under the restrictive
+reference, exactly like a referenced Password credential. Rolling back only the #445 binary while
+`Sms` sessions exist is equally unsupported: revoke them or wait for their 12-hour absolute expiry
+and retention before downgrading.
 
 ## Deployment and rollback gate
 
