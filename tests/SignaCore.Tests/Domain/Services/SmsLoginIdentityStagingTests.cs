@@ -87,7 +87,7 @@ public sealed class SmsLoginIdentityStagingTests : IAsyncLifetime
             _appId, SmsLoginMode.AutoProvision, Phone, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
 
         Assert.Equal(new SmsLoginIdentity(accountId, loginId, AccountCreated: false), identity);
-        var added = Assert.Single(_context.ChangeTracker.Entries().Where(entry => entry.State == EntityState.Added));
+        var added = Assert.Single(_context.ChangeTracker.Entries(), entry => entry.State == EntityState.Added);
         var access = Assert.IsType<AppSmsAccessEntity>(added.Entity);
         Assert.Equal((_appId, loginId, SmsAccessApprovalSource.AutoProvision), (access.AppRegistrationId, access.UserLoginId, access.ApprovalSource));
     }

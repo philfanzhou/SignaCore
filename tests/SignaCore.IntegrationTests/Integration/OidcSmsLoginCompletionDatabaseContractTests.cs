@@ -113,7 +113,7 @@ public sealed class OidcSmsLoginCompletionDatabaseContractTests
         Assert.Equal(seed.AccountId, history.AccountId);
         Assert.Equal((seed.AppId, CorrelationId), (history.AppId, history.CorrelationId));
         Assert.Empty(await db.LoginAttempts.AsNoTracking().ToListAsync(Ct));
-        Assert.Equal(0, unit.AccountCreations.Count);
+        Assert.Empty(unit.AccountCreations);
     }
 
     [Theory]
@@ -302,7 +302,10 @@ public sealed class OidcSmsLoginCompletionDatabaseContractTests
         }
 
         Assert.Equal(1, interceptor.CommitAttempts);
-        Assert.Empty(unit.AccountCreations.Where(_ => !afterCommit));
+        if (!afterCommit)
+        {
+            Assert.Empty(unit.AccountCreations);
+        }
     }
 
     [Fact]
