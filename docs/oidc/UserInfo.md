@@ -32,7 +32,9 @@ After structural input validation, one captured UTC time drives the following ch
    application, audience, and session without inference or fallback.
 4. Load the current application, account, and identity session. Require the application and account
    to be active, the session to exist and be live, its account to equal `sub`, and its
-   application-specific max-age to remain usable.
+   application-specific max-age to remain usable. For an `Sms` session in the target design, the
+   `PS-04` SMS admission predicate for the token's application is part of that live check
+   (`EV-38`).
 5. Intersect optional token scopes with the application's current allow list and build `PS-16`.
 
 UserInfo is a live read, not session activity. It never slides idle expiry and never writes a
@@ -57,8 +59,9 @@ state.
 
 `PS-16` is the complete response contract. Every successful response contains the stable account id
 as `sub`, byte-for-byte identical to the ID-token subject. If both the token and current policy
-contain `profile`, the response also contains the bound Password username as `name` and the current
-non-null account nickname as `nickname`.
+contain `profile`, the response also contains `name`, whose source follows the session auth method
+exactly as `PS-12` defines, and the current non-null account nickname as `nickname`. A phone number
+is never returned, including for an `Sms` session (`DF-16`).
 
 No callback is invoked. UserInfo returns no role, permission, credential-security, phone, email,
 application, provider, or refresh-family claim. It neither echoes token claims blindly nor invents

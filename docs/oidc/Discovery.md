@@ -2,7 +2,7 @@
 
 **Status: activation history and current metadata.** Current behavior is also recorded in
 [Standards Conformance](../overview/StandardsConformance.md); the normative activation rules are
-[AC-01..14](./CanonicalSemanticModel.md#implementation-task--capability-activation).
+[AC-01..17](./CanonicalSemanticModel.md#implementation-task--capability-activation).
 
 ## Current fact
 
@@ -30,7 +30,8 @@ the linked canonical rows and closed design task.
 The prerequisite column is a 2026-08-31 snapshot of GitHub's native dependency graph. It lists only
 direct `Blocked by` edges for every implementation task named in a gate; it never substitutes a
 transitive ancestor. `A ← B, C` means that task A is directly blocked by B and C. Cross-repository
-tasks are qualified with their repository name.
+tasks are qualified with their repository name. The `AC-15`–`AC-17` rows are a 2026-09-29
+snapshot of the same graph.
 
 | Gate | Named task ← direct native prerequisites | Capability effect | Public metadata effect | Contract source |
 | --- | --- | --- | --- | --- |
@@ -48,6 +49,9 @@ tasks are qualified with their repository name.
 | `AC-12` | #98 ← #96, #97, #133 | #98 closes atomic rotation, reuse handling, and session enforcement | Add `offline_access` only now; the already truthful `refresh_token` grant remains | [AC-12](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#133](https://github.com/philfanzhou/SignaCore/issues/133) |
 | `AC-13` | #71 ← #53, #55, #94, #96, [ServiceMantle#83](https://github.com/philfanzhou/ServiceMantle/issues/83), [ServiceMantle#84](https://github.com/philfanzhou/ServiceMantle/issues/84), [ServiceMantle#86](https://github.com/philfanzhou/ServiceMantle/issues/86), [ServiceMantle#88](https://github.com/philfanzhou/ServiceMantle/issues/88), [ServiceMantle#142](https://github.com/philfanzhou/ServiceMantle/issues/142) | Product-specific limits, audit, metrics, and sensitive canaries pass | None; production release remains disabled until the gate passes | [AC-13](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#129](https://github.com/philfanzhou/SignaCore/issues/129), [#134](https://github.com/philfanzhou/SignaCore/issues/134) |
 | `AC-14` | #134 ← #130, #131, #132, #133 | The English target contract is complete | Current metadata remains byte-for-byte unchanged | [AC-14](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#129](https://github.com/philfanzhou/SignaCore/issues/129), [#134](https://github.com/philfanzhou/SignaCore/issues/134) |
+| `AC-15` | #443 ← #441 | Schema can hold `Sms` sessions, the per-continuation send count, and the `oidc-sms-code` bucket; no route writes them | None | [AC-15](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#441](https://github.com/philfanzhou/SignaCore/issues/441) |
+| `AC-16` | #444 ← #441, #442, #443 | Browser SMS send route with its budgets; the login page renders no SMS region and `sms_login` stays rejected | None | [AC-16](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#441](https://github.com/philfanzhou/SignaCore/issues/441) |
+| `AC-17` | #445 ← #443, #444, #446 | SMS login submission, SMS page region, admission rechecks, and `amr: ["sms"]` | None; `amr` values and every other field stay unchanged | [AC-17](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#441](https://github.com/philfanzhou/SignaCore/issues/441) |
 
 `AC-07` publishes only scopes that are usable at that point. In particular, `offline_access` remains
 absent through `AC-11` and appears only at `AC-12`. `AC-10` never turns the prepared logout route into

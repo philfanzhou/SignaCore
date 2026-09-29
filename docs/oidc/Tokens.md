@@ -22,15 +22,17 @@ never substitute for the other.
 | `iat`, `exp` | Captured UTC issue time and exactly five minutes later |
 | `auth_time` | Original identity-session authentication time, not token issue time |
 | `sid` | Original identity-session id |
-| `amr` | JSON array containing only `pwd` in this phase |
+| `amr` | JSON array: `["pwd"]` for a Password session; in the target design `["sms"]` for an `Sms` session (`PS-12`) |
 | `nonce` | Exact authorization-request snapshot, present on the first ID token only |
-| `name` | Bound Password username only when `profile` was granted |
+| `name` | Only when `profile` was granted; its source follows the session auth method (`PS-12`) |
 | `nickname` | Current non-null account nickname only when `profile` was granted |
 
 `azp`, `acr`, role, permission, `auth_method`, `client_id`, callback claims, and access-token binding
-claims are absent. Callback output cannot replace a core claim or inject a second copy. The ID token
-contains an authentication statement, not downstream authorization; consumers must never treat its
-profile fields as roles or permissions.
+claims are absent. No ID-token or access-token claim ever carries a phone number, including for an
+`Sms` session (`DF-16`). A consumer that asserted `amr == ["pwd"]` must accept `["sms"]` once an
+application enables browser SMS login (`AC-17`). Callback output cannot replace a core claim or
+inject a second copy. The ID token contains an authentication statement, not downstream
+authorization; consumers must never treat its profile fields as roles or permissions.
 
 The BFF validates the RS256 signature through the `kid` selected JWKS key, exact issuer, its own
 audience, lifetime, and exact one-time nonce. It also validates the authorization response `iss`
@@ -49,7 +51,7 @@ downstream authorization decision.
 | --- | --- |
 | JWT authority | Configured `iss`; application AppId `aud`; Public 5-minute or Confidential 15-minute `exp`; captured `nbf`/`iat`; unique `jti` |
 | Subject and client binding | Stable account-id `sub`, `client_id`, and identity-session `sid` |
-| Authentication | Existing `auth_method`, carrying the Password method captured by the identity session |
+| Authentication | Existing `auth_method`, carrying the auth method recorded by the identity session (`Password`, or `Sms` in the target design) |
 | Granted authority | Canonical space-delimited `scope`, byte-for-byte equal to the token response |
 | Existing basic/business claims | Existing name/nickname/role/`Permission` behavior plus callback enrichment, subject to reserved-claim protection |
 
