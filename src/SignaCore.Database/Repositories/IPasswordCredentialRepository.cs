@@ -10,6 +10,14 @@ public interface IPasswordCredentialRepository
     Task<PasswordCredentialEntity?> GetByAccountIdAsync(
         Guid accountId,
         CancellationToken cancellationToken = default);
+    /// <summary>
+    /// The username of the account's Password credential when the account has exactly one, read
+    /// untracked; <c>null</c> when it has none or more than one. This is the <c>PS-12</c>/<c>PS-16</c>
+    /// <c>name</c> source of an <c>Sms</c> identity session, which is bound to no credential.
+    /// </summary>
+    Task<string?> GetSoleUsernameByAccountIdAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default);
     Task AddAsync(
         PasswordCredentialEntity credential,
         CancellationToken cancellationToken = default);

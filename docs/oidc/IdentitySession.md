@@ -11,8 +11,8 @@ age is currently usable.
 ## Authority and isolation
 
 Canonical `PS-04` owns the session record and `PS-18` owns the identity cookie. The session binds an
-account, its auth method, and the one credential that proved it — the Password credential today, or
-in the target design the SMS login identity of an `Sms` session — records `auth_time`, activity, idle
+account, its auth method, and the one credential that proved it — the Password credential of a
+`Password` session or the SMS login identity of an `Sms` session — records `auth_time`, activity, idle
 and absolute expiry, and carries optional revocation facts. Both auth methods share every lifetime,
 activity, revocation, and cleanup rule on this page. The cookie contains none of those facts and never
 becomes a self-contained session ticket.
@@ -33,9 +33,10 @@ refresh, UserInfo, logout preparation, and failed authorization do not slide the
 
 Application session max-age is a live, application-specific check against the session's immutable
 `auth_time`. Reaching or reducing that limit does not revoke the global session and cannot affect a
-different application (`EV-05`). It requires fresh identity login for the affected application. In the target design an `Sms` session
-has one more application-specific check of the same kind: the `PS-04` SMS admission predicate. Its
-failure never revokes the session and affects only that application (`EV-38`).
+different application (`EV-05`). It requires fresh identity login for the affected application. An `Sms` session has one more
+application-specific check of the same kind: the `PS-04` SMS admission predicate, read live at
+authorize reuse, code redemption, refresh, and UserInfo. Its failure never revokes the session,
+never writes activity or an admission, and affects only that application (`EV-38`).
 
 Missing, expired, and revoked are distinct observations. A missing row supplies no authority and
 causes no invented revocation or audit. Idle or absolute expiry is a time result, not a revocation
@@ -101,5 +102,6 @@ rejection, provider lock order, and cleanup referential integrity.
 This design changes no current cookie, shared management session (`PS-18`), profile API, grant,
 migration, or runtime route. Storage/lifecycle and state propagation activate only through #67 and
 #69 (`AC-09`), whose #95 storage slice precedes the authorization-code table required by `AC-03`.
-The `Sms` auth method is added by #443 (`AC-15`) and first written by #445 (`AC-17`).
+The `Sms` auth method is added by #443 (`AC-15`); the `EV-38` checks and the `amr`/`name` mapping
+are delivered by #453 before #445 first writes an `Sms` session from a production route (`AC-17`).
 This document itself changes no Discovery metadata (`AC-14`).

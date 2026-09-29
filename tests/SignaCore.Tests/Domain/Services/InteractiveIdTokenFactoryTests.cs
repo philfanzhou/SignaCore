@@ -136,10 +136,14 @@ public sealed class InteractiveIdTokenFactoryTests
         Assert.DoesNotContain(Nonce, exception.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Create_SerializesAmrAsAJsonArrayAndAuthTimeAsANumber()
+    [Theory]
+    [InlineData(IdentityConstants.AuthMethodPassword, "pwd")]
+    [InlineData(IdentityConstants.AuthMethodSms, "sms")]
+    public void Create_SerializesAmrAsAJsonArrayOfTheSessionAuthMethodAndAuthTimeAsANumber(
+        string authMethod,
+        string expectedAmr)
     {
-        var issued = Create(Descriptor());
+        var issued = Create(Descriptor() with { AuthMethod = authMethod });
         var payloadSegment = issued.IdToken.Split('.')[1];
         var padded = payloadSegment.Replace('-', '+').Replace('_', '/');
         padded = padded.PadRight(padded.Length + (4 - padded.Length % 4) % 4, '=');
@@ -151,7 +155,7 @@ public sealed class InteractiveIdTokenFactoryTests
         Assert.Equal(JsonValueKind.Array, amr.ValueKind);
         var members = amr.EnumerateArray().ToList();
         Assert.Single(members);
-        Assert.Equal("pwd", members[0].GetString());
+        Assert.Equal(expectedAmr, members[0].GetString());
 
         Assert.Equal(JsonValueKind.Number, root.GetProperty("auth_time").ValueKind);
         Assert.Equal(AuthTimeSeconds, root.GetProperty("auth_time").GetInt64());
@@ -188,7 +192,10 @@ public sealed class InteractiveIdTokenFactoryTests
         { "empty session", () => Descriptor() with { SessionId = Guid.Empty } },
         { "empty client", () => Descriptor() with { ClientId = "" } },
         { "empty nonce", () => Descriptor(nonce: "") },
-        { "unmapped auth method", () => Descriptor() with { AuthMethod = "SMS" } },
+        { "unmapped auth method (case differs from Sms)", () => Descriptor() with { AuthMethod = "SMS" } },
+        { "unmapped auth method (case differs from Password)", () => Descriptor() with { AuthMethod = "password" } },
+        { "unmapped auth method (unknown)", () => Descriptor() with { AuthMethod = "LDAP" } },
+        { "empty auth method", () => Descriptor() with { AuthMethod = "" } },
         { "non-canonical scope", () => Descriptor(scope: "profile") }
     };
 

@@ -32,9 +32,9 @@ After structural input validation, one captured UTC time drives the following ch
    application, audience, and session without inference or fallback.
 4. Load the current application, account, and identity session. Require the application and account
    to be active, the session to exist and be live, its account to equal `sub`, and its
-   application-specific max-age to remain usable. For an `Sms` session in the target design, the
-   `PS-04` SMS admission predicate for the token's application is part of that live check
-   (`EV-38`).
+   application-specific max-age to remain usable. For an `Sms` session, the `PS-04` SMS admission
+   predicate for the token's application is part of that live check (`EV-38`): when it is false
+   the answer is the same 401 `invalid_token` as any other rejected live state, with no write.
 5. Intersect optional token scopes with the application's current allow list and build `PS-16`.
 
 UserInfo is a live read, not session activity. It never slides idle expiry and never writes a

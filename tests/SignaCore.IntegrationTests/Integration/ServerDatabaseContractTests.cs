@@ -14,6 +14,7 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using Testcontainers.PostgreSql;
@@ -1486,7 +1487,8 @@ public sealed class ServerDatabaseContractTests
             new AccountRepository(context),
             new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             unitOfWork,
-            context);
+            context,
+            new SmsAdmissionService(context));
         return await service.TryIssueAsync(
             accepted,
             sessionId,
@@ -1732,6 +1734,7 @@ public sealed class ServerDatabaseContractTests
             new AppRegistrationRepository(context),
             context,
             new AdminIdentityOptions(),
+            new SmsAdmissionService(context),
             NullLogger<SignaCore.Host.Services.AuthorizationCodeRedemptionService>.Instance);
         return await service.RedeemAsync(
             application,

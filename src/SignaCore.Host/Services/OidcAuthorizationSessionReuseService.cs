@@ -5,6 +5,7 @@ using SignaCore.Host.Audit;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 
 namespace SignaCore.Host.Services;
 
@@ -32,7 +33,8 @@ public sealed class OidcAuthorizationSessionReuseService(
     IAccountRepository accounts,
     IManagementAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
-    IdentityDbContext dbContext)
+    IdentityDbContext dbContext,
+    ISmsAdmissionService smsAdmissions)
 {
     private const string AuditAction = "oidc.authorize.validated";
     private const string AuditTargetType = "OidcAuthorizationRequest";
@@ -44,7 +46,9 @@ public sealed class OidcAuthorizationSessionReuseService(
     /// snapshot. Returns the committed plaintext code, or <c>null</c> when the session row is
     /// missing, revoked, idle- or absolutely expired (inclusive boundaries, <c>EV-04</c>), the
     /// account is gone or deactivated (<c>EV-08</c>), or this application's session max-age is
-    /// reached (<c>EV-05</c>, never a global revocation) — each with the whole unit rolled back.
+    /// reached (<c>EV-05</c>, never a global revocation), or, for an <c>Sms</c> session, this
+    /// application's current <c>PS-04</c> SMS admission predicate is false (<c>EV-38</c>: no
+    /// activity write, no admission write, no provisioning) — each with the whole unit rolled back.
     /// The application's current capability, scope and redirect registration are checked again
     /// under the issuance transaction.
     /// </summary>
@@ -93,6 +97,15 @@ public sealed class OidcAuthorizationSessionReuseService(
             if (application is null
                 || (application.IdentitySessionMaxAgeSeconds is int maxAgeSeconds
                     && now >= session.AuthTime.AddSeconds(maxAgeSeconds)))
+            {
+                await transaction.RollbackAsync(operationToken);
+                return null;
+            }
+
+            // EV-38: an Sms session is usable here only while this application currently admits
+            // its SMS identity. The read is live and write-free; other applications are unaffected.
+            if (!await InteractiveSessionAuthMethodRules.AdmitsAsync(
+                    smsAdmissions, session, application, operationToken))
             {
                 await transaction.RollbackAsync(operationToken);
                 return null;

@@ -173,7 +173,7 @@ write/read owner and must not be used to infer a different outcome.
 | Signing-key rotation | `EV-16` | Family state is unchanged; a successful refresh uses the current `kid` |
 | Correctly bound code replay | `EV-24` | Directly revoke only the exact root family linked by that code and revoke the session; sibling families become unusable only through the session check |
 | Session row missing | `EV-32` | A still-retained family is atomically revoked for missing authority; no session is guessed and no reuse audit is emitted |
-| SMS admission predicate false for an `Sms` session (target) | `EV-38`, `EV-32` | Next refresh atomically revokes that application's family with reason `sms_admission` and returns `invalid_grant`; other applications and the session are unchanged |
+| SMS admission predicate false for an `Sms` session | `EV-38`, `EV-32` | Next refresh atomically revokes that application's family with reason `sms_admission` and returns `invalid_grant`; checked after session missing/expiry and application max-age and before scope removal; other applications and the session are unchanged, and a later restored admission does not revive the family |
 
 A canonical whole-family revocation sets `is_revoked` on every unrevoked retained member and commits
 the closed cause in the triggering audit/state unit (`PS-11`). This is distinct from `EV-14`, which

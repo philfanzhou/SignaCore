@@ -12,6 +12,7 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Validators;
 
 namespace SignaCore.Host.Services;
@@ -113,8 +114,9 @@ public sealed class InteractiveRefreshRotationOutcome
 /// A correctly bound consumed member is reuse (<c>EV-31</c>): every live descendant of the
 /// presented member is revoked, one id-only <c>oidc.refresh.replayed</c> audit is committed, the
 /// identity session is <b>not</b> revoked, and the answer is the single generic
-/// <c>invalid_grant</c>. Session expiry, a missing session row, application max-age, and scope
-/// removal revoke the family atomically inside the rejecting transaction (<c>EV-32</c>); every
+/// <c>invalid_grant</c>. Session expiry, a missing session row, application max-age, a false SMS
+/// admission predicate of an <c>Sms</c> session (<c>EV-38</c>), and scope removal revoke the
+/// family atomically inside the rejecting transaction (<c>EV-32</c>); every
 /// other rejection — wrong client, corrupt marker or binding, an explicitly revoked or expired
 /// member, an inactive account or application — fails closed with the same generic
 /// <c>invalid_grant</c> and zero writes (<c>SC-18</c>). Legacy rows never enter this service
@@ -143,6 +145,7 @@ public sealed class InteractiveRefreshRotationService(
     IUnitOfWork unitOfWork,
     IAppRegistrationRepository applications,
     IdentityDbContext dbContext,
+    ISmsAdmissionService smsAdmissions,
     ILogger<InteractiveRefreshRotationService> logger)
 {
     public const string GrantType = IdentityConstants.GrantTypeRefreshToken;
@@ -318,8 +321,7 @@ public sealed class InteractiveRefreshRotationService(
         if (member.ConsumedAt is not null)
         {
             return InteractiveRefreshDispatch.From(await ExecuteRotationTransactionAsync(
-                app, member, passwordUsername: null, displayName: null, signingKey: null,
-                now, clientIp, correlationId, cancellationToken));
+                app, member, signingKey: null, now, clientIp, correlationId, cancellationToken));
         }
 
         if (member.IsRevoked || now >= member.ExpiresAt)
@@ -327,18 +329,13 @@ public sealed class InteractiveRefreshRotationService(
             return InteractiveRefreshDispatch.From(InvalidGrant());
         }
 
-        // Profile sources for both constructors, resolved outside the transaction like the
-        // redemption's — the locked rows re-supply the authoritative values below.
+        // A non-authoritative account precheck; the locked rows re-supply the authoritative
+        // values, including both profile sources, below.
         var account = await accounts.GetByIdAsync(member.AccountId, cancellationToken);
         if (account is null || !account.IsActive)
         {
             return InteractiveRefreshDispatch.From(InvalidGrant());
         }
-
-        var passwordUsername = await ResolvePasswordUsernameAsync(account, cancellationToken);
-        var displayName = !string.IsNullOrWhiteSpace(account.Nickname)
-            ? account.Nickname
-            : passwordUsername;
 
         await keyManager.RefreshKeysAsync(cancellationToken);
         var signingKey = keyManager.GetCurrentKey();
@@ -346,8 +343,6 @@ public sealed class InteractiveRefreshRotationService(
         return InteractiveRefreshDispatch.From(await ExecuteRotationTransactionAsync(
             app,
             member,
-            passwordUsername,
-            displayName,
             signingKey,
             now,
             clientIp,
@@ -364,8 +359,6 @@ public sealed class InteractiveRefreshRotationService(
     private async Task<InteractiveRefreshRotationOutcome> ExecuteRotationTransactionAsync(
         AppRegistrationEntity app,
         RefreshTokenEntity member,
-        string? passwordUsername,
-        string? displayName,
         RsaSecurityKey? signingKey,
         DateTimeOffset now,
         string? clientIp,
@@ -499,6 +492,19 @@ public sealed class InteractiveRefreshRotationService(
                     operationToken);
             }
 
+            // EV-38: an Sms session refreshes only while this application currently admits its
+            // SMS identity. Only this application's family is revoked; the session stays live, and
+            // a later restored admission never revives the revoked family.
+            if (!await InteractiveSessionAuthMethodRules.AdmitsAsync(
+                    smsAdmissions, lockedSession, currentApplication, operationToken))
+            {
+                return await CommitFamilyRevocationAsync(
+                    lockedRoot.Id,
+                    RefreshFamilyRevocationReason.SmsAdmission,
+                    transaction,
+                    operationToken);
+            }
+
             if (!IsScopeStillAllowed(lockedMember.Scope!, currentApplication.AllowedScopes))
             {
                 return await CommitFamilyRevocationAsync(
@@ -514,6 +520,14 @@ public sealed class InteractiveRefreshRotationService(
                 await transaction.RollbackAsync(operationToken);
                 return InvalidGrant();
             }
+
+            // One credential read feeds both name sources — the access token's display-name
+            // fallback and the ID token's PS-12 name — under the locked session's auth method.
+            var passwordUsername = await InteractiveSessionAuthMethodRules.ResolveNameAsync(
+                passwordCredentials, lockedSession.AuthMethod, lockedAccount.Id, operationToken);
+            var displayName = !string.IsNullOrWhiteSpace(lockedAccount.Nickname)
+                ? lockedAccount.Nickname
+                : passwordUsername;
 
             // EV-26: a failing or oversized construction of either token rolls the consumption
             // back with everything else — the fallible steps precede the parent's consumption.
@@ -731,18 +745,6 @@ public sealed class InteractiveRefreshRotationService(
     {
         var allowed = OidcScopeValidator.ParseCanonical(currentAllowedScopes);
         return scopeSnapshot.Split(' ', StringSplitOptions.RemoveEmptyEntries).All(allowed.Contains);
-    }
-
-    /// <summary>
-    /// The bound Password username of the account, or null when the account has no password
-    /// credential — the same source the redemption's ID-token <c>name</c> claim uses.
-    /// </summary>
-    private async Task<string?> ResolvePasswordUsernameAsync(
-        AccountEntity account,
-        CancellationToken cancellationToken)
-    {
-        var credential = await passwordCredentials.GetByAccountIdAsync(account.Id, cancellationToken);
-        return credential?.Username;
     }
 
     private static InteractiveRefreshRotationOutcome InvalidGrant() =>

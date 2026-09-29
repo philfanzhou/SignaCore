@@ -92,11 +92,17 @@ public interface IInteractiveIdTokenFactory
 public sealed class InteractiveIdTokenFactory : IInteractiveIdTokenFactory
 {
     /// <summary>
-    /// The RFC 8176 authentication-method reference of the Password identity session — the only
-    /// interactive authentication method of this phase (<c>PS-12</c>: <c>amr</c> contains only
-    /// <c>pwd</c>). A future interactive method must extend the mapping, not silently reuse it.
+    /// The RFC 8176 authentication-method reference of each interactive identity-session auth
+    /// method (<c>PS-12</c>): <c>pwd</c> for a <c>Password</c> session and <c>sms</c> for an
+    /// <c>Sms</c> session. The lookup is ordinal — a differently cased or unknown auth method has
+    /// no mapping and is a programming error, never a silently reused value.
     /// </summary>
-    private const string PasswordAmrValue = "pwd";
+    private static readonly IReadOnlyDictionary<string, string> AmrValues =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [IdentityConstants.AuthMethodPassword] = "pwd",
+            [IdentityConstants.AuthMethodSms] = "sms"
+        };
 
     /// <summary>
     /// The full interactive scope vocabulary the canonical-form check runs against. Membership and
@@ -159,10 +165,11 @@ public sealed class InteractiveIdTokenFactory : IInteractiveIdTokenFactory
                 "The signing key id must not be empty.", nameof(signingKey));
         }
 
-        if (descriptor.AuthMethod != IdentityConstants.AuthMethodPassword)
+        if (descriptor.AuthMethod is null
+            || !AmrValues.TryGetValue(descriptor.AuthMethod, out var amrValue))
         {
             throw new ArgumentException(
-                "The auth method has no amr mapping in this phase.", nameof(descriptor));
+                "The auth method has no amr mapping.", nameof(descriptor));
         }
 
         if (!IsCanonicalInteractiveScope(descriptor.Scope))
@@ -191,8 +198,9 @@ public sealed class InteractiveIdTokenFactory : IInteractiveIdTokenFactory
             payloadClaims.Add(new Claim(JwtRegisteredClaimNames.Nonce, descriptor.Nonce));
         }
 
-        // PS-12: name is the bound Password username and nickname is the current account nickname
-        // — a different source than the access token's display-name resolution — and both appear
+        // PS-12: name is the caller-resolved Password username (the auth-method rule lives with
+        // the caller, which reads the credentials) and nickname is the current account nickname —
+        // a different source than the access token's display-name resolution — and both appear
         // only when profile was granted.
         if (SplitCanonicalScope(descriptor.Scope).Contains(OidcScopeValidator.Profile))
         {
@@ -219,7 +227,7 @@ public sealed class InteractiveIdTokenFactory : IInteractiveIdTokenFactory
 
         // RFC 8176 values must serialize as a JSON array and auth_time as a JSON number; claim
         // strings would serialize as JSON strings, so the native values go on the payload directly.
-        payload.Add(JwtRegisteredClaimNames.Amr, new[] { PasswordAmrValue });
+        payload.Add(JwtRegisteredClaimNames.Amr, new[] { amrValue });
         payload.Add(JwtRegisteredClaimNames.AuthTime, descriptor.AuthTime.ToUnixTimeSeconds());
 
         var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.RsaSha256);

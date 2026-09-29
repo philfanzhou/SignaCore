@@ -9,6 +9,7 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Validators;
 
 namespace SignaCore.Host.Services;
@@ -51,7 +52,10 @@ public sealed class OidcUserInfoOutcome
     /// <summary>The stable account id as the <c>PS-16</c> <c>sub</c> value.</summary>
     public string? Subject { get; private init; }
 
-    /// <summary>The bound Password username, present only when <c>profile</c> survived the intersection.</summary>
+    /// <summary>
+    /// The <c>PS-12</c>/<c>PS-16</c> auth-method <c>name</c>, present only when <c>profile</c>
+    /// survived the intersection and the session's auth method yields a Password username.
+    /// </summary>
     public string? Name { get; private init; }
 
     /// <summary>The current non-null account nickname, present only when <c>profile</c> survived.</summary>
@@ -99,6 +103,7 @@ public sealed class OidcUserInfoService(
     IPasswordCredentialRepository passwordCredentials,
     IdentityDbContext dbContext,
     JwtOptions jwtOptions,
+    ISmsAdmissionService smsAdmissions,
     ILogger<OidcUserInfoService> logger)
 {
     /// <summary>The wire path this endpoint serves; also the Discovery activation value (<c>AC-08</c>).</summary>
@@ -262,6 +267,14 @@ public sealed class OidcUserInfoService(
             return Fail(OidcUserInfoRejection.InvalidToken, "session_state");
         }
 
+        // EV-38: an Sms session is live for this application only while the application
+        // currently admits its SMS identity; the read writes nothing either way.
+        if (!await InteractiveSessionAuthMethodRules.AdmitsAsync(
+                smsAdmissions, session, application, cancellationToken))
+        {
+            return Fail(OidcUserInfoRejection.InvalidToken, "sms_admission");
+        }
+
         // Step 5 (PS-16): the optional claims are the token scope intersected with the
         // application's current allow list — scope removal narrows the response (SC-11) without
         // any other effect.
@@ -270,8 +283,8 @@ public sealed class OidcUserInfoService(
         var currentAllowed = OidcScopeValidator.ParseCanonical(application.AllowedScopes);
         if (grantedScopes.Contains(ProfileScope) && currentAllowed.Contains(ProfileScope))
         {
-            var credential = await passwordCredentials.GetByAccountIdAsync(subject, cancellationToken);
-            name = credential?.Username;
+            name = await InteractiveSessionAuthMethodRules.ResolveNameAsync(
+                passwordCredentials, session.AuthMethod, subject, cancellationToken);
             nickname = account.Nickname;
         }
 

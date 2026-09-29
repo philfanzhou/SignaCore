@@ -17,6 +17,7 @@ using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Validators;
 using SignaCore.Host;
 using SignaCore.Host.Controllers;
@@ -673,6 +674,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
                 unitOfWork,
                 new AppRegistrationRepository(context),
                 context,
+                new SmsAdmissionService(context),
                 NullLogger<InteractiveRefreshRotationService>.Instance);
         }
 
@@ -700,6 +702,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
                 new AppRegistrationRepository(context),
                 context,
                 new AdminIdentityOptions(),
+                new SmsAdmissionService(context),
                 NullLogger<AuthorizationCodeRedemptionService>.Instance);
         }
 

@@ -25,6 +25,21 @@ public interface ISmsAdmissionService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The read-only <c>PS-04</c> SMS admission predicate of one <c>Sms</c> identity session for
+    /// one application, read live at every application operation (<c>EV-38</c>): the application's
+    /// current <paramref name="mode"/> is not <see cref="SmsLoginMode.Disabled"/>, an admission row
+    /// for the application and the session's SMS login identity exists and is active, and under
+    /// <see cref="SmsLoginMode.ManualApproval"/> it is Admin-approved. The SMS profile is not part
+    /// of the predicate. The account-active term is the caller's existing account check and is not
+    /// repeated here. The read is untracked and never provisions, approves, or writes.
+    /// </summary>
+    Task<bool> IsSessionAdmittedAsync(
+        Guid appRegistrationId,
+        SmsLoginMode mode,
+        Guid smsUserLoginId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Provisions the admission and invokes <paramref name="beforeCommit"/> after state is staged but
     /// before the service's single transactional commit.
     /// </summary>
@@ -160,6 +175,29 @@ public sealed class SmsAdmissionService : ISmsAdmissionService
             _ => SmsSendEligibility.Eligible
         };
         return new SmsSendEligibilityResult(decision, identity.AccountId);
+    }
+
+    public async Task<bool> IsSessionAdmittedAsync(
+        Guid appRegistrationId,
+        SmsLoginMode mode,
+        Guid smsUserLoginId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (mode is not (SmsLoginMode.ManualApproval or SmsLoginMode.AutoProvision))
+        {
+            return false;
+        }
+
+        var requireAdminApproval = mode == SmsLoginMode.ManualApproval;
+        return await _dbContext.AppSmsAccesses
+            .AsNoTracking()
+            .AnyAsync(
+                row => row.AppRegistrationId == appRegistrationId
+                    && row.UserLoginId == smsUserLoginId
+                    && row.IsActive
+                    && (!requireAdminApproval || row.ApprovalSource == SmsAccessApprovalSource.Admin),
+                cancellationToken);
     }
 
     public async Task<SmsAdmission> ProvisionAsync(

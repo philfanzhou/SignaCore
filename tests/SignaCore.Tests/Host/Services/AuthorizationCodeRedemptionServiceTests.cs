@@ -16,6 +16,7 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Host;
 using SignaCore.Host.Services;
 using Xunit;
@@ -571,6 +572,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             new AppRegistrationRepository(context),
             context,
             new AdminIdentityOptions { Username = Username },
+            new SmsAdmissionService(context),
             logger);
     }
 
