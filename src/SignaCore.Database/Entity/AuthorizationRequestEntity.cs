@@ -55,4 +55,12 @@ public class AuthorizationRequestEntity
     /// stays unconsumed, and consumption is not revocation.
     /// </summary>
     public DateTimeOffset? ConsumedAt { get; set; }
+
+    /// <summary>
+    /// Browser SMS send requests counted against this continuation (<c>PS-03</c>): non-negative,
+    /// database default 0 so an older binary that omits the column still inserts valid rows. Only
+    /// the single conditional send-budget update may write it; the per-continuation maximum lives
+    /// in that update, not in the schema. It is never reset, decremented, or copied elsewhere.
+    /// </summary>
+    public int SmsCodeSendCount { get; set; }
 }

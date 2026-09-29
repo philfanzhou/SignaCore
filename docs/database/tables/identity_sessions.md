@@ -10,9 +10,13 @@ and any instance reads, updates, and revokes any instance's session through the 
 - id (UUID, primary key; the opaque session id — fresh on every creation, never reused, and never
   written to SignaCore logs, metrics, traces, or exception messages)
 - account_id (restrictive reference to accounts; indexed)
-- password_credential_id (restrictive reference to password_credentials; indexed; creation proves
-  the credential exists and belongs to the account)
-- auth_method (fixed to `Password` in this phase)
+- password_credential_id (nullable restrictive reference to password_credentials; indexed; set
+  exactly on `Password` rows; creation proves the credential exists and belongs to the account)
+- sms_user_login_id (nullable restrictive reference to user_logins; indexed; set exactly on `Sms`
+  rows to the SMS login identity proven by the OTP; creation proves the identity exists, is an SMS
+  identity, and belongs to the account)
+- auth_method (`Password` or `Sms`; a database check constraint requires exactly the reference
+  that matches it)
 - auth_time (authentication instant; immutable — it doubles as the creation time, so there is no
   second creation fact)
 - last_seen_at (last activity write; equals auth_time at creation)
@@ -24,9 +28,18 @@ and any instance reads, updates, and revokes any instance's session through the 
 
 ## Relationships and invariants
 
-- Both identity references are restrictive and non-nullable, created together with this table:
-  deleting an account or password credential that session rows still reference fails, and no
-  cascade exists in either direction. Cleanup never nulls a reference to enable a delete.
+- The account reference is restrictive and non-nullable, created together with this table. The
+  authenticating reference is exactly one of `password_credential_id` (a `Password` row) or
+  `sms_user_login_id` (an `Sms` row): the check constraint
+  `CK_identity_sessions_auth_method_reference` rejects both, neither, a reference that does not
+  match `auth_method`, and any other `auth_method` value. Every reference is restrictive:
+  deleting an account, password credential, or SMS login identity that session rows still
+  reference fails, and no cascade exists in either direction. Cleanup never nulls a reference to
+  enable a delete. Lifetime, activity, revocation, and cleanup rules are identical for both auth
+  methods.
+- Rows created before the `AddBrowserSmsLoginStorage` migration are `Password` rows and keep their
+  meaning. No route creates an `Sms` row yet; the browser SMS login route that does is delivered
+  separately.
 - A read classifies one row under a single captured UTC instant: missing, then revoked (whatever
   the expiry columns say), then absolute-expired, then idle-expired, else active. Boundaries are
   inclusive — an instant equal to a deadline is already expired — and reads never write: expiry is
@@ -52,6 +65,14 @@ and any instance reads, updates, and revokes any instance's session through the 
   kept while any retained `authorization_codes` row references it: the authorization-code cleanup
   segment runs before this one in the same round, so once the last referencing code is deleted the
   session becomes deletable.
+
+## Migration rollback
+
+The `AddBrowserSmsLoginStorage` `Down` migration fails closed, changing nothing, while any `Sms`
+row (or any row with `sms_user_login_id` set) remains, because the previous schema cannot
+represent it. Revoke such sessions and wait for their retention, or delete them, before rolling
+back. Behind that gate `Down` restores the non-nullable `password_credential_id` without any
+backfill or column default.
 
 The authoritative semantics are `PS-04` and its related rows in
 [CanonicalSemanticModel.md](../../oidc/CanonicalSemanticModel.md); this page is a projection, not a

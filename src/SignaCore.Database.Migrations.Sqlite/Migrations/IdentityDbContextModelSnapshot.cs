@@ -758,6 +758,12 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("scope");
 
+                    b.Property<int>("SmsCodeSendCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0)
+                        .HasColumnName("sms_code_send_count");
+
                     b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -771,7 +777,10 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                     b.HasIndex("HandleDigest")
                         .IsUnique();
 
-                    b.ToTable("authorization_requests", (string)null);
+                    b.ToTable("authorization_requests", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_authorization_requests_sms_code_send_count", "sms_code_send_count >= 0");
+                        });
                 });
 
             modelBuilder.Entity("SignaCore.Database.Entity.IdentitySessionEntity", b =>
@@ -807,7 +816,7 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("last_seen_at");
 
-                    b.Property<Guid>("PasswordCredentialId")
+                    b.Property<Guid?>("PasswordCredentialId")
                         .HasColumnType("TEXT")
                         .HasColumnName("password_credential_id");
 
@@ -820,14 +829,22 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("revoked_at");
 
+                    b.Property<Guid?>("SmsUserLoginId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("sms_user_login_id");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AccountId");
 
                     b.HasIndex("PasswordCredentialId");
 
+                    b.HasIndex("SmsUserLoginId");
+
                     b.ToTable("identity_sessions", null, t =>
                         {
+                            t.HasCheckConstraint("CK_identity_sessions_auth_method_reference", "(auth_method = 'Password' AND password_credential_id IS NOT NULL AND sms_user_login_id IS NULL) OR (auth_method = 'Sms' AND sms_user_login_id IS NOT NULL AND password_credential_id IS NULL)");
+
                             t.HasCheckConstraint("CK_identity_sessions_revocation_pair", "(revoked_at IS NULL AND revocation_reason IS NULL) OR (revoked_at IS NOT NULL AND revocation_reason IS NOT NULL)");
                         });
                 });
@@ -1146,7 +1163,7 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
 
                             t.HasCheckConstraint("CK_oidc_rate_limit_buckets_permit_count", "permit_count BETWEEN 1 AND 90");
 
-                            t.HasCheckConstraint("CK_oidc_rate_limit_buckets_policy", "policy IN ('oidc-authorize', 'oidc-login', 'oidc-token', 'oidc-userinfo', 'oidc-logout', 'oidc-revoke')");
+                            t.HasCheckConstraint("CK_oidc_rate_limit_buckets_policy", "policy IN ('oidc-authorize', 'oidc-login', 'oidc-token', 'oidc-userinfo', 'oidc-logout', 'oidc-revoke', 'oidc-sms-code')");
                         });
                 });
 
@@ -1615,8 +1632,12 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
                     b.HasOne("SignaCore.Database.Entity.PasswordCredentialEntity", null)
                         .WithMany()
                         .HasForeignKey("PasswordCredentialId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("SignaCore.Database.Entity.UserLoginEntity", null)
+                        .WithMany()
+                        .HasForeignKey("SmsUserLoginId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("SignaCore.Database.Entity.LdapCredentialEntity", b =>

@@ -87,8 +87,10 @@ public interface IIdentitySessionStore
 {
     /// <summary>
     /// Creates a session with a fresh id that is never reused: <c>auth_time = last_seen_at =
-    /// now</c>, idle <c>now + 30min</c>, absolute <c>now + 12h</c>, and the fixed Password auth
-    /// method. The password credential must exist and belong to <paramref name="accountId"/>; a
+    /// now</c>, idle <c>now + 30min</c>, absolute <c>now + 12h</c>, and the
+    /// <see cref="IdentityConstants.AuthMethodPassword"/> auth method with the password credential
+    /// as its only authenticating reference. The password credential must exist and belong to
+    /// <paramref name="accountId"/>; a
     /// violation throws <see cref="InvalidOperationException"/> with zero writes. Inside a
     /// caller-owned transaction (the <c>EV-01</c> success transaction) the row commits or rolls
     /// back with it.
@@ -96,6 +98,21 @@ public interface IIdentitySessionStore
     Task<IdentitySessionEntity> CreateAsync(
         Guid accountId,
         Guid passwordCredentialId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates an <see cref="IdentityConstants.AuthMethodSms"/> session with the same fresh id and
+    /// lifetime rules as <see cref="CreateAsync"/>, referencing the SMS <c>user_logins</c>
+    /// identity proven by the OTP and no password credential (<c>PS-04</c>). The identity must
+    /// exist, be an SMS identity, and belong to <paramref name="accountId"/>; a violation throws
+    /// <see cref="InvalidOperationException"/> with zero writes and a message that names no id.
+    /// Inside a caller-owned transaction (the <c>EV-36</c> success transaction) the row commits
+    /// or rolls back with it.
+    /// </summary>
+    Task<IdentitySessionEntity> CreateSmsAsync(
+        Guid accountId,
+        Guid smsUserLoginId,
         DateTimeOffset now,
         CancellationToken cancellationToken = default);
 
@@ -192,22 +209,58 @@ public sealed class IdentitySessionStore : IIdentitySessionStore
                 "The password credential does not exist or does not belong to the account.");
         }
 
-        var session = new IdentitySessionEntity
-        {
-            Id = Guid.NewGuid(),
-            AccountId = accountId,
-            PasswordCredentialId = passwordCredentialId,
-            AuthMethod = IdentityConstants.AuthMethodPassword,
-            AuthTime = now,
-            LastSeenAt = now,
-            IdleExpiresAt = now.AddMinutes(IdentityConstants.IdentitySessionIdleTimeoutMinutes),
-            AbsoluteExpiresAt = now.AddSeconds(IdentityConstants.MaxIdentitySessionAgeSeconds)
-        };
+        var session = NewSession(accountId, IdentityConstants.AuthMethodPassword, now);
+        session.PasswordCredentialId = passwordCredentialId;
 
         await _repository.AddAsync(session, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return session;
     }
+
+    public async Task<IdentitySessionEntity> CreateSmsAsync(
+        Guid accountId,
+        Guid smsUserLoginId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Same discipline as the Password reference: the SMS login identity is proven to exist,
+        // to be an SMS identity, and to belong to the account before the insert. The message
+        // names no id (DF-06/DF-13 discipline).
+        if (!await _repository.SmsUserLoginExistsForAccountAsync(
+                smsUserLoginId, accountId, cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "The SMS login identity does not exist or does not belong to the account.");
+        }
+
+        var session = NewSession(accountId, IdentityConstants.AuthMethodSms, now);
+        session.SmsUserLoginId = smsUserLoginId;
+
+        await _repository.AddAsync(session, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return session;
+    }
+
+    /// <summary>
+    /// The lifetime shape shared by both auth methods: a fresh id, <c>auth_time = last_seen_at =
+    /// now</c>, and the fixed idle and absolute deadlines. The caller sets exactly the one
+    /// authenticating reference that matches <paramref name="authMethod"/>.
+    /// </summary>
+    private static IdentitySessionEntity NewSession(
+        Guid accountId,
+        string authMethod,
+        DateTimeOffset now) => new()
+    {
+        Id = Guid.NewGuid(),
+        AccountId = accountId,
+        AuthMethod = authMethod,
+        AuthTime = now,
+        LastSeenAt = now,
+        IdleExpiresAt = now.AddMinutes(IdentityConstants.IdentitySessionIdleTimeoutMinutes),
+        AbsoluteExpiresAt = now.AddSeconds(IdentityConstants.MaxIdentitySessionAgeSeconds)
+    };
 
     public async Task<IdentitySessionLookup> GetAsync(
         Guid sessionId,

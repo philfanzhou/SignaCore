@@ -21,6 +21,16 @@ public interface IIdentitySessionRepository
         Guid accountId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Read-only ownership check used by SMS session creation; never writes. True only when the
+    /// <c>user_logins</c> row exists, belongs to <paramref name="accountId"/>, and is an SMS
+    /// identity.
+    /// </summary>
+    Task<bool> SmsUserLoginExistsForAccountAsync(
+        Guid smsUserLoginId,
+        Guid accountId,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Read-only row lookup by id; zero writes, no classification.</summary>
     Task<IdentitySessionEntity?> GetByIdAsync(
         Guid sessionId,

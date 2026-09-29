@@ -36,6 +36,21 @@ public class IdentitySessionRepository : IIdentitySessionRepository
                 cancellationToken);
     }
 
+    public async Task<bool> SmsUserLoginExistsForAccountAsync(
+        Guid smsUserLoginId,
+        Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        var smsProviderName = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms);
+        return await _dbContext.UserLogins
+            .AsNoTracking()
+            .AnyAsync(
+                login => login.Id == smsUserLoginId
+                    && login.AccountId == accountId
+                    && login.ProviderNameNormalized == smsProviderName,
+                cancellationToken);
+    }
+
     public async Task<IdentitySessionEntity?> GetByIdAsync(
         Guid sessionId,
         CancellationToken cancellationToken = default)

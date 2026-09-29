@@ -14,7 +14,8 @@ public static class OidcRateLimitBudgets
             ["oidc-token"] = IdentityConstants.OidcTokenRateLimitPerMinute,
             ["oidc-userinfo"] = IdentityConstants.OidcUserInfoRateLimitPerMinute,
             ["oidc-logout"] = IdentityConstants.OidcLogoutRateLimitPerMinute,
-            ["oidc-revoke"] = IdentityConstants.OidcRevokeRateLimitPerMinute
+            ["oidc-revoke"] = IdentityConstants.OidcRevokeRateLimitPerMinute,
+            ["oidc-sms-code"] = IdentityConstants.OidcSmsCodeRateLimitPerMinute
         };
 
     public static IEnumerable<string> Policies => PermitLimits.Keys;

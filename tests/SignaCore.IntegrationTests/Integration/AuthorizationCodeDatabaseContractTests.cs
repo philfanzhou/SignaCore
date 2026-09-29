@@ -215,24 +215,16 @@ public sealed class AuthorizationCodeDatabaseContractTests
             Id = appId, AppId = ClientId, AppSecretHash = "hash",
             AppName = "Code Upgrade", IsActive = true, CreatedAt = createdAt
         });
-        context.AuthorizationRequests.Add(new AuthorizationRequestEntity
-        {
-            Id = Guid.NewGuid(),
-            HandleDigest = LoginHandleDigest.Compute(handle),
-            AppRegistrationId = appId,
-            RedirectUri = "https://client.example.test/callback",
-            Scope = "openid",
-            State = "upgrade-state",
-            Nonce = "upgrade-nonce",
-            CodeChallenge = Rfc7636Challenge,
-            CreatedAt = createdAt,
-            ExpiresAt = createdAt.AddMinutes(IdentityConstants.LoginHandleLifetimeMinutes)
-        });
-        context.IdentitySessions.Add(CreateValidSession(accountId, credentialId, sessionId, createdAt));
         await context.SaveChangesAsync(cancellationToken);
 
-        // The legacy token row is seeded with raw SQL: the migration version under test predates
-        // the family columns a current-EF-model INSERT would name.
+        // The continuation, session, and legacy token rows are seeded with raw SQL: the migration
+        // version under test predates the #443 columns and the family columns a current-EF-model
+        // INSERT would name.
+        await BrowserSmsStorageTestSupport.InsertLegacyAuthorizationRequestAsync(
+            context, Guid.NewGuid(), LoginHandleDigest.Compute(handle), appId, createdAt,
+            codeChallenge: Rfc7636Challenge);
+        await BrowserSmsStorageTestSupport.InsertLegacySessionAsync(
+            context, sessionId, accountId, credentialId, createdAt);
         await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenSqliteAsync(
             context, tokenId, accountId, tokenDigest, createdAt, createdAt.AddHours(1), ClientId);
 
@@ -1286,8 +1278,9 @@ public sealed class AuthorizationCodeDatabaseContractTests
             context, tokenId);
         Assert.Equal(tokenDigest, token.TokenValue);
 
-        var session = await context.IdentitySessions.AsNoTracking()
-            .SingleAsync(row => row.Id == sessionId, cancellationToken);
+        // Read with raw SQL as well: these history versions predate the #443 session column.
+        var session = await BrowserSmsStorageTestSupport.ReadLegacySessionAsync(context, sessionId);
+        Assert.NotNull(session);
         Assert.Equal(accountId, session.AccountId);
         Assert.Null(session.RevokedAt);
     }

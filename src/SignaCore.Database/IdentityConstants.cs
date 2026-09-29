@@ -178,6 +178,13 @@ public static class IdentityConstants
     public const int OidcLogoutRateLimitPerMinute = 90;
     public const int OidcRevokeRateLimitPerMinute = 90;
 
+    /// <summary>
+    /// Browser SMS code send budget per source network (<c>PS-24</c> policy <c>oidc-sms-code</c>).
+    /// Tighter than the other interactive budgets because every admitted request may deliver an
+    /// SMS; the send route that registers the policy is delivered separately.
+    /// </summary>
+    public const int OidcSmsCodeRateLimitPerMinute = 20;
+
     // ---- OIDC shared rate-limit budget store (PS-24) ----
     // The window every Oidc*RateLimitPerMinute budget is counted in. The database clock decides
     // when a window starts and expires; the application clock never takes part.

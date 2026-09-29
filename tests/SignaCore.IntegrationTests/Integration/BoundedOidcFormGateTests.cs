@@ -1139,7 +1139,7 @@ public sealed partial class BoundedOidcFormGateTests : IClassFixture<IdentitySer
             var session = new SignaCoreDatabase.Entity.IdentitySessionEntity
             {
                 Id = Guid.NewGuid(), AccountId = credential.AccountId, PasswordCredentialId = credential.Id,
-                AuthMethod = "password", AuthTime = now, LastSeenAt = now,
+                AuthMethod = SignaCoreDatabase.IdentityConstants.AuthMethodPassword, AuthTime = now, LastSeenAt = now,
                 IdleExpiresAt = now.AddHours(1), AbsoluteExpiresAt = now.AddHours(8)
             };
             database.IdentitySessions.Add(session);

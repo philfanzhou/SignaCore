@@ -13,6 +13,7 @@ using ServiceMantle.Installation;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.IntegrationTests.Integration;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -21,7 +22,8 @@ namespace SignaCore.Tests.Integration;
 public sealed class OidcRateLimitSchemaDatabaseContractTests
 {
     private const string Table = "oidc_rate_limit_buckets";
-    private static readonly string[] Policies = ["oidc-authorize", "oidc-login", "oidc-token", "oidc-userinfo", "oidc-logout", "oidc-revoke"];
+    // PS-24: the six interactive policies plus oidc-sms-code, admitted by the check since #443.
+    private static readonly string[] Policies = ["oidc-authorize", "oidc-login", "oidc-token", "oidc-userinfo", "oidc-logout", "oidc-revoke", "oidc-sms-code"];
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly DateTimeOffset Instant = new(2026, 9, 25, 0, 0, 0, TimeSpan.Zero);
 
@@ -45,8 +47,12 @@ public sealed class OidcRateLimitSchemaDatabaseContractTests
         Assert.Equal(new[] { "window_expires_at" }, index.Columns);
         Assert.Equal(Table, index.Table);
         Assert.Equal(Table, Assert.IsType<DropTableOperation>(Assert.Single(migration.DownOperations)).Name);
+        // Asserted by column name: the #443 SQLite rebuild of this table reorders the physical
+        // columns, and no code depends on that order.
         var columns = await fixture.RowsAsync(db, $"SELECT * FROM {Table} LIMIT 0", includeHeader: true);
-        Assert.Equal("policy|partition_digest|window_expires_at|permit_count", Assert.Single(columns));
+        Assert.Equal(
+            new[] { "partition_digest", "permit_count", "policy", "window_expires_at" },
+            Assert.Single(columns).Split('|').Order(StringComparer.Ordinal));
         var indexes = await fixture.RowsAsync(db, provider == "SQLite"
             ? "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='oidc_rate_limit_buckets'"
             : "SELECT indexname FROM pg_indexes WHERE schemaname=current_schema() AND tablename='oidc_rate_limit_buckets'");
@@ -59,7 +65,8 @@ public sealed class OidcRateLimitSchemaDatabaseContractTests
         db.OidcRateLimitBuckets.Add(Bucket(Policies[0], new string('b', 64), 90));
         await db.SaveChangesAsync(Ct);
         db.ChangeTracker.Clear();
-        Assert.Equal(7, await db.OidcRateLimitBuckets.CountAsync(Ct));
+        Assert.Equal(Policies.Length + 1, await db.OidcRateLimitBuckets.CountAsync(Ct));
+        Assert.Contains(await db.OidcRateLimitBuckets.ToListAsync(Ct), row => row.Policy == "oidc-sms-code");
         Assert.All(await db.OidcRateLimitBuckets.ToListAsync(Ct), row => Assert.Equal(Instant.AddTicks(1234560), row.WindowExpiresAt));
         foreach (var invalid in new[]
         {
@@ -82,7 +89,7 @@ public sealed class OidcRateLimitSchemaDatabaseContractTests
             await Assert.ThrowsAsync<DbUpdateException>(() => write.SaveChangesAsync(Ct));
             await transaction.RollbackAsync(Ct);
         }
-        Assert.Equal(7, await db.OidcRateLimitBuckets.CountAsync(Ct));
+        Assert.Equal(Policies.Length + 1, await db.OidcRateLimitBuckets.CountAsync(Ct));
         Assert.False(await db.OidcRateLimitBuckets.AnyAsync(x => x.PartitionDigest == new string('d', 64), Ct));
     }
 
@@ -283,11 +290,13 @@ public sealed class OidcRateLimitSchemaDatabaseContractTests
             db.Accounts.Add(new AccountEntity { Id = account, IsActive = true, CreatedAt = Instant, Nickname = "Schema account" });
             db.PasswordCredentials.Add(new PasswordCredentialEntity { Id = password, AccountId = account, Username = "schema_account", PasswordHash = "synthetic-hash", CreatedAt = Instant });
             db.AppRegistrations.Add(new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "schema-client", AppName = "Schema client", AppSecretHash = "synthetic-hash", CreatedAt = Instant });
-            db.IdentitySessions.Add(new IdentitySessionEntity { Id = Guid.NewGuid(), AccountId = account, PasswordCredentialId = password, AuthMethod = "pwd", AuthTime = Instant, LastSeenAt = Instant, IdleExpiresAt = Instant.AddMinutes(30), AbsoluteExpiresAt = Instant.AddHours(12) });
             db.RefreshTokens.Add(new RefreshTokenEntity { Id = token, FamilyId = token, AccountId = account, AppId = "schema-client", TokenValue = "sha256:" + new string('a', 64), CreatedAt = Instant, ExpiresAt = Instant.AddDays(1) });
             db.SecurityKeys.Add(new SecurityKeyEntity { Id = Guid.NewGuid(), KeyId = "schema-key", PublicKeyExponent = "synthetic-public", PublicKeyModulus = "synthetic-public", EncryptedPrivateKeyParams = "synthetic-envelope", EncryptionSalt = "synthetic-salt", CreatedAt = Instant, ExpiresAt = Instant.AddDays(1) });
             db.ServiceInstallations.Add(new ServiceInstallationEntity { ServiceId = "signacore", Status = InstallationStatus.Completed, CreatedAtUtc = Instant.UtcDateTime, CompletedAtUtc = Instant.UtcDateTime, Version = 1 });
             await db.SaveChangesAsync(Ct);
+            // The session row is seeded with raw SQL: the history version under test predates the
+            // #443 identity_sessions columns a current-EF-model INSERT would name.
+            await BrowserSmsStorageTestSupport.InsertLegacySessionAsync(db, Guid.NewGuid(), account, password, Instant, authMethod: "Password");
             await db.Database.ExecuteSqlAsync($"INSERT INTO service_settings (service_id, version, values_json, updated_at_utc, updated_by, restart_required) VALUES ({"signacore"}, {1L}, {"{}"}, {Instant.UtcDateTime}, {"schema-test"}, {false})", Ct);
             await db.Database.ExecuteSqlAsync($"INSERT INTO service_data_protection_keys (service_id, key_id, encrypted_xml) VALUES ({"signacore"}, {"schema-key"}, {"synthetic-envelope"})", Ct);
             await db.Database.ExecuteSqlAsync($"INSERT INTO service_audit_logs (id, action, occurred_at_utc, operator_source, outcome, target_id, target_type) VALUES ({Guid.NewGuid().ToString()}, {"schema.seed"}, {Instant.UtcDateTime}, {"system"}, {0}, {"schema-test"}, {"test"})", Ct);

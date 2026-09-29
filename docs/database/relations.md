@@ -8,7 +8,7 @@ accounts
   +-- ldap_credentials --< app_ldap_accesses >-- app_registrations
   +-- refresh_tokens (also bound to app_id and optional login source; restrictive family_id/parent_id self-references and a restrictive identity_sessions reference)
   +-- login_histories
-  +-- identity_sessions (browser identity authority; also restrictively references password_credentials)
+  +-- identity_sessions (browser identity authority; also restrictively references exactly one of password_credentials or an SMS user_logins row)
   +-- authorization_codes (also restrictively references identity_sessions, app_registrations, and the refresh_tokens family root)
 
 app_registrations
@@ -35,9 +35,11 @@ either direction: deleting an application with live continuation rows fails, and
 rows only by retention. Nothing references `authorization_requests`, and the stored redirect URI is
 a value snapshot rather than a foreign key to `app_redirect_uris`.
 
-The `identity_sessions` foreign keys to `accounts` and `password_credentials` are both restrictive
-and never cascade: deleting a referenced account or credential while session rows exist fails, and
-cleanup removes rows only by retention. The `authorization_codes` foreign keys to
+The `identity_sessions` foreign keys to `accounts`, `password_credentials`, and `user_logins` are
+all restrictive and never cascade: deleting a referenced account, password credential, or SMS login
+identity while session rows exist fails, and cleanup removes rows only by retention. A check
+constraint requires exactly one authenticating reference, `password_credential_id` on a `Password`
+row or `sms_user_login_id` on an `Sms` row. The `authorization_codes` foreign keys to
 `app_registrations`, `accounts`, and `identity_sessions` follow the same `PS-23` rule. Its
 `refresh_family_id` column was the single deferred `PS-23` exception: the family migration adds the
 restrictive reference to the `refresh_tokens` family root and its lookup index after the legacy
