@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -10,6 +11,7 @@ using SignaCore.Database.Entity;
 using SignaCore.Domain;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Http;
 using SignaCore.Host.Security;
@@ -20,8 +22,10 @@ namespace SignaCore.Host.Controllers;
 
 /// <summary>
 /// The browser-side Password identity login of the interactive Authorization Code flow:
-/// <c>GET /oauth2/login</c> renders the form for an active continuation (<c>IN-10</c>) and
-/// <c>POST /oauth2/login</c> processes the login or cancel submission (<c>IN-11</c>–<c>IN-15</c>).
+/// <c>GET /oauth2/login</c> renders the form for an active continuation (<c>IN-10</c>),
+/// <c>POST /oauth2/login</c> processes the login or cancel submission (<c>IN-11</c>–<c>IN-15</c>),
+/// and <c>POST /oauth2/login/sms-code</c> is the browser SMS send route (<c>IN-16</c>,
+/// <c>IN-17</c>, <c>IN-19</c>, <c>EV-35</c>).
 /// </summary>
 /// <remarks>
 /// This controller delivers the browser surface, the antiforgery chain (<c>PS-19</c>), the local
@@ -95,6 +99,8 @@ public sealed partial class OAuthLoginController : ControllerBase
     private const string FormFieldNameAction = "action";
     private const string LoginActionValue = "login";
     private const string CancelActionValue = "cancel";
+    private const string FormFieldNamePhone = "phone";
+    private const string FormFieldNameOtp = "otp";
 
     private const string FormUrlEncodedContentType = "application/x-www-form-urlencoded";
     private const string CharsetParameterName = "charset";
@@ -109,6 +115,8 @@ public sealed partial class OAuthLoginController : ControllerBase
     private const string ReasonAntiforgery = "antiforgery";
     private const string ReasonCredentialField = "credential_field";
     private const string ReasonClientUnavailable = "client_unavailable";
+    private const string ReasonSmsCapability = "sms_capability";
+    private const string ReasonPhoneField = "phone_field";
     private const string OutcomeCancelRedirected = "cancel_redirected";
     private const string OutcomeCancelRejected = "cancel_rejected";
     private const string OutcomeCredentialFailure = "credential_failure";
@@ -126,6 +134,19 @@ public sealed partial class OAuthLoginController : ControllerBase
         FormFieldNameAction,
     ];
 
+    /// <summary>
+    /// The four admitted fields of the SMS send route (<c>IN-16</c>), matched ordinally. The
+    /// <c>otp</c> field is admitted so the future SMS form can post both buttons' fields, and it is
+    /// ignored without validation.
+    /// </summary>
+    private static readonly string[] AdmittedSmsCodeFormFields =
+    [
+        FormFieldNameLoginHandle,
+        LoginAntiforgeryDefaults.TokenFieldName,
+        FormFieldNamePhone,
+        FormFieldNameOtp,
+    ];
+
     private static readonly UTF8Encoding StrictUtf8 =
         new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
@@ -135,8 +156,10 @@ public sealed partial class OAuthLoginController : ControllerBase
     private readonly IOidcAuthorizationRequestValidator _revalidator;
     private readonly OidcLoginFailureRecorder _failureRecorder;
     private readonly OidcLoginCompletionService _loginCompletion;
+    private readonly OidcSmsCodeSendService _smsCodeSend;
     private readonly IdentityDbContext _dbContext;
     private readonly JwtOptions _jwtOptions;
+    private readonly AuthMetrics _metrics;
     private readonly ILogger<OAuthLoginController> _logger;
 
     public OAuthLoginController(
@@ -146,8 +169,10 @@ public sealed partial class OAuthLoginController : ControllerBase
         IOidcAuthorizationRequestValidator revalidator,
         OidcLoginFailureRecorder failureRecorder,
         OidcLoginCompletionService loginCompletion,
+        OidcSmsCodeSendService smsCodeSend,
         IdentityDbContext dbContext,
         JwtOptions jwtOptions,
+        AuthMetrics metrics,
         ILogger<OAuthLoginController> logger)
     {
         _continuations = continuations;
@@ -156,8 +181,10 @@ public sealed partial class OAuthLoginController : ControllerBase
         _revalidator = revalidator;
         _failureRecorder = failureRecorder;
         _loginCompletion = loginCompletion;
+        _smsCodeSend = smsCodeSend;
         _dbContext = dbContext;
         _jwtOptions = jwtOptions;
+        _metrics = metrics;
         _logger = logger;
     }
 
@@ -219,7 +246,7 @@ public sealed partial class OAuthLoginController : ControllerBase
 
         ApplyLoginFormContentSecurityPolicy(continuation);
         return HtmlPage(
-            BuildLoginPage(NegotiatedText(), loginHandle, pair.RequestToken, showFailureNotice: false),
+            BuildLoginPage(NegotiatedText(), loginHandle, pair.RequestToken, notice: null),
             StatusCodes.Status200OK);
     }
 
@@ -268,7 +295,7 @@ public sealed partial class OAuthLoginController : ControllerBase
         // therefore cannot smuggle an oversized body past the bound.
         var body = await ReadBoundedBodyAsync(MaxRequestBodyBytes + 1, cancellationToken);
         if (body.Length > MaxRequestBodyBytes
-            || !TryParseStrictForm(body, out var fields))
+            || !TryParseStrictForm(body, AdmittedFormFields, out var fields))
         {
             return RejectLocally(ReasonBodyStructure);
         }
@@ -296,12 +323,7 @@ public sealed partial class OAuthLoginController : ControllerBase
 
         // ④ Antiforgery (IN-14, PS-19): principal-independent pair validation. A failure here
         // never reaches the Password validator and never writes a failure count (SC-19).
-        if (!fields.TryGetValue(LoginAntiforgeryDefaults.TokenFieldName, out var requestToken)
-            || requestToken.Length == 0
-            || requestToken.Length > LoginAntiforgeryDefaults.MaxTokenLength
-            || !requestToken.All(char.IsAscii)
-            || !Request.Cookies.TryGetValue(LoginAntiforgeryDefaults.CookieName, out var cookieValue)
-            || !_antiforgery.IsValidPair(cookieValue!, requestToken))
+        if (!TryValidateAntiforgery(fields, out var requestToken))
         {
             return RejectLocally(ReasonAntiforgery);
         }
@@ -488,9 +510,165 @@ public sealed partial class OAuthLoginController : ControllerBase
         // validated handle and request token so the browser can retry against its existing
         // cookie; no cookie is written here and no submitted value is echoed.
         ApplyLoginFormContentSecurityPolicy(continuation);
+        var text = NegotiatedText();
         return HtmlPage(
-            BuildLoginPage(NegotiatedText(), loginHandle, requestToken, showFailureNotice: true),
+            BuildLoginPage(text, loginHandle, requestToken, new LoginNotice(AlertRole, text.CredentialFailureNotice)),
             StatusCodes.Status200OK);
+    }
+
+    /// <summary>
+    /// The browser SMS send route (<c>AC-16</c>). The checks run in the canonical order — structure,
+    /// continuation, antiforgery, the <c>IN-19</c> capability gate, then the <c>IN-17</c> phone —
+    /// and each failure there answers the single local 400 with no send count, phone lookup, OTP
+    /// write, or SMS send. An empty or unnormalizable phone re-renders the page with the fixed
+    /// invalid-phone notice, decided by the submitted string alone. Every other request runs the
+    /// <c>EV-35</c> unit and answers one uniform page — status 200, the rendered-form headers with
+    /// no <c>Set-Cookie</c>, and the login page with the fixed send notice — whatever the phone's
+    /// registration, admission, account, budget, OTP, provider, or persistence state; the true case
+    /// reaches only the masked audit row, one closed log reason, and the closed metric outcome.
+    /// <para>
+    /// Until <c>AC-17</c> the login page renders no SMS region, so the uniform page is the Password
+    /// login page and carries no phone input or phone value. The action declares no parameters for
+    /// the same reason as the login POST: MVC must never read this body.
+    /// </para>
+    /// </summary>
+    [HttpPost("sms-code")]
+    [EnableRateLimiting(OidcRateLimitPolicies.SmsCode)]
+    public async Task<IActionResult> SubmitSmsCodeForm()
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var (result, outcome) = await ProcessSmsCodeFormAsync();
+        _metrics.RecordOidcEndpointOutcome(AuthMetrics.OidcMetricEndpoints.LoginSmsCode, outcome);
+        _metrics.RecordOidcEndpointDuration(
+            AuthMetrics.OidcMetricEndpoints.LoginSmsCode,
+            stopwatch.Elapsed.TotalMilliseconds);
+        return result;
+    }
+
+    private async Task<(IActionResult Result, string Outcome)> ProcessSmsCodeFormAsync()
+    {
+        ApplyBrowserSecurityHeaders();
+        var cancellationToken = HttpContext.RequestAborted;
+
+        // ① Structure (IN-16): no query string, the exact form content type, the bounded body,
+        // and the strict parse over the four admitted fields.
+        if (Request.QueryString.HasValue && Request.QueryString.Value!.Length > 0)
+        {
+            return (RejectLocally(ReasonQueryStructure), OidcSmsCodeSendOutcomes.LocalRejected);
+        }
+
+        if (!IsAdmittedContentType(Request.ContentType))
+        {
+            return (RejectLocally(ReasonBodyStructure), OidcSmsCodeSendOutcomes.LocalRejected);
+        }
+
+        var body = await ReadBoundedBodyAsync(MaxRequestBodyBytes + 1, cancellationToken);
+        if (body.Length > MaxRequestBodyBytes
+            || !TryParseStrictForm(body, AdmittedSmsCodeFormFields, out var fields))
+        {
+            return (RejectLocally(ReasonBodyStructure), OidcSmsCodeSendOutcomes.LocalRejected);
+        }
+
+        // ② Continuation (IN-11 via IN-16, EV-03).
+        if (!fields.TryGetValue(FormFieldNameLoginHandle, out var loginHandle))
+        {
+            return (RejectLocally(ReasonContinuationUnavailable), OidcSmsCodeSendOutcomes.LocalRejected);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var continuation = await _continuations.GetActiveAsync(loginHandle, now, cancellationToken);
+        if (continuation is null)
+        {
+            return (RejectLocally(ReasonContinuationUnavailable), OidcSmsCodeSendOutcomes.LocalRejected);
+        }
+
+        // ③ Antiforgery (IN-14 via IN-16, PS-19), the same pair the login form validates.
+        if (!TryValidateAntiforgery(fields, out var requestToken))
+        {
+            return (RejectLocally(ReasonAntiforgery), OidcSmsCodeSendOutcomes.LocalRejected);
+        }
+
+        // ④ The IN-19 capability gate, read from the current row of the continuation's
+        // application — the only source of the application on this route. A closed gate reveals
+        // application configuration only, which the login page already shows.
+        var application = await _dbContext.AppRegistrations
+            .AsNoTracking()
+            .Where(app => app.Id == continuation.AppRegistrationId)
+            .Select(app => new { app.AppId, app.SmsLoginMode, app.SmsProfileKey })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (application is null)
+        {
+            return (RejectLocally(ReasonClientUnavailable), OidcSmsCodeSendOutcomes.LocalRejected);
+        }
+
+        if (application.SmsLoginMode is not (SmsLoginMode.ManualApproval or SmsLoginMode.AutoProvision)
+            || string.IsNullOrWhiteSpace(application.SmsProfileKey))
+        {
+            return (RejectLocally(ReasonSmsCapability), OidcSmsCodeSendOutcomes.LocalRejected);
+        }
+
+        // ⑤ Phone (IN-17): presence and the pre-normalization bound are request shape; a failed
+        // normalization is the fixed invalid-phone page and depends on the submitted string only.
+        if (!fields.TryGetValue(FormFieldNamePhone, out var phone)
+            || phone.Length > IdentityConstants.MaxSubmittedPhoneLength)
+        {
+            return (RejectLocally(ReasonPhoneField), OidcSmsCodeSendOutcomes.LocalRejected);
+        }
+
+        var text = NegotiatedText();
+        ApplyLoginFormContentSecurityPolicy(continuation);
+        if (!MainlandChinaPhoneNumber.TryNormalize(phone, out var phoneE164))
+        {
+            return (
+                HtmlPage(
+                    BuildLoginPage(text, loginHandle, requestToken, new LoginNotice(AlertRole, text.InvalidPhoneNotice)),
+                    StatusCodes.Status200OK),
+                OidcSmsCodeSendOutcomes.InvalidPhone);
+        }
+
+        // ⑥ EV-35: count, eligibility, OTP send, and audit. Its closed outcome never shapes the
+        // response; the page reuses the submitted handle and request token and writes no cookie.
+        var outcome = await _smsCodeSend.SendAsync(
+            new OidcSmsCodeSendRequest(
+                loginHandle,
+                continuation.AppRegistrationId,
+                application.AppId,
+                application.SmsLoginMode,
+                application.SmsProfileKey!,
+                phoneE164,
+                HttpContext.GetClientIp(),
+                HttpContext.GetUserAgent(),
+                HttpContext.GetCorrelationId(),
+                now),
+            cancellationToken);
+        return (
+            HtmlPage(
+                BuildLoginPage(text, loginHandle, requestToken, new LoginNotice(StatusRole, text.SmsCodeSentNotice)),
+                StatusCodes.Status200OK),
+            outcome);
+    }
+
+    /// <summary>
+    /// The <c>IN-14</c>/<c>PS-19</c> antiforgery check shared by the login POST and the SMS send
+    /// route: a bounded ASCII request token that validates against the separate cookie.
+    /// </summary>
+    private bool TryValidateAntiforgery(
+        IReadOnlyDictionary<string, string> fields,
+        out string requestToken)
+    {
+        if (fields.TryGetValue(LoginAntiforgeryDefaults.TokenFieldName, out var token)
+            && token.Length > 0
+            && token.Length <= LoginAntiforgeryDefaults.MaxTokenLength
+            && token.All(char.IsAscii)
+            && Request.Cookies.TryGetValue(LoginAntiforgeryDefaults.CookieName, out var cookieValue)
+            && _antiforgery.IsValidPair(cookieValue!, token))
+        {
+            requestToken = token;
+            return true;
+        }
+
+        requestToken = string.Empty;
+        return false;
     }
 
     private static bool IsAdmittedContentType(string? contentType)
@@ -550,10 +728,11 @@ public sealed partial class OAuthLoginController : ControllerBase
     /// The strict <c>application/x-www-form-urlencoded</c> parse: segments split on <c>&amp;</c>
     /// with no empty segment, exactly one <c>=</c> separator per segment, percent-decoding under
     /// strict UTF-8 (an invalid byte sequence fails the whole body), <c>+</c> as space, ordinal
-    /// membership in the five admitted fields, and at most one occurrence of each.
+    /// membership in the route's admitted fields, and at most one occurrence of each.
     /// </summary>
     private static bool TryParseStrictForm(
         ReadOnlySpan<byte> body,
+        string[] admittedFields,
         out Dictionary<string, string> fields)
     {
         fields = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -587,7 +766,7 @@ public sealed partial class OAuthLoginController : ControllerBase
                 return false;
             }
 
-            if (!AdmittedFormFields.Contains(name, StringComparer.Ordinal)
+            if (!admittedFields.Contains(name, StringComparer.Ordinal)
                 || !fields.TryAdd(name, value))
             {
                 return false;
@@ -672,13 +851,14 @@ public sealed partial class OAuthLoginController : ControllerBase
     /// the button names and values are identical in every language; only the visible text differs.
     /// The single generic credential-failure notice (<c>EV-17</c>) renders the same bytes for
     /// unknown, wrong, disabled, and locked credentials, so the form never becomes an account
-    /// oracle; the validator's internal reason goes to the audit row only.
+    /// oracle; the validator's internal reason goes to the audit row only. The SMS send route
+    /// renders the same page with its fixed send or invalid-phone notice.
     /// </summary>
     private static string BuildLoginPage(
         LoginPageText text,
         string loginHandle,
         string requestToken,
-        bool showFailureNotice)
+        LoginNotice? notice)
     {
         var builder = new StringBuilder(1536);
         builder.Append("<!DOCTYPE html><html lang=\"")
@@ -690,10 +870,12 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append("</head><body><main><h1>")
             .Append(text.Heading)
             .Append("</h1>");
-        if (showFailureNotice)
+        if (notice is { } shown)
         {
-            builder.Append("<p role=\"alert\">")
-                .Append(text.CredentialFailureNotice)
+            builder.Append("<p role=\"")
+                .Append(shown.Role)
+                .Append("\">")
+                .Append(shown.Text)
                 .Append("</p>");
         }
 
@@ -730,6 +912,15 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append("</form></main></body></html>");
         return builder.ToString();
     }
+
+    private const string AlertRole = "alert";
+    private const string StatusRole = "status";
+
+    /// <summary>
+    /// One fixed notice above the login form: an ARIA role and a fixed <see cref="LoginPageText"/>
+    /// literal, never a request value.
+    /// </summary>
+    private readonly record struct LoginNotice(string Role, string Text);
 
     /// <summary>
     /// The local error page of one language. It depends on nothing but the language, so every

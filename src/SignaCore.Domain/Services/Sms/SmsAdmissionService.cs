@@ -10,6 +10,21 @@ public interface ISmsAdmissionService
     Task<SmsAdmission?> FindByLoginIdAsync(Guid appRegistrationId, Guid userLoginId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The read-only browser SMS send eligibility of a normalized phone for one application under
+    /// its current, enabled <paramref name="mode"/> (canonical "send eligibility"). The checks run
+    /// in one fixed order and the first failing one decides: no SMS identity, a disabled account,
+    /// no admission row, an inactive admission, and under <see cref="SmsLoginMode.ManualApproval"/>
+    /// an admission that is not Admin-approved. Under <see cref="SmsLoginMode.AutoProvision"/> a
+    /// missing identity or admission is eligible; nothing is provisioned here. The caller gates
+    /// <see cref="SmsLoginMode.Disabled"/> before asking.
+    /// </summary>
+    Task<SmsSendEligibilityResult> EvaluateSendEligibilityAsync(
+        Guid appRegistrationId,
+        SmsLoginMode mode,
+        string phoneE164,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Provisions the admission and invokes <paramref name="beforeCommit"/> after state is staged but
     /// before the service's single transactional commit.
     /// </summary>
@@ -39,6 +54,26 @@ public sealed record SmsAdmission(
     UserLoginEntity Login,
     AppSmsAccessEntity Access,
     bool AccountCreated = false);
+
+/// <summary>
+/// The closed browser SMS send eligibility decision. Every value except
+/// <see cref="Eligible"/> names the first failing check in the fixed evaluation order.
+/// </summary>
+public enum SmsSendEligibility
+{
+    Eligible,
+    NotRegistered,
+    AccountDisabled,
+    NotAdmitted,
+    AdmissionInactive,
+    NotAdminApproved
+}
+
+/// <summary>
+/// One eligibility decision. <paramref name="AccountId"/> is the account of the phone's SMS
+/// identity when one resolved, for the masked audit row; it is never shown to the browser.
+/// </summary>
+public sealed record SmsSendEligibilityResult(SmsSendEligibility Decision, Guid? AccountId);
 
 public sealed class SmsAdmissionService : ISmsAdmissionService
 {
@@ -74,6 +109,57 @@ public sealed class SmsAdmissionService : ISmsAdmissionService
                 value => value.login.Id, access => access.UserLoginId, (value, access) => new { value.login, value.account, access })
             .FirstOrDefaultAsync(cancellationToken);
         return item == null ? null : new SmsAdmission(item.account, item.login, item.access);
+    }
+
+    public async Task<SmsSendEligibilityResult> EvaluateSendEligibilityAsync(
+        Guid appRegistrationId,
+        SmsLoginMode mode,
+        string phoneE164,
+        CancellationToken cancellationToken = default)
+    {
+        if (mode is not (SmsLoginMode.ManualApproval or SmsLoginMode.AutoProvision))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(mode), "Send eligibility is evaluated only for an application whose SMS login is enabled.");
+        }
+
+        var manualApproval = mode == SmsLoginMode.ManualApproval;
+        var phone = MainlandChinaPhoneNumber.Normalize(phoneE164);
+        var provider = IdentityValueNormalizer.Normalize(IdentityConstants.AuthMethodSms);
+
+        // Reads only, untracked: a send never provisions, approves, or otherwise writes here.
+        var identity = await _dbContext.UserLogins
+            .AsNoTracking()
+            .Where(login => login.ProviderNameNormalized == provider && login.ProviderUserId == phone)
+            .Join(_dbContext.Accounts.AsNoTracking(), login => login.AccountId, account => account.Id,
+                (login, account) => new { LoginId = login.Id, AccountId = account.Id, account.IsActive })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (identity is null)
+        {
+            return new SmsSendEligibilityResult(
+                manualApproval ? SmsSendEligibility.NotRegistered : SmsSendEligibility.Eligible,
+                AccountId: null);
+        }
+
+        if (!identity.IsActive)
+        {
+            return new SmsSendEligibilityResult(SmsSendEligibility.AccountDisabled, identity.AccountId);
+        }
+
+        var access = await _dbContext.AppSmsAccesses
+            .AsNoTracking()
+            .Where(row => row.AppRegistrationId == appRegistrationId && row.UserLoginId == identity.LoginId)
+            .Select(row => new { row.IsActive, row.ApprovalSource })
+            .FirstOrDefaultAsync(cancellationToken);
+        var decision = access switch
+        {
+            null => manualApproval ? SmsSendEligibility.NotAdmitted : SmsSendEligibility.Eligible,
+            { IsActive: false } => SmsSendEligibility.AdmissionInactive,
+            _ when manualApproval && access.ApprovalSource != SmsAccessApprovalSource.Admin =>
+                SmsSendEligibility.NotAdminApproved,
+            _ => SmsSendEligibility.Eligible
+        };
+        return new SmsSendEligibilityResult(decision, identity.AccountId);
     }
 
     public async Task<SmsAdmission> ProvisionAsync(

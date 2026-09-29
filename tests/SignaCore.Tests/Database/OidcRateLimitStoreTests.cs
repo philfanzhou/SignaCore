@@ -21,20 +21,18 @@ public class OidcRateLimitStoreTests
     [Fact]
     public void Budgets_MatchTheHostPoliciesAndTheirFixedLimits()
     {
-        // The budget table already carries the PS-24 oidc-sms-code budget (#443) while the host
-        // registers that policy only with the send route (#444); until then the budgets are the
-        // host policies plus exactly that one name.
+        // Every PS-24 budget is registered by exactly one host policy, and vice versa.
         Assert.Equal(
-            OidcRateLimitPolicies.All.Append("oidc-sms-code").Order(StringComparer.Ordinal),
+            OidcRateLimitPolicies.All.Order(StringComparer.Ordinal),
             OidcRateLimitBudgets.Policies.Order(StringComparer.Ordinal));
-        Assert.DoesNotContain("oidc-sms-code", OidcRateLimitPolicies.All);
-        foreach (var policy in OidcRateLimitPolicies.All)
+        foreach (var policy in OidcRateLimitPolicies.All.Where(policy => policy != OidcRateLimitPolicies.SmsCode))
         {
             Assert.True(OidcRateLimitBudgets.TryGetPermitLimit(policy, out var limit));
             Assert.Equal(90, limit);
         }
 
-        Assert.True(OidcRateLimitBudgets.TryGetPermitLimit("oidc-sms-code", out var smsCodeLimit));
+        Assert.Equal("oidc-sms-code", OidcRateLimitPolicies.SmsCode);
+        Assert.True(OidcRateLimitBudgets.TryGetPermitLimit(OidcRateLimitPolicies.SmsCode, out var smsCodeLimit));
         Assert.Equal(20, smsCodeLimit);
         Assert.Equal(IdentityConstants.OidcSmsCodeRateLimitPerMinute, smsCodeLimit);
     }

@@ -78,6 +78,15 @@ public static class IdentityConstants
     public const int LoginHandleLength = 43;
     public const int LoginHandleLifetimeMinutes = 10;
     public const int AuthorizationRequestRetentionHours = 24;
+
+    /// <summary>
+    /// Browser SMS send requests one continuation may count (<c>PS-03</c>). The maximum lives in
+    /// the conditional send-budget update, not in the schema.
+    /// </summary>
+    public const int MaxSmsCodeSendsPerContinuation = 5;
+
+    /// <summary>The <c>IN-17</c> bound of a submitted phone in UTF-16 code units, before normalization.</summary>
+    public const int MaxSubmittedPhoneLength = 32;
     public const int AuthorizationCodeLength = 43;
     public const int AuthorizationCodeLifetimeSeconds = 60;
     public const int AuthorizationCodeRetentionHours = 24;

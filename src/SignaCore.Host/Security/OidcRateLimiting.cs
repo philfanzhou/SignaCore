@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Caching.Memory;
 using SignaCore.Database;
 using SignaCore.Database.Repositories;
@@ -36,6 +37,15 @@ public static class OidcRateLimitPolicies
     public const string Logout = "oidc-logout";
     public const string Revoke = "oidc-revoke";
 
+    /// <summary>
+    /// The browser SMS send route (<c>PS-24</c>, <c>AC-16</c>): partitioned only by the source
+    /// network, because the route has no trusted client carrier and its body is never read here.
+    /// </summary>
+    public const string SmsCode = "oidc-sms-code";
+
+    /// <summary>The path of the browser SMS send route, the only <see cref="SmsCode"/> endpoint.</summary>
+    public const string SmsCodePath = "/oauth2/login/sms-code";
+
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
     {
         Authorize,
@@ -43,7 +53,8 @@ public static class OidcRateLimitPolicies
         Token,
         UserInfo,
         Logout,
-        Revoke
+        Revoke,
+        SmsCode
     };
 
     /// <summary>The <c>HttpContext.Items</c> key carrying a resolved registered client id.</summary>
@@ -58,11 +69,28 @@ public static class OidcRateLimitPolicies
         "/oauth2/userinfo",
         "/oauth2/logout",
         "/oauth2/logout/requests",
-        "/oauth2/revoke"
+        "/oauth2/revoke",
+        SmsCodePath
     };
 
     public static bool IsInteractiveEndpoint(PathString path) =>
         Endpoints.Contains(path.Value ?? string.Empty);
+
+    /// <summary>
+    /// Whether this interactive endpoint is partitioned by the source network alone. The partition
+    /// resolver reads no client carrier on it — no query <c>client_id</c>, no Basic header, no body
+    /// — and never queries the registration table, so no request value can move it into a client
+    /// partition.
+    /// </summary>
+    public static bool IsSourceNetworkOnlyEndpoint(PathString path) =>
+        string.Equals(path.Value, SmsCodePath, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether the routed endpoint of this request is admitted by <see cref="SmsCode"/>. It reads the
+    /// endpoint metadata, so it holds for every spelling the router maps to the send route.
+    /// </summary>
+    public static bool IsSmsCodeEndpoint(HttpContext httpContext) =>
+        httpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName == SmsCode;
 
     /// <summary>
     /// The fixed overload answer shared by every interactive OIDC endpoint class. The body names
@@ -216,8 +244,9 @@ public static class OidcRateLimitPolicies
 /// <summary>
 /// Resolves the registered-client partition ahead of the rate-limiting middleware: the policy
 /// factory runs synchronously inside the limiter, so the asynchronous registration read happens
-/// here, once per uncached client id, behind a size-bounded cache. Only the six interactive
-/// endpoint classes are inspected; every other request passes through untouched.
+/// here, once per uncached client id, behind a size-bounded cache. Only the interactive endpoint
+/// classes that admit a client partition are inspected; the source-network-only SMS send route and
+/// every other request pass through untouched.
 /// </summary>
 public sealed class OidcClientPartitionResolverMiddleware(
     RequestDelegate next,
@@ -226,7 +255,8 @@ public sealed class OidcClientPartitionResolverMiddleware(
 {
     public async Task InvokeAsync(HttpContext httpContext)
     {
-        if (OidcRateLimitPolicies.IsInteractiveEndpoint(httpContext.Request.Path))
+        if (OidcRateLimitPolicies.IsInteractiveEndpoint(httpContext.Request.Path)
+            && !OidcRateLimitPolicies.IsSourceNetworkOnlyEndpoint(httpContext.Request.Path))
         {
             var candidate = await OidcRateLimitPolicies.ReadClientIdCandidateAsync(
                 httpContext,

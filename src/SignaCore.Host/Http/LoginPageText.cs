@@ -16,6 +16,8 @@ internal sealed record LoginPageText(
     string SignInButton,
     string CancelButton,
     string CredentialFailureNotice,
+    string SmsCodeSentNotice,
+    string InvalidPhoneNotice,
     string ErrorTitle,
     string ErrorHeading,
     string ErrorMessage)
@@ -29,6 +31,9 @@ internal sealed record LoginPageText(
         SignInButton: "Sign in",
         CancelButton: "Cancel",
         CredentialFailureNotice: "Sign-in failed. Check your username and password and try again.",
+        SmsCodeSentNotice: "If this phone number can sign in to this application, a verification "
+            + "code has been sent.",
+        InvalidPhoneNotice: "Enter a valid mainland China mobile number.",
         ErrorTitle: "Invalid login request",
         ErrorHeading: "Invalid login request",
         ErrorMessage: "The login request could not be processed. Return to the application that "
@@ -43,6 +48,8 @@ internal sealed record LoginPageText(
         SignInButton: "登录",
         CancelButton: "取消",
         CredentialFailureNotice: "登录失败。请检查用户名和密码后重试。",
+        SmsCodeSentNotice: "如果此手机号可以登录该应用，验证码已发送。",
+        InvalidPhoneNotice: "请输入有效的中国大陆手机号码。",
         ErrorTitle: "登录请求无效",
         ErrorHeading: "登录请求无效",
         ErrorMessage: "无法处理此登录请求。请返回将您引导至此处的应用，然后重新开始。");

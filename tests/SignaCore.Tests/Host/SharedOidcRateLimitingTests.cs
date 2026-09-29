@@ -129,7 +129,7 @@ public sealed class SharedOidcRateLimitingTests
     }
 
     [Fact]
-    public void TheSharedDecision_CoversExactlyTheSixPoliciesOnPostgreSqlOnly()
+    public void TheSharedDecision_CoversExactlyTheSevenPoliciesOnPostgreSqlOnly()
     {
         Assert.True(SharedOidcRateLimiting.IsEnabled(new DatabaseOptions { Provider = "PostgreSQL", ConnectionString = "Host=db" }));
         Assert.False(SharedOidcRateLimiting.IsEnabled(new DatabaseOptions { Provider = "SQLite", ConnectionString = "Data Source=x.db" }));
@@ -139,12 +139,13 @@ public sealed class SharedOidcRateLimitingTests
             Assert.True(SharedOidcRateLimiting.IsSharedBudgetEndpoint(ContextFor(policy)));
         }
 
-        // The oidc-sms-code budget exists in the table (#443) but no endpoint registers it until
-        // the send route (#444), so it is not yet a shared-budget endpoint policy.
+        // The host registers exactly the PS-24 budgets: the six classes plus the browser SMS send
+        // route's oidc-sms-code (#444), which is a shared-budget endpoint policy like the others.
         Assert.Equal(
             OidcRateLimitBudgets.Policies.Order(),
-            OidcRateLimitPolicies.All.Append("oidc-sms-code").Order());
-        Assert.False(SharedOidcRateLimiting.IsSharedBudgetEndpoint(ContextFor("oidc-sms-code")));
+            OidcRateLimitPolicies.All.Order());
+        Assert.Equal(7, OidcRateLimitPolicies.All.Count);
+        Assert.True(SharedOidcRateLimiting.IsSharedBudgetEndpoint(ContextFor("oidc-sms-code")));
         Assert.False(SharedOidcRateLimiting.IsSharedBudgetEndpoint(ContextFor("sms-code")));
         Assert.False(SharedOidcRateLimiting.IsSharedBudgetEndpoint(ContextFor(null)));
     }

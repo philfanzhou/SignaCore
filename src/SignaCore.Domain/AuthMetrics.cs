@@ -68,12 +68,21 @@ public class AuthMetrics
         public const string UserInfo = "userinfo";
         public const string LogoutPrepare = "logout-prepare";
         public const string LogoutComplete = "logout-complete";
+
+        /// <summary>
+        /// The browser SMS send route <c>POST /oauth2/login/sms-code</c>. Its outcomes are the closed
+        /// <c>sent</c>, <c>invalid_phone</c>, <c>local_rejected</c>, <c>rate_limited</c>,
+        /// <c>persistence_failed</c>, and suppressed-send reason values; it never carries a client
+        /// label.
+        /// </summary>
+        public const string LoginSmsCode = "login-sms-code";
     }
 
     /// <summary>
     /// The outcome value reserved for the rate-limit rejection of an interactive endpoint class.
     /// The value and the endpoint dimension are defined here; the counting itself is wired by the
-    /// limiter delivery — this class keeps no dependency on it.
+    /// limiter delivery — this class keeps no dependency on it. Only the browser SMS send route
+    /// (<see cref="OidcMetricEndpoints.LoginSmsCode"/>) records it today.
     /// </summary>
     public const string RateLimitedOutcome = "rate_limited";
 

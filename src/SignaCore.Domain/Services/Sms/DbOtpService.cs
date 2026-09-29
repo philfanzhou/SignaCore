@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
@@ -36,12 +37,53 @@ public class DbOtpService : IOtpService
         string profileKey,
         CancellationToken cancellationToken = default)
     {
+        var attempt = await SendCoreAsync(appRegistrationId, phoneE164, profileKey, cancellationToken);
+        if (attempt.Outcome == OtpSendOutcome.Sent) return attempt.Code!;
+
+        // The legacy contract: a closed rejection surfaces as its fixed message, and a failure that
+        // originated elsewhere (profile resolution, a provider exception) is rethrown unchanged.
+        attempt.Failure?.Throw();
+        throw new InvalidOperationException(attempt.Message);
+    }
+
+    public async Task<OtpSendOutcome> TrySendAsync(
+        Guid appRegistrationId,
+        string phoneE164,
+        string profileKey,
+        CancellationToken cancellationToken = default)
+    {
+        var attempt = await SendCoreAsync(appRegistrationId, phoneE164, profileKey, cancellationToken);
+        return attempt.Outcome;
+    }
+
+    /// <summary>
+    /// The one send implementation behind both entry points. The limit checks and the profile
+    /// resolution run before any write; the pre-delivery state commits before the provider is
+    /// called; the successful delivery state is staged for the caller's commit. Caller
+    /// cancellation and failures outside the closed outcomes propagate unchanged.
+    /// </summary>
+    private async Task<SendAttempt> SendCoreAsync(
+        Guid appRegistrationId,
+        string phoneE164,
+        string profileKey,
+        CancellationToken cancellationToken)
+    {
         var phone = MainlandChinaPhoneNumber.Normalize(phoneE164);
         var now = DateTimeOffset.UtcNow;
         var existing = await _otpRepository.GetAsync(appRegistrationId, phone, cancellationToken);
-        EnforceSendLimits(existing, now);
+        if (CheckSendLimits(existing, now) is { } limited) return limited;
 
-        var (sender, profile) = _senderResolver.Resolve(profileKey);
+        ISmsSender sender;
+        SmsProviderProfile profile;
+        try
+        {
+            (sender, profile) = _senderResolver.Resolve(profileKey);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return SendAttempt.Failed(OtpSendOutcome.ProfileMissing, ExceptionDispatchInfo.Capture(exception));
+        }
+
         var code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
         var otp = existing ?? new OtpEntity { Id = Guid.NewGuid(), AppRegistrationId = appRegistrationId, Phone = phone };
         if (existing == null) await _otpRepository.AddAsync(otp, cancellationToken);
@@ -64,7 +106,9 @@ public class DbOtpService : IOtpService
         }
         catch (Microsoft.EntityFrameworkCore.DbUpdateException)
         {
-            throw new InvalidOperationException("A verification code is already being sent. Please try again later.");
+            return SendAttempt.Rejected(
+                OtpSendOutcome.ResendInterval,
+                "A verification code is already being sent. Please try again later.");
         }
 
         try
@@ -82,13 +126,21 @@ public class DbOtpService : IOtpService
             _logger.LogWarning(
                 "SMS provider rejected delivery: Provider={Provider}, Code={ProviderCode}, Phone={Phone}",
                 sender.Provider, exception.ProviderCode, SensitiveDataMasker.MaskPhone(phone));
-            throw new InvalidOperationException("SMS provider rejected the verification-code request.");
+            return SendAttempt.Rejected(
+                OtpSendOutcome.ProviderFailed,
+                "SMS provider rejected the verification-code request.");
+        }
+        catch (Exception exception) when (
+            exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // Any other provider failure leaves the committed PendingDelivery state as it was.
+            return SendAttempt.Failed(OtpSendOutcome.ProviderFailed, ExceptionDispatchInfo.Capture(exception));
         }
 
         _logger.LogInformation(
             "OTP generated and sent: AppRegistrationId={AppRegistrationId}, Provider={Provider}, Phone={Phone}, TTL={Ttl}s",
             appRegistrationId, sender.Provider, SensitiveDataMasker.MaskPhone(phone), _options.OtpTtlSeconds);
-        return code;
+        return SendAttempt.Delivered(code);
     }
 
     public async Task<OtpVerificationResult> VerifyAsync(
@@ -156,16 +208,18 @@ public class DbOtpService : IOtpService
         return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes($"{appRegistrationId:N}|{phone}|{code}")));
     }
 
-    private void EnforceSendLimits(OtpEntity? otp, DateTimeOffset now)
+    private SendAttempt? CheckSendLimits(OtpEntity? otp, DateTimeOffset now)
     {
-        if (otp == null) return;
-        if (otp.LockoutUntil > now) throw new InvalidOperationException("Too many verification attempts. Please try again later.");
+        if (otp == null) return null;
+        if (otp.LockoutUntil > now)
+            return SendAttempt.Rejected(OtpSendOutcome.Locked, "Too many verification attempts. Please try again later.");
         if (now - otp.CreatedAt < TimeSpan.FromSeconds(_options.MinSendIntervalSeconds))
-            throw new InvalidOperationException("Verification code requested too frequently.");
+            return SendAttempt.Rejected(OtpSendOutcome.ResendInterval, "Verification code requested too frequently.");
         if (now - otp.HourWindowStartedAt < TimeSpan.FromHours(1) && otp.HourSendCount >= _options.MaxSendsPerHour)
-            throw new InvalidOperationException("Hourly verification-code limit exceeded.");
+            return SendAttempt.Rejected(OtpSendOutcome.HourlyWindow, "Hourly verification-code limit exceeded.");
         if (now - otp.DayWindowStartedAt < TimeSpan.FromDays(1) && otp.DaySendCount >= _options.MaxSendsPerDay)
-            throw new InvalidOperationException("Daily verification-code limit exceeded.");
+            return SendAttempt.Rejected(OtpSendOutcome.DailyWindow, "Daily verification-code limit exceeded.");
+        return null;
     }
 
     private static void UpdateSendWindows(OtpEntity otp, DateTimeOffset now)
@@ -183,5 +237,23 @@ public class DbOtpService : IOtpService
             otp.DaySendCount = 1;
         }
         else otp.DaySendCount++;
+    }
+
+    /// <summary>
+    /// One send result: the delivered code, or a closed outcome with either the fixed legacy
+    /// message or the original failure the legacy entry point rethrows unchanged.
+    /// </summary>
+    private sealed record SendAttempt(
+        OtpSendOutcome Outcome,
+        string? Code,
+        string? Message,
+        ExceptionDispatchInfo? Failure)
+    {
+        public static SendAttempt Delivered(string code) => new(OtpSendOutcome.Sent, code, null, null);
+
+        public static SendAttempt Rejected(OtpSendOutcome outcome, string message) => new(outcome, null, message, null);
+
+        public static SendAttempt Failed(OtpSendOutcome outcome, ExceptionDispatchInfo failure) =>
+            new(outcome, null, null, failure);
     }
 }

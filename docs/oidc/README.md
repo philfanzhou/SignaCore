@@ -48,9 +48,10 @@ PKCE, exact registered Origins, 300-second access tokens, and optional bounded r
 [Public SPA sample](../../samples/SignaCore.PublicSpa/README.md) shows that path and its limits; the
 confidential BFF remains the preferred client for high-privilege applications. The design adds no
 consent screen, dynamic registration, MFA, browser LDAP/WeChat login, or new behavior to existing
-grants. Browser SMS login is target design only: its canonical rows (`IN-16`–`IN-19`,
-`EV-35`–`EV-38`, `DF-16`–`DF-17`, `SC-21`–`SC-26`) activate through `AC-15`–`AC-17`, and until then
-the Password credential is the only browser login. A claims callback remains a server-to-server claims
+grants. Browser SMS login activates through `AC-15`–`AC-17` (canonical rows `IN-16`–`IN-19`,
+`EV-35`–`EV-38`, `DF-16`–`DF-17`, `SC-21`–`SC-26`). Its storage (`AC-15`) and its send route
+`POST /oauth2/login/sms-code` (`AC-16`) are active, but no rendered page offers the send yet; until
+`AC-17` the Password credential is the only browser login. A claims callback remains a server-to-server claims
 source; it is never a browser redirect registration.
 
 ## Accepted extension

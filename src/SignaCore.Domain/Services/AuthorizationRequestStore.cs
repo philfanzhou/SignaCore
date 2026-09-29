@@ -67,6 +67,19 @@ public interface IAuthorizationRequestStore
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Takes one of the <see cref="IdentityConstants.MaxSmsCodeSendsPerContinuation"/> browser SMS
+    /// send slots of the active row for <paramref name="loginHandle"/> (<c>PS-03</c>, <c>EV-35</c>):
+    /// one auto-committed conditional update that must run before any account, admission, or OTP
+    /// read. <c>false</c> — a malformed handle, a consumed or expired row, or an exhausted budget —
+    /// means no send. The row is otherwise never written: it is not consumed, extended, or reset,
+    /// and a taken slot is never refunded, even when the caller fails or is cancelled afterwards.
+    /// </summary>
+    Task<bool> TryTakeSmsCodeSendSlotAsync(
+        string loginHandle,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Deletes rows expired for longer than
     /// <see cref="IdentityConstants.AuthorizationRequestRetentionHours"/> as of
     /// <paramref name="now"/>, returning the deleted count. Rows inside their lifetime or inside the
@@ -164,6 +177,25 @@ public sealed class AuthorizationRequestStore : IAuthorizationRequestStore
         return await _repository.TryConsumeAsync(
             LoginHandleDigest.Compute(loginHandle),
             now,
+            cancellationToken);
+    }
+
+    public async Task<bool> TryTakeSmsCodeSendSlotAsync(
+        string loginHandle,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!IsLoginHandleShape(loginHandle))
+        {
+            return false;
+        }
+
+        return await _repository.TryTakeSmsCodeSendSlotAsync(
+            LoginHandleDigest.Compute(loginHandle),
+            now,
+            IdentityConstants.MaxSmsCodeSendsPerContinuation,
             cancellationToken);
     }
 
