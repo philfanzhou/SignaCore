@@ -38,6 +38,13 @@ namespace SignaCore.Tests.Integration;
 [UsesProcessWideSqlitePoolClearing]
 public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixture>
 {
+    /// <summary>
+    /// The logout route's own fixed policy. It renders no page and loads no stylesheet, so unlike
+    /// the login route it carries no <c>style-src</c>.
+    /// </summary>
+    private const string LogoutContentSecurityPolicy =
+        "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+
     private const string AppId = "logout-contract-app";
     private const string AppSecret = "logout-contract-secret-canary";
     private const string RegisteredRedirectUri = "https://bff.logout.test/callback?tenant=unit";
@@ -917,7 +924,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         Assert.Contains("no-referrer", response.Headers.GetValues("Referrer-Policy").Single(), StringComparison.Ordinal);
         Assert.Contains("DENY", response.Headers.GetValues("X-Frame-Options").Single(), StringComparison.Ordinal);
         Assert.Equal(
-            OAuthLoginTestSupport.ExpectedContentSecurityPolicy,
+            LogoutContentSecurityPolicy,
             response.Headers.GetValues("Content-Security-Policy").Single());
     }
 

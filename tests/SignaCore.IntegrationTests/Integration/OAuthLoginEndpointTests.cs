@@ -63,7 +63,8 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
         // The local page echoes no request value: no submitted handle, no form, no redirect.
         Assert.DoesNotContain(activeHandle, bodies[0], StringComparison.Ordinal);
         Assert.DoesNotContain("login_handle=", bodies[0], StringComparison.Ordinal);
-        Assert.DoesNotContain("href", bodies[0], StringComparison.OrdinalIgnoreCase);
+        AssertOnlyStylesheetReference(bodies[0]);
+        Assert.Equal(EnglishLocalErrorPage, bodies[0]);
         Assert.Equal(before, await DumpLoginTablesAsync(_fixture.Services));
     }
 
