@@ -20,14 +20,25 @@ public class IdentitySessionEntity
     public Guid AccountId { get; set; }
 
     /// <summary>
-    /// Restrictive reference to the password credential proven at login; indexed. Creation
-    /// verifies the credential exists and belongs to <see cref="AccountId"/>.
+    /// Restrictive reference to the password credential proven at login; indexed. Non-null exactly
+    /// on a <see cref="IdentityConstants.AuthMethodPassword"/> row and null on an
+    /// <see cref="IdentityConstants.AuthMethodSms"/> row (the database CHECK enforces the pairing).
+    /// Creation verifies the credential exists and belongs to <see cref="AccountId"/>.
     /// </summary>
-    public Guid PasswordCredentialId { get; set; }
+    public Guid? PasswordCredentialId { get; set; }
 
     /// <summary>
-    /// How the browser identity was established. Fixed to
-    /// <see cref="IdentityConstants.AuthMethodPassword"/> in this phase.
+    /// Restrictive reference to the SMS <c>user_logins</c> identity proven by the OTP; indexed.
+    /// Non-null exactly on an <see cref="IdentityConstants.AuthMethodSms"/> row and null on a
+    /// <see cref="IdentityConstants.AuthMethodPassword"/> row. Creation verifies the identity
+    /// exists, is an SMS identity, and belongs to <see cref="AccountId"/>.
+    /// </summary>
+    public Guid? SmsUserLoginId { get; set; }
+
+    /// <summary>
+    /// How the browser identity was established: <see cref="IdentityConstants.AuthMethodPassword"/>
+    /// or <see cref="IdentityConstants.AuthMethodSms"/>. The database CHECK admits only these two
+    /// values, each with exactly its matching reference (<c>PS-04</c>).
     /// </summary>
     public string AuthMethod { get; set; } = string.Empty;
 

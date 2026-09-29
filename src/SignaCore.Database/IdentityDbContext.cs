@@ -365,7 +365,13 @@ public class IdentityDbContext : DbContext, IServiceDbContext
 
         modelBuilder.Entity<AuthorizationRequestEntity>(entity =>
         {
-            entity.ToTable("authorization_requests");
+            entity.ToTable(
+                "authorization_requests",
+                // PS-03: the per-continuation SMS send count never goes negative. Its maximum is
+                // enforced by the conditional send-budget update, not by the schema.
+                table => table.HasCheckConstraint(
+                    "CK_authorization_requests_sms_code_send_count",
+                    "sms_code_send_count >= 0"));
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.HandleDigest)
@@ -396,6 +402,11 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             ConfigureInstant(entity.Property(e => e.CreatedAt).HasColumnName("created_at"));
             ConfigureInstant(entity.Property(e => e.ExpiresAt).HasColumnName("expires_at"));
             ConfigureInstant(entity.Property(e => e.ConsumedAt).HasColumnName("consumed_at"));
+            // The database default lets an older binary keep inserting continuations during a
+            // PostgreSQL rolling upgrade without naming the column.
+            entity.Property(e => e.SmsCodeSendCount)
+                .HasColumnName("sms_code_send_count")
+                .HasDefaultValue(0);
             entity.HasIndex(e => e.HandleDigest).IsUnique();
             // PS-23: the client reference is restrictive and non-nullable, created together with this
             // table, so a stored continuation can never name a client the schema cannot resolve.
@@ -415,14 +426,25 @@ public class IdentityDbContext : DbContext, IServiceDbContext
                 // reason, is not a revocation. The check enforces the pairing on both providers;
                 // the closed value set itself stays a domain rule so later canonical events can
                 // add reasons without a schema change.
-                table => table.HasCheckConstraint(
-                    "CK_identity_sessions_revocation_pair",
-                    "(revoked_at IS NULL AND revocation_reason IS NULL) "
-                    + "OR (revoked_at IS NOT NULL AND revocation_reason IS NOT NULL)"));
+                table =>
+                {
+                    table.HasCheckConstraint(
+                        "CK_identity_sessions_revocation_pair",
+                        "(revoked_at IS NULL AND revocation_reason IS NULL) "
+                        + "OR (revoked_at IS NOT NULL AND revocation_reason IS NOT NULL)");
+                    // PS-04: a session carries exactly the one authenticating reference that
+                    // matches its auth method, which also closes the auth method set to
+                    // Password and Sms.
+                    table.HasCheckConstraint(
+                        "CK_identity_sessions_auth_method_reference",
+                        "(auth_method = 'Password' AND password_credential_id IS NOT NULL AND sms_user_login_id IS NULL) "
+                        + "OR (auth_method = 'Sms' AND sms_user_login_id IS NOT NULL AND password_credential_id IS NULL)");
+                });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AccountId).HasColumnName("account_id");
             entity.Property(e => e.PasswordCredentialId).HasColumnName("password_credential_id");
+            entity.Property(e => e.SmsUserLoginId).HasColumnName("sms_user_login_id");
             entity.Property(e => e.AuthMethod)
                 .HasColumnName("auth_method")
                 .HasMaxLength(IdentityConstants.MaxAuthMethodLength)
@@ -437,10 +459,13 @@ public class IdentityDbContext : DbContext, IServiceDbContext
                 .HasMaxLength(IdentityConstants.MaxIdentitySessionRevocationReasonLength);
             entity.HasIndex(e => e.AccountId);
             entity.HasIndex(e => e.PasswordCredentialId);
-            // PS-23: both identity references are restrictive and non-nullable, created together
-            // with this table, so a live session can never name an account or credential the
-            // schema cannot resolve. Deleting a referenced account or password credential fails;
-            // cleanup deletes rows only by retention and never nulls a reference.
+            entity.HasIndex(e => e.SmsUserLoginId);
+            // PS-23: the account reference is restrictive and non-nullable, created together with
+            // this table, so a live session can never name an account the schema cannot resolve.
+            // PS-04: the password credential and SMS login identity references are restrictive
+            // and exactly one of them is set (the CHECK above). Deleting a referenced account,
+            // password credential, or SMS login identity fails; cleanup deletes rows only by
+            // retention and never nulls a reference.
             entity.HasOne<AccountEntity>()
                 .WithMany()
                 .HasForeignKey(e => e.AccountId)
@@ -448,6 +473,10 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.HasOne<PasswordCredentialEntity>()
                 .WithMany()
                 .HasForeignKey(e => e.PasswordCredentialId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<UserLoginEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.SmsUserLoginId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -558,7 +587,7 @@ public class IdentityDbContext : DbContext, IServiceDbContext
             entity.ToTable("oidc_rate_limit_buckets", table =>
             {
                 table.HasCheckConstraint("CK_oidc_rate_limit_buckets_policy",
-                    "policy IN ('oidc-authorize', 'oidc-login', 'oidc-token', 'oidc-userinfo', 'oidc-logout', 'oidc-revoke')");
+                    "policy IN ('oidc-authorize', 'oidc-login', 'oidc-token', 'oidc-userinfo', 'oidc-logout', 'oidc-revoke', 'oidc-sms-code')");
                 table.HasCheckConstraint("CK_oidc_rate_limit_buckets_digest_length", "length(partition_digest) = 64");
                 table.HasCheckConstraint("CK_oidc_rate_limit_buckets_permit_count", "permit_count BETWEEN 1 AND 90");
             });

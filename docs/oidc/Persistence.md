@@ -143,21 +143,37 @@ belongs to the family write API (delivered by #294; rotation joins with #98), no
 statement. Cleanup cancellation or failure
 rolls back the unit and never nulls a relationship to force deletion.
 
-## Browser SMS additions (target)
+## Browser SMS additions
 
-#443 adds the storage for browser SMS login (`AC-15`) in one migration per provider, with the same
-shape in both histories. It projects `PS-03`, `PS-04`, and `PS-24` and does not redefine them:
+#443 added the storage for browser SMS login (`AC-15`) as the `AddBrowserSmsLoginStorage`
+migration, one per provider, with the same shape in both histories. It projects `PS-03`, `PS-04`,
+and `PS-24` and does not redefine them. The schema below is current; the routes that write it are
+still target (#444 for the send route, #445 for SMS login):
 
 | Change | Shape | Rollback (`Down`) precondition |
 | --- | --- | --- |
-| `authorization_requests.sms_code_send_count` | Non-null integer, default 0, CHECK `>= 0`; written only by the `PS-03` conditional update | None: no other artifact reads the count, and continuations live for 10 minutes |
-| `identity_sessions.sms_user_login_id` and the auth-method CHECK | Nullable restrictive, indexed reference to `user_logins`; `password_credential_id` becomes nullable; a CHECK requires exactly the reference that matches `auth_method` (`Password` or `Sms`). Existing rows already satisfy it as `Password` rows. SQLite rebuilds the table and preserves every row and index | No `Sms` session row remains; `Down` fails closed otherwise, because an old binary cannot read or revoke such a row correctly |
-| `oidc_rate_limit_buckets` policy CHECK | Adds `oidc-sms-code`; `OidcRateLimitBudgets` gains the same name | No `oidc-sms-code` bucket row remains |
+| `authorization_requests.sms_code_send_count` | Non-null integer, database default 0, CHECK `CK_authorization_requests_sms_code_send_count` (`>= 0`); existing continuations start at 0. Only the target `PS-03` conditional update will write it | None: no other artifact reads the count, and continuations live for 10 minutes |
+| `identity_sessions.sms_user_login_id` and the auth-method CHECK | Nullable restrictive, indexed reference to `user_logins`; `password_credential_id` becomes nullable; `CK_identity_sessions_auth_method_reference` requires exactly the reference that matches `auth_method` (`Password` or `Sms`). Existing rows already satisfy it as `Password` rows. SQLite rebuilds the table and preserves every row, index, and child reference | No `Sms` session row remains; `Down` fails closed otherwise, because an old binary cannot read or revoke such a row correctly |
+| `oidc_rate_limit_buckets` policy CHECK | Adds `oidc-sms-code`; `OidcRateLimitBudgets` gains the same name with a fixed budget of 20 per 60-second window. The host registers the policy only with the target send route | No `oidc-sms-code` bucket row remains |
 
-Deleting a `user_logins` SMS identity that a session still references fails under the restrictive
-reference, exactly like a referenced Password credential. Rolling back only the #445 binary while
-`Sms` sessions exist is equally unsupported: revoke them or wait for their 12-hour absolute expiry
-and retention before downgrading.
+`IIdentitySessionStore.CreateSmsAsync` creates an `Sms` session after proving the SMS login
+identity exists, is an SMS identity, and belongs to the account; no production path calls it until
+#445. Deleting a `user_logins` SMS identity that a session still references fails under the
+restrictive reference, exactly like a referenced Password credential.
+
+PostgreSQL applies the upgrade as in-place `ALTER` statements in one transaction, so a failed or
+cancelled upgrade leaves nothing behind, and an older binary keeps inserting continuations and
+Password sessions during a rolling upgrade (the count column has a database default). SQLite
+rebuilds `identity_sessions`, `authorization_requests`, and `oidc_rate_limit_buckets` across
+several transactions, so a crash between them is not atomic, and the physical column order changes;
+back up the file first.
+
+`Down` checks both preconditions first, in one statement per provider (a PostgreSQL `DO` block, a
+SQLite temp-table `CHECK`), and changes nothing when either fails. Behind the gate it restores the
+previous schema exactly, returning `password_credential_id` to non-null without any backfill or
+column default. Rolling back only the #445 binary while `Sms` sessions exist is equally
+unsupported: revoke them or wait for their 12-hour absolute expiry and retention before
+downgrading.
 
 ## Deployment and rollback gate
 

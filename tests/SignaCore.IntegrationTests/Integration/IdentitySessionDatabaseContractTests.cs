@@ -46,23 +46,29 @@ public sealed class IdentitySessionDatabaseContractTests
         var options = await database.InitializeAsync();
         await using var context = new IdentityDbContext(options);
 
-        // The exact 10-column set, in order, with nullability and the provider storage types.
+        // The exact 11-column set with nullability and the provider storage types. It is asserted
+        // by column name: the #443 SQLite table rebuild reorders the physical columns, and no
+        // code depends on that order.
         var columns = await ReadPragmaAsync(context, "PRAGMA table_info(identity_sessions)");
         Assert.Equal(
             new[]
             {
-                ("id", "TEXT", true),
+                ("absolute_expires_at", "INTEGER", true),
                 ("account_id", "TEXT", true),
-                ("password_credential_id", "TEXT", true),
                 ("auth_method", "TEXT", true),
                 ("auth_time", "INTEGER", true),
-                ("last_seen_at", "INTEGER", true),
+                ("id", "TEXT", true),
                 ("idle_expires_at", "INTEGER", true),
-                ("absolute_expires_at", "INTEGER", true),
+                ("last_seen_at", "INTEGER", true),
+                ("password_credential_id", "TEXT", false),
+                ("revocation_reason", "TEXT", false),
                 ("revoked_at", "INTEGER", false),
-                ("revocation_reason", "TEXT", false)
+                ("sms_user_login_id", "TEXT", false)
             },
-            columns.Select(row => (row[1], row[2], row[3] == "1")).ToArray());
+            columns
+                .Select(row => (row[1], row[2], row[3] == "1"))
+                .OrderBy(column => column.Item1, StringComparer.Ordinal)
+                .ToArray());
 
         // The lookup indexes on both restrictive references exist.
         var indexNames = await ReadPragmaAsync(context, "PRAGMA index_list(identity_sessions)");
@@ -78,22 +84,27 @@ public sealed class IdentitySessionDatabaseContractTests
 
         Assert.Contains("account_id", indexedColumns);
         Assert.Contains("password_credential_id", indexedColumns);
+        Assert.Contains("sms_user_login_id", indexedColumns);
 
-        // PS-23: both references are restrictive; nothing cascades.
+        // PS-23/PS-04: all three references are restrictive; nothing cascades.
         var foreignKeys = await ReadPragmaAsync(context, "PRAGMA foreign_key_list(identity_sessions)");
-        Assert.Equal(2, foreignKeys.Count);
+        Assert.Equal(3, foreignKeys.Count);
         Assert.Contains(foreignKeys, key =>
             key[2] == "accounts" && key[3] == "account_id" && key[4] == "id"
             && string.Equals(key[6], "RESTRICT", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(foreignKeys, key =>
             key[2] == "password_credentials" && key[3] == "password_credential_id" && key[4] == "id"
             && string.Equals(key[6], "RESTRICT", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(foreignKeys, key =>
+            key[2] == "user_logins" && key[3] == "sms_user_login_id" && key[4] == "id"
+            && string.Equals(key[6], "RESTRICT", StringComparison.OrdinalIgnoreCase));
 
-        // The revocation pairing check exists in the DDL...
+        // The revocation pairing and auth-method reference checks exist in the DDL...
         var ddl = await ReadScalarAsync(
             context,
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'identity_sessions'");
         Assert.Contains("CK_identity_sessions_revocation_pair", ddl, StringComparison.Ordinal);
+        Assert.Contains("CK_identity_sessions_auth_method_reference", ddl, StringComparison.Ordinal);
 
         // ...and is enforced: half of the revocation pair fails, the full pair and the empty pair
         // both succeed.
@@ -168,23 +179,13 @@ public sealed class IdentitySessionDatabaseContractTests
             Id = appId, AppId = "session-upgrade-app", AppSecretHash = "hash",
             AppName = "Session Upgrade", IsActive = true, CreatedAt = createdAt
         });
-        context.AuthorizationRequests.Add(new AuthorizationRequestEntity
-        {
-            Id = Guid.NewGuid(),
-            HandleDigest = LoginHandleDigest.Compute(handle),
-            AppRegistrationId = appId,
-            RedirectUri = "https://client.example.test/callback",
-            Scope = "openid",
-            State = "upgrade-state",
-            Nonce = "upgrade-nonce",
-            CodeChallenge = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
-            CreatedAt = createdAt,
-            ExpiresAt = createdAt.AddMinutes(IdentityConstants.LoginHandleLifetimeMinutes)
-        });
         await context.SaveChangesAsync(cancellationToken);
 
-        // The legacy token row is seeded with raw SQL: the migration version under test predates
-        // the family columns a current-EF-model INSERT would name.
+        // The continuation and legacy token rows are seeded with raw SQL: the migration version
+        // under test predates the #443 count column and the family columns a current-EF-model
+        // INSERT would name.
+        await BrowserSmsStorageTestSupport.InsertLegacyAuthorizationRequestAsync(
+            context, Guid.NewGuid(), LoginHandleDigest.Compute(handle), appId, createdAt);
         await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenSqliteAsync(
             context, tokenId, accountId, tokenDigest, createdAt, createdAt.AddHours(1),
             "session-upgrade-app");
@@ -199,7 +200,7 @@ public sealed class IdentitySessionDatabaseContractTests
         await migrator.MigrateAsync(sessionMigration, cancellationToken);
 
         Assert.True(await SqliteTableExistsAsync(context, "identity_sessions"));
-        Assert.Empty(await context.IdentitySessions.AsNoTracking().ToListAsync(cancellationToken));
+        Assert.Equal(0, await BrowserSmsStorageTestSupport.CountAsync(context, "identity_sessions"));
         Assert.True(accountsBefore.SetEquals(await GetSqliteColumnsAsync(context, "accounts")));
         Assert.True(credentialsBefore.SetEquals(await GetSqliteColumnsAsync(context, "password_credentials")));
         Assert.True(appsBefore.SetEquals(await GetSqliteColumnsAsync(context, "app_registrations")));
@@ -281,6 +282,96 @@ public sealed class IdentitySessionDatabaseContractTests
             Assert.Equal(25, rows.Count);
             Assert.Equal(25, rows.Select(row => row.Id).Distinct().Count());
         }
+    }
+
+    [Fact]
+    public async Task SmsCreation_FixesTheSmsShape_AndProvesSmsIdentityOwnership()
+    {
+        await using var database = new SqliteSessionDatabase();
+        var options = await database.InitializeAsync();
+        var (accountId, credentialId) = await SeedAccountWithCredentialAsync(options);
+        var (otherAccountId, _) = await SeedAccountWithCredentialAsync(options, "session-contract-other");
+        var smsLoginId = await SeedUserLoginAsync(options, accountId, IdentityConstants.AuthMethodSms, "+8613800000001");
+        var foreignSmsLoginId = await SeedUserLoginAsync(options, otherAccountId, IdentityConstants.AuthMethodSms, "+8613800000002");
+        var wechatLoginId = await SeedUserLoginAsync(options, accountId, IdentityConstants.AuthMethodWechat, "wechat-open-id");
+        var now = Microsecond(DateTimeOffset.UtcNow);
+
+        await using var context = new IdentityDbContext(options);
+        var store = CreateStore(context);
+        var before = await DumpTablesAsync(options);
+
+        // A missing identity, another account's SMS identity, a non-SMS identity of the same
+        // account, and a password credential id in the SMS slot are all refused.
+        var refusals = new List<InvalidOperationException>();
+        foreach (var candidate in new[] { Guid.NewGuid(), foreignSmsLoginId, wechatLoginId, credentialId })
+        {
+            refusals.Add(await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.CreateSmsAsync(accountId, candidate, now, TestContext.Current.CancellationToken)));
+        }
+
+        // Zero writes for every refusal, and the messages name no identifier (DF-06/DF-13).
+        Assert.Equal(before, await DumpTablesAsync(options));
+        var identifiers = new[] { accountId, otherAccountId, credentialId, smsLoginId, foreignSmsLoginId, wechatLoginId };
+        Assert.All(refusals, exception =>
+        {
+            var text = exception.ToString();
+            Assert.All(identifiers, id =>
+            {
+                Assert.DoesNotContain(id.ToString("D"), text, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(id.ToString("N"), text, StringComparison.OrdinalIgnoreCase);
+            });
+        });
+
+        // Success yields the PS-04 Sms shape with the same lifetime rules as a Password session.
+        var session = await store.CreateSmsAsync(
+            accountId, smsLoginId, now, TestContext.Current.CancellationToken);
+        Assert.Equal(accountId, session.AccountId);
+        Assert.Equal(IdentityConstants.AuthMethodSms, session.AuthMethod);
+        Assert.Equal(smsLoginId, session.SmsUserLoginId);
+        Assert.Null(session.PasswordCredentialId);
+        Assert.Equal(now, session.AuthTime);
+        Assert.Equal(now, session.LastSeenAt);
+        Assert.Equal(now.AddMinutes(IdentityConstants.IdentitySessionIdleTimeoutMinutes), session.IdleExpiresAt);
+        Assert.Equal(now.AddSeconds(IdentityConstants.MaxIdentitySessionAgeSeconds), session.AbsoluteExpiresAt);
+        Assert.Null(session.RevokedAt);
+        Assert.Null(session.RevocationReason);
+
+        var stored = await GetRowAsync(options, session.Id);
+        Assert.Equal(IdentityConstants.AuthMethodSms, stored.AuthMethod);
+        Assert.Equal(smsLoginId, stored.SmsUserLoginId);
+        Assert.Null(stored.PasswordCredentialId);
+
+        // The Password creation path is unchanged next to it.
+        var password = await store.CreateAsync(
+            accountId, credentialId, now, TestContext.Current.CancellationToken);
+        Assert.Equal(IdentityConstants.AuthMethodPassword, password.AuthMethod);
+        Assert.Equal(credentialId, password.PasswordCredentialId);
+        Assert.Null(password.SmsUserLoginId);
+        Assert.Equal(2, await CountRowsAsync(options));
+
+        // The same classification, slide, and revocation rules apply to the Sms row.
+        var lookup = await store.GetAsync(session.Id, now, TestContext.Current.CancellationToken);
+        Assert.Equal(IdentitySessionState.Active, lookup.State);
+        Assert.Equal(
+            IdentitySessionActivityResult.Touched,
+            await store.TouchActivityAsync(
+                session.Id,
+                now.AddMinutes(IdentityConstants.IdentitySessionActivityThresholdMinutes),
+                TestContext.Current.CancellationToken));
+        Assert.Equal(
+            IdentitySessionRevocationResult.Revoked,
+            await store.RevokeAsync(
+                session.Id, IdentitySessionRevocationReason.Logout, now.AddMinutes(2),
+                TestContext.Current.CancellationToken));
+
+        // Deleting the SMS login identity a session still references fails without cascading.
+        await using var deleteContext = new IdentityDbContext(options);
+        var login = await deleteContext.UserLogins
+            .SingleAsync(row => row.Id == smsLoginId, TestContext.Current.CancellationToken);
+        deleteContext.UserLogins.Remove(login);
+        await Assert.ThrowsAsync<DbUpdateException>(() =>
+            deleteContext.SaveChangesAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(2, await CountRowsAsync(options));
     }
 
     // ---- Acceptance 4: classification under one captured instant ----
@@ -1058,6 +1149,25 @@ public sealed class IdentitySessionDatabaseContractTests
         return (accountId, credentialId);
     }
 
+    private static async Task<Guid> SeedUserLoginAsync(
+        DbContextOptions<IdentityDbContext> options,
+        Guid accountId,
+        string providerName,
+        string providerUserId)
+    {
+        await using var context = new IdentityDbContext(options);
+        var loginId = Guid.NewGuid();
+        context.UserLogins.Add(new UserLoginEntity
+        {
+            Id = loginId,
+            AccountId = accountId,
+            ProviderName = providerName,
+            ProviderUserId = providerUserId
+        });
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return loginId;
+    }
+
     private static IdentitySessionEntity CreateValidSession(
         Guid accountId,
         Guid credentialId,
@@ -1195,8 +1305,11 @@ public sealed class IdentitySessionDatabaseContractTests
             RefreshTokenFamilyTestSupport.ToSqliteMicroseconds(createdAt),
             RefreshTokenFamilyTestSupport.ToSqliteMicroseconds(token.CreatedAt));
 
-        var continuation = await context.AuthorizationRequests.AsNoTracking()
-            .SingleAsync(row => row.HandleDigest == LoginHandleDigest.Compute(handle), cancellationToken);
+        // The continuation is read with raw SQL for the same reason: these history versions
+        // predate the #443 count column.
+        var continuation = await BrowserSmsStorageTestSupport.ReadLegacyAuthorizationRequestAsync(
+            context, LoginHandleDigest.Compute(handle));
+        Assert.NotNull(continuation);
         Assert.Equal(appId, continuation.AppRegistrationId);
         Assert.Null(continuation.ConsumedAt);
         Assert.Equal(createdAt.UtcTicks / 10, continuation.CreatedAt.UtcTicks / 10);

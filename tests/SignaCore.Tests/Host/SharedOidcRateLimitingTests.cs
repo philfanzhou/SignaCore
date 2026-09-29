@@ -139,7 +139,12 @@ public sealed class SharedOidcRateLimitingTests
             Assert.True(SharedOidcRateLimiting.IsSharedBudgetEndpoint(ContextFor(policy)));
         }
 
-        Assert.Equal(OidcRateLimitBudgets.Policies.Order(), OidcRateLimitPolicies.All.Order());
+        // The oidc-sms-code budget exists in the table (#443) but no endpoint registers it until
+        // the send route (#444), so it is not yet a shared-budget endpoint policy.
+        Assert.Equal(
+            OidcRateLimitBudgets.Policies.Order(),
+            OidcRateLimitPolicies.All.Append("oidc-sms-code").Order());
+        Assert.False(SharedOidcRateLimiting.IsSharedBudgetEndpoint(ContextFor("oidc-sms-code")));
         Assert.False(SharedOidcRateLimiting.IsSharedBudgetEndpoint(ContextFor("sms-code")));
         Assert.False(SharedOidcRateLimiting.IsSharedBudgetEndpoint(ContextFor(null)));
     }

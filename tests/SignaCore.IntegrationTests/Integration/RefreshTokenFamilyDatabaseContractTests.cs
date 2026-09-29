@@ -827,18 +827,11 @@ public sealed class RefreshTokenFamilyDatabaseContractTests
             Id = appId, AppId = AppId, AppSecretHash = "hash",
             AppName = "Family Contract", IsActive = true, CreatedAt = now
         });
-        context.IdentitySessions.Add(new IdentitySessionEntity
-        {
-            Id = sessionId,
-            AccountId = accountId,
-            PasswordCredentialId = credentialId,
-            AuthMethod = IdentityConstants.AuthMethodPassword,
-            AuthTime = now,
-            LastSeenAt = now,
-            IdleExpiresAt = now.AddMinutes(IdentityConstants.IdentitySessionIdleTimeoutMinutes),
-            AbsoluteExpiresAt = now.AddSeconds(IdentityConstants.MaxIdentitySessionAgeSeconds)
-        });
         await context.SaveChangesAsync(cancellationToken);
+        // The session is seeded with raw SQL: the upgrade and Down tests stand on history
+        // versions that predate the #443 session column a current-EF-model INSERT would name.
+        await BrowserSmsStorageTestSupport.InsertLegacySessionAsync(
+            context, sessionId, accountId, credentialId, now);
         context.ChangeTracker.Clear();
         return (accountId, credentialId, appId, sessionId);
     }

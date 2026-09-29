@@ -15,6 +15,9 @@ External provider identity bindings, including phone and WeChat identities.
 - Provider name plus provider user id identifies an external login and is unique.
 - SMS rows store an E.164 phone number; WeChat rows store an OpenId.
 - An account holds at most one WeChat binding; rebinding requires an explicit unbind.
+- identity_sessions.sms_user_login_id restrictively references an SMS row: deleting an SMS login
+  identity that an `Sms` identity session still references fails, exactly like a referenced
+  password credential, and nothing cascades.
 
 ## Ownership
 

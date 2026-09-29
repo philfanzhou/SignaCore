@@ -261,9 +261,10 @@ public sealed class ServerDatabaseContractTests
                 await migrator.MigrateAsync(continuationMigration, cancellationToken);
 
                 Assert.True(await PostgreSqlTableExistsAsync(context, "authorization_requests"));
-                Assert.Empty(await context.AuthorizationRequests
-                    .AsNoTracking()
-                    .ToListAsync(cancellationToken));
+                // Counted with raw SQL: this history version predates the #443 count column the
+                // current EF model would select.
+                Assert.Equal(0, await BrowserSmsStorageTestSupport.CountAsync(
+                    context, "authorization_requests"));
                 Assert.True(refreshColumnsBefore.SetEquals(
                     await GetPostgreSqlColumnsAsync(context, "refresh_tokens")));
                 Assert.True(appColumnsBefore.SetEquals(
@@ -282,9 +283,13 @@ public sealed class ServerDatabaseContractTests
                     context, accountId, appId, tokenId, createdAt, expiresAt, tokenDigest);
 
                 await migrator.MigrateAsync(continuationMigration, cancellationToken);
+
+                // The remaining sections exercise the current PS-03 shape, which the current EF
+                // model writes and reads, so the schema moves on to the latest migration.
+                await migrator.MigrateAsync(cancellationToken: cancellationToken);
             }
 
-            // ---- Exact fresh schema shape ----
+            // ---- Exact current schema shape ----
             await using (var context = new IdentityDbContext(options))
             {
                 var columnDetails = await GetPostgreSqlColumnDetailsAsync(
@@ -302,7 +307,8 @@ public sealed class ServerDatabaseContractTests
                         ["code_challenge"] = ("NO", 43),
                         ["created_at"] = ("NO", null),
                         ["expires_at"] = ("NO", null),
-                        ["consumed_at"] = ("YES", null)
+                        ["consumed_at"] = ("YES", null),
+                        ["sms_code_send_count"] = ("NO", null)
                     },
                     columnDetails);
 
@@ -455,23 +461,14 @@ public sealed class ServerDatabaseContractTests
                     Id = appId, AppId = "session-upgrade-app", AppSecretHash = "hash",
                     AppName = "Session Upgrade", IsActive = true, CreatedAt = createdAt
                 });
-                context.AuthorizationRequests.Add(new AuthorizationRequestEntity
-                {
-                    Id = Guid.NewGuid(),
-                    HandleDigest = LoginHandleDigest.Compute(handle),
-                    AppRegistrationId = appId,
-                    RedirectUri = "https://client.example.test/callback",
-                    Scope = "openid",
-                    State = "session-upgrade-state",
-                    Nonce = "session-upgrade-nonce",
-                    CodeChallenge = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
-                    CreatedAt = createdAt,
-                    ExpiresAt = createdAt.AddMinutes(IdentityConstants.LoginHandleLifetimeMinutes)
-                });
                 await context.SaveChangesAsync(cancellationToken);
 
-                // The legacy token row is seeded with raw SQL: the migration version under test
-                // predates the family columns a current-EF-model INSERT would name.
+                // The continuation and legacy token rows are seeded with raw SQL: the migration
+                // version under test predates the #443 count column and the family columns a
+                // current-EF-model INSERT would name.
+                await BrowserSmsStorageTestSupport.InsertLegacyAuthorizationRequestAsync(
+                    context, Guid.NewGuid(), LoginHandleDigest.Compute(handle), appId, createdAt,
+                    state: "session-upgrade-state", nonce: "session-upgrade-nonce");
                 await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenPostgreSqlAsync(
                     context, tokenId, accountId, tokenDigest, createdAt, expiresAt,
                     "session-upgrade-app");
@@ -486,7 +483,7 @@ public sealed class ServerDatabaseContractTests
                 await migrator.MigrateAsync(sessionMigration, cancellationToken);
 
                 Assert.True(await PostgreSqlTableExistsAsync(context, "identity_sessions"));
-                Assert.Empty(await context.IdentitySessions.AsNoTracking().ToListAsync(cancellationToken));
+                Assert.Equal(0, await BrowserSmsStorageTestSupport.CountAsync(context, "identity_sessions"));
                 Assert.True(accountsBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "accounts")));
                 Assert.True(credentialsBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "password_credentials")));
                 Assert.True(appsBefore.SetEquals(await GetPostgreSqlColumnsAsync(context, "app_registrations")));
@@ -506,6 +503,10 @@ public sealed class ServerDatabaseContractTests
 
                 await migrator.MigrateAsync(sessionMigration, cancellationToken);
                 Assert.True(await PostgreSqlTableExistsAsync(context, "identity_sessions"));
+
+                // The remaining sections exercise the current PS-04 shape, which the current EF
+                // model writes and reads, so the schema moves on to the latest migration.
+                await migrator.MigrateAsync(cancellationToken: cancellationToken);
 
                 async Task AssertSeedUnchangedAsync(IdentityDbContext assertionContext)
                 {
@@ -536,17 +537,19 @@ public sealed class ServerDatabaseContractTests
                     Assert.Equal(createdAt.UtcTicks / 10, token.CreatedAt.UtcTicks / 10);
                     Assert.Equal(expiresAt.UtcTicks / 10, token.ExpiresAt.UtcTicks / 10);
 
-                    var continuation = await assertionContext.AuthorizationRequests.AsNoTracking()
-                        .SingleAsync(
-                            row => row.HandleDigest == LoginHandleDigest.Compute(handle),
-                            cancellationToken);
+                    // Read with raw SQL as well: these history versions predate the #443
+                    // count column.
+                    var continuation = await BrowserSmsStorageTestSupport
+                        .ReadLegacyAuthorizationRequestAsync(
+                            assertionContext, LoginHandleDigest.Compute(handle));
+                    Assert.NotNull(continuation);
                     Assert.Equal(appId, continuation.AppRegistrationId);
                     Assert.Null(continuation.ConsumedAt);
                     Assert.Equal(createdAt.UtcTicks / 10, continuation.CreatedAt.UtcTicks / 10);
                 }
             }
 
-            // ---- Exact fresh schema shape ----
+            // ---- Exact current schema shape ----
             await using (var context = new IdentityDbContext(options))
             {
                 var columnDetails = await GetPostgreSqlColumnDetailsAsync(context, "identity_sessions");
@@ -555,7 +558,8 @@ public sealed class ServerDatabaseContractTests
                     {
                         ["id"] = ("NO", null),
                         ["account_id"] = ("NO", null),
-                        ["password_credential_id"] = ("NO", null),
+                        ["password_credential_id"] = ("YES", null),
+                        ["sms_user_login_id"] = ("YES", null),
                         ["auth_method"] = ("NO", 50),
                         ["auth_time"] = ("NO", null),
                         ["last_seen_at"] = ("NO", null),
@@ -572,17 +576,21 @@ public sealed class ServerDatabaseContractTests
                     definition.Contains("account_id", StringComparison.Ordinal));
                 Assert.Contains(indexDefinitions, definition =>
                     definition.Contains("password_credential_id", StringComparison.Ordinal));
+                Assert.Contains(indexDefinitions, definition =>
+                    definition.Contains("sms_user_login_id", StringComparison.Ordinal));
 
                 var foreignKeys = await GetPostgreSqlForeignKeysAsync(context, "identity_sessions");
-                Assert.Equal(2, foreignKeys.Count);
+                Assert.Equal(3, foreignKeys.Count);
                 Assert.Contains(foreignKeys, key =>
                     key.ReferencedTable == "accounts" && key.DeleteAction == 'r');
                 Assert.Contains(foreignKeys, key =>
                     key.ReferencedTable == "password_credentials" && key.DeleteAction == 'r');
+                Assert.Contains(foreignKeys, key =>
+                    key.ReferencedTable == "user_logins" && key.DeleteAction == 'r');
 
-                Assert.Contains(
-                    "CK_identity_sessions_revocation_pair",
-                    await GetPostgreSqlCheckConstraintsAsync(context, "identity_sessions"));
+                var checks = await GetPostgreSqlCheckConstraintsAsync(context, "identity_sessions");
+                Assert.Contains("CK_identity_sessions_revocation_pair", checks);
+                Assert.Contains("CK_identity_sessions_auth_method_reference", checks);
             }
 
             // ---- The references and the revocation pairing are enforced by the database ----
@@ -956,34 +964,19 @@ public sealed class ServerDatabaseContractTests
                     Id = appId, AppId = "code-contract-app", AppSecretHash = "hash",
                     AppName = "Code Contract", IsActive = true, CreatedAt = createdAt
                 });
-                context.AuthorizationRequests.Add(new AuthorizationRequestEntity
-                {
-                    Id = Guid.NewGuid(),
-                    HandleDigest = LoginHandleDigest.Compute(handle),
-                    AppRegistrationId = appId,
-                    RedirectUri = "https://client.example.com/callback",
-                    Scope = "openid",
-                    State = "server-contract-state-value",
-                    Nonce = "server-contract-nonce-value",
-                    CodeChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-                    CreatedAt = createdAt,
-                    ExpiresAt = createdAt.AddMinutes(IdentityConstants.LoginHandleLifetimeMinutes)
-                });
-                context.IdentitySessions.Add(new IdentitySessionEntity
-                {
-                    Id = sessionId,
-                    AccountId = accountId,
-                    PasswordCredentialId = credentialId,
-                    AuthMethod = IdentityConstants.AuthMethodPassword,
-                    AuthTime = createdAt,
-                    LastSeenAt = createdAt,
-                    IdleExpiresAt = createdAt.AddMinutes(30),
-                    AbsoluteExpiresAt = createdAt.AddHours(12)
-                });
                 await context.SaveChangesAsync(cancellationToken);
 
-                // The legacy token row is seeded with raw SQL: the migration version under test
-                // predates the family columns a current-EF-model INSERT would name.
+                // The continuation, session, and legacy token rows are seeded with raw SQL: the
+                // migration version under test predates the #443 columns and the family columns a
+                // current-EF-model INSERT would name.
+                await BrowserSmsStorageTestSupport.InsertLegacyAuthorizationRequestAsync(
+                    context, Guid.NewGuid(), LoginHandleDigest.Compute(handle), appId, createdAt,
+                    redirectUri: "https://client.example.com/callback",
+                    state: "server-contract-state-value",
+                    nonce: "server-contract-nonce-value",
+                    codeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+                await BrowserSmsStorageTestSupport.InsertLegacySessionAsync(
+                    context, sessionId, accountId, credentialId, createdAt);
                 await RefreshTokenFamilyTestSupport.InsertLegacyRefreshTokenPostgreSqlAsync(
                     context, tokenId, accountId, tokenDigest, createdAt, expiresAt,
                     "code-contract-app");
@@ -1134,12 +1127,12 @@ public sealed class ServerDatabaseContractTests
                 await context.SaveChangesAsync(cancellationToken);
                 context.ChangeTracker.Clear();
 
-                // Deleting the referenced session fails; no cascade.
-                var session = await context.IdentitySessions
-                    .SingleAsync(row => row.Id == sessionId, cancellationToken);
-                context.IdentitySessions.Remove(session);
-                await Assert.ThrowsAsync<DbUpdateException>(() =>
-                    context.SaveChangesAsync(cancellationToken));
+                // Deleting the referenced session fails; no cascade. The session is deleted with
+                // raw SQL: this history version predates the #443 session column the current EF
+                // model would select.
+                await Assert.ThrowsAsync<Npgsql.PostgresException>(() =>
+                    context.Database.ExecuteSqlInterpolatedAsync(
+                        $"DELETE FROM identity_sessions WHERE id = {sessionId}", cancellationToken));
                 context.ChangeTracker.Clear();
 
                 var store = new AuthorizationCodeStore(
@@ -1152,9 +1145,8 @@ public sealed class ServerDatabaseContractTests
                         cancellationToken));
 
                 // With the code gone the session deletion succeeds.
-                context.IdentitySessions.Remove(
-                    await context.IdentitySessions.SingleAsync(row => row.Id == sessionId, cancellationToken));
-                await context.SaveChangesAsync(cancellationToken);
+                Assert.Equal(1, await context.Database.ExecuteSqlInterpolatedAsync(
+                    $"DELETE FROM identity_sessions WHERE id = {sessionId}", cancellationToken));
             }
         }
     }
@@ -2036,10 +2028,12 @@ public sealed class ServerDatabaseContractTests
                     Id = appRegistrationId, AppId = appId, AppSecretHash = "hash",
                     AppName = "Family Contract", IsActive = true, CreatedAt = createdAt
                 });
-                var session = CreateIdentitySession(accountId, credentialId);
-                context.IdentitySessions.Add(session);
                 await context.SaveChangesAsync(cancellationToken);
-                sessionId = session.Id;
+                // The session is seeded with raw SQL: the pre-family history version predates the
+                // #443 session column a current-EF-model INSERT would name.
+                sessionId = Guid.NewGuid();
+                await BrowserSmsStorageTestSupport.InsertLegacySessionAsync(
+                    context, sessionId, accountId, credentialId, DateTimeOffset.UtcNow);
 
                 // Five legacy shapes on the pre-family schema, seeded with raw SQL: live,
                 // expired, revoked, plaintext (never rewritten; the startup conversion was
@@ -2421,8 +2415,12 @@ public sealed class ServerDatabaseContractTests
                         CreatedAt = gateCreatedAt
                     });
                     var gateSession = CreateIdentitySession(gateAccountId, gateCredentialId);
-                    gateContext.IdentitySessions.Add(gateSession);
                     await gateContext.SaveChangesAsync(cancellationToken);
+                    // The session is seeded with raw SQL: the staged history version predates
+                    // the #443 session column a current-EF-model INSERT would name.
+                    await BrowserSmsStorageTestSupport.InsertLegacySessionAsync(
+                        gateContext, gateSession.Id, gateAccountId, gateCredentialId,
+                        gateSession.AuthTime);
 
                     var gateRootId = Guid.NewGuid();
                     var gateNow = DateTimeOffset.UtcNow;

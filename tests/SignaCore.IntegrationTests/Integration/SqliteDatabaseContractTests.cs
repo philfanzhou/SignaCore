@@ -202,24 +202,31 @@ public sealed class SqliteDatabaseContractTests
             await using var context = new IdentityDbContext(options);
             await context.Database.MigrateAsync(TestContext.Current.CancellationToken);
 
-            // PS-03 column set and nullability, exactly.
+            // PS-03 column set and nullability, exactly, asserted by column name: the #443 SQLite
+            // rebuild reorders the physical columns, and no code depends on that order.
             var columns = await ReadPragmaAsync(context, "PRAGMA table_info(authorization_requests)");
             Assert.Equal(
                 new[]
                 {
-                    ("id", true),
-                    ("handle_digest", true),
                     ("app_registration_id", true),
-                    ("redirect_uri", true),
-                    ("scope", true),
-                    ("state", true),
-                    ("nonce", true),
                     ("code_challenge", true),
+                    ("consumed_at", false),
                     ("created_at", true),
                     ("expires_at", true),
-                    ("consumed_at", false)
+                    ("handle_digest", true),
+                    ("id", true),
+                    ("nonce", true),
+                    ("redirect_uri", true),
+                    ("scope", true),
+                    ("sms_code_send_count", true),
+                    ("state", true)
                 },
-                columns.Select(row => (row[1], row[3] == "1")).ToArray());
+                columns
+                    .Select(row => (row[1], row[3] == "1"))
+                    .OrderBy(column => column.Item1, StringComparer.Ordinal)
+                    .ToArray());
+            // The #443 count column defaults to 0 in the schema itself.
+            Assert.Equal("0", columns.Single(row => row[1] == "sms_code_send_count")[4]);
 
             // The digest carries a single-column unique index.
             var indexNames = await ReadPragmaAsync(context, "PRAGMA index_list(authorization_requests)");
@@ -343,10 +350,10 @@ public sealed class SqliteDatabaseContractTests
                 continuationMigration, TestContext.Current.CancellationToken);
 
             // Purely additive: the new table exists and is empty, existing tables keep their shape.
+            // The count is read with raw SQL: this history version predates the #443 count column
+            // the current EF model would select.
             Assert.True(await SqliteTableExistsAsync(context, "authorization_requests"));
-            Assert.Empty(await context.AuthorizationRequests
-                .AsNoTracking()
-                .ToListAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(0, await BrowserSmsStorageTestSupport.CountAsync(context, "authorization_requests"));
             Assert.True(refreshColumnsBefore.SetEquals(await GetSqliteColumnsAsync(context, "refresh_tokens")));
             Assert.True(appColumnsBefore.SetEquals(await GetSqliteColumnsAsync(context, "app_registrations")));
 

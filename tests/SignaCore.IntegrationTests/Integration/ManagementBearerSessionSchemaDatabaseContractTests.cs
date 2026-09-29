@@ -13,6 +13,7 @@ using ServiceMantle.Installation;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.IntegrationTests.Integration;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -354,11 +355,13 @@ public sealed class ManagementBearerSessionSchemaDatabaseContractTests
             db.Accounts.Add(new AccountEntity { Id = account, IsActive = true, CreatedAt = Instant, Nickname = "Schema account" });
             db.PasswordCredentials.Add(new PasswordCredentialEntity { Id = password, AccountId = account, Username = "schema_account", PasswordHash = "synthetic-hash", CreatedAt = Instant });
             db.AppRegistrations.Add(new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "schema-client", AppName = "Schema client", AppSecretHash = "synthetic-hash", CreatedAt = Instant });
-            db.IdentitySessions.Add(new IdentitySessionEntity { Id = Guid.NewGuid(), AccountId = account, PasswordCredentialId = password, AuthMethod = "pwd", AuthTime = Instant, LastSeenAt = Instant, IdleExpiresAt = Instant.AddMinutes(30), AbsoluteExpiresAt = Instant.AddHours(12) });
             db.RefreshTokens.Add(new RefreshTokenEntity { Id = token, FamilyId = token, AccountId = account, AppId = "schema-client", TokenValue = "sha256:" + new string('a', 64), CreatedAt = Instant, ExpiresAt = Instant.AddDays(1) });
             db.SecurityKeys.Add(new SecurityKeyEntity { Id = Guid.NewGuid(), KeyId = "schema-key", PublicKeyExponent = "synthetic-public", PublicKeyModulus = "synthetic-public", EncryptedPrivateKeyParams = "synthetic-envelope", EncryptionSalt = "synthetic-salt", CreatedAt = Instant, ExpiresAt = Instant.AddDays(1) });
             db.ServiceInstallations.Add(new ServiceInstallationEntity { ServiceId = "signacore", Status = InstallationStatus.Completed, CreatedAtUtc = Instant.UtcDateTime, CompletedAtUtc = Instant.UtcDateTime, Version = 1 });
             await db.SaveChangesAsync(Ct);
+            // The session row is seeded with raw SQL: the history version under test predates the
+            // #443 identity_sessions columns a current-EF-model INSERT would name.
+            await BrowserSmsStorageTestSupport.InsertLegacySessionAsync(db, Guid.NewGuid(), account, password, Instant, authMethod: "Password");
             await db.Database.ExecuteSqlAsync($"INSERT INTO service_settings (service_id, version, values_json, updated_at_utc, updated_by, restart_required) VALUES ({"signacore"}, {1L}, {"{}"}, {Instant.UtcDateTime}, {"schema-test"}, {false})", Ct);
             await db.Database.ExecuteSqlAsync($"INSERT INTO service_data_protection_keys (service_id, key_id, encrypted_xml) VALUES ({"signacore"}, {"schema-key"}, {"synthetic-envelope"})", Ct);
             await db.Database.ExecuteSqlAsync($"INSERT INTO service_audit_logs (id, action, occurred_at_utc, operator_source, outcome, target_id, target_type) VALUES ({Guid.NewGuid().ToString()}, {"schema.seed"}, {Instant.UtcDateTime}, {"system"}, {0}, {"schema-test"}, {"test"})", Ct);

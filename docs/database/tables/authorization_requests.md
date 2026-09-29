@@ -15,6 +15,10 @@ through its digest, on any instance, using only the shared database.
 - state / nonce (byte-for-byte snapshots)
 - code_challenge (S256 challenge snapshot; the PKCE verifier is never stored)
 - created_at / expires_at / consumed_at (nullable)
+- sms_code_send_count (non-null integer, database default 0, check constraint `>= 0`; the browser
+  SMS send requests counted against this continuation. The per-continuation maximum lives in the
+  single conditional send-budget update, not in the schema. Rows inserted without the column, such
+  as by an older binary during a rolling upgrade, get 0)
 
 ## Relationships and invariants
 
@@ -34,6 +38,11 @@ through its digest, on any instance, using only the shared database.
 - Cleanup deletes rows only after they are expired and beyond the 24-hour retention window, as one
   transactional unit; no reference is ever nulled to enable a delete, and no table references this
   one.
+
+- The send count is never reset, decremented, refunded, or copied elsewhere, and it disappears
+  with the row. No route writes it yet; the SMS code send route that does is delivered
+  separately. Rolling back the `AddBrowserSmsLoginStorage` migration drops the column at any time,
+  because no other artifact reads it.
 
 The authoritative semantics are `PS-03` and its related invariants in
 [CanonicalSemanticModel.md](../../oidc/CanonicalSemanticModel.md); this page is a projection, not a
