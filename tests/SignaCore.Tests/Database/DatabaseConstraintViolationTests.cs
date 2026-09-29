@@ -12,7 +12,8 @@ namespace SignaCore.Tests.Database;
 /// shapes (19 with extended code 787, or 1811 for the immediately executed ON DELETE RESTRICT)
 /// answer true; every other <see cref="DbUpdateException"/> — unique violations, connection
 /// failures, missing inner exceptions, unrelated inner types — stays false so the generic handler
-/// keeps owning it.
+/// keeps owning it. <see cref="DatabaseConstraintViolation.IsUniqueViolation"/> is the mirror image:
+/// only SQLSTATE 23505 and SQLite's unique (2067) or primary-key (1555) shapes answer true.
 /// </summary>
 public sealed class DatabaseConstraintViolationTests
 {
@@ -77,6 +78,61 @@ public sealed class DatabaseConstraintViolationTests
         var exception = Wrap(new IOException("The connection was lost."));
 
         Assert.False(DatabaseConstraintViolation.IsForeignKeyViolation(exception));
+    }
+
+    // ---- IsUniqueViolation ----
+
+    [Fact]
+    public void PostgreSqlUniqueViolation_IsRecognized()
+    {
+        var exception = Wrap(new Npgsql.PostgresException(
+            "duplicate key value violates unique constraint",
+            "ERROR",
+            "ERROR",
+            Npgsql.PostgresErrorCodes.UniqueViolation));
+
+        Assert.True(DatabaseConstraintViolation.IsUniqueViolation(exception));
+    }
+
+    [Fact]
+    public void PostgreSqlForeignKeyViolation_IsNotAUniqueViolation()
+    {
+        var exception = Wrap(new Npgsql.PostgresException(
+            "insert or update on table violates foreign key constraint",
+            "ERROR",
+            "ERROR",
+            Npgsql.PostgresErrorCodes.ForeignKeyViolation));
+
+        Assert.False(DatabaseConstraintViolation.IsUniqueViolation(exception));
+    }
+
+    [Theory]
+    [InlineData(2067)]
+    [InlineData(1555)]
+    public void SqliteUniqueAndPrimaryKeyShapes_AreUniqueViolations(int extendedErrorCode)
+    {
+        var exception = Wrap(new SqliteException("UNIQUE constraint failed", 19, extendedErrorCode));
+
+        Assert.True(DatabaseConstraintViolation.IsUniqueViolation(exception));
+    }
+
+    [Theory]
+    [InlineData(19, 787)]
+    [InlineData(19, 275)]
+    [InlineData(5, 5)]
+    public void OtherSqliteShapes_AreNotUniqueViolations(int errorCode, int extendedErrorCode)
+    {
+        var exception = Wrap(new SqliteException("constraint or busy failure", errorCode, extendedErrorCode));
+
+        Assert.False(DatabaseConstraintViolation.IsUniqueViolation(exception));
+    }
+
+    [Fact]
+    public void WithoutAnInnerException_IsNotAUniqueViolation()
+    {
+        Assert.False(DatabaseConstraintViolation.IsUniqueViolation(
+            new DbUpdateException("An error occurred while saving the entity changes.")));
+        Assert.False(DatabaseConstraintViolation.IsUniqueViolation(Wrap(new IOException("The connection was lost."))));
     }
 
     private static DbUpdateException Wrap(Exception innerException) =>

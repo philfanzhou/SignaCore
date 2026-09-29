@@ -232,6 +232,10 @@ public static class ServiceCollectionExtensions
 
         // ---- Browser SMS send route unit (canonical EV-35) ----
         services.AddScoped<OidcSmsCodeSendService>();
+
+        // ---- Browser SMS login success and failure commit paths (canonical EV-36/EV-37) ----
+        services.AddScoped<OidcSmsLoginCompletionService>();
+        services.AddScoped<OidcSmsLoginFailureRecorder>();
         services.AddScoped<OidcAuthorizationSessionReuseService>();
         services.AddScoped<LogoutPreparationScope>();
         services.AddScoped<IdentityDbContext>(provider =>

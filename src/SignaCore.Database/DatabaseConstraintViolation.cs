@@ -3,11 +3,12 @@ using Microsoft.EntityFrameworkCore;
 namespace SignaCore.Database;
 
 /// <summary>
-/// The single classifier of database foreign-key violations across the two supported providers.
-/// The database's restrictive reference is the only authority for "still referenced" decisions
-/// (<c>PS-23</c>): no pre-check, no per-table enumeration, no race window. Any other
-/// <see cref="DbUpdateException"/> stays what it was — an unexpected failure for the generic
-/// handler.
+/// The single classifier of database foreign-key and unique-key violations across the two
+/// supported providers. The database's restrictive reference is the only authority for "still
+/// referenced" decisions (<c>PS-23</c>), and its unique indexes are the only arbiter of a
+/// concurrent insert of the same natural key: no pre-check, no per-table enumeration, no race
+/// window. Any other <see cref="DbUpdateException"/> stays what it was — an unexpected failure
+/// for the generic handler.
 /// </summary>
 public static class DatabaseConstraintViolation
 {
@@ -29,6 +30,26 @@ public static class DatabaseConstraintViolation
             Microsoft.Data.Sqlite.SqliteException sqlite =>
                 sqlite.SqliteErrorCode == 19
                 && sqlite.SqliteExtendedErrorCode is 787 or 1811,
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// PostgreSQL reports SQLSTATE <c>23505</c>; SQLite reports <c>SQLITE_CONSTRAINT</c> (19) with
+    /// the unique extended code (<c>2067</c>) or, for a primary key, <c>1555</c>. Callers decide
+    /// which insert they attribute the violation to; this classifier names no table or index.
+    /// </summary>
+    public static bool IsUniqueViolation(DbUpdateException exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        return exception.InnerException switch
+        {
+            Npgsql.PostgresException postgres =>
+                postgres.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation,
+            Microsoft.Data.Sqlite.SqliteException sqlite =>
+                sqlite.SqliteErrorCode == 19
+                && sqlite.SqliteExtendedErrorCode is 2067 or 1555,
             _ => false
         };
     }

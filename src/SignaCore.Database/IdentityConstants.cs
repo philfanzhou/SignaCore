@@ -87,6 +87,9 @@ public static class IdentityConstants
 
     /// <summary>The <c>IN-17</c> bound of a submitted phone in UTF-16 code units, before normalization.</summary>
     public const int MaxSubmittedPhoneLength = 32;
+
+    /// <summary>The <c>IN-18</c> bound of a submitted browser SMS one-time code in UTF-16 code units.</summary>
+    public const int MaxSubmittedOtpLength = 16;
     public const int AuthorizationCodeLength = 43;
     public const int AuthorizationCodeLifetimeSeconds = 60;
     public const int AuthorizationCodeRetentionHours = 24;

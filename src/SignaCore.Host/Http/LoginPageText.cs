@@ -18,6 +18,12 @@ internal sealed record LoginPageText(
     string CredentialFailureNotice,
     string SmsCodeSentNotice,
     string InvalidPhoneNotice,
+    string SmsFailureNotice,
+    string SmsHeading,
+    string PhoneLabel,
+    string OtpLabel,
+    string SendCodeButton,
+    string SmsSignInButton,
     string ErrorTitle,
     string ErrorHeading,
     string ErrorMessage)
@@ -34,6 +40,13 @@ internal sealed record LoginPageText(
         SmsCodeSentNotice: "If this phone number can sign in to this application, a verification "
             + "code has been sent.",
         InvalidPhoneNotice: "Enter a valid mainland China mobile number.",
+        SmsFailureNotice: "Sign-in failed. Check your mobile number and verification code and try "
+            + "again, or request a new code.",
+        SmsHeading: "Sign in with a verification code",
+        PhoneLabel: "Mobile number",
+        OtpLabel: "Verification code",
+        SendCodeButton: "Send code",
+        SmsSignInButton: "Sign in with code",
         ErrorTitle: "Invalid login request",
         ErrorHeading: "Invalid login request",
         ErrorMessage: "The login request could not be processed. Return to the application that "
@@ -50,6 +63,12 @@ internal sealed record LoginPageText(
         CredentialFailureNotice: "登录失败。请检查用户名和密码后重试。",
         SmsCodeSentNotice: "如果此手机号可以登录该应用，验证码已发送。",
         InvalidPhoneNotice: "请输入有效的中国大陆手机号码。",
+        SmsFailureNotice: "登录失败。请检查手机号和验证码后重试，或重新获取验证码。",
+        SmsHeading: "使用短信验证码登录",
+        PhoneLabel: "手机号",
+        OtpLabel: "验证码",
+        SendCodeButton: "发送验证码",
+        SmsSignInButton: "验证码登录",
         ErrorTitle: "登录请求无效",
         ErrorHeading: "登录请求无效",
         ErrorMessage: "无法处理此登录请求。请返回将您引导至此处的应用，然后重新开始。");
