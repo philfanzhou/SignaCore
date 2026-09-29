@@ -37,12 +37,34 @@ internal static partial class OAuthLoginSmsCodeTestSupport
 
     public const string EnglishInvalidPhoneNotice = "<p role=\"alert\">Enter a valid mainland China mobile number.</p>";
 
+    public const string EnglishSmsFailureNotice =
+        "<p role=\"alert\">Sign-in failed. Check your mobile number and verification code and try again, or request a new code.</p>";
+
+    public const string ChineseSmsFailureNotice = "<p role=\"alert\">登录失败。请检查手机号和验证码后重试，或重新获取验证码。</p>";
+
+    /// <summary>The always empty one-time-code input of the SMS region (<c>DF-17</c>).</summary>
+    public const string OtpInput =
+        "<input type=\"text\" id=\"otp\" name=\"otp\" inputmode=\"numeric\" autocomplete=\"one-time-code\" maxlength=\"16\" required>";
+
+    /// <summary>The unnamed send button: it posts the SMS form to the send route without validation.</summary>
+    public const string SendButton = "<button type=\"submit\" formaction=\"/oauth2/login/sms-code\" formnovalidate>";
+
+    public const string SmsSubmitButton = "<button type=\"submit\" name=\"action\" value=\"sms_login\">";
+
+    /// <summary>The phone input of the SMS region re-rendered with <paramref name="value"/>.</summary>
+    public static string PhoneInput(string value) =>
+        "<input type=\"tel\" id=\"phone\" name=\"phone\" autocomplete=\"tel\" maxlength=\"32\" value=\"" + value + "\" required>";
+
     public sealed record SmsApp(Guid Id, string AppId);
 
     public sealed record SmsSession(string Handle, string CookieValue, string Token, Guid ContinuationId);
 
     [GeneratedRegex("name=\"__RequestVerificationToken\" value=\"([^\"]*)\"")]
     private static partial Regex TokenPattern();
+
+    /// <summary>Replaces every rendered request token of <paramref name="body"/> with <paramref name="token"/>.</summary>
+    public static string WithRequestToken(string body, string token) =>
+        TokenPattern().Replace(body, "name=\"__RequestVerificationToken\" value=\"" + token + "\"");
 
     /// <summary>A fresh mainland mobile number, unique per call, in its bare 11-digit form.</summary>
     public static string NewPhone() =>
