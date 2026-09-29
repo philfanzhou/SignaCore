@@ -7,3 +7,4 @@
 | [0003](./0003-cross-application-refresh-grant.md) | Accepted | Allow a refresh token to be exchanged across applications over an administered directed trust edge, minting single-hop |
 | [0004](./0004-drop-mysql-support.md) | Accepted | Withdraw MySQL/MariaDB support and move the stack to EF Core 10 |
 | [0005](./0005-interactive-oidc-confidential-bff.md) | Accepted | Add interactive OIDC in staged slices for pre-registered confidential BFF clients |
+| [0006](./0006-hosted-login-localization-and-browser-sms.md) | Accepted | Localize the hosted login page and add browser SMS login with rate limits, auth-method-aware sessions, and per-application reuse checks |

@@ -50,3 +50,10 @@ confidential BFF remains the preferred client for high-privilege applications. T
 consent screen, dynamic registration, MFA, browser SMS/LDAP/WeChat login, or new behavior to
 existing grants. A claims callback remains a server-to-server claims
 source; it is never a browser redirect registration.
+
+## Accepted extension
+
+[ADR 0006](../adr/0006-hosted-login-localization-and-browser-sms.md) accepts browser SMS login and
+a `zh-CN`/`en` localized login page as the next extension of this boundary. It changes no runtime
+behavior by itself: the statements above and the canonical model describe current behavior until
+the follow-up design task adds the corresponding canonical rows.

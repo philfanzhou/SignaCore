@@ -14,6 +14,7 @@ SignaCore 是 .NET 10 身份与认证服务，包含 Vue 3 管理控制台。它
 - 流程与约束文档、GitHub issue/PR 正文和 review 全程使用中文；Issue 标题使用中文。
 - PR 标题使用英文 conventional commit 格式（`feat:` / `fix:` / `docs:` / `test:` / `refactor:` / `chore:` 等）。
 - `README.md`、`docs/`、代码注释、自动化注释、API/异常消息和面向使用者的文字保持英文，这是本仓库既有公开契约。
+- 唯一例外：托管登录页（`/oauth2/login`）渲染的界面文字按 `Accept-Language` 提供 `zh-CN` 与 `en`，默认 `en`，见 ADR 0006；其 API、日志、审计与异常文字仍为英文。
 - 代码标识符、配置键、JWT claim、HTTP 路由、命令和 commit message 保持原样/英文。
 
 ## 项目边界与架构
