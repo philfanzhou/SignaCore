@@ -15,6 +15,11 @@ from discovery is what survives a future route change.
 
 No SignaCore assembly or private client SDK is required. The former client SDK is not maintained.
 
+A service that signs users in should redirect them to SignaCore's hosted login page instead of
+collecting credentials itself; the [Hosted Login guide](../integrations/HostedLogin.md) covers
+registration, the Authorization Code flow, sign-out, session lifetime, mobile applications, and
+migration from the Password and SMS grants.
+
 ## External providers
 
 | Integration | Purpose |
