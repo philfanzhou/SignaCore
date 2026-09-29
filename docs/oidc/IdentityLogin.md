@@ -42,7 +42,7 @@ query/form field:
 | --- | --- | --- |
 | `GET /oauth2/login` | `login_handle` only | `IN-10` |
 | `POST /oauth2/login` | `login_handle`, `username`, `password`, `__RequestVerificationToken`, `action`; from `AC-17` also `phone` and `otp` for `action=sms_login` | `IN-11`–`IN-15`, `IN-17`–`IN-19` |
-| `POST /oauth2/login/sms-code` (target, from `AC-16`) | `login_handle`, `__RequestVerificationToken`, `phone`, `otp` (ignored) | `IN-16`, `IN-17`, `IN-19` |
+| `POST /oauth2/login/sms-code` (active since `AC-16`) | `login_handle`, `__RequestVerificationToken`, `phone`, `otp` (ignored) | `IN-16`, `IN-17`, `IN-19` |
 
 The POST is a bounded UTF-8 form. Handle/action/antiforgery validation precedes conditional
 credential fields, so malformed structure and CSRF never invoke the Password validator or increment
@@ -58,8 +58,8 @@ new public login form into an account oracle.
 
 ## SMS one-time-code login
 
-**Status: target design; not active until `AC-16` (send route) and `AC-17` (SMS login and page
-region).** This section explains the canonical rows and does not restate them.
+**Status: the send route is active since `AC-16` (#444); SMS login and the page region remain target
+design until `AC-17` (#445).** This section explains the canonical rows and does not restate them.
 
 The application comes only from the stored continuation, and its current SMS policy decides every
 result exactly as the SMS grant does: the `IN-19` gate (`SmsLoginMode` not `Disabled` and an SMS
@@ -77,6 +77,13 @@ that passes the request-shape checks returns the uniform result listed under
 an invalid phone format is the only other 200 answer and depends only on the typed value. Every SMS
 login failure returns the generic SMS failure of `EV-37`, and the Password failed-attempt counter
 is never touched by the SMS path.
+
+Until `AC-17` the login page renders no SMS region, so no rendered page offers a send yet and the
+route is reached only by a direct form post. Its uniform result is the Password login page, re-rendered
+for the submitted handle and request token with the fixed send notice; the invalid-phone answer is the
+same page with the fixed invalid-phone notice. Neither page has a phone input or carries the submitted
+phone in any form; the filled phone input arrives with the SMS region in `AC-17`. Neither page writes
+a cookie: the browser keeps its existing antiforgery pair.
 
 The uniform result has a user-experience cost that integrators should explain to their users: a
 phone that cannot sign in to the application still sees a notice that a code may have been sent.
@@ -178,7 +185,7 @@ state into this document:
 | Invalid CSRF versus valid but wrong credentials | `SC-19` |
 | Cancellation before and after commit | `SC-20` |
 | Independent concurrent authorization requests | `SC-07` |
-| SMS login, admission, provisioning, reuse, abuse, and races (target) | `SC-21`–`SC-26` |
+| SMS send abuse and send races (active since `AC-16`); SMS login, admission, provisioning, and reuse (target) | `SC-21`–`SC-26` |
 
 Tests additionally assert the `PS-18`/`PS-19` cookie attributes and cross-scheme rejection, the
 `IN-10`–`IN-15` field/error contract, no external redirect from an invalid handle, and the sensitive
@@ -190,6 +197,7 @@ This target document changes no current cookie, principal, Password grant, locko
 management session or management API (`PS-18`), or Data Protection key material. The only browser
 asset is the login stylesheet described above.
 LDAP and WeChat remain token-endpoint grants with no identity-login UI. The SMS token grants and
-`POST /api/auth/sms-code` keep their current behavior; browser SMS login activates only through
-#443–#445 (`AC-15`–`AC-17`). Runtime work for the Password login is divided among #64–#66 and #94;
+`POST /api/auth/sms-code` keep their current behavior. Browser SMS activates through #443–#445
+(`AC-15`–`AC-17`): the storage (#443) and the send route (#444) are active, and SMS login activates
+only with #445. Runtime work for the Password login is divided among #64–#66 and #94;
 documentation completion activates no route or Discovery metadata (`AC-02`, `AC-05`, `AC-14`).

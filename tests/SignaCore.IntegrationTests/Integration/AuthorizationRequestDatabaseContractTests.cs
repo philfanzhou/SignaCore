@@ -299,6 +299,90 @@ public sealed class AuthorizationRequestDatabaseContractTests
     }
 
     /// <summary>
+    /// <c>PS-03</c> browser SMS send budget (#444): exactly five slots per continuation, each one
+    /// auto-committed conditional update of <c>sms_code_send_count</c> that changes nothing else;
+    /// a consumed, expired, malformed, or unknown handle takes no slot; the update refuses to join
+    /// a caller transaction; and a cancelled update takes nothing.
+    /// </summary>
+    [Fact]
+    public async Task TakeSmsCodeSendSlot_AdmitsExactlyFive_AndWritesOnlyTheCount()
+    {
+        await using var database = new SqliteFileDatabase();
+        var options = await database.InitializeAsync();
+        var applicationId = await SeedApplicationAsync(options);
+        var createdAt = DateTimeOffset.UtcNow.AddMinutes(-2);
+
+        AuthorizationRequestCreation creation;
+        AuthorizationRequestCreation expired;
+        AuthorizationRequestCreation consumed;
+        await using (var context = new IdentityDbContext(options))
+        {
+            var store = CreateStore(context);
+            creation = await store.CreateAsync(CreateAccepted(applicationId), createdAt, TestContext.Current.CancellationToken);
+            expired = await store.CreateAsync(
+                CreateAccepted(applicationId),
+                DateTimeOffset.UtcNow.AddMinutes(-(IdentityConstants.LoginHandleLifetimeMinutes + 1)),
+                TestContext.Current.CancellationToken);
+            consumed = await store.CreateAsync(CreateAccepted(applicationId), createdAt, TestContext.Current.CancellationToken);
+            Assert.True(await store.TryConsumeAsync(consumed.LoginHandle, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken));
+        }
+
+        AuthorizationRequestEntity before;
+        await using (var context = new IdentityDbContext(options))
+        {
+            before = await context.AuthorizationRequests.AsNoTracking()
+                .SingleAsync(row => row.Id == creation.Id, TestContext.Current.CancellationToken);
+        }
+
+        var results = new List<bool>();
+        for (var attempt = 0; attempt < IdentityConstants.MaxSmsCodeSendsPerContinuation + 2; attempt++)
+        {
+            // A fresh context per request, as each HTTP request has its own scope.
+            await using var context = new IdentityDbContext(options);
+            results.Add(await CreateStore(context).TryTakeSmsCodeSendSlotAsync(
+                creation.LoginHandle, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken));
+        }
+
+        Assert.Equal([true, true, true, true, true, false, false], results);
+        await using (var context = new IdentityDbContext(options))
+        {
+            var store = CreateStore(context);
+            foreach (var unusable in new[] { expired.LoginHandle, consumed.LoginHandle, new string('b', 43), "short" })
+            {
+                Assert.False(await store.TryTakeSmsCodeSendSlotAsync(
+                    unusable, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken));
+            }
+
+            // The update never joins a caller transaction: it must have auto-committed before any
+            // phone-dependent read, so an ambient transaction is refused and takes nothing.
+            await using (var transaction = await context.Database.BeginTransactionAsync(TestContext.Current.CancellationToken))
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(() => store.TryTakeSmsCodeSendSlotAsync(
+                    creation.LoginHandle, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken));
+            }
+
+            using var cancelled = new CancellationTokenSource();
+            await cancelled.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => store.TryTakeSmsCodeSendSlotAsync(
+                expired.LoginHandle, DateTimeOffset.UtcNow, cancelled.Token));
+        }
+
+        await using var verification = new IdentityDbContext(options);
+        var rows = await verification.AuthorizationRequests.AsNoTracking()
+            .ToDictionaryAsync(row => row.Id, TestContext.Current.CancellationToken);
+        var after = rows[creation.Id];
+        Assert.Equal(IdentityConstants.MaxSmsCodeSendsPerContinuation, after.SmsCodeSendCount);
+        // Only the count changed: the continuation is not consumed, extended, or otherwise written.
+        Assert.Null(after.ConsumedAt);
+        Assert.Equal(before.ExpiresAt, after.ExpiresAt);
+        Assert.Equal(before.CreatedAt, after.CreatedAt);
+        Assert.Equal(before.HandleDigest, after.HandleDigest);
+        Assert.Equal(before.State, after.State);
+        Assert.Equal(0, rows[expired.Id].SmsCodeSendCount);
+        Assert.Equal(0, rows[consumed.Id].SmsCodeSendCount);
+    }
+
+    /// <summary>
     /// <c>EV-01</c> composition and <c>EV-18</c> direction one: inside a caller-owned transaction
     /// the consumption joins it — a rollback before commit leaves the row unconsumed and still
     /// consumable, a commit makes the consumption authoritative.

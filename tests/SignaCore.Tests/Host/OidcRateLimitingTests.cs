@@ -205,6 +205,42 @@ public sealed class OidcRateLimitingTests
         Assert.Equal(expected, await OidcRateLimitPolicies.ReadClientIdCandidateAsync(context, TestContext.Current.CancellationToken));
     }
 
+    /// <summary>
+    /// PS-24: the browser SMS send route is partitioned by the source network only. Its resolver
+    /// pass reads no query <c>client_id</c>, Basic header, or body, and never queries the
+    /// registration table, so a registered client id cannot move it into a client partition.
+    /// </summary>
+    [Fact]
+    public async Task TheSmsCodeRoute_IsSourceNetworkOnly_AndTheResolverReadsNoCarrier()
+    {
+        var repository = new Mock<IAppRegistrationRepository>(MockBehavior.Strict);
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = IPAddress.Parse("198.51.100.11");
+        context.Request.Method = "POST";
+        context.Request.Path = OidcRateLimitPolicies.SmsCodePath;
+        context.Request.QueryString = new QueryString("?client_id=known-client");
+        context.Request.Headers.Authorization =
+            $"Basic {Convert.ToBase64String(Encoding.UTF8.GetBytes("known-client:secret"))}";
+        context.Request.ContentType = "application/x-www-form-urlencoded";
+        context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("client_id=known-client&phone=13912345678"));
+
+        await BuildResolver(repository.Object)(context);
+
+        repository.VerifyNoOtherCalls();
+        Assert.False(context.Items.ContainsKey(OidcRateLimitPolicies.RegisteredClientItemKey));
+        Assert.True(OidcRateLimitPolicies.IsInteractiveEndpoint(context.Request.Path));
+        Assert.True(OidcRateLimitPolicies.IsSourceNetworkOnlyEndpoint(context.Request.Path));
+        Assert.Equal("ip:198.51.100.11", OidcRateLimitPolicies.SourceNetworkKey(context));
+        Assert.Equal(0, context.Request.Body.Position);
+
+        // Even a resolved registration staged by anything else never changes this route's key.
+        context.Items[OidcRateLimitPolicies.RegisteredClientItemKey] = "known-client";
+        Assert.Equal("ip:198.51.100.11", OidcRateLimitPolicies.SourceNetworkKey(context));
+        Assert.All(
+            OidcRateLimitPolicies.Endpoints.Where(path => path != OidcRateLimitPolicies.SmsCodePath),
+            path => Assert.False(OidcRateLimitPolicies.IsSourceNetworkOnlyEndpoint(path)));
+    }
+
     private static Func<HttpContext, Task> BuildResolver(IAppRegistrationRepository repository)
     {
         var services = new ServiceCollection();

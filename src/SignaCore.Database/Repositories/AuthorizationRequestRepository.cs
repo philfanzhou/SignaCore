@@ -86,6 +86,35 @@ public class AuthorizationRequestRepository : IAuthorizationRequestRepository
         }, cancellationToken);
     }
 
+    /// <summary>
+    /// One statement, outside any explicit transaction, so it auto-commits on both providers before
+    /// the caller reads anything else (<c>PS-03</c>). Under the PostgreSQL retry strategy a
+    /// connection lost after the commit may replay the statement: the count can then over-count by
+    /// one, which only shrinks the budget and never admits an extra send.
+    /// </summary>
+    public async Task<bool> TryTakeSmsCodeSendSlotAsync(
+        string handleDigest,
+        DateTimeOffset now,
+        int maximum,
+        CancellationToken cancellationToken = default)
+    {
+        if (_dbContext.Database.CurrentTransaction is not null)
+        {
+            throw new InvalidOperationException(
+                "The SMS send budget update must auto-commit outside any caller transaction.");
+        }
+
+        var affectedRows = await _dbContext.AuthorizationRequests
+            .Where(request => request.HandleDigest == handleDigest
+                && request.ConsumedAt == null
+                && request.ExpiresAt > now
+                && request.SmsCodeSendCount < maximum)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(request => request.SmsCodeSendCount, request => request.SmsCodeSendCount + 1),
+                cancellationToken);
+        return affectedRows == 1;
+    }
+
     public async Task<int> RemoveExpiredBeforeAsync(
         DateTimeOffset cutoff,
         CancellationToken cancellationToken = default)

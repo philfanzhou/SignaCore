@@ -646,6 +646,10 @@ public sealed partial class OidcMultiInstanceAcceptanceTests : IAsyncLifetime
             string loginHandle, DateTimeOffset now, CancellationToken cancellationToken = default) =>
             Task.FromResult(false);
 
+        public Task<bool> TryTakeSmsCodeSendSlotAsync(
+            string loginHandle, DateTimeOffset now, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
+
         public Task<int> CleanupExpiredAsync(
             DateTimeOffset now, CancellationToken cancellationToken = default) =>
             Task.FromResult(0);

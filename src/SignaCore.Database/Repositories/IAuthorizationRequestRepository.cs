@@ -42,6 +42,20 @@ public interface IAuthorizationRequestRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Takes one browser SMS send slot (<c>PS-03</c>) with a single auto-committed conditional
+    /// update: <c>sms_code_send_count + 1</c> where the digest matches, the row is unconsumed and
+    /// unexpired at <paramref name="now"/>, and the count is below <paramref name="maximum"/>.
+    /// Returns <c>true</c> exactly when a row changed. The update never joins a caller
+    /// transaction — an ambient transaction is a programming error — and a taken slot is never
+    /// refunded, so a caller that fails or is cancelled afterwards keeps the slot spent.
+    /// </summary>
+    Task<bool> TryTakeSmsCodeSendSlotAsync(
+        string handleDigest,
+        DateTimeOffset now,
+        int maximum,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Deletes rows whose <c>expires_at</c> is at or before <paramref name="cutoff"/> (now minus the
     /// retention window) as one transactional unit: cancellation or failure before the commit rolls
     /// the whole deletion back. No row is ever kept alive by nulling a reference, and nothing

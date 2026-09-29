@@ -229,6 +229,9 @@ public static class ServiceCollectionExtensions
 
         // ---- Browser OIDC login success commit path (canonical EV-01) ----
         services.AddScoped<OidcLoginCompletionService>();
+
+        // ---- Browser SMS send route unit (canonical EV-35) ----
+        services.AddScoped<OidcSmsCodeSendService>();
         services.AddScoped<OidcAuthorizationSessionReuseService>();
         services.AddScoped<LogoutPreparationScope>();
         services.AddScoped<IdentityDbContext>(provider =>
@@ -269,20 +272,22 @@ public static class ServiceCollectionExtensions
         // /health, /metrics and both JWKS routes are exempt (have their own limits or are infra).
         services.AddRateLimiter(options =>
         {
-            // The six interactive OIDC endpoint classes (issue #304): one fixed-window policy
-            // each, budgeted by the IdentityConstants constants, partitioned between resolved
-            // registered clients and the source network. The policies take effect through
-            // [EnableRateLimiting] on the endpoint classes; the partition resolver middleware
-            // stages the registered-client resolution ahead of the limiter. No queue: overload
-            // fails fast with the fixed OIDC rejection shape.
-            foreach (var (policy, budget) in new[]
+            // The interactive OIDC endpoint classes (issue #304): one fixed-window policy each,
+            // budgeted by the IdentityConstants constants. The six classes are partitioned between
+            // resolved registered clients and the source network; the browser SMS send route
+            // (#444) is partitioned by the source network only (PS-24). The policies take effect
+            // through [EnableRateLimiting] on the endpoint classes; the partition resolver
+            // middleware stages the registered-client resolution ahead of the limiter. No queue:
+            // overload fails fast with the fixed OIDC rejection shape.
+            foreach (var (policy, budget, partitionKey) in new (string, int, Func<HttpContext, string>)[]
                      {
-                         (OidcRateLimitPolicies.Authorize, IdentityConstants.OidcAuthorizeRateLimitPerMinute),
-                         (OidcRateLimitPolicies.Login, IdentityConstants.OidcLoginRateLimitPerMinute),
-                         (OidcRateLimitPolicies.Token, IdentityConstants.OidcTokenRateLimitPerMinute),
-                         (OidcRateLimitPolicies.UserInfo, IdentityConstants.OidcUserInfoRateLimitPerMinute),
-                         (OidcRateLimitPolicies.Logout, IdentityConstants.OidcLogoutRateLimitPerMinute),
-                         (OidcRateLimitPolicies.Revoke, IdentityConstants.OidcRevokeRateLimitPerMinute)
+                         (OidcRateLimitPolicies.Authorize, IdentityConstants.OidcAuthorizeRateLimitPerMinute, OidcRateLimitPolicies.PartitionKey),
+                         (OidcRateLimitPolicies.Login, IdentityConstants.OidcLoginRateLimitPerMinute, OidcRateLimitPolicies.PartitionKey),
+                         (OidcRateLimitPolicies.Token, IdentityConstants.OidcTokenRateLimitPerMinute, OidcRateLimitPolicies.PartitionKey),
+                         (OidcRateLimitPolicies.UserInfo, IdentityConstants.OidcUserInfoRateLimitPerMinute, OidcRateLimitPolicies.PartitionKey),
+                         (OidcRateLimitPolicies.Logout, IdentityConstants.OidcLogoutRateLimitPerMinute, OidcRateLimitPolicies.PartitionKey),
+                         (OidcRateLimitPolicies.Revoke, IdentityConstants.OidcRevokeRateLimitPerMinute, OidcRateLimitPolicies.PartitionKey),
+                         (OidcRateLimitPolicies.SmsCode, IdentityConstants.OidcSmsCodeRateLimitPerMinute, OidcRateLimitPolicies.SourceNetworkKey)
                      })
             {
                 if (sharedOidcBudget)
@@ -296,18 +301,18 @@ public static class ServiceCollectionExtensions
                         var store = httpContext.RequestServices.GetRequiredService<IOidcRateLimitStore>();
                         var partitioner = httpContext.RequestServices.GetRequiredService<OidcRateLimitPartitioner>();
                         return System.Threading.RateLimiting.RateLimitPartition.Get(
-                            OidcRateLimitPolicies.PartitionKey(httpContext),
-                            partitionKey => new SharedOidcBudgetRateLimiter(
+                            partitionKey(httpContext),
+                            key => new SharedOidcBudgetRateLimiter(
                                 store,
                                 policy,
-                                partitioner.Digest(partitionKey)));
+                                partitioner.Digest(key)));
                     });
                     continue;
                 }
 
                 options.AddPolicy(policy, httpContext =>
                     System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                        OidcRateLimitPolicies.PartitionKey(httpContext),
+                        partitionKey(httpContext),
                         _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                         {
                             AutoReplenishment = true,
@@ -386,7 +391,18 @@ public static class ServiceCollectionExtensions
                 // The interactive OIDC endpoint classes answer with their own fixed shape: no
                 // redirect, no partition key, no request value (issue #304). Whichever limiter
                 // fired on one of those endpoints, the answer is the same fixed body.
+                var smsCodeEndpoint = OidcRateLimitPolicies.IsSmsCodeEndpoint(context.HttpContext);
+                if (smsCodeEndpoint)
+                {
+                    // Only the browser SMS send route counts its limiter refusals (429 or 503) as
+                    // the closed rate_limited outcome; the other classes keep their metrics as-is.
+                    context.HttpContext.RequestServices.GetRequiredService<AuthMetrics>().RecordOidcEndpointOutcome(
+                        AuthMetrics.OidcMetricEndpoints.LoginSmsCode,
+                        AuthMetrics.RateLimitedOutcome);
+                }
+
                 if (storeUnavailable
+                    || smsCodeEndpoint
                     || OidcRateLimitPolicies.IsInteractiveEndpoint(context.HttpContext.Request.Path))
                 {
                     context.HttpContext.Response.Headers.CacheControl = "no-store";

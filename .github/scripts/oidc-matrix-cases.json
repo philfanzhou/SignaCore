@@ -29,7 +29,10 @@
     "SignaCore.Tests.Integration.OidcAttackRateLimitDatabaseContractTests.DisconnectedProtection_FailsTheSameBudgetAssertion(endpoint: \"token\", partition: \"ip\", variant: \"local\")",
     "SignaCore.Tests.Integration.OidcAttackRateLimitDatabaseContractTests.DisconnectedProtection_FailsTheSameBudgetAssertion(endpoint: \"userinfo\", partition: \"ip\", variant: \"disabled\")",
     "SignaCore.Tests.Integration.OidcAttackRateLimitDatabaseContractTests.DisconnectedProtection_FailsTheSameBudgetAssertion(endpoint: \"userinfo\", partition: \"ip\", variant: \"local\")",
-    "SignaCore.Tests.Integration.OidcAttackRateLimitDatabaseContractTests.LockedBudget_BothHostsTimeOutWithoutCounting_ThenResumeTheOriginalCount"
+    "SignaCore.Tests.Integration.OidcAttackRateLimitDatabaseContractTests.LockedBudget_BothHostsTimeOutWithoutCounting_ThenResumeTheOriginalCount",
+    "SignaCore.Tests.Integration.OidcAttackRateLimitDatabaseContractTests.SmsCodeContinuationBudget_IsSharedAcrossHosts",
+    "SignaCore.Tests.Integration.OidcAttackRateLimitDatabaseContractTests.SmsCodeWindow_IsOneSourceNetworkBudgetAcrossHosts_WhateverClientCarrierItNames",
+    "SignaCore.Tests.Integration.OidcAttackRateLimitDatabaseContractTests.SmsCodeWindow_UndecidedStore_IsTheFixed503_WithNoCountOrSend"
   ],
   "SignaCore.Tests.Integration.OidcSensitiveCanaryMatrixDatabaseContractTests": [
     "SignaCore.Tests.Integration.OidcSensitiveCanaryMatrixDatabaseContractTests.EveryCarrier_DetectsPlantedValuesWithoutPrintingThem(carrier: \"console\")",

@@ -147,14 +147,15 @@ rolls back the unit and never nulls a relationship to force deletion.
 
 #443 added the storage for browser SMS login (`AC-15`) as the `AddBrowserSmsLoginStorage`
 migration, one per provider, with the same shape in both histories. It projects `PS-03`, `PS-04`,
-and `PS-24` and does not redefine them. The schema below is current; the routes that write it are
-still target (#444 for the send route, #445 for SMS login):
+and `PS-24` and does not redefine them. The schema below is current; the send route (#444) writes
+the count and the `oidc-sms-code` buckets, and SMS login (#445), which writes `Sms` sessions, is still
+target:
 
 | Change | Shape | Rollback (`Down`) precondition |
 | --- | --- | --- |
-| `authorization_requests.sms_code_send_count` | Non-null integer, database default 0, CHECK `CK_authorization_requests_sms_code_send_count` (`>= 0`); existing continuations start at 0. Only the target `PS-03` conditional update will write it | None: no other artifact reads the count, and continuations live for 10 minutes |
+| `authorization_requests.sms_code_send_count` | Non-null integer, database default 0, CHECK `CK_authorization_requests_sms_code_send_count` (`>= 0`); existing continuations start at 0. Only the `PS-03` conditional update of the send route writes it | None: no other artifact reads the count, and continuations live for 10 minutes |
 | `identity_sessions.sms_user_login_id` and the auth-method CHECK | Nullable restrictive, indexed reference to `user_logins`; `password_credential_id` becomes nullable; `CK_identity_sessions_auth_method_reference` requires exactly the reference that matches `auth_method` (`Password` or `Sms`). Existing rows already satisfy it as `Password` rows. SQLite rebuilds the table and preserves every row, index, and child reference | No `Sms` session row remains; `Down` fails closed otherwise, because an old binary cannot read or revoke such a row correctly |
-| `oidc_rate_limit_buckets` policy CHECK | Adds `oidc-sms-code`; `OidcRateLimitBudgets` gains the same name with a fixed budget of 20 per 60-second window. The host registers the policy only with the target send route | No `oidc-sms-code` bucket row remains |
+| `oidc_rate_limit_buckets` policy CHECK | Adds `oidc-sms-code`; `OidcRateLimitBudgets` gains the same name with a fixed budget of 20 per 60-second window. The host registers the policy only on the send route (#444) | No `oidc-sms-code` bucket row remains |
 
 `IIdentitySessionStore.CreateSmsAsync` creates an `Sms` session after proving the SMS login
 identity exists, is an SMS identity, and belongs to the account; no production path calls it until

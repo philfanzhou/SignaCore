@@ -18,7 +18,7 @@ using static SignaCore.Tests.Integration.OAuthLoginTestSupport;
 namespace SignaCore.Tests.Integration;
 
 /// <summary>R1–R7 and the disconnected-store/disabled-policy controls of AC-13 (#108).</summary>
-public sealed class OidcAttackRateLimitDatabaseContractTests
+public sealed partial class OidcAttackRateLimitDatabaseContractTests
 {
     public static TheoryData<string, string> Partitions => new()
     {

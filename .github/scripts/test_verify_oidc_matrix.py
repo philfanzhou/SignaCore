@@ -71,7 +71,7 @@ class MatrixGateTests(unittest.TestCase):
         self.assertNotIn("Traceback", result.stdout + result.stderr)
 
     def test_complete_inventory_passes(self):
-        self.assertEqual([len(self.cases[c]) for c in gate.CLASSES], [30, 13, 5])
+        self.assertEqual([len(self.cases[c]) for c in gate.CLASSES], [33, 13, 5])
         self.check(succeeds=True)
 
     def test_missing_reports_fail(self):
