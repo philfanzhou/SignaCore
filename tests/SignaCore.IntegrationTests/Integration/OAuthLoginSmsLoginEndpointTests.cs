@@ -380,6 +380,9 @@ public sealed class OAuthLoginSmsLoginEndpointTests : IClassFixture<IdentityServ
 
         Assert.Empty(await QueryDbAsync(host.Services, db => db.LoginAttempts.AsNoTracking().ToListAsync(Ct)));
         Assert.Equal(0, sender.CallCount);
+        // Outcomes carry exactly the endpoint and outcome labels, durations the endpoint only.
+        Assert.Equal(metrics.Outcomes.Count, metrics.Durations.Count);
+        Assert.All(metrics.LabelSets, labels => Assert.Contains(labels, new[] { "endpoint", "endpoint,outcome" }));
 
         // The page language is the only other input of the bytes.
         using var chinese = await client.SendAsync(

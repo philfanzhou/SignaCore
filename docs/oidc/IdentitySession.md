@@ -103,5 +103,6 @@ This design changes no current cookie, shared management session (`PS-18`), prof
 migration, or runtime route. Storage/lifecycle and state propagation activate only through #67 and
 #69 (`AC-09`), whose #95 storage slice precedes the authorization-code table required by `AC-03`.
 The `Sms` auth method is added by #443 (`AC-15`); the `EV-38` checks and the `amr`/`name` mapping
-are delivered by #453 before #445 first writes an `Sms` session from a production route (`AC-17`).
+were delivered by #453 before #445, whose `EV-36` transaction is the one production route that
+writes an `Sms` session (`AC-17`).
 This document itself changes no Discovery metadata (`AC-14`).

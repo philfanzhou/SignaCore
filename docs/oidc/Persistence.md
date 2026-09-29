@@ -148,8 +148,7 @@ rolls back the unit and never nulls a relationship to force deletion.
 #443 added the storage for browser SMS login (`AC-15`) as the `AddBrowserSmsLoginStorage`
 migration, one per provider, with the same shape in both histories. It projects `PS-03`, `PS-04`,
 and `PS-24` and does not redefine them. The schema below is current; the send route (#444) writes
-the count and the `oidc-sms-code` buckets, and SMS login (#445), which writes `Sms` sessions, is still
-target:
+the count and the `oidc-sms-code` buckets, and SMS login (#445) writes `Sms` sessions:
 
 | Change | Shape | Rollback (`Down`) precondition |
 | --- | --- | --- |
@@ -158,8 +157,12 @@ target:
 | `oidc_rate_limit_buckets` policy CHECK | Adds `oidc-sms-code`; `OidcRateLimitBudgets` gains the same name with a fixed budget of 20 per 60-second window. The host registers the policy only on the send route (#444) | No `oidc-sms-code` bucket row remains |
 
 `IIdentitySessionStore.CreateSmsAsync` creates an `Sms` session after proving the SMS login
-identity exists, is an SMS identity, and belongs to the account; no production path calls it until
-#445. Deleting a `user_logins` SMS identity that a session still references fails under the
+identity exists, is an SMS identity, and belongs to the account; its only production caller is the
+`EV-36` transaction of #445, which flushes any `AutoProvision` account, identity, and admission rows
+it staged in the same transaction before the call. A concurrent provisioning of the same phone is
+decided by the existing unique indexes on `user_logins (provider_name_normalized, provider_user_id)`
+and `app_sms_accesses (app_registration_id, user_login_id)` on both providers; no schema change is
+involved. Deleting a `user_logins` SMS identity that a session still references fails under the
 restrictive reference, exactly like a referenced Password credential.
 
 PostgreSQL applies the upgrade as in-place `ALTER` statements in one transaction, so a failed or
@@ -172,9 +175,10 @@ back up the file first.
 `Down` checks both preconditions first, in one statement per provider (a PostgreSQL `DO` block, a
 SQLite temp-table `CHECK`), and changes nothing when either fails. Behind the gate it restores the
 previous schema exactly, returning `password_credential_id` to non-null without any backfill or
-column default. Rolling back only the #445 binary while `Sms` sessions exist is equally
+column default. Rolling back to a binary older than #453 while `Sms` sessions exist is equally
 unsupported: revoke them or wait for their 12-hour absolute expiry and retention before
-downgrading.
+downgrading. Rolling back only #445 keeps the #453 rechecks, so existing `Sms` sessions stay
+governed by `EV-38` and expire normally while the page stops offering SMS login.
 
 ## Deployment and rollback gate
 
