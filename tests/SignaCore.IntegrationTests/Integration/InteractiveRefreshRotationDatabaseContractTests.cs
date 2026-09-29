@@ -13,6 +13,7 @@ using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Host.Services;
 using Xunit;
 
@@ -347,6 +348,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
                 unitOfWork,
                 new AppRegistrationRepository(context),
                 context,
+                new SmsAdmissionService(context),
                 NullLogger<InteractiveRefreshRotationService>.Instance);
         }
 

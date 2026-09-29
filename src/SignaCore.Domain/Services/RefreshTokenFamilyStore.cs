@@ -13,8 +13,8 @@ namespace SignaCore.Domain.Services;
 /// authoritative and is never rewritten — so the reason exists to keep every caller of the family
 /// API on one of the canonical events: code replay (<c>EV-24</c>), logout (<c>EV-06</c>),
 /// administrative session revocation (<c>EV-15</c>), and the rotation-time <c>EV-32</c> causes
-/// (session expiry, missing session authority, application max-age, scope removal) that revoke
-/// the family in the rejecting refresh transaction itself.
+/// (session expiry, missing session authority, application max-age, SMS admission, scope
+/// removal) that revoke the family in the rejecting refresh transaction itself.
 /// </summary>
 public enum RefreshFamilyRevocationReason
 {
@@ -36,6 +36,13 @@ public enum RefreshFamilyRevocationReason
 
     /// <summary><c>EV-13</c>/<c>EV-32</c>: a family scope member left the application's current allow list.</summary>
     ScopeRemoved,
+
+    /// <summary>
+    /// <c>EV-38</c>/<c>EV-32</c> (canonical <c>sms_admission</c>): the rejecting refresh found the
+    /// <c>PS-04</c> SMS admission predicate false for this application on an <c>Sms</c> session.
+    /// Only this application's family is revoked; the session stays live.
+    /// </summary>
+    SmsAdmission,
 
     /// <summary><c>EV-08</c>: the account-disable transaction revoked every interactive family of the account.</summary>
     AccountDisabled,

@@ -13,6 +13,7 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Host;
 using SignaCore.Host.Services;
 using Xunit;
@@ -525,6 +526,7 @@ public sealed class OidcUserInfoServiceTests
             new PasswordCredentialRepository(context),
             context,
             new JwtOptions { Issuer = Issuer },
+            new SmsAdmissionService(context),
             NullLogger<OidcUserInfoService>.Instance);
         return new UserInfoHarness(
             connection, context, service, keys, accountId, session.Id, applicationId, scope);

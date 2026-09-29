@@ -7,6 +7,7 @@ using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Host.Services;
 using Xunit;
 
@@ -199,7 +200,8 @@ public sealed class OidcAuthorizationSessionReuseServiceTests
             accountRepository,
             new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             unitOfWork,
-            context);
+            context,
+            new SmsAdmissionService(context));
         return new ReuseDatabase(connection, context, service, sessions, codes);
     }
 

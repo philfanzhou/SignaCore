@@ -11,6 +11,7 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Validators;
 
 namespace SignaCore.Host.Services;
@@ -125,6 +126,7 @@ public sealed class AuthorizationCodeRedemptionService(
     IAppRegistrationRepository applications,
     IdentityDbContext dbContext,
     AdminIdentityOptions adminIdentityOptions,
+    ISmsAdmissionService smsAdmissions,
     ILogger<AuthorizationCodeRedemptionService> logger)
 {
     public const string GrantType = "authorization_code";
@@ -297,11 +299,20 @@ public sealed class AuthorizationCodeRedemptionService(
             return InvalidGrant();
         }
 
+        // EV-38: an Sms session redeems only while this application currently admits its SMS
+        // identity; the code stays unconsumed and no family or replay audit is written.
+        if (!await InteractiveSessionAuthMethodRules.AdmitsAsync(
+                smsAdmissions, session, app, cancellationToken))
+        {
+            return InvalidGrant();
+        }
+
         // Everything below resolves outside the transaction: external HTTP never runs under a
         // held lock, and the descriptor's values survive the ChangeTracker.Clear() of a retry.
         // One credential read feeds both name sources: the access token's display-name fallback
-        // and the ID token's PS-12 name, which is always the bound Password username.
-        var passwordUsername = await ResolvePasswordUsernameAsync(account, cancellationToken);
+        // and the ID token's PS-12 name, whose source follows the session's auth method.
+        var passwordUsername = await InteractiveSessionAuthMethodRules.ResolveNameAsync(
+            passwordCredentials, session.AuthMethod, account.Id, cancellationToken);
         var displayName = !string.IsNullOrWhiteSpace(account.Nickname)
             ? account.Nickname
             : passwordUsername;
@@ -464,8 +475,9 @@ public sealed class AuthorizationCodeRedemptionService(
             }
 
             // The authoritative rechecks under the same captured instant: code expiry, session
-            // classification, the current application and its session policy, the account, and
-            // the current scope allow list (EV-04/05/08/09/10/13).
+            // classification, the current application and its session policy, the account, the
+            // SMS admission of an Sms session, and the current scope allow list
+            // (EV-04/05/08/09/10/13/38).
             var codeCarriesOfflineAccess = ContainsOfflineAccess(lockedCode.Scope);
             var currentApplication = await ReadApplicationAsync(
                 applicationRowId,
@@ -498,6 +510,15 @@ public sealed class AuthorizationCodeRedemptionService(
 
             var lockedAccount = await accounts.GetByIdAsync(descriptor.AccountId, operationToken);
             if (lockedAccount is null || !lockedAccount.IsActive)
+            {
+                await transaction.RollbackAsync(operationToken);
+                return InvalidGrant();
+            }
+
+            // EV-38: the authoritative SMS admission recheck against the re-read application, so
+            // an admission revoked after the precheck still leaves the code unconsumed.
+            if (!await InteractiveSessionAuthMethodRules.AdmitsAsync(
+                    smsAdmissions, lockedSession, currentApplication, operationToken))
             {
                 await transaction.RollbackAsync(operationToken);
                 return InvalidGrant();
@@ -731,19 +752,6 @@ public sealed class AuthorizationCodeRedemptionService(
 
     private static string[] SplitCanonicalScope(string scopeSnapshot) =>
         scopeSnapshot.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-    /// <summary>
-    /// The bound Password username of the account, or null when the account has no password
-    /// credential. The ID token's <c>PS-12</c> <c>name</c> claim uses exactly this value — a
-    /// different source than the access token's display-name resolution.
-    /// </summary>
-    private async Task<string?> ResolvePasswordUsernameAsync(
-        AccountEntity account,
-        CancellationToken cancellationToken)
-    {
-        var credential = await passwordCredentials.GetByAccountIdAsync(account.Id, cancellationToken);
-        return credential?.Username;
-    }
 
     /// <summary>
     /// Same rule as the refresh branch of <see cref="TokenIssuanceService"/>: the bootstrap

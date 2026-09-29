@@ -32,6 +32,20 @@ public class PasswordCredentialRepository : IPasswordCredentialRepository
             .FirstOrDefaultAsync(c => c.AccountId == accountId, cancellationToken);
     }
 
+    public async Task<string?> GetSoleUsernameByAccountIdAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        // Two rows are enough to tell "exactly one" from "more than one".
+        var usernames = await _dbContext.PasswordCredentials
+            .AsNoTracking()
+            .Where(c => c.AccountId == accountId)
+            .Select(c => c.Username)
+            .Take(2)
+            .ToListAsync(cancellationToken);
+        return usernames.Count == 1 ? usernames[0] : null;
+    }
+
     public Task AddAsync(
         PasswordCredentialEntity credential,
         CancellationToken cancellationToken = default)
