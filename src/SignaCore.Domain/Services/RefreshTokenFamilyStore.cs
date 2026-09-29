@@ -37,13 +37,6 @@ public enum RefreshFamilyRevocationReason
     /// <summary><c>EV-13</c>/<c>EV-32</c>: a family scope member left the application's current allow list.</summary>
     ScopeRemoved,
 
-    /// <summary>
-    /// <c>EV-38</c>/<c>EV-32</c> (canonical <c>sms_admission</c>): the rejecting refresh found the
-    /// <c>PS-04</c> SMS admission predicate false for this application on an <c>Sms</c> session.
-    /// Only this application's family is revoked; the session stays live.
-    /// </summary>
-    SmsAdmission,
-
     /// <summary><c>EV-08</c>: the account-disable transaction revoked every interactive family of the account.</summary>
     AccountDisabled,
 
@@ -54,7 +47,15 @@ public enum RefreshFamilyRevocationReason
     ApplicationDisabled,
 
     /// <summary><c>EV-11</c>: the refresh-capability-off transaction revoked the application's interactive families.</summary>
-    RefreshCapabilityDisabled
+    RefreshCapabilityDisabled,
+
+    /// <summary>
+    /// <c>EV-38</c>/<c>EV-32</c> (canonical <c>sms_admission</c>): the rejecting refresh found the
+    /// <c>PS-04</c> SMS admission predicate false for this application on an <c>Sms</c> session.
+    /// Only this application's family is revoked; the session stays live. Appended last so every
+    /// existing member keeps its numeric value.
+    /// </summary>
+    SmsAdmission
 }
 
 /// <summary>
