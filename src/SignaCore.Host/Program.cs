@@ -478,6 +478,10 @@ builder.Services.AddSingleton<BootstrapConfigurationService>();
 
 var app = builder.Build();
 
+// The normal host is reached only after the bootstrap phase observed durable completion.
+app.Services.GetRequiredService<ServiceMantle.Diagnostics.ServiceMetrics>()
+    .SetPhase(ServiceMantle.Installation.ServiceStartupPhase.Completed);
+
 SignaCoreLogging.WriteLokiWarning(app.Logger, lokiSettings!);
 SignaCoreTelemetry.WriteOtlpWarning(app.Logger, otlpEndpoint);
 app.Logger.LogInformation("Service endpoints configured: HTTP={HttpPort}", httpPort);
