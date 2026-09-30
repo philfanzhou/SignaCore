@@ -2,9 +2,10 @@
 # meters anonymous pulls per client address. Nothing here needs a feature beyond the frontend that
 # BuildKit already ships. Re-add the directive if that changes, and expect the Docker Hub pull back.
 
-# Build the administrative frontend. Official images come from the AWS public mirror, for the same
-# reason: it serves the same images, needs no credentials, and is not metered per client address.
-FROM public.ecr.aws/docker/library/node:24-alpine AS frontend-build
+# Default local builds retain the official multi-platform AWS mirror tag. CI supplies a verified
+# official Linux/amd64 digest through NODE_IMAGE; both anonymous registries have quotas.
+ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine
+FROM ${NODE_IMAGE} AS frontend-build
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 ENV npm_config_registry=${NPM_REGISTRY}
 WORKDIR /app

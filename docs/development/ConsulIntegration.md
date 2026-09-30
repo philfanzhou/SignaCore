@@ -6,13 +6,13 @@ product snapshot, registers only while the shared readiness decision is Ready, a
 same registration id on readiness loss and shutdown.
 
 Consul KV is **not** a configuration authority. Global application configuration lives in the business
-database (`system_settings`); the database connection and the external root key live in the read-only
+database (the shared `service_settings` aggregate; see [Shared settings](SharedSettings.md)); the database connection and the external root key live in the read-only
 bootstrap file. The former KV loader, its precedence rules, and the local plaintext configuration
 cache have been removed, along with the `/consul/status` and `/consul/cache/invalidate` endpoints.
 
 ## Enabling discovery
 
-Discovery is disabled by default. Its settings are themselves read from `system_settings` after the
+Discovery is disabled by default. Its settings are themselves read from `service_settings` after the
 database bootstrap phase, so they are configured like any other setting rather than through
 environment variables:
 

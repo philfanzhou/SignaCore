@@ -1,3 +1,6 @@
+using System.Diagnostics.Metrics;
+using Microsoft.Extensions.DependencyInjection;
+using ServiceMantle.Diagnostics;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Health;
@@ -5,6 +8,7 @@ using ServiceMantle.Installation;
 using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Host.Installation;
+using SignaCore.Host;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Management;
@@ -13,6 +17,37 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
 {
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
     private IdentityDbContext? _context;
+    private readonly ServiceProvider _metricServices = CreateMetricServices();
+    private ServiceMetrics Metrics => _metricServices.GetRequiredService<ServiceMetrics>();
+
+    private static ServiceProvider CreateMetricServices()
+    {
+        var services = new ServiceCollection();
+        services.AddSignaCoreServiceMantle().AddServiceMantleMetrics();
+        return services.BuildServiceProvider();
+    }
+
+    private void AssertPhase(string expected)
+    {
+        var phases = new Dictionary<string, long>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, owner) =>
+        {
+            if (instrument.Meter.Name == ServiceMetrics.MeterName && instrument.Name == ServiceMetrics.InstallationPhaseName)
+                owner.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
+        {
+            foreach (var tag in tags) if (tag.Key == "phase") phases.Add((string)tag.Value!, value);
+        });
+        listener.Start();
+        listener.RecordObservableInstruments();
+        Assert.Equal(4, phases.Count);
+        Assert.Equal(1, phases[expected]);
+        Assert.Equal(1, phases.Values.Sum());
+        Assert.All(phases.Values, value => Assert.InRange(value, 0, 1));
+    }
+
 
     private async Task<IdentityDbContext> CreateContextAsync()
     {
@@ -26,6 +61,13 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
             .UseSqlite(_connection).Options);
         await _context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
         return _context;
+    }
+
+    [Fact]
+    public void InitialPublisher_IsUnknown()
+    {
+        _ = Metrics;
+        AssertPhase("unknown");
     }
 
     [Fact]
@@ -45,22 +87,25 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
         Assert.True(consumption.IsStaged);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var source = new InstallationHealthSnapshotSource(db);
+        var source = new InstallationHealthSnapshotSource(db, Metrics);
         var snapshot = await source.GetSnapshotAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ServiceStartupPhase.Completed, snapshot.Phase);
         Assert.Equal(ServiceMigrationReadinessState.Succeeded, snapshot.MigrationStatus);
         Assert.Equal(ServiceDatabaseReadinessState.Reachable, snapshot.DatabaseStatus);
+        AssertPhase("completed");
     }
 
     [Fact]
     public async Task MissingInstallationRow_IsNotReady()
     {
         var db = await CreateContextAsync();
-        var source = new InstallationHealthSnapshotSource(db);
+        Metrics.SetPhase(ServiceStartupPhase.Completed);
+        var source = new InstallationHealthSnapshotSource(db, Metrics);
 
         var snapshot = await source.GetSnapshotAsync(TestContext.Current.CancellationToken);
 
+        AssertPhase("unknown");
         Assert.NotEqual(ServiceStartupPhase.Completed, snapshot.Phase);
     }
 
@@ -88,14 +133,41 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
 
         var state = await installationStore.FindAsync(InstallationStores.ServiceId, ct);
         var shared = SharedInstallationPhase.Resolve(state);
-        var snapshot = await new InstallationHealthSnapshotSource(db).GetSnapshotAsync(ct);
+        var snapshot = await new InstallationHealthSnapshotSource(db, Metrics).GetSnapshotAsync(ct);
         db.ChangeTracker.Clear();
         var resolution = await InstallationStateResolver.ResolveAsync(db, ct);
 
         Assert.Equal(shared, snapshot.Phase);
+        AssertPhase(stateName == "completed" ? "completed" : stateName == "pending" ? "pending_setup" : "unknown");
         Assert.Equal(
             shared == ServiceStartupPhase.Completed,
             resolution.Phase == InstallationPhase.Completed);
+    }
+
+    [Fact]
+    public async Task CallerCancellation_ClearsMetricsAndPreservesCancellation()
+    {
+        var db = await CreateContextAsync();
+        Metrics.SetPhase(ServiceStartupPhase.Completed);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var source = new InstallationHealthSnapshotSource(db, Metrics);
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await source.GetSnapshotAsync(cancellation.Token));
+        Assert.Equal(cancellation.Token, error.CancellationToken);
+        AssertPhase("unknown");
+    }
+
+    [Fact]
+    public async Task DatabaseFailure_ClearsMetricsAndPreservesTheFailure()
+    {
+        var db = await CreateContextAsync();
+        await db.Database.ExecuteSqlRawAsync("DROP TABLE service_installations", TestContext.Current.CancellationToken);
+        Metrics.SetPhase(ServiceStartupPhase.Completed);
+        var source = new InstallationHealthSnapshotSource(db, Metrics);
+        var error = await Assert.ThrowsAsync<ServiceInstallationStoreException>(async () => await source.GetSnapshotAsync(TestContext.Current.CancellationToken));
+        Assert.IsType<SqliteException>(error.InnerException);
+        AssertPhase("unknown");
     }
 
     public async ValueTask DisposeAsync()
@@ -106,5 +178,6 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
         }
 
         await _connection.DisposeAsync();
+        await _metricServices.DisposeAsync();
     }
 }
