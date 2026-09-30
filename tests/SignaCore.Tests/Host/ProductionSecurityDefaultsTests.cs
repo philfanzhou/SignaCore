@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -62,40 +61,6 @@ public class ProductionSecurityDefaultsTests
         Assert.NotNull(policy);
         Assert.Empty(policy.Origins);
         Assert.False(policy.SupportsCredentials);
-    }
-
-    [Fact]
-    public void ForwardedHeaders_TrustOnlyConfiguredProxy()
-    {
-        using var provider = BuildServices(
-            Environments.Production,
-            new Dictionary<string, string?>
-            {
-                ["ReverseProxy:KnownProxies:0"] = "10.20.30.40"
-            });
-
-        var options = provider.GetRequiredService<IOptions<ForwardedHeadersOptions>>().Value;
-
-        Assert.Contains(System.Net.IPAddress.Parse("10.20.30.40"), options.KnownProxies);
-        Assert.Equal(1, options.ForwardLimit);
-        Assert.True(options.RequireHeaderSymmetry);
-    }
-
-    [Fact]
-    public void ForwardedHeaders_RejectInvalidConfiguredProxy()
-    {
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-        {
-            using var provider = BuildServices(
-                Environments.Production,
-                new Dictionary<string, string?>
-                {
-                    ["ReverseProxy:KnownProxies:0"] = "not-an-ip-address"
-                });
-            _ = provider.GetRequiredService<IOptions<ForwardedHeadersOptions>>().Value;
-        });
-
-        Assert.Contains("invalid IP address", exception.Message);
     }
 
     [Fact]

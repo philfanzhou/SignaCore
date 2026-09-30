@@ -65,6 +65,7 @@ internal static class SignaCoreTelemetry
         this ServiceMantleBuilder mantle,
         ServiceSettingSnapshot snapshot)
     {
+        mantle.AddServiceMantleMetrics();
         mantle.AddOpenTelemetryInstrumentation(options =>
         {
             options.Enabled = true;

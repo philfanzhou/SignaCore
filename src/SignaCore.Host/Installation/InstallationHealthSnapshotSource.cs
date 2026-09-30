@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Health;
+using ServiceMantle.Diagnostics;
 using ServiceMantle.Installation;
 using ServiceMantle.Web.Health;
 using SignaCore.Database;
@@ -17,27 +18,32 @@ namespace SignaCore.Host.Installation;
 /// accept. Any other phase is reported as-is and the gate rejects the request. A database failure
 /// propagates and the gate fails closed; it is never disguised as readiness.
 /// </remarks>
-internal sealed class InstallationHealthSnapshotSource(IdentityDbContext db) : IServiceHealthSnapshotSource
+internal sealed class InstallationHealthSnapshotSource(IdentityDbContext db, ServiceMetrics? metrics = null) : IServiceHealthSnapshotSource
 {
     public async ValueTask<ServiceHealthSnapshot> GetSnapshotAsync(
         CancellationToken cancellationToken = default)
     {
-        var installationStore = InstallationStores.CreateInstallationStore(db);
-        var state = await installationStore.FindAsync(InstallationStores.ServiceId, cancellationToken);
-
-        // A missing row in the normal host means the installation authority was lost; that is a
-        // not-ready observation, not a crash.
-        if (SharedInstallationPhase.Resolve(state) != ServiceStartupPhase.Completed)
+        try
         {
+            var installationStore = InstallationStores.CreateInstallationStore(db);
+            var state = await installationStore.FindAsync(InstallationStores.ServiceId, cancellationToken);
+            var phase = SharedInstallationPhase.Resolve(state);
+            // A missing row is not evidence of a committed phase. Keep the existing not-ready
+            // health result, but clear the metrics observation instead of claiming PendingSetup.
+            if (state is null) metrics?.SetUnknown();
+            else metrics?.SetPhase(phase);
+
             return new ServiceHealthSnapshot(
-                ServiceStartupPhase.PendingSetup,
+                phase,
                 ServiceMigrationReadinessState.Succeeded,
                 ServiceDatabaseReadinessState.Reachable);
         }
-
-        return new ServiceHealthSnapshot(
-            ServiceStartupPhase.Completed,
-            ServiceMigrationReadinessState.Succeeded,
-            ServiceDatabaseReadinessState.Reachable);
+        catch
+        {
+            // Failure and caller cancellation both invalidate the observation. Their original
+            // exception/token still reaches the phase gate; metrics never decide admission.
+            metrics?.SetUnknown();
+            throw;
+        }
     }
 }
