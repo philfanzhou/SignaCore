@@ -1,8 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using ServiceMantle.AspNetCore;
-using ServiceMantle.AspNetCore.Health;
 using ServiceMantle.Health;
+using ServiceMantle.Web.Health;
+using ServiceMantle.Web;
 using SignaCore.Host;
 
 namespace SignaCore.Tests.Host.HealthChecks;

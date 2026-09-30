@@ -1,16 +1,16 @@
-using System.Net;
-using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using SignaCore.Database;
-using SignaCore.Database.Repositories;
-using SignaCore.Host.Security;
-using ServiceMantle.AspNetCore.Health;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
+using ServiceMantle.Web.Health;
+using SignaCore.Database.Repositories;
+using SignaCore.Database;
+using SignaCore.Host.Security;
+using System.Net;
+using System.Text;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;

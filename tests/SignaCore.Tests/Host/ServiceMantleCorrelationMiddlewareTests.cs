@@ -1,13 +1,13 @@
-using System.Collections.Concurrent;
-using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
-using SignaCore.Host;
 using SignaCore.Host.Http;
+using SignaCore.Host;
+using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace SignaCore.Tests.Host;
@@ -23,7 +23,7 @@ namespace SignaCore.Tests.Host;
 /// </summary>
 public partial class ServiceMantleCorrelationMiddlewareTests
 {
-    private const string HeaderName = ServiceMantle.AspNetCore.Http.ServiceHeaderNames.CorrelationId;
+    private const string HeaderName = ServiceMantle.Web.Http.ServiceHeaderNames.CorrelationId;
 
     [GeneratedRegex("^[0-9a-f]{32}$")]
     private static partial Regex GeneratedIdPattern();

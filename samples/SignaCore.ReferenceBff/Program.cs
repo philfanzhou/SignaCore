@@ -1,15 +1,15 @@
-using System.Net;
-using Microsoft.AspNetCore.DataProtection;
-using ServiceMantle.Persistence.EntityFrameworkCore;
-using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Antiforgery;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Options;using Microsoft.IdentityModel.Protocols.OpenIdConnect;
-using SignaCore.ReferenceBff;
-using SignaCore.ReferenceBff.Database;
 using ServiceMantle.Installation;
+using ServiceMantle.Persistence.Relational.DataProtection;
+using SignaCore.ReferenceBff.Database;
+using SignaCore.ReferenceBff;
+using System.Net.Http.Headers;
+using System.Net;
 
 const string UserInfoClientName = BffIdentityCheckService.UserInfoClientName;
 

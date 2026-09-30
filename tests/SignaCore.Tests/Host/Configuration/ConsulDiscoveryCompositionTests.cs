@@ -1,13 +1,14 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using ServiceMantle;
 using ServiceMantle.Configuration;
-using ServiceMantle.Consul;
+using ServiceMantle.Discovery.Configuration;
+using ServiceMantle.Discovery.Registration;
+using ServiceMantle;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
-using SignaCore.Host;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Startup;
+using SignaCore.Host;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Configuration;

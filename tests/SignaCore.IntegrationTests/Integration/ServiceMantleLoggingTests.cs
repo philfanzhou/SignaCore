@@ -1,10 +1,3 @@
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Net;
-using System.Net.Http.Json;
-using System.Reflection;
-using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -12,18 +5,25 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using ServiceMantle.AspNetCore.Logging;
+using ServiceMantle.Logging.Pipeline;
+using ServiceMantle.Logging.Remote;
 using ServiceMantle.Logging;
-using ServiceMantle.Serilog;
-using ServiceMantle.Serilog.GrafanaLoki;
+using ServiceMantle.Web.Logging;
 using SignaCore.Database;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Logging;
 using SignaCore.Host.Startup;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Net.Http.Json;
+using System.Net;
+using System.Reflection;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;
@@ -111,7 +111,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         var services = factory.Services;
         Assert.Empty(LoggingPipelineViolations(services));
         Assert.Equal(
-            "ServiceMantle.Serilog",
+            "ServiceMantle.Logging",
             Assert.Single(services.GetServices<ILoggerProvider>()).GetType().Assembly.GetName().Name);
         Assert.StartsWith(
             "ServiceMantle",
@@ -119,7 +119,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
             StringComparison.Ordinal);
 
         // Only the normal host has a setting snapshot, so only it composes the Loki sink.
-        var lokiRuntime = services.GetService(ServiceMantleType("ServiceMantle.Serilog.GrafanaLoki.GrafanaLokiRuntime"));
+        var lokiRuntime = services.GetService(ServiceMantleType("ServiceMantle.Logging.Remote.GrafanaLokiRuntime"));
         var resolver = services.GetService<IRemoteLogAuthorizationResolver>();
         Assert.Equal(branch == "normal", lokiRuntime is not null);
         Assert.Equal(branch == "normal", resolver is not null);
@@ -133,7 +133,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         using var capture = new ConsoleCapture();
         var factory = await StartNormalHostAsync(configureServices: services =>
         {
-            var runtimeProviderType = ServiceMantleType("ServiceMantle.Serilog.RuntimeLoggerProvider");
+            var runtimeProviderType = ServiceMantleType("ServiceMantle.Logging.Pipeline.RuntimeLoggerProvider");
             services.RemoveAll<ILoggerProvider>();
             services.AddSingleton<ILoggerProvider>(serviceProvider => new TransparentLoggerProvider(
                 (ILoggerProvider)ActivatorUtilities.CreateInstance(serviceProvider, runtimeProviderType)));
@@ -153,7 +153,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
 
         var project = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SignaCore.Host", "SignaCore.Host.csproj"));
         Assert.Empty(DirectSerilogPackages(project));
-        Assert.Contains("<PackageReference Include=\"ServiceMantle.Serilog\" />", project, StringComparison.Ordinal);
+        Assert.Contains("<PackageReference Include=\"ServiceMantle.Logging\" />", project, StringComparison.Ordinal);
 
         // Negative variants: the same checks detect a local provider type and a direct package.
         Assert.Contains(
@@ -162,7 +162,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         Assert.Equal(
             ["Serilog.Sinks.Console"],
             DirectSerilogPackages(project.Replace(
-                "<PackageReference Include=\"ServiceMantle.Serilog\" />",
+                "<PackageReference Include=\"ServiceMantle.Logging\" />",
                 "<PackageReference Include=\"Serilog.Sinks.Console\" />",
                 StringComparison.Ordinal)));
     }
@@ -356,7 +356,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     {
         using var capture = new ConsoleCapture();
         var factory = await StartNormalHostAsync(track: false);
-        var runtime = factory.Services.GetRequiredService(ServiceMantleType("ServiceMantle.Serilog.SerilogRuntime"));
+        var runtime = factory.Services.GetRequiredService(ServiceMantleType("ServiceMantle.Logging.Pipeline.SerilogRuntime"));
 
         var stopwatch = Stopwatch.StartNew();
         await factory.DisposeAsync();
@@ -386,7 +386,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
                 options.AllowInsecureLoopbackForTesting = true;
             },
             track: false);
-        var runtime = factory.Services.GetRequiredService(ServiceMantleType("ServiceMantle.Serilog.SerilogRuntime"));
+        var runtime = factory.Services.GetRequiredService(ServiceMantleType("ServiceMantle.Logging.Pipeline.SerilogRuntime"));
         var marker = "probe-" + Guid.NewGuid().ToString("N");
         WriteProbe(factory.Services, marker, "unused");
 
@@ -418,7 +418,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         }
 
         violations.AddRange(providers
-            .Where(provider => provider.GetType().Assembly.GetName().Name != "ServiceMantle.Serilog")
+            .Where(provider => provider.GetType().Assembly.GetName().Name != "ServiceMantle.Logging")
             .Select(provider => "provider:" + provider.GetType().Name));
         var sanitizer = services.GetService<StructuredLogSanitizer>();
         if (sanitizer is null ||
@@ -522,7 +522,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     internal static GrafanaLokiOptions RegisteredLokiOptions(IServiceCollection services)
     {
         var registration = Assert.Single(services, descriptor =>
-            descriptor.ServiceType.FullName == "ServiceMantle.Serilog.GrafanaLoki.GrafanaLokiRegistration");
+            descriptor.ServiceType.FullName == "ServiceMantle.Logging.Remote.GrafanaLokiRegistration");
         var instance = registration.ImplementationInstance!;
         return (GrafanaLokiOptions)instance.GetType().GetProperty("Options")!.GetValue(instance)!;
     }

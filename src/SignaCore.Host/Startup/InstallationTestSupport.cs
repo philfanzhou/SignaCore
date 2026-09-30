@@ -1,16 +1,17 @@
-using System.Data;
 using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Bootstrap;
 using ServiceMantle.Configuration;
 using ServiceMantle.Installation;
-using ServiceMantle.Persistence.EntityFrameworkCore;
-using SignaCore.Database;
+using ServiceMantle.Persistence.Relational.Mapping;
+using ServiceMantle.Persistence.Relational.Stores;
 using SignaCore.Database.Entity;
+using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
+using System.Data;
 
 namespace SignaCore.Host.Startup;
 

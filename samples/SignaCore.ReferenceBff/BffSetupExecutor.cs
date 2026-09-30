@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Antiforgery;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
-using ServiceMantle.AspNetCore.ManagementApi.Setup;
 using ServiceMantle.Installation;
+using ServiceMantle.Web.ManagementApi.Setup;
 
 namespace SignaCore.ReferenceBff;
 

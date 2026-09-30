@@ -1,6 +1,6 @@
-using ServiceMantle.AspNetCore.Health;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
+using ServiceMantle.Web.Health;
 
 namespace SignaCore.Host.Bootstrap;
 

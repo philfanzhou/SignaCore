@@ -19,7 +19,7 @@ OpenID Connect Discovery document. Nothing is hardcoded.
 > single initial-administrator binding slot (`management_role_bindings`, staging and exact-match
 > read via `ManagementRoleBindingStore`) and the shared ServiceMantle tables
 > (`service_installations`, `service_audit_logs` and `service_data_protection_keys`) mapped through the pinned
-> `ServiceMantle.Persistence.EntityFrameworkCore` package — never a local clone of a shared
+> `ServiceMantle.Persistence.Relational` package — never a local clone of a shared
 > entity. The BFF's fixed ServiceMantle service id is `reference-bff`, not the product's
 > `signacore`. Nothing migrates or binds automatically at runtime. Setup requires an explicit
 > local code command followed by authenticated HTTP completion.
@@ -229,7 +229,7 @@ inspection, and does not promise cross-process exactly-once delivery.
 
 ## First administrator over HTTP
 
-With database configuration present, the sample consumes `ServiceMantle.AspNetCore` at the
+With database configuration present, the sample consumes `ServiceMantle.Web` at the
 existing pinned version and uses its composed pipeline and code-only Setup entries. Without
 that configuration, the original login sample remains available and Setup is not mapped.
 The Web host never migrates, creates an installation row, or issues a code. A missing schema,
@@ -282,7 +282,7 @@ above. The SignaCore Authority must also be reachable over trusted HTTPS from th
 
 ## Structured logs
 
-Every Web host uses the pinned `ServiceMantle.Serilog` Console pipeline, with service identity
+Every Web host uses the pinned `ServiceMantle.Logging` Console pipeline, with service identity
 `reference-bff` and instance identity `reference-bff-local`. BFF-owned startup, login, UserInfo,
 authorization, Setup and logout events use `ServiceLogContext` scopes containing `ServiceName`,
 `ServiceVersion` and `InstanceId`. Only finite `Operation` and `Outcome` fields enter those scopes:

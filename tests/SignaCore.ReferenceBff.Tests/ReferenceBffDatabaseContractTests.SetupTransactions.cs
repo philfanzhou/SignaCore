@@ -2,11 +2,11 @@ extern alias BffSample;
 using BffSample::SignaCore.ReferenceBff;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using ServiceMantle.AspNetCore.ManagementApi.Setup;
 using ServiceMantle.Installation;
+using ServiceMantle.Web.ManagementApi.Setup;
 using SignaCore.ReferenceBff.Database;
-using Xunit;
 using SilentTerminal = SignaCore.ReferenceBff.Tests.ReferenceBffSetupCodeTests.SilentTerminal;
+using Xunit;
 
 namespace SignaCore.ReferenceBff.Tests;
 

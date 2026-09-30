@@ -1,14 +1,15 @@
 using DotNet.Testcontainers.Containers;
 using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
-using ServiceMantle.Persistence.EntityFrameworkCore;
-using SignaCore.Database;
+using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Persistence.Relational.Mapping;
+using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
+using SignaCore.Database;
+using SignaCore.Tests.Integration;
 using Testcontainers.PostgreSql;
 using Xunit;
-using SignaCore.Tests.Integration;
 
 namespace SignaCore.IntegrationTests.Integration;
 

@@ -1,9 +1,9 @@
-using System.Data;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Installation;
-using ServiceMantle.Persistence.EntityFrameworkCore;
+using ServiceMantle.Persistence.Relational.Stores;
 using SignaCore.ReferenceBff.Database;
+using System.Data;
 
 namespace SignaCore.ReferenceBff;
 

@@ -1,19 +1,19 @@
-using System.Data;
-using System.Text.Json;
 using Microsoft.AspNetCore.Http;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ServiceMantle.Audit;
-using ServiceMantle.AspNetCore.ManagementApi.Setup;
 using ServiceMantle.Configuration;
 using ServiceMantle.Installation;
-using ServiceMantle.Persistence.EntityFrameworkCore;
+using ServiceMantle.Persistence.Relational.Stores;
+using ServiceMantle.Web.ManagementApi.Setup;
 using SignaCore.Database;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Configuration;
+using System.Data;
+using System.Text.Json;
 
 namespace SignaCore.Host.Installation;
 

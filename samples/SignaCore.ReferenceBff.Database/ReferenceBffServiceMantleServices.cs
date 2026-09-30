@@ -1,8 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
-using ServiceMantle;
 using ServiceMantle.Audit;
 using ServiceMantle.Installation;
-using ServiceMantle.Persistence.EntityFrameworkCore;
+using ServiceMantle.Persistence.Relational.Stores;
+using ServiceMantle;
 
 namespace SignaCore.ReferenceBff.Database;
 

@@ -1,11 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using ServiceMantle;
-using ServiceMantle.AspNetCore;
 using ServiceMantle.Configuration;
 using ServiceMantle.Database.PostgreSql;
 using ServiceMantle.Database.Sqlite;
-using ServiceMantle.Persistence.EntityFrameworkCore;
+using ServiceMantle.Persistence.Relational.Stores;
+using ServiceMantle.Web;
+using ServiceMantle;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Host.Configuration;
@@ -21,9 +21,8 @@ namespace SignaCore.Host;
 /// <remarks>
 /// The host identity and the shared bootstrap file store are registered: the file lifecycle
 /// (locate, read, create, replace) belongs to the shared store, with the PostgreSQL and SQLite
-/// bootstrap providers registered so the store resolves both. The Correlation ID middleware
-/// remains the only ServiceMantle HTTP capability activated in the Bootstrap and Setup hosts; the
-/// normal host composes the full ServiceMantle pipeline (<c>UseServiceMantlePipeline</c>) with the
+/// bootstrap providers registered so the store resolves both. All three hosts use the shared HTTP pipeline
+/// (<c>UseServiceMantlePipeline</c>); the normal host additionally composes the
 /// shared management session capabilities. The installation state, the business database, and
 /// authentication remain owned by SignaCore. Logging is the ServiceMantle Serilog pipeline
 /// composed by <see cref="Logging.SignaCoreLogging"/>; the ServiceMantle request log scope adds the
@@ -36,7 +35,7 @@ internal static class ServiceMantleComposition
     /// <summary>
     /// Registers the ServiceMantle host identity and the shared bootstrap file store. The instance
     /// id is generated once per host build (<c>signacore-</c> plus a GUID in N format) and is used
-    /// for request log scope fields only; it is not a persistent identity. The service version is
+    /// as non-secret runtime metadata; it is not a persistent identity. The service version is
     /// left unset so ServiceMantle resolves the entry assembly version. All three hosts must pass
     /// the same <paramref name="bootstrapFilePath"/> — resolved from the
     /// <c>Bootstrap:FilePath</c> override — so the DI store and the pre-composition store agree.

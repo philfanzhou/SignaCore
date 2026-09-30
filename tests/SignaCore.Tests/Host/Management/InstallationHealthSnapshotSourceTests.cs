@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
-using ServiceMantle.Persistence.EntityFrameworkCore;
+using ServiceMantle.Persistence.Relational;
 using SignaCore.Database;
 using SignaCore.Host.Installation;
 using SignaCore.Host;

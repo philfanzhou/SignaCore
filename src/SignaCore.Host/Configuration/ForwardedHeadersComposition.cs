@@ -1,5 +1,5 @@
 using System.Net;
-using ServiceMantle.AspNetCore;
+using ServiceMantle.Web;
 using ServiceMantle.Configuration;
 
 namespace SignaCore.Host.Configuration;

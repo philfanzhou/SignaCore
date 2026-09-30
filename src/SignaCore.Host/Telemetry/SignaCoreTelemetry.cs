@@ -1,8 +1,8 @@
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
-using ServiceMantle.AspNetCore;
 using ServiceMantle.Configuration;
-using ServiceMantle.OpenTelemetry.Otlp;
+using ServiceMantle.Diagnostics.Export.Otlp;
+using ServiceMantle.Web;
 using SignaCore.Host.Security;
 
 namespace SignaCore.Host.Telemetry;

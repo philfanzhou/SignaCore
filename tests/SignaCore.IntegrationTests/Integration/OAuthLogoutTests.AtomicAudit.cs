@@ -1,18 +1,19 @@
-using System.Data.Common;
-using System.Net;
-using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using ServiceMantle.Audit;
-using ServiceMantle.Persistence.EntityFrameworkCore;
-using SignaCore.Database;
+using ServiceMantle.Persistence.Relational.Stores;
+using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
+using SignaCore.Database;
 using SignaCore.Domain.Services;
+using System.Data.Common;
+using System.Net;
+using System.Text.Json;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;

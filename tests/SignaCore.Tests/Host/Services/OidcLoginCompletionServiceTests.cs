@@ -1,16 +1,15 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using ServiceMantle.Persistence.EntityFrameworkCore;
-using SignaCore.Database;
+using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
+using SignaCore.Database;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Services;
-using Xunit;
-
 using SignaCore.Tests.TestSupport;
+using Xunit;
 
 namespace SignaCore.Tests.Host.Services;
 
