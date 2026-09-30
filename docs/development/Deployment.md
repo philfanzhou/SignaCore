@@ -10,20 +10,44 @@ This produces `signacore:latest` from `src/SignaCore.Host/Dockerfile`. The image
 
 ### Where base images come from
 
-The .NET stages pull from Microsoft's container registry, and the Node stage pulls the official
-image from the AWS public mirror (`public.ecr.aws/docker/library/`) rather than from Docker Hub.
-Docker Hub meters anonymous pulls per client address, so shared egress — a CI runner, an office
-network — exhausts a quota that unrelated traffic consumed, and the pull then fails with
-`unauthorized: authentication required`. The mirror serves the same official images, needs no
-credentials, and is not metered that way. The Dockerfile also carries no `syntax` directive,
-because that alone would restore a Docker Hub pull on every build.
+The .NET stages pull from Microsoft's container registry. Default local builds keep the official
+multi-platform Node `24-alpine` tag from the AWS public mirror
+(`public.ecr.aws/docker/library/`). The Dockerfile has no `syntax` directive, which avoids an
+additional Docker Hub frontend pull. Both AWS Public ECR and Docker Hub impose anonymous quotas;
+shared runner egress can exhaust them even when a change is correct.
 
-The container tests follow the same rule: they request `SIGNACORE_POSTGRES_IMAGE` when it is set
-and fall back to the plain Docker Hub name when it is not, and CI sets it to the mirror.
+CI uses `.github/scripts/resolve_official_image.py` with the fixed `node` or `postgres` profile.
+It pulls Linux/amd64 content from AWS first, then the corresponding `docker.io/library/` official
+repository only after two transient failures. Each source has at most two attempts, each pull has
+a 180-second timeout, and retries wait five seconds. Missing manifests, invalid references,
+unknown errors, or content/platform validation failures stop immediately. Cancellation stops
+without publishing a reference. Both sources failing still fails the original check.
 
-One Docker Hub pull remains. The release job's BuildKit builder image is published only there, so
-it is pulled anonymously on default-branch pushes and release tags. Pull requests never reach that
-job.
+The profiles pin the same platform manifest digest across both sources:
+
+| Profile | Tag | Linux/amd64 manifest digest |
+| --- | --- | --- |
+| Node | `24-alpine` | `sha256:83f1c388c31fb2e51f7cbd4dea949b96260798c98f206e8e4696bc93bd964e3a` |
+| PostgreSQL | `15-alpine` | `sha256:25d430274d8a31184f9435cc5b2f56aff254952065bbbcac0c51acedb5a1d1e7` |
+
+Maintainers must verify that both official sources contain identical content for the stated
+version and platform before updating these pins and the Node allowlist in `build.sh`.
+Docker validates the digest during pull; inspection also verifies the repository digest and
+Linux/amd64 platform. Only the successful `repository:tag@digest` reference is exported.
+`SIGNACORE_NODE_IMAGE` passes that fixed official reference through `build.sh` into the Dockerfile's
+`NODE_IMAGE` build argument. Unlisted overrides are rejected. An ordinary `IMAGE_TAG=latest
+./build.sh` invocation requires no resolver or override and retains its default platform behavior.
+Each CI job independently exports `SIGNACORE_POSTGRES_IMAGE`; container smoke and all integration
+and Reference BFF Testcontainers consume that same warmed reference. Local tests fall back to the
+plain official Docker Hub tag when the variable is absent.
+
+This recovery adds no runtime business configuration, credentials, database migration, or change
+to required checks, scanning, SBOM, smoke, and real database contracts. Reverting the recovery
+change and this documentation restores the single-source CI behavior, including its quota failures.
+It cannot guarantee that either anonymous registry is always available.
+
+The release job's BuildKit builder image still comes from Docker Hub on default-branch pushes and
+release tags. This recovery does not change that publishing path; pull requests never reach it.
 
 ## The `edge` image
 
@@ -162,8 +186,9 @@ A pending-setup instance is live but not ready, so it never receives authenticat
   not force HTTPS for management routes.
 - Prepare the writable persistent bootstrap directory, complete protected bootstrap configuration,
   restrict the resulting file to mode `0600`, and back it up.
-- Set `ReverseProxy:KnownProxies` when TLS terminates at a non-loopback proxy so forwarded scheme and
-  client IP are accepted only from that proxy.
+- Set `reverse_proxy.known_proxies` through the authenticated settings page when TLS terminates at
+  a non-loopback proxy; the legacy projection is `ReverseProxy:KnownProxies`. The activated
+  database snapshot alone supplies this business setting. See the [proxy trust boundary](#proxy-trust-boundary).
 - The built-in console uses a 15-minute in-memory management Bearer and requires sign-in after a
   page reload. Its requests omit Cookie credentials. Preserve its one Bearer header on supported
   management routes; do not add an `Authorization` header to Cookie clients' requests, since a
@@ -262,3 +287,25 @@ SignaCore identity session, so the family stays valid until its bounded expiry a
 not prompt. On shared devices an administrator revokes the identity session, or the browser is
 closed. The [Public SPA sample](../../samples/SignaCore.PublicSpa/README.md) shows the complete
 registration order and these limits.
+
+## Proxy trust boundary
+
+Only the normal host activates ServiceMantle forwarding, once inside the shared pipeline and
+before rate limiting/authentication. It preserves the previous ASP.NET Core trust defaults:
+IPv6 loopback `::1` and IPv4 loopback network `127.0.0.0/8`, plus the explicitly configured proxy
+addresses. Equivalent addresses are normalized and deduplicated; invalid input fails startup
+with a fixed safe diagnostic, without echoing the supplied address. It processes one rightmost
+hop of symmetric `X-Forwarded-For`/`X-Forwarded-Proto` headers. Missing or asymmetric headers are
+ignored. `X-Forwarded-Host` remains disabled, so it cannot change the request Host.
+
+Unconfigured remote peers cannot change the client IP or scheme. Operators must supply the real
+container ingress address in `reverse_proxy.known_proxies`, rather than trusting every source or
+assuming a container bridge is loopback. Validate external HTTPS, identity/management Cookie
+security, discovery/redirect URLs, and IP budgets after deployment. Public issuer/redirect
+configuration remains authoritative and is never derived from an untrusted forwarded Host.
+
+Bootstrap/Setup have no activated application snapshot and continue their previous forwarding
+behavior: they do not process these headers. Terminate/install through an appropriate protected
+network; business proxy trust becomes active only after setup and restart into the normal host.
+No setting key or database migration is added. A binary rollback restores the previous local
+middleware and the same snapshot setting; do not run both middleware implementations together.

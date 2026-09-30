@@ -193,6 +193,23 @@ for the first time by this release) and the ASP.NET Core meters (`http_server_re
 Kestrel, routing, rate limiting, and the other `Microsoft.AspNetCore.*` meters). The OpenTelemetry
 resource carries `service.name=signacore`, `service.version`, and `service.instance.id`.
 
+The normal host also registers ServiceMantle's fixed `servicemantle.service.info` and
+`servicemantle.installation.phase` gauges. Prometheus renders these as
+`servicemantle_service_info` and `servicemantle_installation_phase`, with its unit suffix where
+applicable. Service information is always 1; the four finite phase values (`unknown`,
+`bootstrap_configuration`, `pending_setup`, `completed`) contain exactly one 1 and three 0s.
+Identity comes from the existing non-secret resource attributes, never request/user labels.
+
+The initial phase is unknown. The normal host publishes Completed only after bootstrap has
+observed durable installation completion. Later phase-gate observations publish the actual
+confirmed Completed/PendingSetup state; a missing row, database failure, or cancelled observation
+clears it to unknown without changing health/error/cancellation behavior. Collection performs no
+I/O and reports the last published observation, not a real-time database scrape or a cross-request
+commit ordering guarantee. An unknown observation does not bypass the existing scrape phase
+gate: lost authority can still reject an authorized scrape with 503. Bootstrap/Setup have no metrics publisher/exporter or anonymous scrape:
+continue using their health/status endpoints. Removing the metrics registration/publication calls
+rolls back this addition without changing stored data or scraper authentication.
+
 `GET /metrics` (and `HEAD`) requires the credentials of a registered, active confidential
 application in `X-Admin-AppId` and `X-Admin-AppSecret`, validated exactly like the gateway
 endpoints; a missing or wrong credential, an unknown application, and a public client all get
