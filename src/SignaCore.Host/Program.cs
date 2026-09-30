@@ -423,6 +423,7 @@ builder.Services.AddSingleton<BootstrapConfigurationManager>(provider =>
 
 var mantle = builder.Services.AddSignaCoreServiceMantle(bootstrapFilePath);
 mantle.AddSignaCoreSharedHttpCapabilities();
+mantle.AddSignaCoreForwardedHeaders(bootstrapResult.SharedSnapshot!);
 
 // ---- Telemetry (ServiceMantle OpenTelemetry, authorized Prometheus scrape, optional OTLP) ----
 // Only the normal host composes telemetry, so the Bootstrap and Setup hosts keep answering /metrics
@@ -566,7 +567,6 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Identity Service API v1"));
 }
-app.UseForwardedHeaders();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 // Public OIDC CORS owns the exact token and UserInfo routes. No /oauth2 path inherits AdminWeb.
 app.Use((context, next) =>

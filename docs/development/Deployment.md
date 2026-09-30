@@ -162,8 +162,9 @@ A pending-setup instance is live but not ready, so it never receives authenticat
   not force HTTPS for management routes.
 - Prepare the writable persistent bootstrap directory, complete protected bootstrap configuration,
   restrict the resulting file to mode `0600`, and back it up.
-- Set `ReverseProxy:KnownProxies` when TLS terminates at a non-loopback proxy so forwarded scheme and
-  client IP are accepted only from that proxy.
+- Set `reverse_proxy.known_proxies` through the authenticated settings page when TLS terminates at
+  a non-loopback proxy; the legacy projection is `ReverseProxy:KnownProxies`. The activated
+  database snapshot alone supplies this business setting. See the [proxy trust boundary](#proxy-trust-boundary).
 - The built-in console uses a 15-minute in-memory management Bearer and requires sign-in after a
   page reload. Its requests omit Cookie credentials. Preserve its one Bearer header on supported
   management routes; do not add an `Authorization` header to Cookie clients' requests, since a
@@ -262,3 +263,25 @@ SignaCore identity session, so the family stays valid until its bounded expiry a
 not prompt. On shared devices an administrator revokes the identity session, or the browser is
 closed. The [Public SPA sample](../../samples/SignaCore.PublicSpa/README.md) shows the complete
 registration order and these limits.
+
+## Proxy trust boundary
+
+Only the normal host activates ServiceMantle forwarding, once inside the shared pipeline and
+before rate limiting/authentication. It preserves the previous ASP.NET Core trust defaults:
+IPv6 loopback `::1` and IPv4 loopback network `127.0.0.0/8`, plus the explicitly configured proxy
+addresses. Equivalent addresses are normalized and deduplicated; invalid input fails startup
+with a fixed safe diagnostic, without echoing the supplied address. It processes one rightmost
+hop of symmetric `X-Forwarded-For`/`X-Forwarded-Proto` headers. Missing or asymmetric headers are
+ignored. `X-Forwarded-Host` remains disabled, so it cannot change the request Host.
+
+Unconfigured remote peers cannot change the client IP or scheme. Operators must supply the real
+container ingress address in `reverse_proxy.known_proxies`, rather than trusting every source or
+assuming a container bridge is loopback. Validate external HTTPS, identity/management Cookie
+security, discovery/redirect URLs, and IP budgets after deployment. Public issuer/redirect
+configuration remains authoritative and is never derived from an untrusted forwarded Host.
+
+Bootstrap/Setup have no activated application snapshot and continue their previous forwarding
+behavior: they do not process these headers. Terminate/install through an appropriate protected
+network; business proxy trust becomes active only after setup and restart into the normal host.
+No setting key or database migration is added. A binary rollback restores the previous local
+middleware and the same snapshot setting; do not run both middleware implementations together.
