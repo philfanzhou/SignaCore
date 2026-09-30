@@ -1,5 +1,9 @@
 # Deployment
 
+Current database support is PostgreSQL 15+ and local-file SQLite (single-instance). Candidate
+MySQL, MariaDB, SQL Server and Oracle deployments remain deferred under the
+[database provider support decision](../database/provider-support-decision.md).
+
 ## Build
 
 ```bash
