@@ -162,10 +162,10 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
 
         // The normal API surface is mapped by nothing here: routing answers 404 before any
         // identity capability could exist.
-        foreach (var path in new[] { "/api/oauth2/token", "/.well-known/openid-configuration", "/metrics", "/api/bootstrap/save" })
+        foreach (var path in new[] { "/api/oauth2/token", "/.well-known/openid-configuration", "/metrics", "/api/bootstrap/save", "/management/v1/runtime" })
         {
             var blocked = await http.GetAsync(path, TestContext.Current.CancellationToken);
-            Assert.Equal(HttpStatusCode.NotFound, blocked.StatusCode);
+            Assert.Equal(path == "/management/v1/runtime" ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.NotFound, blocked.StatusCode);
         }
 
         // The Bootstrap page and its static assets are reachable.

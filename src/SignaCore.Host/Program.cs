@@ -727,6 +727,7 @@ ManagementBearerSessionEndpoints.Map(app);
 // single-attempt serializable transaction instead of the legacy controller. The Bootstrap and
 // Setup hosts never map this group, so those phases expose no settings surface.
 var managementApi = app.MapServiceMantleManagementApiV1();
+managementApi.MapServiceMantleRuntimeInfo();
 managementApi.MapServiceMantleSettingQueries();
 managementApi.MapServiceMantleSettingUpdates(ManagementSettingUpdateExecutor.ExecuteAsync);
 // The admin console's audit page reads the shared restricted query from here on; the legacy

@@ -121,12 +121,13 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     [InlineData("/.well-known/jwks")]
     [InlineData("/.well-known/jwks.json")]
     [InlineData("/metrics")]
+    [InlineData("/management/v1/runtime")]
     public async Task NormalApiReads_WhilePending_AreNotFoundAndWrites_ArePhaseUnavailable(string path)
     {
         using var http = await StartHostAsync();
 
         var read = await http.GetAsync(path, TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.NotFound, read.StatusCode);
+        Assert.Equal(path == "/management/v1/runtime" ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.NotFound, read.StatusCode);
 
         var write = await http.PostAsync(path, JsonContent.Create(new { grantType = "password" }),
             TestContext.Current.CancellationToken);
