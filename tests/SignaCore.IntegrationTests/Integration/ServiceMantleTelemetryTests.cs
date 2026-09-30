@@ -1,8 +1,3 @@
-using System.Net;
-using System.Net.Http.Json;
-using System.Reflection;
-using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -10,17 +5,22 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
-using ServiceMantle.OpenTelemetry;
-using SignaCore.Database;
+using ServiceMantle.Diagnostics.Instrumentation;
 using SignaCore.Database.Entity;
+using SignaCore.Database;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Startup;
 using SignaCore.Host.Telemetry;
+using System.Net.Http.Json;
+using System.Net;
+using System.Reflection;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;
@@ -82,19 +82,19 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         var factory = await StartNormalHostAsync();
         var services = factory.Services;
 
-        Assert.NotNull(services.GetService(ServiceMantleType("ServiceMantle.OpenTelemetry.OpenTelemetryRegistration")));
-        Assert.NotNull(services.GetService(ServiceMantleType("ServiceMantle.OpenTelemetry.Prometheus.PrometheusRegistration")));
+        Assert.NotNull(services.GetService(ServiceMantleType("ServiceMantle.Diagnostics.Instrumentation.OpenTelemetryRegistration")));
+        Assert.NotNull(services.GetService(ServiceMantleType("ServiceMantle.Diagnostics.Export.Prometheus.PrometheusRegistration")));
         var metrics = Assert.Single(
             services.GetServices<EndpointDataSource>().SelectMany(source => source.Endpoints).OfType<RouteEndpoint>(),
             endpoint => endpoint.RoutePattern.RawText == SignaCoreTelemetry.MetricsPath);
         Assert.Contains(metrics.Metadata, item => item.GetType().FullName ==
-            "ServiceMantle.OpenTelemetry.Prometheus.PrometheusEndpointMetadata");
+            "ServiceMantle.Diagnostics.Export.Prometheus.PrometheusEndpointMetadata");
 
         var hostAssembly = typeof(SignaCoreTelemetry).Assembly;
         Assert.Empty(LocalTelemetryReferences(hostAssembly));
         var project = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SignaCore.Host", "SignaCore.Host.csproj"));
         Assert.Empty(DirectOpenTelemetryPackages(project));
-        Assert.Contains("<PackageReference Include=\"ServiceMantle.OpenTelemetry\" />", project, StringComparison.Ordinal);
+        Assert.Contains("<PackageReference Include=\"ServiceMantle.Diagnostics\" />", project, StringComparison.Ordinal);
 
         // Negative variants: a local AddPrometheusExporter call and a direct package reference are
         // both detected by the same checks.
@@ -104,7 +104,7 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         Assert.Equal(
             ["OpenTelemetry.Exporter.Prometheus.AspNetCore"],
             DirectOpenTelemetryPackages(project.Replace(
-                "<PackageReference Include=\"ServiceMantle.OpenTelemetry\" />",
+                "<PackageReference Include=\"ServiceMantle.Diagnostics\" />",
                 "<PackageReference Include=\"OpenTelemetry.Exporter.Prometheus.AspNetCore\" />",
                 StringComparison.Ordinal)));
     }
@@ -179,7 +179,7 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         var logs = new CapturingLoggerProvider();
         var factory = await StartNormalHostAsync(logs: logs);
 
-        Assert.Null(factory.Services.GetService(ServiceMantleType("ServiceMantle.OpenTelemetry.Otlp.OtlpRuntime")));
+        Assert.Null(factory.Services.GetService(ServiceMantleType("ServiceMantle.Diagnostics.Export.Otlp.OtlpRuntime")));
         Assert.DoesNotContain(logs.Lines, line => line.Contains(OtlpWarning, StringComparison.Ordinal));
     }
 
@@ -196,7 +196,7 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
 
         // The host started, so the ServiceMantle OTLP startup validation accepted the endpoint.
         Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
-        Assert.NotNull(factory.Services.GetService(ServiceMantleType("ServiceMantle.OpenTelemetry.Otlp.OtlpRuntime")));
+        Assert.NotNull(factory.Services.GetService(ServiceMantleType("ServiceMantle.Diagnostics.Export.Otlp.OtlpRuntime")));
     }
 
     [Fact]
@@ -214,7 +214,7 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         using var ready = await client.GetAsync("/health/ready", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
-        Assert.Null(factory.Services.GetService(ServiceMantleType("ServiceMantle.OpenTelemetry.Otlp.OtlpRuntime")));
+        Assert.Null(factory.Services.GetService(ServiceMantleType("ServiceMantle.Diagnostics.Export.Otlp.OtlpRuntime")));
         Assert.Single(logs.Lines, line => line.Contains(OtlpWarning, StringComparison.Ordinal));
         Assert.DoesNotContain(logs.Lines, line => line.Contains("otlp-legacy", StringComparison.Ordinal));
     }

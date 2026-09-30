@@ -1,27 +1,27 @@
-using System.Globalization;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
-using ServiceMantle.Persistence.EntityFrameworkCore;
-using SignaCore.Database;
+using ServiceMantle.Persistence.Relational.Stores;
+using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
-using SignaCore.Domain;
+using SignaCore.Database;
 using SignaCore.Domain.Keys;
-using SignaCore.Domain.Services;
 using SignaCore.Domain.Services.Sms;
-using SignaCore.Host;
+using SignaCore.Domain.Services;
+using SignaCore.Domain;
 using SignaCore.Host.Services;
-using Xunit;
-
+using SignaCore.Host;
 using SignaCore.Tests.TestSupport;
+using System.Globalization;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Cryptography;
+using Xunit;
 
 namespace SignaCore.Tests.Host.Services;
 

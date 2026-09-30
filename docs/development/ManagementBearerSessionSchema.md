@@ -57,7 +57,7 @@ database that cannot answer yields `503` with `{"errorCode":"management.bearer.u
 Neither response echoes the header, and no log, audit row, or metric carries the credential.
 
 The shared `/management/v1/session` entries remain cookie-only for other clients. With
-`ServiceMantle.AspNetCore` **0.1.1-rc.1** or later on the same package version line, SignaCore
+`ServiceMantle.Web` **0.2.0** or later on the same package version line, SignaCore
 opts the bootstrap update into the narrow `ServiceMantle.ManagementBootstrapUpdateSession`
 policy. `PUT /management/v1/bootstrap`, `GET /api/admin/bootstrap`, and
 `POST /api/admin/bootstrap/test` accept a valid management Bearer without a cookie. Any

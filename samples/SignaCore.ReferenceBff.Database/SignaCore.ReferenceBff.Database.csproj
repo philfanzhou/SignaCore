@@ -14,6 +14,6 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
     <!-- Shared ServiceMantle installation/audit persistence, pinned to the audited release. -->
-    <PackageReference Include="ServiceMantle.Persistence.EntityFrameworkCore" />
+    <PackageReference Include="ServiceMantle.Persistence.Relational" />
   </ItemGroup>
 </Project>

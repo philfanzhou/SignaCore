@@ -1,26 +1,27 @@
 extern alias BffSample;
 
-using System.Data.Common;
-using System.Net;
-using System.Security.Claims;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Protocols;
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
-using SignaCore.ReferenceBff.Database;
-using ServiceMantle.Persistence.EntityFrameworkCore;
-using Xunit;
 using BffIdentityCheckService = BffSample::SignaCore.ReferenceBff.BffIdentityCheckService;
 using BffMemoryTicketStore = BffSample::SignaCore.ReferenceBff.MemoryTicketStore;
 using BffProgram = BffSample::Program;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.IdentityModel.Protocols;
+using ServiceMantle.Persistence.Relational.Stores;
+using ServiceMantle.Persistence.Relational;
+using SignaCore.ReferenceBff.Database;
+using System.Data.Common;
+using System.Net;
+using System.Security.Claims;
+using Xunit;
 
 namespace SignaCore.ReferenceBff.Tests;
 

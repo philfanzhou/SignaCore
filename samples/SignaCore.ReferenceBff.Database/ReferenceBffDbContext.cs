@@ -1,7 +1,9 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using ServiceMantle.Persistence.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+using ServiceMantle.Persistence.Relational.DataProtection;
+using ServiceMantle.Persistence.Relational.Mapping;
+using ServiceMantle.Persistence.Relational;
 
 namespace SignaCore.ReferenceBff.Database;
 

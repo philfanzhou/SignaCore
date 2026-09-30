@@ -1,13 +1,15 @@
-using System.Data.Common;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using ServiceMantle.Audit;
 using ServiceMantle.Installation;
-using ServiceMantle.Persistence.EntityFrameworkCore;
+using ServiceMantle.Persistence.Relational.Mapping;
+using ServiceMantle.Persistence.Relational.Stores;
+using ServiceMantle.Persistence.Relational;
 using SignaCore.ReferenceBff.Database;
+using System.Data.Common;
 using Testcontainers.PostgreSql;
 using Xunit;
 

@@ -420,6 +420,6 @@ only the instance that served the request, so file distribution and coordinated 
 orchestrator responsibilities.
 The bootstrap overview, target probe, and update accept a management Bearer without a Cookie;
 requests with any `Authorization` header use only Bearer, while requests without one retain Cookie
-compatibility. SignaCore requires `ServiceMantle.AspNetCore` 0.1.1-rc.1 or later on the same
+compatibility. SignaCore requires `ServiceMantle.Web` 0.2.0 or later on the same
 ServiceMantle package version line for this bootstrap authorization choice. HTTP carries the
 password and Bearer in plaintext; HTTPS is a deployment choice rather than an application gate.

@@ -1,9 +1,9 @@
-using System.Text;
-using System.Text.Json;
 using Microsoft.Net.Http.Headers;
-using ServiceMantle.AspNetCore.ManagementApi.Entries;
-using ServiceMantle.AspNetCore.RateLimiting;
 using ServiceMantle.Management;
+using ServiceMantle.Web.ManagementApi.Entries;
+using ServiceMantle.Web.RateLimiting;
+using System.Text.Json;
+using System.Text;
 
 namespace SignaCore.Host.Management;
 

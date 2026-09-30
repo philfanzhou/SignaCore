@@ -1,23 +1,23 @@
-using System.Net;
-using System.Net.Http.Json;
-using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.DependencyInjection;
 using ServiceMantle.Bootstrap;
-using ServiceMantle.AspNetCore.Health;
-using ServiceMantle.AspNetCore.Logging;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
-using SignaCore.Database;
+using ServiceMantle.Web.Health;
+using ServiceMantle.Web.Logging;
 using SignaCore.Database.Entity;
+using SignaCore.Database;
 using SignaCore.Host.Bootstrap;
-using Xunit;
 using SignaCore.Tests.Integration;
+using System.Net.Http.Json;
+using System.Net;
+using System.Text.Json;
+using Xunit;
 
 namespace SignaCore.IntegrationTests.Integration;
 

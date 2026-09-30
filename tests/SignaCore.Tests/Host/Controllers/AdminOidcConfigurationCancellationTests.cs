@@ -1,26 +1,26 @@
-using System.Net;
-using System.Security.Claims;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using SignaCore.Database;
+using ServiceMantle.Audit;
+using ServiceMantle.Persistence.Relational.Stores;
+using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
-using SignaCore.Domain;
+using SignaCore.Database;
 using SignaCore.Domain.Services;
+using SignaCore.Domain;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Models;
-using Xunit;
-
-using ServiceMantle.Audit;
-using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.Tests.TestSupport;
+using System.Net;
+using System.Security.Claims;
+using Xunit;
 
 namespace SignaCore.Tests.Host.Controllers;
 

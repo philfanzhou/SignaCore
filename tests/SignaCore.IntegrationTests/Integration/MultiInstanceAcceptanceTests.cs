@@ -1,7 +1,3 @@
-using System.Net;
-using System.Net.Http.Json;
-using System.Text;
-using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
@@ -10,8 +6,12 @@ using Microsoft.Extensions.DependencyInjection;
 using ServiceMantle.Configuration;
 using ServiceMantle.Health;
 using SignaCore.Database;
-using SignaCore.Host;
 using SignaCore.Host.Startup;
+using SignaCore.Host;
+using System.Net.Http.Json;
+using System.Net;
+using System.Text.Json;
+using System.Text;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;
@@ -327,7 +327,7 @@ public sealed class MultiInstanceAcceptanceTests : IAsyncLifetime
     private string RotateSetupCode()
     {
         using var db = OpenDatabase();
-        var setupCodeStore = new ServiceMantle.Persistence.EntityFrameworkCore.EfCoreServiceSetupCodeStore<IdentityDbContext>(
+        var setupCodeStore = new ServiceMantle.Persistence.Relational.Stores.EfCoreServiceSetupCodeStore<IdentityDbContext>(
             db,
             lifetime: ServiceMantle.Installation.SetupCodeLifetime.Create(TimeSpan.FromHours(1)));
         var issued = setupCodeStore.RotateAsync(

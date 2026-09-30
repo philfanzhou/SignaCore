@@ -1,21 +1,21 @@
-using System.Data.Common;
 using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Audit;
-using ServiceMantle.Persistence.EntityFrameworkCore;
-using SignaCore.Database;
+using ServiceMantle.Persistence.Relational.Stores;
+using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
-using SignaCore.Domain.Services;
+using SignaCore.Database;
 using SignaCore.Domain.Services.Ldap;
 using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.WeChat;
-using Xunit;
-using SignaCore.Tests.Integration;
-
+using SignaCore.Domain.Services;
 using SignaCore.Host.Audit;
+using SignaCore.Tests.Integration;
+using System.Data.Common;
+using Xunit;
 
 namespace SignaCore.IntegrationTests.Integration;
 

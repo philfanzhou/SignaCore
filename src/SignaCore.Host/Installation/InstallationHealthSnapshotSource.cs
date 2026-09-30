@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using ServiceMantle.AspNetCore.Health;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
+using ServiceMantle.Web.Health;
 using SignaCore.Database;
 
 namespace SignaCore.Host.Installation;

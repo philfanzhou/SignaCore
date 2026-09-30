@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Http;
-using ServiceMantle.AspNetCore.Management;
-using ServiceMantle.AspNetCore.ManagementApi;
-using ServiceMantle.AspNetCore.ManagementApi.Entries;
-using ServiceMantle.AspNetCore.RateLimiting;
 using ServiceMantle.Bootstrap;
+using ServiceMantle.Web.Management;
+using ServiceMantle.Web.ManagementApi.Entries;
+using ServiceMantle.Web.ManagementApi;
+using ServiceMantle.Web.RateLimiting;
 using SignaCore.Host.Models;
 
 namespace SignaCore.Host.Bootstrap;

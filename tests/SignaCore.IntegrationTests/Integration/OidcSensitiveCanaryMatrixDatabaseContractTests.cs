@@ -1,21 +1,21 @@
-using System.Net;
-using System.Net.Http.Headers;
-using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using ServiceMantle.AspNetCore.Logging;
+using ServiceMantle.Logging.Pipeline;
 using ServiceMantle.Logging;
-using ServiceMantle.Serilog;
-using SignaCore.Database;
+using ServiceMantle.Web.Logging;
 using SignaCore.Database.Entity;
+using SignaCore.Database;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Security;
 using SignaCore.Host.Telemetry;
+using System.Net.Http.Headers;
+using System.Net;
+using System.Text.Json;
 using Xunit;
 using static SignaCore.Tests.Integration.OidcDatabaseTestSupport;
 using static SignaCore.Tests.Integration.ServiceMantleLoggingTests;
@@ -193,7 +193,7 @@ public sealed partial class OidcSensitiveCanaryMatrixDatabaseContractTests
         await using var harness = await Harness.CreateAsync();
         using (var wrapper = harness.CreateHost(services =>
                {
-                   var type = typeof(SerilogOptions).Assembly.GetType("ServiceMantle.Serilog.RuntimeLoggerProvider", true)!;
+                   var type = typeof(SerilogOptions).Assembly.GetType("ServiceMantle.Logging.Pipeline.RuntimeLoggerProvider", true)!;
                    services.RemoveAll<ILoggerProvider>();
                    services.AddSingleton<ILoggerProvider>(provider => new TransparentLoggerProvider((ILoggerProvider)ActivatorUtilities.CreateInstance(provider, type)));
                }, captureLogs: false))
@@ -279,7 +279,7 @@ public sealed partial class OidcSensitiveCanaryMatrixDatabaseContractTests
         Assert.Contains(services.GetServices<SignaCoreTelemetry.MeterSelection>(), selection => selection.MeterNames.Contains("SignaCore"));
         var endpoint = Assert.Single(services.GetServices<EndpointDataSource>().SelectMany(source => source.Endpoints)
             .OfType<RouteEndpoint>(), endpoint => endpoint.RoutePattern.RawText == "/metrics");
-        Assert.Contains(endpoint.Metadata, item => item.GetType().FullName == "ServiceMantle.OpenTelemetry.Prometheus.PrometheusEndpointMetadata");
+        Assert.Contains(endpoint.Metadata, item => item.GetType().FullName == "ServiceMantle.Diagnostics.Export.Prometheus.PrometheusEndpointMetadata");
         var factory = services.GetRequiredService<ILoggerFactory>();
         Assert.False(factory.CreateLogger("Microsoft.AspNetCore.Hosting.Diagnostics").IsEnabled(LogLevel.Information));
         Assert.False(factory.CreateLogger("Microsoft.EntityFrameworkCore.Database.Command").IsEnabled(LogLevel.Information));

@@ -1,6 +1,6 @@
-using ServiceMantle;
 using ServiceMantle.Installation;
-using ServiceMantle.Persistence.EntityFrameworkCore;
+using ServiceMantle.Persistence.Relational.Stores;
+using ServiceMantle;
 using SignaCore.Database;
 
 namespace SignaCore.Host.Installation;

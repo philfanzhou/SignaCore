@@ -1,16 +1,16 @@
-using System.Data.Common;
-using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using ServiceMantle.Configuration;
 using ServiceMantle.Installation;
-using ServiceMantle.Persistence.EntityFrameworkCore;
-using SignaCore.Database;
+using ServiceMantle.Persistence.Relational.Mapping;
 using SignaCore.Database.Entity;
+using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
+using System.Data.Common;
+using System.Security.Cryptography;
 
 namespace SignaCore.Host.Bootstrap;
 

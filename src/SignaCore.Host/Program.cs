@@ -1,16 +1,15 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using ServiceMantle;
 using ServiceMantle.Audit;
-using ServiceMantle.AspNetCore.Health;
+using ServiceMantle.Bootstrap;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
+using ServiceMantle.Web.Health;
+using ServiceMantle;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
-using SignaCore.Host;
-using ServiceMantle.Bootstrap;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
@@ -21,6 +20,7 @@ using SignaCore.Host.Provisioning;
 using SignaCore.Host.Security;
 using SignaCore.Host.Startup;
 using SignaCore.Host.Telemetry;
+using SignaCore.Host;
 
 var builder = WebApplication.CreateBuilder(args);
 

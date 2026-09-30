@@ -1,13 +1,13 @@
-using System.Data;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ServiceMantle.Configuration;
-using ServiceMantle.Persistence.EntityFrameworkCore;
+using ServiceMantle.Persistence.Relational.Stores;
 using SignaCore.Database;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
+using System.Data;
 
 namespace SignaCore.Host.Management;
 

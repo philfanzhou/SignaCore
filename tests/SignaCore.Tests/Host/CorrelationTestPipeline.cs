@@ -32,7 +32,7 @@ internal static class CorrelationTestPipeline
     {
         if (correlationId is not null)
         {
-            context.Request.Headers[ServiceMantle.AspNetCore.Http.ServiceHeaderNames.CorrelationId] = correlationId;
+            context.Request.Headers[ServiceMantle.Web.Http.ServiceHeaderNames.CorrelationId] = correlationId;
         }
 
         await Pipeline(context);

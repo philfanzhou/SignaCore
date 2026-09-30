@@ -1,10 +1,11 @@
-using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using ServiceMantle;
 using ServiceMantle.Configuration;
-using ServiceMantle.Consul;
+using ServiceMantle.Discovery.Configuration;
+using ServiceMantle.Discovery.Registration;
+using ServiceMantle;
 using SignaCore.Domain.Keys;
+using System.Net;
 
 namespace SignaCore.Host.Configuration;
 

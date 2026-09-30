@@ -1,17 +1,17 @@
-using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Moq;
-using ServiceMantle.AspNetCore.Health;
-using ServiceMantle.AspNetCore.Logging;
 using ServiceMantle.Health;
 using ServiceMantle.Logging;
+using ServiceMantle.Web.Health;
+using ServiceMantle.Web.Logging;
 using SignaCore.Domain.Keys;
-using SignaCore.Host;
 using SignaCore.Host.HealthChecks;
 using SignaCore.Host.Http;
+using SignaCore.Host;
 using SignaCore.Tests.Host.HealthChecks;
+using System.Text.Json;
 using Xunit;
 
 namespace SignaCore.Tests.Host;

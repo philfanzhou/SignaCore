@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
@@ -7,14 +6,15 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ServiceMantle.Audit;
-using ServiceMantle.AspNetCore.Management;
 using ServiceMantle.Management;
+using ServiceMantle.Web.Management;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
-using SignaCore.Host;
 using SignaCore.Host.Management;
 using SignaCore.Host.Security;
+using SignaCore.Host;
 using SignaCore.Tests.Domain.Keys;
+using System.Security.Claims;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Management;

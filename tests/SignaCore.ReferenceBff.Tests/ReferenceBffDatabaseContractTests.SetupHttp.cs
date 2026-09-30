@@ -1,17 +1,17 @@
 extern alias BffSample;
-using System.Net;
-using System.Text;
-using System.Text.Json;
-using System.Text.RegularExpressions;
 using BffSample::SignaCore.ReferenceBff;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.AspNetCore.Mvc.Testing;
-using ServiceMantle.AspNetCore.ManagementApi.Setup;
 using ServiceMantle.Installation;
+using ServiceMantle.Web.ManagementApi.Setup;
 using SignaCore.ReferenceBff.Database;
-using Xunit;
 using SilentTerminal = SignaCore.ReferenceBff.Tests.ReferenceBffSetupCodeTests.SilentTerminal;
+using System.Net;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Text;
+using Xunit;
 
 namespace SignaCore.ReferenceBff.Tests;
 

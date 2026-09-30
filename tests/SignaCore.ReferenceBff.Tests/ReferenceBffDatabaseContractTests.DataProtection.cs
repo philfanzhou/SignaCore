@@ -1,18 +1,19 @@
 extern alias BffSample;
-using System.Security.Cryptography;
-using System.Xml.Linq;
 using BffSample::SignaCore.ReferenceBff;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using ServiceMantle.Persistence.Relational.DataProtection;
+using ServiceMantle.Persistence.Relational;
 using ServiceMantle;
-using ServiceMantle.Persistence.EntityFrameworkCore;
 using SignaCore.ReferenceBff.Database;
+using System.Security.Cryptography;
+using System.Xml.Linq;
 using Xunit;
 
 namespace SignaCore.ReferenceBff.Tests;

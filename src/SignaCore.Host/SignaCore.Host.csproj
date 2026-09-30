@@ -16,13 +16,13 @@
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="ServiceMantle" />
-    <PackageReference Include="ServiceMantle.AspNetCore" />
-    <PackageReference Include="ServiceMantle.Consul" />
-    <PackageReference Include="ServiceMantle.OpenTelemetry" />
+    <PackageReference Include="ServiceMantle.Web" />
+    <PackageReference Include="ServiceMantle.Discovery" />
+    <PackageReference Include="ServiceMantle.Diagnostics" />
     <PackageReference Include="ServiceMantle.Database.PostgreSql" />
     <PackageReference Include="ServiceMantle.Database.Sqlite" />
-    <PackageReference Include="ServiceMantle.Persistence.EntityFrameworkCore" />
-    <PackageReference Include="ServiceMantle.Serilog" />
+    <PackageReference Include="ServiceMantle.Persistence.Relational" />
+    <PackageReference Include="ServiceMantle.Logging" />
   </ItemGroup>
 
   <ItemGroup>

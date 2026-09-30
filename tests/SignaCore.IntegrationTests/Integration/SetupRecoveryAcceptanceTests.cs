@@ -1,18 +1,18 @@
-using System.Net;
-using System.Net.Http.Json;
-using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using ServiceMantle.AspNetCore.ManagementApi.Setup;
 using ServiceMantle.Installation;
+using ServiceMantle.Web.ManagementApi.Setup;
 using SignaCore.Database;
 using SignaCore.Domain.Validators;
-using SignaCore.Host;
 using SignaCore.Host.Installation;
 using SignaCore.Host.Startup;
+using SignaCore.Host;
+using System.Net.Http.Json;
+using System.Net;
+using System.Text.Json;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;
@@ -335,7 +335,7 @@ public sealed class SetupRecoveryAcceptanceTests : IAsyncLifetime
     private async Task<string> RotateSetupCodeAsync(TimeSpan expiresIn)
     {
         await using var db = OpenDatabase();
-        var setupCodeStore = new ServiceMantle.Persistence.EntityFrameworkCore.EfCoreServiceSetupCodeStore<IdentityDbContext>(
+        var setupCodeStore = new ServiceMantle.Persistence.Relational.Stores.EfCoreServiceSetupCodeStore<IdentityDbContext>(
             db,
             lifetime: SetupCodeLifetime.Create(expiresIn));
         var issued = await setupCodeStore.RotateAsync(

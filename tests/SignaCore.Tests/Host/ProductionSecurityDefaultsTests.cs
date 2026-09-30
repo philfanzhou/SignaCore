@@ -8,11 +8,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using ServiceMantle.AspNetCore.Management;
+using ServiceMantle.Web.Management;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
-using SignaCore.Host;
 using SignaCore.Host.Management;
+using SignaCore.Host;
 using SignaCore.Tests.Domain.Keys;
 using Xunit;
 

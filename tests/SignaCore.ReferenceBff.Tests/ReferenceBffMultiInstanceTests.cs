@@ -1,23 +1,23 @@
 extern alias BffSample;
 
-using System.IdentityModel.Tokens.Jwt;
-using System.Net;
-using System.Net.Http.Json;
-using System.Text.Json;
-using Microsoft.AspNetCore.Authentication;
+using BffOperationLog = BffSample::SignaCore.ReferenceBff.BffOperationLog;
+using MemoryTicketStore = BffSample::SignaCore.ReferenceBff.MemoryTicketStore;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using System.Collections.Concurrent;
-using System.Text.RegularExpressions;
-using BffOperationLog = BffSample::SignaCore.ReferenceBff.BffOperationLog;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using SignaCore.ReferenceBff.Database;
+using System.Collections.Concurrent;
+using System.IdentityModel.Tokens.Jwt;
+using System.Net.Http.Json;
+using System.Net;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Xunit;
-using MemoryTicketStore = BffSample::SignaCore.ReferenceBff.MemoryTicketStore;
 
 namespace SignaCore.ReferenceBff.Tests;
 
@@ -63,7 +63,7 @@ public sealed class ReferenceBffMultiInstanceTests
             await using (var db = Context(connection))
             {
                 await db.Database.MigrateAsync(ct);
-                await new ServiceMantle.Persistence.EntityFrameworkCore.EfCoreServiceInstallationStore<ReferenceBffDbContext>(db)
+                await new ServiceMantle.Persistence.Relational.Stores.EfCoreServiceInstallationStore<ReferenceBffDbContext>(db)
                     .CreatePendingAsync(ReferenceBffServiceMantle.ServiceId, ct);
             }
             using var routing = new RoutedAuthority(a.Server.CreateHandler(), b.Server.CreateHandler());

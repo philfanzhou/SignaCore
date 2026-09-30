@@ -1,26 +1,26 @@
 using DotNet.Testcontainers.Containers;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
-using ServiceMantle.Persistence.EntityFrameworkCore;
-using SignaCore.Database;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using ServiceMantle.Persistence.Relational.Stores;
+using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
-using SignaCore.Domain;
+using SignaCore.Database;
 using SignaCore.Domain.Models;
-using SignaCore.Domain.Services;
 using SignaCore.Domain.Services.Sms;
+using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
+using SignaCore.Domain;
 using SignaCore.Host;
+using SignaCore.Tests.Integration;
 using Testcontainers.PostgreSql;
 using Xunit;
-
-using SignaCore.Tests.Integration;
 
 namespace SignaCore.IntegrationTests.Integration;
 

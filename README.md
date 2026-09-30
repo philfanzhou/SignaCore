@@ -34,7 +34,15 @@ SignaCore is a .NET 10 identity and authentication service. It centralizes accou
 
 Requirements: .NET SDK 10, Node.js 22.12+, 24+, or 26+ with npm for the admin UI, and Docker for the container smoke test.
 
-The host references the `ServiceMantle.AspNetCore` NuGet package for the shared request-correlation
+SignaCore pins all eight ServiceMantle packages to `0.2.0`: the core package, `Web`,
+`Discovery`, `Logging`, `Diagnostics`, `Persistence.Relational`, and the PostgreSQL/SQLite
+providers. Upgrade or roll back the complete binaries together; do not mix the retired adapter
+assemblies with capability-named assemblies. This package migration adds no database migration:
+HTTP routes, configuration keys, JWT/JWKS, management Cookie/Data Protection purposes, and
+existing migration history remain unchanged. A binary rollback does not undo an independently
+applied irreversible database migration (see [migration guidance](docs/database/migrations.md)).
+
+The host references the `ServiceMantle.Web` NuGet package for the shared request-correlation
 middleware; its version is pinned centrally in `Directory.Packages.props` and restores from
 nuget.org like every other dependency — a clean checkout needs no source checkout, submodule, or
 extra feed configuration.

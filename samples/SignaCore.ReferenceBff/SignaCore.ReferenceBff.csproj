@@ -12,8 +12,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
-    <PackageReference Include="ServiceMantle.AspNetCore" />
-    <PackageReference Include="ServiceMantle.Serilog" />
+    <PackageReference Include="ServiceMantle.Web" />
+    <PackageReference Include="ServiceMantle.Logging" />
   </ItemGroup>
 
   <ItemGroup>
