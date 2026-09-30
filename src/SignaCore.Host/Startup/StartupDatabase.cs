@@ -227,14 +227,20 @@ internal static class StartupDatabase
     /// Composition seam for the directory pre-step, so its failure classification can be exercised
     /// deterministically; the production entry always uses <see cref="Directory.CreateDirectory"/>.
     /// </param>
+    /// <param name="canonicalizePath">
+    /// Composition seam for the path canonicalization inside the pre-step, so its failure
+    /// classification can be exercised deterministically on every platform; the production entry
+    /// always uses <see cref="Path.GetFullPath(string)"/>.
+    /// </param>
     internal static async Task EnsureSqliteDatabaseExistsAsync(
         DatabaseOptions options,
         IDatabaseTargetPreparationProvider? targetPreparationProvider,
         Func<string, DirectoryInfo>? createParentDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, string>? canonicalizePath = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        EnsureSqliteParentDirectoryExists(options.ConnectionString, createParentDirectory);
+        EnsureSqliteParentDirectoryExists(options.ConnectionString, createParentDirectory, canonicalizePath);
 
         var provider = targetPreparationProvider ?? new SqliteDatabaseTargetPreparationProvider();
         var target = new BootstrapDatabaseConfiguration(
@@ -297,7 +303,8 @@ internal static class StartupDatabase
     /// </summary>
     private static void EnsureSqliteParentDirectoryExists(
         string connectionString,
-        Func<string, DirectoryInfo>? createParentDirectory)
+        Func<string, DirectoryInfo>? createParentDirectory,
+        Func<string, string>? canonicalizePath)
     {
         string dataSource;
         try
@@ -318,9 +325,25 @@ internal static class StartupDatabase
 
         // The parent chain is computed from the canonical form so a path the provider will refuse
         // for its shape (for example a `..` segment) does not materialize directories first; the
-        // input is already absolute, so this never consults the working directory.
-        var canonicalPath = Path.GetFullPath(dataSource);
-        var directory = Path.GetDirectoryName(canonicalPath);
+        // input is already absolute, so this never consults the working directory. Canonicalization
+        // runs through the same closed classification as the connection-string parse above: a value
+        // the OS full-path expansion refuses (for example a drive-absolute path with an extra
+        // colon on Windows) fails startup closed with the fixed sanitized invalid-target message
+        // instead of letting the BCL exception — whose text embeds the configured path — escape.
+        string? directory;
+        try
+        {
+            var canonicalPath = (canonicalizePath ?? Path.GetFullPath)(dataSource);
+            directory = Path.GetDirectoryName(canonicalPath);
+        }
+        catch (Exception exception) when (exception is ArgumentException
+            or NotSupportedException
+            or PathTooLongException
+            or IOException)
+        {
+            throw SqlitePreparationFailure(WellKnownDatabaseTargetPreparationErrorCodes.InvalidTarget);
+        }
+
         if (string.IsNullOrEmpty(directory) || Directory.Exists(directory))
         {
             return;
