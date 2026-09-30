@@ -186,7 +186,7 @@ if (bootstrap is null)
         });
 
         bootstrapApp.UseMiddleware<ExceptionHandlingMiddleware>();
-        bootstrapApp.UseServiceMantlePipeline();
+        bootstrapApp.UseSignaCoreSharedHttpPipeline();
 
         bootstrapApp.MapServiceMantleHealthEndpoints();
         bootstrapApp.MapServiceMantleBootstrap();
@@ -352,7 +352,7 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
     });
 
     setupApp.UseMiddleware<ExceptionHandlingMiddleware>();
-    setupApp.UseServiceMantlePipeline();
+    setupApp.UseSignaCoreSharedHttpPipeline();
 
     setupApp.MapServiceMantleHealthEndpoints();
     setupApp.MapServiceMantleSetup(SetupCompletionExecutor.ExecuteAsync);
@@ -602,7 +602,7 @@ app.UseMiddleware<OidcClientPartitionResolverMiddleware>();
 // The composed ServiceMantle pipeline replaces the individually inserted correlation-id,
 // rate-limiting, authentication, and authorization middleware. It must be called exactly once and
 // must not be mixed with the individual ServiceMantle entry points.
-app.UseServiceMantlePipeline();
+app.UseSignaCoreSharedHttpPipeline();
 
 // The bootstrap update guard runs after the shared pipeline — so its 401/403 still precede the
 // host rules — and before the endpoint: it refuses a Development-fallback host and an
