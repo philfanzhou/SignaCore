@@ -41,24 +41,24 @@ public class ExceptionHandlingMiddlewareTests
     }
 
     [Fact]
-    public async Task InvokeAsync_ArgumentException_Returns400()
+    public async Task InvokeAsync_ArgumentException_Returns500()
     {
         var (status, body) = await InvokeAsync(_ => throw new ArgumentException("secret field detail"));
 
-        Assert.Equal(StatusCodes.Status400BadRequest, status);
+        Assert.Equal(StatusCodes.Status500InternalServerError, status);
         using var doc = JsonDocument.Parse(body);
-        Assert.Equal(400, doc.RootElement.GetProperty("Status").GetInt32());
-        Assert.Equal("Bad Request", doc.RootElement.GetProperty("Title").GetString());
+        Assert.Equal(500, doc.RootElement.GetProperty("Status").GetInt32());
+        Assert.Equal("Internal Server Error", doc.RootElement.GetProperty("Title").GetString());
     }
 
     [Fact]
-    public async Task InvokeAsync_InvalidOperationException_Returns409()
+    public async Task InvokeAsync_InvalidOperationException_Returns500()
     {
         var (status, body) = await InvokeAsync(_ => throw new InvalidOperationException("internal state detail"));
 
-        Assert.Equal(StatusCodes.Status409Conflict, status);
+        Assert.Equal(StatusCodes.Status500InternalServerError, status);
         using var doc = JsonDocument.Parse(body);
-        Assert.Equal("Conflict", doc.RootElement.GetProperty("Title").GetString());
+        Assert.Equal("Internal Server Error", doc.RootElement.GetProperty("Title").GetString());
     }
 
     [Fact]
@@ -116,60 +116,80 @@ public class ExceptionHandlingMiddlewareTests
         var logger = new RecordingLogger();
         var middleware = new ExceptionHandlingMiddleware(_ => throw failure, logger);
 
-        await middleware.InvokeAsync(context);
-
         var clientCancellation = aborted && failure is OperationCanceledException;
-        // The ProblemDetails write observes RequestAborted, so a request the client already gave up
-        // on keeps its decided status code but receives no body, logged as the same client-gone case.
         var writeAborted = aborted && !clientCancellation && !started;
-        if (writeAborted)
-        {
-            Assert.Collection(
-                logger.Entries,
-                first => Assert.Equal(LogLevel.Error, first.Level),
-                second => Assert.Equal(LogLevel.Debug, second.Level));
-        }
+        if (clientCancellation || writeAborted)
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => middleware.InvokeAsync(context));
         else
-        {
-            var entry = Assert.Single(logger.Entries);
-            Assert.Equal(clientCancellation ? LogLevel.Debug : LogLevel.Error, entry.Level);
-        }
+            await middleware.InvokeAsync(context);
 
+        Assert.Equal(clientCancellation ? 0 : 1, logger.Entries.Count);
         Assert.All(logger.Entries, entry =>
         {
+            Assert.Equal(LogLevel.Error, entry.Level);
             Assert.Null(entry.Exception);
             Assert.DoesNotContain(privateMarker, entry.Message);
         });
         if (started || clientCancellation)
         {
-            Assert.Equal(StatusCodes.Status202Accepted, context.Response.StatusCode);
+            Assert.Equal(202, context.Response.StatusCode);
             Assert.Equal(0, body.Length);
             Assert.Null(context.Response.ContentType);
         }
-        else if (writeAborted)
-        {
-            Assert.Equal(
-                kind switch { "argument" => 400, "invalid-operation" => 409, _ => 500 },
-                context.Response.StatusCode);
-            Assert.Equal("application/json", context.Response.ContentType);
-            Assert.Equal(0, body.Length);
-        }
         else
         {
-            var status = kind switch { "argument" => 400, "invalid-operation" => 409, _ => 500 };
-            Assert.Equal(status, context.Response.StatusCode);
+            Assert.Equal(500, context.Response.StatusCode);
             Assert.Equal("application/json", context.Response.ContentType);
-            var content = System.Text.Encoding.UTF8.GetString(body.ToArray());
-            Assert.DoesNotContain(privateMarker, content);
-            using var json = JsonDocument.Parse(content);
-            Assert.Equal(3, json.RootElement.EnumerateObject().Count());
-            Assert.Equal(status, json.RootElement.GetProperty("Status").GetInt32());
-            Assert.Equal(status switch { 400 => "Bad Request", 409 => "Conflict", _ => "Internal Server Error" },
-                json.RootElement.GetProperty("Title").GetString());
-            Assert.Equal(status == 500 ? "An internal error occurred." :
-                "The request could not be processed. See server logs for details.",
-                json.RootElement.GetProperty("Detail").GetString());
+            if (writeAborted) Assert.Equal(0, body.Length);
+            else
+            {
+                var content = System.Text.Encoding.UTF8.GetString(body.ToArray());
+                Assert.DoesNotContain(privateMarker, content);
+                using var json = JsonDocument.Parse(content);
+                Assert.Equal(3, json.RootElement.EnumerateObject().Count());
+                Assert.Equal(500, json.RootElement.GetProperty("Status").GetInt32());
+                Assert.Equal("Internal Server Error", json.RootElement.GetProperty("Title").GetString());
+                Assert.Equal("An internal error occurred.", json.RootElement.GetProperty("Detail").GetString());
+            }
         }
+    }
+
+    [Theory]
+    [MemberData(nameof(ExceptionCases))]
+    public async Task SharedEntry_PropagatesTheOriginalFailureWithoutLocalLoggingOrWriting(
+        string kind, bool aborted, bool started)
+    {
+        using var cancellation = new CancellationTokenSource();
+        if (aborted) cancellation.Cancel();
+        var context = new DefaultHttpContext { RequestAborted = cancellation.Token };
+        using var body = new MemoryStream();
+        if (started) context.Features.Set<IHttpResponseFeature>(new StartedResponseFeature(body));
+        else context.Response.Body = body;
+        Exception failure = kind switch
+        {
+            "argument" => new ArgumentException("synthetic-private-canary"),
+            "invalid-operation" => new InvalidOperationException("synthetic-private-canary"),
+            "cancel" => new OperationCanceledException(cancellation.Token),
+            "task-cancel" => new TaskCanceledException("synthetic-private-canary"),
+            _ => new IOException("synthetic-private-canary")
+        };
+        var logger = new RecordingLogger();
+        var middleware = new ExceptionHandlingMiddleware(http =>
+        {
+            ExceptionHandlingMiddleware.MarkSharedPipelineEntry(http);
+            throw failure;
+        }, logger);
+        var observed = await Record.ExceptionAsync(() => middleware.InvokeAsync(context));
+        Assert.Same(failure, observed);
+        Assert.Empty(logger.Entries);
+        Assert.Equal(0, body.Length);
+        Assert.Null(context.Response.ContentType);
+        // The request-local marker must not suppress another request's fallback.
+        var other = new DefaultHttpContext();
+        other.Response.Body = new MemoryStream();
+        await new ExceptionHandlingMiddleware(_ => throw new Exception(), logger).InvokeAsync(other);
+        Assert.Equal(500, other.Response.StatusCode);
+        Assert.Single(logger.Entries);
     }
 
     /// <summary>
@@ -188,20 +208,19 @@ public class ExceptionHandlingMiddlewareTests
 
         await middleware.InvokeAsync(context);
 
-        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        Assert.Equal(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
         Assert.Equal("application/json", context.Response.ContentType);
         Assert.NotEmpty(body.ObservedTokens);
         Assert.All(body.ObservedTokens, token => Assert.Equal(cancellation.Token, token));
         using var json = JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(body.ToArray()));
-        Assert.Equal(400, json.RootElement.GetProperty("Status").GetInt32());
+        Assert.Equal(500, json.RootElement.GetProperty("Status").GetInt32());
     }
 
     /// <summary>
-    /// An abort observed while writing is the same client-gone case #197 already classifies as
-    /// Debug: the status code stays decided, nothing is rethrown, and no second Error appears.
+    /// A failed fallback write propagates cancellation without a second log or response.
     /// </summary>
     [Fact]
-    public async Task InvokeAsync_WhenTheClientDisconnectsDuringTheWrite_LogsDebugWithoutANewError()
+    public async Task InvokeAsync_WhenTheClientDisconnectsDuringTheWrite_PropagatesCancellation()
     {
         using var cancellation = new CancellationTokenSource();
         var context = new DefaultHttpContext { RequestAborted = cancellation.Token };
@@ -210,14 +229,11 @@ public class ExceptionHandlingMiddlewareTests
         var logger = new RecordingLogger();
         var middleware = new ExceptionHandlingMiddleware(_ => throw new Exception("private-marker"), logger);
 
-        await middleware.InvokeAsync(context);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => middleware.InvokeAsync(context));
 
         Assert.Equal(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
         Assert.Equal(cancellation.Token, body.ObservedToken);
-        Assert.Collection(
-            logger.Entries,
-            first => Assert.Equal(LogLevel.Error, first.Level),
-            second => Assert.Equal(LogLevel.Debug, second.Level));
+        Assert.Equal(LogLevel.Error, Assert.Single(logger.Entries).Level);
         Assert.All(logger.Entries, entry => Assert.DoesNotContain("private-marker", entry.Message));
     }
 

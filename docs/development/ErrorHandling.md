@@ -1,6 +1,34 @@
 # Error Handling
 
-`ExceptionHandlingMiddleware` is the final boundary for unhandled request exceptions. Controllers should return expected validation and authorization failures explicitly; unexpected failures are logged with the correlation identifier and converted to a stable JSON error response.
+ServiceMantle Problem Details handles unexpected endpoint failures in the Bootstrap, Setup, and
+normal host. `ExceptionHandlingMiddleware` covers only middleware before that shared pipeline.
+Controllers return expected validation, OAuth/OIDC, and management failures explicitly.
+
+## HTTP exception boundaries
+
+Each host calls `UseSignaCoreSharedHttpPipeline` once. Its request-private marker prevents the outer
+fallback from logging or serializing failures rethrown after entry. The marker is never shared across
+requests. No broad `ArgumentException` or `InvalidOperationException` mapping is registered: current
+throw sites represent internal invariants, while expected client errors have explicit results.
+
+| Path | Previous behavior | Current behavior |
+| --- | --- | --- |
+| Unexpected endpoint failure, including argument/state invariant failures | Shared 500 | Unchanged: 500, `application/problem+json`, exactly `type`, `title`, `status`, `correlationId`, `errorCode` |
+| Explicit OAuth/OIDC or management rejection | Protocol-specific response | Unchanged |
+| Pre-pipeline argument/state/unknown failure | Local 400/409/500 | Always 500, `application/json`, exactly PascalCase `Status`, `Title`, `Detail` |
+| Caller cancellation before response starts | Could be swallowed by outer fallback | Propagates with the original request token; no fabricated response |
+| Shared error-response write failure | Could trigger a second fallback | Propagates; no second serializer or outer error log |
+| Failure after response starts | Sent response retained | Unchanged; no appended error body |
+
+The prefix fallback uses only fixed public strings and logs the exception type without the exception
+instance or message. Its own failed write also propagates using `RequestAborted`. Shared errors are
+logged once by ServiceMantle with a safe error code and correlation ID. Transport failure does not
+promise an HTTP response. The shared library retains its existing handling for already-started
+responses; this change does not alter that contract.
+
+Rollback restores the previous outer boundary and three pipeline calls together. It restores the
+prefix 400/409 behavior and cancellation swallowing; endpoint Problem Details and explicit protocol
+responses remain unchanged. There is no schema or configuration migration.
 
 ## Request correlation
 
@@ -16,8 +44,8 @@ The shared ServiceMantle correlation middleware (`UseServiceMantleCorrelationId`
   reads only the slot. It throws a fixed `InvalidOperationException` when the middleware has not
   run, so there is no raw-header fallback and no second id generation. Audit rows therefore always
   match the response header and the logs.
-- The middleware logs nothing itself and never swallows downstream exceptions or cancellation;
-  `ExceptionHandlingMiddleware` remains the single logging boundary for unhandled failures. A
+- The correlation middleware logs nothing itself and never swallows downstream exceptions or
+  cancellation; shared Problem Details owns endpoint error logging. A
   correlation id is a log-correlation value only — not authenticated, not unique, and never an
   authorization or audit subject identity. The raw caller header stays on the request object; do
   not bypass the accessor and treat it as trusted.
