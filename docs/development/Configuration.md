@@ -440,3 +440,6 @@ requests with any `Authorization` header use only Bearer, while requests without
 compatibility. SignaCore requires `ServiceMantle.AspNetCore` 0.1.1-rc.1 or later on the same
 ServiceMantle package version line for this bootstrap authorization choice. HTTP carries the
 password and Bearer in plaintext; HTTPS is a deployment choice rather than an application gate.
+
+The completed host also offers protected [management runtime information](./ManagementRuntimeInfo.md)
+for identifying the instance and version serving an administrator request.
