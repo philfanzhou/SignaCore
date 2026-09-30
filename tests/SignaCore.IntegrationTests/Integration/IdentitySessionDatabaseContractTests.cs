@@ -1423,7 +1423,7 @@ public sealed class IdentitySessionDatabaseContractTests
     private sealed class SqliteSessionDatabase : IAsyncDisposable
     {
         private readonly string _databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-identity-session-{Guid.NewGuid():N}.db");
 
         public DbContextOptions<IdentityDbContext> BuildOptions(IInterceptor? interceptor = null)

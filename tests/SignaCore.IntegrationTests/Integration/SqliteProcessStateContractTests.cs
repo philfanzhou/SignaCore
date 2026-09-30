@@ -105,7 +105,7 @@ public sealed class SqliteProcessStateContractTests
     public async Task APoolClearInvokedAgainstAPooledHolder_RemovesTheHotWalSidecarItDependsOn()
     {
         var databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-pool-contract-{Guid.NewGuid():N}.db");
         var connectionString = new SqliteConnectionStringBuilder
         {

@@ -76,7 +76,7 @@ public sealed class ServiceSettingsDatabaseContractTests
 
     private static async Task<DbContextOptions<IdentityDbContext>> CreateMigratedSqliteAsync()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"signacore-shared-settings-{Guid.NewGuid():N}.db");
+        var path = Path.Combine(PhysicalTempPath.Root(), $"signacore-shared-settings-{Guid.NewGuid():N}.db");
         var options = CreateSqliteOptions(path);
         await using var context = new IdentityDbContext(options);
         await context.Database.MigrateAsync(TestContext.Current.CancellationToken);
@@ -493,7 +493,7 @@ public sealed class ServiceSettingsDatabaseContractTests
     public async Task ExistingDatabaseUpgradeWithUnmigratedLegacyRows_IsRefusedAndKeepsTheRows()
     {
         var path = Path.Combine(
-            Path.GetTempPath(), $"signacore-shared-upgrade-{Guid.NewGuid():N}.db");
+            PhysicalTempPath.Root(), $"signacore-shared-upgrade-{Guid.NewGuid():N}.db");
         var options = CreateSqliteOptions(path);
         var databaseOptions = new DatabaseOptions
         {
@@ -574,7 +574,7 @@ public sealed class ServiceSettingsDatabaseContractTests
     public async Task ExistingDatabaseUpgradeWithAnEmptyLegacyTable_RetainsTheAuditHistoryRows()
     {
         var path = Path.Combine(
-            Path.GetTempPath(), $"signacore-shared-upgrade-{Guid.NewGuid():N}.db");
+            PhysicalTempPath.Root(), $"signacore-shared-upgrade-{Guid.NewGuid():N}.db");
         var options = CreateSqliteOptions(path);
         var databaseOptions = new DatabaseOptions
         {
@@ -653,7 +653,7 @@ public sealed class ServiceSettingsDatabaseContractTests
     public async Task PendingSetupHost_RegistersOnlyTheSharedUpdatePath()
     {
         var workingDirectory = Path.Combine(
-            Path.GetTempPath(), $"signacore-setup-nostack-{Guid.NewGuid():N}");
+            PhysicalTempPath.Root(), $"signacore-setup-nostack-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workingDirectory);
         var bootstrapFilePath = await InstallationTestSupport.PrepareUninstalledBootstrapAsync(
             workingDirectory,

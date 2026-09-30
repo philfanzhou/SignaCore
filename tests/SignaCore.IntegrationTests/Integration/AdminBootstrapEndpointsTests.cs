@@ -39,7 +39,7 @@ public sealed class AdminBootstrapEndpointsTests : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        _directory = Path.Combine(Path.GetTempPath(), $"signacore-bootstrap-endpoints-{Guid.NewGuid():N}");
+        _directory = Path.Combine(PhysicalTempPath.Root(), $"signacore-bootstrap-endpoints-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_directory);
         _databasePath = Path.Combine(_directory, "identity.db");
         _databaseConnectionString =

@@ -56,7 +56,7 @@ public sealed class ServiceMantleInstallationAdoptionTests
     public async Task SqliteAddServiceInstallations_AdoptsFailClosed(AdoptionScenario scenario)
     {
         var databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-sm-install-{scenario}-{Guid.NewGuid():N}.db");
         var options = CreateSqliteOptions(databasePath);
 
@@ -79,7 +79,7 @@ public sealed class ServiceMantleInstallationAdoptionTests
     public async Task SqliteModelMatchesSnapshot_NoPendingChanges()
     {
         var databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-sm-symmetry-{Guid.NewGuid():N}.db");
         var options = CreateSqliteOptions(databasePath);
 

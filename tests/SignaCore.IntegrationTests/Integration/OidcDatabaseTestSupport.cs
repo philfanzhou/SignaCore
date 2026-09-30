@@ -372,7 +372,7 @@ internal static class OidcDatabaseTestSupport
         {
             Assert.SkipUnless(Environment.GetEnvironmentVariable("RUN_SIGNACORE_DATABASE_CONTRACTS") == "true", "Enable the PostgreSQL database contract matrix.");
             var container = new PostgreSqlBuilder(Environment.GetEnvironmentVariable("SIGNACORE_POSTGRES_IMAGE") ?? "postgres:15-alpine").Build();
-            var directory = Path.Combine(Path.GetTempPath(), $"signacore-shared-budget-{Guid.NewGuid():N}");
+            var directory = Path.Combine(PhysicalTempPath.Root(), $"signacore-shared-budget-{Guid.NewGuid():N}");
             try
             {
                 await container.StartAsync(Ct);

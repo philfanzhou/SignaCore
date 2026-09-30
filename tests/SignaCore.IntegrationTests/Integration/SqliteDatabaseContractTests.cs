@@ -21,7 +21,7 @@ public sealed class SqliteDatabaseContractTests
     public async Task InteractiveOidcMigration_FreshDatabaseUsesFailClosedDefaultsAndConstraints()
     {
         var databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-oidc-fresh-{Guid.NewGuid():N}.db");
         var options = CreateSqliteOptions(databasePath);
         var appId = Guid.NewGuid();
@@ -131,7 +131,7 @@ public sealed class SqliteDatabaseContractTests
     public async Task InteractiveOidcMigration_LegacyUpgradePreservesApplicationAndDownRefusesAtTheRetirement()
     {
         var databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-oidc-upgrade-{Guid.NewGuid():N}.db");
         var options = CreateSqliteOptions(databasePath);
         var appId = Guid.NewGuid();
@@ -193,7 +193,7 @@ public sealed class SqliteDatabaseContractTests
     public async Task AuthorizationRequestsMigration_FreshDatabaseMatchesContinuationContract()
     {
         var databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-continuation-fresh-{Guid.NewGuid():N}.db");
         var options = CreateSqliteOptions(databasePath);
 
@@ -303,7 +303,7 @@ public sealed class SqliteDatabaseContractTests
         // refresh_tokens (the family columns), which is not this migration's contract.
         const string continuationMigration = "20260916073317_AddAuthorizationRequests";
         var databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-continuation-upgrade-{Guid.NewGuid():N}.db");
         var options = CreateSqliteOptions(databasePath);
         var accountId = Guid.NewGuid();
@@ -454,7 +454,7 @@ public sealed class SqliteDatabaseContractTests
     [Fact]
     public async Task SmsMigration_DropsLegacyEphemeralOtpRowsBeforeAddingAppForeignKey()
     {
-        var databasePath = Path.Combine(Path.GetTempPath(), $"signacore-sms-migration-{Guid.NewGuid():N}.db");
+        var databasePath = Path.Combine(PhysicalTempPath.Root(), $"signacore-sms-migration-{Guid.NewGuid():N}.db");
         var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
         optionsBuilder.UseIdentityDatabase(new DatabaseOptions
         {
@@ -487,7 +487,7 @@ public sealed class SqliteDatabaseContractTests
     public async Task MigrationAndCrud_PreserveUtcInstantAtMicrosecondPrecision()
     {
         var databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-{Guid.NewGuid():N}.db");
 
         try
@@ -560,7 +560,7 @@ public sealed class SqliteDatabaseContractTests
     public async Task CaseInsensitiveKeysAndConcurrentConsumption_AreProviderIndependent()
     {
         var databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-{Guid.NewGuid():N}.db");
         var databaseOptions = new DatabaseOptions
         {

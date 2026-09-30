@@ -636,7 +636,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
     private sealed class ConcurrencyDatabase : IAsyncDisposable
     {
         private readonly string _databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-state-concurrency-{Guid.NewGuid():N}.db");
 
         public DbContextOptions<IdentityDbContext> BuildOptions()

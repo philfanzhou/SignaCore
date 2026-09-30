@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Npgsql;
 using ServiceMantle.Bootstrap;
 using ServiceMantle.Database.PostgreSql;
+using ServiceMantle.Database.Sqlite;
 using SignaCore.Database;
 
 namespace SignaCore.Host.Startup;
@@ -26,6 +27,16 @@ namespace SignaCore.Host.Startup;
 /// only a proven-missing target is created through the maintenance database, then re-observed
 /// before the initialization lock is taken. An already-connectable target needs no maintenance
 /// access and no creation privileges.
+/// </para>
+/// <para>
+/// SQLite target preparation delegates to the shared
+/// <see cref="SqliteDatabaseTargetPreparationProvider"/> — the same provider the bootstrap
+/// candidate path uses — behind SignaCore's own idempotent parent-directory pre-step. The path
+/// contract is narrowed to platform-absolute canonical file paths: relative paths,
+/// <c>|DataDirectory|</c>, <c>file:</c> URIs, and symlinked or aliased targets are rejected by
+/// the provider and fail startup closed. An existing dirty target (WAL/journal sidecars, or a
+/// failed read-only probe) is deliberately passed through to EF's native open, which stays the
+/// final judge exactly as before.
 /// </para>
 /// <para>
 /// SQLite has no server-side advisory lock: startup relies on the process-local single-instance
@@ -55,7 +66,11 @@ internal static class StartupDatabase
                     cancellationToken);
                 break;
             case DatabaseProvider.Sqlite:
-                EnsureSqliteDirectoryExists(options.ConnectionString);
+                await EnsureSqliteDatabaseExistsAsync(
+                    options,
+                    targetPreparationProvider: null,
+                    createParentDirectory: null,
+                    cancellationToken);
                 break;
             default:
                 throw new InvalidOperationException("Unsupported database provider.");
@@ -196,21 +211,171 @@ internal static class StartupDatabase
             "existing target, if any, was not modified."
     };
 
-    private static void EnsureSqliteDirectoryExists(string connectionString)
+    /// <summary>
+    /// Prepares the SQLite file target through the shared preparation provider, behind SignaCore's
+    /// own idempotent parent-directory pre-step, per the product's narrowed compatibility contract.
+    /// </summary>
+    /// <param name="options">
+    /// The loaded database options. Only the provider and connection string are read; nothing is
+    /// logged here.
+    /// </param>
+    /// <param name="targetPreparationProvider">
+    /// Composition seam with an injectable preparation provider for startup-level tests; the
+    /// production entry always uses the shared SQLite provider.
+    /// </param>
+    /// <param name="createParentDirectory">
+    /// Composition seam for the directory pre-step, so its failure classification can be exercised
+    /// deterministically; the production entry always uses <see cref="Directory.CreateDirectory"/>.
+    /// </param>
+    internal static async Task EnsureSqliteDatabaseExistsAsync(
+        DatabaseOptions options,
+        IDatabaseTargetPreparationProvider? targetPreparationProvider,
+        Func<string, DirectoryInfo>? createParentDirectory,
+        CancellationToken cancellationToken)
     {
-        var builder = new SqliteConnectionStringBuilder(connectionString);
-        var databasePath = builder.DataSource;
-        if (!Path.IsPathFullyQualified(databasePath))
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureSqliteParentDirectoryExists(options.ConnectionString, createParentDirectory);
+
+        var provider = targetPreparationProvider ?? new SqliteDatabaseTargetPreparationProvider();
+        var target = new BootstrapDatabaseConfiguration(
+            options.Provider,
+            options.ServerVersion,
+            options.ConnectionString);
+
+        var observation = await provider.ObserveAsync(target, cancellationToken);
+        if (observation.Status == DatabaseTargetObservationStatus.TargetConnectable)
         {
-            databasePath = Path.GetFullPath(databasePath);
+            return;
         }
 
-        var directory = Path.GetDirectoryName(databasePath);
-        if (!string.IsNullOrWhiteSpace(directory))
+        // An existing dirty target — WAL/journal sidecars present, or a read-only probe failure —
+        // is not a startup precondition failure: EF's native open stays the final judge, completing
+        // WAL recovery or failing exactly as it did before this contract existed. Only the shared
+        // target-conflict classification is passed through; every other unreachable observation
+        // (permission denied, connection failed, invalid target) fails closed.
+        if (observation.Status == DatabaseTargetObservationStatus.TargetUnreachable &&
+            string.Equals(
+                observation.ErrorCode,
+                WellKnownDatabaseTargetPreparationErrorCodes.TargetConflict,
+                StringComparison.Ordinal))
         {
-            Directory.CreateDirectory(directory);
+            return;
+        }
+
+        // Only a proven-missing target is created, and never over anything that already exists.
+        if (observation.Status != DatabaseTargetObservationStatus.TargetMissing)
+        {
+            throw SqlitePreparationFailure(observation.ErrorCode);
+        }
+
+        var prepared = await provider.PrepareAsync(
+            DatabaseTargetPreparationRequest.ForFile(target),
+            TargetPreparationTimeout,
+            cancellationToken);
+        if (!prepared.Succeeded)
+        {
+            throw SqlitePreparationFailure(prepared.ErrorCode);
+        }
+
+        // The final observation is never skipped: a created (or concurrently already created) file
+        // counts only once it is connectable itself. A failure here fails closed before the
+        // initialization lock and migrations, leaves any created file in place for the next start,
+        // and never rewrites the bootstrap file or the installation authority.
+        var confirmation = await provider.ObserveAsync(target, cancellationToken);
+        if (confirmation.Status != DatabaseTargetObservationStatus.TargetConnectable)
+        {
+            throw SqlitePreparationFailure(confirmation.ErrorCode);
         }
     }
+
+    /// <summary>
+    /// SignaCore's idempotent pre-step: create the target's parent directory (never the database
+    /// file) when it is missing, so the first-install experience of pointing SignaCore at a fresh
+    /// directory keeps working. Paths that are not platform-absolute are left untouched — the
+    /// shared provider refuses them with its invalid-target classification instead of resolving
+    /// them against the working directory.
+    /// </summary>
+    private static void EnsureSqliteParentDirectoryExists(
+        string connectionString,
+        Func<string, DirectoryInfo>? createParentDirectory)
+    {
+        string dataSource;
+        try
+        {
+            dataSource = new SqliteConnectionStringBuilder(connectionString).DataSource;
+        }
+        catch (Exception exception) when (exception is ArgumentException or FormatException)
+        {
+            // The shared provider refuses an unparseable connection string with the same
+            // classification this startup reports for every other invalid input.
+            throw SqlitePreparationFailure(WellKnownDatabaseTargetPreparationErrorCodes.InvalidTarget);
+        }
+
+        if (!Path.IsPathFullyQualified(dataSource))
+        {
+            return;
+        }
+
+        // The parent chain is computed from the canonical form so a path the provider will refuse
+        // for its shape (for example a `..` segment) does not materialize directories first; the
+        // input is already absolute, so this never consults the working directory.
+        var canonicalPath = Path.GetFullPath(dataSource);
+        var directory = Path.GetDirectoryName(canonicalPath);
+        if (string.IsNullOrEmpty(directory) || Directory.Exists(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            (createParentDirectory ?? Directory.CreateDirectory)(directory);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException
+            or IOException
+            or NotSupportedException)
+        {
+            throw new StartupDatabaseException(
+                WellKnownDatabaseTargetPreparationErrorCodes.PermissionDenied,
+                "The parent directory of the SQLite database target could not be created. Verify " +
+                "the configured path and the account's write permissions; startup fails closed " +
+                "and no database file was created.");
+        }
+    }
+
+    private static StartupDatabaseException SqlitePreparationFailure(string? errorCode)
+    {
+        var code = errorCode ?? WellKnownDatabaseTargetPreparationErrorCodes.PreparationFailed;
+        return new StartupDatabaseException(code, DescribeSqlitePreparationFailure(code));
+    }
+
+    /// <summary>
+    /// The fixed, sanitized operator message per closed classification. Messages never contain the
+    /// connection string or an original exception value.
+    /// </summary>
+    private static string DescribeSqlitePreparationFailure(string errorCode) => errorCode switch
+    {
+        WellKnownDatabaseTargetPreparationErrorCodes.InvalidTarget =>
+            "The SQLite database target must be a platform-absolute canonical file path. Relative " +
+            "paths, |DataDirectory| substitution, file: URIs, symbolic links, and other aliases " +
+            "are rejected; update the bootstrap database configuration to use an absolute path.",
+        WellKnownDatabaseTargetPreparationErrorCodes.PermissionDenied =>
+            "Access to the SQLite database target or its creation was denied. Verify the file and " +
+            "directory permissions of the configured path; startup fails closed and the existing " +
+            "target was not modified.",
+        WellKnownDatabaseTargetPreparationErrorCodes.ConnectionFailed =>
+            "The SQLite database file could not be opened or read. Verify that the configured " +
+            "target is a readable SQLite database file; startup fails closed.",
+        WellKnownDatabaseTargetPreparationErrorCodes.TargetConflict =>
+            "The SQLite database target could not be created because conflicting files (for " +
+            "example WAL or journal sidecars) are present next to it. Resolve the conflict and " +
+            "restart; startup fails closed and the existing files were not modified.",
+        WellKnownDatabaseTargetPreparationErrorCodes.Timeout =>
+            "Preparing the SQLite database target timed out. Startup fails closed; a file created " +
+            "before the timeout is kept and re-observed on the next start.",
+        _ =>
+            "The SQLite database target could not be prepared. Startup fails closed; the existing " +
+            "target, if any, was not modified."
+    };
 
     private sealed class DatabaseInitializationLock : IAsyncDisposable
     {

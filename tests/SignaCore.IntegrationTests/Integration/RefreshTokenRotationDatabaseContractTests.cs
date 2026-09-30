@@ -188,7 +188,7 @@ public sealed class RefreshTokenRotationDatabaseContractTests
     private sealed class SqliteTestDatabase : IDisposable
     {
         private readonly string _databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-rotation-{Guid.NewGuid():N}.db");
 
         public DbContextOptions<IdentityDbContext> BuildOptions(

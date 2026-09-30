@@ -229,7 +229,7 @@ public sealed class ManagementBearerSessionEndpointTests : IClassFixture<Identit
     [Fact]
     public async Task Login_IssuanceStorageFailure_Is503WithoutACredential()
     {
-        var missing = Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}", "bearer.db");
+        var missing = Path.Combine(PhysicalTempPath.Root(), $"missing-{Guid.NewGuid():N}", "bearer.db");
         using var host = CreateHost(services => services.Replace(ServiceDescriptor.Singleton(serviceProvider =>
             new ManagementBearerSessionService(
                 new DatabaseOptions { Provider = "SQLite", ConnectionString = $"Data Source={missing};Pooling=false" },

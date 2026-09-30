@@ -229,7 +229,7 @@ public sealed class OidcRateLimitSchemaDatabaseContractTests
                 }
                 else
                 {
-                    path = Path.Combine(Path.GetTempPath(), $"rate-limit-schema-{Guid.NewGuid():N}.db");
+                    path = Path.Combine(PhysicalTempPath.Root(), $"rate-limit-schema-{Guid.NewGuid():N}.db");
                     connection = $"Data Source={path};Pooling=false";
                 }
                 return new Harness(provider, new DatabaseOptions { Provider = provider, ServerVersion = provider == "PostgreSQL" ? "15" : null, ConnectionString = connection }, path, container);

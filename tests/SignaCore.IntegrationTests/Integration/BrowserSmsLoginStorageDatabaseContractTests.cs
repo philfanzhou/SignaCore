@@ -519,7 +519,7 @@ public sealed class BrowserSmsLoginStorageDatabaseContractTests
                 }
                 else
                 {
-                    path = Path.Combine(Path.GetTempPath(), $"sms-storage-{Guid.NewGuid():N}.db");
+                    path = Path.Combine(PhysicalTempPath.Root(), $"sms-storage-{Guid.NewGuid():N}.db");
                     connection = $"Data Source={path};Pooling=false";
                 }
 

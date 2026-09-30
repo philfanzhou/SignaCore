@@ -294,7 +294,7 @@ public sealed class ManagementBearerSessionSchemaDatabaseContractTests
                 }
                 else
                 {
-                    path = Path.Combine(Path.GetTempPath(), $"management-bearer-schema-{Guid.NewGuid():N}.db");
+                    path = Path.Combine(PhysicalTempPath.Root(), $"management-bearer-schema-{Guid.NewGuid():N}.db");
                     connection = $"Data Source={path};Pooling=false";
                 }
                 return new Harness(provider, new DatabaseOptions { Provider = provider, ServerVersion = provider == "PostgreSQL" ? "15" : null, ConnectionString = connection }, path, container);

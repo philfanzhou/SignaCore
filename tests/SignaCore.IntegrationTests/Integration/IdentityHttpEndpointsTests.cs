@@ -1243,10 +1243,10 @@ public class IdentityServerFixture : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         _bootstrapDirectory = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-bootstrap-{Guid.NewGuid():N}");
         _databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-http-{Guid.NewGuid():N}.db");
         var connectionString = new SqliteConnectionStringBuilder
         {

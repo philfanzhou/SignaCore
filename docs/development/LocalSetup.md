@@ -21,6 +21,13 @@ copy `src/SignaCore.Host/appsettings.Development.example.json` to
 `config/signacore.bootstrap.json` is absent, Development uses that file's `Database` section as a
 convenience fallback. Override it with `Database__ConnectionString` if your local database differs.
 
+When selecting SQLite locally, the `Data Source` must be a platform-absolute canonical file path
+(for example `Data Source=/Users/you/signacore/signacore.db`): startup preparation rejects relative
+paths, `|DataDirectory|`, `file:` URIs, and symlinked path components, matching the shared
+validation the `/bootstrap` page applies. On macOS the default temporary directory lives under
+`/var`, a symlink to `/private/var`, so point at a physical path under your home directory or use
+`/private/var/...` explicitly.
+
 Everything else — public base URL, issuer, SMS, WeChat, LDAP — lives in the database. The first run
 against an empty database enters Setup Mode: open `http://localhost:5002/setup` and enter the
 one-time setup code printed to the console. See [First-run setup](./FirstRunSetup.md).

@@ -214,7 +214,7 @@ public sealed class ConsulRealAgentAcceptanceTests
         // /metrics is authorized by a registered application's gateway credentials.
         internal const string ScraperId = "consul-acceptance-scraper";
         internal const string ScraperSecret = "consul-acceptance-scraper-secret";
-        private readonly string directory = Path.Combine(Path.GetTempPath(), "signacore-consul-real-" + Guid.NewGuid().ToString("N"));
+        private readonly string directory = Path.Combine(PhysicalTempPath.Root(), "signacore-consul-real-" + Guid.NewGuid().ToString("N"));
         private readonly string container = "signacore-consul-test-" + Guid.NewGuid().ToString("N");
         private readonly int agentPort = FreePort();
         private readonly List<RealHost> hosts = [];

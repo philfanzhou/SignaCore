@@ -59,7 +59,7 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
     /// </summary>
     private static string CreateTemporaryRoot()
     {
-        var root = Path.GetTempPath();
+        var root = PhysicalTempPath.Root();
         if (OperatingSystem.IsMacOS() && root.StartsWith("/var/", StringComparison.Ordinal))
         {
             root = "/private" + root;

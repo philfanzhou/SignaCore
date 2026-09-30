@@ -163,7 +163,7 @@ public sealed class AdminSpaResponseTests
 
     private sealed class SpaFiles : IDisposable
     {
-        public string Directory { get; } = Path.Combine(Path.GetTempPath(), $"signacore-spa-{Guid.NewGuid():N}");
+        public string Directory { get; } = Path.Combine(PhysicalTempPath.Root(), $"signacore-spa-{Guid.NewGuid():N}");
         public string WebRoot => Path.Combine(Directory, "wwwroot");
         public SpaFiles()
         {

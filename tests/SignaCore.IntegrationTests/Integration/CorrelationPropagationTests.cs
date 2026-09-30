@@ -138,7 +138,7 @@ public sealed partial class CorrelationPropagationTests : IClassFixture<Identity
     [InlineData(null)]
     public async Task BootstrapHost_RoundTripsCorrelation(string? headerValue)
     {
-        var directory = Path.Combine(Path.GetTempPath(), $"signacore-correlation-{Guid.NewGuid():N}");
+        var directory = Path.Combine(PhysicalTempPath.Root(), $"signacore-correlation-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         try
         {
@@ -181,7 +181,7 @@ public sealed partial class CorrelationPropagationTests : IClassFixture<Identity
     [InlineData(null)]
     public async Task SetupHost_RoundTripsCorrelation(string? headerValue)
     {
-        var workingDirectory = Path.Combine(Path.GetTempPath(), $"signacore-correlation-{Guid.NewGuid():N}");
+        var workingDirectory = Path.Combine(PhysicalTempPath.Root(), $"signacore-correlation-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workingDirectory);
         var databasePath = Path.Combine(workingDirectory, "identity.db");
         try

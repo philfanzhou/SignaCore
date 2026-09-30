@@ -51,7 +51,7 @@ public sealed class LegacyDatabaseUpgradeAcceptanceTests : IAsyncLifetime
 
     public ValueTask InitializeAsync()
     {
-        _workingDirectory = Path.Combine(Path.GetTempPath(), $"signacore-upgrade-{Guid.NewGuid():N}");
+        _workingDirectory = Path.Combine(PhysicalTempPath.Root(), $"signacore-upgrade-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workingDirectory);
         _databasePath = Path.Combine(_workingDirectory, "signacore.db");
         _connectionString = new SqliteConnectionStringBuilder { DataSource = _databasePath }.ConnectionString;
