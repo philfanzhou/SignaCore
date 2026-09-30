@@ -1,6 +1,8 @@
 # Database
 
 SignaCore uses one EF Core model with provider-specific migrations for PostgreSQL and SQLite.
+Additional engines remain deferred; see [Database provider support decision](provider-support-decision.md)
+for candidate-specific limits and production acceptance gates.
 
 ## Tables
 

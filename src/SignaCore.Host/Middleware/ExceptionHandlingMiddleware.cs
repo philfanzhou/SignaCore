@@ -1,90 +1,52 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using ServiceMantle.Web.Http;
 
 namespace SignaCore.Host;
 
-/// <summary>
-/// Global HTTP exception handling middleware — Phase 2 replacement for
-/// ExceptionHandlingInterceptor. Maps domain exceptions to RFC 7807-style
-/// ProblemDetails JSON responses.
-/// See the exception mapping rules in docs/development/ErrorHandling.md.
-/// </summary>
-public class ExceptionHandlingMiddleware
+/// <summary>Handles only failures before the shared HTTP exception boundary.</summary>
+public class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
 {
-    private readonly RequestDelegate _next;
-    private readonly ILogger<ExceptionHandlingMiddleware> _logger;
+    private static readonly object SharedPipelineEntry = new();
 
-    public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger)
-    {
-        _next = next;
-        _logger = logger;
-    }
+    internal static void MarkSharedPipelineEntry(HttpContext context) => context.Items[SharedPipelineEntry] = true;
 
     public async Task InvokeAsync(HttpContext context)
     {
         try
         {
-            await _next(context);
+            await next(context);
         }
-        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        catch (Exception ex) when (!context.Items.ContainsKey(SharedPipelineEntry) &&
+                                   !(ex is OperationCanceledException && context.RequestAborted.IsCancellationRequested))
         {
-            _logger.LogDebug("Request aborted by the client.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError("Unhandled exception: Type={ExceptionType}", ex.GetType().Name);
-            await WriteProblemDetailsAsync(context, ex);
-        }
-    }
+            logger.LogError("Unhandled pre-pipeline exception: Type={ExceptionType}", ex.GetType().Name);
+            if (context.Response.HasStarted) return;
 
-    private async Task WriteProblemDetailsAsync(HttpContext context, Exception ex)
-    {
-        if (context.Response.HasStarted)
-        {
-            return;
-        }
-
-        // Do not expose raw exception messages to clients — they may contain
-        // internal field names, database details, or stack-like information.
-        // The correlation is via server-side logs (see the ServiceMantle correlation middleware).
-        var (status, title) = ex switch
-        {
-            ArgumentException => (StatusCodes.Status400BadRequest, "Bad Request"),
-            InvalidOperationException => (StatusCodes.Status409Conflict, "Conflict"),
-            _ => (StatusCodes.Status500InternalServerError, "Internal Server Error")
-        };
-
-        var detail = status == StatusCodes.Status500InternalServerError
-            ? "An internal error occurred."
-            : "The request could not be processed. See server logs for details.";
-
-        context.Response.StatusCode = status;
-        context.Response.ContentType = "application/json";
-
-        var body = new ProblemDetailsPayload
-        {
-            Status = status,
-            Title = title,
-            Detail = detail
-        };
-        try
-        {
-            await JsonSerializer.SerializeAsync(context.Response.Body, body, cancellationToken: context.RequestAborted);
-        }
-        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
-        {
-            // The client is gone: the status code and headers were already decided, and an
-            // unfinished body is not a new failure. Classify it the same way as an aborted request
-            // reaching this middleware.
-            _logger.LogDebug("Request aborted by the client while writing the error response.");
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            context.Response.ContentType = "application/json";
+            // Only fixed public values are serialized; writes retain the original request token.
+            await JsonSerializer.SerializeAsync(context.Response.Body,
+                new ProblemDetailsPayload(500, "Internal Server Error", "An internal error occurred."),
+                cancellationToken: context.RequestAborted);
         }
     }
 
-    private sealed class ProblemDetailsPayload
+    private sealed record ProblemDetailsPayload(int Status, string Title, string Detail);
+}
+
+internal static class SignaCoreExceptionBoundary
+{
+    /// <summary>Marks this request before composing the shared pipeline exactly once.</summary>
+    internal static WebApplication UseSignaCoreSharedHttpPipeline(this WebApplication app)
     {
-        public int Status { get; init; }
-        public string Title { get; init; } = string.Empty;
-        public string Detail { get; init; } = string.Empty;
+        app.Use((context, next) =>
+        {
+            ExceptionHandlingMiddleware.MarkSharedPipelineEntry(context);
+            return next(context);
+        });
+        return app.UseServiceMantlePipeline();
     }
 }
