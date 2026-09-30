@@ -31,7 +31,7 @@ bootstrap file absent -> minimal live/not-ready host -> protected /bootstrap wor
 writable protected bootstrap file -> derive root key -> connect business database
     -> initialization lock -> migration gate -> apply migrations -> read service_installations
     -> Pending: Setup Mode host   (shared setup entry, console SPA, health endpoints)
-    -> Completed: load and validate the system_settings snapshot -> normal host
+    -> Completed: load and validate the service_settings snapshot -> normal host
 ```
 
 There is no production configuration fallback once a file exists. Database unavailability is a

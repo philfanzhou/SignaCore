@@ -3,6 +3,12 @@
 - Status: Accepted
 - Date: 2026-08-15
 
+This ADR preserves the original storage decision. The current runtime authority is the shared
+`service_settings` aggregate; the legacy `system_settings` table has been retired. See
+[Shared settings](../development/SharedSettings.md) and
+[System settings retirement](../database/system-settings-retirement.md) for the current contract
+and the guarded, irreversible upgrade boundary.
+
 ## Context
 
 Global application configuration used to arrive from appsettings, environment variables injected by

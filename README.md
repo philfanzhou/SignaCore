@@ -85,9 +85,11 @@ launcher reports that instead of rolling back.
 
 ## Configuration
 
-Global application configuration lives in the business database, in `system_settings`. Every instance
+Global application configuration lives in the business database, in the shared `service_settings`
+aggregate. Every instance
 reads the same active configuration, changes are transactional and audited, and there is no
-per-instance drift.
+per-instance drift. See [Shared settings](docs/development/SharedSettings.md) and the
+[legacy table retirement](docs/database/system-settings-retirement.md).
 
 Only what is required to open and decrypt that database stays outside it, in one writable bootstrap
 file at `/app/config/signacore.bootstrap.json`: the database provider, server version, and connection
