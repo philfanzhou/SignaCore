@@ -305,6 +305,63 @@ public sealed class StartupSqliteTargetPreparationTests
         }
     }
 
+    // ----- Path canonicalization pre-step failure -----
+
+    // The simulated BCL failure texts embed the configured data source exactly like the real
+    // Windows full-path expansion does; the classification under test must discard them.
+    public static TheoryData<Exception> CanonicalizationFailures => new()
+    {
+        new ArgumentException($"Illegal characters in path. : 'C:\\data:v2\\signacore.db'"),
+        new NotSupportedException($"The given path's format is not supported. : 'C:\\data:v2\\signacore.db'"),
+        new PathTooLongException(
+            "The specified path, file name, or both are too long. : 'C:\\data:v2\\signacore.db'"),
+        new IOException(
+            "The filename, directory name, or volume label syntax is incorrect. : " +
+            "'C:\\data:v2\\signacore.db'."),
+    };
+
+    [Theory]
+    [MemberData(nameof(CanonicalizationFailures))]
+    public async Task CanonicalizationFailure_FailsClosedAsInvalidTargetWithoutLeakingThePath(
+        Exception canonicalizationError)
+    {
+        var path = NewTargetPath();
+        var provider = new RecordingPreparationProvider();
+        try
+        {
+            // A data source the OS full-path expansion refuses (proven on Windows for a
+            // drive-absolute path with an extra colon) must fail through the same closed
+            // classification as every other invalid target, never as the raw BCL exception.
+            var exception = await Assert.ThrowsAsync<StartupDatabaseException>(() =>
+                StartupDatabase.EnsureSqliteDatabaseExistsAsync(
+                    FileOptions(path),
+                    provider,
+                    null,
+                    TestContext.Current.CancellationToken,
+                    _ => throw canonicalizationError));
+
+            Assert.Equal(
+                WellKnownDatabaseTargetPreparationErrorCodes.InvalidTarget,
+                exception.ErrorCode);
+            Assert.Contains("absolute", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(path, exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                FileOptions(path).ConnectionString,
+                exception.Message,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("C:\\data:v2", exception.Message, StringComparison.Ordinal);
+
+            // Fails closed before any observation, directory materialization, or file creation.
+            Assert.False(provider.Reached);
+            Assert.False(Directory.Exists(Path.GetDirectoryName(path)));
+            Assert.False(File.Exists(path));
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
     // ----- Scripted provider flows -----
 
     [Fact]
