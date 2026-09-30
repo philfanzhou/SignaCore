@@ -65,7 +65,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
 
     public ValueTask InitializeAsync()
     {
-        _directory = Path.Combine(Path.GetTempPath(), $"signacore-logging-{Guid.NewGuid():N}");
+        _directory = Path.Combine(PhysicalTempPath.Root(), $"signacore-logging-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_directory);
         _connectionString = new SqliteConnectionStringBuilder
         {

@@ -701,7 +701,7 @@ public sealed class OidcSmsLoginCompletionDatabaseContractTests
             return new Database(_postgres.Options(interceptor), null);
         }
 
-        var path = Path.Combine(Path.GetTempPath(), $"signacore-sms-completion-{Guid.NewGuid():N}.db");
+        var path = Path.Combine(PhysicalTempPath.Root(), $"signacore-sms-completion-{Guid.NewGuid():N}.db");
         DbContextOptions<IdentityDbContext> Build(IInterceptor? withInterceptor)
         {
             var builder = new DbContextOptionsBuilder<IdentityDbContext>();

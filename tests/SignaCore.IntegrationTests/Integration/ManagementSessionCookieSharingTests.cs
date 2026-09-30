@@ -35,9 +35,9 @@ public sealed class ManagementSessionCookieSharingTests : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         _bootstrapDirectory = Path.Combine(
-            Path.GetTempPath(), $"signacore-sharing-{Guid.NewGuid():N}");
+            PhysicalTempPath.Root(), $"signacore-sharing-{Guid.NewGuid():N}");
         _databasePath = Path.Combine(
-            Path.GetTempPath(), $"signacore-sharing-{Guid.NewGuid():N}.db");
+            PhysicalTempPath.Root(), $"signacore-sharing-{Guid.NewGuid():N}.db");
         var connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = _databasePath

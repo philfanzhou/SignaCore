@@ -853,7 +853,7 @@ public sealed class AuthorizationRequestDatabaseContractTests
     private sealed class SqliteFileDatabase : IAsyncDisposable
     {
         private readonly string _databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-authz-request-{Guid.NewGuid():N}.db");
 
         public DbContextOptions<IdentityDbContext> BuildOptions(IInterceptor? interceptor = null)

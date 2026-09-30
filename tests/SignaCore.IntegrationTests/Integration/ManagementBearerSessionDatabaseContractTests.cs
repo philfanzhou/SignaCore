@@ -462,7 +462,7 @@ public sealed class ManagementBearerSessionDatabaseContractTests
 
         public string UnreachableConnectionString => provider == "PostgreSQL"
             ? new Npgsql.NpgsqlConnectionStringBuilder(database.ConnectionString) { Port = 1, Timeout = 1 }.ConnectionString
-            : $"Data Source={Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}", "bearer.db")};Pooling=false";
+            : $"Data Source={Path.Combine(PhysicalTempPath.Root(), $"missing-{Guid.NewGuid():N}", "bearer.db")};Pooling=false";
 
         public static async Task<Harness> CreateAsync(string provider)
         {
@@ -482,7 +482,7 @@ public sealed class ManagementBearerSessionDatabaseContractTests
                 }
                 else
                 {
-                    path = Path.Combine(Path.GetTempPath(), $"management-bearer-{Guid.NewGuid():N}.db");
+                    path = Path.Combine(PhysicalTempPath.Root(), $"management-bearer-{Guid.NewGuid():N}.db");
                     connection = $"Data Source={path};Pooling=false";
                 }
                 var harness = new Harness(provider, new DatabaseOptions { Provider = provider, ServerVersion = provider == "PostgreSQL" ? "15" : null, ConnectionString = connection }, path, container);

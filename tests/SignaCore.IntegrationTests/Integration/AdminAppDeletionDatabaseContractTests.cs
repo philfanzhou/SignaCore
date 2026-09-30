@@ -241,7 +241,7 @@ public sealed class AdminAppDeletionDatabaseContractTests
     private sealed class SqliteDeletionDatabase : IAsyncDisposable
     {
         private readonly string _databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-app-deletion-{Guid.NewGuid():N}.db");
 
         public DbContextOptions<IdentityDbContext> BuildOptions()

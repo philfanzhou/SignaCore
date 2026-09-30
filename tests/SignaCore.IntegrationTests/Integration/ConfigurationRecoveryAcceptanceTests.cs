@@ -47,7 +47,7 @@ public sealed class ConfigurationRecoveryAcceptanceTests : IAsyncLifetime
 
     public ValueTask InitializeAsync()
     {
-        _workingDirectory = Path.Combine(Path.GetTempPath(), $"signacore-config-recovery-{Guid.NewGuid():N}");
+        _workingDirectory = Path.Combine(PhysicalTempPath.Root(), $"signacore-config-recovery-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workingDirectory);
         _databasePath = Path.Combine(_workingDirectory, "signacore.db");
         _connectionString = new SqliteConnectionStringBuilder { DataSource = _databasePath }.ConnectionString;

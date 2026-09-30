@@ -228,7 +228,7 @@ public sealed class LogoutPreparationDatabaseContractTests
                 await container.StartAsync(TestContext.Current.CancellationToken);
                 connection = container.GetConnectionString();
             }
-            else { path = Path.Combine(Path.GetTempPath(), $"logout-atomic-{Guid.NewGuid():N}.db"); connection = $"Data Source={path};Pooling=false"; }
+            else { path = Path.Combine(PhysicalTempPath.Root(), $"logout-atomic-{Guid.NewGuid():N}.db"); connection = $"Data Source={path};Pooling=false"; }
             var harness = new Harness(path, container, new DatabaseOptions { Provider = provider, ServerVersion = provider == "PostgreSQL" ? "15.0" : null, ConnectionString = connection });
             await using var context = harness.Context();
             await context.Database.MigrateAsync(TestContext.Current.CancellationToken);

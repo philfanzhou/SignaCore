@@ -19,7 +19,7 @@ namespace SignaCore.Tests.Integration;
 [UsesProcessWideSqlitePoolClearing]
 public sealed class ForwardedHeadersHostTests : IAsyncLifetime
 {
-    private readonly string _directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "signacore-proxy-" + Guid.NewGuid().ToString("N"));
+    private readonly string _directory = System.IO.Path.Combine(PhysicalTempPath.Root(), "signacore-proxy-" + Guid.NewGuid().ToString("N"));
     private WebApplicationFactory<Program>? _host;
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     public ValueTask InitializeAsync() { Directory.CreateDirectory(_directory); return ValueTask.CompletedTask; }

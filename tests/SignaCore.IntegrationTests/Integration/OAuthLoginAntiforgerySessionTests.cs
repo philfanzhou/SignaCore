@@ -45,9 +45,9 @@ public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
     private async Task<string> PrepareInstallationAsync()
     {
         var bootstrapDirectory = Path.Combine(
-            Path.GetTempPath(), $"signacore-login-antiforgery-{Guid.NewGuid():N}");
+            PhysicalTempPath.Root(), $"signacore-login-antiforgery-{Guid.NewGuid():N}");
         var databasePath = Path.Combine(
-            Path.GetTempPath(), $"signacore-login-antiforgery-{Guid.NewGuid():N}.db");
+            PhysicalTempPath.Root(), $"signacore-login-antiforgery-{Guid.NewGuid():N}.db");
         _bootstrapDirectories.Add(bootstrapDirectory);
         _databasePaths.Add(databasePath);
         var connectionString = new SqliteConnectionStringBuilder

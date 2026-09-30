@@ -65,7 +65,7 @@ public sealed class ConsulDiscoveryRegistrationTests : IAsyncLifetime
 
     public ValueTask InitializeAsync()
     {
-        _workingDirectory = Path.Combine(Path.GetTempPath(), $"signacore-consul-{Guid.NewGuid():N}");
+        _workingDirectory = Path.Combine(PhysicalTempPath.Root(), $"signacore-consul-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workingDirectory);
         _connectionString = new SqliteConnectionStringBuilder
         {

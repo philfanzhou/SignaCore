@@ -161,6 +161,17 @@ The launcher gives the old container 35 seconds to shut down cleanly. A rollback
 container image and configuration, but it does not reverse database migrations; keep migrations
 backward-compatible and take a verified database backup before deployment.
 
+On SQLite, startup prepares the file target through the shared ServiceMantle preparation provider
+under a narrowed path contract (see
+[First-run setup](./FirstRunSetup.md#sqlite-target-preparation-and-the-absolute-path-contract)):
+the `Data Source` must be a platform-absolute canonical file path. Deployments that completed first
+install already satisfy this; a hand-edited bootstrap file naming a relative path, a
+`|DataDirectory|` form, or a `file:` URI must be corrected to an absolute path during upgrade, or
+the new version refuses to start with a fixed message. The preparation provider creates a missing
+target as an ordinary SQLite file an older binary keeps reading after a rollback; existing
+WAL-mode databases keep their journal mode. Start failures on the preparation step are reported
+with fixed closed classifications and never include the connection string.
+
 The launcher owns only deployment concerns, overridable through the environment:
 
 | Variable | Default | Purpose |

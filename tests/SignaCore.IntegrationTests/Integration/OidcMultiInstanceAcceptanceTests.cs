@@ -68,7 +68,7 @@ public sealed partial class OidcMultiInstanceAcceptanceTests : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        _workingDirectory = Path.Combine(Path.GetTempPath(), $"signacore-oidc-multi-{Guid.NewGuid():N}");
+        _workingDirectory = Path.Combine(PhysicalTempPath.Root(), $"signacore-oidc-multi-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workingDirectory);
         _connectionString = ConnectionStringOf("signacore.db");
         _isolatedConnectionString = ConnectionStringOf("isolated.db");

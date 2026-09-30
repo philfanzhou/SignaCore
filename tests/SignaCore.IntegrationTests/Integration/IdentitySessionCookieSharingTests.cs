@@ -48,9 +48,9 @@ public sealed class IdentitySessionCookieSharingTests : IAsyncLifetime
     private async Task<string> PrepareInstallationAsync(string label)
     {
         var bootstrapDirectory = Path.Combine(
-            Path.GetTempPath(), $"signacore-identity-cookie-{label}-{Guid.NewGuid():N}");
+            PhysicalTempPath.Root(), $"signacore-identity-cookie-{label}-{Guid.NewGuid():N}");
         var databasePath = Path.Combine(
-            Path.GetTempPath(), $"signacore-identity-cookie-{label}-{Guid.NewGuid():N}.db");
+            PhysicalTempPath.Root(), $"signacore-identity-cookie-{label}-{Guid.NewGuid():N}.db");
         _bootstrapDirectories.Add(bootstrapDirectory);
         _databasePaths.Add(databasePath);
         var connectionString = new SqliteConnectionStringBuilder

@@ -264,7 +264,7 @@ public sealed class OidcLoginFailureDatabaseContractTests
     private sealed class SqliteTestDatabase : IDisposable
     {
         private readonly string _databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-login-failure-{Guid.NewGuid():N}.db");
 
         public DbContextOptions<IdentityDbContext> BuildOptions(IInterceptor? interceptor = null)

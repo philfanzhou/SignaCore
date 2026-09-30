@@ -290,7 +290,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
     private sealed class RotationDatabase(IInterceptor? interceptor = null) : IAsyncDisposable
     {
         private readonly string _databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-rotation-family-{Guid.NewGuid():N}.db");
 
         /// <summary>

@@ -225,7 +225,7 @@ public sealed class SqliteStartupMigrationGateTests
     [Fact]
     public async Task Gate_UnreadableTarget_DeliversInspectionFailedWithoutOriginalException()
     {
-        var directoryPath = Path.Combine(Path.GetTempPath(), $"signacore-gate-dir-{Guid.NewGuid():N}");
+        var directoryPath = Path.Combine(PhysicalTempPath(), $"signacore-gate-dir-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directoryPath);
         try
         {
@@ -467,7 +467,7 @@ public sealed class SqliteStartupMigrationGateTests
     [Fact]
     public async Task Bootstrap_CurrentHistoryWithCompletedInstallation_SkipsExecuteAndLoadsSnapshot()
     {
-        var databaseDirectory = Path.Combine(Path.GetTempPath(), $"signacore-gate-completed-{Guid.NewGuid():N}");
+        var databaseDirectory = Path.Combine(PhysicalTempPath(), $"signacore-gate-completed-{Guid.NewGuid():N}");
         Directory.CreateDirectory(databaseDirectory);
         var databasePath = Path.Combine(databaseDirectory, "identity.db");
         try
@@ -636,7 +636,7 @@ public sealed class SqliteStartupMigrationGateTests
     [Fact]
     public async Task Bootstrap_UnknownHistoryVersion_FailsClosedWithoutTouchingInstallState()
     {
-        var databaseDirectory = Path.Combine(Path.GetTempPath(), $"signacore-gate-toonew-{Guid.NewGuid():N}");
+        var databaseDirectory = Path.Combine(PhysicalTempPath(), $"signacore-gate-toonew-{Guid.NewGuid():N}");
         Directory.CreateDirectory(databaseDirectory);
         var databasePath = Path.Combine(databaseDirectory, "identity.db");
         try

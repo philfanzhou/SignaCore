@@ -36,6 +36,33 @@ determines the installation state:
 Database unavailability is a fatal startup error. There is no local persisted fallback: an instance
 cannot provide correct identity behavior while its authoritative identity database is unreachable.
 
+### SQLite target preparation and the absolute-path contract
+
+On SQLite, startup prepares the file target through the shared ServiceMantle preparation provider —
+the same provider the `/bootstrap` candidate path uses — behind SignaCore's own idempotent
+parent-directory pre-step, which creates the target's missing parent directory (never the database
+file) so a fresh-directory first install keeps working.
+
+The path contract is narrowed to platform-absolute canonical file paths. Startup no longer resolves
+a relative path against the working directory: relative paths, `|DataDirectory|` substitution,
+`file:` URIs, paths with `.`/`..` segments, and symlinked components are rejected by the provider
+and fail the start with a fixed message asking for an absolute path. Deployments that completed
+first install are unaffected — the first-install validation only accepts absolute canonical paths —
+but a hand-edited bootstrap file that still names a relative path must be corrected to an absolute
+path during upgrade, or the new version refuses to start.
+
+Only a target proven missing is created (as an ordinary SQLite file), and the created target is
+observed again and must be connectable before the initialization lock is taken and migrations run.
+An existing dirty target — WAL or journal sidecars present, or a read-only probe failure — is not a
+startup precondition failure: EF's native open remains the final judge and completes WAL recovery
+or reports the file as-is, exactly as before. Every other observation (permission denied,
+connection failure, invalid target) fails closed with a fixed sanitized classification, and a
+cancellation or timeout stops the start while keeping any created file for the next start.
+
+One behavioral note for new databases: a file created by the preparation provider stays in SQLite's
+rollback-journal mode, whereas EF Core switched databases it created itself into WAL mode. Existing
+WAL-mode databases keep their mode; single-instance semantics and recovery behavior are unchanged.
+
 ## Setup Mode
 
 While installation is `Pending`, the process serves a minimal host composed of the shared

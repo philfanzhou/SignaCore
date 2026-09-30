@@ -52,7 +52,7 @@ public sealed class SystemSettingsRetirementTests
     }
 
     private static string NewSqlitePath() =>
-        Path.Combine(Path.GetTempPath(), $"signacore-retirement-{Guid.NewGuid():N}.db");
+        Path.Combine(PhysicalTempPath.Root(), $"signacore-retirement-{Guid.NewGuid():N}.db");
 
     /// <summary>
     /// Two raw legacy rows — one public, one secret sentinel — staged on the fixed historical

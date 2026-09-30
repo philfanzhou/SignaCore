@@ -84,7 +84,7 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
     /// </summary>
     private static string CreateTemporaryRoot()
     {
-        var root = Path.GetTempPath();
+        var root = PhysicalTempPath.Root();
         if (OperatingSystem.IsMacOS() && root.StartsWith("/var/", StringComparison.Ordinal))
         {
             root = "/private" + root;
@@ -311,20 +311,24 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
     [Fact]
     public async Task SavingTheLiveTargetAgain_IsRefusedByTheSharedCandidateChecks()
     {
-        // The running SQLite database keeps a hot WAL, and the shared candidate validation
-        // deliberately refuses a target with present journal sidecars, so an identical candidate
-        // on this host answers the shared fixed 400 instead of reaching the manager. The guard's
-        // 200 path audits without comparing content, so the identical-candidate 200 row of the
-        // semantic model is reachable only for targets the shared checks accept.
+        // The shared candidate validation deliberately refuses a target with present journal
+        // sidecars, so an identical candidate on a dirty host answers the shared fixed 400 instead
+        // of reaching the manager. Databases the startup preparation provider creates stay in
+        // rollback-journal mode and hold no hot sidecars while running, so the dirty state is
+        // staged explicitly here — the same shape a pre-switch WAL database or an unclean
+        // shutdown leaves behind. The guard's 200 path audits without comparing content, so the
+        // identical-candidate 200 row of the semantic model stays reachable only for targets the
+        // shared checks accept.
         using var factory = StartHost();
         var stopping = CaptureStoppingToken(factory);
         using var admin = await CreateAdminClientAsync(factory);
         var before = await ReadBootstrapAsync();
+        File.WriteAllText(_databasePath + "-wal", "staged hot sidecar");
 
         using var response = await PutAsync(admin, ReplacementJson(_databaseConnectionString));
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync(Token);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("management.request.invalid", body, StringComparison.Ordinal);
         Assert.Equal(before, await ReadBootstrapAsync(), StringComparer.Ordinal);
         Assert.Empty(await ReadAuditRowsAsync());
@@ -429,8 +433,8 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
             admin,
             $$"""{"database":{"provider":"SQLite","serverVersion":null,"connectionString":"Data Source={{Path.Combine(_directory, "blank-key.db")}}"},"masterKey":""}""");
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync(Token);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("management.request.invalid", body, StringComparison.Ordinal);
         Assert.Equal(before, await ReadBootstrapAsync(), StringComparer.Ordinal);
         Assert.Empty(await ReadAuditRowsAsync());
@@ -834,7 +838,7 @@ public sealed class DevelopmentFallbackBootstrapUpdateTests : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        var root = Path.GetTempPath();
+        var root = PhysicalTempPath.Root();
         if (OperatingSystem.IsMacOS() && root.StartsWith("/var/", StringComparison.Ordinal))
         {
             root = "/private" + root;

@@ -29,7 +29,7 @@ public sealed class ManagementBearerSessionEndpointDatabaseContractTests
         Assert.SkipUnless(Environment.GetEnvironmentVariable("RUN_SIGNACORE_DATABASE_CONTRACTS") == "true", "Enable the PostgreSQL database contract matrix.");
         await using var container = new PostgreSqlBuilder(Environment.GetEnvironmentVariable("SIGNACORE_POSTGRES_IMAGE") ?? "postgres:15-alpine").Build();
         await container.StartAsync(Ct);
-        var directory = Path.Combine(Path.GetTempPath(), $"signacore-bearer-endpoint-{Guid.NewGuid():N}");
+        var directory = Path.Combine(PhysicalTempPath.Root(), $"signacore-bearer-endpoint-{Guid.NewGuid():N}");
         try
         {
             var database = new DatabaseOptions

@@ -285,8 +285,25 @@ public sealed class SqliteMigrationObservationTests
 
 internal static class SqliteMigrationGateTestSupport
 {
+    /// <summary>
+    /// The shared SQLite target preparation contract rejects symlinked path components, and macOS
+    /// exposes the per-user temp directory under <c>/var</c>, a symlink to <c>/private/var</c>:
+    /// tests that run the real startup preparation need the physical location so they exercise the
+    /// contract instead of the platform's symlink.
+    /// </summary>
+    public static string PhysicalTempPath()
+    {
+        var temp = Path.GetTempPath();
+        if (temp.StartsWith("/var/", StringComparison.Ordinal) && Directory.Exists("/private" + temp))
+        {
+            return "/private" + temp;
+        }
+
+        return temp;
+    }
+
     public static string NewDatabasePath() =>
-        Path.Combine(Path.GetTempPath(), $"signacore-gate-{Guid.NewGuid():N}.db");
+        Path.Combine(PhysicalTempPath(), $"signacore-gate-{Guid.NewGuid():N}.db");
 
     public static DatabaseOptions TestDatabaseOptions(string databasePath, string? extra = null) => new()
     {

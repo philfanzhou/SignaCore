@@ -46,7 +46,7 @@ public sealed class SmsAdmissionRevocationConcurrencyDatabaseContractTests
     [InlineData(false)]
     public async Task SerialOrders_OnSqlite_ProduceTheTwoCanonicalOutcomes(bool rotationFirst)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"signacore-sms-admission-{Guid.NewGuid():N}.db");
+        var path = Path.Combine(PhysicalTempPath.Root(), $"signacore-sms-admission-{Guid.NewGuid():N}.db");
         try
         {
             var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();

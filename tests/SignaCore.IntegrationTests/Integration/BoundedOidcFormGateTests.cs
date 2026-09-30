@@ -1018,11 +1018,11 @@ public sealed partial class BoundedOidcFormGateTests : IClassFixture<IdentitySer
         public static async Task<KestrelSmokeEnvironment> StartAsync()
         {
             var bootstrapDirectory = Path.Combine(
-                Path.GetTempPath(), $"signacore-kestrel-{Guid.NewGuid():N}");
+                PhysicalTempPath.Root(), $"signacore-kestrel-{Guid.NewGuid():N}");
             var databasePath = Path.Combine(
-                Path.GetTempPath(), $"signacore-kestrel-{Guid.NewGuid():N}.db");
+                PhysicalTempPath.Root(), $"signacore-kestrel-{Guid.NewGuid():N}.db");
             var logPath = Path.Combine(
-                Path.GetTempPath(), $"signacore-kestrel-{Guid.NewGuid():N}.log");
+                PhysicalTempPath.Root(), $"signacore-kestrel-{Guid.NewGuid():N}.log");
             var connectionString = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
             {
                 DataSource = databasePath

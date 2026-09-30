@@ -32,7 +32,7 @@ public sealed class WechatAdmissionDatabaseContractTests : IDisposable
 {
     private const string OpenId = "o-contract-openid";
     private readonly string _databasePath = Path.Combine(
-        Path.GetTempPath(), $"signacore-wechat-{Guid.NewGuid():N}.db");
+        PhysicalTempPath.Root(), $"signacore-wechat-{Guid.NewGuid():N}.db");
 
     [Fact]
     public async Task Provision_CreatesAccountAndAdmission_AndIsIdempotent()

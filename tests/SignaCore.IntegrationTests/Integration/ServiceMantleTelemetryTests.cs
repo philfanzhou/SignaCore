@@ -53,7 +53,7 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
 
     public ValueTask InitializeAsync()
     {
-        _directory = Path.Combine(Path.GetTempPath(), $"signacore-telemetry-{Guid.NewGuid():N}");
+        _directory = Path.Combine(PhysicalTempPath.Root(), $"signacore-telemetry-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_directory);
         _connectionString = new SqliteConnectionStringBuilder
         {

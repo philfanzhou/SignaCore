@@ -1,3 +1,4 @@
+using SignaCore.Tests.Integration;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -587,7 +588,7 @@ public sealed class ManagementKeyRingPostgreSqlContractTests
     private sealed class TemporaryDirectory() : IDisposable
     {
         public string Path { get; } = System.IO.Path.Combine(
-            System.IO.Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-keyring-{Guid.NewGuid():N}");
 
         public void Dispose()

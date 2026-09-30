@@ -984,7 +984,7 @@ public sealed class RefreshTokenFamilyDatabaseContractTests
     private sealed class SqliteFamilyDatabase : IAsyncDisposable
     {
         private readonly string _databasePath = Path.Combine(
-            Path.GetTempPath(),
+            PhysicalTempPath.Root(),
             $"signacore-family-{Guid.NewGuid():N}.db");
 
         public DbContextOptions<IdentityDbContext> BuildOptions()
