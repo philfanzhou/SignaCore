@@ -1,3 +1,7 @@
+using System.Diagnostics.Metrics;
+using ServiceMantle.AspNetCore.Health;
+using ServiceMantle.Health;
+using ServiceMantle.Installation;
 using System.Net;
 using System.Net.Http.Json;
 using System.Reflection;
@@ -16,6 +20,7 @@ using Microsoft.Extensions.Logging;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using ServiceMantle.OpenTelemetry;
+using ServiceMantle.Diagnostics;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Host.Configuration;
@@ -141,6 +146,7 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         var metrics = await scraped.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.True(ExportsProductSeries(metrics), "No SignaCore product series was exported.");
         Assert.Contains("http_server_request_duration", metrics, StringComparison.Ordinal);
+        AssertSharedPhase(metrics, "completed");
         Assert.DoesNotContain(canary, metrics, StringComparison.Ordinal);
         Assert.DoesNotContain(_scraperSecret, metrics, StringComparison.Ordinal);
         Assert.DoesNotContain(logs.Lines, line => line.Contains(canary, StringComparison.Ordinal));
@@ -169,6 +175,99 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         var metrics = await scraped.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.False(ExportsProductSeries(metrics));
         Assert.Contains("http_server_request_duration", metrics, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MissingAuthority_PublishesUnknown_AndKeepsTheExistingScrapePhaseGate()
+    {
+        var factory = await StartNormalHostAsync();
+        await SeedApplicationsAsync();
+        using var client = factory.CreateClient();
+        await using (var db = CreateDbContext())
+            await db.ServiceInstallations.ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+        using var ready = await client.GetAsync("/health/ready", TestContext.Current.CancellationToken);
+        // Readiness contributors do not use the phase snapshot. A management read drives the
+        // production authority observation, without trusting the process's startup intent.
+        using var rejected = await client.GetAsync("/management/v1/settings", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, rejected.StatusCode);
+        using var scraped = await ScrapeAsync(client, ScraperId, _scraperSecret);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, scraped.StatusCode);
+        Assert.Equal("{\"errorCode\":\"service.phase.unavailable\"}", await scraped.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var publisher = factory.Services.GetRequiredService<ServiceMetrics>();
+        var meter = (Meter)typeof(ServiceMetrics).GetProperty("Meter", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(publisher)!;
+        var values = new Dictionary<string, long>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, owner) =>
+        {
+            if (ReferenceEquals(instrument.Meter, meter) && instrument.Name == ServiceMetrics.InstallationPhaseName)
+                owner.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
+        {
+            foreach (var tag in tags) if (tag.Key == "phase") values.Add((string)tag.Value!, value);
+        });
+        listener.Start();
+        listener.RecordObservableInstruments();
+        Assert.Equal(4, values.Count);
+        Assert.Equal(1, values["unknown"]);
+        Assert.Equal(1, values.Values.Sum());
+    }
+
+    [Fact]
+    public async Task ConcurrentScrapesAndHostDisposal_KeepOneHotPerHostObservations()
+    {
+        var first = await StartNormalHostAsync(track: false, configureServices: services =>
+        {
+            services.RemoveAll<IServiceHealthSnapshotSource>();
+            services.AddSingleton<IServiceHealthSnapshotSource, ConfirmedSnapshot>();
+        });
+        try
+        {
+            // Reuse the installed file; preparing the same aggregate twice is a version conflict.
+            var second = first.WithWebHostBuilder(builder => builder.UseSetting("Endpoints:Http", "0"));
+            _factories.Add(second);
+            _ = second.Services;
+            await SeedApplicationsAsync();
+            first.Services.GetRequiredService<ServiceMetrics>().SetUnknown();
+            using var a = first.CreateClient();
+            using var b = second.CreateClient();
+            async Task Scrape(HttpClient client, string phase)
+            {
+                using var response = await ScrapeAsync(client, ScraperId, _scraperSecret);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                AssertSharedPhase(await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken), phase);
+            }
+            // Stay within the existing four concurrent scrape budget on each host.
+            await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => Scrape(a, "unknown"))
+                .Concat(Enumerable.Range(0, 3).Select(_ => Scrape(b, "completed"))));
+            await first.DisposeAsync();
+            await Scrape(b, "completed");
+        }
+        finally { await first.DisposeAsync(); }
+    }
+
+    private sealed class ConfirmedSnapshot : IServiceHealthSnapshotSource
+    {
+        public ValueTask<ServiceHealthSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new ServiceHealthSnapshot(ServiceStartupPhase.Completed,
+                ServiceMigrationReadinessState.Succeeded, ServiceDatabaseReadinessState.Reachable));
+        }
+    }
+
+    private static void AssertSharedPhase(string text, string expected)
+    {
+        var info = text.Split('\n').Where(line => line.StartsWith("servicemantle_service_info", StringComparison.Ordinal)).ToArray();
+        Assert.Single(info);
+        Assert.EndsWith(" 1", info[0], StringComparison.Ordinal);
+        var lines = text.Split('\n').Where(line => line.StartsWith("servicemantle_installation_phase", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(4, lines.Length);
+        foreach (var phase in new[] { "unknown", "bootstrap_configuration", "pending_setup", "completed" })
+        {
+            var line = Assert.Single(lines, item => item.Contains("phase=\"" + phase + "\"", StringComparison.Ordinal));
+            Assert.EndsWith(phase == expected ? " 1" : " 0", line, StringComparison.Ordinal);
+        }
     }
 
     // ---- OTLP ----
