@@ -18,13 +18,9 @@ concurrency:
 permissions:
   contents: read
 
-# Official images come from the AWS public mirror rather than from Docker Hub. Docker Hub meters
-# anonymous pulls per client address, and GitHub-hosted runners share their egress addresses with
-# every other tenant, so unrelated traffic exhausts the quota and the pull fails with
-# "unauthorized: authentication required" for a reason that has nothing to do with the change under
-# test. The mirror serves the same official images, needs no credentials, and is not metered that
-# way. The database contract tests read this variable too, so the image they request is the image
-# the pre-pull step warmed.
+# Both anonymous official registries have quotas. Each job resolves the same pinned content
+# from AWS first, then Docker Hub on bounded transient failures, and propagates the successful
+# reference to every consumer. Local tests retain the default below when CI is not resolving.
 env:
   SIGNACORE_POSTGRES_IMAGE: public.ecr.aws/docker/library/postgres:15-alpine
 
@@ -82,6 +78,14 @@ jobs:
       # The Public SPA sample has no npm dependencies; Node's built-in runner executes its tests.
       - name: Public SPA sample tests
         run: node --test 'samples/SignaCore.PublicSpa/test/*.test.mjs'
+
+      - name: Official image recovery self-tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_resolve_official_image.py' -v
+
+      - name: Resolve official Node image
+        run: |
+          node_image="$(python3 .github/scripts/resolve_official_image.py node)"
+          printf 'SIGNACORE_NODE_IMAGE=%s\n' "$node_image" >> "$GITHUB_ENV"
 
       - name: Build image
         run: bash build.sh
@@ -158,7 +162,9 @@ jobs:
             --no-restore
 
       - name: Pre-pull PostgreSQL image
-        run: .github/scripts/docker-pull.sh "$SIGNACORE_POSTGRES_IMAGE"
+        run: |
+          postgres_image="$(python3 .github/scripts/resolve_official_image.py postgres)"
+          printf 'SIGNACORE_POSTGRES_IMAGE=%s\n' "$postgres_image" >> "$GITHUB_ENV"
 
       - name: Start PostgreSQL
         run: |
@@ -605,8 +611,8 @@ jobs:
 
       - name: Pre-pull database images
         run: |
-          .github/scripts/docker-pull.sh "$SIGNACORE_POSTGRES_IMAGE"
-          docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+          postgres_image="$(python3 .github/scripts/resolve_official_image.py postgres)"
+          printf 'SIGNACORE_POSTGRES_IMAGE=%s\n' "$postgres_image" >> "$GITHUB_ENV"
 
       - name: Database contract matrix
         run: |

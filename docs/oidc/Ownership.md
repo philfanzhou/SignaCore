@@ -46,7 +46,7 @@ open dependency.
 ## Configuration and deployment ownership
 
 OIDC business policy follows the repository-wide configuration boundary: global policy belongs in
-`system_settings`; provider/version/connection string and the external root key remain deployment
+`service_settings`; provider/version/connection string and the external root key remain deployment
 bootstrap concerns. PostgreSQL owns multi-instance transactional guarantees. SQLite owns the same
 semantic results for one SignaCore instance and one writer, as fixed by
 [PS-22](./CanonicalSemanticModel.md#artifact--persistence-relationship) and
