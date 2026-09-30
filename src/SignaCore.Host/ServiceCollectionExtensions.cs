@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -503,30 +502,6 @@ public static class ServiceCollectionExtensions
                         .AllowAnyMethod();
                 }
             });
-        });
-
-        // Forwarded headers are honored only from explicitly trusted proxies (plus the framework's
-        // loopback defaults). This keeps scheme/client-IP handling correct without trusting spoofed
-        // X-Forwarded-* headers from arbitrary clients.
-        services.Configure<ForwardedHeadersOptions>(options =>
-        {
-            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor |
-                                       ForwardedHeaders.XForwardedProto;
-            options.ForwardLimit = 1;
-            options.RequireHeaderSymmetry = true;
-
-            foreach (var value in configuration
-                         .GetSection("ReverseProxy:KnownProxies")
-                         .Get<string[]>() ?? [])
-            {
-                if (!System.Net.IPAddress.TryParse(value, out var address))
-                {
-                    throw new InvalidOperationException(
-                        $"ReverseProxy:KnownProxies contains an invalid IP address: '{value}'.");
-                }
-
-                options.KnownProxies.Add(address);
-            }
         });
 
         // The identity cookie payload format is pinned to the explicit identity purpose before the
