@@ -21,9 +21,10 @@ then flushes a temporary file and atomically replaces `config/signacore.bootstra
 `0600`. It stops the minimal host only after the response finishes so a supervisor can restart it.
 
 When the file is present, the bootstrap phase strictly parses it, resolves the inline root key
-without logging it, validates the database provider/version/connection, connects to the business
-database, acquires the provider-appropriate migration lock, applies all schema migrations, and then
-determines the installation state:
+without logging it, validates the database provider/version/connection, prepares the database
+target through the shared ServiceMantle preparation providers (the same providers the `/bootstrap`
+candidate path uses), connects to the business database, acquires the provider-appropriate
+migration lock, applies all schema migrations, and then determines the installation state:
 
 | Observed state | Outcome |
 | --- | --- |
@@ -35,6 +36,24 @@ determines the installation state:
 
 Database unavailability is a fatal startup error. There is no local persisted fallback: an instance
 cannot provide correct identity behavior while its authoritative identity database is unreachable.
+
+### Database target preparation at startup
+
+Before anything connects, startup observes the named database target through the shared
+preparation provider. On PostgreSQL, an existing connectable database proceeds directly: no
+maintenance-database connection is opened and no creation or ownership privilege is required. Only
+a target proven missing is created — through a maintenance connection to the provider's
+`postgres` database with the target's own credentials, within a fixed 30-second budget — and the
+newly created target is observed again and must be connectable before the initialization lock is
+taken and migrations run. Concurrent instances creating the same missing target converge through
+the shared provider's race handling and the unchanged outer initialization lock.
+
+Every other outcome — an unreachable server, failed authentication, refused access, or an invalid
+target — fails closed with a fixed, sanitized classification, so a failed connection is never
+mistaken for a missing target and nothing is created or modified on refusal. A cancellation or
+timeout stops the start; a database created before it is kept in place and re-observed on the next
+start. The created target is an ordinary PostgreSQL database, so an older binary can still open it
+after a rollback.
 
 ### SQLite target preparation and the absolute-path contract
 

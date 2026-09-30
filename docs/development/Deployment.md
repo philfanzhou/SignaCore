@@ -161,6 +161,14 @@ The launcher gives the old container 35 seconds to shut down cleanly. A rollback
 container image and configuration, but it does not reverse database migrations; keep migrations
 backward-compatible and take a verified database backup before deployment.
 
+Startup prepares a missing PostgreSQL database target through the shared ServiceMantle preparation
+provider (see [First-run setup](./FirstRunSetup.md#database-target-preparation-at-startup)). An
+already-connectable target is used as-is without any maintenance-database access; a missing target
+is created as an ordinary PostgreSQL database owned by the configured role, so a rollback to an
+older binary keeps reading it unchanged. Start failures on the preparation step are reported with
+the fixed closed classifications (for example authentication or connection failures) instead of raw
+driver errors, and never include the connection string or credentials.
+
 On SQLite, startup prepares the file target through the shared ServiceMantle preparation provider
 under a narrowed path contract (see
 [First-run setup](./FirstRunSetup.md#sqlite-target-preparation-and-the-absolute-path-contract)):
