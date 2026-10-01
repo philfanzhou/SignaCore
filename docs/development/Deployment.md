@@ -20,6 +20,11 @@ multi-platform Node `24-alpine` tag from the AWS public mirror
 additional Docker Hub frontend pull. Both AWS Public ECR and Docker Hub impose anonymous quotas;
 shared runner egress can exhaust them even when a change is correct.
 
+The final stage also runs a targeted `apt-get install --only-upgrade` of the Ubuntu `openssl` and
+`libssl3t64` packages to clear CVE-2026-84782 from the floating `aspnet:10.0` tag. Only these two
+packages are upgraded; once the base image carries the fixed version the step becomes a no-op, and
+the CI Trivy gate remains the independent guard.
+
 CI uses `.github/scripts/resolve_official_image.py` with the fixed `node` or `postgres` profile.
 It pulls Linux/amd64 content from AWS first, then the corresponding `docker.io/library/` official
 repository only after two transient failures. Each source has at most two attempts, each pull has
