@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SignaCore.Client.AspNetCore</RootNamespace>
+    <Description>Official SignaCore hosted-login client for ASP.NET Core: confidential Authorization Code + PKCE registration, hardened callback, and a server-side session.</Description>
+    <!-- The package is shipped from the repository tag alongside the container image (ADR 0007);
+         the release pipeline sets the concrete version, 1.0.0 is only the local default. -->
+    <Version>1.0.0</Version>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/philfanzhou/SignaCore</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Dependency policy (ADR 0007): the shared ASP.NET Core framework plus the
+         Microsoft.IdentityModel family only; no SignaCore server assembly, no third-party
+         authentication library. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

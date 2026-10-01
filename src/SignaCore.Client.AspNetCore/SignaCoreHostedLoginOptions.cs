@@ -1,0 +1,86 @@
+using Microsoft.AspNetCore.Http;
+
+namespace SignaCore.Client.AspNetCore;
+
+/// <summary>
+/// The configuration of the hosted-login integration. The protocol settings (Authority, client
+/// registration, redirect URI) are validated at startup: a missing or illegal value is a startup
+/// failure whose diagnostics name the option, never the value.
+/// </summary>
+public sealed class SignaCoreHostedLoginOptions
+{
+    /// <summary>
+    /// The SignaCore base address, for example <c>https://signacore.example</c>. Must be an
+    /// absolute HTTPS URI without a path, query, or fragment; only the Development and Testing
+    /// environments additionally accept an explicit loopback origin
+    /// (<c>http://127.0.0.1</c> or <c>http://[::1]</c>). The package verifies the Discovery
+    /// document's <c>issuer</c> against this value.
+    /// </summary>
+    public string? Authority { get; set; }
+
+    /// <summary>The registered application id (the SignaCore <c>appId</c>).</summary>
+    public string? ClientId { get; set; }
+
+    /// <summary>
+    /// The registered application secret of the Confidential client. It is used only as HTTP Basic
+    /// authentication on the server-to-server token request and never reaches the browser.
+    /// </summary>
+    public string? ClientSecret { get; set; }
+
+    /// <summary>
+    /// The exact, pre-registered callback URI, for example
+    /// <c>https://orders.example/bff/callback</c>. Must be an absolute HTTPS URI whose path is
+    /// byte-for-byte the callback path of the mapped prefix
+    /// (<see cref="M:SignaCore.Client.AspNetCore.SignaCoreHostedLoginEndpointExtensions.MapSignaCoreHostedLogin(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder,string)"/>).
+    /// </summary>
+    public string? RedirectUri { get; set; }
+
+    /// <summary>
+    /// The requested scopes. Always includes <c>openid</c>; add <c>profile</c> to receive the
+    /// display name. Refresh tokens are not supported by this package in the first phase.
+    /// </summary>
+    public string Scope { get; set; } = "openid profile";
+
+    /// <summary>The name of the opaque session cookie. The default is
+    /// <see cref="SignaCoreHostedLoginDefaults.SessionCookieName"/>.</summary>
+    public string SessionCookieName { get; set; } = SignaCoreHostedLoginDefaults.SessionCookieName;
+
+    /// <summary>
+    /// The maximum number of concurrent server-side session tickets the default in-memory store
+    /// holds. When the store is full a new sign-in fails closed with the bounded
+    /// <c>session_store_full</c> reason; nothing of an existing session is evicted. Consumers with
+    /// more traffic replace the store through their own <see cref="ITicketStore"/> registration.
+    /// </summary>
+    public int TicketCapacity { get; set; } = 10_000;
+
+    /// <summary>
+    /// Extension point — authorization decision. Called with the principal verified from the ID
+    /// token; the consumer decides what that subject may do (typically by matching the verified
+    /// issuer plus <c>sub</c> against its own bindings). The result is reported by the session
+    /// endpoint; the package itself enforces no business rule. Default: allow every subject.
+    /// </summary>
+    public ISignaCoreAuthorizationDecision AuthorizationDecision { get; set; } =
+        SignaCoreAllowAllAuthorizationDecision.Instance;
+
+    /// <summary>
+    /// Extension point — response format. Owns the bodies and status codes of the consumer-facing
+    /// routes (the failure redirect target and the session-status answer). The package defines the
+    /// protocol outcomes; this writer defines their presentation. Default: a fixed English failure
+    /// page and a fixed JSON session body.
+    /// </summary>
+    public ISignaCoreHostedLoginResponseWriter ResponseWriter { get; set; } =
+        SignaCoreDefaultResponseWriter.Instance;
+
+    /// <summary>
+    /// Extension point — session and Bearer scheme selection. Returns, per request, the
+    /// authentication scheme that serves it: the package's session scheme
+    /// (<see cref="SignaCoreHostedLoginDefaults.SessionAuthenticationScheme"/>) or a host-owned
+    /// scheme such as its Bearer handler. Return <see langword="null"/> to keep the session
+    /// scheme. Default: every request authenticates against the package's session.
+    /// </summary>
+    public Func<HttpContext, string?>? SchemeSelector { get; set; }
+
+    /// <summary>The route prefix the endpoints are mapped under; set by
+    /// <c>MapSignaCoreHostedLogin</c>, not by consumer code.</summary>
+    public string? Prefix { get; internal set; }
+}

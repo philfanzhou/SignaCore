@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- xUnit.net v3 test projects are executables hosted by Microsoft.Testing.Platform. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pins the assembly's parallelism contract so local full runs and CI make the same
+         scheduling assumptions (issue #293). -->
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <!-- Mints the fake authority's ID tokens; the package under test validates with
+         Microsoft.IdentityModel.JsonWebTokens. -->
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The package under test. -->
+    <ProjectReference Include="..\..\src\SignaCore.Client.AspNetCore\SignaCore.Client.AspNetCore.csproj" />
+    <!-- The consumer application the package is wired into; the alias keeps its top-level
+         Program distinct from SignaCore.Host's. -->
+    <ProjectReference Include="..\..\tests\SignaCore.Client.TestApp\SignaCore.Client.TestApp.csproj" Aliases="ConsumerApp" />
+    <!-- The real-host contract tests drive the installed SignaCore.Host in memory. -->
+    <ProjectReference Include="..\..\src\SignaCore.Database\SignaCore.Database.csproj" />
+    <ProjectReference Include="..\..\src\SignaCore.Domain\SignaCore.Domain.csproj" />
+    <ProjectReference Include="..\..\src\SignaCore.Host\SignaCore.Host.csproj">
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+      <ExcludeAssets>buildTransitive</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>
