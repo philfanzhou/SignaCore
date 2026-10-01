@@ -1,6 +1,7 @@
 extern alias ConsumerApp;
 
 using System.Net;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -169,6 +170,64 @@ public sealed class ClientCsrfBoundaryTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("api-data-written", await response.Content.ReadAsStringAsync(
             TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task TheBoundary_KeepsWorking_WhenTheSessionSchemeIsTheDefaultScheme()
+    {
+        await using var authority = await FakeIdentityProvider.StartAsync();
+        var consumer = ConsumerAppTestServer.Create(
+            FakeIdentityProvider.BaseAddress,
+            ClientId,
+            "client-pack-test-secret",
+            SignaCoreHostFixture.RedirectUri,
+            authority.Server.CreateHandler(),
+            // The integration shape a BFF-style consumer uses: the package's scheme is the
+            // application's default scheme, so the request pipeline presents the session
+            // principal on every surface, including GET /auth/csrf. The boundary's antiforgery
+            // pairs are user-neutral, so tokens issued on such a consumer still validate.
+            configureTestServices: services => services.PostConfigure<AuthenticationOptions>(
+                options =>
+                {
+                    options.DefaultScheme = SignaCoreHostedLoginDefaults.AuthenticationScheme;
+                    options.DefaultChallengeScheme = SignaCoreHostedLoginDefaults.AuthenticationScheme;
+                }));
+        var browser = ConsumerAppTestServer.CreateBrowserOverAuthority(
+            consumer, authority.Server.CreateHandler(), new Uri(FakeIdentityProvider.BaseAddress));
+        using var _ = browser;
+
+        using (var start = new HttpRequestMessage(
+            HttpMethod.Get, new Uri(browser.ConsumerBase, "/auth/start")))
+        using (var startResponse = await browser.SendOnConsumerAsync(start, TestContext.Current.CancellationToken))
+        using (var authorize = new HttpRequestMessage(HttpMethod.Get, startResponse.Headers.Location!))
+        using (var authorizeResponse = await browser.SendOnIdentityServerAsync(
+            authorize, TestContext.Current.CancellationToken))
+        using (var callback = new HttpRequestMessage(HttpMethod.Get, authorizeResponse.Headers.Location!))
+        using (var callbackResponse = await browser.SendOnConsumerAsync(
+            callback, TestContext.Current.CancellationToken))
+        {
+            Assert.Equal(HttpStatusCode.Found, callbackResponse.StatusCode);
+        }
+
+        var token = await FetchCsrfTokenAsync(browser);
+        using var write = new HttpRequestMessage(
+            HttpMethod.Post, new Uri(browser.ConsumerBase, "/dashboard"));
+        write.Headers.TryAddWithoutValidation(
+            SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, token);
+        using var response = await browser.SendOnConsumerAsync(write, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var logout = new HttpRequestMessage(
+            HttpMethod.Post, new Uri(browser.ConsumerBase, "/auth/logout"));
+        logout.Headers.TryAddWithoutValidation(
+            SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, token);
+        using var logoutResponse = await browser.SendOnConsumerAsync(
+            logout, TestContext.Current.CancellationToken);
+        Assert.NotEqual(HttpStatusCode.BadRequest, logoutResponse.StatusCode);
+        Assert.NotEqual("""{"outcome":"csrf_rejected"}""", await logoutResponse.Content.ReadAsStringAsync(
+            TestContext.Current.CancellationToken));
+
+        await consumer.DisposeAsync();
     }
 
     [Fact]

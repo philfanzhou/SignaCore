@@ -69,12 +69,15 @@ internal sealed class SignaCoreSessionAuthenticationHandler(
 
         // The CSRF boundary: a session-authenticated unsafe method must present a valid
         // antiforgery token (header or form field, as configured). Failing the authentication —
-        // not merely hiding it — keeps the request from reaching any authorization policy.
+        // not merely hiding it — keeps the request from reaching any authorization policy. The
+        // validation is user-neutral (see SignaCoreAntiforgeryBoundary): the ambient principal at
+        // this stage is whatever the consumer's pipeline presented, which must not decide the
+        // pair's validity.
         if (!IsSafeMethod(Request.Method))
         {
             try
             {
-                await antiforgery.ValidateRequestAsync(Context);
+                await antiforgery.ValidateRequestUserNeutralAsync(Context);
             }
             catch (Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException)
             {

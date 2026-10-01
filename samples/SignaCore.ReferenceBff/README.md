@@ -4,12 +4,21 @@ A minimal reference Browser-for-Frontend (BFF) that signs administrators in to a
 server through Authorization Code + PKCE (S256), keeps every token in a server-side session, and
 exposes only an opaque local cookie to the browser.
 
+The sample consumes the official client package
+[`SignaCore.Client.AspNetCore`](../../src/SignaCore.Client.AspNetCore/README.md) through a
+project reference: the package owns the whole sign-in handshake, the server-side session, and
+the prepared-logout surface, and the sample is the package's first real consumer — it proves the
+package's public API and its extension points are enough for a real BFF. The sample's own code
+keeps only what is genuinely its own: the local administrator binding, the Setup flow, the
+`/bff/me` UserInfo integration, the diagnostics page, and their logging.
+
 The sample resolves the authorization, token, JWKS, and UserInfo endpoints from the Authority's
 OpenID Connect Discovery document. Nothing is hardcoded.
 
-> **Single-instance reference.** The session ticket store is in-process memory: a restart loses
-> sessions and replicas do not share them. Replace it with a shared store before running more
-> than one instance. Coordinated upstream logout is delivered by a later SignaCore task.
+> **Single-instance reference.** The session ticket store is the package's default in-process
+> memory store: a restart loses sessions and replicas do not share them. Replace it with a
+> shared store through the package's `ITicketStore` registration before running more than one
+> instance.
 >
 > **Runtime authorization over an optional local database.** The sample's sign-in keeps working
 > with no database at all; `GET /bff/admin` additionally enforces the local administrator
@@ -54,10 +63,14 @@ Follow this order; an installed SignaCore administrator and a BFF administrator 
    `PUT /api/admin/apps/{appId}/audience-mode` with `{"mode":"PerApplication"}`.
 5. Register the BFF's exact HTTPS callback using
    `POST /api/admin/apps/{appId}/oidc/redirect-uris` with
-   `{"kind":"Redirect","uris":["https://<bff-host>/signin-oidc"]}`. Set the same URI in
-   `ReferenceBff__RedirectUri`. See [Interactive Client Model](../../docs/oidc/ClientModel.md)
+   `{"kind":"Redirect","uris":["https://<bff-host>/bff/callback"]}`. Set the same URI in
+   `ReferenceBff__RedirectUri`: the client package accepts exactly `/bff/callback` as the
+   callback path and fails startup on anything else. Also register the prepared-logout return
+   address the same way with `{"kind":"PostLogout","uris":["https://<bff-host>/bff/logout/return"]}`;
+   the sample derives that URI from the redirect URI's origin. See
+   [Interactive Client Model](../../docs/oidc/ClientModel.md)
    for the audience and redirect-registration contract; its target-design label does not enable
-   future public-client or logout capabilities in this sample.
+   future public-client capabilities in this sample.
 6. Enable the application's interactive policy using
    `PUT /api/admin/apps/{appId}/oidc-policy` with
    `{"clientType":"Confidential","allowAuthorizationCode":true,"allowedScopes":["openid","profile"],"allowRefreshToken":false,"identitySessionMaxAgeSeconds":null}`.
@@ -84,12 +97,13 @@ Follow this order; an installed SignaCore administrator and a BFF administrator 
 
 | Capability / decision | Owner | Consumer responsibility |
 | --- | --- | --- |
-| Credentials, authentication, Discovery, OIDC, JWT signing/JWKS and UserInfo | SignaCore | BFF validates the protocol and keeps tokens server-side; it never handles the account password. |
+| Credentials, authentication, Discovery, OIDC, JWT signing/JWKS and UserInfo | SignaCore | SignaCore's public HTTP contract only; the BFF never handles the account password. |
+| The OIDC handshake, server-side session, session CSRF boundary, and prepared logout | `SignaCore.Client.AspNetCore` | The sample registers the package, keeps its established cookie name and antiforgery header, and replaces nothing inside the protocol. |
 | Installation state and Setup Code lifecycle, common management HTTP gates | ServiceMantle | BFF supplies its service id, database context, and first-administrator contributor. |
 | Management audit persistence, sensitive-header registry and structured-log sanitization/Console host | ServiceMantle | BFF emits bounded events and registers its CSRF header; it does not copy shared algorithms or storage. |
 | Encrypted Data Protection key-ring persistence | ServiceMantle (framework owns key lifetimes) | BFF supplies its independent database and external root key; see the existing upgrade section below. |
 | Local role binding and each administrator authorization decision | BFF | Match the verified issuer/subject to the active local binding after current UserInfo confirmation. SignaCore does not assign this role. |
-| Browser session and local logout | BFF / ASP.NET Core | Keep tokens in the single-instance ticket store and enforce antiforgery on logout. |
+| The `/bff/me` UserInfo integration, Setup, diagnostics, and their logging | BFF | Present the stored access token only on the server-to-server leg and keep every answer bounded. |
 
 The authoritative state/recovery model remains [#74](https://github.com/philfanzhou/SignaCore/issues/74),
 and the first-release boundary remains [#47](https://github.com/philfanzhou/SignaCore/issues/47).
@@ -131,11 +145,15 @@ to `Pending` by re-importing a dropped row.
 | `ReferenceBff:Authority` | SignaCore base address (HTTPS) |
 | `ReferenceBff:ClientId` | Client id registered in SignaCore |
 | `ReferenceBff:ClientSecret` | Client secret — inject through the environment or user secrets |
-| `ReferenceBff:RedirectUri` | This host's HTTPS redirect URI (default path `/signin-oidc`) |
+| `ReferenceBff:RedirectUri` | This host's HTTPS redirect URI (path exactly `/bff/callback`) |
 | `ReferenceBff:Scope` | Requested scope (must contain `openid`) |
 | `ReferenceBffDatabase:Provider` | Optional local database provider: `SQLite` or `PostgreSQL` |
 | `ReferenceBffDatabase:ConnectionString` | Optional local database connection string |
 | `ReferenceBffDatabase:DataProtectionRootKey` | External key-ring root key; inject only through a protected environment |
+
+The prepared-logout return URI is derived from the redirect URI's origin as
+`https://<bff-host>/bff/logout/return` and needs no separate key; register it in SignaCore with
+the `PostLogout` kind as described above.
 
 The configuration is validated at startup; an incomplete configuration fails to start. The three
 `ReferenceBffDatabase` keys must be provided together, and a partial or unknown combination fails
@@ -177,7 +195,7 @@ startup or first key use; the repository never falls back to local files.
 
 A code rollback preserves the new table and data. On an isolated backup copy only, migrating to
 `AddSharedInstallationAndAudit` removes **only** `service_data_protection_keys`. This destroys the
-key ring and invalidates existing antiforgery/correlation cookies; it is not a recovery procedure.
+key ring and invalidates existing antiforgery cookies; it is not a recovery procedure.
 Root key distribution, rotation and recovery, multi-instance coordination and shared session stores
 remain operator responsibilities outside this single-instance sample.
 
@@ -236,13 +254,14 @@ The Web host never migrates, creates an installation row, or issues a code. A mi
 missing installation, corrupt state, or unavailable database returns 503. Run the local `create`
 command before attempting to sign in to a configured BFF.
 
-Open `/bff/setup`, sign in through the normal OIDC challenge, and enter the locally issued code.
-The form posts only `{ "code": "..." }` to `POST /management/v1/setup`, with
+Open `/bff/setup`, sign in through the normal hosted-login challenge, and enter the locally
+issued code. The form posts only `{ "code": "..." }` to `POST /management/v1/setup`, with
 `X-ServiceMantle-Request: 1` and the cookie-bound `X-ReferenceBff-CSRF` token. The shared parser
-limits JSON to 4 KiB; identity, role, duplicate fields, and extra input are rejected. The
-configured OIDC callback must not conflict with `/`, `/error`, `/bff`, or `/management` routes.
-Existing login, callback, diagnostics, profile, local logout and admin reads remain admitted in
-Pending and Completed; local administrator authorization is still required for `/bff/admin`.
+limits JSON to 4 KiB; identity, role, duplicate fields, and extra input are rejected. The client
+package accepts exactly `/bff/callback` as the callback path and fails startup on any other
+value, so the callback can never shadow `/`, `/error`, `/bff/*`, or `/management` routes.
+Existing login, callback, session, diagnostics, profile, logout and admin reads remain admitted
+in Pending and Completed; local administrator authorization is still required for `/bff/admin`.
 
 The authoritative BFF state model and failure boundaries are maintained in
 [the BFF tracker](https://github.com/philfanzhou/SignaCore/issues/74). Completion checks the code,
@@ -283,9 +302,11 @@ above. The SignaCore Authority must also be reachable over trusted HTTPS from th
 ## Structured logs
 
 Every Web host uses the pinned `ServiceMantle.Logging` Console pipeline, with service identity
-`reference-bff` and instance identity `reference-bff-local`. BFF-owned startup, login, UserInfo,
-authorization, Setup and logout events use `ServiceLogContext` scopes containing `ServiceName`,
-`ServiceVersion` and `InstanceId`. Only finite `Operation` and `Outcome` fields enter those scopes:
+`reference-bff` and instance identity `reference-bff-local`. BFF-owned startup, UserInfo,
+authorization, and Setup events use `ServiceLogContext` scopes containing `ServiceName`,
+`ServiceVersion` and `InstanceId`. Sign-in and logout outcomes belong to the client package's
+own bounded logs, which never carry a code, state, nonce, verifier, token, or secret. Only
+finite `Operation` and `Outcome` fields enter the sample's scopes:
 the shared `StructuredLogSanitizer` drops unlisted fields and headers before any logger sees them.
 The shared host independently sanitizes structured output properties. No request bodies, identities,
 exception details, tokens, setup codes, cookies, credentials or connection values are BFF log fields.
@@ -308,32 +329,39 @@ logging behavior without a schema, data, token or HTTP migration.
 
 - SignaCore credentials never pass through this BFF: the browser is redirected to SignaCore's
   authorization endpoint, and the password is posted directly to SignaCore's own login form.
-- Every login uses a fresh `state`, `nonce`, and PKCE verifier; the correlation cookie is
-  `Secure`, `HttpOnly`, and `SameSite=None` for the top-level redirect back.
+- Every login uses a fresh server-side `state`, `nonce`, and PKCE verifier held by the package's
+  pending-sign-in store; the handshake sets no correlation or nonce cookie at all, and the
+  one-time `state` is consumed by the first callback that presents it.
 - The ID token is validated for `iss`, signature (via JWKS), `exp`/`iat`, `nonce`, and `aud`
   (the client id). A failure of any of them fails the sign-in; no local session is established.
-- A missing or mismatching `state` or correlation cookie fails the callback before any token
-  exchange.
-- Tokens are saved into a server-side ticket store (`ITicketStore`); the browser receives only
+- Tokens are saved into the package's server-side ticket store; the browser receives only
   the opaque `Secure`, `HttpOnly`, `SameSite=Lax` session key cookie. No token material is
-  stored in the browser, rendered into HTML, or placed in a URL.
+  stored in the browser, rendered into HTML, or placed in a URL. The session never outlives the
+  access token's expiry.
 - The access token is used only on the server-to-server `GET /bff/me` call to SignaCore's
   Discovery-resolved UserInfo endpoint. A UserInfo `401` (the upstream identity session is gone)
   revokes the local session and answers the bounded error page — the BFF never keeps a
   signed-in appearance over a dead upstream session.
-- `POST /bff/logout` is protected by antiforgery and clears the local cookie and server-side
-  ticket. There is no GET logout. The optional Setup POST has the separate protections described
-  in [First administrator over HTTP](#first-administrator-over-http).
+- `POST /bff/logout` is the package's prepared logout and is protected by antiforgery — the
+  token arrives in the hidden form field or the configured `X-ReferenceBff-CSRF` header from
+  `GET /bff/csrf`. The local session ends first, then SignaCore's session ends and the browser
+  returns through the one-time `/bff/logout/return` to `/`. There is no GET logout. An upstream
+  preparation failure still ends the local session and answers the bounded
+  `{"outcome":"local_only"}` result. The optional Setup POST has the separate protections
+  described in [First administrator over HTTP](#first-administrator-over-http).
 - Expired tickets are reclaimed both when presented and by a periodic background sweep.
 
 ## Runtime authorization (`GET /bff/admin`)
 
 Authentication and authorization are deliberately separate decisions in this sample:
 
-- At sign-in, the validated ID token's issuer and its single non-empty `sub` are captured
-  byte-for-byte into the server-side ticket. The configured Authority is never treated as the
-  verified issuer, and a token without exactly one usable subject fails the sign-in. A ticket
-  from before this capture cannot prove an identity and is rejected with a re-login.
+- At sign-in, the client package validates the ID token and its principal — with the verified
+  issuer and its single non-empty `sub` — becomes the server-side ticket. The configured
+  Authority is never treated as the verified issuer, and a token without exactly one usable
+  subject fails the sign-in. A ticket that cannot prove that identity is rejected with a
+  re-login. The package reports the binding decision for its `/bff/session` endpoint through the
+  sample's `ISignaCoreAuthorizationDecision` implementation; `/bff/admin` keeps its own stronger
+  per-request decision below.
 - Every management request re-confirms the identity live: one Discovery-resolved UserInfo call
   carrying the stored access token, whose successful JSON object must contain exactly one string
   `sub` Ordinal-equal to the captured subject. Nothing about the administrator decision is cached
@@ -344,8 +372,8 @@ Authentication and authorization are deliberately separate decisions in this sam
 - The responses are fixed and carry no identity or token: `200 {"isAdministrator":true}` when the
   exact binding holds; `401` when the session can no longer prove a valid upstream identity (the
   ticket is torn down); `403` for a local denial (the ticket is kept); `503` when a dependency
-  cannot answer (the ticket is kept). Anonymous requests take the standard OIDC challenge back to
-  the fixed `/bff/admin` route only — no open return URL.
+  cannot answer (the ticket is kept). Anonymous requests take the package's challenge, whose
+  return address is always a local path of the fixed `/bff/admin` route — no open return URL.
 - `GET /bff/me` keeps its original contract: the confirmed profile payload is passed through,
   and its failure paths remain the bounded redirect pages.
 
@@ -390,8 +418,8 @@ The finite output checks use these carrier-specific rules:
 | --- | --- |
 | BFF-owned logs | A tee for the exact `BffOperationLog` emitter captures every complete message, scope/state property and exception before forwarding unchanged to the shared Console pipeline. Expected operation/outcome events must exist. Injected message/property/exception canaries must fail the same scanner. Events are never selected by canary content. |
 | Final `/`, `/bff/me`, `/bff/admin`, `/bff/diagnostics` | Body, headers and URL exclude credentials, code/verifier, tokens, cookies, state and nonce. Only the exact home-form CSRF value is required in its hidden field, with its antiforgery cookie in Set-Cookie. |
-| Login challenge | State, nonce and PKCE challenge are required only in their named Location query fields. OIDC nonce/correlation cookies are required only in their Set-Cookie carrier. |
-| Callback | Code/state are necessary callback request query inputs; the server-side-ticket session cookie and OIDC-cookie deletion are necessary Set-Cookie outputs. Later display pages may not reflect those values. |
+| Login entry and challenge | The `/bff/login` entry redirects into the package's start endpoint; state, nonce and PKCE challenge are required only in the authorize redirect's named Location query fields, and the start endpoint sets no protocol cookie at all — the pending sign-in lives server-side. |
+| Callback | Code/state are necessary callback request query inputs; the server-side-ticket session cookie is the necessary Set-Cookie output. Later display pages may not reflect those values. |
 
 No global canary allowlist is used. Failure artifacts report safe stages/results, never raw
 Console output, protocol URLs or credential values. The existing `ReferenceBffLoggingTests`
@@ -400,7 +428,7 @@ collectors remain outside the BFF-owned log guarantee. CI Build & Test runs this
 
 ## Scope
 
-This is a sample consumer of SignaCore, not a product. The ticket store is single-instance
-memory; coordinated upstream logout, multiple administrators, role CRUD, and deployment
-hardening beyond the boundaries above are intentionally left out. This is not a production
-administrator console.
+This is a sample consumer of SignaCore, not a product. The ticket store is the package's
+single-instance memory default; multiple administrators, role CRUD, and deployment hardening
+beyond the boundaries above are intentionally left out. This is not a production administrator
+console.

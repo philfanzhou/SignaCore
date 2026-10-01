@@ -11,9 +11,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
     <PackageReference Include="ServiceMantle.Web" />
     <PackageReference Include="ServiceMantle.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The hosted-login client package owns the OIDC handshake, the server-side session, and the
+         prepared-logout surface; the sample references it as a project so both always move
+         together inside this repository. -->
+    <ProjectReference Include="..\..\src\SignaCore.Client.AspNetCore\SignaCore.Client.AspNetCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>
