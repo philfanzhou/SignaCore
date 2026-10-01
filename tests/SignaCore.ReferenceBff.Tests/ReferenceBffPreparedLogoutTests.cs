@@ -23,10 +23,7 @@ public sealed class ReferenceBffPreparedLogoutTests(SignaCoreHostFixture fixture
     [Fact]
     public async Task PreparedLogout_EndsTheLocalAndUpstreamSessions_AndReturnsToTheLandingPage()
     {
-        using var authorityClient = fixture.Host.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            BaseAddress = new Uri(SignaCoreHostFixture.Authority)
-        });
+        using var authorityClient = fixture.Host.Server.CreateHandler();
         using var bff = BffTestServer.Create(
             SignaCoreHostFixture.Authority,
             SignaCoreHostFixture.ClientId,
@@ -137,7 +134,7 @@ public sealed class ReferenceBffPreparedLogoutTests(SignaCoreHostFixture fixture
         // The fake authority serves the sign-in contract but has no logout-preparation endpoint,
         // so the upstream leg fails after the local session has already ended.
         await using var authority = await FakeAuthority.StartAsync();
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
         await using var bff = BffTestServer.Create(
             FakeAuthority.BaseAddress,
             SignaCoreHostFixture.ClientId,
@@ -188,10 +185,7 @@ public sealed class ReferenceBffPreparedLogoutTests(SignaCoreHostFixture fixture
     [Fact]
     public async Task TheLogoutReturnEndpoint_RejectsAnUnusableStateWithTheBoundedPage()
     {
-        using var authorityClient = fixture.Host.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            BaseAddress = new Uri(SignaCoreHostFixture.Authority)
-        });
+        using var authorityClient = fixture.Host.Server.CreateHandler();
         using var bff = BffTestServer.Create(
             SignaCoreHostFixture.Authority,
             SignaCoreHostFixture.ClientId,
@@ -215,10 +209,7 @@ public sealed class ReferenceBffPreparedLogoutTests(SignaCoreHostFixture fixture
 
     private async Task<SignedIn> SignInOnceAsync()
     {
-        var authorityClient = fixture.Host.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            BaseAddress = new Uri(SignaCoreHostFixture.Authority)
-        });
+        var authorityClient = fixture.Host.Server.CreateHandler();
         var bff = BffTestServer.Create(
             SignaCoreHostFixture.Authority,
             SignaCoreHostFixture.ClientId,

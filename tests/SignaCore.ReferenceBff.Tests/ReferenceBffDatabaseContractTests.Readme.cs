@@ -74,7 +74,7 @@ public sealed partial class ReferenceBffDatabaseContractTests
         var terminal = new ReferenceBffSetupCodeTests.SilentTerminal();
         Assert.Equal(0, await RunCode(database, "create", terminal));
         await using var context = database.CreateContext();
-        using var backchannel = identity.Host.CreateClient();
+        using var backchannel = identity.Host.Server.CreateHandler();
         await using var host = BffTestServer.Create(SignaCoreHostFixture.Authority, id, secret,
             SignaCoreHostFixture.RedirectUri, backchannel, identity.Host.Server.CreateHandler(),
             databaseProvider: "SQLite", databaseConnectionString: context.Database.GetConnectionString());

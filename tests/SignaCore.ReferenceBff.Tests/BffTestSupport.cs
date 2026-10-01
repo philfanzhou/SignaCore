@@ -315,7 +315,7 @@ public static class BffTestServer
         string clientId,
         string clientSecret,
         string redirectUri,
-        HttpClient backchannel,
+        HttpMessageHandler backchannel,
         HttpMessageHandler? userInfoHandler = null,
         TimeProvider? timeProvider = null,
         string? databaseProvider = null,
@@ -342,11 +342,13 @@ public static class BffTestServer
             builder.ConfigureTestServices(services =>
             {
                 // The hosted-login package's backchannel (Discovery, JWKS, the token endpoint,
-                // and logout preparation) routes through the test's client so the in-memory
-                // TestServer and the recording handlers stay in the loop. A later registration
-                // of the primary handler wins over the package's own.
+                // and logout preparation) routes to the test's own handler so the in-memory
+                // TestServer and the recording handlers stay in the loop. The replacement is the
+                // primary handler itself — a later registration wins over the package's own —
+                // because bridging through another HttpClient would hand it an already-started
+                // request, which HttpClient refuses.
                 services.AddHttpClient(SignaCoreHostedLoginDefaults.HttpClientName)
-                    .ConfigurePrimaryHttpMessageHandler(() => new ForwardingHandler(backchannel));
+                    .ConfigurePrimaryHttpMessageHandler(() => backchannel);
 
                 // Route the BFF's own authority reads (the named "signacore" client: Discovery
                 // for the identity check and diagnostics, and the UserInfo call) to the
@@ -367,18 +369,6 @@ public static class BffTestServer
                 configureTestServices?.Invoke(services);
             });
         });
-
-    /// <summary>
-    /// Forwards the package's backchannel through the test's own <see cref="HttpClient"/> so both
-    /// the in-memory TestServer and any recording handler around it observe every leg.
-    /// </summary>
-    private sealed class ForwardingHandler(HttpClient client) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken) =>
-            client.SendAsync(request, cancellationToken);
-    }
 
     /// <summary>
     /// One browser over the SignaCore host and the BFF, with cookies enabled on both clients.

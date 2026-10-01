@@ -65,7 +65,7 @@ public sealed partial class ReferenceBffDatabaseContractTests
         await using var context = database.CreateContext();
         await using var authority = await FakeAuthority.StartAsync();
         await using var bff = BffTestServer.Create(FakeAuthority.BaseAddress, "reference-bff", "reference-bff-test-secret",
-            "https://bff.localhost" + path, authority.CreateClient(), databaseProvider: "SQLite",
+            "https://bff.localhost" + path, authority.Server.CreateHandler(), databaseProvider: "SQLite",
             databaseConnectionString: context.Database.GetConnectionString());
         // The client package accepts exactly <prefix>/callback as the redirect URI's path; every
         // conflicting route fails startup instead of silently shadowing a reserved path.

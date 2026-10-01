@@ -64,7 +64,7 @@ public sealed class ReferenceBffMultiInstanceTests
                     .CreatePendingAsync(ReferenceBffServiceMantle.ServiceId, ct);
             }
             using var routing = new RoutedAuthority(a.Server.CreateHandler(), b.Server.CreateHandler());
-            using var backchannel = new HttpClient(routing);
+            using var backchannel = routing;
             using var userInfoRouting = new RoutedAuthority(a.Server.CreateHandler(), b.Server.CreateHandler());
             await using var bff = BffTestServer.Create(SignaCoreHostFixture.Authority,
                 SignaCoreHostFixture.ClientId, SignaCoreHostFixture.ClientSecret,

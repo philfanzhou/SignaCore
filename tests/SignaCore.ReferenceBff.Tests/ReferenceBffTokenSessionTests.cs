@@ -350,11 +350,7 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         ManipulableClock? clock = null,
         HttpMessageHandler? userInfoHandler = null)
     {
-        var backchannel = new RecordingHandler(fixture.Host.Server.CreateHandler());
-        var backchannelClient = new HttpClient(backchannel, disposeHandler: false)
-        {
-            BaseAddress = new Uri(SignaCoreHostFixture.Authority)
-        };
+        var backchannelClient = new RecordingHandler(fixture.Host.Server.CreateHandler());
         var outbound = new RecordingHandler(fixture.Host.Server.CreateHandler());
         var bff = BffTestServer.Create(
             SignaCoreHostFixture.Authority,
@@ -414,8 +410,7 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
             {
                 Bff = bff,
                 Browser = browser,
-                BackchannelClient = backchannelClient,
-                Backchannel = backchannel,
+                Backchannel = backchannelClient,
                 UserInfoTraffic = outbound,
                 BffResponses = captures,
                 SessionCookieValue = cookieValue!,
@@ -503,8 +498,6 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
 
         public required CrossServerBrowser Browser { get; init; }
 
-        public required HttpClient BackchannelClient { get; init; }
-
         public required RecordingHandler Backchannel { get; init; }
 
         public required RecordingHandler UserInfoTraffic { get; init; }
@@ -543,7 +536,7 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         public async ValueTask DisposeAsync()
         {
             Browser.Dispose();
-            BackchannelClient.Dispose();
+            Backchannel.Dispose();
             await Bff.DisposeAsync();
         }
     }

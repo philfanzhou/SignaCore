@@ -20,10 +20,7 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
     [Fact]
     public async Task Login_CompletesOverTheRealSignaCoreFlow_AndEstablishesTheLocalSession()
     {
-        using var authorityClient = fixture.Host.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            BaseAddress = new Uri(SignaCoreHostFixture.Authority)
-        });
+        using var authorityClient = fixture.Host.Server.CreateHandler();
         using var bff = BffTestServer.Create(
             SignaCoreHostFixture.Authority,
             SignaCoreHostFixture.ClientId,
@@ -92,10 +89,7 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
     [Fact]
     public async Task Diagnostics_ReportTheDiscoveryResolvedEndpoints_NotHardcodedPaths()
     {
-        using var authorityClient = fixture.Host.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            BaseAddress = new Uri(SignaCoreHostFixture.Authority)
-        });
+        using var authorityClient = fixture.Host.Server.CreateHandler();
         using var bff = BffTestServer.Create(
             SignaCoreHostFixture.Authority,
             SignaCoreHostFixture.ClientId,
@@ -139,10 +133,7 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
     [Fact]
     public async Task AnIncompleteConfiguration_FailsAtStartupWithAClearMessage()
     {
-        using var authorityClient = fixture.Host.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            BaseAddress = new Uri(SignaCoreHostFixture.Authority)
-        });
+        using var authorityClient = fixture.Host.Server.CreateHandler();
         using var bff = new WebApplicationFactory<BffSample.Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ReferenceBff:Authority", SignaCoreHostFixture.Authority);
@@ -176,10 +167,7 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
     public async Task AnUnreachableAuthority_AnswersTheFirstLoginWithABoundedNonSensitiveError()
     {
         // A backchannel that reaches nothing: the authority host has no server behind it.
-        using var deadBackchannel = new HttpClient
-        {
-            BaseAddress = new Uri("https://dead-authority.example.test")
-        };
+        using var deadBackchannel = new SocketsHttpHandler();
         using var bff = BffTestServer.Create(
             "https://dead-authority.example.test",
             SignaCoreHostFixture.ClientId,

@@ -17,11 +17,8 @@ public sealed class ReferenceBffCancellationTests(SignaCoreHostFixture fixture)
     [Fact]
     public async Task CancellingTheLogin_AbortsThePendingDiscoveryCall()
     {
-        var blocking = new BlockingBackchannelHandler();
-        using var backchannel = new HttpClient(blocking)
-        {
-            BaseAddress = new Uri("https://blocking-authority.example.test")
-        };
+        using var blocking = new BlockingBackchannelHandler();
+        using var backchannel = blocking;
         using var bff = BffTestServer.Create(
             "https://blocking-authority.example.test",
             SignaCoreHostFixture.ClientId,

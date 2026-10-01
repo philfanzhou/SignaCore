@@ -337,7 +337,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
     public async Task WithoutAnyDatabaseConfiguration_TheLoginSampleRuns_AndManagementIsAFixed503()
     {
         await using var authority = await FakeAuthority.StartAsync();
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
         await using var bff = BffTestServer.Create(
             FakeAuthority.BaseAddress,
             ClientId,
@@ -361,7 +361,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
     public async Task APartialDatabaseConfiguration_FailsStartup_WithoutEchoingValues()
     {
         await using var authority = await FakeAuthority.StartAsync();
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
 
         var connectionSecret = "Data Source=/tmp/never-created-4f6a2d9b7e1c.db";
         var factory = BffTestServer.Create(
@@ -579,12 +579,9 @@ public sealed class ReferenceBffAdminAuthorizationTests
         DbCommandInterceptor? dbInterceptor = null,
         DelegatingHandler? userInfoWrapper = null)
     {
-        // The backchannel client intentionally outlives this method: the BFF's OIDC handler owns
-        // it for the lifetime of the factory, and the authority disposes the underlying server.
-        var backchannelClient = new HttpClient(authority.Server.CreateHandler(), disposeHandler: false)
-        {
-            BaseAddress = new Uri(FakeAuthority.BaseAddress)
-        };
+        // The authority's own handler is the package's backchannel for this factory's lifetime;
+        // the authority disposes the underlying server when the test ends.
+        var backchannelClient = authority.Server.CreateHandler();
 
         HttpMessageHandler userInfo = authority.Server.CreateHandler();
         if (userInfoWrapper is not null)

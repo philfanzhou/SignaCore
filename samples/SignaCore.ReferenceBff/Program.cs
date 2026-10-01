@@ -83,9 +83,9 @@ if (databaseSettings.IsConfigured)
     BffSetupHosting.AddSetup(builder.Services);
 }
 
-// The configuration is validated at startup — before the client package's own options, so the
-// diagnostics keep naming the sample's keys — and an incomplete configuration is a startup
-// failure with a clear message, never a silently degraded run.
+// The configuration is validated at startup — both by the sample's own keys and by the client
+// package's options over the same values — and an incomplete configuration is a startup failure
+// with a clear message that names the missing key and never echoes a value.
 builder.Services
     .AddOptions<ReferenceBffOptions>()
     .BindConfiguration(ReferenceBffOptions.SectionName)

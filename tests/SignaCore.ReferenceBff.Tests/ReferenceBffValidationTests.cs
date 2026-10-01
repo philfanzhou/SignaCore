@@ -20,7 +20,7 @@ public sealed class ReferenceBffValidationTests
     public async Task ACorrectResponse_EstablishesTheLocalSession()
     {
         await using var authority = await FakeAuthority.StartAsync();
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
         await using var bff = CreateBff(backchannel);
         using var browser = CreateBrowser(bff, authority.Server.CreateHandler());
 
@@ -41,7 +41,7 @@ public sealed class ReferenceBffValidationTests
     {
         await using var authority = await FakeAuthority.StartAsync();
         authority.Defect = defect;
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
         await using var bff = CreateBff(backchannel);
         using var browser = CreateBrowser(bff, authority.Server.CreateHandler());
 
@@ -58,7 +58,7 @@ public sealed class ReferenceBffValidationTests
     public async Task ATamperedState_FailsTheCallbackWithoutAnyTokenExchange()
     {
         await using var authority = await FakeAuthority.StartAsync();
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
         await using var bff = CreateBff(backchannel);
         using var browser = CreateBrowser(bff, authority.Server.CreateHandler());
 
@@ -77,7 +77,7 @@ public sealed class ReferenceBffValidationTests
     public async Task AReplayedCallbackState_FailsTheSecondAttemptWithoutASecondTokenExchange()
     {
         await using var authority = await FakeAuthority.StartAsync();
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
         await using var bff = CreateBff(backchannel);
         using var browser = CreateBrowser(bff, authority.Server.CreateHandler());
 
@@ -113,7 +113,7 @@ public sealed class ReferenceBffValidationTests
 
     // ---- Driving ----
 
-    private static WebApplicationFactory<BffSample.Program> CreateBff(HttpClient backchannel) =>
+    private static WebApplicationFactory<BffSample.Program> CreateBff(HttpMessageHandler backchannel) =>
         BffTestServer.Create(
             FakeAuthority.BaseAddress,
             ClientId,

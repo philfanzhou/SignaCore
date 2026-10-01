@@ -131,7 +131,7 @@ public sealed partial class ReferenceBffDatabaseContractTests
     {
         using var context = database.CreateContext();
         return BffTestServer.Create(FakeAuthority.BaseAddress, "reference-bff", "reference-bff-test-secret",
-            SignaCoreHostFixture.RedirectUri, authority.CreateClient(), authority.Server.CreateHandler(),
+            SignaCoreHostFixture.RedirectUri, authority.Server.CreateHandler(), authority.Server.CreateHandler(),
             databaseProvider: provider, databaseConnectionString: context.Database.GetConnectionString(), configureTestServices: configure);
     }
 

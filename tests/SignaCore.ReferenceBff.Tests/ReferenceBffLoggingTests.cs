@@ -79,7 +79,7 @@ public sealed class ReferenceBffLoggingTests
         var fault = new LogAuditFailure();
         using var capture = new ConsoleCapture();
         using var recorder = new VerifierRecorder(identity.Host.Server.CreateHandler());
-        using var backchannel = new HttpClient(recorder);
+        using var backchannel = recorder;
         await using var host = BffTestServer.Create(SignaCoreHostFixture.Authority, SignaCoreHostFixture.ClientId,
             SignaCoreHostFixture.ClientSecret, SignaCoreHostFixture.RedirectUri, backchannel,
             identity.Host.Server.CreateHandler(), databaseProvider: configured ? "SQLite" : null,
@@ -258,7 +258,7 @@ public sealed class ReferenceBffLoggingTests
 
     private static Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<BffSample::Program> CreateHost(FakeAuthority authority, LogDatabase? database) =>
         BffTestServer.Create(FakeAuthority.BaseAddress, "reference-bff", "reference-bff-test-secret", SignaCoreHostFixture.RedirectUri,
-            authority.CreateClient(), authority.Server.CreateHandler(), databaseProvider: database is null ? null : "SQLite", databaseConnectionString: database?.ConnectionString);
+            authority.Server.CreateHandler(), authority.Server.CreateHandler(), databaseProvider: database is null ? null : "SQLite", databaseConnectionString: database?.ConnectionString);
 
     private static async Task<int> RunCode(LogDatabase database, string operation, ReferenceBffSetupCodeTests.SilentTerminal terminal)
     {
