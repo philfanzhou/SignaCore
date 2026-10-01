@@ -161,6 +161,23 @@ jobs:
             --results-directory reports \
             --no-restore
 
+      # The official client package keeps its own test project for the same reason as the
+      # reference BFF: its real-host contract tests (ADR 0007's compatibility matrix) and its
+      # fake-authority negative cases must stay a separate signal from the server slices.
+      - name: Client package tests
+        run: |
+          dotnet restore tests/SignaCore.Client.AspNetCore.Tests/SignaCore.Client.AspNetCore.Tests.csproj
+          dotnet test tests/SignaCore.Client.AspNetCore.Tests/SignaCore.Client.AspNetCore.Tests.csproj \
+            --configuration Release \
+            --coverage \
+            --coverage-output signacore-client-pack.cobertura.xml \
+            --coverage-output-format cobertura \
+            --coverage-settings tests/coverage.settings.xml \
+            --report-xunit-trx \
+            --report-xunit-trx-filename signacore-client-pack.trx \
+            --results-directory reports \
+            --no-restore
+
       - name: Pre-pull PostgreSQL image
         run: |
           postgres_image="$(python3 .github/scripts/resolve_official_image.py postgres)"

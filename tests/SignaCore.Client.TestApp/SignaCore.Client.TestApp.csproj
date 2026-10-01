@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>SignaCore.Client.TestApp</RootNamespace>
+    <!-- The consumer application under test for the client-package contract tests: a real
+         minimal host of the package, never packed, never shipped. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SignaCore.Client.AspNetCore\SignaCore.Client.AspNetCore.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -5,12 +5,15 @@
     <Project Path="samples/SignaCore.ReferenceBff/SignaCore.ReferenceBff.csproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/SignaCore.Client.AspNetCore/SignaCore.Client.AspNetCore.csproj" />
     <Project Path="src/SignaCore.Database.Migrations.Sqlite/SignaCore.Database.Migrations.Sqlite.csproj" />
     <Project Path="src/SignaCore.Database/SignaCore.Database.csproj" />
     <Project Path="src/SignaCore.Domain/SignaCore.Domain.csproj" />
     <Project Path="src/SignaCore.Host/SignaCore.Host.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/SignaCore.Client.AspNetCore.Tests/SignaCore.Client.AspNetCore.Tests.csproj" />
+    <Project Path="tests/SignaCore.Client.TestApp/SignaCore.Client.TestApp.csproj" />
     <Project Path="tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj" />
     <Project Path="tests/SignaCore.ReferenceBff.Tests/SignaCore.ReferenceBff.Tests.csproj" />
     <Project Path="tests/SignaCore.Tests/SignaCore.Tests.csproj" />
