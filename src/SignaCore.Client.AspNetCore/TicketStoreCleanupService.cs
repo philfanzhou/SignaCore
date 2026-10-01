@@ -3,18 +3,20 @@ using Microsoft.Extensions.Hosting;
 namespace SignaCore.Client.AspNetCore;
 
 /// <summary>
-/// The periodic sweep behind the ticket and pending-sign-in stores: expired entries are reclaimed
-/// on a timer, not only when a request happens to present their key again.
+/// The periodic sweep behind the ticket, pending-sign-in, and logout-return stores: expired
+/// entries are reclaimed on a timer, not only when a request happens to present their key again.
 /// </summary>
 internal sealed class TicketStoreCleanupService(
     ITicketStore ticketStore,
-    PendingSignInStore pendingSignInStore) : BackgroundService
+    PendingSignInStore pendingSignInStore,
+    LogoutReturnStateStore logoutReturnStateStore) : BackgroundService
 {
-    /// <summary>The sweep cadence of both stores.</summary>
+    /// <summary>The sweep cadence of all three stores.</summary>
     public static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
 
     private readonly ITicketStore _ticketStore = ticketStore;
     private readonly PendingSignInStore _pendingSignInStore = pendingSignInStore;
+    private readonly LogoutReturnStateStore _logoutReturnStateStore = logoutReturnStateStore;
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -26,6 +28,7 @@ internal sealed class TicketStoreCleanupService(
             {
                 _ticketStore.RemoveExpired(stoppingToken);
                 _pendingSignInStore.RemoveExpired(stoppingToken);
+                _logoutReturnStateStore.RemoveExpired(stoppingToken);
             }
         }
         catch (OperationCanceledException)

@@ -30,6 +30,7 @@ public sealed partial class SignaCoreHostFixture : IAsyncLifetime
     public const string ClientId = "client-pack-app";
     public const string ClientSecret = "client-pack-test-secret";
     public const string RedirectUri = "https://bff.localhost/auth/callback";
+    public const string PostLogoutRedirectUri = "https://bff.localhost/auth/logout/return";
     public const string Username = "client_pack_user";
     public const string Password = "Client-Pack-123!";
     public const string Authority = "https://localhost";
@@ -135,6 +136,13 @@ public sealed partial class SignaCoreHostFixture : IAsyncLifetime
                 AppRegistrationId = application.Id,
                 Kind = RedirectUriKind.Redirect,
                 CanonicalUri = RedirectUri
+            });
+            dbContext.AppRedirectUris.Add(new AppRedirectUriEntity
+            {
+                Id = Guid.NewGuid(),
+                AppRegistrationId = application.Id,
+                Kind = RedirectUriKind.PostLogout,
+                CanonicalUri = PostLogoutRedirectUri
             });
         }
 
@@ -279,7 +287,8 @@ public static class ConsumerAppTestServer
         TimeProvider? timeProvider = null,
         Action<IServiceCollection>? configureTestServices = null,
         string? environment = null,
-        ILoggerProvider? loggerProvider = null) =>
+        ILoggerProvider? loggerProvider = null,
+        string? postLogoutRedirectUri = null) =>
         new WebApplicationFactory<ConsumerApp.Program>().WithWebHostBuilder(builder =>
         {
             if (environment is not null)
@@ -296,6 +305,7 @@ public static class ConsumerAppTestServer
             builder.UseSetting("ClientApp:ClientId", clientId);
             builder.UseSetting("ClientApp:ClientSecret", clientSecret);
             builder.UseSetting("ClientApp:RedirectUri", redirectUri);
+            builder.UseSetting("ClientApp:PostLogoutRedirectUri", postLogoutRedirectUri ?? string.Empty);
 
             builder.ConfigureTestServices(services =>
             {

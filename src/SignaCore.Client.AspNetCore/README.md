@@ -12,12 +12,12 @@ carries exactly `response_type=code`, `state`, `nonce`, and an S256 PKCE challen
 single-valued callback that validates `state` and `iss` before anything else, a one-time,
 never-retried code redemption with HTTP Basic client authentication, strict ID-token validation
 (RS256 via JWKS `kid`, `typ: JWT`, `iss`, `aud`, lifetime, `nonce`), a capacity-bounded
-server-side ticket store with periodic expiry sweep, and logs and telemetry that never carry a
-code, `state`, `nonce`, verifier, token, secret, or full query string.
+server-side ticket store with periodic expiry sweep, a session CSRF boundary, a local-session-first
+prepared logout, and logs and telemetry that never carry a code, `state`, `nonce`, verifier,
+token, secret, or full query string.
 
-Out of scope by design: refresh-token handling, CSRF and prepared logout (tracked separately),
-downstream Bearer token validation, and any business authorization — those stay with the consumer
-through the extension points below.
+Out of scope by design: refresh-token handling, downstream Bearer token validation, and any
+business authorization — those stay with the consumer through the extension points below.
 
 ## Getting started
 
@@ -47,7 +47,8 @@ var app = builder.Build();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Mount the package's endpoints: /auth/start, /auth/callback, /auth/session, /auth/signin-failed.
+// Mount the package's endpoints: /auth/start, /auth/callback, /auth/session, /auth/csrf,
+// /auth/logout, /auth/logout/return, and /auth/signin-failed.
 app.MapSignaCoreHostedLogin("/auth");
 
 // The consumer's own routes authenticate against the package's session scheme.
@@ -115,6 +116,60 @@ builder.Services.AddSingleton<ITicketStore>(new RedisTicketStore(/* ... */));
 
 The session cookie is HttpOnly, Secure, and SameSite=Lax, and the session never outlives the
 access token's expiry.
+
+## The session CSRF boundary
+
+Every session-authenticated unsafe method — anything but GET, HEAD, OPTIONS, and TRACE on a route
+that authenticates against the package's session scheme — must present a valid antiforgery token.
+The browser obtains it from `GET <prefix>/csrf`, which answers `{"token":"..."}` and sets the
+matching antiforgery cookie; the front end then sends the token on every write:
+
+```http
+GET  /auth/csrf
+POST /orders
+X-SignaCore-CSRF: <token from /auth/csrf>
+```
+
+A missing or wrong token answers one fixed 403 and changes nothing. The header name is
+`options.AntiforgeryHeaderName` (default `X-SignaCore-CSRF`). Requests your
+`options.SchemeSelector` forwards to your own Bearer handler never pass through the boundary.
+
+## Sign out with prepared logout
+
+`POST <prefix>/logout` ends the local session first and then coordinates the upstream sign-out
+(the [prepared logout](https://github.com/philfanzhou/SignaCore/blob/main/docs/oidc/Logout.md)
+contract; Confidential clients only). The request needs the antiforgery token exactly like any
+other session write:
+
+1. Inside a per-session gate the package removes the server-side ticket and deletes the session
+   cookie — the local sign-out is done and is never rolled back.
+2. It then calls `POST /oauth2/logout/requests` on the server-to-server backchannel with HTTP
+   Basic client authentication, the ID token it has kept server-side since sign-in, your
+   registered post-logout URI, and a fresh one-time state. One attempt, never retried.
+3. The browser is redirected to the returned logout URI — but only after the package has verified
+   it is same-origin and carries exactly one well-formed logout handle. A forged or cross-origin
+   `logout_uri` is never followed.
+4. When SignaCore finishes, it returns the browser to `<prefix>/logout/return?state=...`. The
+   package accepts the state only once, only with the browser's correlation cookie, and only
+   within five minutes, then redirects to `options.PostLogoutReturnPath` (default `/`).
+
+If the upstream preparation fails, times out, is cancelled, or answers an unverifiable URI, the
+endpoint answers the fixed local-only result — `200 {"outcome":"local_only"}` — and the browser
+stays signed out locally. Access tokens already issued remain valid downstream until they expire;
+revoking them is not part of this flow.
+
+Register the exact return URI in SignaCore with the `PostLogout` kind
+(`https://orders.example/auth/logout/return`) and configure it:
+
+```csharp
+options.PostLogoutRedirectUri = "https://orders.example/auth/logout/return"; // registered in SignaCore
+options.PostLogoutReturnPath = "/signed-out";                               // your fixed landing path
+```
+
+Without `PostLogoutRedirectUri` the upstream logout still happens, but SignaCore shows its own
+signed-out page instead of returning the browser. Repeated or concurrent logouts revoke the local
+session at most once and prepare at most once; the later request answers the same local-only
+result.
 
 ## Dependencies
 

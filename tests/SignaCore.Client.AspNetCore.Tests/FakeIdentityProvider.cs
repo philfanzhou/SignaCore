@@ -68,6 +68,31 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         ReuseCode
     }
 
+    /// <summary>The injectable answer shapes of the logout preparation endpoint.</summary>
+    public enum LogoutPrepareShape
+    {
+        /// <summary>The contract's success: one relative <c>logout_uri</c> with a fresh handle.</summary>
+        Normal,
+
+        /// <summary>An HTTP 500 — the authority failed after consuming nothing.</summary>
+        HttpError,
+
+        /// <summary>A <c>logout_uri</c> pointing at another origin: the browser must never go there.</summary>
+        CrossOriginUri,
+
+        /// <summary>A <c>logout_uri</c> with an extra query member beyond the handle.</summary>
+        ExtraQueryUri,
+
+        /// <summary>A 200 whose body has no <c>logout_uri</c> member.</summary>
+        MissingUriMember,
+
+        /// <summary>A transport failure thrown before any answer: an unreachable authority.</summary>
+        Unreachable,
+
+        /// <summary>A timeout: the response never arrives within the client's patience.</summary>
+        Timeout
+    }
+
     public TestServer Server { get; }
 
     public TokenDefect Defect
@@ -87,6 +112,22 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         get => _state.Echo;
         set => _state.Echo = value;
     }
+
+    public LogoutPrepareShape LogoutPrepare
+    {
+        get => _state.LogoutPrepare;
+        set => _state.LogoutPrepare = value;
+    }
+
+    /// <summary>Every preparation request's form body, in order.</summary>
+    public ConcurrentQueue<string> LogoutPrepareBodies => _state.LogoutPrepareBodies;
+
+    /// <summary>Every preparation request's Authorization header, in order.</summary>
+    public ConcurrentQueue<string?> LogoutPrepareAuthorizationHeaders =>
+        _state.LogoutPrepareAuthorizationHeaders;
+
+    /// <summary>Every logout handle the browser completion endpoint saw, in order.</summary>
+    public ConcurrentQueue<string> CompletedLogoutHandles => _state.CompletedLogoutHandles;
 
     /// <summary>The Discovery document's issuer; corrupting it breaks the start-time issuer check.</summary>
     public string DiscoveryIssuer
@@ -239,14 +280,96 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
 
         app.MapGet("/userinfo", () => Results.Json(new { sub = DefaultSubject }));
 
+        // The prepared-logout preparation endpoint, with the contract's success shape and the
+        // injectable failure shapes the negative cases need.
+        app.MapPost("/oauth2/logout/requests", async (HttpContext context) =>
+        {
+            var form = await context.Request.ReadFormAsync(TestContext.Current.CancellationToken);
+            var body = string.Join(
+                "&",
+                form.OrderBy(member => member.Key, StringComparer.Ordinal)
+                    .Select(member => $"{member.Key}={Uri.EscapeDataString(member.Value.ToString())}"));
+            state.LogoutPrepareBodies.Enqueue(body);
+            state.LogoutPrepareAuthorizationHeaders.Enqueue(
+                context.Request.Headers.Authorization.ToString());
+
+            switch (state.LogoutPrepare)
+            {
+                case LogoutPrepareShape.HttpError:
+                    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                    return;
+
+                case LogoutPrepareShape.Unreachable:
+                    throw new System.Net.Http.HttpRequestException("The fake authority is offline.");
+
+                case LogoutPrepareShape.Timeout:
+                    // Longer than any client patience: the caller observes a timeout, and the
+                    // test controls the end of the wait through its own cancellation.
+                    await Task.Delay(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
+                    break;
+
+                default:
+                    break;
+            }
+
+            var handle = NewLogoutHandle();
+            var logoutUri = state.LogoutPrepare switch
+            {
+                LogoutPrepareShape.CrossOriginUri =>
+                    $"https://evil.example/oauth2/logout?logout_handle={handle}",
+                LogoutPrepareShape.ExtraQueryUri =>
+                    $"/oauth2/logout?logout_handle={handle}&extra=1",
+                LogoutPrepareShape.MissingUriMember => null,
+                _ => $"/oauth2/logout?logout_handle={handle}"
+            };
+            var echoedState = form["state"].ToString();
+            state.PreparedLogouts.Enqueue(
+                (handle, form["post_logout_redirect_uri"].ToString(), echoedState));
+
+            if (logoutUri is null)
+            {
+                await Results.Json(new { other = "member" }).ExecuteAsync(context);
+                return;
+            }
+
+            context.Response.Headers.CacheControl = "no-store";
+            await Results.Json(new { logout_uri = logoutUri }).ExecuteAsync(context);
+        });
+
+        // The browser completion: records the handle and redirects back to the prepared
+        // post-logout URI with the stored state echoed byte-for-byte.
+        app.MapGet("/oauth2/logout", (HttpRequest http) =>
+        {
+            var handle = http.Query["logout_handle"].ToString();
+            state.CompletedLogoutHandles.Enqueue(handle);
+            var prepared = state.PreparedLogouts.FirstOrDefault(entry => entry.Handle == handle);
+            if (prepared.PostLogoutRedirectUri is { Length: > 0 } target)
+            {
+                var separator = target.Contains('?', StringComparison.Ordinal) ? '&' : '?';
+                return Results.Redirect(
+                    prepared.EchoedState is { Length: > 0 } echoedState
+                        ? $"{target}{separator}state={Uri.EscapeDataString(echoedState)}"
+                        : target);
+            }
+
+            return Results.Text("signed out at the authority", "text/html");
+        });
+
         await app.StartAsync(TestContext.Current.CancellationToken);
         var server = app.GetTestServer();
         server.BaseAddress = new Uri(BaseAddress);
         return new FakeIdentityProvider(app, server, state);
 
-        static string Mint(AuthorityState state)
+        // One fresh 43-character base64url handle, exactly the completion contract's shape.
+        static string NewLogoutHandle()
         {
-            if (state.ResponseShape == TokenResponseShape.MissingIdToken)
+            Span<byte> entropy = stackalloc byte[32];
+            RandomNumberGenerator.Fill(entropy);
+            return Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        }
+
+        static string Mint(AuthorityState state)
+        {            if (state.ResponseShape == TokenResponseShape.MissingIdToken)
             {
                 return string.Empty;
             }
@@ -302,6 +425,16 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         public TokenResponseShape ResponseShape { get; set; } = TokenResponseShape.Normal;
 
         public AuthorizeEcho Echo { get; set; }
+
+        public LogoutPrepareShape LogoutPrepare { get; set; }
+
+        public ConcurrentQueue<string> LogoutPrepareBodies { get; } = [];
+
+        public ConcurrentQueue<string?> LogoutPrepareAuthorizationHeaders { get; } = [];
+
+        public ConcurrentQueue<string> CompletedLogoutHandles { get; } = [];
+
+        public ConcurrentQueue<(string Handle, string PostLogoutRedirectUri, string EchoedState)> PreparedLogouts { get; } = [];
 
         public string DiscoveryIssuer { get; set; } = BaseAddress;
 
