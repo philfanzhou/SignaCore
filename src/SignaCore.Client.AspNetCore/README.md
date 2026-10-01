@@ -27,6 +27,8 @@ the exact callback URI registered, as described in the
 The callback path must be exactly `<prefix>/callback` of the prefix you map below.
 
 ```csharp
+using SignaCore.Client.AspNetCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAuthorization();
@@ -50,7 +52,9 @@ app.MapSignaCoreHostedLogin("/auth");
 
 // The consumer's own routes authenticate against the package's session scheme.
 app.MapGet("/orders", () => "Signed-in content")
-    .RequireAuthorization(SignaCoreHostedLoginDefaults.AuthenticationScheme);
+    .RequireAuthorization(policy =>
+        policy.AddAuthenticationSchemes(SignaCoreHostedLoginDefaults.AuthenticationScheme)
+            .RequireAuthenticatedUser());
 
 app.Run();
 ```
