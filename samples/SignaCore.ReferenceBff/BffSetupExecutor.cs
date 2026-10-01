@@ -25,7 +25,11 @@ internal static class BffSetupExecutor
             if (http.User.Identity?.IsAuthenticated != true) return SetupCompletionResult.CredentialInvalid();
             try
             {
-                await http.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(http);
+                // User-neutral, like every antiforgery validation of the sample and the package:
+                // the setup form issues its pair on the signed-in page, and the session CSRF
+                // boundary upstream already validated this request's pair the same way.
+                await BffAntiforgery.ValidateAsync(
+                    http, http.RequestServices.GetRequiredService<IAntiforgery>());
             }
             catch (AntiforgeryValidationException)
             {

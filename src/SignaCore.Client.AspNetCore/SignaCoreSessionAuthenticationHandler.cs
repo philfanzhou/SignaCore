@@ -119,8 +119,12 @@ internal sealed class SignaCoreSessionAuthenticationHandler(
             returnUrl += Request.QueryString.Value;
         }
 
+        // An absolute redirect, built like every authentication handler's challenge redirect:
+        // consumers' challenges and the tests behind them observe one fully formed address
+        // instead of an implementation-defined relative one.
         Response.Redirect(
-            $"{current.Prefix}/{SignaCoreHostedLoginDefaults.StartPathSegment}"
+            $"{Request.Scheme}://{Request.Host}"
+            + $"{current.Prefix}/{SignaCoreHostedLoginDefaults.StartPathSegment}"
             + $"?returnUrl={Uri.EscapeDataString(returnUrl)}");
         return Task.CompletedTask;
     }

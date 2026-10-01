@@ -216,7 +216,7 @@ routes.MapGet("/", (HttpContext http, IAntiforgery antiforgery) =>
     // The issuance is user-neutral on purpose: the package's antiforgery boundary binds its pairs
     // to the per-browser cookie alone, so a token minted on this signed-in page stays
     // interchangeable with one from GET /bff/csrf.
-    var tokens = IssueLogoutFormToken(http, antiforgery);
+    var tokens = BffAntiforgery.Issue(http, antiforgery);
     return Results.Text(
         $"""
          <!doctype html>
@@ -237,8 +237,11 @@ routes.MapGet("/", (HttpContext http, IAntiforgery antiforgery) =>
         "text/html");
 });
 
-routes.MapGet("/bff/login", () => Results.Redirect(
-    BffRoutePrefix + "/" + SignaCoreHostedLoginDefaults.StartPathSegment + "?returnUrl=%2F",
+// An absolute redirect, like the package's own challenge redirect: the login entry and every
+// later hop of the handshake observe one fully formed address.
+routes.MapGet("/bff/login", (HttpContext http) => Results.Redirect(
+    http.Request.Scheme + "://" + http.Request.Host + BffRoutePrefix + "/"
+    + SignaCoreHostedLoginDefaults.StartPathSegment + "?returnUrl=%2F",
     permanent: false, preserveMethod: false));
 
 routes.MapGet("/bff/diagnostics", async (
@@ -408,25 +411,6 @@ routes.MapGet("/error", (string? reason) => Results.Text(
 app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<BffOperationLog>()
     .Record(BffLogOperation.WebHost, BffLogOutcome.Started, CancellationToken.None));
 app.Run();
-
-/// <summary>
-/// Issues the home page's logout-form antiforgery pair with an unauthenticated principal in
-/// place, matching the client package's user-neutral antiforgery boundary: the pair validates on
-/// the package's endpoints regardless of the principal this signed-in page presents.
-/// </summary>
-static AntiforgeryTokenSet IssueLogoutFormToken(HttpContext http, IAntiforgery antiforgery)
-{
-    var originalUser = http.User;
-    http.User = new ClaimsPrincipal(new ClaimsIdentity());
-    try
-    {
-        return antiforgery.GetAndStoreTokens(http);
-    }
-    finally
-    {
-        http.User = originalUser;
-    }
-}
 
 /// <summary>Exposed for Microsoft.AspNetCore.Mvc.Testing.</summary>
 public partial class Program;

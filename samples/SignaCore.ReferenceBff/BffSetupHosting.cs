@@ -32,7 +32,7 @@ internal static class BffSetupHosting
         if (http.User.Identity?.IsAuthenticated != true)
             return Results.Challenge(new AuthenticationProperties { RedirectUri = "/bff/setup" });
         http.Response.Headers.CacheControl = "no-store";
-        var token = WebUtility.HtmlEncode(antiforgery.GetAndStoreTokens(http).RequestToken);
+        var token = WebUtility.HtmlEncode(BffAntiforgery.Issue(http, antiforgery).RequestToken);
         return Results.Content($$"""
             <!doctype html><html lang="en"><head><title>Set up administrator</title></head><body>
             <h1>Set up administrator</h1>

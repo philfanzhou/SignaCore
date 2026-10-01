@@ -56,7 +56,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
             Assert.Equal("/bff/start", response.Headers.Location!.AbsolutePath);
             Assert.StartsWith(
                 "/bff/start?returnUrl=",
-                response.Headers.Location!.ToString(),
+                response.Headers.Location!.PathAndQuery,
                 StringComparison.Ordinal);
         }
 

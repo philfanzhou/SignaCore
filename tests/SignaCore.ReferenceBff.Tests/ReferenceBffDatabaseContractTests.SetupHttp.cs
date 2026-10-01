@@ -92,8 +92,11 @@ public sealed partial class ReferenceBffDatabaseContractTests
         using var formResponse = form.Response;
         var html = await formResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var csrf = WebUtility.HtmlDecode(Regex.Match(html, "id=\"csrf\" type=\"hidden\" value=\"([^\"]+)\"").Groups[1].Value);
+        // Without the token the package's session CSRF boundary fails the authentication
+        // itself, so the setup executor never runs: the attempt is answered by the fixed
+        // anonymous rejection and writes nothing.
         using (var missingCsrf = await SendSetup(browser.Bff, terminal.Code.Reveal(), null))
-            Assert.Equal(HttpStatusCode.BadRequest, missingCsrf.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, missingCsrf.StatusCode);
         using (var invalid = await SendSetup(browser.Bff, new string('A', 32), csrf))
             Assert.Equal(HttpStatusCode.Unauthorized, invalid.StatusCode);
         Assert.Equal(0, authority.UserInfoCalls);
