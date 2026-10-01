@@ -237,11 +237,8 @@ routes.MapGet("/", (HttpContext http, IAntiforgery antiforgery) =>
         "text/html");
 });
 
-// An absolute redirect, like the package's own challenge redirect: the login entry and every
-// later hop of the handshake observe one fully formed address.
-routes.MapGet("/bff/login", (HttpContext http) => Results.Redirect(
-    http.Request.Scheme + "://" + http.Request.Host + BffRoutePrefix + "/"
-    + SignaCoreHostedLoginDefaults.StartPathSegment + "?returnUrl=%2F",
+routes.MapGet("/bff/login", () => Results.Redirect(
+    BffRoutePrefix + "/" + SignaCoreHostedLoginDefaults.StartPathSegment + "?returnUrl=%2F",
     permanent: false, preserveMethod: false));
 
 routes.MapGet("/bff/diagnostics", async (

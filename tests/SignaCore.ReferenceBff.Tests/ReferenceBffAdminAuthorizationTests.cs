@@ -53,10 +53,11 @@ public sealed class ReferenceBffAdminAuthorizationTests
         using (var response = await browser.SendOnBffAsync(anonymous, TestContext.Current.CancellationToken))
         {
             Assert.Equal(HttpStatusCode.Found, response.StatusCode);
-            Assert.Equal("/bff/start", response.Headers.Location!.AbsolutePath);
+            // The challenge redirect stays relative (the package's contract), so the assertion
+            // reads the Location as the raw string it is.
             Assert.StartsWith(
                 "/bff/start?returnUrl=",
-                response.Headers.Location!.PathAndQuery,
+                response.Headers.Location!.ToString(),
                 StringComparison.Ordinal);
         }
 

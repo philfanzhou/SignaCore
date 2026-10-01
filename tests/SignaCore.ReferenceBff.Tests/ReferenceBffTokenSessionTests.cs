@@ -214,10 +214,9 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         // through the package's start endpoint.
         Assert.Equal(0, BffTickets.Count(session.Bff));
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
-        Assert.Equal("/bff/start", response.Headers.Location!.AbsolutePath);
         Assert.StartsWith(
             "/bff/start?returnUrl=",
-            response.Headers.Location!.PathAndQuery,
+            response.Headers.Location!.ToString(),
             StringComparison.Ordinal);
     }
 

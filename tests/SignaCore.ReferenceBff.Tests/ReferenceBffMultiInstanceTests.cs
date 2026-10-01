@@ -204,7 +204,7 @@ public sealed class ReferenceBffMultiInstanceTests
         // state lives server-side, so the start endpoint sets no protocol cookie at all.
         using var login = await browser.Bff.GetAsync("/bff/login", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Found, login.StatusCode);
-        Assert.True(login.Headers.Location!.PathAndQuery.StartsWith("/bff/start", StringComparison.Ordinal), "The login entry must route into the package's start endpoint.");
+        Assert.True(login.Headers.Location!.ToString().StartsWith("/bff/start", StringComparison.Ordinal), "The login entry must route into the package's start endpoint.");
         outputs.Add(await BrowserOutput.ReadAsync(login, "login entry"));
 
         using var response = await browser.Bff.GetAsync(login.Headers.Location, TestContext.Current.CancellationToken);
