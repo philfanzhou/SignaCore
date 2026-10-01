@@ -665,6 +665,20 @@ jobs:
             --results-directory reports \
             --no-restore
 
+      # The persistent client ticket store keeps its own test assembly for the same reason: its
+      # SQLite matrix runs everywhere, and its PostgreSQL cases join through the same
+      # RUN_SIGNACORE_DATABASE_CONTRACTS gate as the rest of this job.
+      - name: Client package EF ticket store contracts
+        run: |
+          dotnet restore tests/SignaCore.Client.AspNetCore.EntityFrameworkCore.Tests/SignaCore.Client.AspNetCore.EntityFrameworkCore.Tests.csproj
+          dotnet test tests/SignaCore.Client.AspNetCore.EntityFrameworkCore.Tests/SignaCore.Client.AspNetCore.EntityFrameworkCore.Tests.csproj \
+            --configuration Release \
+            --report-xunit-trx \
+            --report-xunit-trx-filename signacore-client-ef-store.trx \
+            --output Detailed \
+            --results-directory reports \
+            --no-restore
+
       - name: Verify OIDC matrix results
         if: ${{ !cancelled() }}
         run: python3 .github/scripts/verify_oidc_matrix.py reports
