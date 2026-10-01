@@ -20,7 +20,7 @@ SignaCore 是 .NET 10 身份与认证服务，包含 Vue 3 管理控制台。它
 ## 项目边界与架构
 
 - Host 组合 `SignaCore.Domain`、`SignaCore.Database` 和 provider-specific migration projects；Domain 不得依赖 ASP.NET Core transport 类型。
-- 下游系统通过 HTTP discovery、JWKS 和 API 集成，不直接引用本仓库程序集。
+- 下游系统通过 HTTP discovery、JWKS 和 API 集成，或引用官方客户端包 `SignaCore.Client.AspNetCore`（唯一允许下游引用的本仓库程序集，见 `docs/adr/0007-official-hosted-login-client-package.md`）；Host、Domain、Database 等服务端程序集禁止被下游引用。纯 HTTP 接入继续受支持并保持文档化。
 - 保持 `SignaCore` 根命名空间及项目/程序集名称一致；公共路由、JSON 字段、claims 和现有数据库表名默认稳定，破坏性变化必须有明确 migration 和兼容方案。
 - 全局业务配置存于共享 `service_settings` 单聚合（见 `docs/development/SharedSettings.md`），通过首次安装和认证后的管理页维护；除打开数据库所需的 provider/version/connection string 与外部 root key 外，不得把新业务配置塞进 `appsettings.json`。
 - PostgreSQL migration 在 `src/SignaCore.Database`，SQLite migration 在 `src/SignaCore.Database.Migrations.Sqlite`；任何 schema 变更必须同时考虑两套 migration history。

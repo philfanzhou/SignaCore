@@ -23,6 +23,16 @@ npm --prefix src/SignaCore.Admin run build
 
 Docker is required for the complete database contract matrix and image smoke checks.
 
+## Project boundaries
+
+Downstream systems integrate with SignaCore over HTTP (Discovery, JWKS, and the documented API
+and OAuth surfaces) or by referencing the officially released client package
+`SignaCore.Client.AspNetCore`; see
+[ADR 0007](docs/adr/0007-official-hosted-login-client-package.md). Server-side assemblies (`SignaCore`
+host, `SignaCore.Domain`, `SignaCore.Database`, and the migration projects) are never published for
+downstream reference, and contributions to the client package must not add consumer business
+models, branding, or authorization rules.
+
 ## Database changes
 
 Schema changes must include reviewed migrations for PostgreSQL and SQLite. Keep existing migration identifiers intact and verify each provider's contract tests.

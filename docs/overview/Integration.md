@@ -13,7 +13,7 @@ Downstream services should use OpenID discovery and JWKS directly:
 use `/.well-known/jwks.json` instead — it is an alias for the same document — but reading the URL
 from discovery is what survives a future route change.
 
-No SignaCore assembly or private client SDK is required. The former client SDK is not maintained.
+Pure HTTP integration requires no SignaCore assembly. A hosted-login consumer may instead reference the official client package defined by [ADR 0007](../adr/0007-official-hosted-login-client-package.md), the only SignaCore assembly downstream systems may reference. The former client SDK is not maintained.
 
 A service that signs users in should redirect them to SignaCore's hosted login page instead of
 collecting credentials itself; the [Hosted Login guide](../integrations/HostedLogin.md) covers
