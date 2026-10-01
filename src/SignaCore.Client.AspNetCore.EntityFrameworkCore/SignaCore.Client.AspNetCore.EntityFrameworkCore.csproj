@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SignaCore.Client.AspNetCore.EntityFrameworkCore</RootNamespace>
+    <Description>Persistent, revocable server-side ticket store for the SignaCore hosted-login client: an Entity Framework Core ITicketStore that stores Data Protection-encrypted payloads in the consumer's own database.</Description>
+    <!-- The package is shipped from the repository tag alongside the container image (ADR 0007);
+         the release pipeline sets the concrete version, 1.0.0 is only the local default. -->
+    <Version>1.0.0</Version>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/philfanzhou/SignaCore</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Dependency policy (ADR 0007): the shared ASP.NET Core framework (Data Protection and the
+         authentication ticket serializer live there) plus EF Core relational; the concrete
+         provider (Npgsql, Microsoft.EntityFrameworkCore.Sqlite, ...) is the consumer's choice,
+         which is why this package stays provider-neutral. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SignaCore.Client.AspNetCore\SignaCore.Client.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
