@@ -131,8 +131,14 @@ X-SignaCore-CSRF: <token from /auth/csrf>
 ```
 
 A missing or wrong token answers one fixed 403 and changes nothing. The header name is
-`options.AntiforgeryHeaderName` (default `X-SignaCore-CSRF`). Requests your
+configurable through `options.AntiforgeryHeaderName` (default `X-SignaCore-CSRF`). Requests your
 `options.SchemeSelector` forwards to your own Bearer handler never pass through the boundary.
+
+The boundary is user-neutral: the package issues and validates every antiforgery pair against
+the per-browser cookie binding alone, never against the principal any pipeline stage presents,
+so a pair works the same whether the browser fetched it before or after signing in, and a
+form-token minted on your own signed-in page (issue it the same way, with an unauthenticated
+principal in place) stays interchangeable with a `GET <prefix>/csrf` token.
 
 ## Sign out with prepared logout
 

@@ -7,6 +7,7 @@ using SignaCore.Client.AspNetCore;
 using SignaCore.ReferenceBff.Database;
 using SignaCore.ReferenceBff;
 using System.Net;
+using System.Security.Claims;
 
 const string UserInfoClientName = BffIdentityCheckService.UserInfoClientName;
 const string BffRoutePrefix = "/bff";
@@ -212,7 +213,10 @@ routes.MapGet("/", (HttpContext http, IAntiforgery antiforgery) =>
 
     // The logout form posts to the package's prepared-logout endpoint and carries the
     // antiforgery token in its hidden field; the token is issued together with its cookie here.
-    var tokens = antiforgery.GetAndStoreTokens(http);
+    // The issuance is user-neutral on purpose: the package's antiforgery boundary binds its pairs
+    // to the per-browser cookie alone, so a token minted on this signed-in page stays
+    // interchangeable with one from GET /bff/csrf.
+    var tokens = IssueLogoutFormToken(http, antiforgery);
     return Results.Text(
         $"""
          <!doctype html>
@@ -404,6 +408,25 @@ routes.MapGet("/error", (string? reason) => Results.Text(
 app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<BffOperationLog>()
     .Record(BffLogOperation.WebHost, BffLogOutcome.Started, CancellationToken.None));
 app.Run();
+
+/// <summary>
+/// Issues the home page's logout-form antiforgery pair with an unauthenticated principal in
+/// place, matching the client package's user-neutral antiforgery boundary: the pair validates on
+/// the package's endpoints regardless of the principal this signed-in page presents.
+/// </summary>
+static AntiforgeryTokenSet IssueLogoutFormToken(HttpContext http, IAntiforgery antiforgery)
+{
+    var originalUser = http.User;
+    http.User = new ClaimsPrincipal(new ClaimsIdentity());
+    try
+    {
+        return antiforgery.GetAndStoreTokens(http);
+    }
+    finally
+    {
+        http.User = originalUser;
+    }
+}
 
 /// <summary>Exposed for Microsoft.AspNetCore.Mvc.Testing.</summary>
 public partial class Program;

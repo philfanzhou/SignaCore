@@ -95,7 +95,8 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
             SignaCoreHostFixture.ClientId,
             SignaCoreHostFixture.ClientSecret,
             SignaCoreHostFixture.RedirectUri,
-            authorityClient);
+            authorityClient,
+            userInfoHandler: fixture.Host.Server.CreateHandler());
         using var browser = BffTestServer.CreateBrowser(fixture.Host, bff);
 
         // Sign in once (the diagnostics page requires the local session).
@@ -146,6 +147,8 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
 
         // The startup validation refuses the incomplete configuration with a clear message;
         // through the test host the failure surfaces when the server is first brought up. The
+        // failing validator may be the sample's own or the client package's (both validate the
+        // secret at startup), so the assertion keeps to the bounded contract both share: the
         // message names the missing key and echoes no configured value.
         var exception = await Assert.ThrowsAnyAsync<OptionsValidationException>(async () =>
         {
@@ -157,7 +160,7 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
             using var response = await client.GetAsync("/bff/login", TestContext.Current.CancellationToken);
         });
         Assert.Contains(
-            "ReferenceBff:ClientSecret is required.",
+            "ClientSecret is required.",
             exception.Message,
             StringComparison.Ordinal);
         Assert.DoesNotContain(SignaCoreHostFixture.ClientId, exception.Message, StringComparison.Ordinal);

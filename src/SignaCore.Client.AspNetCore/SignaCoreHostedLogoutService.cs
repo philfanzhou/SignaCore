@@ -41,7 +41,9 @@ internal sealed class SignaCoreHostedLogoutService(
         var cancellationToken = context.RequestAborted;
         // The token is bound to the antiforgery cookie set alongside it; issuing one is a public,
         // unauthenticated read — the protection is the cookie binding, not secrecy of the issuer.
-        var tokens = antiforgery.GetAndStoreTokens(context);
+        // The issuance is user-neutral: the pair must validate on every package surface whatever
+        // principal the consumer's pipeline presents at that stage.
+        var tokens = await antiforgery.GetAndStoreTokensUserNeutralAsync(context);
         SignaCoreClientLog.CsrfIssued(logger, cancellationToken);
         context.Response.ContentType = "application/json";
         context.Response.Headers.CacheControl = "no-store";
@@ -57,7 +59,9 @@ internal sealed class SignaCoreHostedLogoutService(
 
         try
         {
-            await antiforgery.ValidateRequestAsync(context);
+            // User-neutral, like every antiforgery validation of the boundary: a pair issued on
+            // any surface must validate here regardless of the ambient principal.
+            await antiforgery.ValidateRequestUserNeutralAsync(context);
         }
         catch (AntiforgeryValidationException)
         {
