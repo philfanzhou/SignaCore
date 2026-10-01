@@ -5,13 +5,11 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using BffSample::SignaCore.ReferenceBff;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using ServiceMantle.Audit;
+using SignaCore.Client.AspNetCore;
 using SignaCore.ReferenceBff.Database;
 using Xunit;
 
@@ -63,7 +61,7 @@ public sealed class ReferenceBffLoggingTests
         Assert.Contains(entries, line => line.Contains("projection-contract", StringComparison.Ordinal));
         // Cancellation is observed immediately before emission, including an otherwise successful result.
         var before = capture.Text.Split('\n').Count(line => line.Contains("Reference BFF operation completed.", StringComparison.Ordinal));
-        Assert.ThrowsAny<OperationCanceledException>(() => log.Record(BffLogOperation.Login, BffLogOutcome.Succeeded, new CancellationToken(true)));
+        Assert.ThrowsAny<OperationCanceledException>(() => log.Record(BffLogOperation.UserInfo, BffLogOutcome.Succeeded, new CancellationToken(true)));
         Assert.Equal(before, capture.Text.Split('\n').Count(line => line.Contains("Reference BFF operation completed.", StringComparison.Ordinal)));
     }
 
@@ -88,8 +86,8 @@ public sealed class ReferenceBffLoggingTests
             databaseConnectionString: configured ? database.ConnectionString : null,
             configureTestServices: services => { if (failAudit) services.AddScoped<IManagementAuditWriter>(_ => fault); });
         using var browser = BffTestServer.CreateBrowser(identity.Host, host);
-        using var challenge = await browser.Bff.GetAsync("/bff/login", TestContext.Current.CancellationToken);
-        using var authorize = await browser.SendOnIdentityServerAsync(new HttpRequestMessage(HttpMethod.Get, challenge.Headers.Location), TestContext.Current.CancellationToken);
+        var authorizeUrl = await BffSignIn.BeginAsync(browser, TestContext.Current.CancellationToken);
+        using var authorize = await browser.SendOnIdentityServerAsync(new HttpRequestMessage(HttpMethod.Get, authorizeUrl), TestContext.Current.CancellationToken);
         using var login = await SignaCoreLoginDriver.PostCredentialsAsync(browser, authorize.Headers.Location!.ToString(),
             SignaCoreHostFixture.Username, SignaCoreHostFixture.Password, TestContext.Current.CancellationToken);
         using var callback = await browser.SendOnBffAsync(new HttpRequestMessage(HttpMethod.Get, login.Headers.Location), TestContext.Current.CancellationToken);
@@ -105,13 +103,10 @@ public sealed class ReferenceBffLoggingTests
             : "name=\"__RequestVerificationToken\" value=\"([^\"]+)\"").Groups[1].Value);
         Assert.NotEmpty(csrf);
         var cookie = browser.Cookies.GetCookies(browser.BffBase)["signacore-bff-session"]!.Value;
-        var options = host.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get("Cookies");
-        var stub = options.TicketDataFormat.Unprotect(cookie)!;
-        var key = stub.Principal.FindFirst("Microsoft.AspNetCore.Authentication.Cookies-SessionId")!.Value;
-        var ticket = (await host.Services.GetRequiredService<MemoryTicketStore>().RetrieveAsync(key))!;
-        var access = ticket.Properties.GetTokenValue("access_token")!;
+        var ticket = (await BffTickets.RetrieveAsync(host, cookie, TestContext.Current.CancellationToken))!;
+        var access = ticket.AccessToken;
         var canaries = new[] { SignaCoreHostFixture.Password, SignaCoreHostFixture.ClientSecret, terminal.Code!.Reveal(), cookie,
-            access, ticket.Properties.GetTokenValue("id_token")!, recorder.Verifier, csrf, "Bearer " + access,
+            access, ticket.IdToken, recorder.Verifier, csrf, "Bearer " + access,
             database.ConnectionString, BffTestServer.DatabaseRootKey };
         fault.Text = string.Join('|', canaries);
         using var request = new HttpRequestMessage(HttpMethod.Post, "/management/v1/setup")
@@ -133,7 +128,7 @@ public sealed class ReferenceBffLoggingTests
             BffCanaryAssertions.Absent(response.RequestMessage!.RequestUri!.AbsoluteUri, browserCanaries, "browser URL");
         }
         foreach (var reason in new[] { "authority_unreachable", "configuration_incomplete", "access_denied",
-                     "sign_in_failed", "session_expired", "", "unrecognized" })
+                     "state_mismatch", "invalid_token", "session_expired", "", "unrecognized" })
         {
             using var error = await browser.Bff.GetAsync("/error?reason=" + Uri.EscapeDataString(reason), TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, error.StatusCode);
@@ -141,7 +136,7 @@ public sealed class ReferenceBffLoggingTests
         }
         // Callback must issue the session cookie, but every other secret is forbidden in its headers.
         await BffCanaryAssertions.ResponseAsync(callback, browserCanaries.Where(value => value != cookie));
-        await BffCanaryAssertions.ResponseAsync(challenge, browserCanaries);
+        BffCanaryAssertions.Absent(authorizeUrl, browserCanaries, "authorize redirect URL");
         using var home = await browser.Bff.GetAsync("/", TestContext.Current.CancellationToken);
         var homeHtml = await home.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var logoutCsrf = WebUtility.HtmlDecode(Regex.Match(homeHtml, "name=\"__RequestVerificationToken\" value=\"([^\"]+)\"").Groups[1].Value);
@@ -154,8 +149,10 @@ public sealed class ReferenceBffLoggingTests
         BffCanaryAssertions.Absent(output, canaries.Append(logoutCsrf), "console");
         var events = output.Split('\n').Where(line => line.Contains("Reference BFF operation completed.", StringComparison.Ordinal)).ToArray();
         Assert.All(events, AssertIdentity);
-        foreach (var operation in configured ? new[] { "Login", "UserInfo", "Authorization", "Setup", "Logout" }
-                     : new[] { "Login", "UserInfo", "Authorization", "Logout" })
+        // Sign-in and logout outcomes are the client package's bounded logs; the sample's own
+        // operation log carries the UserInfo, authorization, and Setup decisions.
+        foreach (var operation in configured ? new[] { "UserInfo", "Authorization", "Setup" }
+                     : new[] { "UserInfo", "Authorization" })
             Assert.Contains(events, entry => Field(entry, "Operation") == operation);
         if (configured)
             Assert.Contains(events, entry => entry.Contains(failAudit ? "Unavailable" : "Committed", StringComparison.Ordinal));
@@ -188,7 +185,7 @@ public sealed class ReferenceBffLoggingTests
         finally { gate.TrySetResult(); }
         var events = capture.Text.Split('\n').Where(line => line.Contains("Reference BFF operation completed.", StringComparison.Ordinal));
         Assert.DoesNotContain(events, entry => Field(entry, "Operation") == "UserInfo");
-        Assert.Equal(1, host.Services.GetRequiredService<MemoryTicketStore>().Count);
+        Assert.Equal(1, BffTickets.Count(host));
     }
 
     [Fact]

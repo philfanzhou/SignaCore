@@ -1,15 +1,12 @@
 extern alias BffSample;
 
 using BffOperationLog = BffSample::SignaCore.ReferenceBff.BffOperationLog;
-using MemoryTicketStore = BffSample::SignaCore.ReferenceBff.MemoryTicketStore;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using SignaCore.Client.AspNetCore;
 using SignaCore.ReferenceBff.Database;
 using System.Collections.Concurrent;
 using System.IdentityModel.Tokens.Jwt;
@@ -119,12 +116,10 @@ public sealed class ReferenceBffMultiInstanceTests
                 await CallbackAsync(browser, next.Headers.Location, outputs);
 
                 var cookie = browser.Cookies.GetCookies(browser.BffBase)["signacore-bff-session"]!.Value;
-                var options = bff.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get("Cookies");
-                var stub = options.TicketDataFormat.Unprotect(cookie)!;
-                var ticketKey = stub.Principal.FindFirst("Microsoft.AspNetCore.Authentication.Cookies-SessionId")!.Value;
-                var ticket = (await bff.Services.GetRequiredService<MemoryTicketStore>().RetrieveAsync(ticketKey))!;
-                var access = ticket.Properties.GetTokenValue("access_token")!;
-                var id = ticket.Properties.GetTokenValue("id_token")!;
+                var ticket = (await bff.Services.GetRequiredService<SignaCore.Client.AspNetCore.ITicketStore>()
+                    .RetrieveAsync(cookie, ct))!;
+                var access = ticket.AccessToken;
+                var id = ticket.IdToken;
                 secrets.AddRange([cookie, access, id]);
                 var idJwt = new JwtSecurityTokenHandler().ReadJwtToken(id);
                 var accessJwt = new JwtSecurityTokenHandler().ReadJwtToken(access);
@@ -204,7 +199,15 @@ public sealed class ReferenceBffMultiInstanceTests
 
     private static async Task<Uri> ChallengeAsync(CrossServerBrowser browser, List<BrowserOutput> outputs)
     {
-        using var response = await browser.Bff.GetAsync("/bff/login", TestContext.Current.CancellationToken);
+        // The two local hops of the entry: /bff/login redirects to the package's start endpoint,
+        // whose answer is the Discovery-resolved authorization redirect. The handshake's pending
+        // state lives server-side, so the start endpoint sets no protocol cookie at all.
+        using var login = await browser.Bff.GetAsync("/bff/login", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Found, login.StatusCode);
+        Assert.True(login.Headers.Location!.AbsolutePath == "/bff/start", "The login entry must route into the package's start endpoint.");
+        outputs.Add(await BrowserOutput.ReadAsync(login, "login entry"));
+
+        using var response = await browser.Bff.GetAsync(login.Headers.Location, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         Assert.True(response.Headers.Location!.AbsolutePath == "/oauth2/authorize", "Discovery must resolve Authorization.");
         outputs.Add(await BrowserOutput.ReadAsync(response, "login challenge", locationFields: ["state", "nonce", "code_challenge"], allowProtocolCookies: true));
@@ -372,10 +375,11 @@ public sealed class ReferenceBffMultiInstanceTests
     private static void AssertCompleteAndScan(IEnumerable<OwnedEvent> events, IEnumerable<string> canaries)
     {
         Assert.NotEmpty(events);
-        foreach (var (operation, outcome) in new[] { ("WebHost", "Started"), ("Login", "Succeeded"), ("UserInfo", "Confirmed"), ("Authorization", "Forbidden"), ("Authorization", "Authorized") })
+        // Sign-in outcomes are the client package's bounded logs; the sample's owned events are
+        // its host startup, UserInfo confirmations, and authorization decisions.
+        foreach (var (operation, outcome) in new[] { ("WebHost", "Started"), ("UserInfo", "Confirmed"), ("Authorization", "Forbidden"), ("Authorization", "Authorized") })
             Assert.True(events.Any(e => Equals(e.Properties.GetValueOrDefault("Operation"), operation)
                 && Equals(e.Properties.GetValueOrDefault("Outcome"), outcome)), "Missing expected owned operation/outcome: " + operation + "/" + outcome);
-        Assert.True(events.Count(e => Equals(e.Properties.GetValueOrDefault("Operation"), "Login")) >= 3);
         foreach (var entry in events) ScanOwnedEvent(entry, canaries);
     }
     private static void ScanOwnedEvent(OwnedEvent entry, IEnumerable<string> canaries) =>

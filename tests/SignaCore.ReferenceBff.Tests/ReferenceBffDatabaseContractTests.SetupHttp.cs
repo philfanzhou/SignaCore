@@ -116,11 +116,11 @@ public sealed partial class ReferenceBffDatabaseContractTests
         authority.UserInfoMode = FakeAuthority.UserInfoResponse.InternalError;
         using (var unavailable = await SendSetup(browser.Bff, terminal.Code.Reveal(), csrf))
             Assert.Equal(HttpStatusCode.ServiceUnavailable, unavailable.StatusCode);
-        Assert.Equal(1, bff.Services.GetRequiredService<MemoryTicketStore>().Count);
+        Assert.Equal(1, BffTickets.Count(bff));
         authority.UserInfoMode = FakeAuthority.UserInfoResponse.SubjectMismatch;
         using (var invalid = await SendSetup(browser.Bff, terminal.Code.Reveal(), csrf))
             Assert.Equal(HttpStatusCode.Unauthorized, invalid.StatusCode);
-        Assert.Equal(0, bff.Services.GetRequiredService<MemoryTicketStore>().Count);
+        Assert.Equal(0, BffTickets.Count(bff));
         await using var read = database.CreateContext();
         Assert.Empty(await read.ManagementRoleBindings.ToListAsync(TestContext.Current.CancellationToken));
         Assert.Equal(0, await CountSharedAuditRowsAsync(read));

@@ -5,13 +5,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using BffSample::SignaCore.ReferenceBff;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using ServiceMantle.Audit;
 using Xunit;
 using SilentTerminal = SignaCore.ReferenceBff.Tests.ReferenceBffSetupCodeTests.SilentTerminal;
@@ -70,7 +67,9 @@ public sealed partial class ReferenceBffDatabaseContractTests
         await using var bff = BffTestServer.Create(FakeAuthority.BaseAddress, "reference-bff", "reference-bff-test-secret",
             "https://bff.localhost" + path, authority.CreateClient(), databaseProvider: "SQLite",
             databaseConnectionString: context.Database.GetConnectionString());
-        Assert.Throws<OptionsValidationException>(() => bff.CreateClient());
+        // The client package accepts exactly <prefix>/callback as the redirect URI's path; every
+        // conflicting route fails startup instead of silently shadowing a reserved path.
+        Assert.ThrowsAny<Exception>(() => bff.CreateClient());
     }
 
     [Theory]
@@ -96,12 +95,9 @@ public sealed partial class ReferenceBffDatabaseContractTests
         var html = await formResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var csrf = WebUtility.HtmlDecode(Regex.Match(html, "id=\"csrf\" type=\"hidden\" value=\"([^\"]+)\"").Groups[1].Value);
         var cookie = browser.Cookies.GetCookies(browser.BffBase)["signacore-bff-session"]!.Value;
-        var options = bff.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get("Cookies");
-        var stub = options.TicketDataFormat.Unprotect(cookie)!;
-        var key = stub.Principal.FindFirst("Microsoft.AspNetCore.Authentication.Cookies-SessionId")!.Value;
-        var ticket = (await bff.Services.GetRequiredService<MemoryTicketStore>().RetrieveAsync(key))!;
-        var canaries = new[] { terminal.Code!.Reveal(), ticket.Properties.GetTokenValue("access_token")!,
-            ticket.Properties.GetTokenValue("id_token")!, cookie, authority.Subject, csrf, "reference-bff-test-secret",
+        var ticket = (await BffTickets.RetrieveAsync(bff, cookie, TestContext.Current.CancellationToken))!;
+        var canaries = new[] { terminal.Code!.Reveal(), ticket.AccessToken,
+            ticket.IdToken, cookie, authority.Subject, csrf, "reference-bff-test-secret",
             SignaCoreHostFixture.Password, BffTestServer.DatabaseRootKey,
             bff.Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>()["ReferenceBffDatabase:ConnectionString"]! };
         fault.Text = string.Join("|", canaries);

@@ -79,9 +79,8 @@ public sealed partial class ReferenceBffDatabaseContractTests
             SignaCoreHostFixture.RedirectUri, backchannel, identity.Host.Server.CreateHandler(),
             databaseProvider: "SQLite", databaseConnectionString: context.Database.GetConnectionString());
         using var browser = BffTestServer.CreateBrowser(identity.Host, host);
-        using var challenge = await browser.Bff.GetAsync("/bff/login", TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.Found, challenge.StatusCode);
-        using var authorize = await browser.SendOnIdentityServerAsync(new HttpRequestMessage(HttpMethod.Get, challenge.Headers.Location), TestContext.Current.CancellationToken);
+        var authorizeUrl = await BffSignIn.BeginAsync(browser, TestContext.Current.CancellationToken);
+        using var authorize = await browser.SendOnIdentityServerAsync(new HttpRequestMessage(HttpMethod.Get, authorizeUrl), TestContext.Current.CancellationToken);
         using var credentials = await SignaCoreLoginDriver.PostCredentialsAsync(browser, authorize.Headers.Location!.ToString(),
             SignaCoreHostFixture.Username, SignaCoreHostFixture.Password, TestContext.Current.CancellationToken);
         using var callback = await browser.SendOnBffAsync(new HttpRequestMessage(HttpMethod.Get, credentials.Headers.Location), TestContext.Current.CancellationToken);

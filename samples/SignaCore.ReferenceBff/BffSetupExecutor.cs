@@ -1,6 +1,4 @@
 using Microsoft.AspNetCore.Antiforgery;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Installation;
 using ServiceMantle.Web.ManagementApi.Setup;
@@ -39,7 +37,7 @@ internal static class BffSetupExecutor
                 () => new BffSetupSession(http.RequestServices.CreateAsyncScope()),
                 () => new ValueTask<BffIdentityCheckResult>(http.RequestServices
                     .GetRequiredService<BffIdentityCheckService>().CheckAsync(http, token)),
-                () => new ValueTask(http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)), token);
+                () => new ValueTask(BffSession.RevokeAsync(http, token)), token);
         }
         catch
         {

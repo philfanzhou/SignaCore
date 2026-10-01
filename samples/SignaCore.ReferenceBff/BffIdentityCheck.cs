@@ -1,11 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using SignaCore.Client.AspNetCore;
 
 namespace SignaCore.ReferenceBff;
 
@@ -44,16 +41,20 @@ internal sealed record BffIdentityCheckResult(
 }
 
 /// <summary>
-/// The typed identity check behind every identity-sensitive surface: reads the server-side ticket,
-/// resolves UserInfo from Discovery, presents the stored access token once, and requires the
-/// successful JSON object to carry exactly one string <c>sub</c> Ordinal-equal to the subject
-/// verified at sign-in. One call performs at most one UserInfo round trip; caller cancellation
-/// propagates, and every other failure stays inside the typed result — no upstream detail, token,
-/// or payload fragment is ever surfaced by this service.
+/// The typed identity check behind every identity-sensitive surface: reads the server-side
+/// session ticket the client package issued, resolves UserInfo from Discovery, presents the
+/// stored access token once, and requires the successful JSON object to carry exactly one string
+/// <c>sub</c> Ordinal-equal to the subject verified at sign-in — the package's validated ID-token
+/// principal is the only source of that identity, never the configured authority. One call
+/// performs at most one UserInfo round trip; caller cancellation propagates, and every other
+/// failure stays inside the typed result — no upstream detail, token, or payload fragment is ever
+/// surfaced by this service.
 /// </summary>
 internal sealed class BffIdentityCheckService(
     IHttpClientFactory httpClientFactory,
-    IOptionsMonitor<OpenIdConnectOptions> oidcOptions)
+    ITicketStore ticketStore,
+    IOptionsMonitor<SignaCoreHostedLoginOptions> loginOptions,
+    BffAuthorityMetadataReader metadataReader)
 {
     /// <summary>The named client that carries the Bearer header on the server-to-server leg.</summary>
     public const string UserInfoClientName = "signacore";
@@ -70,21 +71,31 @@ internal sealed class BffIdentityCheckService(
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var authentication = await http.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-        if (!authentication.Succeeded || authentication.Properties is null)
+        // The session cookie names the key of the server-side ticket the client package stored.
+        if (!http.Request.Cookies.TryGetValue(loginOptions.CurrentValue.SessionCookieName, out var key)
+            || string.IsNullOrEmpty(key))
         {
             return BffIdentityCheckResult.SessionInvalid;
         }
 
-        // A ticket from before the verified-identity capture answers nothing: it cannot prove
-        // which identity the authority signed in, and no identity is ever inferred for it.
-        var verified = ReferenceBffVerifiedIdentity.Read(authentication.Properties);
-        if (verified is null)
+        var ticket = await ticketStore.RetrieveAsync(key, cancellationToken);
+        if (ticket is null)
+        {
+            // An unknown or expired key proves nothing.
+            return BffIdentityCheckResult.SessionInvalid;
+        }
+
+        // The verified identity is the one the package validated from the ID token at sign-in:
+        // exactly one issuer and one subject, read from the server-side ticket, never from
+        // request input and never from the configured authority.
+        var verifiedIssuer = ReadSingleClaim(ticket.Principal, "iss");
+        var verifiedSubject = ReadSingleClaim(ticket.Principal, "sub");
+        if (verifiedIssuer is null || verifiedSubject is null)
         {
             return BffIdentityCheckResult.SessionInvalid;
         }
 
-        var accessToken = authentication.Properties.GetTokenValue("access_token");
+        var accessToken = ticket.AccessToken;
         if (string.IsNullOrEmpty(accessToken))
         {
             return BffIdentityCheckResult.SessionInvalid;
@@ -167,7 +178,7 @@ internal sealed class BffIdentityCheckService(
 
                 var upstreamSubject = ReadSingleSubject(document.RootElement);
                 if (upstreamSubject is null
-                    || !string.Equals(upstreamSubject, verified.Value.Subject, StringComparison.Ordinal))
+                    || !string.Equals(upstreamSubject, verifiedSubject, StringComparison.Ordinal))
                 {
                     // The authority no longer confirms the identity this session was built on.
                     return BffIdentityCheckResult.SessionInvalid;
@@ -175,8 +186,8 @@ internal sealed class BffIdentityCheckService(
 
                 return new BffIdentityCheckResult(
                     BffIdentityCheckStatus.Confirmed,
-                    verified.Value.Issuer,
-                    verified.Value.Subject,
+                    verifiedIssuer,
+                    verifiedSubject,
                     payload,
                     contentType);
             }
@@ -191,10 +202,8 @@ internal sealed class BffIdentityCheckService(
     {
         try
         {
-            var configuration = await oidcOptions.Get(OpenIdConnectDefaults.AuthenticationScheme)
-                .ConfigurationManager!.GetConfigurationAsync(cancellationToken);
-            var endpoint = configuration.UserInfoEndpoint;
-            return string.IsNullOrEmpty(endpoint) ? null : endpoint;
+            var metadata = await metadataReader.ReadAsync(cancellationToken);
+            return string.IsNullOrEmpty(metadata.UserInfoEndpoint) ? null : metadata.UserInfoEndpoint;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -213,6 +222,15 @@ internal sealed class BffIdentityCheckService(
             cancellationToken.ThrowIfCancellationRequested();
             return null;
         }
+    }
+
+    /// <summary>Reads exactly one non-empty claim of a type, or null for zero, many, or empty.</summary>
+    private static string? ReadSingleClaim(System.Security.Claims.ClaimsPrincipal principal, string claimType)
+    {
+        var claims = principal.FindAll(claimType).ToList();
+        return claims.Count == 1 && !string.IsNullOrEmpty(claims[0].Value)
+            ? claims[0].Value
+            : null;
     }
 
     /// <summary>

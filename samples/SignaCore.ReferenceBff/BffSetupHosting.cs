@@ -27,18 +27,6 @@ internal static class BffSetupHosting
         // API v1 registers the matching phase gate on /management/v1.
     }
 
-    internal static bool IsCallbackPathSafe(string? redirectUri)
-    {
-        if (!Uri.TryCreate(redirectUri, UriKind.Absolute, out var uri)) return false;
-        var path = Uri.UnescapeDataString(uri.AbsolutePath).TrimEnd('/');
-        return path.Length > 0 && !path.Equals("/error", StringComparison.OrdinalIgnoreCase)
-            && !path.Equals("/signout-callback-oidc", StringComparison.OrdinalIgnoreCase)
-            && !path.Equals("/bff", StringComparison.OrdinalIgnoreCase)
-            && !path.StartsWith("/bff/", StringComparison.OrdinalIgnoreCase)
-            && !path.Equals("/management", StringComparison.OrdinalIgnoreCase)
-            && !path.StartsWith("/management/", StringComparison.OrdinalIgnoreCase);
-    }
-
     internal static IResult Form(HttpContext http, IAntiforgery antiforgery)
     {
         if (http.User.Identity?.IsAuthenticated != true)

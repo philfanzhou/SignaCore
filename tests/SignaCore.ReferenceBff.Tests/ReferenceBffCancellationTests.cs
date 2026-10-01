@@ -2,16 +2,14 @@ extern alias BffSample;
 
 using System.Net;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.Options;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Xunit;
 
 namespace SignaCore.ReferenceBff.Tests;
 
 /// <summary>
 /// The outbound-cancellation contract of the reference BFF: the Discovery, JWKS, and
-/// token-exchange calls of the OIDC handler observe the request's cancellation, so an abandoned
-/// sign-in aborts the backchannel instead of running to completion detached.
+/// token-exchange calls of the client package's handshake observe the request's cancellation, so
+/// an abandoned sign-in aborts the backchannel instead of running to completion detached.
 /// </summary>
 public sealed class ReferenceBffCancellationTests(SignaCoreHostFixture fixture)
     : IClassFixture<SignaCoreHostFixture>
@@ -37,7 +35,9 @@ public sealed class ReferenceBffCancellationTests(SignaCoreHostFixture fixture)
             BaseAddress = new Uri("https://bff.localhost"),
             AllowAutoRedirect = false
         });
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/bff/login");
+        // The package's start endpoint is where the handshake resolves Discovery; the sample's
+        // /bff/login entry only redirects to it.
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/bff/start");
 
         var operation = client.SendAsync(request, cancellation.Token);
         // Give the pipeline time to reach the blocked Discovery call, then abandon it.
