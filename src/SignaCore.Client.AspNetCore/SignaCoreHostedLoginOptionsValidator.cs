@@ -75,6 +75,34 @@ internal sealed class SignaCoreHostedLoginOptionsValidator(IHostEnvironment envi
             failures.Add($"{OptionsName}.SessionCookieName is required.");
         }
 
+        if (string.IsNullOrWhiteSpace(options.AntiforgeryHeaderName))
+        {
+            failures.Add($"{OptionsName}.AntiforgeryHeaderName is required.");
+        }
+
+        if (options.PostLogoutRedirectUri is not null)
+        {
+            if (!SignaCoreAuthorityUriRules.IsAcceptableRedirectUri(
+                    options.PostLogoutRedirectUri, allowInsecureLoopback))
+            {
+                failures.Add(
+                    $"{OptionsName}.PostLogoutRedirectUri must be an absolute HTTPS URI with a path and without a query, fragment, or user info. An explicit loopback HTTP origin (127.0.0.1 or [::1]) is accepted only in the Development and Testing environments.");
+            }
+            else if (options.Prefix is { } prefix
+                && new Uri(options.PostLogoutRedirectUri).AbsolutePath.TrimEnd('/')
+                    != prefix + "/" + SignaCoreHostedLoginDefaults.LogoutReturnPathSegment)
+            {
+                failures.Add(
+                    $"{OptionsName}.PostLogoutRedirectUri does not match the hosted-login logout-return path; the redirect URI's path must be exactly <prefix>/logout/return.");
+            }
+        }
+
+        if (SignaCoreHostedLoginEndpointService.AsLocalPath(options.PostLogoutReturnPath) is null)
+        {
+            failures.Add(
+                $"{OptionsName}.PostLogoutReturnPath must be a local absolute path that starts with exactly one slash.");
+        }
+
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
             : ValidateOptionsResult.Success;

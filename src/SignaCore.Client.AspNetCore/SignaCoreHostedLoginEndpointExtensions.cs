@@ -53,6 +53,16 @@ public static class SignaCoreHostedLoginEndpointExtensions
 
         options.Prefix = normalizedPrefix;
 
+        if (options.PostLogoutRedirectUri is { } postLogoutRedirectUri
+            && !string.Equals(
+                new Uri(postLogoutRedirectUri).AbsolutePath.TrimEnd('/'),
+                normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.LogoutReturnPathSegment,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "SignaCoreHostedLoginOptions.PostLogoutRedirectUri does not match the hosted-login logout-return path; the redirect URI's path must be exactly <prefix>/logout/return.");
+        }
+
         endpoints.MapGet(
             normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.StartPathSegment,
             static context => context.RequestServices
@@ -74,6 +84,21 @@ public static class SignaCoreHostedLoginEndpointExtensions
             static context => context.RequestServices
                 .GetRequiredService<SignaCoreHostedLoginEndpointService>()
                 .HandleFailurePageAsync(context));
+        endpoints.MapGet(
+            normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.CsrfPathSegment,
+            static context => context.RequestServices
+                .GetRequiredService<SignaCoreHostedLogoutService>()
+                .HandleCsrfAsync(context));
+        endpoints.MapPost(
+            normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.LogoutPathSegment,
+            static context => context.RequestServices
+                .GetRequiredService<SignaCoreHostedLogoutService>()
+                .HandleLogoutAsync(context));
+        endpoints.MapGet(
+            normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.LogoutReturnPathSegment,
+            static context => context.RequestServices
+                .GetRequiredService<SignaCoreHostedLogoutService>()
+                .HandleLogoutReturnAsync(context));
     }
 
     private static string NormalizePrefix(string prefix)

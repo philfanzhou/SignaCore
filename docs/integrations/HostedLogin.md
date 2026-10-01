@@ -176,6 +176,15 @@ Reference BFF clears only its own local session and does not demonstrate this up
 Public client cannot use prepared logout: signing out only forgets its tokens, and a later sign-in
 may complete without a login page while the SignaCore session is still valid.
 
+Applications using the [official client package]
+(https://www.nuget.org/packages/SignaCore.Client.AspNetCore) get prepared logout from the package:
+`GET <prefix>/csrf` issues the antiforgery token, `POST <prefix>/logout` revokes the local
+server-side session first and then performs the preparation above on the backchannel, and
+`GET <prefix>/logout/return` consumes the one-time echoed state and redirects to the consumer's
+fixed landing path. The package's own README documents the exact options
+(`PostLogoutRedirectUri`, `PostLogoutReturnPath`, `AntiforgeryHeaderName`); the ID token and
+client secret never leave the server side of the consuming application.
+
 ## 8. Session lifetime
 
 The SignaCore session behind a sign-in lasts at most 12 hours and ends after 30 minutes without

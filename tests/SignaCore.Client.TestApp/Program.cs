@@ -16,6 +16,15 @@ builder.Services.AddSignaCoreHostedLogin(options =>
     options.ClientSecret = builder.Configuration["ClientApp:ClientSecret"];
     options.RedirectUri = builder.Configuration["ClientApp:RedirectUri"];
     options.Scope = "openid profile";
+    // An unset or blank configuration leaves the option null: no post-logout redirect is
+    // registered with SignaCore and the browser stays on the authority's completion page.
+    var postLogoutRedirectUri = builder.Configuration["ClientApp:PostLogoutRedirectUri"];
+    if (!string.IsNullOrWhiteSpace(postLogoutRedirectUri))
+    {
+        options.PostLogoutRedirectUri = postLogoutRedirectUri;
+    }
+
+    options.PostLogoutReturnPath = "/signed-out";
 });
 
 // A host-owned Bearer scheme: the scheme-selection extension point decides, per request, whether
@@ -40,8 +49,23 @@ app.MapGet("/dashboard", (HttpContext http) =>
         policy.AddAuthenticationSchemes(SignaCoreHostedLoginDefaults.AuthenticationScheme)
             .RequireAuthenticatedUser());
 
+// A state-changing route behind the session scheme: the package's CSRF boundary must gate it.
+app.MapPost("/dashboard", (HttpContext http) =>
+        $"dashboard-write:{http.User.FindFirst("sub")?.Value}")
+    .RequireAuthorization(policy =>
+        policy.AddAuthenticationSchemes(SignaCoreHostedLoginDefaults.AuthenticationScheme)
+            .RequireAuthenticatedUser());
+
+// The fixed local landing page of a completed prepared logout.
+app.MapGet("/signed-out", () => "signed-out");
+
 // A host-owned API route behind the consumer's own Bearer handler.
 app.MapGet("/api/data", () => "api-data")
+    .RequireAuthorization(policy => policy.AddAuthenticationSchemes("TestBearer")
+        .RequireAuthenticatedUser());
+
+// A Bearer-authenticated write route: it must never require the session CSRF token.
+app.MapPost("/api/data", () => "api-data-written")
     .RequireAuthorization(policy => policy.AddAuthenticationSchemes("TestBearer")
         .RequireAuthenticatedUser());
 
