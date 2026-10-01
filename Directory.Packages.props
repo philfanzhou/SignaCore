@@ -26,14 +26,14 @@
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <!-- ServiceMantle hosting foundation; the version is pinned to the audited release,
          not floated to a moving feed. -->
-    <PackageVersion Include="ServiceMantle" Version="0.2.0" />
-    <PackageVersion Include="ServiceMantle.Web" Version="0.2.0" />
-    <PackageVersion Include="ServiceMantle.Discovery" Version="0.2.0" />
-    <PackageVersion Include="ServiceMantle.Diagnostics" Version="0.2.0" />
-    <PackageVersion Include="ServiceMantle.Logging" Version="0.2.0" />
-    <PackageVersion Include="ServiceMantle.Database.PostgreSql" Version="0.2.0" />
-    <PackageVersion Include="ServiceMantle.Database.Sqlite" Version="0.2.0" />
-    <PackageVersion Include="ServiceMantle.Persistence.Relational" Version="0.2.0" />
+    <PackageVersion Include="ServiceMantle" Version="0.2.1" />
+    <PackageVersion Include="ServiceMantle.Web" Version="0.2.1" />
+    <PackageVersion Include="ServiceMantle.Discovery" Version="0.2.1" />
+    <PackageVersion Include="ServiceMantle.Diagnostics" Version="0.2.1" />
+    <PackageVersion Include="ServiceMantle.Logging" Version="0.2.1" />
+    <PackageVersion Include="ServiceMantle.Database.PostgreSql" Version="0.2.1" />
+    <PackageVersion Include="ServiceMantle.Database.Sqlite" Version="0.2.1" />
+    <PackageVersion Include="ServiceMantle.Persistence.Relational" Version="0.2.1" />
     <!-- Overrides the 2.1.12 that EF Core Sqlite resolves transitively. -->
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.2.3" />
