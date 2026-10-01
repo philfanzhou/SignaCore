@@ -34,6 +34,13 @@ RUN dotnet publish "src/SignaCore.Host/SignaCore.Host.csproj" -c $BUILD_CONFIGUR
 
 # Run with the non-root user provided by the official ASP.NET image.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+# Targeted upgrade of the Ubuntu openssl source packages (openssl, libssl3t64) to clear
+# CVE-2026-84782 from the floating aspnet tag. Only these two packages are upgraded; once the
+# base image ships the fixed version this step becomes a no-op, and the CI Trivy gate stays as
+# the independent guard against image regressions.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --only-upgrade openssl libssl3t64 && \
+    rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 LABEL org.opencontainers.image.title="SignaCore" \
       org.opencontainers.image.description="Identity and authentication service" \
