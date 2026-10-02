@@ -6,5 +6,6 @@
 - [First-run setup](./FirstRunSetup.md)
 - [Consul integration](./ConsulIntegration.md)
 - [Deployment](./Deployment.md)
+- [Releasing](./Releasing.md)
 - [Error handling](./ErrorHandling.md)
 - [Verification](./Verification.md)

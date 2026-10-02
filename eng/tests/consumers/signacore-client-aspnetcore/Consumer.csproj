@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>SignaCore.PackageConsumer.AspNetCore</RootNamespace>
+    <AssemblyName>SignaCore.PackageConsumer.AspNetCore</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SignaCore.Client.AspNetCore" Version="[__SIGNACORE_VERSION__]" />
+  </ItemGroup>
+
+</Project>
