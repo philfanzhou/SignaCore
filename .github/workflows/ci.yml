@@ -911,9 +911,10 @@ jobs:
           set -euo pipefail
           # No --skip-duplicate: the pre-check above owns idempotence, so an unexpected 409 must
           # fail loudly instead of silently claiming success for bytes that were never verified.
+          # The pinned SDK reads NUGET_API_KEY from the environment, keeping the credential
+          # out of process arguments as well as logs.
           dotnet nuget push artifacts/packages/*.nupkg \
-            --source "$NUGET_SOURCE" \
-            --api-key "$NUGET_API_KEY"
+            --source "$NUGET_SOURCE"
 
       # Publishing succeeded is not the same as a consumer being able to use the result: this
       # restores the published version from NuGet.org through a cache that has never held a
