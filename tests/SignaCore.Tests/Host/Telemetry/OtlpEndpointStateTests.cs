@@ -68,7 +68,7 @@ public sealed class OtlpEndpointStateTests
         string? endpoint,
         bool validateManagementUpdateRules) =>
         new ServiceSettingDefinitionRegistry(
-                [new ServiceSettingDefinitions()],
+                SharedSettingComposition.CreateDefinitionProviders(),
                 [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules)])
             .Validate(Candidate(endpoint))
             .Errors;

@@ -122,7 +122,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         var lokiRuntime = services.GetService(ServiceMantleType("ServiceMantle.Logging.Remote.GrafanaLokiRuntime"));
         var resolver = services.GetService<IRemoteLogAuthorizationResolver>();
         Assert.Equal(branch == "normal", lokiRuntime is not null);
-        Assert.Equal(branch == "normal", resolver is not null);
+        Assert.Null(resolver);
     }
 
     [Fact]
@@ -193,7 +193,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         var decision = Assert.Single(decided);
         Assert.True(decision.Enabled);
         Assert.Equal(new Uri(loki.HttpsAddress), decision.Endpoint);
-        Assert.Equal(SignaCoreLogging.LokiAuthorizationResolverName, decision.ResolverName);
+        Assert.Equal(ServiceMantleGrafanaLokiHostApplicationBuilderExtensions.SettingDrivenAuthorizationResolverName, decision.ResolverName);
 
         var canary = "canary-" + Guid.NewGuid().ToString("N");
         var marker = "probe-" + Guid.NewGuid().ToString("N");
@@ -233,14 +233,15 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         WriteProbe(factory.Services, marker, "unused");
         Assert.Contains(marker, capture.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(LokiWarning, capture.Output, StringComparison.Ordinal);
-        Assert.Null(factory.Services.GetRequiredService<IRemoteLogAuthorizationResolver>()
-            .ResolveAuthorizationHeader(SignaCoreLogging.LokiAuthorizationResolverName));
+        Assert.Empty(factory.Services.GetServices<IRemoteLogAuthorizationResolver>());
     }
 
     [Theory]
     [InlineData("http://loki-legacy.example.com:3100", "Basic bGVnYWN5OnZhbHVl", "endpoint_not_https")]
     [InlineData("http://loki-legacy.example.com:3100", "", "endpoint_not_https")]
     [InlineData("https://loki-legacy.example.com", "", "authorization_missing")]
+    [InlineData("", "Bearer fixture", "endpoint_missing")]
+    [InlineData("https://loki-legacy.example.com", "Bearer a\nb", "authorization_invalid")]
     public async Task StoredValuesLokiCannotUse_StartWithLokiOffAndAFixedWarning(
         string uri,
         string authorization,
@@ -261,6 +262,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
 
         Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
         Assert.False(enabled);
+        Assert.Empty(factory.Services.GetServices<IRemoteLogAuthorizationResolver>());
         var warning = Assert.Single(capture.Lines(), line => line.Contains(LokiWarning, StringComparison.Ordinal));
         Assert.Contains(category, warning, StringComparison.Ordinal);
         Assert.DoesNotContain("loki-legacy", capture.Output, StringComparison.Ordinal);
@@ -268,6 +270,18 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         {
             Assert.DoesNotContain(authorization, capture.Output, StringComparison.Ordinal);
         }
+
+        // Reading a legacy row is tolerant; a management update over that same candidate is strict.
+        // Capability-injected validators must neither block startup nor change product error codes.
+        using var admin = await CreateAdminClientAsync(factory);
+        var version = await ReadVersionAsync(admin);
+        await using var db = CreateDbContext();
+        var audits = await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken);
+        using var rejected = await PostSettingsAsync(admin, version, [("jwt.audience", "unchanged-contract")]);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Equal(version, await ReadVersionAsync(admin));
+        Assert.Equal(audits.Count, (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+            db, TestContext.Current.CancellationToken)).Count);
     }
 
     // ---- Management validation of the Loki pair ----

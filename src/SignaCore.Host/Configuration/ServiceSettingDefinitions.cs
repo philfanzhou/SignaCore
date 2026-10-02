@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ServiceMantle.Configuration;
+using ServiceMantle.Logging.Remote;
 using SignaCore.Database;
 
 namespace SignaCore.Host.Configuration;
@@ -198,6 +199,12 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
     {
         foreach (var product in DefinitionTable)
         {
+            // Shared definitions own runtime metadata; these rows remain for legacy/UI mapping.
+            if (product.Key is GrafanaLokiSettingDefinitions.Endpoint or GrafanaLokiSettingDefinitions.Authorization)
+            {
+                continue;
+            }
+
             yield return new ServiceSettingDefinition(
                 product.Key,
                 product.ValueType,
