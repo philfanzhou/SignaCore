@@ -262,6 +262,8 @@ public sealed class ConsulDiscoveryCompositionTests
              ("consul.discovery.register", "true"),
              ("consul.discovery.deregister", "true")]);
         var services = new ServiceCollection();
+        var globalAccessor = new ServiceSettingCurrentSnapshotAccessor();
+        services.AddSingleton<IServiceSettingCurrentSnapshotAccessor>(globalAccessor);
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?>
             {
@@ -285,11 +287,61 @@ public sealed class ConsulDiscoveryCompositionTests
             descriptor.ImplementationType == typeof(ConsulSettingDefinitions));
 
         using var provider = services.BuildServiceProvider();
+        Assert.Same(globalAccessor, provider.GetRequiredService<IServiceSettingCurrentSnapshotAccessor>());
         var activated = provider.GetRequiredService<ConsulDiscoverySnapshotAccessor>();
         Assert.True(activated.TryGetCurrent(out var snapshot));
         Assert.Equal(product.Version, snapshot!.Version);
-        Assert.Equal(8, snapshot.Values.Count);
+        var expectedTypes = new Dictionary<string, ServiceSettingValueType>
+        {
+            [ConsulSettingDefinitions.Enabled] = ServiceSettingValueType.Boolean,
+            [ConsulSettingDefinitions.Endpoint] = ServiceSettingValueType.String,
+            [ConsulSettingDefinitions.AllowInsecureHttp] = ServiceSettingValueType.Boolean,
+            [ConsulSettingDefinitions.Token] = ServiceSettingValueType.String,
+            [ConsulSettingDefinitions.ServiceName] = ServiceSettingValueType.String,
+            [ConsulSettingDefinitions.Address] = ServiceSettingValueType.String,
+            [ConsulSettingDefinitions.Port] = ServiceSettingValueType.Number,
+            [ConsulSettingDefinitions.HealthPath] = ServiceSettingValueType.String,
+            [ConsulSettingDefinitions.HealthScheme] = ServiceSettingValueType.String
+        };
+        Assert.Equal(
+            expectedTypes.Keys.Order(StringComparer.Ordinal),
+            snapshot.Values.Keys.Order(StringComparer.Ordinal));
+        Assert.All(expectedTypes, expected =>
+            Assert.Equal(expected.Value, snapshot.Values[expected.Key].ValueType));
+        var allowInsecureHttp = snapshot.Values[ConsulSettingDefinitions.AllowInsecureHttp];
+        Assert.True(allowInsecureHttp.HasValue);
+        Assert.False(allowInsecureHttp.GetBoolean());
         Assert.DoesNotContain("consul.host", snapshot.Values.Keys, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain(snapshot.Values.Keys, key =>
+            key.StartsWith("consul.", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("http://consul.internal:8500/")]
+    [InlineData("http://192.0.2.7:8500/")]
+    public async Task Composition_NonLoopbackHttp_IsRefusedEvenWithASharedProcessSetting(string host)
+    {
+        var product = await BuildProductSnapshotAsync(
+            [("consul.discovery.enabled", "true"),
+             ("consul.discovery.register", "true"),
+             ("consul.discovery.deregister", "true"),
+             ("consul.host", host)]);
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?>
+            {
+                [ConsulDiscoveryComposition.AdvertisementAddressKey] = "10.1.2.3",
+                [ConsulDiscoveryComposition.AdvertisementPortKey] = "9443",
+                // Shared catalog switches are not product or process configuration inputs.
+                [ConsulSettingDefinitions.AllowInsecureHttp] = "true"
+            }).Build();
+
+        var exception = await Assert.ThrowsAsync<ConsulDiscoveryConfigurationException>(() =>
+            services.AddConsulDiscoveryLifecycleAsync(
+                configuration, product, new BootstrapMasterKeyProvider(RootSecret)));
+
+        Assert.Equal(ConsulDiscoveryConfigurationException.SnapshotInvalid, exception.ErrorCode);
+        Assert.Empty(services);
     }
 
     [Fact]
