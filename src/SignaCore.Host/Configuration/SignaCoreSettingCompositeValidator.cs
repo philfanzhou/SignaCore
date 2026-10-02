@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using ServiceMantle.Configuration;
+using ServiceMantle.Diagnostics.Export.Otlp;
 using ServiceMantle.Logging.Remote;
 using SignaCore.Domain.Services.Ldap;
 using SignaCore.Domain.Services.Sms;
@@ -147,7 +148,7 @@ internal sealed class SignaCoreSettingCompositeValidator(
     {
         if (!values.TryGetValue(SystemSettingKeys.OpenTelemetryOtlpEndpoint, out var endpoint) ||
             string.IsNullOrWhiteSpace(endpoint) ||
-            Telemetry.OtlpEndpointState.TryParse(endpoint, out _))
+            OtlpSettingState.TryParseEndpoint(endpoint, out _))
         {
             return;
         }

@@ -1,5 +1,6 @@
 using ServiceMantle.Audit;
 using ServiceMantle.Configuration;
+using ServiceMantle.Diagnostics.Export.Otlp;
 using ServiceMantle.Logging.Remote;
 using SignaCore.Domain.Keys;
 
@@ -36,7 +37,7 @@ internal static class SharedSettingComposition
     // its error-code adapter explicitly so startup/legacy/bootstrap remain tolerant, while updates
     // retain every product cross-key rule and the existing signacore.setting.* codes.
     internal static IEnumerable<IServiceSettingDefinitionProvider> CreateDefinitionProviders() =>
-        [new ServiceSettingDefinitions(), new GrafanaLokiSettingDefinitions()];
+        [new ServiceSettingDefinitions(), new GrafanaLokiSettingDefinitions(), new OtlpSettingDefinitions()];
 
     /// <summary>
     /// Validates one complete legacy-keyed candidate dictionary (the fixed 44-key input form of

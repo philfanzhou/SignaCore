@@ -1,4 +1,9 @@
 using ServiceMantle.Configuration;
+using ServiceMantle.Diagnostics.Export.Otlp;
+using Microsoft.Extensions.DependencyInjection;
+using ServiceMantle;
+using SignaCore.Host;
+using System.Reflection;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Telemetry;
 using Xunit;
@@ -24,7 +29,7 @@ public sealed class OtlpEndpointStateTests
     [InlineData("collector.example.com:4317", false, true)]
     public void Classify_YieldsOneStatePerStoredValue(string? value, bool enabled, bool unusable)
     {
-        var state = OtlpEndpointState.Classify(value);
+        var state = OtlpSettingState.Classify(value);
 
         Assert.Equal(enabled, state.Endpoint is not null);
         Assert.Equal(unusable, state.IsUnusable);
@@ -62,6 +67,37 @@ public sealed class OtlpEndpointStateTests
         Assert.Empty(SharedSettingComposition.CreateRegistry(isDevelopment: false)
             .Validate(Candidate(endpoint))
             .Errors);
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("http://collector.example.com:4317", false)]
+    [InlineData("https://collector.example.com:4317", true)]
+    public void Composition_OnlyUsableSnapshotEnablesGrpcTraces(string? endpoint, bool enabled)
+    {
+        var result = SharedSettingComposition.CreateRegistry(false).Validate(Candidate(endpoint));
+        Assert.True(result.IsValid);
+        var snapshot = (ServiceSettingSnapshot)Activator.CreateInstance(typeof(ServiceSettingSnapshot),
+            BindingFlags.Instance | BindingFlags.NonPublic, null,
+            [ServiceId.Parse("signacore"), 1L, result.Values!, new byte[32]], null)!;
+        var services = new ServiceCollection();
+        var mantle = services.AddSignaCoreServiceMantle();
+        var state = mantle.AddSignaCoreTelemetry(snapshot);
+        Assert.Equal(enabled, state.Endpoint is not null);
+        Assert.Equal(enabled, services.Any(d => d.ServiceType.Name == "OtlpRuntime"));
+        var registrations = services.Where(d => d.ServiceType.Name == "OtlpRegistration").ToArray();
+        if (!enabled)
+        {
+            Assert.Empty(registrations);
+            return;
+        }
+        var registration = Assert.Single(registrations).ImplementationInstance!;
+        var traces = registration.GetType().GetProperty("Traces")!.GetValue(registration)!;
+        var metrics = registration.GetType().GetProperty("Metrics")!.GetValue(registration)!;
+        Assert.True((bool)traces.GetType().GetProperty("Enabled")!.GetValue(traces)!);
+        Assert.Equal("Grpc", traces.GetType().GetProperty("Protocol")!.GetValue(traces)!.ToString());
+        Assert.Equal(new Uri(endpoint!), traces.GetType().GetProperty("Endpoint")!.GetValue(traces));
+        Assert.False((bool)metrics.GetType().GetProperty("Enabled")!.GetValue(metrics)!);
     }
 
     private static IReadOnlyList<ServiceSettingValidationError> Validate(

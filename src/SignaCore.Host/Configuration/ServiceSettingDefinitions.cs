@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ServiceMantle.Configuration;
+using ServiceMantle.Diagnostics.Export.Otlp;
 using ServiceMantle.Logging.Remote;
 using SignaCore.Database;
 
@@ -200,7 +201,9 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
         foreach (var product in DefinitionTable)
         {
             // Shared definitions own runtime metadata; these rows remain for legacy/UI mapping.
-            if (product.Key is GrafanaLokiSettingDefinitions.Endpoint or GrafanaLokiSettingDefinitions.Authorization)
+            if (product.Key is GrafanaLokiSettingDefinitions.Endpoint
+                or GrafanaLokiSettingDefinitions.Authorization
+                or OtlpSettingDefinitions.Endpoint)
             {
                 continue;
             }

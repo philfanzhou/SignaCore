@@ -61,7 +61,7 @@ internal static class SignaCoreTelemetry
     /// <c>IConfiguration</c>; a stored value OTLP cannot use keeps the exporter off and is reported
     /// by <see cref="WriteOtlpWarning"/> once the host is built.
     /// </summary>
-    internal static OtlpEndpointState AddSignaCoreTelemetry(
+    internal static OtlpSettingState AddSignaCoreTelemetry(
         this ServiceMantleBuilder mantle,
         ServiceSettingSnapshot snapshot)
     {
@@ -80,19 +80,12 @@ internal static class SignaCoreTelemetry
             options.AuthorizationPolicyName = GatewayAppAuthenticationDefaults.Policy;
         });
 
-        var otlp = OtlpEndpointState.Classify(OptionalText(snapshot, OtlpEndpointState.SettingKey));
-        mantle.AddOpenTelemetryOtlpExporter(options =>
+        var otlp = mantle.AddOpenTelemetryOtlpExporterFromSettings(snapshot, options =>
         {
-            if (otlp.Endpoint is null)
-            {
-                return;
-            }
-
             // Traces only, over gRPC and without an authentication header, as before; metrics
-            // are scraped through Prometheus and never pushed.
+            // are scraped through Prometheus and never pushed. The snapshot owns the endpoint.
             options.Traces.Enabled = true;
             options.Traces.Protocol = OtlpProtocol.Grpc;
-            options.Traces.Endpoint = otlp.Endpoint;
         });
 
         // Each selection is a registered service the shared meter provider reads when it is
@@ -111,7 +104,7 @@ internal static class SignaCoreTelemetry
     }
 
     /// <summary>Writes the fixed, address-free warning for a stored OTLP endpoint the host cannot use.</summary>
-    internal static void WriteOtlpWarning(ILogger logger, OtlpEndpointState state)
+    internal static void WriteOtlpWarning(ILogger logger, OtlpSettingState state)
     {
         if (!state.IsUnusable)
         {
@@ -124,68 +117,6 @@ internal static class SignaCoreTelemetry
             "page and restart the service.");
     }
 
-    private static string? OptionalText(ServiceSettingSnapshot snapshot, string key) =>
-        snapshot.Values.TryGetValue(key, out var value) &&
-        value.HasValue &&
-        value.ValueType == ServiceSettingValueType.String
-            ? value.GetString()
-            : null;
-
     /// <summary>Meters SignaCore selects for export through the shared ServiceMantle meter provider.</summary>
     internal sealed record MeterSelection(IReadOnlyList<string> MeterNames);
-}
-
-/// <summary>The classified <c>opentelemetry.otlp_endpoint</c> setting.</summary>
-internal sealed class OtlpEndpointState
-{
-    internal const string SettingKey = "opentelemetry.otlp_endpoint";
-
-    private OtlpEndpointState(Uri? endpoint, bool isUnusable)
-    {
-        Endpoint = endpoint;
-        IsUnusable = isUnusable;
-    }
-
-    /// <summary>The endpoint to export traces to; <see langword="null"/> keeps OTLP off.</summary>
-    public Uri? Endpoint { get; }
-
-    /// <summary>True when a value is stored but cannot be used, so the start has to say so.</summary>
-    public bool IsUnusable { get; }
-
-    public override string ToString() =>
-        $"OtlpEndpointState(Enabled={Endpoint is not null}, Unusable={IsUnusable})";
-
-    internal static OtlpEndpointState Classify(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return new(null, isUnusable: false);
-        }
-
-        return TryParse(value, out var endpoint)
-            ? new(endpoint, isUnusable: false)
-            : new(null, isUnusable: true);
-    }
-
-    /// <summary>
-    /// The same endpoint rule the ServiceMantle OTLP exporter enforces when it starts: an absolute
-    /// https URL without user info, query, or fragment.
-    /// </summary>
-    internal static bool TryParse(string? value, out Uri? endpoint)
-    {
-        endpoint = null;
-        if (string.IsNullOrWhiteSpace(value) ||
-            !Uri.TryCreate(value.Trim(), UriKind.Absolute, out var parsed) ||
-            parsed.Scheme != Uri.UriSchemeHttps ||
-            string.IsNullOrEmpty(parsed.Host) ||
-            !string.IsNullOrEmpty(parsed.UserInfo) ||
-            !string.IsNullOrEmpty(parsed.Query) ||
-            !string.IsNullOrEmpty(parsed.Fragment))
-        {
-            return false;
-        }
-
-        endpoint = parsed;
-        return true;
-    }
 }
