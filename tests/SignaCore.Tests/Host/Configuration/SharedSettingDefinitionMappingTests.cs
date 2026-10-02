@@ -134,7 +134,7 @@ public sealed partial class SharedSettingDefinitionMappingTests
     };
 
     private static readonly Dictionary<string, ServiceSettingDefinition> SharedDefinitions =
-        new ServiceSettingDefinitions().GetDefinitions().ToDictionary(
+        SharedSettingComposition.CreateDefinitionProviders().SelectMany(provider => provider.GetDefinitions()).ToDictionary(
             definition => definition.Key, StringComparer.Ordinal);
 
     [GeneratedRegex("^[a-z0-9][a-z0-9._-]{0,127}$")]
@@ -293,7 +293,7 @@ public sealed partial class SharedSettingDefinitionMappingTests
     [Fact]
     public void TheRegistry_BuildsFromTheProviderAndRejectsDuplicates()
     {
-        var registry = new ServiceSettingDefinitionRegistry([new ServiceSettingDefinitions()]);
+        var registry = new ServiceSettingDefinitionRegistry(SharedSettingComposition.CreateDefinitionProviders());
         Assert.Equal(SharedDefinitions.Count, registry.Definitions.Count);
 
         Assert.Throws<ServiceSettingDefinitionException>(() => new ServiceSettingDefinitionRegistry(

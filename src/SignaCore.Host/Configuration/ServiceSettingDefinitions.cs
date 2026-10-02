@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ServiceMantle.Configuration;
+using ServiceMantle.Diagnostics.Export.Otlp;
 using SignaCore.Database;
 
 namespace SignaCore.Host.Configuration;
@@ -198,6 +199,12 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
     {
         foreach (var product in DefinitionTable)
         {
+            // The shared definition owns runtime metadata; this row remains for legacy/UI mapping.
+            if (product.Key == OtlpSettingDefinitions.Endpoint)
+            {
+                continue;
+            }
+
             yield return new ServiceSettingDefinition(
                 product.Key,
                 product.ValueType,

@@ -18,7 +18,7 @@ issue #556); see [System settings retirement](../database/system-settings-retire
 
 | Capability | Registration |
 | --- | --- |
-| Product definitions (44 keys) | `ServiceSettingDefinitions : IServiceSettingDefinitionProvider` (the authoritative `Table` of `ProductSettingDefinition` rows) |
+| Runtime definitions (44 unique keys) | `ServiceSettingDefinitions` plus shared `OtlpSettingDefinitions`; product `Table` retains legacy/UI metadata for every key |
 | Cross-key rules | `SignaCoreSettingCompositeValidator : IServiceSettingCompositeValidator` |
 | Integer Number semantics | `IntegerSettingConstraint : IServiceSettingValueConstraint` |
 | Store (single aggregate per service) | `EfCoreServiceSettingStore<IdentityDbContext>` over `IDbContextFactory<IdentityDbContext>` |
@@ -27,6 +27,12 @@ issue #556); see [System settings retirement](../database/system-settings-retire
 | Query / snapshot services | `AddServiceMantleSettingSnapshots()` |
 
 Everything lives in `src/SignaCore.Host/Configuration/` and is internal; no public API is added.
+`SharedSettingComposition.CreateRegistry` explicitly selects the runtime definition providers and
+product composite validator for both direct and DI composition. Startup, legacy import, and
+bootstrap probing use the tolerant validator; management updates add the product error-code
+adapter over the shared OTLP endpoint primitive. The automatic strict validator contributed by
+`AddOpenTelemetryOtlpExporterFromSettings` is not loaded into the product registry.
+
 The composition entry point is `ServiceMantleComposition.AddSignaCoreSharedSettings`, called from
 `Program.cs` after the identity infrastructure. The PendingSetup host registers only the
 transactional update path (`AddSignaCoreSharedSettingUpdates`) so first-run completion writes the

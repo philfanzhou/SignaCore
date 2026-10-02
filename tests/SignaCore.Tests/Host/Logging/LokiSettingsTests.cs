@@ -135,7 +135,7 @@ public sealed class LokiSettingsTests
         string? authorization,
         bool validateManagementUpdateRules) =>
         new ServiceSettingDefinitionRegistry(
-                [new ServiceSettingDefinitions()],
+                SharedSettingComposition.CreateDefinitionProviders(),
                 [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules)])
             .Validate(Candidate(uri, authorization))
             .Errors;

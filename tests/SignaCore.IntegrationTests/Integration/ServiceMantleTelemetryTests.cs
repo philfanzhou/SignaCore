@@ -298,14 +298,18 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         Assert.NotNull(factory.Services.GetService(ServiceMantleType("ServiceMantle.Diagnostics.Export.Otlp.OtlpRuntime")));
     }
 
-    [Fact]
-    public async Task StoredHttpOtlpEndpoint_StartsWithOtlpOffAndAFixedWarning()
+    [Theory]
+    [InlineData("http://otlp-legacy.example.com:4317")]
+    [InlineData("https://user:fixture@otlp-legacy.example.com:4317")]
+    [InlineData("https://otlp-legacy.example.com:4317/?tenant=fixture")]
+    [InlineData("https://otlp-legacy.example.com:4317/#fixture")]
+    public async Task StoredUnusableOtlpEndpoint_StartsWithOtlpOffAndAFixedWarning(string endpoint)
     {
         var logs = new CapturingLoggerProvider();
         var factory = await StartNormalHostAsync(
             new Dictionary<string, string>
             {
-                [SystemSettingKeys.OpenTelemetryOtlpEndpoint] = "http://otlp-legacy.example.com:4317"
+                [SystemSettingKeys.OpenTelemetryOtlpEndpoint] = endpoint
             },
             logs: logs);
         using var client = factory.CreateClient();
@@ -316,6 +320,24 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         Assert.Null(factory.Services.GetService(ServiceMantleType("ServiceMantle.Diagnostics.Export.Otlp.OtlpRuntime")));
         Assert.Single(logs.Lines, line => line.Contains(OtlpWarning, StringComparison.Ordinal));
         Assert.DoesNotContain(logs.Lines, line => line.Contains("otlp-legacy", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs.Lines, line => line.Contains("fixture", StringComparison.Ordinal));
+
+        // A legacy row stays readable, while the same candidate must be rejected for updates.
+        using var admin = await CreateAdminClientAsync(factory);
+        await using var db = CreateDbContext();
+        var version = (await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken))!.Version;
+        var audits = await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken);
+        using var rejected = await admin.PostAsJsonAsync(Root + "/settings", new
+        {
+            expectedVersion = version,
+            changes = new[] { new { key = "jwt.audience", value = "unchanged-contract" } }
+        }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Equal(version, (await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken))!.Version);
+        Assert.Equal(audits.Count, (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+            db, TestContext.Current.CancellationToken)).Count);
     }
 
     [Fact]

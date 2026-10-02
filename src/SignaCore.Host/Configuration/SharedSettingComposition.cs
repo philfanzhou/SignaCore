@@ -1,5 +1,6 @@
 using ServiceMantle.Audit;
 using ServiceMantle.Configuration;
+using ServiceMantle.Diagnostics.Export.Otlp;
 using SignaCore.Domain.Keys;
 
 namespace SignaCore.Host.Configuration;
@@ -26,9 +27,16 @@ internal static class SharedSettingComposition
         "legacy-import");
 
     /// <summary>Builds the SignaCore definition registry with its composite validator.</summary>
-    internal static ServiceSettingDefinitionRegistry CreateRegistry(bool isDevelopment) => new(
-        [new ServiceSettingDefinitions()],
-        [new SignaCoreSettingCompositeValidator(isDevelopment)]);
+    internal static ServiceSettingDefinitionRegistry CreateRegistry(
+        bool isDevelopment, bool validateManagementUpdateRules = false) => new(
+        CreateDefinitionProviders(),
+        [new SignaCoreSettingCompositeValidator(isDevelopment, validateManagementUpdateRules)]);
+
+    // Capability registrations contribute generic strict validators. The product registry selects
+    // its error-code adapter explicitly so startup/legacy/bootstrap remain tolerant, while updates
+    // retain every product cross-key rule and the existing signacore.setting.* codes.
+    internal static IEnumerable<IServiceSettingDefinitionProvider> CreateDefinitionProviders() =>
+        [new ServiceSettingDefinitions(), new OtlpSettingDefinitions()];
 
     /// <summary>
     /// Validates one complete legacy-keyed candidate dictionary (the fixed 44-key input form of
