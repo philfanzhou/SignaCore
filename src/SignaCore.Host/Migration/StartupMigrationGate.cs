@@ -1,6 +1,7 @@
 using ServiceMantle;
 using ServiceMantle.Bootstrap;
 using ServiceMantle.Database.PostgreSql.Migration;
+using ServiceMantle.Database.Sqlite;
 using ServiceMantle.Migration;
 using SignaCore.Database;
 
@@ -96,7 +97,7 @@ internal static class StartupMigrationGate
                     providers: null,
                     DatabaseProviderIdResolver.Empty),
                 new DatabaseDeploymentCapabilityRegistry(
-                    [new SqliteDeploymentCapabilityProvider()],
+                    [new SqliteDatabaseTargetPreparationProvider()],
                     DatabaseProviderIdResolver.Empty));
 
             result = await orchestrator.OrchestrateMigrationAsync(
