@@ -33,6 +33,53 @@ public sealed class SqliteStartupMigrationGateTests
     private const string PreServiceInstallations = "20260831103622_PersistInteractiveOidcClientConfiguration";
     private const string SetupCodeSentinel = "SETUP-CODE-987654-SENTINEL";
 
+    [Fact]
+    public async Task Gate_EachRunUsesFreshReceiptAndLeavesBorrowedContextAndExecutorAlive()
+    {
+        var path = NewDatabasePath();
+        try
+        {
+            var options = TestDatabaseOptions(path);
+            var contextOptions = new DbContextOptionsBuilder<IdentityDbContext>();
+            contextOptions.UseIdentityDatabase(options);
+            await using var db = new IdentityDbContext(contextOptions.Options);
+            using var executor = new DisposableExecutor(new SignaCoreMigrationExecutor(db, options));
+
+            await StartupMigrationGate.RunAsync(db, options, NullLogger.Instance, executor,
+                TestContext.Current.CancellationToken);
+            Assert.False(executor.Disposed);
+            Assert.Equal(1, executor.ExecuteCount);
+            var history = (await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken)).ToArray();
+            Assert.NotEmpty(history);
+
+            // A second direct call must receive a fresh receipt, observe current, and skip migration.
+            await StartupMigrationGate.RunAsync(db, options, NullLogger.Instance, executor,
+                TestContext.Current.CancellationToken);
+            Assert.False(executor.Disposed);
+            Assert.Equal(1, executor.ExecuteCount);
+            Assert.Equal(history, await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken));
+            await db.Database.ExecuteSqlRawAsync("SELECT 1;", TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    private sealed class DisposableExecutor(IDatabaseMigrationExecutor inner) : IDatabaseMigrationExecutor, IDisposable
+    {
+        public bool Disposed { get; private set; }
+        public int ExecuteCount { get; private set; }
+        public ValueTask<MigrationObservationState> InspectAsync(CancellationToken cancellationToken = default)
+            => inner.InspectAsync(cancellationToken);
+        public ValueTask ExecuteAsync(CancellationToken cancellationToken = default)
+        {
+            ExecuteCount++;
+            return inner.ExecuteAsync(cancellationToken);
+        }
+        public void Dispose() => Disposed = true;
+    }
+
     // ----- Shared single-instance serialization -----
 
     [Fact]

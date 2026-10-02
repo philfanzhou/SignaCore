@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using ServiceMantle.Configuration;
 using ServiceMantle.Diagnostics.Export.Otlp;
+using ServiceMantle.Logging.Remote;
 using SignaCore.Domain.Services.Ldap;
 using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.WeChat;
@@ -170,14 +171,14 @@ internal sealed class SignaCoreSettingCompositeValidator(
         var hasUri = !string.IsNullOrWhiteSpace(uri);
         var hasAuthorization = !string.IsNullOrWhiteSpace(authorization);
 
-        if (hasUri && !Logging.LokiSettings.TryParseEndpoint(uri, out _))
+        if (hasUri && !GrafanaLokiSettingState.TryParseEndpoint(uri, out _))
         {
             errors.Add(new ServiceSettingValidationError(
                 SharedSettingKeys.NormalizedByLegacyKey[SystemSettingKeys.LokiUri],
                 IsAbsoluteHttp(uri!) ? HttpsRequiredCode : RuntimeInvalidCode));
         }
 
-        if (hasAuthorization && !Logging.LokiSettings.IsUsableAuthorization(authorization))
+        if (hasAuthorization && !GrafanaLokiSettingDefinitions.IsUsableAuthorization(authorization))
         {
             errors.Add(new ServiceSettingValidationError(
                 SharedSettingKeys.NormalizedByLegacyKey[SystemSettingKeys.LokiAuthorization],

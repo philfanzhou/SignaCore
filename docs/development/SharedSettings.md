@@ -18,7 +18,7 @@ issue #556); see [System settings retirement](../database/system-settings-retire
 
 | Capability | Registration |
 | --- | --- |
-| Runtime definitions (44 unique keys) | `ServiceSettingDefinitions` plus shared `OtlpSettingDefinitions`; product `Table` retains legacy/UI metadata for every key |
+| Runtime definitions (44 unique keys) | `ServiceSettingDefinitions` plus shared `GrafanaLokiSettingDefinitions` and `OtlpSettingDefinitions`; product `Table` retains legacy/UI metadata for every key |
 | Cross-key rules | `SignaCoreSettingCompositeValidator : IServiceSettingCompositeValidator` |
 | Integer Number semantics | `IntegerSettingConstraint : IServiceSettingValueConstraint` |
 | Store (single aggregate per service) | `EfCoreServiceSettingStore<IdentityDbContext>` over `IDbContextFactory<IdentityDbContext>` |
@@ -30,8 +30,9 @@ Everything lives in `src/SignaCore.Host/Configuration/` and is internal; no publ
 `SharedSettingComposition.CreateRegistry` explicitly selects the runtime definition providers and
 product composite validator for both direct and DI composition. Startup, legacy import, and
 bootstrap probing use the tolerant validator; management updates add the product error-code
-adapter over the shared OTLP endpoint primitive. The automatic strict validator contributed by
-`AddOpenTelemetryOtlpExporterFromSettings` is not loaded into the product registry.
+adapter over shared Loki endpoint/header and OTLP endpoint primitives. The automatic strict
+validators contributed by `AddServiceMantleGrafanaLokiFromSettings` and
+`AddOpenTelemetryOtlpExporterFromSettings` are not loaded into the product registry.
 
 The composition entry point is `ServiceMantleComposition.AddSignaCoreSharedSettings`, called from
 `Program.cs` after the identity infrastructure. The PendingSetup host registers only the
