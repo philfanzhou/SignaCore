@@ -4,7 +4,9 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using SignaCore.Database;
 using SignaCore.Host.Migration;
+using ServiceMantle;
 using ServiceMantle.Bootstrap;
+using ServiceMantle.Database.Sqlite;
 using ServiceMantle.Migration;
 using Xunit;
 using static SignaCore.Tests.Host.Migration.SqliteMigrationGateTestSupport;
@@ -212,58 +214,105 @@ public sealed class SqliteMigrationObservationTests
     }
 
     [Fact]
-    public async Task CapabilityProvider_NormalizesOrdinaryPathsAndEquivalentConnectionStrings()
+    public async Task SharedCapability_EquivalentAbsoluteTargetsHavePrivateStableIdentityWithoutCreatingFiles()
     {
-        var provider = new SqliteDeploymentCapabilityProvider();
-        Assert.Equal(
-            DatabaseDeploymentSupport.SingleInstanceOnly,
-            provider.Capability.Support);
+        var provider = new SqliteDatabaseTargetPreparationProvider();
+        Assert.Equal(DatabaseDeploymentSupport.SingleInstanceOnly, provider.Capability.Support);
 
-        var file = Path.Combine(Path.GetTempPath(), $"signacore-identity-{Guid.NewGuid():N}.db");
+        var file = NewDatabasePath();
         var absolute = $"Data Source={file}";
-        var relative = $"Data Source={Path.GetRelativePath(Environment.CurrentDirectory, file)}";
-        var equivalents = new[]
+        var target = new BootstrapDatabaseConfiguration(WellKnownDatabaseProviderIds.Sqlite, null, absolute);
+        var identity = await provider.GetCanonicalTargetIdentityAsync(target, TestContext.Current.CancellationToken);
+
+        foreach (var equivalent in new[]
         {
             absolute,
-            relative,
             $"DataSource={file};Default Timeout=30",
-            $"Data Source={file};Cache=Shared",
             $"data source={file};Pooling=False"
-        };
-
-        var identity = await provider.GetCanonicalTargetIdentityAsync(
-            new BootstrapDatabaseConfiguration(WellKnownDatabaseProviderIds.Sqlite, null, absolute),
-            TestContext.Current.CancellationToken);
-
-        foreach (var equivalent in equivalents)
+        })
         {
-            Assert.Equal(
-                identity,
-                await provider.GetCanonicalTargetIdentityAsync(
-                    new BootstrapDatabaseConfiguration(WellKnownDatabaseProviderIds.Sqlite, null, equivalent),
-                    TestContext.Current.CancellationToken));
+            Assert.Equal(identity, await provider.GetCanonicalTargetIdentityAsync(
+                new BootstrapDatabaseConfiguration(WellKnownDatabaseProviderIds.Sqlite, null, equivalent),
+                TestContext.Current.CancellationToken));
         }
 
-        Assert.Equal(Path.GetFullPath(file), identity);
-
-        var otherFile = Path.Combine(Path.GetTempPath(), $"signacore-other-{Guid.NewGuid():N}.db");
-        Assert.NotEqual(
-            identity,
-            await provider.GetCanonicalTargetIdentityAsync(
-                new BootstrapDatabaseConfiguration(WellKnownDatabaseProviderIds.Sqlite, null, $"Data Source={otherFile}"),
-                TestContext.Current.CancellationToken));
-
-        // A file: URI target is used verbatim and stays distinct from the plain path identity.
-        Assert.Equal(
-            "file:identity.db?mode=ro",
-            await provider.GetCanonicalTargetIdentityAsync(
-                new BootstrapDatabaseConfiguration(WellKnownDatabaseProviderIds.Sqlite, null, "Data Source=file:identity.db?mode=ro"),
-                TestContext.Current.CancellationToken));
-
-        // Identity resolution does not rewrite the caller's connection string or options.
-        var target = new BootstrapDatabaseConfiguration(WellKnownDatabaseProviderIds.Sqlite, null, absolute);
-        await provider.GetCanonicalTargetIdentityAsync(target, TestContext.Current.CancellationToken);
+        Assert.Matches("^sqlite-file-sha256:[0-9A-F]{64}$", identity);
+        Assert.DoesNotContain(file, identity);
+        Assert.DoesNotContain(Path.GetFileName(file), identity);
         Assert.Equal(absolute, target.ConnectionString);
+        Assert.False(File.Exists(file));
+
+        var otherFile = NewDatabasePath();
+        Assert.NotEqual(identity, await provider.GetCanonicalTargetIdentityAsync(
+            new BootstrapDatabaseConfiguration(WellKnownDatabaseProviderIds.Sqlite, null, $"Data Source={otherFile}"),
+            TestContext.Current.CancellationToken));
+        Assert.False(File.Exists(otherFile));
+    }
+
+    [Fact]
+    public async Task SharedCapability_PreCancelledIdentityResolutionPreservesOriginalTokenWithoutCreatingFile()
+    {
+        var file = NewDatabasePath();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var provider = new SqliteDatabaseTargetPreparationProvider();
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await provider.GetCanonicalTargetIdentityAsync(
+                new BootstrapDatabaseConfiguration(WellKnownDatabaseProviderIds.Sqlite, null, $"Data Source={file}"),
+                cts.Token));
+        Assert.Equal(cts.Token, exception.CancellationToken);
+        Assert.False(File.Exists(file));
+    }
+
+    [Theory]
+    [InlineData("relative")]
+    [InlineData("uri")]
+    [InlineData("shared-cache")]
+    [InlineData("read-only")]
+    [InlineData("memory")]
+    public async Task SharedCapability_UnsupportedInputIsRejectedWithoutCreatingFile(string kind)
+    {
+        var file = NewDatabasePath();
+        var connectionString = kind switch
+        {
+            "relative" => $"Data Source={Path.GetRelativePath(Environment.CurrentDirectory, file)}",
+            "uri" => $"Data Source=file:{file}",
+            "shared-cache" => $"Data Source={file};Cache=Shared",
+            "read-only" => $"Data Source={file};Mode=ReadOnly",
+            _ => $"Data Source={file};Mode=Memory"
+        };
+        var provider = new SqliteDatabaseTargetPreparationProvider();
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await provider.GetCanonicalTargetIdentityAsync(
+                new BootstrapDatabaseConfiguration(WellKnownDatabaseProviderIds.Sqlite, null, connectionString),
+                TestContext.Current.CancellationToken));
+        Assert.DoesNotContain(file, exception.Message);
+        Assert.DoesNotContain(connectionString, exception.Message);
+        Assert.False(File.Exists(file));
+    }
+
+    [Fact]
+    public async Task SharedCapability_MultiInstanceFailsClosedWithoutCallingExecutorOrCreatingFile()
+    {
+        var file = NewDatabasePath();
+        var executor = new DelegateMigrationExecutor();
+        var orchestrator = new DatabaseMigrationOrchestrator(
+            executor,
+            new DatabaseMigrationLockProviderRegistry(providers: null, DatabaseProviderIdResolver.Empty),
+            new DatabaseDeploymentCapabilityRegistry(
+                [new SqliteDatabaseTargetPreparationProvider()], DatabaseProviderIdResolver.Empty));
+        var result = await orchestrator.OrchestrateMigrationAsync(
+            ServiceId.Parse("signacore"),
+            new BootstrapDatabaseConfiguration(WellKnownDatabaseProviderIds.Sqlite, null, $"Data Source={file}"),
+            DatabaseDeploymentMode.MultiInstance,
+            StartupMigrationGate.SharedLockWaitBudget,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(WellKnownMigrationErrorCodes.LockNotSupported, result.ErrorCode);
+        Assert.Equal(0, executor.InspectCount);
+        Assert.Equal(0, executor.ExecuteCount);
+        Assert.False(File.Exists(file));
     }
 
     private static (SignaCoreMigrationExecutor Executor, IdentityDbContext Database) CreateExecutor(
