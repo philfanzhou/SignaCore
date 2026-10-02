@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using ServiceMantle;
 using ServiceMantle.Bootstrap;
 using ServiceMantle.Database.PostgreSql.Migration;
@@ -24,13 +25,10 @@ internal sealed class StartupMigrationException : Exception
 }
 
 /// <summary>
-/// Composes SignaCore's migration executor into the shared
-/// <see cref="DatabaseMigrationOrchestrator"/> during startup. PostgreSQL uses the real
-/// <see cref="PostgreSqlMigrationLockProvider"/> under the fixed service id <c>signacore</c>;
-/// SQLite uses the shared single-instance overload with the local-file deployment capability. The
-/// lock wait budget is fixed at 30 seconds for the shared migration lock only; it is not a wall
-/// clock bound for the surrounding startup phase, which stays serialized by SignaCore's own outer
-/// lock.
+/// Calls the shared startup database gate inside SignaCore's outer initialization lock. Target
+/// preparation remains before that lock so the legacy pre-check still precedes migration. A fresh
+/// receipt and isolated provider belong to each call; the executor and context belong to the caller.
+/// The shared migration lock wait budget is 30 seconds, independent of the surrounding startup.
 /// </summary>
 internal static class StartupMigrationGate
 {
@@ -74,42 +72,37 @@ internal static class StartupMigrationGate
             databaseOptions.ServerVersion,
             databaseOptions.ConnectionString);
 
-        MigrationExecutionResult result;
+        var mode = databaseOptions.ProviderKind switch
+        {
+            DatabaseProvider.PostgreSql => DatabaseDeploymentMode.MultiInstance,
+            DatabaseProvider.Sqlite => DatabaseDeploymentMode.SingleInstance,
+            _ => throw new InvalidOperationException("Unsupported database provider.")
+        };
+        var options = new StartupDatabaseGateOptions(
+            bootstrap, mode, SharedLockWaitBudget, enableTargetPreparation: false);
+        var services = new ServiceCollection();
+        var builder = services.AddServiceMantle(
+            serviceId, InstanceId.Parse($"signacore-startup-{Guid.NewGuid():N}"));
         if (databaseOptions.ProviderKind == DatabaseProvider.PostgreSql)
         {
-            var orchestrator = new DatabaseMigrationOrchestrator(
-                executor,
-                new DatabaseMigrationLockProviderRegistry(
-                    [new PostgreSqlMigrationLockProvider()],
-                    DatabaseProviderIdResolver.Empty));
-
-            result = await orchestrator.OrchestrateMigrationAsync(
-                serviceId,
-                bootstrap,
-                SharedLockWaitBudget,
-                cancellationToken);
-        }
-        else if (databaseOptions.ProviderKind == DatabaseProvider.Sqlite)
-        {
-            var orchestrator = new DatabaseMigrationOrchestrator(
-                executor,
-                new DatabaseMigrationLockProviderRegistry(
-                    providers: null,
-                    DatabaseProviderIdResolver.Empty),
-                new DatabaseDeploymentCapabilityRegistry(
-                    [new SqliteDatabaseTargetPreparationProvider()],
-                    DatabaseProviderIdResolver.Empty));
-
-            result = await orchestrator.OrchestrateMigrationAsync(
-                serviceId,
-                bootstrap,
-                DatabaseDeploymentMode.SingleInstance,
-                SharedLockWaitBudget,
-                cancellationToken);
+            services.AddSingleton<IDatabaseMigrationLockProvider, PostgreSqlMigrationLockProvider>();
+            services.AddSingleton<IDatabaseDeploymentCapabilityProvider, PostgreSqlDeploymentCapability>();
         }
         else
         {
-            throw new InvalidOperationException("Unsupported database provider.");
+            services.AddSingleton<IDatabaseDeploymentCapabilityProvider, SqliteDatabaseTargetPreparationProvider>();
+        }
+
+        // The shared gate owns its scope, but never the caller's executor or DbContext. Register a
+        // non-disposable delegate so disposable test executors also remain caller-owned.
+        services.AddScoped<IDatabaseMigrationExecutor>(_ => new BorrowedExecutor(executor));
+        builder.AddStartupDatabaseGate(options);
+        StartupDatabaseGateResult result;
+        await using (var provider = services.BuildServiceProvider())
+        {
+            // Direct invocation only: none of this isolated provider's hosted services are started.
+            result = await provider.GetRequiredService<StartupDatabaseGate>().RunAsync(
+                options, new StartupDatabaseReceipt(), serviceId, cancellationToken);
         }
 
         // Completion checkpoint after the orchestration and its owned cleanup (shared lease or
@@ -132,5 +125,26 @@ internal static class StartupMigrationGate
             logger.LogInformation(
                 "Database schema was already current; the migration executor was skipped.");
         }
+    }
+
+    // The shared PostgreSQL lock supplies coordination; the product explicitly authorizes its
+    // existing multi-instance deployment. Canonical target identity is only used by SingleInstance.
+    private sealed class PostgreSqlDeploymentCapability : IDatabaseDeploymentCapabilityProvider
+    {
+        public DatabaseDeploymentCapability Capability { get; } = new(
+            WellKnownDatabaseProviderIds.PostgreSql, DatabaseDeploymentSupport.SingleAndMultiInstance);
+
+        public ValueTask<string> GetCanonicalTargetIdentityAsync(
+            BootstrapDatabaseConfiguration target, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("PostgreSQL startup requires multi-instance coordination.");
+    }
+
+    private sealed class BorrowedExecutor(IDatabaseMigrationExecutor executor) : IDatabaseMigrationExecutor
+    {
+        public ValueTask<MigrationObservationState> InspectAsync(CancellationToken cancellationToken = default)
+            => executor.InspectAsync(cancellationToken);
+
+        public ValueTask ExecuteAsync(CancellationToken cancellationToken = default)
+            => executor.ExecuteAsync(cancellationToken);
     }
 }

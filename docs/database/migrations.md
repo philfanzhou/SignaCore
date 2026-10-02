@@ -76,7 +76,7 @@ Upgrade and rollback boundaries for the fixed version:
 
 ## Startup migration gate
 
-At startup, `InstallationStartup` runs the shared ServiceMantle migration orchestration (`DatabaseMigrationOrchestrator`) through an internal executor before any installation-state resolution, legacy configuration import, or snapshot loading happens. The orchestration applies a limited, read-only observation to the target and only allows migration to proceed from an `Empty` or `PendingMigration` state:
+At startup, `InstallationStartup` runs the shared ServiceMantle startup database gate (`StartupDatabaseGate`) through an internal executor before any installation-state resolution, legacy configuration import, or snapshot loading happens. The orchestration applies a limited, read-only observation to the target and only allows migration to proceed from an `Empty` or `PendingMigration` state:
 
 | Observed history and objects | Outcome |
 | --- | --- |
@@ -88,6 +88,13 @@ At startup, `InstallationStartup` runs the shared ServiceMantle migration orches
 | Post-execution re-inspection not at the current version | `final_state_invalid` — startup fails closed |
 
 The observation only reads the migration schema the connection actually uses (its history table plus that schema's object catalog); the history table and EF's own lock table are not application objects, and any other table or view counts even when empty. Read-only observation never creates the SQLite file, the history table, or any data.
+
+Target preparation stays before the outer initialization lock through the existing shared target
+providers. The gate disables its own target preparation because it offers no preparation-only
+entry: moving that stage into the gate would migrate before the legacy-row pre-check. Each direct
+call creates a fresh receipt and an isolated provider without starting its hosted services. The
+gate's scope borrows the executor and database context; installation resolution continues using
+the same caller-owned context after the scope and provider are released.
 
 The executor's `ExecuteAsync` owns the full SignaCore migration workflow (formerly `SchemaMigrator`), so the PostgreSQL expand/backfill/contract phases, normalized-value collision checks, and OTP uniqueness checks are unchanged.
 
