@@ -1,4 +1,10 @@
 using ServiceMantle.Configuration;
+using ServiceMantle.Logging.Remote;
+using ServiceMantle.Logging;
+using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using ServiceMantle;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Logging;
 using Xunit;
@@ -35,12 +41,12 @@ public sealed class LokiSettingsTests
         string? authorization,
         string expectedStatus)
     {
-        var expected = Enum.Parse<LokiSettingStatus>(expectedStatus);
-        var state = LokiSettings.Classify(uri, authorization);
+        var expected = Enum.Parse<GrafanaLokiSettingStatus>(expectedStatus);
+        var state = GrafanaLokiSettingState.Classify(uri, authorization);
 
         Assert.Equal(expected, state.Status);
-        Assert.Equal(expected is not (LokiSettingStatus.Enabled or LokiSettingStatus.Disabled), state.IsUnusable);
-        if (expected == LokiSettingStatus.Enabled)
+        Assert.Equal(expected is not (GrafanaLokiSettingStatus.Enabled or GrafanaLokiSettingStatus.Disabled), state.IsUnusable);
+        if (expected == GrafanaLokiSettingStatus.Enabled)
         {
             Assert.Equal(Uri.UriSchemeHttps, state.Endpoint!.Scheme);
             Assert.Equal(authorization, state.Authorization);
@@ -55,30 +61,60 @@ public sealed class LokiSettingsTests
     [Fact]
     public void Classify_TooLongAuthorization_IsUnusable()
     {
-        var state = LokiSettings.Classify(Endpoint, "Bearer " + new string('a', 4_096));
+        var state = GrafanaLokiSettingState.Classify(Endpoint, "Bearer " + new string('a', 4_096));
 
-        Assert.Equal(LokiSettingStatus.AuthorizationInvalid, state.Status);
+        Assert.Equal(GrafanaLokiSettingStatus.AuthorizationInvalid, state.Status);
     }
 
     [Fact]
     public void State_NeverRendersTheEndpointOrTheCredential()
     {
-        var state = LokiSettings.Classify(Endpoint, Authorization);
+        var state = GrafanaLokiSettingState.Classify(Endpoint, Authorization);
 
         Assert.DoesNotContain("loki.example.com", state.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(Authorization, state.ToString(), StringComparison.Ordinal);
         Assert.Equal("enabled", state.Category);
     }
 
-    [Fact]
-    public void Resolver_AnswersOnlyTheSignaCoreLokiName()
+    [Theory]
+    [InlineData(null, null, false)]
+    [InlineData("http://loki.example.com", Authorization, false)]
+    [InlineData(Endpoint, Authorization, true)]
+    public void Composition_UsesSharedResolverOnlyWhenEnabled(string? endpoint, string? authorization, bool enabled)
     {
-        var resolver = new SignaCoreLogging.LokiAuthorizationResolver(Authorization);
-
-        Assert.Equal(Authorization, resolver.ResolveAuthorizationHeader("signacore-loki"));
-        Assert.Null(resolver.ResolveAuthorizationHeader("SIGNACORE-LOKI"));
+        var validation = SharedSettingComposition.CreateRegistry(false).Validate(Candidate(endpoint, authorization));
+        Assert.True(validation.IsValid);
+        var snapshot = (ServiceSettingSnapshot)Activator.CreateInstance(typeof(ServiceSettingSnapshot),
+            BindingFlags.Instance | BindingFlags.NonPublic, null,
+            [ServiceId.Parse("signacore"), 1L, validation.Values!, new byte[32]], null)!;
+        var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder();
+        // A launcher value cannot turn shipping on or replace the activated snapshot.
+        builder.Configuration["Loki:Uri"] = "https://launcher.example.com";
+        var state = builder.AddSignaCoreLogging(snapshot);
+        Assert.Equal(enabled, state.Status == GrafanaLokiSettingStatus.Enabled);
+        using var services = builder.Services.BuildServiceProvider();
+        var resolvers = services.GetServices<IRemoteLogAuthorizationResolver>().ToArray();
+        if (!enabled)
+        {
+            Assert.Empty(resolvers);
+            return;
+        }
+        var resolver = Assert.Single(resolvers);
+        Assert.IsType<FixedRemoteLogAuthorizationResolver>(resolver);
+        Assert.Equal(authorization, resolver.ResolveAuthorizationHeader(
+            ServiceMantleGrafanaLokiHostApplicationBuilderExtensions.SettingDrivenAuthorizationResolverName));
         Assert.Null(resolver.ResolveAuthorizationHeader("other"));
-        Assert.DoesNotContain(Authorization, resolver.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(authorization!, resolver.ToString()!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(4096, true)]
+    [InlineData(4097, false)]
+    public void AuthorizationBoundary_MatchesClassificationAndManagement(int length, bool usable)
+    {
+        var authorization = new string('x', length);
+        Assert.Equal(usable, GrafanaLokiSettingState.Classify(Endpoint, authorization).Status == GrafanaLokiSettingStatus.Enabled);
+        Assert.Equal(usable, Validate(Endpoint, authorization, true).Count == 0);
     }
 
     public static TheoryData<string?, string?, string?, string?> RejectedCandidates => new()
@@ -135,7 +171,7 @@ public sealed class LokiSettingsTests
         string? authorization,
         bool validateManagementUpdateRules) =>
         new ServiceSettingDefinitionRegistry(
-                [new ServiceSettingDefinitions()],
+                SharedSettingComposition.CreateDefinitionProviders(),
                 [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules)])
             .Validate(Candidate(uri, authorization))
             .Errors;
