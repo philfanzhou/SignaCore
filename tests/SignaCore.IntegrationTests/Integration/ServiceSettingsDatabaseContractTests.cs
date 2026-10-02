@@ -43,7 +43,7 @@ public sealed class ServiceSettingsDatabaseContractTests
         "admin-00000000-0000-0000-0000-000000000000");
 
     private static ServiceSettingDefinitionRegistry CreateRegistry() => new(
-        [new ServiceSettingDefinitions()],
+        SharedSettingComposition.CreateDefinitionProviders(),
         [new SignaCoreSettingCompositeValidator(isDevelopment: false)]);
 
     /// <summary>

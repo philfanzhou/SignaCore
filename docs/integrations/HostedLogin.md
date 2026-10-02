@@ -14,6 +14,18 @@ and the [Public SPA sample](../../samples/SignaCore.PublicSpa/README.md) are run
 flow below. The examples use a neutral service named `OrderService` at `https://orders.example`;
 values in angle brackets are placeholders.
 
+**Recommended: the official client package.** An ASP.NET Core service does not need to implement
+the steps below by hand. The [`SignaCore.Client.AspNetCore`](https://www.nuget.org/packages/SignaCore.Client.AspNetCore)
+package implements steps 3–7 over the same public HTTP contract — Discovery with issuer
+verification, the authorization request with server-side `state`/`nonce` and PKCE S256, the
+hardened callback, strict ID-token validation, a capacity-bounded server-side session with its
+CSRF boundary, and the prepared logout of step 7 — with every token kept server-side. Its
+[README](https://github.com/philfanzhou/SignaCore/blob/main/src/SignaCore.Client.AspNetCore/README.md)
+documents the registration, the four extension points (authorization decision, route prefix,
+response format, scheme selection), and the session-store replacement for multi-instance
+deployments. The steps below remain the authoritative description of the wire contract the
+package speaks, and they are what a service on another stack implements directly.
+
 ## Choose a client type
 
 | Client type | Use it for | Holds |
@@ -172,9 +184,18 @@ It keeps the ID token off the browser:
    same whether or not the browser still had that session, so do not infer anything from it.
 
 The whole contract, including error answers, is in [Prepared Logout](../oidc/Logout.md). The
-Reference BFF clears only its own local session and does not demonstrate this upstream logout. A
+Reference BFF demonstrates this flow end to end through the client package. A
 Public client cannot use prepared logout: signing out only forgets its tokens, and a later sign-in
 may complete without a login page while the SignaCore session is still valid.
+
+Applications using the [official client package]
+(https://www.nuget.org/packages/SignaCore.Client.AspNetCore) get prepared logout from the package:
+`GET <prefix>/csrf` issues the antiforgery token, `POST <prefix>/logout` revokes the local
+server-side session first and then performs the preparation above on the backchannel, and
+`GET <prefix>/logout/return` consumes the one-time echoed state and redirects to the consumer's
+fixed landing path. The package's own README documents the exact options
+(`PostLogoutRedirectUri`, `PostLogoutReturnPath`, `AntiforgeryHeaderName`); the ID token and
+client secret never leave the server side of the consuming application.
 
 ## 8. Session lifetime
 

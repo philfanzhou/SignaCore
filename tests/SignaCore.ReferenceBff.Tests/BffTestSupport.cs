@@ -7,13 +7,13 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Xunit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
+using SignaCore.Client.AspNetCore;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Host;
@@ -25,13 +25,14 @@ namespace SignaCore.ReferenceBff.Tests;
 /// <summary>
 /// The SignaCore side of the reference-BFF contract tests: one installed SQLite host (the same
 /// installation composition production uses), one interactive client registration whose redirect
-/// URI routes to the BFF test server, and one seeded end user.
+/// and post-logout URIs route to the BFF test server, and one seeded end user.
 /// </summary>
 public sealed partial class SignaCoreHostFixture : IAsyncLifetime
 {
     public const string ClientId = "reference-bff";
     public const string ClientSecret = "reference-bff-test-secret";
-    public const string RedirectUri = "https://bff.localhost/signin-oidc";
+    public const string RedirectUri = "https://bff.localhost/bff/callback";
+    public const string PostLogoutRedirectUri = "https://bff.localhost/bff/logout/return";
     public const string Username = "reference_bff_user";
     public const string Password = "Reference-Bff-123!";
     public const string Authority = "https://localhost";
@@ -134,6 +135,15 @@ public sealed partial class SignaCoreHostFixture : IAsyncLifetime
                 AppRegistrationId = application.Id,
                 Kind = RedirectUriKind.Redirect,
                 CanonicalUri = RedirectUri
+            });
+            // The BFF's derived prepared-logout return address, registered with the PostLogout
+            // kind so the package's logout round trip is admitted by the authority.
+            dbContext.AppRedirectUris.Add(new AppRedirectUriEntity
+            {
+                Id = Guid.NewGuid(),
+                AppRegistrationId = application.Id,
+                Kind = RedirectUriKind.PostLogout,
+                CanonicalUri = PostLogoutRedirectUri
             });
         }
 
@@ -294,8 +304,8 @@ public sealed partial class CrossServerBrowser(
 
 /// <summary>
 /// The BFF test server: the real sample application with its configuration pointed at the test
-/// SignaCore host (or a fake authority), with the OIDC backchannel routed to the in-memory
-/// TestServer client instead of the network.
+/// SignaCore host (or a fake authority), with the client package's backchannel routed to the
+/// in-memory TestServer client instead of the network.
 /// </summary>
 public static class BffTestServer
 {
@@ -305,7 +315,7 @@ public static class BffTestServer
         string clientId,
         string clientSecret,
         string redirectUri,
-        HttpClient backchannel,
+        HttpMessageHandler backchannel,
         HttpMessageHandler? userInfoHandler = null,
         TimeProvider? timeProvider = null,
         string? databaseProvider = null,
@@ -329,17 +339,19 @@ public static class BffTestServer
                 builder.UseSetting("ReferenceBffDatabase:DataProtectionRootKey", DatabaseRootKey);
             }
 
-            // Configure (not PostConfigure): the OIDC handler's own post-configuration builds the
-            // ConfigurationManager over whatever backchannel is already set, so the test client
-            // has to be in place before it runs.
             builder.ConfigureTestServices(services =>
             {
-                services.ConfigureAll<OpenIdConnectOptions>(options =>
-                {
-                    options.Backchannel = backchannel;
-                });
+                // The hosted-login package's backchannel (Discovery, JWKS, the token endpoint,
+                // and logout preparation) routes to the test's own handler so the in-memory
+                // TestServer and the recording handlers stay in the loop. The replacement is the
+                // primary handler itself — a later registration wins over the package's own —
+                // because bridging through another HttpClient would hand it an already-started
+                // request, which HttpClient refuses.
+                services.AddHttpClient(SignaCoreHostedLoginDefaults.HttpClientName)
+                    .ConfigurePrimaryHttpMessageHandler(() => backchannel);
 
-                // Route the BFF's UserInfo backchannel (the named "signacore" client) to the
+                // Route the BFF's own authority reads (the named "signacore" client: Discovery
+                // for the identity check and diagnostics, and the UserInfo call) to the
                 // in-memory SignaCore TestServer instead of the network.
                 if (userInfoHandler is not null)
                 {
@@ -505,4 +517,54 @@ public static partial class SignaCoreLoginDriver
         };
         return await browser.SendOnIdentityServerAsync(post, cancellationToken);
     }
+}
+
+/// <summary>
+/// Drives the sample's sign-in entry across the two local hops it now takes: <c>/bff/login</c>
+/// redirects to the package's start endpoint, and the start endpoint redirects to the authority's
+/// authorization endpoint. Returns the authorization URL.
+/// </summary>
+public static class BffSignIn
+{
+    public static async Task<string> BeginAsync(
+        CrossServerBrowser browser,
+        CancellationToken cancellationToken = default)
+    {
+        using var login = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/login"));
+        using var loginResponse = await browser.SendOnBffAsync(login, cancellationToken);
+        Assert.Equal(HttpStatusCode.Found, loginResponse.StatusCode);
+
+        using var start = new HttpRequestMessage(
+            HttpMethod.Get, new Uri(browser.BffBase, loginResponse.Headers.Location!.ToString()));
+        using var startResponse = await browser.SendOnBffAsync(start, cancellationToken);
+        Assert.Equal(HttpStatusCode.Found, startResponse.StatusCode);
+        return startResponse.Headers.Location!.ToString();
+    }
+}
+
+/// <summary>
+/// Access to the wired server-side session store of the sample under test. The sample keeps the
+/// client package's default in-memory store, so the tests observe it through the package's public
+/// <see cref="ITicketStore"/> surface; the concrete cast only reaches the same wired instance.
+/// </summary>
+public static class BffTickets
+{
+    public const string SessionCookieName = "signacore-bff-session";
+
+    public static InMemoryTicketStore Store(WebApplicationFactory<BffSample.Program> bff) =>
+        (InMemoryTicketStore)bff.Services.GetRequiredService<SignaCore.Client.AspNetCore.ITicketStore>();
+
+    public static int Count(WebApplicationFactory<BffSample.Program> bff) =>
+        Store(bff).Count;
+
+    public static string? SessionKey(CrossServerBrowser browser) =>
+        browser.Cookies.GetCookies(browser.BffBase)[SessionCookieName]?.Value;
+
+    public static async Task<SignaCoreSessionTicket?> RetrieveAsync(
+        WebApplicationFactory<BffSample.Program> bff,
+        string? key,
+        CancellationToken cancellationToken = default) =>
+        string.IsNullOrEmpty(key)
+            ? null
+            : await Store(bff).RetrieveAsync(key, cancellationToken);
 }

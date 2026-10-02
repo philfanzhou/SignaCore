@@ -20,7 +20,7 @@ public sealed class ReferenceBffValidationTests
     public async Task ACorrectResponse_EstablishesTheLocalSession()
     {
         await using var authority = await FakeAuthority.StartAsync();
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
         await using var bff = CreateBff(backchannel);
         using var browser = CreateBrowser(bff, authority.Server.CreateHandler());
 
@@ -41,7 +41,7 @@ public sealed class ReferenceBffValidationTests
     {
         await using var authority = await FakeAuthority.StartAsync();
         authority.Defect = defect;
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
         await using var bff = CreateBff(backchannel);
         using var browser = CreateBrowser(bff, authority.Server.CreateHandler());
 
@@ -58,7 +58,7 @@ public sealed class ReferenceBffValidationTests
     public async Task ATamperedState_FailsTheCallbackWithoutAnyTokenExchange()
     {
         await using var authority = await FakeAuthority.StartAsync();
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
         await using var bff = CreateBff(backchannel);
         using var browser = CreateBrowser(bff, authority.Server.CreateHandler());
 
@@ -74,30 +74,46 @@ public sealed class ReferenceBffValidationTests
     }
 
     [Fact]
-    public async Task AMissingCorrelationCookie_FailsTheCallbackWithoutAnyTokenExchange()
+    public async Task AReplayedCallbackState_FailsTheSecondAttemptWithoutASecondTokenExchange()
     {
         await using var authority = await FakeAuthority.StartAsync();
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
         await using var bff = CreateBff(backchannel);
         using var browser = CreateBrowser(bff, authority.Server.CreateHandler());
 
         var callbackUrl = await BeginSignInAndGetCallbackUrlAsync(browser);
 
-        // The correlation cookie is dropped before the callback arrives — exactly what a CSRF
-        // or session-fixation attempt looks like to the handshake.
+        // The one-time server-side state is the handshake's replay and fixation gate: the first
+        // callback consumes it, so presenting the very same response again — with or without the
+        // browser's cookies — fails before any token exchange.
+        using (var first = new HttpRequestMessage(HttpMethod.Get, new Uri(callbackUrl)))
+        using (var firstResponse = await browser.SendOnBffAsync(first, TestContext.Current.CancellationToken))
+        {
+            Assert.Equal(HttpStatusCode.Found, firstResponse.StatusCode);
+        }
+
+        Assert.Single(authority.RedeemedCodes);
         browser.DropAllBffCookies();
 
-        using var callback = new HttpRequestMessage(HttpMethod.Get, new Uri(callbackUrl));
-        using var callbackResponse = await browser.SendOnBffAsync(callback, TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.Found, callbackResponse.StatusCode);
-        Assert.StartsWith("/error", callbackResponse.Headers.Location!.ToString(), StringComparison.Ordinal);
+        using var replay = new HttpRequestMessage(HttpMethod.Get, new Uri(callbackUrl));
+        using var replayResponse = await browser.SendOnBffAsync(replay, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Found, replayResponse.StatusCode);
+        Assert.Equal(
+            "/error?reason=state_mismatch",
+            replayResponse.Headers.Location!.ToString());
 
-        await AssertNoExchangeAndNoSessionAsync(authority, browser);
+        // Exactly the first exchange's single code was ever redeemed, and no request after the
+        // cookie drop presented a session cookie.
+        Assert.Single(authority.RedeemedCodes);
+        Assert.DoesNotContain(
+            browser.BffRequests.SkipWhile(request => !ReferenceEquals(request.Request, replay)),
+            request => request.Request.Headers.TryGetValues("Cookie", out var cookies)
+                && cookies.Any(cookie => cookie.Contains("signacore-bff-session", StringComparison.Ordinal)));
     }
 
     // ---- Driving ----
 
-    private static WebApplicationFactory<BffSample.Program> CreateBff(HttpClient backchannel) =>
+    private static WebApplicationFactory<BffSample.Program> CreateBff(HttpMessageHandler backchannel) =>
         BffTestServer.Create(
             FakeAuthority.BaseAddress,
             ClientId,
@@ -131,14 +147,12 @@ public sealed class ReferenceBffValidationTests
 
     private static async Task<string> BeginSignInAndGetCallbackUrlAsync(CrossServerBrowser browser)
     {
-        using var challenge = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/login"));
-        using var challengeResponse = await browser.SendOnBffAsync(challenge, TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.Found, challengeResponse.StatusCode);
+        var authorizeUrl = await BffSignIn.BeginAsync(browser, TestContext.Current.CancellationToken);
 
         // The fake authority answers the authorize request with the immediate callback redirect.
         using var authorize = new HttpRequestMessage(
             HttpMethod.Get,
-            new Uri(browser.IdentityBase, challengeResponse.Headers.Location!.PathAndQuery));
+            new Uri(browser.IdentityBase, authorizeUrl));
         using var authorizeResponse = await browser.SendOnIdentityServerAsync(authorize, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Found, authorizeResponse.StatusCode);
         return authorizeResponse.Headers.Location!.ToString();

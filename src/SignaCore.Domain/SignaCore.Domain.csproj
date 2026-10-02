@@ -5,6 +5,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="ServiceMantle" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
     <PackageReference Include="BCrypt.Net-Next" />
     <PackageReference Include="Microsoft.Extensions.Http" />

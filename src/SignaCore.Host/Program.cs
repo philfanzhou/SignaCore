@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Audit;
 using ServiceMantle.Bootstrap;
 using ServiceMantle.Health;
+using ServiceMantle.Logging.Remote;
 using ServiceMantle.Installation;
 using ServiceMantle.Web.Health;
 using ServiceMantle;
@@ -245,7 +246,7 @@ if (bootstrapResult.ConfigurationEntries is not null)
 // stored that Loki can no longer use switch Loki off with a startup warning instead of failing the
 // start, so an administrator can still sign in and correct them. The ServiceMantle lifecycle
 // flushes the pipeline once on shutdown and on an unhandled exception after the host started.
-LokiSettingState? lokiSettings = null;
+GrafanaLokiSettingState? lokiSettings = null;
 if (bootstrapResult.Phase == InstallationPhase.Completed)
 {
     lokiSettings = builder.AddSignaCoreLogging(bootstrapResult.SharedSnapshot!);

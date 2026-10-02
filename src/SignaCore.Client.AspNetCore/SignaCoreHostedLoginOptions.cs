@@ -80,6 +80,33 @@ public sealed class SignaCoreHostedLoginOptions
     /// </summary>
     public Func<HttpContext, string?>? SchemeSelector { get; set; }
 
+    /// <summary>
+    /// The request-header name the antiforgery validation accepts. Every session-authenticated
+    /// unsafe method (anything but GET, HEAD, OPTIONS, and TRACE) must present the token from
+    /// <c>GET &lt;prefix&gt;/csrf</c> in this header; a missing or wrong token fails the request.
+    /// Requests forwarded by <see cref="SchemeSelector"/> to a host scheme are unaffected. The
+    /// default is <see cref="SignaCoreHostedLoginDefaults.AntiforgeryHeaderName"/>; the value is
+    /// applied to the shared antiforgery configuration, and an application that post-configures
+    /// <c>AntiforgeryOptions</c> after <c>AddSignaCoreHostedLogin</c> can still override it.
+    /// </summary>
+    public string AntiforgeryHeaderName { get; set; } = SignaCoreHostedLoginDefaults.AntiforgeryHeaderName;
+
+    /// <summary>
+    /// The consumer's post-logout redirect URI, exactly as registered in SignaCore with the
+    /// <c>PostLogout</c> kind. Its path must be exactly <c>&lt;prefix&gt;/logout/return</c>. When
+    /// set, the logout endpoint passes it to the prepared-logout request and SignaCore returns the
+    /// browser to that endpoint after finishing; when <see langword="null"/>, SignaCore shows its
+    /// own signed-out page instead of redirecting back.
+    /// </summary>
+    public string? PostLogoutRedirectUri { get; set; }
+
+    /// <summary>
+    /// The fixed local path the logout-return endpoint redirects the browser to after a completed
+    /// prepared logout. Must be a local absolute path (it starts with exactly one slash). The
+    /// default is <c>/</c>.
+    /// </summary>
+    public string PostLogoutReturnPath { get; set; } = "/";
+
     /// <summary>The route prefix the endpoints are mapped under; set by
     /// <c>MapSignaCoreHostedLogin</c>, not by consumer code.</summary>
     public string? Prefix { get; internal set; }

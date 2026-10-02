@@ -20,10 +20,7 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
     [Fact]
     public async Task Login_CompletesOverTheRealSignaCoreFlow_AndEstablishesTheLocalSession()
     {
-        using var authorityClient = fixture.Host.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            BaseAddress = new Uri(SignaCoreHostFixture.Authority)
-        });
+        using var authorityClient = fixture.Host.Server.CreateHandler();
         using var bff = BffTestServer.Create(
             SignaCoreHostFixture.Authority,
             SignaCoreHostFixture.ClientId,
@@ -32,12 +29,10 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
             authorityClient);
         using var browser = BffTestServer.CreateBrowser(fixture.Host, bff);
 
-        // 1. The BFF challenge redirects to SignaCore's authorize endpoint with state, nonce,
-        //    and the S256 challenge of a fresh verifier.
-        using var challenge = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/login"));
-        using var challengeResponse = await browser.SendOnBffAsync(challenge, TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.Found, challengeResponse.StatusCode);
-        var authorizeUrl = challengeResponse.Headers.Location!.ToString();
+        // 1. The BFF's login entry redirects to the package's start endpoint, which redirects to
+        //    SignaCore's authorize endpoint with state, nonce, and the S256 challenge of a fresh
+        //    verifier.
+        var authorizeUrl = await BffSignIn.BeginAsync(browser, TestContext.Current.CancellationToken);
         Assert.StartsWith(SignaCoreHostFixture.Authority + "/oauth2/authorize", authorizeUrl, StringComparison.Ordinal);
         Assert.Contains("code_challenge=", authorizeUrl, StringComparison.Ordinal);
         Assert.Contains("code_challenge_method=S256", authorizeUrl, StringComparison.Ordinal);
@@ -94,22 +89,18 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
     [Fact]
     public async Task Diagnostics_ReportTheDiscoveryResolvedEndpoints_NotHardcodedPaths()
     {
-        using var authorityClient = fixture.Host.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            BaseAddress = new Uri(SignaCoreHostFixture.Authority)
-        });
+        using var authorityClient = fixture.Host.Server.CreateHandler();
         using var bff = BffTestServer.Create(
             SignaCoreHostFixture.Authority,
             SignaCoreHostFixture.ClientId,
             SignaCoreHostFixture.ClientSecret,
             SignaCoreHostFixture.RedirectUri,
-            authorityClient);
+            authorityClient,
+            userInfoHandler: fixture.Host.Server.CreateHandler());
         using var browser = BffTestServer.CreateBrowser(fixture.Host, bff);
 
         // Sign in once (the diagnostics page requires the local session).
-        using var challenge = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/login"));
-        using var challengeResponse = await browser.SendOnBffAsync(challenge, TestContext.Current.CancellationToken);
-        var authorizeUrl = challengeResponse.Headers.Location!.ToString();
+        var authorizeUrl = await BffSignIn.BeginAsync(browser, TestContext.Current.CancellationToken);
         using var authorize = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.IdentityBase, authorizeUrl));
         using var authorizeResponse = await browser.SendOnIdentityServerAsync(authorize, TestContext.Current.CancellationToken);
         using var login = await SignaCoreLoginDriver.PostCredentialsAsync(
@@ -143,10 +134,7 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
     [Fact]
     public async Task AnIncompleteConfiguration_FailsAtStartupWithAClearMessage()
     {
-        using var authorityClient = fixture.Host.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            BaseAddress = new Uri(SignaCoreHostFixture.Authority)
-        });
+        using var authorityClient = fixture.Host.Server.CreateHandler();
         using var bff = new WebApplicationFactory<BffSample.Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ReferenceBff:Authority", SignaCoreHostFixture.Authority);
@@ -159,6 +147,8 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
 
         // The startup validation refuses the incomplete configuration with a clear message;
         // through the test host the failure surfaces when the server is first brought up. The
+        // failing validator may be the sample's own or the client package's (both validate the
+        // secret at startup), so the assertion keeps to the bounded contract both share: the
         // message names the missing key and echoes no configured value.
         var exception = await Assert.ThrowsAnyAsync<OptionsValidationException>(async () =>
         {
@@ -170,7 +160,7 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
             using var response = await client.GetAsync("/bff/login", TestContext.Current.CancellationToken);
         });
         Assert.Contains(
-            "ReferenceBff:ClientSecret is required.",
+            "ClientSecret is required.",
             exception.Message,
             StringComparison.Ordinal);
         Assert.DoesNotContain(SignaCoreHostFixture.ClientId, exception.Message, StringComparison.Ordinal);
@@ -180,10 +170,7 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
     public async Task AnUnreachableAuthority_AnswersTheFirstLoginWithABoundedNonSensitiveError()
     {
         // A backchannel that reaches nothing: the authority host has no server behind it.
-        using var deadBackchannel = new HttpClient
-        {
-            BaseAddress = new Uri("https://dead-authority.example.test")
-        };
+        using var deadBackchannel = new SocketsHttpHandler();
         using var bff = BffTestServer.Create(
             "https://dead-authority.example.test",
             SignaCoreHostFixture.ClientId,
@@ -192,14 +179,12 @@ public sealed class ReferenceBffSignInTests(SignaCoreHostFixture fixture)
             deadBackchannel);
         using var browser = BffTestServer.CreateBrowser(fixture.Host, bff);
 
-        using var challenge = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/login"));
-        using var response = await browser.SendOnBffAsync(challenge, TestContext.Current.CancellationToken);
-
-        // The bounded error page, not a raw exception and not a silent run.
-        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        // The login entry hops to the package's start endpoint, whose unreachable Discovery is
+        // answered by the sample's bounded error redirect — not a raw exception.
+        var authorizeUrl = await BffSignIn.BeginAsync(browser, TestContext.Current.CancellationToken);
         Assert.Equal(
             "/error?reason=authority_unreachable",
-            response.Headers.Location!.ToString());
+            authorizeUrl);
         using var error = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/error?reason=authority_unreachable"));
         using var errorResponse = await browser.SendOnBffAsync(error, TestContext.Current.CancellationToken);
         errorResponse.EnsureSuccessStatusCode();

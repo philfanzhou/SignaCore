@@ -6,22 +6,21 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using SignaCore.Client.AspNetCore;
 using SignaCore.Database;
 using Xunit;
-using BffMemoryTicketStore = BffSample::SignaCore.ReferenceBff.MemoryTicketStore;
 
 namespace SignaCore.ReferenceBff.Tests;
 
 /// <summary>
 /// The server-side token session of the reference BFF against the real SignaCore host (DF-07,
-/// DF-15): tokens are stored in the server-side ticket store, the browser holds only the opaque
-/// session cookie, the access token is used solely on the BFF→SignaCore UserInfo leg, an upstream
-/// 401 tears the local session down (fail closed), and the only state-changing browser surface is
-/// the antiforgery-protected POST logout.
+/// DF-15): tokens are stored in the client package's server-side ticket store, the browser holds
+/// only the opaque session cookie, the access token is used solely on the BFF→SignaCore UserInfo
+/// leg, an upstream 401 tears the local session down (fail closed), and the only state-changing
+/// browser surface is the antiforgery-protected prepared-logout POST.
 /// </summary>
 public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture fixture)
     : IClassFixture<SignaCoreHostFixture>
@@ -44,8 +43,8 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
             $"The session cookie is {session.SessionCookieValue.Length} characters; an opaque key was expected.");
         Assert.DoesNotContain("eyJ", session.SessionCookieValue, StringComparison.Ordinal);
 
-        // The session cookie is HttpOnly, Secure, and SameSite=Lax; the correlation cookie keeps
-        // the handshake shape fixed by the sign-in task (SameSite=None).
+        // The session cookie is HttpOnly, Secure, and SameSite=Lax; the handshake's pending
+        // state lives entirely server-side, so the sign-in start sets no browser cookie at all.
         var sessionCookieHeader = session.BffResponses
             .SelectMany(response => response.SetCookies)
             .First(cookie => cookie.StartsWith(SessionCookieName + "=", StringComparison.Ordinal));
@@ -53,14 +52,14 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         Assert.Contains("secure", sessionCookieHeader, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=lax", sessionCookieHeader, StringComparison.OrdinalIgnoreCase);
 
-        var correlationCookieHeader = session.BffResponses
-            .SelectMany(response => response.SetCookies)
-            .First(cookie => cookie.Contains("signacore-bff-correlation", StringComparison.Ordinal));
-        Assert.Contains("samesite=none", correlationCookieHeader, StringComparison.OrdinalIgnoreCase);
+        var startResponse = session.BffResponses.Single(response =>
+            response.Method == HttpMethod.Get
+            && response.Uri.AbsolutePath == "/bff/start");
+        Assert.Empty(startResponse.SetCookies);
 
         // The tokens live in the server-side store instead: exactly one ticket, and the cookie
         // carries none of the issued material.
-        Assert.Equal(1, session.Store.Count);
+        Assert.Equal(1, BffTickets.Count(session.Bff));
         var issued = session.ReadIssuedTokens();
         Assert.DoesNotContain(issued.AccessToken, session.SessionCookieValue, StringComparison.Ordinal);
         Assert.DoesNotContain(issued.IdToken, session.SessionCookieValue, StringComparison.Ordinal);
@@ -116,7 +115,7 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         var authorizeCallsAfter = session.Browser.IdentityServerRequests
             .Count(request => request.Request.RequestUri!.AbsolutePath == "/oauth2/authorize");
         Assert.Equal(authorizeCallsBefore, authorizeCallsAfter);
-        Assert.Equal(1, session.Store.Count);
+        Assert.Equal(1, BffTickets.Count(session.Bff));
     }
 
     // ---- Acceptance 4, 5: token canary over every browser-visible surface ----
@@ -186,7 +185,7 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         Assert.Contains("no longer valid", errorBody, StringComparison.Ordinal);
 
         // The ticket is gone from the store, and the browser no longer presents a signed-in state.
-        Assert.Equal(0, session.Store.Count);
+        Assert.Equal(0, BffTickets.Count(session.Bff));
         var (homeResponse, homeBody) = await SendOnBffCapturingAsync(
             session,
             new HttpRequestMessage(HttpMethod.Get, new Uri(session.Browser.BffBase, "/")));
@@ -201,20 +200,22 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
     {
         var clock = new ManipulableClock(DateTimeOffset.UtcNow);
         await using var session = await SignInAsync(clock);
-        Assert.Equal(1, session.Store.Count);
+        Assert.Equal(1, BffTickets.Count(session.Bff));
 
-        // Past the 8-hour local session lifetime: the ticket is expired.
+        // The session never outlives the access token; the real host issues 15-minute tokens, so
+        // nine hours is far past every expiry the authority can issue.
         clock.Advance(TimeSpan.FromHours(9));
 
         var (response, _) = await SendOnBffCapturingAsync(
             session,
             new HttpRequestMessage(HttpMethod.Get, new Uri(session.Browser.BffBase, "/bff/me")));
 
-        // The expired ticket is reclaimed on the spot, and the endpoint starts a new handshake.
-        Assert.Equal(0, session.Store.Count);
+        // The expired ticket is reclaimed on the spot, and the endpoint starts a new handshake
+        // through the package's start endpoint.
+        Assert.Equal(0, BffTickets.Count(session.Bff));
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         Assert.StartsWith(
-            SignaCoreHostFixture.Authority + "/oauth2/authorize",
+            "/bff/start?returnUrl=",
             response.Headers.Location!.ToString(),
             StringComparison.Ordinal);
     }
@@ -223,27 +224,28 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
     public async Task TheTicketStore_ReclaimsExpiredTickets_OnRetrieveAndOnSweep()
     {
         var clock = new ManipulableClock(new DateTimeOffset(2026, 9, 19, 12, 0, 0, TimeSpan.Zero));
-        var store = new BffMemoryTicketStore(clock);
+        var store = new InMemoryTicketStore(clock);
+        var none = CancellationToken.None;
 
-        var liveKey = await store.StoreAsync(CreateTicket(clock.GetUtcNow().AddHours(1)));
-        var deadKey = await store.StoreAsync(CreateTicket(clock.GetUtcNow().AddMinutes(-1)));
+        var liveKey = await store.StoreAsync(CreateTicket(clock.GetUtcNow().AddHours(1)), none);
+        var deadKey = await store.StoreAsync(CreateTicket(clock.GetUtcNow().AddMinutes(-1)), none);
 
         // Retrieve of an expired ticket returns null and removes it.
-        Assert.Null(await store.RetrieveAsync(deadKey));
+        Assert.Null(await store.RetrieveAsync(deadKey!, none));
         Assert.Equal(1, store.Count);
-        Assert.NotNull(await store.RetrieveAsync(liveKey));
+        Assert.NotNull(await store.RetrieveAsync(liveKey!, none));
 
         // The sweep reclaims expired tickets no request ever presents again.
-        _ = await store.StoreAsync(CreateTicket(clock.GetUtcNow().AddMinutes(-5)));
+        _ = await store.StoreAsync(CreateTicket(clock.GetUtcNow().AddMinutes(-5)), none);
         Assert.Equal(2, store.Count);
-        Assert.Equal(1, store.RemoveExpired());
+        Assert.Equal(1, store.RemoveExpired(none));
         Assert.Equal(1, store.Count);
-        Assert.NotNull(await store.RetrieveAsync(liveKey));
+        Assert.NotNull(await store.RetrieveAsync(liveKey!, none));
 
         // Remove drops the ticket entirely.
-        await store.RemoveAsync(liveKey);
+        await store.RemoveAsync(liveKey!, none);
         Assert.Equal(0, store.Count);
-        Assert.Null(await store.RetrieveAsync(liveKey));
+        Assert.Null(await store.RetrieveAsync(liveKey!, none));
     }
 
     // ---- Acceptance 10: cancelling the UserInfo leg leaves no half-written state ----
@@ -267,7 +269,7 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
 
         // No half-written state: the ticket is untouched and the session still signs the home
         // page in; nothing detached kept running.
-        Assert.Equal(1, session.Store.Count);
+        Assert.Equal(1, BffTickets.Count(session.Bff));
         var (response, body) = await SendOnBffCapturingAsync(
             session,
             new HttpRequestMessage(HttpMethod.Get, new Uri(session.Browser.BffBase, "/")));
@@ -289,7 +291,7 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         using var get = new HttpRequestMessage(HttpMethod.Get, new Uri(session.Browser.BffBase, "/bff/logout"));
         using var getResponse = await session.Browser.SendOnBffAsync(get, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.MethodNotAllowed, getResponse.StatusCode);
-        Assert.Equal(1, session.Store.Count);
+        Assert.Equal(1, BffTickets.Count(session.Bff));
 
         // A cross-site POST without a token is rejected before any state changes.
         using var barePost = new HttpRequestMessage(HttpMethod.Post, new Uri(session.Browser.BffBase, "/bff/logout"))
@@ -298,7 +300,8 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         };
         using var bareResponse = await session.Browser.SendOnBffAsync(barePost, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, bareResponse.StatusCode);
-        Assert.Equal(1, session.Store.Count);
+        Assert.Equal("""{"outcome":"csrf_rejected"}""", await bareResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(1, BffTickets.Count(session.Bff));
 
         // A forged token is rejected as well.
         using var forgedPost = new HttpRequestMessage(HttpMethod.Post, new Uri(session.Browser.BffBase, "/bff/logout"))
@@ -310,9 +313,10 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         };
         using var forgedResponse = await session.Browser.SendOnBffAsync(forgedPost, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, forgedResponse.StatusCode);
-        Assert.Equal(1, session.Store.Count);
+        Assert.Equal(1, BffTickets.Count(session.Bff));
 
-        // The genuine POST signs the local session out: cookie cleared, ticket removed.
+        // The genuine POST is the package's prepared logout: the local session ends first (cookie
+        // cleared, ticket removed), then the browser is sent to SignaCore's logout URI.
         using var post = new HttpRequestMessage(HttpMethod.Post, new Uri(session.Browser.BffBase, "/bff/logout"))
         {
             Content = new FormUrlEncodedContent(new Dictionary<string, string>
@@ -322,12 +326,16 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         };
         using var postResponse = await session.Browser.SendOnBffAsync(post, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Found, postResponse.StatusCode);
-        Assert.Equal("/", postResponse.Headers.Location!.ToString());
+        Assert.StartsWith(
+            SignaCoreHostFixture.Authority + "/oauth2/logout",
+            postResponse.Headers.Location!.ToString(),
+            StringComparison.Ordinal);
+        Assert.Contains("logout_handle=", postResponse.Headers.Location!.ToString(), StringComparison.Ordinal);
         Assert.Contains(
             postResponse.Headers.TryGetValues("Set-Cookie", out var cookies) ? cookies : [],
             cookie => cookie.StartsWith(SessionCookieName + "=", StringComparison.Ordinal)
                 && cookie.Contains("expires=Thu, 01 Jan 1970", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(0, session.Store.Count);
+        Assert.Equal(0, BffTickets.Count(session.Bff));
 
         var (_, homeBody) = await SendOnBffCapturingAsync(
             session,
@@ -341,11 +349,7 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         ManipulableClock? clock = null,
         HttpMessageHandler? userInfoHandler = null)
     {
-        var backchannel = new RecordingHandler(fixture.Host.Server.CreateHandler());
-        var backchannelClient = new HttpClient(backchannel, disposeHandler: false)
-        {
-            BaseAddress = new Uri(SignaCoreHostFixture.Authority)
-        };
+        var backchannelClient = new RecordingHandler(fixture.Host.Server.CreateHandler());
         var outbound = new RecordingHandler(fixture.Host.Server.CreateHandler());
         var bff = BffTestServer.Create(
             SignaCoreHostFixture.Authority,
@@ -360,13 +364,19 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
 
         try
         {
-            // The full real handshake: challenge → authorize → credential POST → callback → home.
+            // The full real handshake: login → start → authorize → credential POST → callback → home.
             var (challenge, _) = await SendOnBffCapturingAsync(
                 browser,
                 captures,
                 new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/login")));
             Assert.Equal(HttpStatusCode.Found, challenge.StatusCode);
-            var authorizeUrl = challenge.Headers.Location!.ToString();
+
+            var (start, _) = await SendOnBffCapturingAsync(
+                browser,
+                captures,
+                new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, challenge.Headers.Location!.ToString())));
+            Assert.Equal(HttpStatusCode.Found, start.StatusCode);
+            var authorizeUrl = start.Headers.Location!.ToString();
 
             using var authorize = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.IdentityBase, authorizeUrl));
             using var authorizeResponse = await browser.SendOnIdentityServerAsync(authorize, TestContext.Current.CancellationToken);
@@ -399,8 +409,7 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
             {
                 Bff = bff,
                 Browser = browser,
-                BackchannelClient = backchannelClient,
-                Backchannel = backchannel,
+                Backchannel = backchannelClient,
                 UserInfoTraffic = outbound,
                 BffResponses = captures,
                 SessionCookieValue = cookieValue!,
@@ -465,11 +474,13 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         return (response, body);
     }
 
-    private static AuthenticationTicket CreateTicket(DateTimeOffset expiresUtc) =>
+    private static SignaCoreSessionTicket CreateTicket(DateTimeOffset expiresUtc) =>
         new(
-            new ClaimsPrincipal(new ClaimsIdentity([], "Test")),
-            new AuthenticationProperties { ExpiresUtc = expiresUtc },
-            "Test");
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "token-session-test")], "SignaCoreHostedLogin")),
+            DateTimeOffset.UtcNow,
+            expiresUtc,
+            AccessToken: "stored-access-token-material",
+            IdToken: "stored-id-token-material");
 
     private sealed record CapturedResponse(
         HttpMethod Method,
@@ -486,8 +497,6 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
 
         public required CrossServerBrowser Browser { get; init; }
 
-        public required HttpClient BackchannelClient { get; init; }
-
         public required RecordingHandler Backchannel { get; init; }
 
         public required RecordingHandler UserInfoTraffic { get; init; }
@@ -497,8 +506,6 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         public required string SessionCookieValue { get; init; }
 
         public required string HomeBody { get; init; }
-
-        public BffMemoryTicketStore Store => Bff.Services.GetRequiredService<BffMemoryTicketStore>();
 
         /// <summary>The material the token endpoint issued and the PKCE verifier presented to it,
         /// read from the recorded backchannel traffic.</summary>
@@ -528,13 +535,13 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         public async ValueTask DisposeAsync()
         {
             Browser.Dispose();
-            BackchannelClient.Dispose();
+            Backchannel.Dispose();
             await Bff.DisposeAsync();
         }
     }
 
     /// <summary>Records both legs of the BFF's outbound traffic and replays the response body so
-    /// the OIDC handler and the endpoints can still consume it.</summary>
+    /// the client package and the endpoints can still consume it.</summary>
     private sealed class RecordingHandler(HttpMessageHandler inner) : DelegatingHandler(inner)
     {
         public List<OutboundRecord> Records { get; } = [];

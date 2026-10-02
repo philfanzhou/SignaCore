@@ -1,6 +1,4 @@
 using Microsoft.AspNetCore.Antiforgery;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Installation;
 using ServiceMantle.Web.ManagementApi.Setup;
@@ -27,7 +25,11 @@ internal static class BffSetupExecutor
             if (http.User.Identity?.IsAuthenticated != true) return SetupCompletionResult.CredentialInvalid();
             try
             {
-                await http.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(http);
+                // User-neutral, like every antiforgery validation of the sample and the package:
+                // the setup form issues its pair on the signed-in page, and the session CSRF
+                // boundary upstream already validated this request's pair the same way.
+                await BffAntiforgery.ValidateAsync(
+                    http, http.RequestServices.GetRequiredService<IAntiforgery>());
             }
             catch (AntiforgeryValidationException)
             {
@@ -39,7 +41,7 @@ internal static class BffSetupExecutor
                 () => new BffSetupSession(http.RequestServices.CreateAsyncScope()),
                 () => new ValueTask<BffIdentityCheckResult>(http.RequestServices
                     .GetRequiredService<BffIdentityCheckService>().CheckAsync(http, token)),
-                () => new ValueTask(http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)), token);
+                () => new ValueTask(BffSession.RevokeAsync(http, token)), token);
         }
         catch
         {

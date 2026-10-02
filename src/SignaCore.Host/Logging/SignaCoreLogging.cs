@@ -1,5 +1,6 @@
 using ServiceMantle.Configuration;
 using ServiceMantle.Logging.Pipeline;
+using ServiceMantle.Logging.Remote;
 using ServiceMantle.Logging;
 
 namespace SignaCore.Host.Logging;
@@ -16,9 +17,6 @@ namespace SignaCore.Host.Logging;
 /// </remarks>
 internal static class SignaCoreLogging
 {
-    /// <summary>The non-secret name the Loki sink asks the authorization resolver for.</summary>
-    internal const string LokiAuthorizationResolverName = "signacore-loki";
-
     /// <summary>
     /// The Console-only pipeline of the Bootstrap Configuration Mode and Setup hosts, which have no
     /// setting snapshot and therefore never ship logs anywhere else.
@@ -36,37 +34,20 @@ internal static class SignaCoreLogging
     /// <c>IConfiguration</c>, so no launcher, environment variable, or appsettings file can supply a
     /// Loki address or credential.
     /// </remarks>
-    internal static LokiSettingState AddSignaCoreLogging(
+    internal static GrafanaLokiSettingState AddSignaCoreLogging(
         this IHostApplicationBuilder builder,
         ServiceSettingSnapshot snapshot)
     {
         builder.AddServiceMantleSerilog(ConfigureSerilog);
 
-        var state = LokiSettings.Classify(
-            OptionalText(snapshot, LokiSettings.UriKey),
-            OptionalText(snapshot, LokiSettings.AuthorizationKey));
-        builder.Services.AddSingleton<IRemoteLogAuthorizationResolver>(
-            new LokiAuthorizationResolver(state.Authorization));
-        builder.AddServiceMantleGrafanaLoki(options =>
-        {
-            if (state.Status != LokiSettingStatus.Enabled)
-            {
-                options.Enabled = false;
-                return;
-            }
-
-            options.Enabled = true;
-            options.Endpoint = state.Endpoint;
-            options.AuthorizationHeaderResolverName = LokiAuthorizationResolverName;
-        });
-        return state;
+        return builder.AddServiceMantleGrafanaLokiFromSettings(snapshot);
     }
 
     /// <summary>
     /// Writes the fixed startup warning for stored Loki settings the host could not use. Only the
     /// category is logged — never the address or the credential.
     /// </summary>
-    internal static void WriteLokiWarning(ILogger logger, LokiSettingState state)
+    internal static void WriteLokiWarning(ILogger logger, GrafanaLokiSettingState state)
     {
         if (!state.IsUnusable)
         {
@@ -77,30 +58,9 @@ internal static class SignaCoreLogging
             "Remote log shipping to Loki is disabled because the stored Loki settings are not usable " +
             "({LokiSettingProblem}). Loki requires an absolute https URL and an Authorization value; " +
             "correct both in the settings page and restart the service.",
-            state.Category);
+            state.Status == GrafanaLokiSettingStatus.EndpointInvalid ? "endpoint_not_https" : state.Category);
     }
 
     private static void ConfigureSerilog(SerilogOptions options) =>
         options.MinimumLevel = LogLevel.Information;
-
-    private static string? OptionalText(ServiceSettingSnapshot snapshot, string key) =>
-        snapshot.Values.TryGetValue(key, out var value) &&
-        value.HasValue &&
-        value.ValueType == ServiceSettingValueType.String
-            ? value.GetString()
-            : null;
-
-    /// <summary>
-    /// Answers the Loki sink's authorization lookup from the decrypted setting held in memory. It
-    /// resolves only <see cref="LokiAuthorizationResolverName"/>; every other name has no value.
-    /// </summary>
-    internal sealed class LokiAuthorizationResolver(string? authorization) : IRemoteLogAuthorizationResolver
-    {
-        public string? ResolveAuthorizationHeader(string name) =>
-            string.Equals(name, LokiAuthorizationResolverName, StringComparison.Ordinal)
-                ? authorization
-                : null;
-
-        public override string ToString() => nameof(LokiAuthorizationResolver);
-    }
 }

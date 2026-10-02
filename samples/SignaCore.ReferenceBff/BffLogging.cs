@@ -19,7 +19,13 @@ internal static class BffLogging
     }
 }
 
-internal enum BffLogOperation { WebHost, Login, UserInfo, Authorization, Setup, Logout }
+/// <summary>
+/// The operations the sample's own surfaces emit. Sign-in and logout outcomes belong to the
+/// hosted-login client package's bounded logs; this log carries only the sample-owned decisions:
+/// host startup, the UserInfo identity check, the administrator authorization decision, and
+/// Setup completion.
+/// </summary>
+internal enum BffLogOperation { WebHost, UserInfo, Authorization, Setup }
 internal enum BffLogOutcome { Started, Succeeded, Rejected }
 
 /// <summary>

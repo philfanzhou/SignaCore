@@ -142,9 +142,8 @@ internal static class ServiceMantleComposition
         services.AddSingleton<IServiceSettingCompositeValidator>(_ =>
             new SignaCoreSettingCompositeValidator(isDevelopment, validateManagementUpdateRules: true));
         services.AddSingleton<IServiceSettingRootKeySource, MasterKeyRootKeySource>();
-        services.TryAddSingleton(serviceProvider => new ServiceSettingDefinitionRegistry(
-            serviceProvider.GetServices<IServiceSettingDefinitionProvider>(),
-            serviceProvider.GetServices<IServiceSettingCompositeValidator>()));
+        services.TryAddSingleton(_ => SharedSettingComposition.CreateRegistry(
+            isDevelopment, validateManagementUpdateRules: true));
 
         services.AddScoped<IServiceSettingUpdateTransaction>(serviceProvider =>
             new EfCoreServiceSettingUpdateTransaction<IdentityDbContext>(

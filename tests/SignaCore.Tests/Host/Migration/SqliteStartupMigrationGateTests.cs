@@ -33,6 +33,53 @@ public sealed class SqliteStartupMigrationGateTests
     private const string PreServiceInstallations = "20260831103622_PersistInteractiveOidcClientConfiguration";
     private const string SetupCodeSentinel = "SETUP-CODE-987654-SENTINEL";
 
+    [Fact]
+    public async Task Gate_EachRunUsesFreshReceiptAndLeavesBorrowedContextAndExecutorAlive()
+    {
+        var path = NewDatabasePath();
+        try
+        {
+            var options = TestDatabaseOptions(path);
+            var contextOptions = new DbContextOptionsBuilder<IdentityDbContext>();
+            contextOptions.UseIdentityDatabase(options);
+            await using var db = new IdentityDbContext(contextOptions.Options);
+            using var executor = new DisposableExecutor(new SignaCoreMigrationExecutor(db, options));
+
+            await StartupMigrationGate.RunAsync(db, options, NullLogger.Instance, executor,
+                TestContext.Current.CancellationToken);
+            Assert.False(executor.Disposed);
+            Assert.Equal(1, executor.ExecuteCount);
+            var history = (await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken)).ToArray();
+            Assert.NotEmpty(history);
+
+            // A second direct call must receive a fresh receipt, observe current, and skip migration.
+            await StartupMigrationGate.RunAsync(db, options, NullLogger.Instance, executor,
+                TestContext.Current.CancellationToken);
+            Assert.False(executor.Disposed);
+            Assert.Equal(1, executor.ExecuteCount);
+            Assert.Equal(history, await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken));
+            await db.Database.ExecuteSqlRawAsync("SELECT 1;", TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    private sealed class DisposableExecutor(IDatabaseMigrationExecutor inner) : IDatabaseMigrationExecutor, IDisposable
+    {
+        public bool Disposed { get; private set; }
+        public int ExecuteCount { get; private set; }
+        public ValueTask<MigrationObservationState> InspectAsync(CancellationToken cancellationToken = default)
+            => inner.InspectAsync(cancellationToken);
+        public ValueTask ExecuteAsync(CancellationToken cancellationToken = default)
+        {
+            ExecuteCount++;
+            return inner.ExecuteAsync(cancellationToken);
+        }
+        public void Dispose() => Disposed = true;
+    }
+
     // ----- Shared single-instance serialization -----
 
     [Fact]
@@ -223,14 +270,15 @@ public sealed class SqliteStartupMigrationGateTests
     }
 
     [Fact]
-    public async Task Gate_UnreadableTarget_DeliversInspectionFailedWithoutOriginalException()
+    public async Task Gate_CorruptFile_DeliversInspectionFailedWithoutOriginalException()
     {
-        var directoryPath = Path.Combine(PhysicalTempPath(), $"signacore-gate-dir-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directoryPath);
+        var databasePath = NewDatabasePath();
+        var corruptBytes = Enumerable.Repeat((byte)0x41, 512).ToArray();
+        File.WriteAllBytes(databasePath, corruptBytes);
         try
         {
-            // The real executor on a target whose catalogs cannot be read.
-            var options = TestDatabaseOptions(directoryPath);
+            // A supported ordinary file reaches the real executor, whose catalog inspection fails.
+            var options = TestDatabaseOptions(databasePath);
             var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
             optionsBuilder.UseIdentityDatabase(options);
             await using var db = new IdentityDbContext(optionsBuilder.Options);
@@ -244,10 +292,85 @@ public sealed class SqliteStartupMigrationGateTests
                     TestContext.Current.CancellationToken));
 
             Assert.Equal(WellKnownMigrationErrorCodes.InspectionFailed, exception.ErrorCode);
+            Assert.DoesNotContain(databasePath, exception.Message);
+            Assert.Null(exception.InnerException);
+            Assert.Equal(corruptBytes, File.ReadAllBytes(databasePath));
         }
         finally
         {
-            Directory.Delete(directoryPath);
+            Cleanup(databasePath);
+        }
+    }
+
+    [Theory]
+    [InlineData("relative")]
+    [InlineData("uri")]
+    [InlineData("shared-cache")]
+    [InlineData("read-only")]
+    [InlineData("noncanonical")]
+    [InlineData("directory")]
+    [InlineData("symlink")]
+    public async Task Gate_UnsupportedTarget_FailsLockSafelyWithoutCallingExecutorOrWritingFiles(string kind)
+    {
+        var directory = Path.Combine(PhysicalTempPath(), $"signacore-gate-invalid-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var databasePath = Path.Combine(directory, "identity.db");
+        var target = databasePath;
+        string? extra = null;
+        switch (kind)
+        {
+            case "relative":
+                target = Path.GetRelativePath(Environment.CurrentDirectory, databasePath);
+                break;
+            case "uri":
+                target = $"file:{databasePath}";
+                break;
+            case "shared-cache":
+                extra = "Cache=Shared";
+                break;
+            case "read-only":
+                extra = "Mode=ReadOnly";
+                break;
+            case "noncanonical":
+                target = Path.Combine(directory, ".", "identity.db");
+                break;
+            case "directory":
+                target = directory;
+                break;
+            case "symlink":
+                File.WriteAllBytes(databasePath, []);
+                target = Path.Combine(directory, "link.db");
+                File.CreateSymbolicLink(target, databasePath);
+                break;
+        }
+
+        try
+        {
+            var entriesBefore = Directory.GetFileSystemEntries(directory).Order().ToArray();
+            var executor = new DelegateMigrationExecutor();
+            var exception = await Assert.ThrowsAsync<StartupMigrationException>(() =>
+                RunGate(target, executor, TestContext.Current.CancellationToken, extra));
+
+            Assert.Equal(WellKnownMigrationErrorCodes.LockFailed, exception.ErrorCode);
+            Assert.Equal("SignaCore startup database migration failed (migration.lock_failed).", exception.Message);
+            Assert.DoesNotContain(target, exception.Message);
+            Assert.DoesNotContain(directory, exception.Message);
+            Assert.Null(exception.InnerException);
+            Assert.Equal(0, executor.InspectCount);
+            Assert.Equal(0, executor.ExecuteCount);
+            Assert.Equal(entriesBefore, Directory.GetFileSystemEntries(directory).Order().ToArray());
+            if (kind == "symlink")
+            {
+                Assert.Empty(File.ReadAllBytes(databasePath));
+            }
+            else
+            {
+                Assert.False(File.Exists(databasePath));
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
         }
     }
 
@@ -813,9 +936,10 @@ public sealed class SqliteStartupMigrationGateTests
     private static Task RunGate(
         string databasePath,
         IDatabaseMigrationExecutor executor,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? extra = null)
     {
-        var options = TestDatabaseOptions(databasePath);
+        var options = TestDatabaseOptions(databasePath, extra);
         var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
         optionsBuilder.UseIdentityDatabase(options);
         var db = new IdentityDbContext(optionsBuilder.Options);

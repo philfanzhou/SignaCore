@@ -92,8 +92,11 @@ public sealed partial class ReferenceBffDatabaseContractTests
         using var formResponse = form.Response;
         var html = await formResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         var csrf = WebUtility.HtmlDecode(Regex.Match(html, "id=\"csrf\" type=\"hidden\" value=\"([^\"]+)\"").Groups[1].Value);
+        // Without the token the package's session CSRF boundary fails the authentication
+        // itself, so the setup executor never runs: the attempt is answered by the fixed
+        // anonymous rejection and writes nothing.
         using (var missingCsrf = await SendSetup(browser.Bff, terminal.Code.Reveal(), null))
-            Assert.Equal(HttpStatusCode.BadRequest, missingCsrf.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, missingCsrf.StatusCode);
         using (var invalid = await SendSetup(browser.Bff, new string('A', 32), csrf))
             Assert.Equal(HttpStatusCode.Unauthorized, invalid.StatusCode);
         Assert.Equal(0, authority.UserInfoCalls);
@@ -116,11 +119,11 @@ public sealed partial class ReferenceBffDatabaseContractTests
         authority.UserInfoMode = FakeAuthority.UserInfoResponse.InternalError;
         using (var unavailable = await SendSetup(browser.Bff, terminal.Code.Reveal(), csrf))
             Assert.Equal(HttpStatusCode.ServiceUnavailable, unavailable.StatusCode);
-        Assert.Equal(1, bff.Services.GetRequiredService<MemoryTicketStore>().Count);
+        Assert.Equal(1, BffTickets.Count(bff));
         authority.UserInfoMode = FakeAuthority.UserInfoResponse.SubjectMismatch;
         using (var invalid = await SendSetup(browser.Bff, terminal.Code.Reveal(), csrf))
             Assert.Equal(HttpStatusCode.Unauthorized, invalid.StatusCode);
-        Assert.Equal(0, bff.Services.GetRequiredService<MemoryTicketStore>().Count);
+        Assert.Equal(0, BffTickets.Count(bff));
         await using var read = database.CreateContext();
         Assert.Empty(await read.ManagementRoleBindings.ToListAsync(TestContext.Current.CancellationToken));
         Assert.Equal(0, await CountSharedAuditRowsAsync(read));
@@ -131,7 +134,7 @@ public sealed partial class ReferenceBffDatabaseContractTests
     {
         using var context = database.CreateContext();
         return BffTestServer.Create(FakeAuthority.BaseAddress, "reference-bff", "reference-bff-test-secret",
-            SignaCoreHostFixture.RedirectUri, authority.CreateClient(), authority.Server.CreateHandler(),
+            SignaCoreHostFixture.RedirectUri, authority.Server.CreateHandler(), authority.Server.CreateHandler(),
             databaseProvider: provider, databaseConnectionString: context.Database.GetConnectionString(), configureTestServices: configure);
     }
 

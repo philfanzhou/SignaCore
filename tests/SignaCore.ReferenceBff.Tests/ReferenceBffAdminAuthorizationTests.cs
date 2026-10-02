@@ -1,22 +1,16 @@
 extern alias BffSample;
 
 using BffIdentityCheckService = BffSample::SignaCore.ReferenceBff.BffIdentityCheckService;
-using BffMemoryTicketStore = BffSample::SignaCore.ReferenceBff.MemoryTicketStore;
 using BffProgram = BffSample::Program;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
-using Microsoft.IdentityModel.Protocols;
 using ServiceMantle.Persistence.Relational.Stores;
 using ServiceMantle.Persistence.Relational;
+using SignaCore.Client.AspNetCore;
 using SignaCore.ReferenceBff.Database;
 using System.Data.Common;
 using System.Net;
@@ -27,12 +21,13 @@ namespace SignaCore.ReferenceBff.Tests;
 
 /// <summary>
 /// The runtime administrator authorization of the reference BFF (#74 runtime identity/authorization
-/// sub-stage): the standard OIDC handshake captures the verified issuer/subject server-side, every
-/// management request re-confirms the identity upstream and then matches the exact local active
-/// binding, and each failure family answers one fixed manual status — 401 (session torn down), 403
-/// (local denial, ticket kept), or 503 (a dependency could not answer, ticket kept). Anonymous
-/// requests take the standard challenge back to the fixed route. Cancellation traverses every
-/// boundary; no boundary ever widens permission.
+/// sub-stage): the hosted-login client package's handshake establishes the verified issuer/subject
+/// server-side, every management request re-confirms the identity upstream and then matches the
+/// exact local active binding, and each failure family answers one fixed manual status — 401
+/// (session torn down), 403 (local denial, ticket kept), or 503 (a dependency could not answer,
+/// ticket kept). Anonymous requests take the package's challenge, whose return address stays a
+/// local path of the fixed route. Cancellation traverses every boundary; no boundary ever widens
+/// permission.
 /// </summary>
 public sealed class ReferenceBffAdminAuthorizationTests
 {
@@ -50,14 +45,18 @@ public sealed class ReferenceBffAdminAuthorizationTests
         await using var bff = CreateBff(authority, database);
         using var browser = CreateBrowser(bff, authority);
 
-        // An attacker-controlled query parameter must not become an open return URL.
+        // An attacker-controlled query parameter must not become an open return URL: the package's
+        // challenge redirects to its own start endpoint with a return address that stays a local
+        // path of the challenged route.
         using (var anonymous = new HttpRequestMessage(
             HttpMethod.Get, new Uri(browser.BffBase, "/bff/admin?next=https://attacker.example")))
         using (var response = await browser.SendOnBffAsync(anonymous, TestContext.Current.CancellationToken))
         {
             Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+            // The challenge redirect stays relative (the package's contract), so the assertion
+            // reads the Location as the raw string it is.
             Assert.StartsWith(
-                FakeAuthority.BaseAddress + "/authorize",
+                "/bff/start?returnUrl=",
                 response.Headers.Location!.ToString(),
                 StringComparison.Ordinal);
         }
@@ -190,7 +189,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
     // ---- The session-invalid family: ticket metadata and upstream confirmation ----
 
     [Fact]
-    public async Task ALegacyTicketWithoutIdentityMetadata_IsRejectedAndCleared()
+    public async Task ATicketWithoutIdentityMetadata_IsRejectedAndCleared()
     {
         await using var authority = await FakeAuthority.StartAsync();
         await using var database = await TempBffDatabase.CreateMigratedWithBindingAsync(
@@ -199,18 +198,20 @@ public sealed class ReferenceBffAdminAuthorizationTests
         using var browser = CreateBrowser(bff, authority);
         await SignInAsync(browser);
 
-        await ReplaceTicketAsync(bff, browser, ticket => new AuthenticationTicket(
-            ticket.Principal,
-            new AuthenticationProperties(
-                ticket.Properties.Items
-                    .Where(pair => !pair.Key.StartsWith("referenceBff.", StringComparison.Ordinal))
-                    .ToDictionary(pair => pair.Key, pair => pair.Value)),
-            ticket.AuthenticationScheme));
+        // A server-side ticket whose principal cannot prove the identity the ID token verified
+        // (no single issuer and subject) answers nothing and is torn down.
+        await ReplaceTicketAsync(bff, browser, ticket => ticket with
+        {
+            Principal = new ClaimsPrincipal(new ClaimsIdentity(
+                ticket.Principal.Claims.Where(claim =>
+                    claim.Type is not ("iss" or "sub")),
+                "SignaCoreHostedLogin"))
+        });
 
         using var admin = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/admin"));
         using var response = await browser.SendOnBffAsync(admin, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Equal(0, TicketStore(bff).Count);
+        Assert.Equal(0, BffTickets.Count(bff));
         AssertSignedOutCookieAsync(response);
     }
 
@@ -224,20 +225,14 @@ public sealed class ReferenceBffAdminAuthorizationTests
         using var browser = CreateBrowser(bff, authority);
         await SignInAsync(browser);
 
-        await ReplaceTicketAsync(bff, browser, ticket => new AuthenticationTicket(
-            ticket.Principal,
-            // Tokens live inside Items under the ".Token." prefix: filtering them out yields a
-            // ticket with the identity metadata but no stored token material.
-            new AuthenticationProperties(
-                ticket.Properties.Items
-                    .Where(pair => !pair.Key.StartsWith(".Token.", StringComparison.Ordinal))
-                    .ToDictionary(pair => pair.Key, pair => pair.Value)),
-            ticket.AuthenticationScheme));
+        // The ticket keeps its verified principal but carries no access token: the identity
+        // check cannot confirm anything upstream.
+        await ReplaceTicketAsync(bff, browser, ticket => ticket with { AccessToken = "" });
 
         using var admin = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/admin"));
         using var response = await browser.SendOnBffAsync(admin, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Equal(0, TicketStore(bff).Count);
+        Assert.Equal(0, BffTickets.Count(bff));
     }
 
     [Theory]
@@ -343,7 +338,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
     public async Task WithoutAnyDatabaseConfiguration_TheLoginSampleRuns_AndManagementIsAFixed503()
     {
         await using var authority = await FakeAuthority.StartAsync();
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
         await using var bff = BffTestServer.Create(
             FakeAuthority.BaseAddress,
             ClientId,
@@ -367,7 +362,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
     public async Task APartialDatabaseConfiguration_FailsStartup_WithoutEchoingValues()
     {
         await using var authority = await FakeAuthority.StartAsync();
-        using var backchannel = authority.CreateClient();
+        using var backchannel = authority.Server.CreateHandler();
 
         var connectionSecret = "Data Source=/tmp/never-created-4f6a2d9b7e1c.db";
         var factory = BffTestServer.Create(
@@ -494,22 +489,19 @@ public sealed class ReferenceBffAdminAuthorizationTests
         await using var authority = await FakeAuthority.StartAsync();
         await using var database = await TempBffDatabase.CreateMigratedWithBindingAsync(
             FakeAuthority.BaseAddress, FakeAuthority.DefaultSubject);
-        await using var bff = CreateBff(authority, database);
+        // Service-level probe over the real host's DI and the signed-in session cookie,
+        // mirroring the deterministic review experiment: the sample's own Discovery boundary
+        // parks, the caller abandons the request, and only then does the boundary complete
+        // normally with a document that carries no UserInfo endpoint. The observation after
+        // the boundary must propagate the caller's cancellation — never an unavailable
+        // verdict. Driving the check directly keeps the transport's own cancellation from
+        // masking the server-side outcome.
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var probe = new DiscoveryBoundaryProbeHandler(entered);
+        await using var bff = CreateBff(authority, database, userInfoWrapper: probe);
         using var browser = CreateBrowser(bff, authority);
         await SignInAsync(browser);
 
-        // Service-level probe over the real host's DI and the signed-in session cookie,
-        // mirroring the deterministic review experiment: Discovery's boundary parks, the
-        // caller abandons the request, and only then does the boundary complete normally with
-        // a configuration that carries no UserInfo endpoint. The observation after the
-        // boundary must propagate the caller's cancellation — never an unavailable verdict.
-        // Driving the check directly keeps the transport's own cancellation from masking the
-        // server-side outcome.
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var oidcOptions = bff.Services.GetRequiredService<IOptionsMonitor<OpenIdConnectOptions>>()
-            .Get(OpenIdConnectDefaults.AuthenticationScheme);
-        oidcOptions.ConfigurationManager = new DiscoveryBoundaryProbeManager(
-            oidcOptions.ConfigurationManager!, entered);
         using (var scope = bff.Services.CreateScope())
         {
             var http = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
@@ -525,7 +517,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
         }
 
         // No verdict ran: the session is intact and the next request authorizes normally.
-        Assert.Equal(1, TicketStore(bff).Count);
+        Assert.Equal(1, BffTickets.Count(bff));
         using var retry = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/admin"));
         using var response = await browser.SendOnBffAsync(retry, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -588,12 +580,9 @@ public sealed class ReferenceBffAdminAuthorizationTests
         DbCommandInterceptor? dbInterceptor = null,
         DelegatingHandler? userInfoWrapper = null)
     {
-        // The backchannel client intentionally outlives this method: the BFF's OIDC handler owns
-        // it for the lifetime of the factory, and the authority disposes the underlying server.
-        var backchannelClient = new HttpClient(authority.Server.CreateHandler(), disposeHandler: false)
-        {
-            BaseAddress = new Uri(FakeAuthority.BaseAddress)
-        };
+        // The authority's own handler is the package's backchannel for this factory's lifetime;
+        // the authority disposes the underlying server when the test ends.
+        var backchannelClient = authority.Server.CreateHandler();
 
         HttpMessageHandler userInfo = authority.Server.CreateHandler();
         if (userInfoWrapper is not null)
@@ -632,8 +621,8 @@ public sealed class ReferenceBffAdminAuthorizationTests
         BffTestServer.CreateBrowserOverAuthority(
             bff, authority.Server.CreateHandler(), new Uri(FakeAuthority.BaseAddress));
 
-    private static BffMemoryTicketStore TicketStore(WebApplicationFactory<BffProgram> bff) =>
-        bff.Services.GetRequiredService<BffMemoryTicketStore>();
+    private static InMemoryTicketStore TicketStore(WebApplicationFactory<BffProgram> bff) =>
+        BffTickets.Store(bff);
 
     private static async Task SignInAsync(CrossServerBrowser browser)
     {
@@ -643,12 +632,10 @@ public sealed class ReferenceBffAdminAuthorizationTests
 
     private static async Task<(string Body, string Subject)> DriveSignInAsync(CrossServerBrowser browser)
     {
-        using var challenge = new HttpRequestMessage(HttpMethod.Get, new Uri(browser.BffBase, "/bff/login"));
-        using var challengeResponse = await browser.SendOnBffAsync(challenge, TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.Found, challengeResponse.StatusCode);
+        var authorizeUrl = await BffSignIn.BeginAsync(browser, TestContext.Current.CancellationToken);
 
         using var authorize = new HttpRequestMessage(
-            HttpMethod.Get, new Uri(browser.IdentityBase, challengeResponse.Headers.Location!.PathAndQuery));
+            HttpMethod.Get, new Uri(browser.IdentityBase, authorizeUrl));
         using var authorizeResponse = await browser.SendOnIdentityServerAsync(authorize, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Found, authorizeResponse.StatusCode);
 
@@ -685,42 +672,29 @@ public sealed class ReferenceBffAdminAuthorizationTests
     }
 
     /// <summary>
-    /// Replaces the browser's server-side ticket with a transformed copy (same principal shape,
-    /// caller-controlled properties) so a test can present a legacy or token-less ticket. With a
-    /// session store the browser cookie carries a protected stub whose single claim
-    /// (<c>Microsoft.AspNetCore.Authentication.Cookies-SessionId</c>) is the store key; the
-    /// sample's own TicketDataFormat is used to read and re-mint that stub.
+    /// Replaces the browser's server-side session ticket with a transformed copy (same overall
+    /// shape, caller-controlled contents) so a test can present an identity-less or token-less
+    /// ticket. The package's session cookie carries the store key verbatim, so the swap is one
+    /// store remove-and-store plus the new key in the cookie.
     /// </summary>
     private static async Task ReplaceTicketAsync(
         WebApplicationFactory<BffProgram> bff,
         CrossServerBrowser browser,
-        Func<AuthenticationTicket, AuthenticationTicket> transform)
+        Func<SignaCoreSessionTicket, SignaCoreSessionTicket> transform)
     {
-        const string sessionIdClaimType = "Microsoft.AspNetCore.Authentication.Cookies-SessionId";
         var store = TicketStore(bff);
-        var cookieOptions = bff.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
-            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
         var cookieValue = browser.Cookies.GetCookies(browser.BffBase)[SessionCookieName]?.Value;
         Assert.False(string.IsNullOrEmpty(cookieValue), "The browser held no BFF session cookie.");
 
-        var stub = cookieOptions.TicketDataFormat!.Unprotect(cookieValue!);
-        Assert.NotNull(stub);
-        var key = Assert.Single(stub!.Principal.Claims, claim => claim.Type == sessionIdClaimType).Value;
-        var ticket = await store.RetrieveAsync(key);
+        var ticket = await store.RetrieveAsync(cookieValue!, TestContext.Current.CancellationToken);
         Assert.NotNull(ticket);
 
-        await store.RemoveAsync(key);
-        var newKey = await store.StoreAsync(transform(ticket!));
+        await store.RemoveAsync(cookieValue!, TestContext.Current.CancellationToken);
+        var newKey = await store.StoreAsync(
+            transform(ticket!), TestContext.Current.CancellationToken);
+        Assert.NotNull(newKey);
 
-        var newStub = new AuthenticationTicket(
-            new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim(sessionIdClaimType, newKey)],
-                authenticationType: "Cookies")),
-            new AuthenticationProperties(),
-            CookieAuthenticationDefaults.AuthenticationScheme);
-        browser.Cookies.Add(
-            browser.BffBase,
-            new Cookie(SessionCookieName, cookieOptions.TicketDataFormat.Protect(newStub)));
+        browser.Cookies.Add(browser.BffBase, new Cookie(SessionCookieName, newKey));
     }
 
     private static async Task SeedCaseBindingAsync(TempBffDatabase database, string caseName)
@@ -922,38 +896,44 @@ public sealed class ReferenceBffAdminAuthorizationTests
     }
 
     /// <summary>
-    /// Replaces Discovery for one identity-check leg: the boundary signals its arrival, waits
-    /// for the caller to abandon the request, and still completes normally with a configuration
-    /// that carries no UserInfo endpoint. The observation after the boundary must throw, never
-    /// classify the missing endpoint as unavailable.
+    /// Replaces the sample's own Discovery read for one identity-check leg: the boundary signals
+    /// its arrival, waits for the caller to abandon the request, and still completes normally
+    /// with a document that carries no UserInfo endpoint. The observation after the boundary
+    /// must throw, never classify the missing endpoint as unavailable.
     /// </summary>
-    private sealed class DiscoveryBoundaryProbeManager(
-        IConfigurationManager<OpenIdConnectConfiguration> inner,
-        TaskCompletionSource entered) : IConfigurationManager<OpenIdConnectConfiguration>
+    private sealed class DiscoveryBoundaryProbeHandler(TaskCompletionSource entered) : DelegatingHandler
     {
         private int _calls;
 
-        public async Task<OpenIdConnectConfiguration> GetConfigurationAsync(CancellationToken cancel)
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
         {
-            if (Interlocked.Increment(ref _calls) == 1)
+            if (request.RequestUri!.AbsolutePath.EndsWith("/.well-known/openid-configuration", StringComparison.Ordinal)
+                && Interlocked.Increment(ref _calls) == 1)
             {
                 entered.TrySetResult();
                 try
                 {
-                    await Task.Delay(Timeout.InfiniteTimeSpan, cancel);
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
                     // The caller abandoned the request; the boundary completes anyway.
                 }
 
-                return new OpenIdConnectConfiguration();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    // A usable document that deliberately carries no userinfo_endpoint.
+                    Content = new StringContent(
+                        $$"""{"issuer":"{{FakeAuthority.BaseAddress}}"}""",
+                        System.Text.Encoding.UTF8,
+                        "application/json")
+                };
             }
 
-            return await inner.GetConfigurationAsync(cancel);
+            return await base.SendAsync(request, cancellationToken);
         }
-
-        public void RequestRefresh() => inner.RequestRefresh();
     }
 
     /// <summary>

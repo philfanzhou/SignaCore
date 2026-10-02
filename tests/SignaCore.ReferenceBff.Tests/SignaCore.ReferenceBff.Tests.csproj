@@ -18,6 +18,9 @@
   <ItemGroup>
     <!-- The alias keeps the sample's top-level Program distinct from SignaCore.Host's. -->
     <ProjectReference Include="..\..\samples\SignaCore.ReferenceBff\SignaCore.ReferenceBff.csproj" Aliases="BffSample" />
+    <!-- The hosted-login client package the sample consumes; the tests exercise its public
+         surface (ticket store, session status, logout endpoints) directly. -->
+    <ProjectReference Include="..\..\src\SignaCore.Client.AspNetCore\SignaCore.Client.AspNetCore.csproj" />
     <!-- The BFF's own storage contracts target the sample database project, never the product
          IdentityDbContext. -->
     <ProjectReference Include="..\..\samples\SignaCore.ReferenceBff.Database\SignaCore.ReferenceBff.Database.csproj" />

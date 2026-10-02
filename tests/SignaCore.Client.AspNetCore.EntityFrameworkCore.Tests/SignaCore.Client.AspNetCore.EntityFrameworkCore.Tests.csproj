@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- xUnit.net v3 test projects are executables hosted by Microsoft.Testing.Platform. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pins the assembly's parallelism contract so local full runs and CI make the same
+         scheduling assumptions (issue #293). -->
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The package under test. -->
+    <ProjectReference Include="..\..\src\SignaCore.Client.AspNetCore.EntityFrameworkCore\SignaCore.Client.AspNetCore.EntityFrameworkCore.csproj" />
+  </ItemGroup>
+
+</Project>

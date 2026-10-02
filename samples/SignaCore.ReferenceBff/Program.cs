@@ -1,17 +1,16 @@
 using Microsoft.AspNetCore.Antiforgery;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.DataProtection;
-using Microsoft.Extensions.Options;using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using ServiceMantle.Installation;
 using ServiceMantle.Persistence.Relational.DataProtection;
+using SignaCore.Client.AspNetCore;
 using SignaCore.ReferenceBff.Database;
 using SignaCore.ReferenceBff;
-using System.Net.Http.Headers;
 using System.Net;
+using System.Security.Claims;
 
 const string UserInfoClientName = BffIdentityCheckService.UserInfoClientName;
+const string BffRoutePrefix = "/bff";
 
 if (SetupCodeCommand.IsRequested(args))
 {
@@ -52,20 +51,15 @@ builder.AddServiceMantleSerilog(options =>
 });
 BffLogging.AddServices(builder.Services);
 
-// The server-side session store (DF-07). The browser holds only the opaque key it returns; every
-// token stays on the server. The expiry clock is injectable so tests can advance it.
-builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<MemoryTicketStore>(
-    static services => new MemoryTicketStore(services.GetRequiredService<TimeProvider>()));
-builder.Services.AddHostedService<TicketStoreCleanupService>();
-
-// The named client the BFF uses to call SignaCore's UserInfo with the stored access token. The
-// Bearer header only ever appears on this server-to-server leg, never toward the browser.
+// The named client the BFF uses for its own authority reads: the UserInfo call behind /bff/me
+// and the Discovery document behind /bff/me and /bff/diagnostics. The Bearer header only ever
+// appears on the server-to-server UserInfo leg, never toward the browser.
 builder.Services.AddHttpClient(UserInfoClientName);
 
 // The typed identity check and the local administrator authorization boundary. The identity
 // check is what every identity-sensitive surface shares; the admin decision composes it with the
 // BFF's own binding store and is computed fresh on every request.
+builder.Services.AddScoped<BffAuthorityMetadataReader>();
 builder.Services.AddScoped<BffIdentityCheckService>();
 builder.Services.AddScoped<BffAdminAuthorizationService>();
 
@@ -90,11 +84,9 @@ if (databaseSettings.IsConfigured)
     BffSetupHosting.AddSetup(builder.Services);
 }
 
-// Keep the existing logout form token and add a BFF-specific header for Setup JSON.
-builder.Services.AddAntiforgery(options => options.HeaderName = BffSetupHosting.CsrfHeader);
-
-// The configuration is validated at startup: an incomplete configuration is a startup failure
-// with a clear message, never a silently degraded run.
+// The configuration is validated at startup — both by the sample's own keys and by the client
+// package's options over the same values — and an incomplete configuration is a startup failure
+// with a clear message that names the missing key and never echoes a value.
 builder.Services
     .AddOptions<ReferenceBffOptions>()
     .BindConfiguration(ReferenceBffOptions.SectionName)
@@ -108,161 +100,68 @@ builder.Services
     .Validate(o => Uri.TryCreate(o.RedirectUri, UriKind.Absolute, out var redirect)
             && redirect.Scheme == Uri.UriSchemeHttps,
         "ReferenceBff:RedirectUri must be an absolute HTTPS URL.")
-    .Validate(o => !databaseSettings.IsConfigured || BffSetupHosting.IsCallbackPathSafe(o.RedirectUri),
-        "ReferenceBff:RedirectUri callback path conflicts with a reserved route.")
     .ValidateOnStart();
 
+// The hosted-login client package owns the whole sign-in handshake and the server-side session:
+// Discovery, the authorization request with state/nonce/PKCE, the hardened callback, strict
+// ID-token validation, the capacity-bounded ticket store with its sweep, the session CSRF
+// boundary, and the prepared-logout surface. The sample registers the package's scheme as the
+// default so its own routes challenge into the package's start endpoint.
 builder.Services.AddAuthentication(options =>
-    {
-        options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-        options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
-        options.DefaultSignOutScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-    })
-    .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options =>
-    {
-        // The local session cookie: server-side read, never accessible to scripts, only ever
-        // issued over HTTPS. With SessionStore set (below) it carries only the opaque store key —
-        // the ticket with the saved tokens never leaves the server.
-        options.Cookie.Name = "signacore-bff-session";
-        options.Cookie.HttpOnly = true;
-        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-        options.Cookie.SameSite = SameSiteMode.Lax;
-        options.ExpireTimeSpan = TimeSpan.FromHours(8);
-        options.SlidingExpiration = true;
-        options.AccessDeniedPath = "/error";
-        options.Events.OnRedirectToAccessDenied = context =>
-        {
-            context.Response.Redirect("/error?reason=access_denied");
-            return Task.CompletedTask;
-        };
-    })
-    .AddOpenIdConnect(options =>
-    {
-        var settings = builder.Configuration
-            .GetSection(ReferenceBffOptions.SectionName)
-            .Get<ReferenceBffOptions>() ?? new ReferenceBffOptions();
+{
+    options.DefaultScheme = SignaCoreHostedLoginDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = SignaCoreHostedLoginDefaults.AuthenticationScheme;
+});
 
-        // Everything endpoint-shaped is resolved from the Authority's Discovery document; the
-        // sample never hardcodes an authorization, token, or JWKS path.
-        options.Authority = settings.Authority!;
-        options.ClientId = settings.ClientId!;
-        options.ClientSecret = settings.ClientSecret!;
-        options.ResponseType = OpenIdConnectResponseType.Code;
-        // SignaCore delivers the authorization result as redirect query parameters; the
-        // handler's default form_post mode is not part of SignaCore's contract.
-        options.ResponseMode = OpenIdConnectResponseMode.Query;
-        options.UsePkce = true;
-        options.CallbackPath = new Uri(settings.RedirectUri!).AbsolutePath;
-        options.SignedOutCallbackPath = "/signout-callback-oidc";
-        // The tokens are saved into the server-side ticket (SessionStore above), never into the
-        // browser cookie; the access token is used only for the BFF's own UserInfo call.
-        options.SaveTokens = true;
-        options.GetClaimsFromUserInfoEndpoint = false;
-        options.MapInboundClaims = false;
-        options.TokenValidationParameters.ValidAudience = settings.ClientId!;
-        options.TokenValidationParameters.ValidateIssuer = true;
-        // The correlation cookie is the CSRF state of the handshake: Secure, HttpOnly, and
-        // SameSite=None so the top-level redirect back from SignaCore can present it.
-        options.CorrelationCookie = new CookieBuilder
-        {
-            Name = "signacore-bff-correlation",
-            HttpOnly = true,
-            SecurePolicy = CookieSecurePolicy.Always,
-            SameSite = SameSiteMode.None,
-            IsEssential = true,
-            MaxAge = TimeSpan.FromMinutes(5)
-        };
-        options.RequireHttpsMetadata = true;
-        options.Scope.Clear();
-        foreach (var member in settings.Scope.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-        {
-            options.Scope.Add(member);
-        }
+// The administrator-binding decision the package reports through its session endpoint. It is a
+// singleton over the application services because the package resolves it once with its options.
+builder.Services.AddSingleton<BffAdministratorBindingDecision>();
 
-        // Discovery must be reachable before any browser is sent anywhere; an unreachable or
-        // invalid authority answers with the bounded, non-sensitive error page instead of a raw
-        // exception or a silent failure.
-        options.Events.OnRedirectToIdentityProvider = async context =>
-        {
-            try
-            {
-                await context.Options.ConfigurationManager!.GetConfigurationAsync(
-                    context.HttpContext.RequestAborted);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                context.Response.Redirect("/error?reason=authority_unreachable");
-                context.HandleResponse();
-            }
-        };
-        // Capture the identity this handshake actually verified: the validated token's issuer and
-        // its single non-empty subject, byte-for-byte, into the server-side ticket properties. The
-        // configured Authority is never treated as the verified issuer, and a token without
-        // exactly one usable subject fails the sign-in — no identity is ever inferred or repaired.
-        options.Events.OnTokenValidated = context =>
-        {
-            var subjectClaims = (context.Principal?.FindAll("sub") ?? [])
-                .ToList();
-            if (subjectClaims.Count != 1
-                || string.IsNullOrEmpty(subjectClaims[0].Value)
-                || string.IsNullOrEmpty(context.SecurityToken.Issuer))
-            {
-                context.Fail(
-                    "The validated ID token must carry exactly one non-empty subject and an issuer.");
-                return Task.CompletedTask;
-            }
+builder.Services.AddSignaCoreHostedLogin(options =>
+{
+    var settings = builder.Configuration
+        .GetSection(ReferenceBffOptions.SectionName)
+        .Get<ReferenceBffOptions>() ?? new ReferenceBffOptions();
 
-            context.Properties!.Items[ReferenceBffVerifiedIdentity.IssuerItem] = context.SecurityToken.Issuer;
-            context.Properties.Items[ReferenceBffVerifiedIdentity.SubjectItem] = subjectClaims[0].Value;
-            return Task.CompletedTask;
-        };
-        options.Events.OnTicketReceived = context =>
-        {
-            context.HttpContext.RequestServices.GetRequiredService<BffOperationLog>()
-                .Record(BffLogOperation.Login, BffLogOutcome.Succeeded, context.HttpContext.RequestAborted);
-            return Task.CompletedTask;
-        };
-        options.Events.OnRemoteFailure = context =>
-        {
-            context.HttpContext.RequestServices.GetRequiredService<BffOperationLog>()
-                .Record(BffLogOperation.Login, BffLogOutcome.Rejected, context.HttpContext.RequestAborted);
-            // Bounded reason codes only: the failure detail never reaches the browser.
-            context.Response.Redirect("/error?reason=sign_in_failed");
-            context.HandleResponse();
-            return Task.CompletedTask;
-        };
-        // A failing ID-token validation (iss, signature, exp/iat, nonce, aud) is not a remote
-        // failure: it raises the authentication-failed event, and gets the same bounded page.
-        options.Events.OnAuthenticationFailed = context =>
-        {
-            context.HttpContext.RequestServices.GetRequiredService<BffOperationLog>()
-                .Record(BffLogOperation.Login, BffLogOutcome.Rejected, context.HttpContext.RequestAborted);
-            context.Response.Redirect("/error?reason=sign_in_failed");
-            context.HandleResponse();
-            return Task.CompletedTask;
-        };
-    });
+    options.Authority = settings.Authority;
+    options.ClientId = settings.ClientId;
+    options.ClientSecret = settings.ClientSecret;
+    options.RedirectUri = settings.RedirectUri;
+    options.Scope = string.IsNullOrWhiteSpace(settings.Scope) ? "openid profile" : settings.Scope;
+
+    // The sample keeps its established browser contract: the same opaque session-cookie name it
+    // always issued, and the single antiforgery header its Setup surface already uses.
+    options.SessionCookieName = BffSession.CookieName;
+    options.AntiforgeryHeaderName = BffSetupHosting.CsrfHeader;
+
+    // The prepared-logout return address is derived from the registered redirect URI's origin:
+    // the package requires exactly <prefix>/logout/return, and the redirect URI is the one
+    // externally known origin the sample already trusts. Register it in SignaCore with the
+    // PostLogout kind; without that registration the upstream preparation fails and the package
+    // answers its bounded local-only result instead.
+    if (Uri.TryCreate(settings.RedirectUri, UriKind.Absolute, out var registered))
+    {
+        var origin = registered.GetComponents(
+            UriComponents.Scheme | UriComponents.Host | UriComponents.Port,
+            UriFormat.UriEscaped);
+        options.PostLogoutRedirectUri = origin + BffRoutePrefix + "/"
+            + SignaCoreHostedLoginDefaults.LogoutReturnPathSegment;
+    }
+});
+
+// The package reports the administrator decision through its session endpoint; this registration
+// runs after AddSignaCoreHostedLogin and replaces the default allow-all decision.
+builder.Services.AddOptions<SignaCoreHostedLoginOptions>()
+    .Configure<BffAdministratorBindingDecision>(
+        static (options, decision) => options.AuthorizationDecision = decision);
+
+// The sample's presentation of the package's bounded outcomes: sign-in failures redirect to the
+// sample's own /error page with the closed reason, and the session status keeps the package's
+// fixed JSON body.
+builder.Services.AddOptions<SignaCoreHostedLoginOptions>()
+    .PostConfigure(static options => options.ResponseWriter = BffResponseWriter.Instance);
 
 builder.Services.AddAuthorization();
-
-// Attach the server-side session store to the cookie handler. With SessionStore set, the cookie
-// carries only the opaque key and the ticket (with the saved tokens) never leaves the server.
-builder.Services
-    .AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
-    .Configure<MemoryTicketStore>((options, store) =>
-    {
-        options.SessionStore = store;
-    });
-
-// SignaCore's authorize contract caps the state at 128 unreserved characters; the default
-// Data Protection state is longer, so the handshake uses the compact server-side format.
-builder.Services.AddSingleton<CompactStateDataFormat>();
-builder.Services
-    .AddOptions<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme)
-    .Configure<CompactStateDataFormat>((options, stateFormat) =>
-    {
-        options.StateDataFormat = stateFormat;
-    });
 
 var app = builder.Build();
 
@@ -281,9 +180,6 @@ var routes = app.MapGroup("");
 if (databaseSettings.IsConfigured)
 {
     routes.WithServiceMantlePhaseAdmission(ServiceStartupPhase.PendingSetup, ServiceStartupPhase.Completed);
-    var callback = new Uri(app.Configuration["ReferenceBff:RedirectUri"]!).AbsolutePath;
-    // Routing supplies phase metadata before the standard OIDC handler consumes the callback.
-    routes.MapGet(callback, () => Results.BadRequest());
     routes.MapGet("/bff/setup", BffSetupHosting.Form);
     routes.MapMethods("/bff/admin", ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"], (HttpContext http) =>
     {
@@ -291,6 +187,11 @@ if (databaseSettings.IsConfigured)
         return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
     });
 }
+
+// The package's endpoints — start, callback (at the registered redirect URI's exact path),
+// session, signin-failed, csrf, logout, and logout/return — mount under the same /bff prefix
+// and the same phase admission as the sample's own routes.
+routes.MapSignaCoreHostedLogin(BffRoutePrefix);
 
 routes.MapGet("/", (HttpContext http, IAntiforgery antiforgery) =>
 {
@@ -310,9 +211,12 @@ routes.MapGet("/", (HttpContext http, IAntiforgery antiforgery) =>
             "text/html");
     }
 
-    // The logout form is the only state-changing surface the sample renders, and it is a POST
-    // carrying the antiforgery token; the token is issued together with its cookie here.
-    var tokens = antiforgery.GetAndStoreTokens(http);
+    // The logout form posts to the package's prepared-logout endpoint and carries the
+    // antiforgery token in its hidden field; the token is issued together with its cookie here.
+    // The issuance is user-neutral on purpose: the package's antiforgery boundary binds its pairs
+    // to the per-browser cookie alone, so a token minted on this signed-in page stays
+    // interchangeable with one from GET /bff/csrf.
+    var tokens = BffAntiforgery.Issue(http, antiforgery);
     return Results.Text(
         $"""
          <!doctype html>
@@ -333,47 +237,13 @@ routes.MapGet("/", (HttpContext http, IAntiforgery antiforgery) =>
         "text/html");
 });
 
-routes.MapGet("/bff/login", async (
+routes.MapGet("/bff/login", () => Results.Redirect(
+    BffRoutePrefix + "/" + SignaCoreHostedLoginDefaults.StartPathSegment + "?returnUrl=%2F",
+    permanent: false, preserveMethod: false));
+
+routes.MapGet("/bff/diagnostics", async (
     HttpContext http,
-    IOptionsMonitor<OpenIdConnectOptions> oidc,
-    IOptionsMonitor<ReferenceBffOptions> settings) =>
-{
-    // The configuration gate: an incomplete configuration never starts a handshake. The bounded
-    // reason names nothing the caller did not already know.
-    ReferenceBffOptions current;
-    try
-    {
-        current = settings.CurrentValue;
-    }
-    catch (OptionsValidationException)
-    {
-        return Results.Redirect("/error?reason=configuration_incomplete");
-    }
-
-    if (string.IsNullOrWhiteSpace(current.Authority)
-        || string.IsNullOrWhiteSpace(current.ClientId)
-        || string.IsNullOrWhiteSpace(current.ClientSecret)
-        || string.IsNullOrWhiteSpace(current.RedirectUri))
-    {
-        return Results.Redirect("/error?reason=configuration_incomplete");
-    }
-
-    // Discovery is resolved before the browser is sent anywhere: an unreachable or invalid
-    // authority answers with the bounded error page instead of a raw server error.
-    try
-    {
-        var options = oidc.Get(OpenIdConnectDefaults.AuthenticationScheme);
-        await options.ConfigurationManager!.GetConfigurationAsync(http.RequestAborted);
-    }
-    catch (Exception exception) when (exception is not OperationCanceledException)
-    {
-        return Results.Redirect("/error?reason=authority_unreachable");
-    }
-
-    return Results.Challenge(new AuthenticationProperties { RedirectUri = "/" });
-});
-
-routes.MapGet("/bff/diagnostics", async (HttpContext http, IOptionsMonitor<OpenIdConnectOptions> oidc) =>
+    BffAuthorityMetadataReader metadata) =>
 {
     if (http.User.Identity?.IsAuthenticated != true)
     {
@@ -382,8 +252,16 @@ routes.MapGet("/bff/diagnostics", async (HttpContext http, IOptionsMonitor<OpenI
 
     // Public Discovery metadata only — this is the proof that the endpoints were resolved from
     // the authority's Discovery document rather than hardcoded anywhere in the sample.
-    var configuration = await oidc.Get(OpenIdConnectDefaults.AuthenticationScheme)
-        .ConfigurationManager!.GetConfigurationAsync(http.RequestAborted);
+    BffAuthorityMetadata document;
+    try
+    {
+        document = await metadata.ReadAsync(http.RequestAborted);
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+        return Results.Redirect("/error?reason=authority_unreachable");
+    }
+
     return Results.Text(
         $"""
          <!doctype html>
@@ -391,10 +269,10 @@ routes.MapGet("/bff/diagnostics", async (HttpContext http, IOptionsMonitor<OpenI
          <head><title>SignaCore Reference BFF — diagnostics</title></head>
          <body>
          <h1>Resolved from Discovery</h1>
-         <p>authorization_endpoint: {WebUtility.HtmlEncode(configuration.AuthorizationEndpoint)}</p>
-         <p>token_endpoint: {WebUtility.HtmlEncode(configuration.TokenEndpoint)}</p>
-         <p>jwks_uri: {WebUtility.HtmlEncode(configuration.JwksUri)}</p>
-         <p>issuer: {WebUtility.HtmlEncode(configuration.Issuer)}</p>
+         <p>authorization_endpoint: {WebUtility.HtmlEncode(document.AuthorizationEndpoint)}</p>
+         <p>token_endpoint: {WebUtility.HtmlEncode(document.TokenEndpoint)}</p>
+         <p>jwks_uri: {WebUtility.HtmlEncode(document.JwksUri)}</p>
+         <p>issuer: {WebUtility.HtmlEncode(document.Issuer)}</p>
          </body>
          </html>
          """,
@@ -436,7 +314,7 @@ routes.MapGet("/bff/me", async (
         // A session whose upstream identity is gone (no token, an upstream 401, or an unconfirmed
         // subject) cannot project a profile: sign out and answer the bounded page. The upstream
         // payload is never echoed into any failure.
-        await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        await BffSession.RevokeAsync(http, http.RequestAborted);
         return Results.Redirect("/error?reason=session_expired");
     }
 
@@ -448,19 +326,19 @@ routes.MapGet("/bff/me", async (
     return Results.Content(identity.ProfilePayload!, identity.ProfileContentType);
 });
 
-// The read-only management surface: authentication (the standard OIDC handshake) proves who signed
-// in; this endpoint proves the sample's own authorization is a separate, local decision. The
-// verified identity must currently be confirmed upstream AND exactly match the active local
-// binding. Every response is fixed and carries no identity and no token: 200 with the constant
-// body, or the manual 401/403/503 mappings — the cookie handler's 302 access-denied page is never
-// used here. Anonymous requests start the standard challenge back to this fixed route only.
+// The read-only management surface: authentication (the package's hosted-login handshake) proves
+// who signed in; this endpoint proves the sample's own authorization is a separate, local
+// decision. The verified identity must currently be confirmed upstream AND exactly match the
+// active local binding. Every response is fixed and carries no identity and no token: 200 with
+// the constant body, or the manual 401/403/503 mappings. Anonymous requests start the package's
+// challenge, which returns to this fixed route and nowhere else.
 routes.MapGet("/bff/admin", async (
     HttpContext http,
     BffAdminAuthorizationService authorization) =>
 {
     if (http.User.Identity?.IsAuthenticated != true)
     {
-        return Results.Challenge(new AuthenticationProperties { RedirectUri = "/bff/admin" });
+        return Results.Challenge();
     }
 
     BffAdminAuthorizationStatus status;
@@ -486,7 +364,7 @@ routes.MapGet("/bff/admin", async (
             return Results.Json(new { isAdministrator = true });
 
         case BffAdminAuthorizationStatus.SessionInvalid:
-            await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            await BffSession.RevokeAsync(http, http.RequestAborted);
             return Results.StatusCode(StatusCodes.Status401Unauthorized);
 
         case BffAdminAuthorizationStatus.Forbidden:
@@ -496,28 +374,6 @@ routes.MapGet("/bff/admin", async (
         default:
             return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     }
-});
-
-// The only state-changing browser surface: a POST behind antiforgery. There is no GET logout, and
-// a cross-site POST without a valid token is rejected before any state changes.
-routes.MapPost("/bff/logout", async (HttpContext http, IAntiforgery antiforgery) =>
-{
-    try
-    {
-        await antiforgery.ValidateRequestAsync(http);
-    }
-    catch (AntiforgeryValidationException)
-    {
-        // A missing or mismatched token is a bad request; nothing is signed out.
-        return Results.BadRequest();
-    }
-
-    // Terminates the BFF local session only (cookie plus server-side ticket). Coordinated
-    // upstream sign-out is out of scope for this sample.
-    await http.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-    http.RequestServices.GetRequiredService<BffOperationLog>()
-        .Record(BffLogOperation.Logout, BffLogOutcome.Succeeded, http.RequestAborted);
-    return Results.Redirect("/");
 });
 
 routes.MapGet("/error", (string? reason) => Results.Text(
@@ -531,8 +387,15 @@ routes.MapGet("/error", (string? reason) => Results.Text(
      {
          "authority_unreachable" => "The sign-in server is unreachable or its discovery document is invalid.",
          "configuration_incomplete" => "The reference BFF configuration is incomplete.",
+         "invalid_return_url" => "The return address was not a local path.",
+         "invalid_response" => "The sign-in response was not usable.",
          "access_denied" => "Access was denied.",
-         "sign_in_failed" => "The sign-in response failed validation.",
+         "state_mismatch" => "The sign-in response did not match the pending sign-in.",
+         "issuer_mismatch" => "The sign-in response did not come from the expected sign-in server.",
+         "token_exchange_failed" => "The sign-in code could not be exchanged.",
+         "invalid_token" => "The sign-in response failed validation.",
+         "session_store_full" => "The service cannot accept more sessions right now.",
+         "requires_reauthentication" => "Re-authentication is required.",
          "session_expired" => "Your session is no longer valid; please sign in again.",
          _ => "Unknown reason."
      }}</p>

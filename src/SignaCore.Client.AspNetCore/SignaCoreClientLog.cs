@@ -14,7 +14,10 @@ internal static class SignaCoreClientLog
         SignInStarted,
         SignInSucceeded,
         SignInRejected,
-        SessionStatus
+        SessionStatus,
+        CsrfIssued,
+        Logout,
+        LogoutReturn
     }
 
     internal static class Outcome
@@ -25,6 +28,12 @@ internal static class SignaCoreClientLog
         internal const string Authenticated = "authenticated";
         internal const string RequiresReauthentication = "requires_reauthentication";
         internal const string RequiringDecision = "with_decision";
+        internal const string Issued = "issued";
+        internal const string Prepared = "prepared";
+        internal const string LocalOnly = "local_only";
+        internal const string CsrfRejected = "csrf_rejected";
+        internal const string Completed = "completed";
+        internal const string Invalid = "invalid";
     }
 
     internal static void SignInStarted(ILogger logger, CancellationToken cancellationToken)
@@ -64,5 +73,35 @@ internal static class SignaCoreClientLog
             "SignaCore hosted login session queried. Operation: {Operation} Outcome: {Outcome}",
             Operation.SessionStatus,
             authenticated ? Outcome.Authenticated : Outcome.RequiresReauthentication);
+    }
+
+    internal static void CsrfIssued(ILogger logger, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        logger.LogInformation(
+            "SignaCore hosted login antiforgery token issued. Operation: {Operation} Outcome: {Outcome}",
+            Operation.CsrfIssued, Outcome.Issued);
+    }
+
+    internal static void Logout(
+        ILogger logger,
+        string outcome,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        logger.LogInformation(
+            "SignaCore hosted login logout finished. Operation: {Operation} Outcome: {Outcome}",
+            Operation.Logout, outcome);
+    }
+
+    internal static void LogoutReturn(
+        ILogger logger,
+        bool completed,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        logger.LogInformation(
+            "SignaCore hosted login logout return answered. Operation: {Operation} Outcome: {Outcome}",
+            Operation.LogoutReturn, completed ? Outcome.Completed : Outcome.Invalid);
     }
 }
