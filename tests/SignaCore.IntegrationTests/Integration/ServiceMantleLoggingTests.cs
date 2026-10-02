@@ -274,12 +274,14 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         // Reading a legacy row is tolerant; a management update over that same candidate is strict.
         // Capability-injected validators must neither block startup nor change product error codes.
         using var admin = await CreateAdminClientAsync(factory);
-        var version = await ReadVersionAsync(admin);
         await using var db = CreateDbContext();
+        var version = (await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken))!.Version;
         var audits = await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken);
         using var rejected = await PostSettingsAsync(admin, version, [("jwt.audience", "unchanged-contract")]);
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
-        Assert.Equal(version, await ReadVersionAsync(admin));
+        Assert.Equal(version, (await SharedSettingTestDatabase.LoadAggregateAsync(
+            db, TestContext.Current.CancellationToken))!.Version);
         Assert.Equal(audits.Count, (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
             db, TestContext.Current.CancellationToken)).Count);
     }
