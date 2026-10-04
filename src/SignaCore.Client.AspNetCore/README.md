@@ -104,6 +104,53 @@ option — never the value.
            : null;                                    // null keeps the package's session scheme
    ```
 
+### Optional authorization before sign-in
+
+`AuthorizationDecision` is called only when reading session status, with the verified ID-token
+principal. Denied reports authorization failure while the existing session remains authenticated.
+It does not prevent callback sign-in. To decide whether a **new** session may be created, explicitly
+configure the optional gate (default `null`):
+
+```csharp
+options.PreSignInAuthorizationDecision = new OrderServicePreSignInDecision();
+options.PreSignInAuthorizationTimeout = TimeSpan.FromSeconds(10); // default; positive, at most 30
+```
+
+Implement `ISignaCorePreSignInAuthorizationDecision.DecideAsync(context, cancellationToken)` and
+return `Allowed` or `Denied`. The context supplies request-local copies of `AccessTokenPrincipal`
+and `IdTokenPrincipal`, plus the verified shared `Issuer` and `Subject`; no raw tokens or handshake
+values are exposed. Authorize using access-token claims and your own rules, never ID-token profile
+fields as permissions. The session continues to use the ID-token principal. Both decision options
+can be used together at their respective times.
+
+Before invoking the gate, the callback validates the ID token as before, strictly validates the
+SignaCore access token (1–8192 ASCII compact JWS; RS256, a published matching `kid`, `typ: at+jwt`,
+one exact issuer, one string audience equal to ClientId, one non-empty subject, valid `exp`/`nbf`/
+`iat`, and 30-second clock skew), and requires both verified issuer/subject pairs to match. An
+actually expired access token fails even within skew. Invalid or uncorrelated tokens produce
+`invalid_token` without calling the decision. This internal check supports SignaCore Confidential
+PerApplication code-flow tokens; it is not a general Bearer validator or a third-party JWT API.
+
+Only timely `Allowed` passes the final cancellation and actual-expiry checkpoints and writes a
+new ticket and cookie. Denied, an unknown result, consumer exceptions, non-request cancellation,
+or asynchronous timeout produce `access_denied`; existing tickets and cookies are unchanged.
+Request cancellation propagates without a failure redirect or new session. Timeout cancels the
+decision token; late completion cannot sign in. The ticket expires at the earlier of the verified
+access-token expiry and `expires_in` measured at completed redemption, so decision wait cannot
+extend its lifetime.
+
+Return promptly with asynchronous work, honor cancellation, and only return a decision: do not
+sign in or perform side effects. The package cannot sandbox synchronous blocking or stop a
+non-cooperative consumer's external side effects. This gate does not revoke existing sessions or
+upstream tokens, refresh tokens, or make role changes immediate for an existing session. The
+consumer still protects its own logs and ticket store.
+
+Upgrades preserve existing callback behavior while the gate is null, including opaque access-token
+compatibility. To migrate, keep your Confidential/PerApplication registration and explicitly set
+the gate alongside your existing session-status decision. No server contract or ticket format
+changes. To roll back, remove the new option/interface use and restore the old package; consumers
+that require the gate must preserve their prior authorization boundary during rollback.
+
 ## Session storage
 
 The default ticket store is in-process, capacity-bounded (`options.TicketCapacity`), and swept of

@@ -8,7 +8,7 @@ public enum SignaCoreAuthorizationDecisionResult
     /// <summary>The subject is allowed.</summary>
     Allowed,
 
-    /// <summary>The subject is denied. A denial is not a sign-out: the session stays valid.</summary>
+    /// <summary>The subject is denied. Session-status denial retains the session; pre-sign-in denial prevents a new session.</summary>
     Denied
 }
 

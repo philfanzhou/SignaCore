@@ -17,8 +17,8 @@ public enum SignaCoreSignInReason
     /// missing, duplicated, or otherwise not usable.</summary>
     InvalidResponse,
 
-    /// <summary>The user cancelled the sign-in (the authorization response's
-    /// <c>error=access_denied</c>).</summary>
+    /// <summary>The user cancelled the sign-in, or the optional pre-sign-in authorization
+    /// gate denied the new session (including decision failure or timeout).</summary>
     AccessDenied,
 
     /// <summary>The response's <c>state</c> did not match a pending sign-in.</summary>
@@ -30,7 +30,7 @@ public enum SignaCoreSignInReason
     /// <summary>The code could not be redeemed at the token endpoint.</summary>
     TokenExchangeFailed,
 
-    /// <summary>The token response or the ID token failed validation.</summary>
+    /// <summary>The token response, ID token, or gated access token/correlation failed validation.</summary>
     InvalidToken,
 
     /// <summary>The server-side ticket store rejected the new session (capacity reached).</summary>

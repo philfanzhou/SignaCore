@@ -150,6 +150,17 @@ account id), `auth_time`, `sid`, and `amr` (`["pwd"]` for a password sign-in, `[
 SignaCore username. Key the local user by `iss` plus `sub`; the ID token carries no roles or
 permissions, so authorization stays the service's own decision.
 
+The official client package optionally gates new callback sessions with
+`PreSignInAuthorizationDecision` (default null). When configured, it strictly validates the
+SignaCore access token and correlates its verified issuer/subject with the ID token before calling
+your decision on request-local claim copies. Only timely Allowed creates a ticket/cookie; denial,
+exceptions, or timeout leave existing sessions unchanged, and request cancellation propagates.
+This differs from `AuthorizationDecision`, which only reports authorization at session-status read
+and retains an authenticated session on denial. See the
+[package gate and migration guide](../../src/SignaCore.Client.AspNetCore/README.md#optional-authorization-before-sign-in)
+for timeout, cancellation, expiry, consumer responsibilities, and rollback. Pure HTTP integration
+and downstream Bearer validation remain unchanged.
+
 Call downstream services with the access token as a Bearer credential. They validate it as before —
 signature through JWKS, issuer, audience (the application's `appId`), lifetime, and `typ: at+jwt` —
 without calling SignaCore. `GET userinfo_endpoint` with the access token returns `sub` and, with
