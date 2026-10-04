@@ -576,7 +576,7 @@ public sealed partial class OAuthLoginController : ControllerBase
                 text,
                 loginHandle,
                 requestToken,
-                new LoginNotice(AlertRole, text.CredentialFailureNotice),
+                new LoginNotice(NoticeTarget.Password, AlertRole, text.CredentialFailureNotice),
                 IsSmsCapabilityOpen(application.SmsLoginMode, application.SmsProfileKey) ? SmsRegion.Empty : null),
             StatusCodes.Status200OK);
     }
@@ -640,7 +640,7 @@ public sealed partial class OAuthLoginController : ControllerBase
             return (
                 HtmlPage(
                     BuildLoginPage(
-                        text, loginHandle, requestToken, new LoginNotice(AlertRole, text.InvalidPhoneNotice), SmsRegion.Empty),
+                        text, loginHandle, requestToken, new LoginNotice(NoticeTarget.Sms, AlertRole, text.InvalidPhoneNotice), SmsRegion.Empty),
                     StatusCodes.Status200OK),
                 SmsLoginMetricLocalRejected);
         }
@@ -780,7 +780,7 @@ public sealed partial class OAuthLoginController : ControllerBase
                     failure.Text,
                     failure.LoginHandle,
                     failure.RequestToken,
-                    new LoginNotice(AlertRole, failure.Text.SmsFailureNotice),
+                    new LoginNotice(NoticeTarget.Sms, AlertRole, failure.Text.SmsFailureNotice),
                     new SmsRegion(failure.PhoneE164)),
                 StatusCodes.Status200OK),
             SmsLoginMetricFailure);
@@ -909,7 +909,7 @@ public sealed partial class OAuthLoginController : ControllerBase
             return (
                 HtmlPage(
                     BuildLoginPage(
-                        text, loginHandle, requestToken, new LoginNotice(AlertRole, text.InvalidPhoneNotice), SmsRegion.Empty),
+                        text, loginHandle, requestToken, new LoginNotice(NoticeTarget.Sms, AlertRole, text.InvalidPhoneNotice), SmsRegion.Empty),
                     StatusCodes.Status200OK),
                 OidcSmsCodeSendOutcomes.InvalidPhone);
         }
@@ -932,7 +932,7 @@ public sealed partial class OAuthLoginController : ControllerBase
         return (
             HtmlPage(
                 BuildLoginPage(
-                    text, loginHandle, requestToken, new LoginNotice(StatusRole, text.SmsCodeSentNotice), new SmsRegion(phoneE164)),
+                    text, loginHandle, requestToken, new LoginNotice(NoticeTarget.Sms, StatusRole, text.SmsCodeSentNotice), new SmsRegion(phoneE164)),
                 StatusCodes.Status200OK),
             outcome);
     }
@@ -1166,20 +1166,13 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append(text.PageTitle)
             .Append("</title>")
             .Append(HeadTail)
-            .Append("</head><body><main><h1>")
+            .Append("</head><body><main><header class=\"page-header\"><p class=\"wordmark\">SignaCore</p><h1>")
             .Append(text.Heading)
-            .Append("</h1>");
-        if (notice is { } shown)
-        {
-            builder.Append("<p role=\"")
-                .Append(shown.Role)
-                .Append("\">")
-                .Append(shown.Text)
-                .Append("</p>");
-        }
-
-        builder.Append("<form action=\"/oauth2/login\" method=\"post\">")
-            .Append("<input type=\"hidden\" name=\"login_handle\" value=\"")
+            .Append("</h1><p class=\"description\">")
+            .Append(text.Description)
+            .Append("</p></header>");
+        AppendFormStart(builder, notice, NoticeTarget.Password);
+        builder.Append("<input type=\"hidden\" name=\"login_handle\" value=\"")
             .Append(WebUtility.HtmlEncode(loginHandle))
             .Append("\"><input type=\"hidden\" name=\"")
             .Append(LoginAntiforgeryDefaults.TokenFieldName)
@@ -1200,7 +1193,7 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append("autocomplete=\"current-password\" maxlength=\"")
             .Append(MaxPasswordLength)
             .Append("\" required></p>")
-            .Append("<p><button type=\"submit\" name=\"action\" value=\"login\">")
+            .Append("<p class=\"actions\"><button type=\"submit\" name=\"action\" value=\"login\">")
             .Append(text.SignInButton)
             .Append("</button> ")
             // Cancel skips the browser's constraint validation of the required credential fields:
@@ -1211,7 +1204,7 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append("</form>");
         if (smsRegion is { } sms)
         {
-            AppendSmsRegion(builder, text, loginHandle, requestToken, sms.Phone);
+            AppendSmsRegion(builder, text, loginHandle, requestToken, sms.Phone, notice);
         }
 
         builder.Append("</main></body></html>");
@@ -1223,12 +1216,14 @@ public sealed partial class OAuthLoginController : ControllerBase
         LoginPageText text,
         string loginHandle,
         string requestToken,
-        string phone)
+        string phone,
+        LoginNotice? notice)
     {
-        builder.Append("<h2>")
+        builder.Append("<section class=\"sms-region\" aria-labelledby=\"sms-heading\"><h2 id=\"sms-heading\">")
             .Append(text.SmsHeading)
-            .Append("</h2><form action=\"/oauth2/login\" method=\"post\">")
-            .Append("<input type=\"hidden\" name=\"login_handle\" value=\"")
+            .Append("</h2>");
+        AppendFormStart(builder, notice, NoticeTarget.Sms);
+        builder.Append("<input type=\"hidden\" name=\"login_handle\" value=\"")
             .Append(WebUtility.HtmlEncode(loginHandle))
             .Append("\"><input type=\"hidden\" name=\"")
             .Append(LoginAntiforgeryDefaults.TokenFieldName)
@@ -1243,7 +1238,7 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append("\" value=\"")
             .Append(WebUtility.HtmlEncode(phone))
             .Append("\" required></p>")
-            .Append("<p><label for=\"otp\">")
+            .Append("<div class=\"otp-row\"><p class=\"otp-field\"><label for=\"otp\">")
             .Append(text.OtpLabel)
             .Append("</label> ")
             .Append("<input type=\"text\" id=\"otp\" name=\"otp\" inputmode=\"numeric\" ")
@@ -1252,23 +1247,41 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append("\" required></p>")
             // The send button carries no name, so the send route receives exactly this form's
             // handle, request token, phone, and otp (IN-16); it skips the otp constraint check.
-            .Append("<p><button type=\"submit\" formaction=\"/oauth2/login/sms-code\" formnovalidate>")
+            .Append("<button type=\"submit\" formaction=\"/oauth2/login/sms-code\" formnovalidate>")
             .Append(text.SendCodeButton)
-            .Append("</button> ")
+            .Append("</button></div><p class=\"actions\">")
             .Append("<button type=\"submit\" name=\"action\" value=\"sms_login\">")
             .Append(text.SmsSignInButton)
             .Append("</button></p>")
-            .Append("</form>");
+            .Append("</form></section>");
     }
+
+    private static void AppendFormStart(StringBuilder builder, LoginNotice? notice, NoticeTarget target)
+    {
+        builder.Append("<form action=\"/oauth2/login\" method=\"post\"");
+        if (notice is { } shown && shown.Target == target)
+        {
+            var id = target == NoticeTarget.Password ? "password-notice" : "sms-notice";
+            builder.Append(" aria-describedby=\"").Append(id).Append("\"><p role=\"")
+                .Append(shown.Role).Append("\" id=\"").Append(id)
+                .Append("\" class=\"notice\">").Append(shown.Text).Append("</p>");
+        }
+        else
+        {
+            builder.Append('>');
+        }
+    }
+
+    private enum NoticeTarget { Password, Sms }
 
     private const string AlertRole = "alert";
     private const string StatusRole = "status";
 
     /// <summary>
-    /// One fixed notice above the login form: an ARIA role and a fixed <see cref="LoginPageText"/>
+    /// One fixed notice within its target form: an ARIA role and a fixed <see cref="LoginPageText"/>
     /// literal, never a request value.
     /// </summary>
-    private readonly record struct LoginNotice(string Role, string Text);
+    private readonly record struct LoginNotice(NoticeTarget Target, string Role, string Text);
 
     /// <summary>
     /// The SMS region of an open <c>IN-19</c> gate. <paramref name="Phone"/> is the normalized
@@ -1285,8 +1298,8 @@ public sealed partial class OAuthLoginController : ControllerBase
     /// </summary>
     private static string BuildLocalErrorPage(LoginPageText text) =>
         "<!DOCTYPE html><html lang=\"" + text.HtmlLang + "\"><head><meta charset=\"utf-8\"><title>"
-        + text.ErrorTitle + "</title>" + HeadTail + "</head><body><main><h1>"
-        + text.ErrorHeading + "</h1><p>" + text.ErrorMessage + "</p></main></body></html>";
+        + text.ErrorTitle + "</title>" + HeadTail + "</head><body><main><header class=\"page-header\"><p class=\"wordmark\">SignaCore</p><h1>"
+        + text.ErrorHeading + "</h1></header><p class=\"error-message\">" + text.ErrorMessage + "</p></main></body></html>";
 
     /// <summary>
     /// The text of the language negotiated from this request's <c>Accept-Language</c> header —

@@ -260,7 +260,7 @@ public sealed partial class OAuthLoginLocalizationTests : IClassFixture<Identity
 
         Assert.All(bodies, body => Assert.Equal(bodies[0], body));
         Assert.All(headers, header => Assert.Equal(headers[0], header));
-        Assert.Contains($"<p role=\"alert\">{notice}</p>", bodies[0], StringComparison.Ordinal);
+        Assert.Contains($"<p role=\"alert\" id=\"password-notice\" class=\"notice\">{notice}</p>", bodies[0], StringComparison.Ordinal);
         AssertLoginFormValidationMarkup(bodies[0]);
         foreach (var (username, password) in submissions)
         {

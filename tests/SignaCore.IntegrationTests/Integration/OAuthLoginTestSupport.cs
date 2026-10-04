@@ -79,17 +79,17 @@ internal static partial class OAuthLoginTestSupport
     /// <summary>The exact English local 400 bytes: identical for every rejection reason.</summary>
     public const string EnglishLocalErrorPage =
         "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-        + "<title>Invalid login request</title>" + PageHeadTail + "</head><body><main>"
-        + "<h1>Invalid login request</h1>"
-        + "<p>The login request could not be processed. Return to the application that "
+        + "<title>Invalid login request</title>" + PageHeadTail + "</head><body><main><header class=\"page-header\"><p class=\"wordmark\">SignaCore</p>"
+        + "<h1>Invalid login request</h1></header>"
+        + "<p class=\"error-message\">The login request could not be processed. Return to the application that "
         + "sent you here and start again.</p></main></body></html>";
 
     /// <summary>The exact Simplified Chinese local 400 bytes: identical for every rejection reason.</summary>
     public const string ChineseLocalErrorPage =
         "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
-        + "<title>登录请求无效</title>" + PageHeadTail + "</head><body><main>"
-        + "<h1>登录请求无效</h1>"
-        + "<p>无法处理此登录请求。请返回将您引导至此处的应用，然后重新开始。</p></main></body></html>";
+        + "<title>登录请求无效</title>" + PageHeadTail + "</head><body><main><header class=\"page-header\"><p class=\"wordmark\">SignaCore</p>"
+        + "<h1>登录请求无效</h1></header>"
+        + "<p class=\"error-message\">无法处理此登录请求。请返回将您引导至此处的应用，然后重新开始。</p></main></body></html>";
 
     /// <summary>
     /// Asserts that a local error page links nothing but the fixed stylesheet: no form, no
@@ -555,6 +555,7 @@ internal static partial class OAuthLoginTestSupport
     /// </summary>
     public static void AssertLoginFormValidationMarkup(string body)
     {
+        AssertFormNoticePlacement(body);
         var buttons = ButtonTagPattern().Matches(body).Select(match => match.Value).ToList();
         Assert.Equal(2, buttons.Count);
         var cancel = Assert.Single(buttons, button => button.Contains("value=\"cancel\"", StringComparison.Ordinal));
@@ -569,6 +570,32 @@ internal static partial class OAuthLoginTestSupport
             var input = Assert.Single(inputs, tag => tag.Contains($"name=\"{name}\"", StringComparison.Ordinal));
             Assert.EndsWith(" required>", input, StringComparison.Ordinal);
         }
+    }
+
+    /// <summary>Each fixed notice belongs to, and describes, exactly its method's form.</summary>
+    public static void AssertFormNoticePlacement(string body)
+    {
+        Assert.Single(Regex.Matches(body, "<h1>"));
+        Assert.Contains("<p class=\"wordmark\">SignaCore</p>", body, StringComparison.Ordinal);
+        var forms = Regex.Matches(body, "<form[^>]*>.*?</form>").Select(match => match.Value).ToArray();
+        Assert.NotEmpty(forms);
+        foreach (var form in forms)
+        {
+            var notices = Regex.Matches(form, "<p role=\"(?:alert|status)\" id=\"([^\"]*)\" class=\"notice\">");
+            if (notices.Count == 0)
+            {
+                Assert.DoesNotContain("aria-describedby", form, StringComparison.Ordinal);
+                continue;
+            }
+            var id = Assert.Single(notices).Groups[1].Value;
+            Assert.Contains("aria-describedby=\"" + id + "\"", form, StringComparison.Ordinal);
+            var sms = form.Contains("name=\"phone\"", StringComparison.Ordinal);
+            Assert.Equal(sms ? "sms-notice" : "password-notice", id);
+            Assert.True(form.IndexOf("class=\"notice\"", StringComparison.Ordinal)
+                < form.IndexOf(sms ? "name=\"phone\"" : "name=\"username\"", StringComparison.Ordinal));
+        }
+        Assert.Equal(Regex.Matches(body, "class=\"notice\"").Count,
+            forms.Sum(form => Regex.Matches(form, "class=\"notice\"").Count));
     }
 
     public static string? GetSetCookieHeader(HttpResponseMessage response, string cookieName)
