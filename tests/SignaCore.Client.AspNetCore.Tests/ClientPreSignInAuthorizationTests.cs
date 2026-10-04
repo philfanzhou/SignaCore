@@ -232,15 +232,37 @@ public sealed class ClientPreSignInAuthorizationTests
         Assert.Equal(1, harness.Store.Writes);
     }
 
-    [Fact]
-    public async Task PublishedRotatedKey_AndAllowedClockSkew_AreAccepted()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(30)]
+    public async Task PublishedRotatedKey_AndAllowedClockSkew_AreAccepted(int offsetSeconds)
     {
         await using var harness = await Harness.CreateAsync();
         harness.Authority.RotateSigningKey();
-        harness.Authority.AccessTimeOffset = TimeSpan.FromSeconds(30);
+        harness.Authority.AccessTimeOffset = TimeSpan.FromSeconds(offsetSeconds);
+        var expectedTime = harness.Clock.GetUtcNow().AddSeconds(offsetSeconds).ToUnixTimeSeconds();
+        harness.Decision.Run = (context, _) =>
+        {
+            Assert.Equal(expectedTime.ToString(System.Globalization.CultureInfo.InvariantCulture), context.AccessTokenPrincipal.FindFirst("nbf")?.Value);
+            Assert.Equal(expectedTime.ToString(System.Globalization.CultureInfo.InvariantCulture), context.AccessTokenPrincipal.FindFirst("iat")?.Value);
+            return ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Allowed);
+        };
         using var response = await harness.CallbackAsync(await harness.BeginAsync());
         Assert.Equal("/dashboard", response.Headers.Location?.ToString());
+        Assert.Equal(1, harness.Decision.Calls);
         Assert.Equal(1, harness.Store.Writes);
+    }
+
+    [Fact]
+    public async Task ClockSkewBeyondThirtySeconds_IsRejectedBeforeDecision()
+    {
+        await using var harness = await Harness.CreateAsync();
+        harness.Authority.RotateSigningKey();
+        harness.Authority.AccessTimeOffset = TimeSpan.FromSeconds(31);
+        using var response = await harness.CallbackAsync(await harness.BeginAsync());
+        AssertFailure(response, "invalid_token");
+        Assert.Equal(0, harness.Decision.Calls);
+        Assert.Equal(0, harness.Store.Writes);
     }
 
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -276,7 +298,7 @@ public sealed class ClientPreSignInAuthorizationTests
 
     private sealed class Clock : TimeProvider
     {
-        private DateTimeOffset _now = DateTimeOffset.UtcNow;
+        private DateTimeOffset _now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         private readonly List<TestTimer> _timers = [];
         public TaskCompletionSource TimerCreated { get; } = Signal();
         public override DateTimeOffset GetUtcNow() => _now;
@@ -311,9 +333,9 @@ public sealed class ClientPreSignInAuthorizationTests
         public required Clock Clock { get; init; }
         public static async Task<Harness> CreateAsync(CapturingLoggerProvider? capture = null)
         {
-            var authority = await FakeIdentityProvider.StartAsync();
-            authority.SignedAccessToken = true;
             var clock = new Clock(); var decision = new Decision(); var store = new RecordingStore(clock);
+            var authority = await FakeIdentityProvider.StartAsync(clock);
+            authority.SignedAccessToken = true;
             var consumer = ConsumerAppTestServer.Create(FakeIdentityProvider.BaseAddress,
                 SignaCoreHostFixture.ClientId, SignaCoreHostFixture.ClientSecret,
                 SignaCoreHostFixture.RedirectUri, authority.Server.CreateHandler(), timeProvider: clock,

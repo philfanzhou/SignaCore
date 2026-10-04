@@ -175,9 +175,9 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
 
     public Task TokenArrived => _state.TokenArrived?.Task ?? Task.CompletedTask;
 
-    public static async Task<FakeIdentityProvider> StartAsync()
+    public static async Task<FakeIdentityProvider> StartAsync(TimeProvider? timeProvider = null)
     {
-        var state = new AuthorityState();
+        var state = new AuthorityState(timeProvider ?? TimeProvider.System);
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
         builder.WebHost.UseUrls(BaseAddress);
@@ -395,7 +395,7 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
                 return string.Empty;
             }
 
-            var now = DateTimeOffset.UtcNow;
+            var now = state.TimeProvider.GetUtcNow();
             var signingKey = state.Defect == TokenDefect.SigningKeyAbsentFromJwks
                 ? state.UnlistedKey
                 : state.SigningKey;
@@ -431,7 +431,7 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         if (defect == AccessDefect.NonCompact) return "not-a-jwt";
         if (defect == AccessDefect.TooLong) return new string('a', 8193);
         if (defect == AccessDefect.NonAscii) return "é.a.b";
-        var now = DateTimeOffset.UtcNow;
+        var now = state.TimeProvider.GetUtcNow();
         var header = new Dictionary<string, object?>
         {
             ["alg"] = defect == AccessDefect.Alg ? "HS256" : "RS256",
@@ -493,8 +493,10 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         _host.Dispose();
     }
 
-    private sealed class AuthorityState
+    private sealed class AuthorityState(TimeProvider timeProvider)
     {
+        public TimeProvider TimeProvider { get; } = timeProvider;
+
         public RsaSecurityKey SigningKey { get; set; } = CreateKey("client-pack-signing-key");
 
         public RsaSecurityKey UnlistedKey { get; } = CreateKey("client-pack-unlisted-key");
