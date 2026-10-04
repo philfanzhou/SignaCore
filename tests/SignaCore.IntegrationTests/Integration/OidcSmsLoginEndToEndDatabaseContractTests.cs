@@ -187,6 +187,46 @@ public sealed class OidcSmsLoginEndToEndDatabaseContractTests
         Assert.Equal(1, await db.LoginHistories.CountAsync(row => row.AppId == app.AppId && row.EventType == "login_success", Ct));
     }
 
+    [Fact]
+    public async Task WinnerOnOtherReplicaCommitsBeforeLoserVerifies_TheLoserIsLocal400()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var sender = new FakeSmsSender();
+        var barrier = new SmsVerificationBarrier();
+        using var a = harness.CreateHost(services => { ConfigureSms(services, sender); barrier.Configure(services); });
+        using var b = harness.CreateHost(services => ConfigureSms(services, sender));
+        var app = await SeedSmsAppAsync(a.Factory.Services, SmsLoginMode.AutoProvision);
+        var session = await BeginAsync(a.Factory.Services, a.Client, app);
+        var phone = NewPhone();
+        using (var send = await a.Client.SendAsync(SendPost(session, fields: SendFields(session, phone)), Ct))
+            Assert.Equal(HttpStatusCode.OK, send.StatusCode);
+        var code = Assert.Single(sender.Calls).Code;
+        var pending = a.Client.SendAsync(SmsLoginPost(session, phone, code), Ct);
+        try
+        {
+            await barrier.Reached.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+            using var winner = await b.Client.SendAsync(SmsLoginPost(session, phone, code), Ct);
+            Assert.Equal(HttpStatusCode.Found, winner.StatusCode);
+        }
+        finally { barrier.Release(); }
+        using var loser = await pending;
+        Assert.Equal(HttpStatusCode.BadRequest, loser.StatusCode);
+        Assert.Null(loser.Headers.Location);
+        Assert.False(loser.Headers.Contains("Set-Cookie"));
+        Assert.Equal(OAuthLoginTestSupport.EnglishLocalErrorPage, await loser.Content.ReadAsStringAsync(Ct));
+        OAuthLoginTestSupport.AssertLoginSecurityHeaders(loser);
+        await using var db = harness.Context();
+        var identity = await db.UserLogins.AsNoTracking().SingleAsync(row => row.ProviderUserId == E164(phone), Ct);
+        Assert.Equal(1, await db.IdentitySessions.CountAsync(row => row.SmsUserLoginId == identity.Id, Ct));
+        Assert.Equal(1, await db.AppSmsAccesses.CountAsync(row => row.UserLoginId == identity.Id, Ct));
+        Assert.Equal(1, await db.AuthorizationCodes.CountAsync(row => row.AppRegistrationId == app.Id, Ct));
+        var otp = await db.Otps.AsNoTracking().SingleAsync(row => row.AppRegistrationId == app.Id, Ct);
+        Assert.Equal((OtpStatus.Consumed, 0), (otp.Status, otp.Attempts));
+        Assert.Equal(["login_success", "sms_code_sent"], await db.LoginHistories.AsNoTracking()
+            .Where(row => row.AppId == app.AppId).OrderBy(row => row.EventType).Select(row => row.EventType).ToListAsync(Ct));
+        AssertNoCanary(a.Probe.Logs, phone, E164(phone), code);
+    }
+
     private static void ConfigureSms(IServiceCollection services, FakeSmsSender sender)
     {
         services.Replace(ServiceDescriptor.Singleton(CreateSmsOptions()));

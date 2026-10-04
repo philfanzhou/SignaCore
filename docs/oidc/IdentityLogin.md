@@ -77,7 +77,10 @@ that passes the request-shape checks returns the uniform result listed under
 [browser SMS send eligibility and uniform results](./CanonicalSemanticModel.md#browser-sms-send-eligibility-and-uniform-results);
 an invalid phone format is the only other 200 answer and depends only on the typed value. Every SMS
 login failure returns the generic SMS failure of `EV-37`, and the Password failed-attempt counter
-is never touched by the SMS path.
+is never touched by the SMS path. If a consuming submission has already committed after the
+initial continuation read, the failure transaction rechecks the continuation before any OTP
+failure change or audit: the unavailable continuation takes precedence as the local 400 of
+`EV-03` (see `SC-26`), without a failure audit or cookie.
 
 While the `IN-19` gate is open, every rendered login page — the GET page, the Password failure
 re-render, both send-route answers, and every SMS login answer — carries the SMS region as a second

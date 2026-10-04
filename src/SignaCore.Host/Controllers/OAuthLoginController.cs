@@ -653,7 +653,7 @@ public sealed partial class OAuthLoginController : ControllerBase
         }
 
         var failure = new SmsLoginFailureContext(
-            loginHandle, requestToken, continuation, application.AppId, phoneE164, text);
+            loginHandle, requestToken, continuation, application.AppId, phoneE164, text, now);
 
         // ⑧ Send eligibility: the same read-only decision as the send route. An ineligible phone
         // never reaches the OTP verifier, so it writes no OTP state (EV-37).
@@ -753,8 +753,8 @@ public sealed partial class OAuthLoginController : ControllerBase
 
     /// <summary>
     /// Commits the <c>EV-37</c> failure unit and renders the generic SMS failure page. The page is
-    /// the same whether or not the unit committed; only a closed log reason records a failed
-    /// commit. No cookie is written and the <c>otp</c> input stays empty.
+    /// the same when persistence fails; only a closed log reason records a failed commit. An
+    /// unavailable continuation instead answers EV-03 before any failure writes. No cookie is written and the <c>otp</c> input stays empty.
     /// </summary>
     private async Task<(IActionResult Result, string Outcome)> FailSmsLoginAsync(
         SmsLoginFailureContext failure,
@@ -763,7 +763,9 @@ public sealed partial class OAuthLoginController : ControllerBase
         string reason,
         CancellationToken cancellationToken)
     {
-        await _smsFailureRecorder.RecordFailureAsync(
+        var recorded = await _smsFailureRecorder.RecordFailureAsync(
+            failure.Continuation.Id,
+            failure.Now,
             otpFailure,
             failure.PhoneE164,
             accountId,
@@ -773,6 +775,11 @@ public sealed partial class OAuthLoginController : ControllerBase
             HttpContext.GetUserAgent(),
             HttpContext.GetCorrelationId(),
             cancellationToken);
+        if (recorded == OidcSmsLoginFailureResult.ContinuationUnavailable)
+        {
+            return (RejectLocally(ReasonContinuationUnavailable), SmsLoginMetricLocalRejected);
+        }
+
         ApplyLoginFormContentSecurityPolicy(failure.Continuation);
         return (
             HtmlPage(
@@ -793,7 +800,8 @@ public sealed partial class OAuthLoginController : ControllerBase
         AuthorizationRequestEntity Continuation,
         string AppId,
         string PhoneE164,
-        LoginPageText Text);
+        LoginPageText Text,
+        DateTimeOffset Now);
 
     /// <summary>
     /// The <c>IN-19</c> capability gate of one application row: open exactly when SMS login is

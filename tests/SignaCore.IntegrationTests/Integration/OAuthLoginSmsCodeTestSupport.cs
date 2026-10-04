@@ -492,3 +492,39 @@ internal sealed class SmsCodeMetricsCollector : IDisposable
         }
     }
 }
+
+/// <summary>Pauses exactly the first verifier before the real read, after continuation validation.</summary>
+internal sealed class SmsVerificationBarrier
+{
+    private int _entered;
+    private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public Task Reached => _reached.Task;
+    public void Release() => _release.TrySetResult();
+
+    public void Configure(IServiceCollection services) =>
+        services.Replace(ServiceDescriptor.Scoped<IOtpService>(provider => new PausedOtpService(
+            ActivatorUtilities.CreateInstance<DbOtpService>(provider), this)));
+
+    private sealed class PausedOtpService(DbOtpService inner, SmsVerificationBarrier barrier) : IOtpService
+    {
+        public Task<string> GenerateAndSendAsync(Guid appRegistrationId, string phoneE164, string profileKey,
+            CancellationToken cancellationToken = default) =>
+            inner.GenerateAndSendAsync(appRegistrationId, phoneE164, profileKey, cancellationToken);
+        public Task<OtpSendOutcome> TrySendAsync(Guid appRegistrationId, string phoneE164, string profileKey,
+            CancellationToken cancellationToken = default) =>
+            inner.TrySendAsync(appRegistrationId, phoneE164, profileKey, cancellationToken);
+        public Task InvalidateAsync(Guid appRegistrationId, string phoneE164, CancellationToken cancellationToken = default) =>
+            inner.InvalidateAsync(appRegistrationId, phoneE164, cancellationToken);
+        public async Task<OtpVerificationResult> VerifyAsync(Guid appRegistrationId, string phoneE164, string code,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref barrier._entered) == 1)
+            {
+                barrier._reached.TrySetResult();
+                await barrier._release.Task.WaitAsync(cancellationToken);
+            }
+            return await inner.VerifyAsync(appRegistrationId, phoneE164, code, cancellationToken);
+        }
+    }
+}
