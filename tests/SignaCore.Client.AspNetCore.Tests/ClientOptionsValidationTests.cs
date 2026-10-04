@@ -99,6 +99,17 @@ public sealed class ClientOptionsValidationTests
         Assert.DoesNotContain("tenant", diagnostics, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(31)]
+    public void InvalidPreSignInTimeout_FailsStartupWithoutEchoingTheValue(int seconds) =>
+        Assert.Contains("SignaCoreHostedLoginOptions.PreSignInAuthorizationTimeout is invalid.",
+            StartupDiagnostics("https://signacore.example",
+                configureTestServices: services => services.PostConfigure<SignaCoreHostedLoginOptions>(
+                    options => options.PreSignInAuthorizationTimeout = TimeSpan.FromSeconds(seconds)),
+                environment: "Production"), StringComparison.Ordinal);
+
     [Fact]
     public void AZeroTicketCapacity_FailsStartup() =>
         Assert.Contains(

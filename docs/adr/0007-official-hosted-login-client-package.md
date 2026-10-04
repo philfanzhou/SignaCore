@@ -91,6 +91,17 @@ the package:
 
 1. Administrator and authorization decisions — the consumer decides what an authenticated subject
    may do, typically by matching the verified `iss` plus `sub` against its own bindings.
+   The original `AuthorizationDecision` reports a decision on the ID-token principal only when
+   reading session status; Denied retains the authenticated session. Its optional
+   `PreSignInAuthorizationDecision` sub-extension (default null) gates new callback sessions using
+   strictly validated SignaCore access-token claims and correlated verified ID/access issuer and
+   subject. Only timely Allowed creates a ticket/cookie; denial, exceptions, or a bounded timeout
+   leave existing sessions unchanged. Request cancellation propagates. The asynchronous timeout
+   defaults to ten seconds (positive, at most thirty), and consumers must honor cancellation,
+   return promptly, and avoid sign-in or external side effects. Non-cooperative synchronous work
+   cannot be sandboxed, late completion cannot sign in, and existing sessions/roles and upstream
+   tokens are not revoked. This adds no public Bearer validator; details and migration are in the
+   [package README](../../src/SignaCore.Client.AspNetCore/README.md#optional-authorization-before-sign-in).
 2. Route prefix — where the package's endpoints are mounted (for example `/bff`).
 3. Response format — bodies and status codes of the consumer-facing routes; the package defines
    protocol outcomes, not presentation.

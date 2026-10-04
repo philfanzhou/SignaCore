@@ -78,6 +78,7 @@ public static class SignaCoreHostedLoginServiceExtensions
         services.AddSingleton<SignaCoreDiscoveryClient>();
         services.AddSingleton<SignaCoreTokenClient>();
         services.AddSingleton<SignaCoreIdTokenValidator>();
+        services.AddSingleton<SignaCoreAccessTokenValidator>();
         services.AddSingleton<SignaCoreLogoutClient>();
         services.AddSingleton<LogoutReturnStateStore>();
         services.AddSingleton<SignaCoreHostedLoginEndpointService>();

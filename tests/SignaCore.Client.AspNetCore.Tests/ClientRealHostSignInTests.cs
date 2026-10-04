@@ -25,8 +25,10 @@ public sealed class ClientRealHostSignInTests(SignaCoreHostFixture fixture)
         "code_challenge", "code_challenge_method"
     ];
 
-    [Fact]
-    public async Task SignIn_CompletesOverTheRealHostFlow_AndEstablishesTheServerSideSession()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SignIn_CompletesOverTheRealHostFlow_AndEstablishesTheServerSideSession(bool useGate)
     {
         var authorityHandler = fixture.Host.Server.CreateHandler();
         var capture = new CapturingLoggerProvider();
@@ -36,7 +38,9 @@ public sealed class ClientRealHostSignInTests(SignaCoreHostFixture fixture)
             SignaCoreHostFixture.ClientSecret,
             SignaCoreHostFixture.RedirectUri,
             authorityHandler,
-            loggerProvider: capture);
+            loggerProvider: capture,
+            configureTestServices: services => services.PostConfigure<SignaCoreHostedLoginOptions>(options =>
+                options.PreSignInAuthorizationDecision = useGate ? new RealHostDecision() : null));
         using var browser = ConsumerAppTestServer.CreateBrowser(fixture.Host, consumer);
 
         // 1. The start endpoint resolves Discovery and redirects to the real authorize endpoint
@@ -216,6 +220,18 @@ public sealed class ClientRealHostSignInTests(SignaCoreHostFixture fixture)
         Assert.All(
             browser.ConsumerRequests.Select(request => request.Request.RequestUri!.PathAndQuery),
             query => Assert.False(query.Contains("secret", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private sealed class RealHostDecision : ISignaCorePreSignInAuthorizationDecision
+    {
+        public ValueTask<SignaCoreAuthorizationDecisionResult> DecideAsync(
+            SignaCorePreSignInAuthorizationContext context, CancellationToken cancellationToken)
+        {
+            Assert.Equal(SignaCoreHostFixture.Authority, context.Issuer);
+            Assert.Equal(context.Subject, context.AccessTokenPrincipal.FindFirst("sub")?.Value);
+            Assert.Equal(context.Subject, context.IdTokenPrincipal.FindFirst("sub")?.Value);
+            return ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Allowed);
+        }
     }
 
     private static Dictionary<string, string> ParseSingleValuedQuery(string url)

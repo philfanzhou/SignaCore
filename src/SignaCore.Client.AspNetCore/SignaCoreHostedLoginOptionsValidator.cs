@@ -55,6 +55,12 @@ internal sealed class SignaCoreHostedLoginOptionsValidator(IHostEnvironment envi
                 $"{OptionsName}.RedirectUri must be an absolute HTTPS URI with a path and without a query, fragment, or user info. An explicit loopback HTTP origin (127.0.0.1 or [::1]) is accepted only in the Development and Testing environments.");
         }
 
+        if (options.PreSignInAuthorizationTimeout <= TimeSpan.Zero
+            || options.PreSignInAuthorizationTimeout > TimeSpan.FromSeconds(30))
+        {
+            failures.Add($"{OptionsName}.PreSignInAuthorizationTimeout is invalid.");
+        }
+
         if (options.TicketCapacity <= 0)
         {
             failures.Add($"{OptionsName}.TicketCapacity must be positive.");

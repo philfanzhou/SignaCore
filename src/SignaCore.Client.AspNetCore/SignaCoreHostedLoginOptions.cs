@@ -63,6 +63,19 @@ public sealed class SignaCoreHostedLoginOptions
         SignaCoreAllowAllAuthorizationDecision.Instance;
 
     /// <summary>
+    /// Optional authorization before callback sign-in. Default null preserves the ID-token-only
+    /// path. When configured, strictly validates and correlates the SignaCore access token too.
+    /// Only timely Allowed writes a new session; failures leave existing sessions unchanged.
+    /// </summary>
+    public ISignaCorePreSignInAuthorizationDecision? PreSignInAuthorizationDecision { get; set; }
+
+    /// <summary>
+    /// Maximum asynchronous decision wait. Default ten seconds; must be positive and at most
+    /// thirty seconds. Timeout cancels the decision token and fails closed with access_denied.
+    /// </summary>
+    public TimeSpan PreSignInAuthorizationTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
     /// Extension point — response format. Owns the bodies and status codes of the consumer-facing
     /// routes (the failure redirect target and the session-status answer). The package defines the
     /// protocol outcomes; this writer defines their presentation. Default: a fixed English failure

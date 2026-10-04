@@ -19,6 +19,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
     SignaCoreDiscoveryClient discoveryClient,
     SignaCoreTokenClient tokenClient,
     SignaCoreIdTokenValidator idTokenValidator,
+    SignaCoreAccessTokenValidator accessTokenValidator,
     PendingSignInStore pendingSignInStore,
     ITicketStore ticketStore,
     TimeProvider timeProvider,
@@ -189,6 +190,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             return;
         }
 
+        var exchangedAt = timeProvider.GetUtcNow();
         var identity = await idTokenValidator.ValidateAsync(
             configuration, exchange.IdToken, pending.Nonce, cancellationToken);
         if (identity is null)
@@ -200,6 +202,41 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         var now = timeProvider.GetUtcNow();
         // The session never outlives the access token.
         var expiresAt = now.AddSeconds(exchange.ExpiresIn);
+        if (current.PreSignInAuthorizationDecision is { } decision)
+        {
+            var access = await accessTokenValidator.ValidateAsync(
+                configuration, exchange.AccessToken, cancellationToken);
+            if (access is null
+                || !string.Equals(access.Issuer, identity.Issuer, StringComparison.Ordinal)
+                || !string.Equals(access.Subject, identity.Subject, StringComparison.Ordinal))
+            {
+                await RejectAsync(context, SignaCoreSignInReason.InvalidToken, cancellationToken);
+                return;
+            }
+
+            var authorizationContext = new SignaCorePreSignInAuthorizationContext(
+                access.Principal, identity.Principal, access.Issuer, access.Subject);
+            if (!await AuthorizeSignInAsync(decision, authorizationContext,
+                current.PreSignInAuthorizationTimeout, cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await RejectAsync(context, SignaCoreSignInReason.AccessDenied, cancellationToken);
+                return;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (access.ExpiresUtc <= timeProvider.GetUtcNow())
+            {
+                await RejectAsync(context, SignaCoreSignInReason.InvalidToken, cancellationToken);
+                return;
+            }
+
+            now = exchangedAt;
+            expiresAt = exchangedAt.AddSeconds(exchange.ExpiresIn);
+            if (access.ExpiresUtc < expiresAt) expiresAt = access.ExpiresUtc;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             identity.Principal.Claims, "SignaCoreHostedLogin", nameType: "name", roleType: "role"));
         var ticket = new SignaCoreSessionTicket(
@@ -225,6 +262,37 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             });
         SignaCoreClientLog.SignInSucceeded(logger, cancellationToken);
         context.Response.Redirect(pending.ReturnUrl);
+    }
+
+    private async Task<bool> AuthorizeSignInAsync(
+        ISignaCorePreSignInAuthorizationDecision decision,
+        SignaCorePreSignInAuthorizationContext context, TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task<SignaCoreAuthorizationDecisionResult>? task = null;
+        try
+        {
+            var started = timeProvider.GetTimestamp();
+            task = decision.DecideAsync(context, linked.Token).AsTask();
+            var remaining = timeout - timeProvider.GetElapsedTime(started);
+            if (remaining <= TimeSpan.Zero) throw new TimeoutException();
+            var result = await task.WaitAsync(remaining, timeProvider, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            return result == SignaCoreAuthorizationDecisionResult.Allowed;
+        }
+        catch (Exception)
+        {
+            // Observe a non-cooperative task's late failure without giving it a sign-in path.
+            if (task is not null)
+                _ = task.ContinueWith(static completed => { _ = completed.Exception; },
+                    CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted
+                    | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            try { linked.Cancel(); } catch (Exception) { /* Consumer cancellation callbacks. */ }
+            cancellationToken.ThrowIfCancellationRequested();
+            return false;
+        }
     }
 
     internal async Task HandleSessionAsync(HttpContext context)

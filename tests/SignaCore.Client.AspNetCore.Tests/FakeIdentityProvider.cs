@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -45,6 +47,21 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         WrongNonce,
         SigningKeyAbsentFromJwks
     }
+
+    public enum AccessDefect
+    {
+        None, Signature, Kid, MissingKid, Alg, Typ, Issuer, Audience, AdditionalAudience,
+        MissingSubject, DuplicateSubject, SubjectType, SubjectMismatch, Expired, FutureNbf,
+        FutureIat, MissingExp, MissingNbf, MissingIat, InvalidTime, DuplicateIssuer,
+        DuplicateAudience, DuplicateExp, DuplicateNbf, DuplicateIat, NonCompact, TooLong,
+        IdToken, NonAscii, MissingIssuer, MissingAudience, EmptySubject, InvalidExp, InvalidNbf, OutOfRangeTime, SingleArrayAudience
+    }
+
+    public bool SignedAccessToken { get => _state.SignedAccessToken; set => _state.SignedAccessToken = value; }
+    public AccessDefect AccessTokenDefect { get => _state.AccessTokenDefect; set => _state.AccessTokenDefect = value; }
+    public TimeSpan AccessLifetime { get => _state.AccessLifetime; set => _state.AccessLifetime = value; }
+    public TimeSpan AccessTimeOffset { get => _state.AccessTimeOffset; set => _state.AccessTimeOffset = value; }
+    public void RotateSigningKey() => _state.SigningKey = AuthorityState.CreateKey("rotated-key");
 
     public enum TokenResponseShape
     {
@@ -192,7 +209,7 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
                         kty = "RSA",
                         use = "sig",
                         alg = "RS256",
-                        kid = state.SigningKeyId,
+                        kid = state.SigningKey.KeyId,
                         n = Base64UrlEncoder.Encode(parameters.Modulus!),
                         e = Base64UrlEncoder.Encode(parameters.Exponent!)
                     }
@@ -204,6 +221,8 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         {
             state.AuthorizeRequests.Enqueue(new Uri(BaseAddress + http.Path + http.QueryString));
             state.LastNonce = http.Query["nonce"].ToString();
+            var normalCode = Guid.NewGuid().ToString("N");
+            state.CodeNonces[normalCode] = state.LastNonce;
             var redirectUri = http.Query["redirect_uri"].ToString();
             var redirectState = http.Query["state"].ToString();
             var separator = redirectUri.Contains('?', StringComparison.Ordinal) ? '&' : '?';
@@ -224,7 +243,7 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
                 AuthorizeEcho.ReuseCode => Results.Redirect(
                     $"{redirectUri}{separator}code=fixed-reused-code&state={Uri.EscapeDataString(redirectState)}&iss={state.DiscoveryIssuer}"),
                 _ => Results.Redirect(
-                    $"{redirectUri}{separator}code=fake-authority-code&state={Uri.EscapeDataString(redirectState)}&iss={state.DiscoveryIssuer}")
+                    $"{redirectUri}{separator}code={normalCode}&state={Uri.EscapeDataString(redirectState)}&iss={state.DiscoveryIssuer}")
             };
         });
 
@@ -268,11 +287,13 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
                 ["expires_in"] = state.ResponseShape == TokenResponseShape.NonPositiveExpiresIn
                     ? 0
                     : 900,
-                ["id_token"] = Mint(state)
+                ["id_token"] = Mint(state, state.CodeNonces.GetValueOrDefault(code, state.LastNonce))
             };
             if (state.ResponseShape != TokenResponseShape.MissingAccessToken)
             {
-                payload["access_token"] = AccessTokenMaterial;
+                payload["access_token"] = !state.SignedAccessToken ? AccessTokenMaterial
+                    : state.AccessTokenDefect == AccessDefect.IdToken ? payload["id_token"]
+                    : MintAccess(state);
             }
 
             await Results.Json(payload).ExecuteAsync(context);
@@ -368,7 +389,7 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
             return Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         }
 
-        static string Mint(AuthorityState state)
+        static string Mint(AuthorityState state, string nonce)
         {            if (state.ResponseShape == TokenResponseShape.MissingIdToken)
             {
                 return string.Empty;
@@ -383,7 +404,7 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
                 new("sub", DefaultSubject),
                 new("nonce", state.Defect == TokenDefect.WrongNonce
                     ? "a-nonce-that-was-never-requested"
-                    : state.LastNonce),
+                    : nonce),
                 new("name", "client_pack_user")
             };
             var descriptor = new SecurityTokenDescriptor
@@ -404,6 +425,66 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         }
     }
 
+    private static string MintAccess(AuthorityState state)
+    {
+        var defect = state.AccessTokenDefect;
+        if (defect == AccessDefect.NonCompact) return "not-a-jwt";
+        if (defect == AccessDefect.TooLong) return new string('a', 8193);
+        if (defect == AccessDefect.NonAscii) return "é.a.b";
+        var now = DateTimeOffset.UtcNow;
+        var header = new Dictionary<string, object?>
+        {
+            ["alg"] = defect == AccessDefect.Alg ? "HS256" : "RS256",
+            ["typ"] = defect == AccessDefect.Typ ? "JWT" : "at+jwt",
+            ["kid"] = defect == AccessDefect.Kid ? "unknown-key" : state.SigningKey.KeyId
+        };
+        if (defect == AccessDefect.MissingKid) header.Remove("kid");
+        var payload = new Dictionary<string, object?>
+        {
+            ["iss"] = defect == AccessDefect.Issuer ? "https://other.example" : BaseAddress,
+            ["aud"] = defect == AccessDefect.SingleArrayAudience ? new[] { "client-pack-app" }
+                : defect == AccessDefect.Audience ? "other-client"
+                : defect == AccessDefect.AdditionalAudience ? new[] { "client-pack-app", "other-client" }
+                : "client-pack-app",
+            ["sub"] = defect == AccessDefect.SubjectType ? 42
+                : defect == AccessDefect.SubjectMismatch ? "different-subject" : DefaultSubject,
+            ["exp"] = now.Add(defect == AccessDefect.Expired ? TimeSpan.FromSeconds(-1)
+                : state.AccessLifetime).ToUnixTimeSeconds(),
+            ["nbf"] = now.Add(defect == AccessDefect.FutureNbf ? TimeSpan.FromMinutes(2)
+                : state.AccessTimeOffset).ToUnixTimeSeconds(),
+            ["iat"] = now.Add(defect == AccessDefect.FutureIat ? TimeSpan.FromMinutes(2)
+                : state.AccessTimeOffset).ToUnixTimeSeconds(),
+            ["role"] = "reader"
+        };
+        switch (defect)
+        {
+            case AccessDefect.MissingIssuer: payload.Remove("iss"); break;
+            case AccessDefect.MissingAudience: payload.Remove("aud"); break;
+            case AccessDefect.EmptySubject: payload["sub"] = ""; break;
+            case AccessDefect.InvalidExp: payload["exp"] = "tomorrow"; break;
+            case AccessDefect.InvalidNbf: payload["nbf"] = false; break;
+            case AccessDefect.OutOfRangeTime: payload["exp"] = long.MaxValue; break;
+            case AccessDefect.MissingSubject: payload.Remove("sub"); break;
+            case AccessDefect.MissingExp: payload.Remove("exp"); break;
+            case AccessDefect.MissingNbf: payload.Remove("nbf"); break;
+            case AccessDefect.MissingIat: payload.Remove("iat"); break;
+            case AccessDefect.InvalidTime: payload["iat"] = "yesterday"; break;
+        }
+        var json = JsonSerializer.Serialize(payload);
+        var duplicate = defect switch
+        {
+            AccessDefect.DuplicateSubject => "sub", AccessDefect.DuplicateIssuer => "iss",
+            AccessDefect.DuplicateAudience => "aud", AccessDefect.DuplicateExp => "exp",
+            AccessDefect.DuplicateNbf => "nbf", AccessDefect.DuplicateIat => "iat", _ => null
+        };
+        if (duplicate is not null)
+            json = json[..^1] + ",\"" + duplicate + "\":" + JsonSerializer.Serialize(payload[duplicate]) + "}";
+        var input = Base64UrlEncoder.Encode(JsonSerializer.Serialize(header)) + "." + Base64UrlEncoder.Encode(json);
+        var key = defect == AccessDefect.Signature ? state.UnlistedKey : state.SigningKey;
+        var signature = key.Rsa.SignData(Encoding.ASCII.GetBytes(input), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        return input + "." + Base64UrlEncoder.Encode(signature);
+    }
+
     public HttpClient CreateClient() => Server.CreateClient();
 
     public async ValueTask DisposeAsync()
@@ -414,11 +495,15 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
 
     private sealed class AuthorityState
     {
-        public RsaSecurityKey SigningKey { get; } = CreateKey("client-pack-signing-key");
+        public RsaSecurityKey SigningKey { get; set; } = CreateKey("client-pack-signing-key");
 
         public RsaSecurityKey UnlistedKey { get; } = CreateKey("client-pack-unlisted-key");
 
-        public string SigningKeyId { get; } = "client-pack-signing-key";
+        public bool SignedAccessToken { get; set; }
+        public AccessDefect AccessTokenDefect { get; set; }
+        public TimeSpan AccessLifetime { get; set; } = TimeSpan.FromMinutes(15);
+        public TimeSpan AccessTimeOffset { get; set; }
+        public ConcurrentDictionary<string, string> CodeNonces { get; } = new();
 
         public TokenDefect Defect { get; set; }
 
@@ -450,7 +535,7 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
 
         public ConcurrentQueue<string?> TokenAuthorizationHeaders { get; } = [];
 
-        private static RsaSecurityKey CreateKey(string kid)
+        internal static RsaSecurityKey CreateKey(string kid)
         {
             var rsa = RSA.Create(2048);
             return new RsaSecurityKey(rsa) { KeyId = kid };
