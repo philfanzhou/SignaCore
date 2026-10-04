@@ -389,6 +389,11 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
     return 0;
 }
 
+// Construct before any application seeding or requests. Only the activated snapshot and the
+// actual host environment authorize this policy; later IConfiguration overlays cannot alter it.
+builder.Services.AddSingleton(HostedLoginHttpTestPolicy.Create(
+    bootstrapResult.SharedSnapshot!, builder.Environment));
+
 // ---- Consul Service Discovery (optional, snapshot-driven shared lifecycle) ----
 // The product snapshot activated by the bootstrap phase is projected in memory onto the shared
 // discovery catalog and drives one shared Consul lifecycle owner. Registration changes of every

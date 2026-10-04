@@ -434,8 +434,10 @@ public sealed class ServiceSettingsDatabaseContractTests
         await AssertZeroChangesAndZeroAuditsAsync(options);
     }
 
-    [Fact]
-    public async Task CancellationAfterLoad_PropagatesCleanlyAndRollsBack()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellationAfterLoad_PropagatesCleanlyAndRollsBack(bool includeHttpTestOrigins)
     {
         var options = await CreateMigratedSqliteAsync();
         await using var context = new IdentityDbContext(options);
@@ -443,12 +445,15 @@ public sealed class ServiceSettingsDatabaseContractTests
             TestContext.Current.CancellationToken);
         using var cancellation = new CancellationTokenSource();
 
+        var changes = SeedChanges();
+        if (includeHttpTestOrigins)
+            changes["security.hosted_login_http_test_origins"] = "[\"http://10.0.0.1:5002\"]";
         var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             UpdateInTransactionAsync(
                 context,
                 transaction,
                 0,
-                SeedChanges(),
+                changes,
                 transactionOverride: new CancellingAfterLoadTransaction(
                     new EfCoreServiceSettingUpdateTransaction<IdentityDbContext>(context),
                     cancellation),

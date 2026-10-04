@@ -7,6 +7,7 @@ using ServiceMantle.Logging.Remote;
 using SignaCore.Domain.Services.Ldap;
 using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.WeChat;
+using SignaCore.Host.Security;
 
 namespace SignaCore.Host.Configuration;
 
@@ -51,6 +52,12 @@ internal sealed class SignaCoreSettingCompositeValidator(
         var legacy = BuildLegacySnapshot(context);
         var errors = new List<ServiceSettingValidationError>();
 
+        if (context.TryGetValue(HostedLoginHttpTestOrigins.SettingKey, out var httpOrigins) && httpOrigins.HasValue
+            && !HostedLoginHttpTestOrigins.TryParseJson(httpOrigins.GetJson().GetRawText(), out _))
+        {
+            errors.Add(new ServiceSettingValidationError(
+                HostedLoginHttpTestOrigins.SettingKey, HostedLoginHttpTestOrigins.InvalidCode));
+        }
         ValidatePublicBaseUrl(legacy, errors);
         RequireNonBlank(legacy, SystemSettingKeys.JwtAudience, errors);
         RequireNonBlank(legacy, SystemSettingKeys.AdminUsername, errors);
