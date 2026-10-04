@@ -680,6 +680,41 @@ public sealed class OAuthLoginSmsLoginEndpointTests : IClassFixture<IdentityServ
     }
 
     [Fact]
+    public async Task WinnerCommitsBeforeLoserVerifies_TheLoserIsLocal400WithoutFailureWrites()
+    {
+        var sender = new FakeSmsSender();
+        var barrier = new SmsVerificationBarrier();
+        using var host = _fixture.CreateSmsHost(sender, barrier.Configure);
+        using var client = host.CreateBrowserClient();
+        var app = await SeedSmsAppAsync(host.Services, SmsLoginMode.AutoProvision);
+        var session = await BeginAsync(host.Services, client, app);
+        var phone = NewPhone();
+        using (var send = await client.SendAsync(SendPost(session, fields: SendFields(session, phone)), Ct))
+            Assert.Equal(HttpStatusCode.OK, send.StatusCode);
+        var code = Assert.Single(sender.Calls).Code;
+        var pending = client.SendAsync(Post(session, SmsLoginFields(session, phone, code)), Ct);
+        try
+        {
+            await barrier.Reached.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+            using var winner = await client.SendAsync(Post(session, SmsLoginFields(session, phone, code)), Ct);
+            Assert.Equal(HttpStatusCode.Found, winner.StatusCode);
+        }
+        finally { barrier.Release(); }
+        using var loser = await pending;
+        await AssertLocalRejectionAsync(loser);
+        Assert.Null(loser.Headers.Location);
+        Assert.False(loser.Headers.Contains("Set-Cookie"));
+        var identity = await QueryDbAsync(host.Services, db => db.UserLogins.AsNoTracking()
+            .SingleAsync(row => row.ProviderUserId == E164(phone), Ct));
+        Assert.Equal(1, await QueryDbAsync(host.Services, db => db.IdentitySessions.CountAsync(row => row.SmsUserLoginId == identity.Id, Ct)));
+        Assert.Equal(1, await QueryDbAsync(host.Services, db => db.AuthorizationCodes.CountAsync(row => row.AppRegistrationId == app.Id, Ct)));
+        Assert.Equal(1, await QueryDbAsync(host.Services, db => db.AppSmsAccesses.CountAsync(row => row.UserLoginId == identity.Id, Ct)));
+        Assert.Equal((OtpStatus.Consumed, 0), ((await OtpAsync(host.Services, app.Id, E164(phone)))!.Status,
+            (await OtpAsync(host.Services, app.Id, E164(phone)))!.Attempts));
+        Assert.Equal(["sms_code_sent", "login_success"], (await SmsHistoriesAsync(host.Services, app.AppId)).Select(row => row.EventType));
+    }
+
+    [Fact]
     public async Task AnSmsLoginRacingAPasswordLogin_ConsumesTheContinuationOnce()
     {
         var sender = new FakeSmsSender();
