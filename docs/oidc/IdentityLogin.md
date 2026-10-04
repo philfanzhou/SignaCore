@@ -165,6 +165,24 @@ one language, every local rejection still returns the same bytes and every crede
 same page (`SC-19`); neither language echoes a submitted value. API, log, audit, and exception text
 stays English.
 
+All login states share a single SignaCore wordmark, heading and short description, and a centered
+card with responsive spacing and independent light/dark palettes. Password and SMS forms remain
+directly visible and independent when the SMS gate is open. Sign-in buttons occupy the form width;
+Cancel is a secondary submit button and still bypasses credential validation. The OTP input and
+unnamed send button share a wrapping row, in the same order as keyboard navigation. Every button
+has at least a 44px activation area, and focus remains visible. Content scrolls naturally on short
+or narrow screens, including browser zoom; CSS is not required to operate either form.
+
+A fixed notice is inside, and referenced by `aria-describedby` from, its corresponding form:
+password failure above credentials; phone-format, uniform send and SMS failure notices above SMS
+inputs. Errors retain `role="alert"`; the uniform send notice retains `role="status"` with neutral
+information styling, independent of actual send outcome. All existing notice text and
+indistinguishability rules remain unchanged. Local errors share the same framework while remaining
+one static page per language, without fields, request echoes, or dynamic return links.
+
+The [presentation verification record](./HostedLoginVisualChecks.md) includes responsive, contrast,
+keyboard and native-browser checks and sanitized screenshots.
+
 The page stays script-free. It links one same-origin stylesheet, `GET /oauth2/login/style.css`,
 admitted by `style-src 'self'`. The stylesheet is a fixed constant served with
 `Content-Type: text/css; charset=utf-8`, `Cache-Control: public, max-age=3600`, and

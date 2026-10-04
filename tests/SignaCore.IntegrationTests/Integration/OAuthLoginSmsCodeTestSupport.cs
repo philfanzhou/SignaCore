@@ -32,16 +32,16 @@ internal static partial class OAuthLoginSmsCodeTestSupport
     public const string FixedCorrelationId = "sms-send-correlation-0123456789abcdef";
 
     public const string EnglishSentNotice =
-        "<p role=\"status\">If this phone number can sign in to this application, a verification code has been sent.</p>";
+        "<p role=\"status\" id=\"sms-notice\" class=\"notice\">If this phone number can sign in to this application, a verification code has been sent.</p>";
 
-    public const string ChineseSentNotice = "<p role=\"status\">如果此手机号可以登录该应用，验证码已发送。</p>";
+    public const string ChineseSentNotice = "<p role=\"status\" id=\"sms-notice\" class=\"notice\">如果此手机号可以登录该应用，验证码已发送。</p>";
 
-    public const string EnglishInvalidPhoneNotice = "<p role=\"alert\">Enter a valid mainland China mobile number.</p>";
+    public const string EnglishInvalidPhoneNotice = "<p role=\"alert\" id=\"sms-notice\" class=\"notice\">Enter a valid mainland China mobile number.</p>";
 
     public const string EnglishSmsFailureNotice =
-        "<p role=\"alert\">Sign-in failed. Check your mobile number and verification code and try again, or request a new code.</p>";
+        "<p role=\"alert\" id=\"sms-notice\" class=\"notice\">Sign-in failed. Check your mobile number and verification code and try again, or request a new code.</p>";
 
-    public const string ChineseSmsFailureNotice = "<p role=\"alert\">登录失败。请检查手机号和验证码后重试，或重新获取验证码。</p>";
+    public const string ChineseSmsFailureNotice = "<p role=\"alert\" id=\"sms-notice\" class=\"notice\">登录失败。请检查手机号和验证码后重试，或重新获取验证码。</p>";
 
     /// <summary>The always empty one-time-code input of the SMS region (<c>DF-17</c>).</summary>
     public const string OtpInput =

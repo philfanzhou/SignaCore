@@ -65,6 +65,7 @@ public sealed class OAuthLoginSmsLoginEndpointTests : IClassFixture<IdentityServ
         var body = await page.Content.ReadAsStringAsync(Ct);
 
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        OAuthLoginTestSupport.AssertFormNoticePlacement(body);
         Assert.DoesNotContain("<script", body, StringComparison.OrdinalIgnoreCase);
         // The Password form keeps exactly its five fields in every case.
         Assert.Equal(1, Occurrences(body, "name=\"username\""));
@@ -76,7 +77,7 @@ public sealed class OAuthLoginSmsLoginEndpointTests : IClassFixture<IdentityServ
             Assert.Equal(2, Occurrences(body, "<form "));
             Assert.Equal(2, Occurrences(body, "name=\"login_handle\""));
             Assert.Equal(2, Occurrences(body, "name=\"__RequestVerificationToken\""));
-            Assert.Contains("<h2>Sign in with a verification code</h2>", body, StringComparison.Ordinal);
+            Assert.Contains("<h2 id=\"sms-heading\">Sign in with a verification code</h2>", body, StringComparison.Ordinal);
             Assert.Contains(PhoneInput(string.Empty), body, StringComparison.Ordinal);
             Assert.Contains(OtpInput, body, StringComparison.Ordinal);
             Assert.Contains(SendButton + "Send code</button>", body, StringComparison.Ordinal);
@@ -108,7 +109,7 @@ public sealed class OAuthLoginSmsLoginEndpointTests : IClassFixture<IdentityServ
         using var page = await client.SendAsync(request, Ct);
         var body = await page.Content.ReadAsStringAsync(Ct);
 
-        Assert.Contains("<h2>使用短信验证码登录</h2>", body, StringComparison.Ordinal);
+        Assert.Contains("<h2 id=\"sms-heading\">使用短信验证码登录</h2>", body, StringComparison.Ordinal);
         Assert.Contains("<label for=\"phone\">手机号</label>", body, StringComparison.Ordinal);
         Assert.Contains("<label for=\"otp\">验证码</label>", body, StringComparison.Ordinal);
         Assert.Contains(SendButton + "发送验证码</button>", body, StringComparison.Ordinal);
@@ -346,6 +347,7 @@ public sealed class OAuthLoginSmsLoginEndpointTests : IClassFixture<IdentityServ
             Assert.Equal(HttpStatusCode.OK, answer.Status);
             AssertRenderedFormHeaders(response);
             Assert.Contains(EnglishSmsFailureNotice, answer.Body, StringComparison.Ordinal);
+            OAuthLoginTestSupport.AssertFormNoticePlacement(answer.Body);
             Assert.Contains(PhoneInput(e164), answer.Body, StringComparison.Ordinal);
             Assert.Contains(OtpInput, answer.Body, StringComparison.Ordinal);
             Assert.DoesNotContain(typed, answer.Body, StringComparison.Ordinal);

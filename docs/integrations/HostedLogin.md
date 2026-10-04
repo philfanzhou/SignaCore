@@ -123,6 +123,13 @@ SignaCore answers in one of these ways:
   `error=access_denied`, `state`, and `iss`; other request errors such as `invalid_scope` return
   the same way.
 
+The hosted page uses a consistent SignaCore card in English or Simplified Chinese (selected only
+by `Accept-Language`) and follows the browser's light/dark preference. Password and optional SMS
+remain separate, directly visible forms. Primary sign-in actions occupy the form width; Cancel
+stays secondary and works with empty fields. The OTP/send row wraps on narrow screens. Notices
+appear within the method's form, with a uniform neutral SMS-send notice regardless of delivery
+outcome. The page needs no scripts or external assets and remains usable without CSS.
+
 At the callback, reject the response unless `state` matches the pending sign-in and `iss` equals
 the Discovery `issuer`, then discard the pending values after one use. Treat the code as a secret:
 keep it out of logs and analytics.

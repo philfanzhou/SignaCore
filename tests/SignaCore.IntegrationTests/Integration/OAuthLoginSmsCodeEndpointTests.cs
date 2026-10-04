@@ -212,6 +212,7 @@ public sealed class OAuthLoginSmsCodeEndpointTests : IClassFixture<IdentityServe
             answers.Add(answer);
             Assert.Equal(HttpStatusCode.OK, answer.Status);
             Assert.Contains(EnglishInvalidPhoneNotice, answer.Body, StringComparison.Ordinal);
+            OAuthLoginTestSupport.AssertFormNoticePlacement(answer.Body);
             Assert.DoesNotContain(EnglishSentNotice, answer.Body, StringComparison.Ordinal);
             if (invalid.Trim().Length > 0)
             {
@@ -337,6 +338,7 @@ public sealed class OAuthLoginSmsCodeEndpointTests : IClassFixture<IdentityServe
             Assert.Equal(HttpStatusCode.OK, answer.Status);
             AssertRenderedFormHeaders(response);
             Assert.Contains(EnglishSentNotice, answer.Body, StringComparison.Ordinal);
+            OAuthLoginTestSupport.AssertFormNoticePlacement(answer.Body);
             // The phone appears once, normalized, as the value of the page's own phone input
             // (DF-16); the submitted spelling is never echoed.
             Assert.Equal(1, CountOccurrences(answer.Body, e164));
@@ -619,8 +621,10 @@ public sealed class OAuthLoginSmsCodeEndpointTests : IClassFixture<IdentityServe
         Assert.Equal(
             pageBody,
             sentBody.Replace(EnglishSentNotice, string.Empty, StringComparison.Ordinal)
-                .Replace(PhoneInput(E164(phone)), PhoneInput(string.Empty), StringComparison.Ordinal));
-        Assert.Equal(pageBody, invalidBody.Replace(EnglishInvalidPhoneNotice, string.Empty, StringComparison.Ordinal));
+                .Replace(PhoneInput(E164(phone)), PhoneInput(string.Empty), StringComparison.Ordinal)
+                .Replace(" aria-describedby=\"sms-notice\"", string.Empty, StringComparison.Ordinal));
+        Assert.Equal(pageBody, invalidBody.Replace(EnglishInvalidPhoneNotice, string.Empty, StringComparison.Ordinal)
+            .Replace(" aria-describedby=\"sms-notice\"", string.Empty, StringComparison.Ordinal));
     }
 
     private static int CountOccurrences(string text, string value)
