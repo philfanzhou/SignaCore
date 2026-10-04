@@ -23,6 +23,7 @@ internal static class SharedSettingKeys
             [SystemSettingKeys.JwtTokenExpirationHours] = "jwt.token_expiration_hours",
             [SystemSettingKeys.RefreshTokenExpirationDays] = "refresh_token.expiration_days",
             [SystemSettingKeys.PasswordHasherWorkFactor] = "password_hasher.work_factor",
+            [SystemSettingKeys.SecurityHostedLoginHttpTestOrigins] = "security.hosted_login_http_test_origins",
             [SystemSettingKeys.SecurityAllowNonHttpsIssuer] = "security.allow_non_https_issuer",
 
             // ---- Administrative console ----

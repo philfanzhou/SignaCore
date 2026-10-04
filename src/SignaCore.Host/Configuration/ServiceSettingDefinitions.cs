@@ -106,6 +106,7 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
             ServiceSettingValueType.Number,
             IsSensitive: false,
             LegacyDefault: IdentityConstants.BCryptWorkFactor.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        new("security.hosted_login_http_test_origins", ServiceSettingValueType.Json, IsSensitive: false, LegacyDefault: "[]"),
         new("security.allow_non_https_issuer", ServiceSettingValueType.Boolean, IsSensitive: false, LegacyDefault: "false"),
 
         // ---- Administrative console ----
@@ -230,6 +231,7 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
     private static readonly IReadOnlyDictionary<string, JsonValueKind> JsonRootKinds =
         new Dictionary<string, JsonValueKind>(StringComparer.Ordinal)
         {
+            ["security.hosted_login_http_test_origins"] = JsonValueKind.Array,
             ["admin_web.allowed_origins"] = JsonValueKind.Array,
             ["callback.allowed_domains"] = JsonValueKind.Array,
             ["sms.bypass_phones"] = JsonValueKind.Array,

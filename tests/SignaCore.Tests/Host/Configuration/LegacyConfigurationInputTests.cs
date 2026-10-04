@@ -43,10 +43,10 @@ public class LegacyConfigurationInputTests
         });
 
         // Exactly the four required keys came from the deployment; the other 39 keep the definition
-        // table's legacy defaults, so the complete candidate always covers all 44 keys.
+        // table's legacy defaults, so the complete candidate always covers all 45 keys.
         Assert.Equal(4, importedCount);
         Assert.Equal(ServiceSettingDefinitions.Table.Count, values.Count);
-        Assert.Equal(44, values.Count);
+        Assert.Equal(45, values.Count);
 
         // Deployment values are trimmed; defaults are untouched.
         Assert.Equal(BaseUrl, values[SystemSettingKeys.PublicBaseUrl]);

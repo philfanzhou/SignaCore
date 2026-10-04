@@ -337,3 +337,18 @@ behavior: they do not process these headers. Terminate/install through an approp
 network; business proxy trust becomes active only after setup and restart into the normal host.
 No setting key or database migration is added. A binary rollback restores the previous local
 middleware and the same snapshot setting; do not run both middleware implementations together.
+
+## Hosted-login HTTP testing foundation
+
+The optional shared `security.hosted_login_http_test_origins` JSON list can be activated only by
+a normal Host whose actual environment is exactly `Testing`. Missing/empty keeps it disabled;
+all changes require restart. It is stored in the existing aggregate, never in launcher settings.
+An HTTP public base URL must have its exact origin listed and must independently retain the
+existing non-HTTPS issuer opt-in and issuer equality. Non-Testing Hosts refuse nonempty lists
+on their next startup, even if an authenticated administrator previously saved the value.
+
+This policy foundation does not yet enable HTTP callback registration or HTTP identity/CSRF
+Cookies. See [Private-network HTTP testing](../oidc/HttpTesting.md) for strict private literal-IP
+syntax, isolated-network responsibilities, staged delivery and rollback. Remove the explicit
+new key through shared updates with `value=null` before running an older 44-key binary; retain
+the database and external keys. No schema migration or deployment default changes are needed.

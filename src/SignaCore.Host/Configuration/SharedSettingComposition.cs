@@ -40,7 +40,7 @@ internal static class SharedSettingComposition
         [new ServiceSettingDefinitions(), new GrafanaLokiSettingDefinitions(), new OtlpSettingDefinitions()];
 
     /// <summary>
-    /// Validates one complete legacy-keyed candidate dictionary (the fixed 44-key input form of
+    /// Validates one complete legacy-keyed candidate dictionary (the fixed 45-key input form of
     /// first-run setup, the legacy import, and the test installation fixtures): input completeness
     /// and integer text form first, then the shared registry that owns every other rule.
     /// </summary>
