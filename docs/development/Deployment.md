@@ -166,6 +166,16 @@ The launcher gives the old container 35 seconds to shut down cleanly. A rollback
 container image and configuration, but it does not reverse database migrations; keep migrations
 backward-compatible and take a verified database backup before deployment.
 
+Startup uses one core-only ServiceMantle container for the preparation and migration stages.
+It registers no hosted services or startup identity. Preparation runs before the historical outer
+initialization lock; the legacy pre-check runs inside that lock before migration, then installation
+resolution follows. Each migration run has a fresh receipt and explicitly skips preparation;
+the caller retains ownership of its executor and DbContext. Shared preparation owns the only
+observe/create/confirm sequence. The product preserves fixed provider error classifications from
+its invocation-local observations, and delegates an initially dirty SQLite target to EF's native
+open without enabling shared WAL checkpointing. No target creation or committed migration is
+rolled back by a later failure or cancellation.
+
 Startup prepares a missing PostgreSQL database target through the shared ServiceMantle preparation
 provider (see [First-run setup](./FirstRunSetup.md#database-target-preparation-at-startup)). An
 already-connectable target is used as-is without any maintenance-database access; a missing target

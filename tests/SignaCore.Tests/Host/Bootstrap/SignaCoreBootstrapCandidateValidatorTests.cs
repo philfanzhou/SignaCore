@@ -332,6 +332,10 @@ public sealed class SignaCoreBootstrapCandidateValidatorTests : IAsyncLifetime
             VALUES ('signacore', {valuesJson}, 1, {DateTime.UtcNow}, 'seed', 0)
             """,
             TestContext.Current.CancellationToken);
+        // This is the clean, connectable candidate used by the key-compatibility assertions.
+        // Checkpoint through SQLite and leave rollback-journal mode; deleting sidecars alone leaves
+        // a WAL header that the shared read-only guard correctly refuses before decryption.
+        await context.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=DELETE;", TestContext.Current.CancellationToken);
         await context.DisposeAsync();
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
         foreach (var sidecar in new[] { "-journal", "-wal", "-shm" })

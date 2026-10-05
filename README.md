@@ -34,7 +34,7 @@ SignaCore is a .NET 10 identity and authentication service. It centralizes accou
 
 Requirements: .NET SDK 10, Node.js 22.12+, 24+, or 26+ with npm for the admin UI, and Docker for the container smoke test.
 
-SignaCore pins all eight ServiceMantle packages to `0.3.0`: the core package, `Web`,
+SignaCore pins all eight ServiceMantle packages to the official `0.3.1-rc.1` prerelease: the core package, `Web`,
 `Discovery`, `Logging`, `Diagnostics`, `Persistence.Relational`, and the PostgreSQL/SQLite
 providers. Upgrade or roll back the complete binaries together; do not mix the retired adapter
 assemblies with capability-named assemblies. This package migration adds no database migration:

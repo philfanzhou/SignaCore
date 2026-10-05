@@ -528,6 +528,32 @@ public sealed class StartupSqliteTargetPreparationTests
         }
     }
 
+    [Fact]
+    public async Task ConfirmationConflict_DoesNotUseInitialDirtyTargetException()
+    {
+        var path = NewTargetPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var provider = new ScriptedPreparationProvider(
+            [DatabaseTargetObservation.TargetMissing(),
+             DatabaseTargetObservation.TargetUnreachable(
+                 WellKnownDatabaseTargetPreparationErrorCodes.TargetConflict, targetExists: true)],
+            [DatabaseTargetPreparationResult.Success(DatabaseTargetPreparationOutcome.Created)]);
+        try
+        {
+            var exception = await Assert.ThrowsAsync<StartupDatabaseException>(() =>
+                StartupDatabase.EnsureSqliteDatabaseExistsAsync(
+                    FileOptions(path), provider, null, TestContext.Current.CancellationToken));
+            Assert.Equal(WellKnownDatabaseTargetPreparationErrorCodes.TargetConflict, exception.ErrorCode);
+            Assert.Equal(2, provider.ObserveCount);
+            Assert.Single(provider.PrepareRequests);
+            Assert.Null(exception.InnerException);
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
     // ----- Cancellation -----
 
     [Fact]

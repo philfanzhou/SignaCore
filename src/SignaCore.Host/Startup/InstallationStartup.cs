@@ -63,7 +63,9 @@ internal static class InstallationStartup
 
         await using var db = CreateDbContext(databaseOptions);
 
-        await StartupDatabase.EnsureDatabaseExistsAsync(databaseOptions, cancellationToken);
+        var executor = migrationExecutor ?? new SignaCoreMigrationExecutor(db, databaseOptions);
+        await using var startup = StartupDatabaseComposition.Create(databaseOptions, executor);
+        await startup.PrepareAsync(cancellationToken);
         await using (await StartupDatabase.AcquireInitializationLockAsync(databaseOptions, cancellationToken))
         {
             // The retirement pre-check runs ahead of the migration gate: a database that still
@@ -78,15 +80,7 @@ internal static class InstallationStartup
             // limited observation, executes the full SignaCore migration workflow at most once, and
             // re-inspects before returning; SQLite serializes on the process-local single-instance
             // turn.
-            if (migrationExecutor is null)
-            {
-                await StartupMigrationGate.RunAsync(db, databaseOptions, logger, cancellationToken);
-            }
-            else
-            {
-                await StartupMigrationGate.RunAsync(
-                    db, databaseOptions, logger, migrationExecutor, cancellationToken);
-            }
+            await startup.RunMigrationAsync(logger, cancellationToken);
 
             // Completion checkpoint after the migration gate and its owned cleanup have settled:
             // original-token cancellation takes precedence over entering installation resolution.

@@ -1,8 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using ServiceMantle;
-using ServiceMantle.Bootstrap;
-using ServiceMantle.Database.PostgreSql.Migration;
-using ServiceMantle.Database.Sqlite;
 using ServiceMantle.Migration;
 using SignaCore.Database;
 
@@ -27,7 +22,8 @@ internal sealed class StartupMigrationException : Exception
 /// <summary>
 /// Calls the shared startup database gate inside SignaCore's outer initialization lock. Target
 /// preparation remains before that lock so the legacy pre-check still precedes migration. A fresh
-/// receipt and isolated provider belong to each call; the executor and context belong to the caller.
+/// receipt belongs to each run; the startup core container owns its services while the executor and
+/// context belong to the caller.
 /// The shared migration lock wait budget is 30 seconds, independent of the surrounding startup.
 /// </summary>
 internal static class StartupMigrationGate
@@ -51,8 +47,8 @@ internal static class StartupMigrationGate
     }
 
     /// <summary>
-    /// Composition seam with an injectable executor; production always goes through
-    /// <see cref="RunAsync(IdentityDbContext, DatabaseOptions, ILogger, CancellationToken)"/>.
+    /// Direct-call seam with an injectable executor. The installation startup reuses one core
+    /// composition across target preparation and migration.
     /// </summary>
     internal static async Task RunAsync(
         IdentityDbContext database,
@@ -66,85 +62,11 @@ internal static class StartupMigrationGate
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(executor);
 
-        var serviceId = ServiceId.Parse(ServiceMantleComposition.ServiceIdentifier);
-        var bootstrap = new BootstrapDatabaseConfiguration(
-            databaseOptions.Provider,
-            databaseOptions.ServerVersion,
-            databaseOptions.ConnectionString);
-
-        var mode = databaseOptions.ProviderKind switch
+        await using (var composition = Startup.StartupDatabaseComposition.Create(databaseOptions, executor))
         {
-            DatabaseProvider.PostgreSql => DatabaseDeploymentMode.MultiInstance,
-            DatabaseProvider.Sqlite => DatabaseDeploymentMode.SingleInstance,
-            _ => throw new InvalidOperationException("Unsupported database provider.")
-        };
-        var options = new StartupDatabaseGateOptions(
-            bootstrap, mode, SharedLockWaitBudget, enableTargetPreparation: false);
-        var services = new ServiceCollection();
-        var builder = services.AddServiceMantle(
-            serviceId, InstanceId.Parse($"signacore-startup-{Guid.NewGuid():N}"));
-        if (databaseOptions.ProviderKind == DatabaseProvider.PostgreSql)
-        {
-            services.AddSingleton<IDatabaseMigrationLockProvider, PostgreSqlMigrationLockProvider>();
-            services.AddSingleton<IDatabaseDeploymentCapabilityProvider, PostgreSqlDeploymentCapability>();
-        }
-        else
-        {
-            services.AddSingleton<IDatabaseDeploymentCapabilityProvider, SqliteDatabaseTargetPreparationProvider>();
+            await composition.RunMigrationAsync(logger, cancellationToken);
         }
 
-        // The shared gate owns its scope, but never the caller's executor or DbContext. Register a
-        // non-disposable delegate so disposable test executors also remain caller-owned.
-        services.AddScoped<IDatabaseMigrationExecutor>(_ => new BorrowedExecutor(executor));
-        builder.AddStartupDatabaseGate(options);
-        StartupDatabaseGateResult result;
-        await using (var provider = services.BuildServiceProvider())
-        {
-            // Direct invocation only: none of this isolated provider's hosted services are started.
-            result = await provider.GetRequiredService<StartupDatabaseGate>().RunAsync(
-                options, new StartupDatabaseReceipt(), serviceId, cancellationToken);
-        }
-
-        // Completion checkpoint after the orchestration and its owned cleanup (shared lease or
-        // single-instance turn release) have settled: original-token cancellation takes precedence
-        // over delivering success to the caller.
         cancellationToken.ThrowIfCancellationRequested();
-
-        if (!result.Succeeded)
-        {
-            throw new StartupMigrationException(result.ErrorCode!);
-        }
-
-        if (result.ExecutorWasCalled)
-        {
-            logger.LogInformation(
-                "Database schema is current after the shared migration orchestration.");
-        }
-        else
-        {
-            logger.LogInformation(
-                "Database schema was already current; the migration executor was skipped.");
-        }
-    }
-
-    // The shared PostgreSQL lock supplies coordination; the product explicitly authorizes its
-    // existing multi-instance deployment. Canonical target identity is only used by SingleInstance.
-    private sealed class PostgreSqlDeploymentCapability : IDatabaseDeploymentCapabilityProvider
-    {
-        public DatabaseDeploymentCapability Capability { get; } = new(
-            WellKnownDatabaseProviderIds.PostgreSql, DatabaseDeploymentSupport.SingleAndMultiInstance);
-
-        public ValueTask<string> GetCanonicalTargetIdentityAsync(
-            BootstrapDatabaseConfiguration target, CancellationToken cancellationToken)
-            => throw new InvalidOperationException("PostgreSQL startup requires multi-instance coordination.");
-    }
-
-    private sealed class BorrowedExecutor(IDatabaseMigrationExecutor executor) : IDatabaseMigrationExecutor
-    {
-        public ValueTask<MigrationObservationState> InspectAsync(CancellationToken cancellationToken = default)
-            => executor.InspectAsync(cancellationToken);
-
-        public ValueTask ExecuteAsync(CancellationToken cancellationToken = default)
-            => executor.ExecuteAsync(cancellationToken);
     }
 }
