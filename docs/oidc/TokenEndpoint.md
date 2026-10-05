@@ -228,3 +228,5 @@ whose current application has refresh disabled follows `EV-11`/`EV-13`: generic 
 no consumption, and no family. Legacy validation, rotation, and revocation fail closed on any
 interactive row (`EV-33`). This document itself activates no route or metadata beyond what its
 slices delivered (`AC-14`).
+
+The current transport-policy and complete-registration checks, including the explicit Testing HTTP exception and old-artifact rejection, are defined in [the canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust).

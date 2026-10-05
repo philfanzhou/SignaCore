@@ -111,3 +111,5 @@ The shared ServiceMantle management session, including its logout route, remains
 ServiceMantle management-session contract and is unchanged by this design (`PS-18`). Runtime
 activation belongs to #68 and publishes no standard logout metadata (`AC-10`); this document itself
 changes no route or Discovery response (`AC-14`).
+
+The current transport-policy and complete-registration checks, including the explicit Testing HTTP exception and old-artifact rejection, are defined in [the canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust).

@@ -78,11 +78,13 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
     private const int MaxOpaqueValueLength = 128;
     private const int CodeChallengeLength = 43;
 
+    private readonly OidcRedirectUriPolicy _uriPolicy;
     private readonly IAppRegistrationRepository _appRegistrationRepository;
 
-    public OidcAuthorizationRequestValidator(IAppRegistrationRepository appRegistrationRepository)
+    public OidcAuthorizationRequestValidator(IAppRegistrationRepository appRegistrationRepository, OidcRedirectUriPolicy? uriPolicy = null)
     {
         _appRegistrationRepository = appRegistrationRepository;
+        _uriPolicy = uriPolicy ?? OidcRedirectUriPolicy.Default;
     }
 
     public async Task<OidcAuthorizationValidationResult> ValidateAsync(
@@ -147,7 +149,7 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
             .Where(uri => uri.Kind == RedirectUriKind.Redirect)
             .Select(uri => uri.CanonicalUri)
             .FirstOrDefault(uri => string.Equals(uri, submittedRedirectUri, StringComparison.Ordinal));
-        if (registeredRedirectUri is null)
+        if (registeredRedirectUri is null || !_uriPolicy.Allows(registeredRedirectUri))
         {
             return Local(OidcAuthorizationLocalReasons.RedirectUriUnmatched);
         }

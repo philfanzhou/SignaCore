@@ -33,7 +33,8 @@ public sealed class OidcLogoutPreparationService(
     IServiceScopeFactory scopeFactory,
     IKeyManager keyManager,
     JwtOptions jwtOptions,
-    ILogger<OidcLogoutPreparationService> logger)
+    ILogger<OidcLogoutPreparationService> logger,
+    SignaCore.Domain.Validators.OidcRedirectUriPolicy? uriPolicy = null)
 {
     public const string CompletionPath = "/oauth2/logout";
 
@@ -169,7 +170,9 @@ public sealed class OidcLogoutPreparationService(
             cancellationToken.ThrowIfCancellationRequested();
             verifiedPostLogoutUri = registeredUris.SingleOrDefault(
                 registered => string.Equals(registered, postLogoutUri, StringComparison.Ordinal));
-            if (verifiedPostLogoutUri is null) return null;
+            if (verifiedPostLogoutUri is null
+                || !await OidcCurrentRedirectTrust.AllowsAsync(dbContext, app.Id, RedirectUriKind.PostLogout,
+                    verifiedPostLogoutUri, uriPolicy ?? SignaCore.Domain.Validators.OidcRedirectUriPolicy.Default, cancellationToken)) return null;
         }
 
         var creation = await scope.ServiceProvider.GetRequiredService<ILogoutRequestStore>().StageCreateAsync(

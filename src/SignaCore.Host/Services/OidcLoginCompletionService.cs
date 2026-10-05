@@ -43,7 +43,8 @@ public sealed class OidcLoginCompletionService(
     IAccountLoginInfoService accountLoginInfo,
     IAuditService auditService,
     IUnitOfWork unitOfWork,
-    IdentityDbContext dbContext)
+    IdentityDbContext dbContext,
+    SignaCore.Domain.Validators.OidcRedirectUriPolicy? uriPolicy = null)
 {
     private const string LoginSuccessEventType = "login_success";
 
@@ -115,7 +116,7 @@ public sealed class OidcLoginCompletionService(
             }
 
             if (!await OidcCurrentAuthorizationPolicy.AllowsAsync(
-                    dbContext, accepted, operationCancellationToken))
+                    dbContext, accepted, operationCancellationToken, uriPolicy))
             {
                 await transaction.RollbackAsync(operationCancellationToken);
                 return null;

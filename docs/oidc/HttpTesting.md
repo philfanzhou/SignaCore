@@ -2,8 +2,8 @@
 
 The shared `security.hosted_login_http_test_origins` setting establishes a policy foundation for
 staged hosted-login HTTP support. **This foundation alone does not enable HTTP hosted login:**
-private-network HTTP redirect registration and identity/antiforgery Cookie support remain separate
-implementation stages. Existing HTTPS, Secure `__Host-` Cookies and the Development numeric-loopback
+private-network HTTP redirect registration is supported through the current-policy checks in the
+[canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust), while identity/antiforgery Cookie support remains a separate stage. Existing HTTPS, Secure `__Host-` Cookies and the Development numeric-loopback
 redirect exception keep their behavior. Management Bearer authentication does not change.
 
 ## Configuration and activation
@@ -71,3 +71,5 @@ its `value` as `null`, verify the removal, then replace the image. Writing `[]` 
 policy but does not remove an unknown key for an older binary. Existing aggregate versions and
 audits remain intact. Official dual-end browser/image acceptance belongs to the later complete
 HTTP capability, not this policy foundation.
+
+The URI stage preserves exact complete callback/logout registration and rejects old artifacts after policy narrowing. IPv6 ULA origin/URI registration does not promise cross-origin IPv6 form navigation: retain the [login CSP limitations](./IdentityLogin.md) and use RFC1918 IPv4 for browser acceptance. Remove HTTP registrations and require a new login before rollback; artifacts are never converted.

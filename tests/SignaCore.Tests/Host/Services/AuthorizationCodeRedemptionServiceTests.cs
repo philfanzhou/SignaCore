@@ -47,6 +47,30 @@ public sealed class AuthorizationCodeRedemptionServiceTests
     private const string Challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
     [Fact]
+    public async Task RemovedRedirectRegistration_RejectsUnconsumedCodeWithoutWrites()
+    {
+        await using var database = await CreateDatabaseAsync();
+        var seed = await SeedAsync(database.Context);
+        await database.Context.AppRedirectUris.ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+        var result = await database.Service.RedeemAsync(seed.Application, CreateForm(seed.Code), null, null, TestContext.Current.CancellationToken);
+        Assert.False(result.IsSuccess);
+        Assert.Equal("invalid_grant", result.ErrorCode);
+        await AssertNothingWrittenAsync(database.Context, seed);
+    }
+
+    [Fact]
+    public async Task RemovedRedirectRegistration_DoesNotBypassCorrectlyBoundReplayDisposal()
+    {
+        await using var database = await CreateDatabaseAsync();
+        var seed = await SeedAsync(database.Context);
+        Assert.True((await database.Service.RedeemAsync(seed.Application, CreateForm(seed.Code), null, null, TestContext.Current.CancellationToken)).IsSuccess);
+        await database.Context.AppRedirectUris.ExecuteDeleteAsync(TestContext.Current.CancellationToken);
+        var replay = await database.Service.RedeemAsync(seed.Application, CreateForm(seed.Code), null, null, TestContext.Current.CancellationToken);
+        Assert.Equal("replay", replay.FailureReason);
+        Assert.NotNull((await database.Context.IdentitySessions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).RevokedAt);
+    }
+
+    [Fact]
     public async Task RedeemAsync_CommitsTheConsumptionTheAuditAndBothTokens()
     {
         await using var database = await CreateDatabaseAsync();
@@ -637,6 +661,10 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         };
         var accountId = Guid.NewGuid();
         var credentialId = Guid.NewGuid();
+        application.RedirectUris.Add(new AppRedirectUriEntity
+        {
+            Id = Guid.NewGuid(), AppRegistrationId = application.Id, Kind = RedirectUriKind.Redirect, CanonicalUri = RedirectUri
+        });
         context.AppRegistrations.Add(application);
         context.Accounts.Add(new AccountEntity
         {
