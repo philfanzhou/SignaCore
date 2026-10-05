@@ -34,7 +34,7 @@ SignaCore is a .NET 10 identity and authentication service. It centralizes accou
 
 Requirements: .NET SDK 10, Node.js 22.12+, 24+, or 26+ with npm for the admin UI, and Docker for the container smoke test.
 
-SignaCore pins all eight ServiceMantle packages to `0.3.0`: the core package, `Web`,
+SignaCore pins all eight ServiceMantle packages to the official `0.3.1-rc.1` prerelease: the core package, `Web`,
 `Discovery`, `Logging`, `Diagnostics`, `Persistence.Relational`, and the PostgreSQL/SQLite
 providers. Upgrade or roll back the complete binaries together; do not mix the retired adapter
 assemblies with capability-named assemblies. This package migration adds no database migration:
@@ -104,10 +104,12 @@ file at `/app/config/signacore.bootstrap.json`: the database provider, server ve
 string, plus the inline external root key. The whole file is a mode-`0600` secret on persistent
 storage and must be backed up with the database.
 
-An optional [private-network HTTP testing policy foundation](docs/oidc/HttpTesting.md) is available
+An optional [private-network HTTP testing policy](docs/oidc/HttpTesting.md) is available
 through the shared `security.hosted_login_http_test_origins` JSON setting (missing/`[]` disables it).
-A nonempty list requires the actual `Testing` Host environment and restart. This stage does not yet
-enable HTTP callback registration or identity/CSRF Cookies; existing HTTPS defaults remain in force.
+A nonempty list requires the actual `Testing` Host environment and restart. Exact allowlisted HTTP callback/logout registration and current-policy runtime revalidation are
+supported, together with the isolated HTTP identity/CSRF Cookie carrier at exact allowed request
+origins. Both stages are implemented; official dual-end published-image/browser release acceptance
+remains pending. HTTPS defaults remain in force.
 
 Important defaults, all stored in the database and editable after installation:
 

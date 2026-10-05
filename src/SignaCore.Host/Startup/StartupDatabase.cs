@@ -9,8 +9,8 @@ using SignaCore.Database;
 namespace SignaCore.Host.Startup;
 
 /// <summary>
-/// Startup-owned database preparation that stays outside the shared ServiceMantle migration
-/// orchestration: preparing the named database before anything connects to it, and the outer
+/// Startup-owned database preparation through the shared ServiceMantle gate before anything
+/// connects to the named target, and the outer
 /// initialization advisory lock that serializes whole-bootstrap-phase work across instances.
 /// </summary>
 /// <remarks>
@@ -47,34 +47,13 @@ internal static class StartupDatabase
 {
     private const long PostgreSqlInitializationLockId = 5860957687944148308;
 
-    /// <summary>
-    /// The fixed preparation budget, matching the bootstrap candidate path so both creation paths
-    /// share one deployment rule.
-    /// </summary>
-    private static readonly TimeSpan TargetPreparationTimeout = TimeSpan.FromSeconds(30);
-
     public static async Task EnsureDatabaseExistsAsync(
         DatabaseOptions options,
         CancellationToken cancellationToken = default)
     {
-        switch (options.ProviderKind)
-        {
-            case DatabaseProvider.PostgreSql:
-                await EnsurePostgreSqlDatabaseExistsAsync(
-                    options,
-                    targetPreparationProvider: null,
-                    cancellationToken);
-                break;
-            case DatabaseProvider.Sqlite:
-                await EnsureSqliteDatabaseExistsAsync(
-                    options,
-                    targetPreparationProvider: null,
-                    createParentDirectory: null,
-                    cancellationToken);
-                break;
-            default:
-                throw new InvalidOperationException("Unsupported database provider.");
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        await using var composition = StartupDatabaseComposition.Create(options);
+        await composition.PrepareAsync(cancellationToken);
     }
 
     public static async Task<IAsyncDisposable> AcquireInitializationLockAsync(
@@ -127,53 +106,15 @@ internal static class StartupDatabase
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var provider = targetPreparationProvider ?? new PostgreSqlDatabaseTargetPreparationProvider();
-        var target = new BootstrapDatabaseConfiguration(
-            options.Provider,
-            options.ServerVersion,
-            options.ConnectionString);
-
-        // Observation runs against the target itself: an existing connectable database never
-        // touches the maintenance database and needs no creation or ownership privileges.
-        var observation = await provider.ObserveAsync(target, cancellationToken);
-        if (observation.Status == DatabaseTargetObservationStatus.TargetConnectable)
-        {
-            return;
-        }
-
-        // Only a proven-missing target is prepared. Unreachable servers, failed authentication,
-        // and refused access fail closed here, so they are never mistaken for a missing target.
-        if (observation.Status != DatabaseTargetObservationStatus.TargetMissing)
-        {
-            throw PostgreSqlPreparationFailure(observation.ErrorCode);
-        }
-
-        // The maintenance connection reuses the target's own credentials against the provider's
-        // maintenance database, the same convention the bootstrap candidate path applies.
-        var maintenance = new NpgsqlConnectionStringBuilder(options.ConnectionString)
-        {
-            Database = "postgres",
-            Pooling = false
-        };
-        var prepared = await provider.PrepareAsync(
-            new DatabaseTargetPreparationRequest(target, maintenance.ConnectionString),
-            TargetPreparationTimeout,
-            cancellationToken);
-        if (!prepared.Succeeded)
-        {
-            throw PostgreSqlPreparationFailure(prepared.ErrorCode);
-        }
-
-        // The final observation is never skipped: a created (or concurrently already created)
-        // target counts only once it is connectable itself. A failure here fails closed before the
-        // initialization lock and migrations, leaves any created database in place for the next
-        // start, and never rewrites the bootstrap file or the installation authority.
-        var confirmation = await provider.ObserveAsync(target, cancellationToken);
-        if (confirmation.Status != DatabaseTargetObservationStatus.TargetConnectable)
-        {
-            throw PostgreSqlPreparationFailure(confirmation.ErrorCode);
-        }
+        await using var composition = StartupDatabaseComposition.Create(
+            options, targetPreparationProvider: targetPreparationProvider);
+        await composition.PrepareAsync(cancellationToken);
     }
+
+    internal static StartupDatabaseException PreparationFailure(DatabaseProvider provider, string? code)
+        => provider == DatabaseProvider.PostgreSql
+            ? PostgreSqlPreparationFailure(code)
+            : SqlitePreparationFailure(code);
 
     private static StartupDatabaseException PostgreSqlPreparationFailure(string? errorCode)
     {
@@ -240,58 +181,9 @@ internal static class StartupDatabase
         Func<string, string>? canonicalizePath = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        EnsureSqliteParentDirectoryExists(options.ConnectionString, createParentDirectory, canonicalizePath);
-
-        var provider = targetPreparationProvider ?? new SqliteDatabaseTargetPreparationProvider();
-        var target = new BootstrapDatabaseConfiguration(
-            options.Provider,
-            options.ServerVersion,
-            options.ConnectionString);
-
-        var observation = await provider.ObserveAsync(target, cancellationToken);
-        if (observation.Status == DatabaseTargetObservationStatus.TargetConnectable)
-        {
-            return;
-        }
-
-        // An existing dirty target — WAL/journal sidecars present, or a read-only probe failure —
-        // is not a startup precondition failure: EF's native open stays the final judge, completing
-        // WAL recovery or failing exactly as it did before this contract existed. Only the shared
-        // target-conflict classification is passed through; every other unreachable observation
-        // (permission denied, connection failed, invalid target) fails closed.
-        if (observation.Status == DatabaseTargetObservationStatus.TargetUnreachable &&
-            string.Equals(
-                observation.ErrorCode,
-                WellKnownDatabaseTargetPreparationErrorCodes.TargetConflict,
-                StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        // Only a proven-missing target is created, and never over anything that already exists.
-        if (observation.Status != DatabaseTargetObservationStatus.TargetMissing)
-        {
-            throw SqlitePreparationFailure(observation.ErrorCode);
-        }
-
-        var prepared = await provider.PrepareAsync(
-            DatabaseTargetPreparationRequest.ForFile(target),
-            TargetPreparationTimeout,
-            cancellationToken);
-        if (!prepared.Succeeded)
-        {
-            throw SqlitePreparationFailure(prepared.ErrorCode);
-        }
-
-        // The final observation is never skipped: a created (or concurrently already created) file
-        // counts only once it is connectable itself. A failure here fails closed before the
-        // initialization lock and migrations, leaves any created file in place for the next start,
-        // and never rewrites the bootstrap file or the installation authority.
-        var confirmation = await provider.ObserveAsync(target, cancellationToken);
-        if (confirmation.Status != DatabaseTargetObservationStatus.TargetConnectable)
-        {
-            throw SqlitePreparationFailure(confirmation.ErrorCode);
-        }
+        await using var composition = StartupDatabaseComposition.Create(
+            options, targetPreparationProvider: targetPreparationProvider);
+        await composition.PrepareAsync(cancellationToken, createParentDirectory, canonicalizePath);
     }
 
     /// <summary>
@@ -301,7 +193,7 @@ internal static class StartupDatabase
     /// shared provider refuses them with its invalid-target classification instead of resolving
     /// them against the working directory.
     /// </summary>
-    private static void EnsureSqliteParentDirectoryExists(
+    internal static void EnsureSqliteParentDirectoryExists(
         string connectionString,
         Func<string, DirectoryInfo>? createParentDirectory,
         Func<string, string>? canonicalizePath)

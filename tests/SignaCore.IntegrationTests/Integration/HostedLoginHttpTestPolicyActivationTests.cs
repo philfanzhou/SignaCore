@@ -63,7 +63,8 @@ public sealed class HostedLoginHttpTestPolicyActivationTests : IAsyncLifetime
         Assert.True(policy.ContainsOrigin(Origin));
         Assert.False(policy.ContainsOrigin("http://10.20.30.41:5008"));
         Assert.Equal("Testing", host.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>().EnvironmentName);
-        // This foundation does not change the identity/CSRF Cookie profile or relax URI policy.
+        // URI policy is projected only from the activated snapshot; the HTTPS carrier remains Secure.
+        Assert.True(host.Services.GetRequiredService<SignaCore.Domain.Validators.OidcRedirectUriPolicy>().Allows(Origin + "/callback"));
         var app = await OAuthLoginSmsCodeTestSupport.SeedSmsAppAsync(host.Services, SignaCore.Database.Entity.SmsLoginMode.Disabled);
         var (handle, _) = await OAuthLoginSmsCodeTestSupport.SeedContinuationAsync(host.Services, app);
         using var page = await client.GetAsync("/oauth2/login?login_handle=" + handle, Ct);

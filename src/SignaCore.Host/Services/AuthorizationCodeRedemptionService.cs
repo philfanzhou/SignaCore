@@ -127,7 +127,8 @@ public sealed class AuthorizationCodeRedemptionService(
     IdentityDbContext dbContext,
     AdminIdentityOptions adminIdentityOptions,
     ISmsAdmissionService smsAdmissions,
-    ILogger<AuthorizationCodeRedemptionService> logger)
+    ILogger<AuthorizationCodeRedemptionService> logger,
+    OidcRedirectUriPolicy? uriPolicy = null)
 {
     public const string GrantType = "authorization_code";
 
@@ -283,6 +284,10 @@ public sealed class AuthorizationCodeRedemptionService(
         {
             return InvalidGrant();
         }
+
+        if (!await OidcCurrentRedirectTrust.AllowsAsync(dbContext, app.Id, RedirectUriKind.Redirect,
+                lookup.Entity.RedirectUri, uriPolicy ?? OidcRedirectUriPolicy.Default, cancellationToken))
+            return InvalidGrant();
 
         var session = sessionLookup.Session;
         var account = await accounts.GetByIdAsync(lookup.Entity.AccountId, cancellationToken);
@@ -478,6 +483,13 @@ public sealed class AuthorizationCodeRedemptionService(
             // classification, the current application and its session policy, the account, the
             // SMS admission of an Sms session, and the current scope allow list
             // (EV-04/05/08/09/10/13/38).
+            if (!await OidcCurrentRedirectTrust.AllowsAsync(dbContext, applicationRowId, RedirectUriKind.Redirect,
+                    lockedCode.RedirectUri, uriPolicy ?? OidcRedirectUriPolicy.Default, operationToken))
+            {
+                await transaction.RollbackAsync(operationToken);
+                return InvalidGrant();
+            }
+
             var codeCarriesOfflineAccess = ContainsOfflineAccess(lockedCode.Scope);
             var currentApplication = await ReadApplicationAsync(
                 applicationRowId,

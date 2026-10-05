@@ -171,6 +171,16 @@ The launcher gives the old container 35 seconds to shut down cleanly. A rollback
 container image and configuration, but it does not reverse database migrations; keep migrations
 backward-compatible and take a verified database backup before deployment.
 
+Startup uses one core-only ServiceMantle container for the preparation and migration stages.
+It registers no hosted services or startup identity. Preparation runs before the historical outer
+initialization lock; the legacy pre-check runs inside that lock before migration, then installation
+resolution follows. Each migration run has a fresh receipt and explicitly skips preparation;
+the caller retains ownership of its executor and DbContext. Shared preparation owns the only
+observe/create/confirm sequence. The product preserves fixed provider error classifications from
+its invocation-local observations, and delegates an initially dirty SQLite target to EF's native
+open without enabling shared WAL checkpointing. No target creation or committed migration is
+rolled back by a later failure or cancellation.
+
 Startup prepares a missing PostgreSQL database target through the shared ServiceMantle preparation
 provider (see [First-run setup](./FirstRunSetup.md#database-target-preparation-at-startup)). An
 already-connectable target is used as-is without any maintenance-database access; a missing target
@@ -353,7 +363,9 @@ existing non-HTTPS issuer opt-in and issuer equality. Non-Testing Hosts refuse n
 on their next startup, even if an authenticated administrator previously saved the value.
 
 The exact allowed Testing request origin can use the isolated HTTP identity/CSRF Cookie carrier.
-HTTP callback URI registration and runtime trust remain a separate deployment stage. See [Private-network HTTP testing](../oidc/HttpTesting.md) for strict private literal-IP
-syntax, isolated-network responsibilities, staged delivery and rollback. Remove the explicit
+Exact allowlisted complete HTTP callback/logout registrations also require current-policy
+revalidation at runtime. Both stages are implemented; official dual-end published-image/browser
+acceptance remains the complete-capability release gate. See [Private-network HTTP testing](../oidc/HttpTesting.md) for strict private literal-IP
+syntax, isolated-network responsibilities, release acceptance and rollback. Remove the explicit
 new key through shared updates with `value=null` before running an older 44-key binary; retain
 the database and external keys. No schema migration or deployment default changes are needed.

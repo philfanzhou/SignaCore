@@ -17,12 +17,15 @@ internal static class OidcCurrentAuthorizationPolicy
     public static async Task<bool> AllowsAsync(
         IdentityDbContext context,
         OidcAuthorizationValidationResult.Accepted accepted,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, OidcRedirectUriPolicy? uriPolicy = null)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (context.Database.CurrentTransaction is null)
         {
             throw new InvalidOperationException("Authorization policy recheck requires a transaction.");
         }
+
+        if (!(uriPolicy ?? OidcRedirectUriPolicy.Default).Allows(accepted.RegisteredRedirectUri)) return false;
 
         var sqlite = string.Equals(context.Database.ProviderName,
             "Microsoft.EntityFrameworkCore.Sqlite", StringComparison.Ordinal);

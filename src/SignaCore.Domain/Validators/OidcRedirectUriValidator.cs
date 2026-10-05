@@ -8,7 +8,8 @@ public static class OidcRedirectUriValidator
 {
     public static IReadOnlyList<OidcRedirectUri> ValidateAndCanonicalize(
         IEnumerable<string> values,
-        bool isDevelopment)
+        bool isDevelopment,
+        OidcRedirectUriPolicy? policy = null)
     {
         ArgumentNullException.ThrowIfNull(values);
 
@@ -23,7 +24,7 @@ public static class OidcRedirectUriValidator
                     "A redirect URI set cannot contain more than ten values.");
             }
 
-            var canonical = Canonicalize(value, isDevelopment);
+            var canonical = Canonicalize(value, isDevelopment, policy);
             if (!uniqueValues.Add(canonical))
             {
                 throw new OidcClientConfigurationException(
@@ -38,12 +39,13 @@ public static class OidcRedirectUriValidator
 
     public static OidcRedirectUri ValidateAndCanonicalize(
         string value,
-        bool isDevelopment)
+        bool isDevelopment,
+        OidcRedirectUriPolicy? policy = null)
     {
-        return new OidcRedirectUri(Canonicalize(value, isDevelopment));
+        return new OidcRedirectUri(Canonicalize(value, isDevelopment, policy));
     }
 
-    private static string Canonicalize(string value, bool isDevelopment)
+    private static string Canonicalize(string value, bool isDevelopment, OidcRedirectUriPolicy? policy)
     {
         if (string.IsNullOrEmpty(value)
             || value.Length > IdentityConstants.MaxOidcRedirectUriLength
@@ -107,8 +109,8 @@ public static class OidcRedirectUriValidator
         }
 
         if (scheme == "http"
-            && (!isDevelopment
-                || (host != "127.0.0.1" && host != "[::1]")))
+            && !(isDevelopment && (host == "127.0.0.1" || host == "[::1]"))
+            && !(policy?.AllowsHttpAuthority(rawAuthority) ?? false))
         {
             throw InvalidUri();
         }

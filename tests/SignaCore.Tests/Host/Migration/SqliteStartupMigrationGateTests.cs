@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -58,6 +59,41 @@ public sealed class SqliteStartupMigrationGateTests
             Assert.False(executor.Disposed);
             Assert.Equal(1, executor.ExecuteCount);
             Assert.Equal(history, await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken));
+            await db.Database.ExecuteSqlRawAsync("SELECT 1;", TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
+    [Fact]
+    public async Task CoreComposition_PrepareAndRepeatedRunShareGateWithoutHostedServicesOrExecutorOwnership()
+    {
+        var path = NewDatabasePath();
+        try
+        {
+            var options = TestDatabaseOptions(path);
+            var contextOptions = new DbContextOptionsBuilder<IdentityDbContext>();
+            contextOptions.UseIdentityDatabase(options);
+            await using var db = new IdentityDbContext(contextOptions.Options);
+            using var executor = new DisposableExecutor(new SignaCoreMigrationExecutor(db, options));
+            await using (var composition = StartupDatabaseComposition.Create(options, executor))
+            {
+                Assert.Empty(composition.Services.GetServices<IHostedService>());
+                Assert.Same(executor, composition.Services.GetRequiredService<IDatabaseMigrationExecutor>());
+                var gate = composition.Services.GetRequiredService<StartupDatabaseGate>();
+                await composition.PrepareAsync(TestContext.Current.CancellationToken);
+                Assert.Equal(0, executor.ExecuteCount);
+                Assert.True(File.Exists(path));
+                Assert.Empty(await db.Database.GetAppliedMigrationsAsync(TestContext.Current.CancellationToken));
+                await composition.RunMigrationAsync(NullLogger.Instance, TestContext.Current.CancellationToken);
+                await composition.RunMigrationAsync(NullLogger.Instance, TestContext.Current.CancellationToken);
+                Assert.Same(gate, composition.Services.GetRequiredService<StartupDatabaseGate>());
+                Assert.Equal(1, executor.ExecuteCount);
+                Assert.False(executor.Disposed);
+            }
+            Assert.False(executor.Disposed);
             await db.Database.ExecuteSqlRawAsync("SELECT 1;", TestContext.Current.CancellationToken);
         }
         finally

@@ -391,8 +391,9 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
 
 // Construct before any application seeding or requests. Only the activated snapshot and the
 // actual host environment authorize this policy; later IConfiguration overlays cannot alter it.
-builder.Services.AddSingleton(HostedLoginHttpTestPolicy.Create(
-    bootstrapResult.SharedSnapshot!, builder.Environment));
+var httpTestPolicy = HostedLoginHttpTestPolicy.Create(bootstrapResult.SharedSnapshot!, builder.Environment);
+builder.Services.AddSingleton(httpTestPolicy);
+builder.Services.AddSingleton(httpTestPolicy.ToRedirectUriPolicy(builder.Environment.IsDevelopment()));
 
 // ---- Consul Service Discovery (optional, snapshot-driven shared lifecycle) ----
 // The product snapshot activated by the bootstrap phase is projected in memory onto the shared
@@ -553,7 +554,8 @@ using (var seedScope = app.Services.CreateScope())
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger(typeof(BootstrapAppSeeder).FullName!),
         seedScope.ServiceProvider.GetRequiredService<IHostEnvironment>().IsDevelopment(),
-        app.Lifetime.ApplicationStopping);
+        app.Lifetime.ApplicationStopping,
+        seedScope.ServiceProvider.GetRequiredService<SignaCore.Domain.Validators.OidcRedirectUriPolicy>());
 }
 
 // ---- Wait for KeyManager initialization before accepting requests ----

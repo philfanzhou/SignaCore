@@ -920,6 +920,12 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
             .Select(app => app.Id)
             .SingleAsync(TestContext.Current.CancellationToken);
 
+        if (!await dbContext.AppRedirectUris.AnyAsync(row => row.AppRegistrationId == applicationRowId && row.CanonicalUri == redirectUri && row.Kind == RedirectUriKind.Redirect, TestContext.Current.CancellationToken))
+        {
+            dbContext.AppRedirectUris.Add(new() { Id = Guid.NewGuid(), AppRegistrationId = applicationRowId, Kind = RedirectUriKind.Redirect, CanonicalUri = redirectUri });
+            await dbContext.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
         var now = createdAt ?? DateTimeOffset.UtcNow;
         var session = await sessions.CreateAsync(accountId, credentialId, now, TestContext.Current.CancellationToken);
         var creation = await codes.CreateAsync(

@@ -36,7 +36,8 @@ internal static class BootstrapAppSeeder
         IPasswordHasher passwordHasher,
         ILogger logger,
         bool isDevelopment,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        OidcRedirectUriPolicy? uriPolicy = null)
     {
         var filePath = configuration["BootstrapApps:FilePath"] ?? DefaultBootstrapAppsFilePath;
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
@@ -95,7 +96,7 @@ internal static class BootstrapAppSeeder
                     passwordHasher,
                     logger,
                     isDevelopment,
-                    cancellationToken);
+                    cancellationToken, uriPolicy);
                 switch (result)
                 {
                     case BootstrapAppSeedResult.Created:
@@ -139,7 +140,7 @@ internal static class BootstrapAppSeeder
         IPasswordHasher passwordHasher,
         ILogger logger,
         bool isDevelopment,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, OidcRedirectUriPolicy? uriPolicy)
     {
         if (string.IsNullOrWhiteSpace(entry.AppId) || string.IsNullOrWhiteSpace(entry.AppSecret))
         {
@@ -181,7 +182,7 @@ internal static class BootstrapAppSeeder
             {
                 // The change lists are irrelevant here: the application itself is new, so adding it
                 // below stages its registrations with it.
-                OidcClientConfigurationApplier.Apply(app, entry.Oidc, isDevelopment);
+                OidcClientConfigurationApplier.Apply(app, entry.Oidc, isDevelopment, uriPolicy);
             }
             catch (OidcClientConfigurationException exception)
             {
