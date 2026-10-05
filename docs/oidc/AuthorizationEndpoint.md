@@ -106,3 +106,5 @@ the complete flow reaches activation row `AC-07`.
 Current `/oauth2/token`, `/oauth2/revoke`, `/api/auth/*`, claims callbacks, management routes,
 Discovery documents, and the shared ServiceMantle management cookie (`PS-18`) remain unchanged.
 This document does not register a route or enable an application.
+
+The current transport-policy and complete-registration checks, including the explicit Testing HTTP exception and old-artifact rejection, are defined in [the canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust).

@@ -765,6 +765,7 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
                     AppName = $"Rotation {appId}",
                     CreatedAt = DateTimeOffset.UtcNow
                 };
+                application.RedirectUris.Add(new() { Id = Guid.NewGuid(), AppRegistrationId = application.Id, Kind = RedirectUriKind.Redirect, CanonicalUri = RedirectUri });
                 dbContext.AppRegistrations.Add(application);
             }
 

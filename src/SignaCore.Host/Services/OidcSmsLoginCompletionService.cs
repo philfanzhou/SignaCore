@@ -96,7 +96,8 @@ public sealed class OidcSmsLoginCompletionService(
     IUnitOfWork unitOfWork,
     IdentityDbContext dbContext,
     AuthMetrics metrics,
-    ILogger<OidcSmsLoginCompletionService> logger)
+    ILogger<OidcSmsLoginCompletionService> logger,
+    SignaCore.Domain.Validators.OidcRedirectUriPolicy? uriPolicy = null)
 {
     /// <summary>The <c>auth.account.creation</c> source, shared with the SMS token grant.</summary>
     public const string AccountCreationSource = "auto_register_sms";
@@ -168,7 +169,7 @@ public sealed class OidcSmsLoginCompletionService(
             // ① Consume first: the single point a concurrent duplicate submission loses on,
             // before any OTP, identity, session, or code write (EV-03 race, SC-26).
             if (!await continuations.TryConsumeAsync(request.LoginHandle, request.Now, operationCancellationToken)
-                || !await OidcCurrentAuthorizationPolicy.AllowsAsync(dbContext, accepted, operationCancellationToken))
+                || !await OidcCurrentAuthorizationPolicy.AllowsAsync(dbContext, accepted, operationCancellationToken, uriPolicy))
             {
                 await transaction.RollbackAsync(operationCancellationToken);
                 return ((OidcSmsLoginResult)OidcSmsLoginResult.Unavailable, false);

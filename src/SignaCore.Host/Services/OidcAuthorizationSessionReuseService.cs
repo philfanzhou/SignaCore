@@ -34,7 +34,8 @@ public sealed class OidcAuthorizationSessionReuseService(
     IManagementAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
     IdentityDbContext dbContext,
-    ISmsAdmissionService smsAdmissions)
+    ISmsAdmissionService smsAdmissions,
+    SignaCore.Domain.Validators.OidcRedirectUriPolicy? uriPolicy = null)
 {
     private const string AuditAction = "oidc.authorize.validated";
     private const string AuditTargetType = "OidcAuthorizationRequest";
@@ -86,7 +87,7 @@ public sealed class OidcAuthorizationSessionReuseService(
             }
 
             if (!await OidcCurrentAuthorizationPolicy.AllowsAsync(
-                    dbContext, accepted, operationToken))
+                    dbContext, accepted, operationToken, uriPolicy))
             {
                 await transaction.RollbackAsync(operationToken);
                 return null;

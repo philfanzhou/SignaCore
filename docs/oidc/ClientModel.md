@@ -93,3 +93,5 @@ admission policies, active state, and audience mode. This target design changes 
 by documentation alone. Existing applications, grants, callbacks, shared-audience tokens,
 `bootstrap-apps.json`, and admin API responses retain their current behavior until their focused
 implementation tasks explicitly add disabled-by-default fields and provider-symmetric migrations.
+
+The current transport-policy and complete-registration checks, including the explicit Testing HTTP exception and old-artifact rejection, are defined in [the canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust).

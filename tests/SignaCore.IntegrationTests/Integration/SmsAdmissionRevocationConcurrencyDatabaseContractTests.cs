@@ -312,6 +312,7 @@ public sealed class SmsAdmissionRevocationConcurrencyDatabaseContractTests
                 AllowRefreshToken = true,
                 SmsLoginMode = SmsLoginMode.ManualApproval
             };
+            application.RedirectUris.Add(new() { Id = Guid.NewGuid(), AppRegistrationId = application.Id, Kind = RedirectUriKind.Redirect, CanonicalUri = RedirectUri });
             context.AppRegistrations.Add(application);
         }
 

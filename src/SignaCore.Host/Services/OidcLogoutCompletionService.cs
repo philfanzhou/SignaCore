@@ -56,7 +56,8 @@ public sealed class OidcLogoutCompletionService(
     IManagementAuditWriter auditWriter,
     IUnitOfWork unitOfWork,
     IdentityDbContext dbContext,
-    ILogger<OidcLogoutCompletionService> logger)
+    ILogger<OidcLogoutCompletionService> logger,
+    SignaCore.Domain.Validators.OidcRedirectUriPolicy? uriPolicy = null)
 {
     private const string CompletedAuditAction = "oidc.logout.completed";
     private const string LogoutRequestAuditTargetType = "LogoutRequest";
@@ -105,6 +106,15 @@ public sealed class OidcLogoutCompletionService(
             if (lockedRequest is null
                 || lockedRequest.ConsumedAt is not null
                 || lockedRequest.ExpiresAt <= now)
+            {
+                await transaction.RollbackAsync(operationToken);
+                return OidcLogoutCompletionResult.Unavailable;
+            }
+
+            if (lockedRequest.PostLogoutRedirectUri is string redirect
+                && !await OidcCurrentRedirectTrust.AllowsAsync(dbContext, lockedRequest.AppRegistrationId,
+                    SignaCore.Database.Entity.RedirectUriKind.PostLogout, redirect,
+                    uriPolicy ?? SignaCore.Domain.Validators.OidcRedirectUriPolicy.Default, operationToken))
             {
                 await transaction.RollbackAsync(operationToken);
                 return OidcLogoutCompletionResult.Unavailable;

@@ -4,10 +4,11 @@ Current database support is PostgreSQL 15+ and local-file SQLite (single-instanc
 MySQL, MariaDB, SQL Server and Oracle deployments remain deferred under the
 [database provider support decision](../database/provider-support-decision.md).
 
-Runtime instance identifiers use the shared `InstanceId.CreateRandom` generator: `signacore-`
-for each Bootstrap, Setup, or normal host build, and `signacore-startup-` for a direct startup
-gate invocation. The suffix remains 32 lowercase hexadecimal characters; these are diagnostic
-metadata generated anew, while the stable migration service identity remains `signacore`.
+Runtime instance identifiers use the shared `InstanceId.CreateRandom` generator with the
+`signacore-` prefix for each Bootstrap, Setup, or normal host build. The suffix remains 32
+lowercase hexadecimal characters, generated anew as diagnostic metadata. Core-only startup
+database composition creates no isolated runtime identity; its migration service identity remains
+the stable `signacore` value.
 
 ## Build
 
@@ -170,6 +171,16 @@ recognizes both states and keeps the container running instead of rolling back. 
 The launcher gives the old container 35 seconds to shut down cleanly. A rollback restores the prior
 container image and configuration, but it does not reverse database migrations; keep migrations
 backward-compatible and take a verified database backup before deployment.
+
+Startup uses one core-only ServiceMantle container for the preparation and migration stages.
+It registers no hosted services or startup identity. Preparation runs before the historical outer
+initialization lock; the legacy pre-check runs inside that lock before migration, then installation
+resolution follows. Each migration run has a fresh receipt and explicitly skips preparation;
+the caller retains ownership of its executor and DbContext. Shared preparation owns the only
+observe/create/confirm sequence. The product preserves fixed provider error classifications from
+its invocation-local observations, and delegates an initially dirty SQLite target to EF's native
+open without enabling shared WAL checkpointing. No target creation or committed migration is
+rolled back by a later failure or cancellation.
 
 Startup prepares a missing PostgreSQL database target through the shared ServiceMantle preparation
 provider (see [First-run setup](./FirstRunSetup.md#database-target-preparation-at-startup)). An
@@ -352,8 +363,8 @@ An HTTP public base URL must have its exact origin listed and must independently
 existing non-HTTPS issuer opt-in and issuer equality. Non-Testing Hosts refuse nonempty lists
 on their next startup, even if an authenticated administrator previously saved the value.
 
-This policy foundation does not yet enable HTTP callback registration or HTTP identity/CSRF
-Cookies. See [Private-network HTTP testing](../oidc/HttpTesting.md) for strict private literal-IP
+Exact allowlisted complete HTTP callback/logout registrations now require current-policy
+revalidation at runtime. HTTP identity/CSRF Cookies remain a separate stage. See [Private-network HTTP testing](../oidc/HttpTesting.md) for strict private literal-IP
 syntax, isolated-network responsibilities, staged delivery and rollback. Remove the explicit
 new key through shared updates with `value=null` before running an older 44-key binary; retain
 the database and external keys. No schema migration or deployment default changes are needed.

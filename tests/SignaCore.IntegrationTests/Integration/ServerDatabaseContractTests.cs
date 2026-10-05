@@ -1657,6 +1657,7 @@ public sealed class ServerDatabaseContractTests
             Id = appId, AppId = "redemption-contract-app",
             AppSecretHash = clientType == OidcClientType.Public ? string.Empty : "hash",
             AppName = "Redemption Contract", IsActive = true, CreatedAt = DateTimeOffset.UtcNow,
+            RedirectUris = [new() { Id = Guid.NewGuid(), AppRegistrationId = appId, Kind = RedirectUriKind.Redirect, CanonicalUri = "https://client.example.com/callback" }],
             AudienceMode = AudienceMode.PerApplication,
             ClientType = clientType,
             AllowAuthorizationCode = true,

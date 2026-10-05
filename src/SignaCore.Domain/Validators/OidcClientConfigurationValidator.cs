@@ -18,7 +18,8 @@ public static class OidcClientConfigurationValidator
         bool isDevelopment,
         OidcClientType? currentClientType = null,
         bool applicationIsActive = true,
-        bool hasAppSecret = false)
+        bool hasAppSecret = false,
+        OidcRedirectUriPolicy? policy = null)
     {
         if (!Enum.IsDefined(clientType))
         {
@@ -38,10 +39,10 @@ public static class OidcClientConfigurationValidator
             allowRefreshToken);
         var canonicalRedirectUris = OidcRedirectUriValidator.ValidateAndCanonicalize(
             redirectUris,
-            isDevelopment);
+            isDevelopment, policy);
         var canonicalPostLogoutRedirectUris = OidcRedirectUriValidator.ValidateAndCanonicalize(
             postLogoutRedirectUris,
-            isDevelopment);
+            isDevelopment, policy);
 
         if (clientType == OidcClientType.Public && allowRefreshToken
             && (!applicationIsActive

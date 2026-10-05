@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using ServiceMantle;
 using SignaCore.Host;
-using SignaCore.Host.Migration;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Configuration;
@@ -30,15 +29,4 @@ public sealed class ServiceMantleInstanceIdentityTests
         Assert.Same(firstId, first.GetRequiredService<InstanceId>());
     }
 
-    [Fact]
-    public void DirectStartupComposition_PreservesItsDistinctDiagnosticPrefixOnEachInvocation()
-    {
-        var first = StartupMigrationGate.CreateStartupInstanceId();
-        var second = StartupMigrationGate.CreateStartupInstanceId();
-        Assert.Matches("^signacore-startup-[0-9a-f]{32}$", first.Value);
-        Assert.Matches("^signacore-startup-[0-9a-f]{32}$", second.Value);
-        Assert.Equal(first, InstanceId.Parse(first.Value));
-        Assert.Equal(second, InstanceId.Parse(second.Value));
-        Assert.NotEqual(first, second);
-    }
 }
