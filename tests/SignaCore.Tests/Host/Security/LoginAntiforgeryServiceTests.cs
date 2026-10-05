@@ -175,6 +175,24 @@ public sealed class LoginAntiforgeryServiceTests : IDisposable
         Assert.False(validator.IsValidPair(pair.CookieValue, pair.RequestToken));
     }
 
+    [Fact]
+    public void HttpTestPairs_AreCryptographicallyIsolated_AndReuseOnlyTheirOwnCookie()
+    {
+        var service = CreateService();
+        var secure = service.IssuePair(null);
+        var test = service.IssuePair(null, httpTest: true);
+        Assert.True(service.IsValidPair(test.CookieValue, test.RequestToken, true));
+        Assert.False(service.IsValidPair(test.CookieValue, test.RequestToken));
+        Assert.False(service.IsValidPair(secure.CookieValue, secure.RequestToken, true));
+        Assert.False(service.IsValidPair(test.CookieValue, secure.RequestToken, true));
+        Assert.False(service.IsValidPair(secure.CookieValue, test.RequestToken));
+        Assert.False(service.IssuePair(secure.CookieValue, true).ReusedExistingCookie);
+        Assert.False(service.IssuePair(test.CookieValue).ReusedExistingCookie);
+        var parallel = service.IssuePair(test.CookieValue, true);
+        Assert.True(parallel.ReusedExistingCookie);
+        Assert.True(service.IsValidPair(test.CookieValue, parallel.RequestToken, true));
+    }
+
     private static string TamperLastCharacter(string value)
     {
         var last = value[^1];

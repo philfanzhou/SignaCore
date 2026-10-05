@@ -141,6 +141,41 @@ implementation tasks; this document itself changes neither history.
 | `PS-23` | Reference introduction phase | Every persisted reference in this table is created by the same provider migration that creates its own column, and that migration runs only after the referenced authority table already exists in both histories. `authorization_codes` is therefore created complete: #50 creates the table with its non-null restrictive `PS-04` session reference and runs after #95. The single named exception is the nullable `authorization_codes.refresh_family_id` column, created by #50 without a reference because no family root shape exists yet and added as a restrictive reference by #97 after its backfill | No history state exists in which a stored artifact can name an authority the schema cannot resolve, so no domain-only substitute for a missing reference is ever written. PostgreSQL and SQLite carry the same one-migration shape and the same `Down` boundary: a reference introduced with its table is removed only by dropping that table, and the one deferred reference is removed by the migration that added it |
 | `PS-24` | Shared OIDC rate-limit budget | `oidc_rate_limit_buckets` has composite primary key `(policy, partition_digest)`, `policy` varchar(32)/SQLite TEXT, `partition_digest` varchar(64)/TEXT, `window_expires_at` UTC DateTimeOffset (PostgreSQL timestamptz / SQLite Unix microseconds INTEGER), and `permit_count` INTEGER. Expiry index; CHECK constraints admit only `oidc-authorize`, `oidc-login`, `oidc-token`, `oidc-userinfo`, `oidc-logout`, `oidc-revoke`, `oidc-sms-code` (added by #443), digest length 64, and count 1–90. No foreign keys, raw client/IP/credential fields, or per-request business audit rows | One row per policy/partition, not per window. Lowercase hex and HMAC input validation belong to the future store boundary, not this schema. #379 installs the table on both providers. On PostgreSQL, #381 admits the interactive policies of every replica through one auto-committed statement per request (`503` when the store cannot decide); partitions are stored as HMAC digests keyed from the root key. SQLite registers no writer and retains its single-instance in-memory limiter. Admission events and sensitive partition derivation remain in [#71](https://github.com/philfanzhou/SignaCore/issues/71); the rest of AC-13 is unchanged. `oidc-sms-code` has a fixed budget of 20 per 60-second window in `OidcRateLimitBudgets`, is partitioned only by source network (the send route has no trusted client carrier and its body is never read by the resolver), and is registered on the send route by #444; rollback of the policy value requires that no `oidc-sms-code` bucket row remains |
 
+### Testing HTTP cookie carrier (PS-18 / PS-19)
+
+HTTPS always retains the original identity scheme, `__Host-signacore_identity`,
+`SignaCore.IdentitySession.v1` purpose, and Secure attributes. All explicit identity authenticate,
+challenge, forbid, sign-in and sign-out calls select one immutable request profile. HTTP is admitted
+only when the actual Host is `Testing` and its trusted effective request scheme plus literal IP and
+effective port exactly match the activated shared HTTP test origins. Raw forwarding headers have
+no authority. Other HTTP requests fail locally before credential, OTP, continuation, session or code
+writes and cannot issue, read or delete either identity profile.
+
+The admitted HTTP carrier uses scheme `SignaCore.IdentitySession.HttpTest`, identity cookie
+`signacore_http_test_identity`, and purpose `SignaCore.IdentitySession.HttpTest.v1`. It retains
+HttpOnly, SameSite=Lax, Path=/, no Domain, and the opaque session-id-only payload; Secure is false.
+Its principal still carries the original explicit identity authentication type and satisfies only the
+identity policy. Management authentication and the shared Data Protection discriminator/keyring do
+not change. Distinct purpose protection rejects renamed cookie payloads in both directions.
+
+The same profile selects antiforgery issue, cookie read, request-token validation and deletion.
+HTTP uses `signacore_http_test_login_csrf` and root purpose
+`SignaCore.LoginAntiforgery.HttpTest.v1`, with separate cookie/request sub-purposes. It retains
+HttpOnly, SameSite=Strict, Path=/ and no Domain; Secure is false. HTTPS retains the original
+`__Host-signacore_login_csrf` and purpose. Concurrent requests never mutate global options or
+singleton profile state. A pair from either profile is invalid in the other, including renamed
+cookies. Reusable secrets for parallel tabs remain profile-local and independent of principals.
+
+After a committed prepared logout, both current-profile identity and login CSRF cookies are deleted
+with their original attributes, on both the matching-session and indistinguishable no-cookie
+success paths. Failed, canceled and replayed completions do not perform successful deletion.
+HTTPS and a disabled HTTP policy never import HTTP cookies or convert their session authority;
+database expiry and revocation remain authoritative. Cookies have no port isolation: an allowlisted
+port restricts server admission, not browser cookie visibility. Deploy HTTP testing on an isolated
+host/IP and network, separate from high-trust HTTPS. HTTP provides no confidentiality or integrity.
+Rollback first disables/removes the shared policy, removes HTTP URI registrations, and requires a
+fresh login; preserve the database and keyring, and never copy test cookies into HTTPS.
+
 Cleanup removes expired continuation/logout requests, expired unconsumed codes after the retention
 window, consumed codes after the same window, and sessions after their retention policy. Cleanup must
 not turn a still-retained consumed code into `missing` before its 24-hour replay window ends. Family

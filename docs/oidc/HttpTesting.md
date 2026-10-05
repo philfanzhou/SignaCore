@@ -1,10 +1,12 @@
-# Private-network HTTP testing: policy foundation
+# Private-network HTTP testing
 
-The shared `security.hosted_login_http_test_origins` setting establishes a policy foundation for
-staged hosted-login HTTP support. **This foundation alone does not enable HTTP hosted login:**
-private-network HTTP redirect registration and identity/antiforgery Cookie support remain separate
-implementation stages. Existing HTTPS, Secure `__Host-` Cookies and the Development numeric-loopback
-redirect exception keep their behavior. Management Bearer authentication does not change.
+The shared `security.hosted_login_http_test_origins` setting activates an isolated identity and
+antiforgery HTTP Cookie carrier in the actual `Testing` Host at an exact allowed request origin.
+The canonical [PS-18 / PS-19 carrier contract](./CanonicalSemanticModel.md#testing-http-cookie-carrier-ps-18--ps-19)
+defines its names, protection purposes, attributes, request forwarding and logout cleanup. URI
+registration/runtime trust is a separate implementation stage; the complete HTTP capability needs
+both stages on the deployed main branch. Existing HTTPS Secure `__Host-` Cookies, management
+authentication and Development numeric-loopback URI behavior retain their contracts.
 
 ## Configuration and activation
 
@@ -59,7 +61,8 @@ HTTP client registration; its HTTPS Cookie profile remains Secure.
 ## Deployment and rollback
 
 HTTP provides no transport confidentiality or integrity. Private addresses do not prove trust:
-use an isolated test network and enforce access controls. Configure all instances of the test
+use an isolated test host/IP and network and enforce access controls. Cookies are not isolated by
+port, so never share this HTTP host with high-trust HTTPS. Configure all instances of the test
 deployment consistently and restart them. Existing trusted-forwarding rules remain authoritative
 for effective request addresses. Later URI stages must still require exact complete-URI registration;
 an origin entry alone never authorizes a callback.
@@ -69,5 +72,5 @@ bootstrap root key and Data Protection keyring. Before rolling back to a binary 
 only 44 keys, remove the explicit new entry through the authenticated shared update API by sending
 its `value` as `null`, verify the removal, then replace the image. Writing `[]` disables the new
 policy but does not remove an unknown key for an older binary. Existing aggregate versions and
-audits remain intact. Official dual-end browser/image acceptance belongs to the later complete
-HTTP capability, not this policy foundation.
+audits remain intact. Existing HTTP test cookies are never imported into HTTPS. Official dual-end browser/image
+acceptance remains the parent complete-capability release gate.

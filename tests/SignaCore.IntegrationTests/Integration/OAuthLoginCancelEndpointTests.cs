@@ -87,7 +87,7 @@ public sealed class OAuthLoginCancelEndpointTests : IClassFixture<IdentityServer
         // browser body carries both credential fields empty.
         var counter = new CountingPasswordValidator();
         using var factory = _fixture.CreateHostWithCountingValidator(counter);
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
         var session = await BeginLegalLoginAsync(factory.Services, client);
 
         using var request = CreateLoginPost(
@@ -218,7 +218,7 @@ public sealed class OAuthLoginCancelEndpointTests : IClassFixture<IdentityServer
         using var factory = CreateHostWithDbInterceptor(
             new ArmOnConsumptionUpdateInterceptor(gate),
             new ConsumptionCommitCancellationInterceptor(gate, cancellation, afterCommit));
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
         var session = await BeginLegalLoginAsync(factory.Services, client);
 
         if (afterCommit)
@@ -277,7 +277,7 @@ public sealed class OAuthLoginCancelEndpointTests : IClassFixture<IdentityServer
                 logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
             }));
         });
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
         var session = await BeginLegalLoginAsync(factory.Services, client);
 
         using var response = await client.SendAsync(

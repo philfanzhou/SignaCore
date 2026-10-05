@@ -199,6 +199,7 @@ public sealed class AdminIdentitySessionEndpointTests : IClassFixture<IdentitySe
         // endpoint falls back to the login page.
         using var browser = host.CreateClient(new WebApplicationFactoryClientOptions
         {
+            BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         });
@@ -307,6 +308,7 @@ public sealed class AdminIdentitySessionEndpointTests : IClassFixture<IdentitySe
         var accountId = await OAuthLoginTestSupport.SeedUserAsync(_fixture.Services, username, Password);
         using var client = host.CreateClient(new WebApplicationFactoryClientOptions
         {
+            BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         });

@@ -120,6 +120,7 @@ public class OAuthAuthorizationControllerTests
             NullLogger<OAuthAuthorizationController>.Instance).WithHttpContext("correlation-148");
         // The accepted branch validates the continuation destination through the real local-URL
         // predicate, so the controller needs a real URL helper exactly like the hosted pipeline.
+        controller.Request.Scheme = "https";
         UseRealUrlHelper(controller);
 
         var result = await controller.Authorize(TestContext.Current.CancellationToken);
@@ -170,6 +171,7 @@ public class OAuthAuthorizationControllerTests
             unitOfWork.Object, AuthTestDoubles.AuthMetrics(),
             new JwtOptions { Issuer = "https://issuer.example" },
             NullLogger<OAuthAuthorizationController>.Instance).WithHttpContext();
+        controller.Request.Scheme = "https";
         UseRealUrlHelper(controller);
 
         var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => controller.Authorize(cancellation.Token));
@@ -222,6 +224,7 @@ public class OAuthAuthorizationControllerTests
             AuthTestDoubles.AuthMetrics(),
             new JwtOptions { Issuer = "https://issuer.example" },
             NullLogger<OAuthAuthorizationController>.Instance).WithHttpContext("correlation-149");
+        controller.Request.Scheme = "https";
         UseRealUrlHelper(controller);
         controller.Request.PathBase = new PathString("//outside.example.test");
 
@@ -302,6 +305,7 @@ public class OAuthAuthorizationControllerTests
             logger);
 
         var httpContext = new DefaultHttpContext();
+        httpContext.Request.Scheme = "https";
         httpContext.Request.Headers[CorrelationIdHeader] = correlationId;
         // The correlation slot is established by the real middleware, so the controller's accessor
         // observes exactly what production would: an accepted value verbatim, or the generated

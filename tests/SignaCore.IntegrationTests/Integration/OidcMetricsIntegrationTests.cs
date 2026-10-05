@@ -65,7 +65,7 @@ public sealed class OidcMetricsIntegrationTests : IClassFixture<IdentityServerFi
     {
         using var collector = new MetricsCollector();
         using var host = _fixture.WithTestServices(_ => { });
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Authorization = BasicHeader(ClientId, ClientSecret);
 
         using var structural = await http.PostAsync(
@@ -85,7 +85,7 @@ public sealed class OidcMetricsIntegrationTests : IClassFixture<IdentityServerFi
     {
         using var collector = new MetricsCollector();
         using var host = _fixture.WithTestServices(_ => { });
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
 
         using var noBearer = await http.GetAsync("/oauth2/userinfo", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, noBearer.StatusCode);
@@ -108,7 +108,7 @@ public sealed class OidcMetricsIntegrationTests : IClassFixture<IdentityServerFi
     {
         using var collector = new MetricsCollector();
         using var host = _fixture.WithTestServices(_ => { });
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Authorization = BasicHeader(ClientId, ClientSecret);
 
         using var invalid = await http.PostAsync(
@@ -130,7 +130,7 @@ public sealed class OidcMetricsIntegrationTests : IClassFixture<IdentityServerFi
             services.RemoveAll<AuthMetrics>();
             services.AddSingleton<AuthMetrics, ThrowingAuthMetrics>();
         });
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Authorization = BasicHeader(ClientId, ClientSecret);
 
         using var response = await http.PostAsync(

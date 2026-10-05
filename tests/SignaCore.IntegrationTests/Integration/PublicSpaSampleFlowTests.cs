@@ -48,6 +48,7 @@ public sealed class PublicSpaSampleFlowTests(IdentityServerFixture fixture) : IC
         var (appId, username) = await RegisterSampleAsync(admin, token);
         using var browser = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
+            BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         });
@@ -199,6 +200,7 @@ public sealed class PublicSpaSampleFlowTests(IdentityServerFixture fixture) : IC
         var (appId, _) = await RegisterSampleAsync(admin, token);
         using var browser = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
+            BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         });

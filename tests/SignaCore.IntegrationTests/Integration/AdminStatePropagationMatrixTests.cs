@@ -184,6 +184,7 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
         // Authorize with the account's browser cookie: falls back to the login page.
         using var browser = host.CreateClient(new WebApplicationFactoryClientOptions
         {
+            BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         });

@@ -101,8 +101,7 @@ internal static partial class OAuthLoginSmsCodeTestSupport
         });
 
     public static HttpClient CreateBrowserClient(this WebApplicationFactory<Program> host) =>
-        host.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        host.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         });

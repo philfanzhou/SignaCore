@@ -187,6 +187,9 @@ public sealed class OAuthLogoutController : ControllerBase
     public async Task<IActionResult> Complete(CancellationToken cancellationToken)
     {
         ApplyBrowserSecurityHeaders();
+        cancellationToken.ThrowIfCancellationRequested();
+        var profile = IdentityCookieProfile.Resolve(HttpContext);
+        if (profile is null) return LocalBadRequest();
 
         // IN-35: exactly one query field, the 43-character handle; anything else is the single
         // local 400 with no redirect and no invented consumption.
@@ -220,6 +223,7 @@ public sealed class OAuthLogoutController : ControllerBase
         // The cookie deletion follows the committed result (PS-18 attributes, explicit scheme);
         // it never runs for an uncommitted unit and never touches the management cookie.
         await HttpContext.SignOutAsync(IdentitySessionDefaults.AuthenticationScheme);
+        Response.Cookies.Delete(profile.CsrfCookie, profile.CsrfOptions());
 
         if (result.VerifiedPostLogoutUri is null)
         {

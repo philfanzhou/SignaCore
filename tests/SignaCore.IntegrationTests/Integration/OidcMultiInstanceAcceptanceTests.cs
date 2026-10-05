@@ -444,12 +444,12 @@ public sealed partial class OidcMultiInstanceAcceptanceTests : IAsyncLifetime
                 }
             });
         _factories.Add(factory);
-        factory.CreateClient();
+        factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         return factory;
     }
 
     private static HttpClient NonRedirectingClient(WebApplicationFactory<Program> factory) =>
-        factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false });
 
     private async Task<string> LoginOnInstanceAsync(WebApplicationFactory<Program> factory)
     {
@@ -526,7 +526,7 @@ public sealed partial class OidcMultiInstanceAcceptanceTests : IAsyncLifetime
 
     private static async Task<string> RedeemCodeAsync(WebApplicationFactory<Program> factory, string code)
     {
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(
             "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{SuccessAppId}:{ClientSecret}")));
         using var response = await client.PostAsync(
@@ -547,7 +547,7 @@ public sealed partial class OidcMultiInstanceAcceptanceTests : IAsyncLifetime
 
     private static async Task<JsonElement> GetDiscoveryAsync(WebApplicationFactory<Program> factory)
     {
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         using var response = await client.GetAsync(
             "/.well-known/openid-configuration", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -557,7 +557,7 @@ public sealed partial class OidcMultiInstanceAcceptanceTests : IAsyncLifetime
 
     private static async Task<JsonElement> GetJwksAsync(WebApplicationFactory<Program> factory)
     {
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         using var response = await client.GetAsync(
             "/.well-known/jwks.json", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -602,7 +602,7 @@ public sealed partial class OidcMultiInstanceAcceptanceTests : IAsyncLifetime
 
     private static async Task<string> LoginManagementAsync(WebApplicationFactory<Program> factory)
     {
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         using var request = new HttpRequestMessage(HttpMethod.Post, "/management/v1/session/login")
         {
             Content = new StringContent(

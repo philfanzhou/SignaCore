@@ -1,5 +1,10 @@
 # Deployment
 
+The isolated Testing HTTP identity/antiforgery carrier follows the canonical
+[PS-18 / PS-19 contract](../oidc/CanonicalSemanticModel.md#testing-http-cookie-carrier-ps-18--ps-19).
+HTTPS keeps its original Secure cookie names and purposes. Successful prepared logout clears both
+current-profile cookies; failed or replayed completion performs no successful cleanup.
+
 Current database support is PostgreSQL 15+ and local-file SQLite (single-instance). Candidate
 MySQL, MariaDB, SQL Server and Oracle deployments remain deferred under the
 [database provider support decision](../database/provider-support-decision.md).
@@ -347,8 +352,8 @@ An HTTP public base URL must have its exact origin listed and must independently
 existing non-HTTPS issuer opt-in and issuer equality. Non-Testing Hosts refuse nonempty lists
 on their next startup, even if an authenticated administrator previously saved the value.
 
-This policy foundation does not yet enable HTTP callback registration or HTTP identity/CSRF
-Cookies. See [Private-network HTTP testing](../oidc/HttpTesting.md) for strict private literal-IP
+The exact allowed Testing request origin can use the isolated HTTP identity/CSRF Cookie carrier.
+HTTP callback URI registration and runtime trust remain a separate deployment stage. See [Private-network HTTP testing](../oidc/HttpTesting.md) for strict private literal-IP
 syntax, isolated-network responsibilities, staged delivery and rollback. Remove the explicit
 new key through shared updates with `value=null` before running an older 44-key binary; retain
 the database and external keys. No schema migration or deployment default changes are needed.

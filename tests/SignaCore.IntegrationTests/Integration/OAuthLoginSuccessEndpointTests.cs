@@ -472,8 +472,7 @@ public sealed class OAuthLoginSuccessEndpointTests : IClassFixture<IdentityServe
                 optionsBuilder.AddInterceptors(
                     new ArmOnConsumptionUpdateInterceptor(gate),
                     new CancelOnceAtCommitInterceptor(gate, cancellation))));
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
         var session = await BeginSuccessLoginViaAuthorizeAsync(factory.Services, client);
@@ -526,8 +525,7 @@ public sealed class OAuthLoginSuccessEndpointTests : IClassFixture<IdentityServe
             services.AddScoped<IAuditService>(scope => new FailingSuccessAuditService(
                 new AuditService(scope.GetRequiredService<ILoginHistoryRepository>())));
         });
-        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
         var session = await BeginSuccessLoginViaAuthorizeAsync(factory.Services, client);

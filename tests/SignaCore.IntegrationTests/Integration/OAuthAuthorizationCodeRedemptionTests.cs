@@ -776,7 +776,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
                 logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
             }));
         });
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         client.DefaultRequestHeaders.Authorization = BasicHeader(AppId, AppSecret);
 
         var bodies = new List<string>();
@@ -1320,7 +1320,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
             services.RemoveAll<IInteractiveAccessTokenFactory>();
             services.AddSingleton<IInteractiveAccessTokenFactory>(_ => flaky);
         });
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         client.DefaultRequestHeaders.Authorization = BasicHeader(AppId, AppSecret);
 
         using var failed = await client.PostAsync(

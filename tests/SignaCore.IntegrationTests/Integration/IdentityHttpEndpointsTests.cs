@@ -176,6 +176,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     public async Task DiscoveryEndpoints_DescribeTheEndpointsThatActuallyExist(string path)
     {
         using var http = _fixture.CreateHttpClient();
+        // This fixture explicitly configures an HTTP public discovery origin.
+        http.BaseAddress = new Uri("http://localhost");
 
         var response = await http.GetAsync(path, TestContext.Current.CancellationToken);
 
@@ -1295,7 +1297,7 @@ public class IdentityServerFixture : IAsyncLifetime
 
     public HttpClient CreateHttpClient()
     {
-        return _factory!.CreateClient();
+        return _factory!.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
     }
 
     /// <summary>
@@ -1303,10 +1305,11 @@ public class IdentityServerFixture : IAsyncLifetime
     /// <paramref name="handleCookies"/> disabled the client keeps no cookie state between
     /// requests, so a test replays exactly the cookies it names.
     /// </summary>
-    public HttpClient CreateNonRedirectingHttpClient(bool handleCookies = true)
+    public HttpClient CreateNonRedirectingHttpClient(bool handleCookies = false)
     {
         return _factory!.CreateClient(new WebApplicationFactoryClientOptions
         {
+            BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = handleCookies
         });

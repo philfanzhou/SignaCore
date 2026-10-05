@@ -50,7 +50,7 @@ public sealed partial class OAuthLogoutTests
         fault.Enabled = boundary == "sql";
         var beforeRows = await QueryAsync(context => context.LogoutRequests.CountAsync(TestContext.Current.CancellationToken));
         var beforeAudit = await QueryAsync(context => SharedSettingTestDatabase.LoadSharedAuditRowsAsync(context, TestContext.Current.CancellationToken));
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         client.DefaultRequestHeaders.Authorization = BasicHeader();
         using var response = await client.PostAsync("/oauth2/logout/requests", new FormUrlEncodedContent(new Dictionary<string, string>
         {

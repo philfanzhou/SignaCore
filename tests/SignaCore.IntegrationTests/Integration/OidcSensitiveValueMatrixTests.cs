@@ -117,7 +117,7 @@ public sealed partial class OidcSensitiveValueMatrixTests : IClassFixture<Identi
         var metricLabels = new MetricLabelCapture();
         using var host = CreateHost(capture, metricLabels.Configure);
         using var client = host.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        { BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
         var scan = new CarrierScan(
@@ -147,7 +147,7 @@ public sealed partial class OidcSensitiveValueMatrixTests : IClassFixture<Identi
         scan.HttpSurfaces.Add(("authorize-location", authorize.Headers.Location?.ToString() ?? string.Empty));
 
         // ---- token: canary code, verifier, Basic client secret, and canary refresh member ----
-        using var tokenClient = host.CreateClient();
+        using var tokenClient = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         tokenClient.DefaultRequestHeaders.Authorization = BasicHeader(ClientId, ClientSecret);
         using var redeem = await tokenClient.PostAsync(
             "/oauth2/token",
@@ -214,7 +214,7 @@ public sealed partial class OidcSensitiveValueMatrixTests : IClassFixture<Identi
         // ---- the exception path: a persistence (audit) failure inside the committed login ----
         using var faultHost = CreateHost(capture, metricLabels.Configure, faultingAudit: true);
         using var faultClient = faultHost.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        { BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
         var faultHandle = await SeedContinuationAsync(faultHost.Services);
@@ -257,7 +257,7 @@ public sealed partial class OidcSensitiveValueMatrixTests : IClassFixture<Identi
     {
         using var host = CreateHost(new CapturingLoggerProvider(), _ => { });
         using var client = host.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        { BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
 

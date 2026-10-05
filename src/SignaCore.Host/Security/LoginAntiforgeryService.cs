@@ -29,7 +29,7 @@ public interface ILoginAntiforgeryService
     /// and already-rendered tabs keep validating; otherwise a fresh CSPRNG secret is generated and
     /// the caller must write <see cref="LoginAntiforgeryPair.CookieValue"/>.
     /// </summary>
-    LoginAntiforgeryPair IssuePair(string? existingCookieValue);
+    LoginAntiforgeryPair IssuePair(string? existingCookieValue, bool httpTest = false);
 
     /// <summary>
     /// Validates a submitted pair: both values must unprotect under their own sub-purpose and the
@@ -37,13 +37,15 @@ public interface ILoginAntiforgeryService
     /// foreign purpose payload, a swapped or tampered value, malformed base64url — is simply
     /// <c>false</c>; the caller folds it into the single local 400 (<c>SC-19</c>).
     /// </summary>
-    bool IsValidPair(string cookieValue, string requestToken);
+    bool IsValidPair(string cookieValue, string requestToken, bool httpTest = false);
 }
 
 public sealed class LoginAntiforgeryService : ILoginAntiforgeryService
 {
     private readonly IDataProtector _cookieProtector;
     private readonly IDataProtector _requestProtector;
+    private readonly IDataProtector _httpCookieProtector;
+    private readonly IDataProtector _httpRequestProtector;
 
     public LoginAntiforgeryService(IDataProtectionProvider dataProtectionProvider)
     {
@@ -54,33 +56,38 @@ public sealed class LoginAntiforgeryService : ILoginAntiforgeryService
             LoginAntiforgeryDefaults.DataProtectionPurpose);
         _cookieProtector = root.CreateProtector("cookie");
         _requestProtector = root.CreateProtector("request");
+        var testRoot = dataProtectionProvider.CreateProtector(IdentityCookieProfile.TestCsrfPurpose);
+        _httpCookieProtector = testRoot.CreateProtector("cookie");
+        _httpRequestProtector = testRoot.CreateProtector("request");
     }
 
-    public LoginAntiforgeryPair IssuePair(string? existingCookieValue)
+    public LoginAntiforgeryPair IssuePair(string? existingCookieValue, bool httpTest = false)
     {
-        var existingSecret = TryUnprotect(_cookieProtector, existingCookieValue);
+        var cookieProtector = httpTest ? _httpCookieProtector : _cookieProtector;
+        var requestProtector = httpTest ? _httpRequestProtector : _requestProtector;
+        var existingSecret = TryUnprotect(cookieProtector, existingCookieValue);
         if (existingSecret is { Length: LoginAntiforgeryDefaults.SecretLength })
         {
             // Multi-tab: the browser already holds a usable cookie secret, so only a fresh request
             // token is derived and no cookie is written.
             return new LoginAntiforgeryPair(
                 existingCookieValue!,
-                Protect(_requestProtector, existingSecret),
+                Protect(requestProtector, existingSecret),
                 ReusedExistingCookie: true);
         }
 
         var secret = new byte[LoginAntiforgeryDefaults.SecretLength];
         RandomNumberGenerator.Fill(secret);
         return new LoginAntiforgeryPair(
-            Protect(_cookieProtector, secret),
-            Protect(_requestProtector, secret),
+            Protect(cookieProtector, secret),
+            Protect(requestProtector, secret),
             ReusedExistingCookie: false);
     }
 
-    public bool IsValidPair(string cookieValue, string requestToken)
+    public bool IsValidPair(string cookieValue, string requestToken, bool httpTest = false)
     {
-        var cookieSecret = TryUnprotect(_cookieProtector, cookieValue);
-        var requestSecret = TryUnprotect(_requestProtector, requestToken);
+        var cookieSecret = TryUnprotect(httpTest ? _httpCookieProtector : _cookieProtector, cookieValue);
+        var requestSecret = TryUnprotect(httpTest ? _httpRequestProtector : _requestProtector, requestToken);
         if (cookieSecret is null || requestSecret is null)
         {
             return false;
