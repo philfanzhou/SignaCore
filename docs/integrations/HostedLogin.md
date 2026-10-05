@@ -321,3 +321,5 @@ The service keeps its client secret, PKCE verifiers, `state`/`nonce` values, and
 browsers, logs, and URLs; validates every callback and ID token as described above; and owns every
 authorization decision it makes from `iss` plus `sub`. SignaCore owns credentials, the login page,
 the SignaCore session, and token issuance.
+
+For the explicit Testing URI exception and required runtime revalidation, see [current redirect transport trust](../oidc/CanonicalSemanticModel.md#current-redirect-transport-trust) and [HTTP testing](../oidc/HttpTesting.md). URI support alone does not enable the browser Cookie carrier.

@@ -9,6 +9,7 @@ internal sealed class HostedLoginHttpTestPolicy
 {
     private readonly FrozenSet<string> _origins;
     private HostedLoginHttpTestPolicy(HashSet<string> origins) => _origins = origins.ToFrozenSet(StringComparer.Ordinal);
+    internal SignaCore.Domain.Validators.OidcRedirectUriPolicy ToRedirectUriPolicy(bool isDevelopment) => new(isDevelopment, _origins);
     internal bool Enabled => _origins.Count != 0;
     internal bool ContainsOrigin(string origin) =>
         HostedLoginHttpTestOrigins.TryCanonicalize(origin, out var canonical) && _origins.Contains(canonical);

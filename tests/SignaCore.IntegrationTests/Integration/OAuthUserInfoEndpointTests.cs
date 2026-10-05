@@ -509,6 +509,7 @@ public sealed class OAuthUserInfoEndpointTests : IClassFixture<IdentityServerFix
                 AppName = "UserInfo Endpoint Client",
                 CreatedAt = DateTimeOffset.UtcNow
             };
+            application.RedirectUris.Add(new() { Id = Guid.NewGuid(), AppRegistrationId = application.Id, Kind = RedirectUriKind.Redirect, CanonicalUri = RedirectUri });
             dbContext.AppRegistrations.Add(application);
         }
 

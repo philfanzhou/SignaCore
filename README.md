@@ -106,8 +106,8 @@ storage and must be backed up with the database.
 
 An optional [private-network HTTP testing policy foundation](docs/oidc/HttpTesting.md) is available
 through the shared `security.hosted_login_http_test_origins` JSON setting (missing/`[]` disables it).
-A nonempty list requires the actual `Testing` Host environment and restart. This stage does not yet
-enable HTTP callback registration or identity/CSRF Cookies; existing HTTPS defaults remain in force.
+A nonempty list requires the actual `Testing` Host environment and restart. Exact allowlisted HTTP callback/logout registration and current-policy runtime revalidation are
+supported. HTTP identity/CSRF Cookies remain a separate stage; HTTPS defaults remain in force.
 
 Important defaults, all stored in the database and editable after installation:
 

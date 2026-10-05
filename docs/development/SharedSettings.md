@@ -199,6 +199,6 @@ independently of configuration overlays. Shared updates do not activate the new 
 current process; storing a nonempty list outside Testing makes the next normal startup fail.
 
 See [Private-network HTTP testing](../oidc/HttpTesting.md) for literal-IP syntax, issuer/authority
-checks and the staged capability boundary. URI and Cookie exceptions are not enabled by this
-foundation. Before a binary rollback, remove the explicit key with a shared update `value=null`;
+checks and the staged capability boundary. The URI stage accepts exact allowlisted complete HTTP registrations and rechecks current trust
+at runtime; Cookie transport is a separate stage. Before a binary rollback, remove the explicit key with a shared update `value=null`;
 `[]` is not removal. No PostgreSQL or SQLite migration is needed.

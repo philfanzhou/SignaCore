@@ -347,8 +347,8 @@ An HTTP public base URL must have its exact origin listed and must independently
 existing non-HTTPS issuer opt-in and issuer equality. Non-Testing Hosts refuse nonempty lists
 on their next startup, even if an authenticated administrator previously saved the value.
 
-This policy foundation does not yet enable HTTP callback registration or HTTP identity/CSRF
-Cookies. See [Private-network HTTP testing](../oidc/HttpTesting.md) for strict private literal-IP
+Exact allowlisted complete HTTP callback/logout registrations now require current-policy
+revalidation at runtime. HTTP identity/CSRF Cookies remain a separate stage. See [Private-network HTTP testing](../oidc/HttpTesting.md) for strict private literal-IP
 syntax, isolated-network responsibilities, staged delivery and rollback. Remove the explicit
 new key through shared updates with `value=null` before running an older 44-key binary; retain
 the database and external keys. No schema migration or deployment default changes are needed.
