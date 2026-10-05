@@ -47,7 +47,7 @@ internal static class ServiceMantleComposition
     {
         var builder = services.AddServiceMantle(
             ServiceId.Parse(ServiceIdentifier),
-            InstanceId.Parse($"{ServiceIdentifier}-{Guid.NewGuid():N}"),
+            InstanceId.CreateRandom(ServiceId.Parse(ServiceIdentifier)),
             bootstrapFilePath);
         builder.AddBootstrapDatabaseProvider<PostgreSqlBootstrapDatabaseProvider>();
         builder.AddBootstrapDatabaseProvider<SqliteBootstrapDatabaseProvider>();

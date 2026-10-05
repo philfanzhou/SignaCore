@@ -34,6 +34,9 @@ internal static class StartupMigrationGate
 {
     internal static readonly TimeSpan SharedLockWaitBudget = TimeSpan.FromSeconds(30);
 
+    internal static InstanceId CreateStartupInstanceId()
+        => InstanceId.CreateRandom(ServiceId.Parse("signacore-startup"));
+
     /// <summary>
     /// Runs the shared migration orchestration with SignaCore's real executor. Caller cancellation
     /// propagates as <see cref="OperationCanceledException"/> on the original token; every other
@@ -82,7 +85,7 @@ internal static class StartupMigrationGate
             bootstrap, mode, SharedLockWaitBudget, enableTargetPreparation: false);
         var services = new ServiceCollection();
         var builder = services.AddServiceMantle(
-            serviceId, InstanceId.Parse($"signacore-startup-{Guid.NewGuid():N}"));
+            serviceId, CreateStartupInstanceId());
         if (databaseOptions.ProviderKind == DatabaseProvider.PostgreSql)
         {
             services.AddSingleton<IDatabaseMigrationLockProvider, PostgreSqlMigrationLockProvider>();
