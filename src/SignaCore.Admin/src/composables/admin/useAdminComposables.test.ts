@@ -44,6 +44,7 @@ const mocks = vi.hoisted(() => ({
     revokeRefreshToken: vi.fn(),
     getSettings: vi.fn(),
     updateSettings: vi.fn(),
+    getSettingDiagnostics: vi.fn(),
     getBootstrapSettings: vi.fn(),
     testBootstrapSettings: vi.fn(),
     updateBootstrapSettings: vi.fn(),
@@ -138,6 +139,12 @@ const emptyAuditPage = {
   hasNextPage: false,
 }
 
+/** loadSettings 触发的诊断刷新是 void 调用；冲刷微任务让它完成。 */
+async function flushMicrotasks() {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   // Mirrors axios v1: isAxiosError checks the object's own flag, so rejection doubles carrying
@@ -166,6 +173,9 @@ beforeEach(() => {
     runningConfigurationVersion: 1,
     restartPending: false,
     items: [],
+  })
+  mocks.api.getSettingDiagnostics.mockResolvedValue({
+    version: 1, runningVersion: 1, issues: [],
   })
   mocks.confirm.mockResolvedValue(true)
 })
@@ -732,6 +742,170 @@ describe('admin security and runtime settings', () => {
     mocks.api.updateBootstrapSettings.mockRejectedValue(rejection(503))
     await state.saveBootstrapSettings()
     expect(state.bootstrapError.value).toBe('服务暂时无法完成请求，请稍后重试。')
+  })
+
+  it('runs diagnostics beside settings and refuses to invent a healthy verdict', async () => {
+    const state = useAdminSettings()
+    const lokiUri: AdminSettingValue = {
+      key: 'loki.uri', valueType: 'string', isRequired: false, isSensitive: false,
+      hasDefault: false, requiresRestart: true, hasValue: true, source: 'persisted',
+      value: 'http://loki.example.com',
+    }
+    const lokiAuthorization: AdminSettingValue = {
+      key: 'loki.authorization', valueType: 'string', isRequired: false, isSensitive: true,
+      hasDefault: false, requiresRestart: true, hasValue: true, source: 'persisted',
+      value: null,
+    }
+    mocks.api.getSettings.mockResolvedValue({
+      snapshot: { version: 4, values: [lokiUri, lokiAuthorization] },
+      runningVersion: 4,
+    })
+    mocks.api.getSettingDiagnostics.mockResolvedValue({
+      version: 4,
+      runningVersion: 3,
+      issues: [{ key: 'loki.uri', errorCode: 'signacore.setting.https_required' }],
+    })
+
+    await state.loadSettings()
+    await flushMicrotasks()
+
+    // Same saved version: the issues are shown as the saved version's verdict, and the
+    // saved/running pair is explicit rather than inferred.
+    expect(state.diagnosticsCurrent.value).toBe(true)
+    expect(state.diagnostics.value?.issues).toEqual([
+      { key: 'loki.uri', errorCode: 'signacore.setting.https_required' },
+    ])
+    expect(state.configurationVersion.value).toBe(4)
+    expect(state.runningConfigurationVersion.value).toBe(4)
+    expect(state.diagnostics.value?.runningVersion).toBe(3)
+
+    // A diagnostics version that no longer matches the loaded settings is never shown as
+    // the current version's answer.
+    mocks.api.getSettingDiagnostics.mockResolvedValue({
+      version: 9, runningVersion: 3, issues: [],
+    })
+    await state.loadDiagnostics()
+    expect(state.diagnosticsCurrent.value).toBe(false)
+
+    // A failed read keeps diagnostics at null with the error recorded — no "no issues" claim.
+    mocks.api.getSettingDiagnostics.mockRejectedValue(new Error('boom'))
+    await state.loadDiagnostics()
+    expect(state.diagnostics.value).toBeNull()
+    expect(state.diagnosticsError.value).toContain('boom')
+  })
+
+  it('drafts the atomic Loki disable and keeps removals through conflicts', async () => {
+    const state = useAdminSettings()
+    const lokiUri: AdminSettingValue = {
+      key: 'loki.uri', valueType: 'string', isRequired: false, isSensitive: false,
+      hasDefault: false, requiresRestart: true, hasValue: true, source: 'persisted',
+      value: 'http://loki.example.com',
+    }
+    const lokiAuthorization: AdminSettingValue = {
+      key: 'loki.authorization', valueType: 'string', isRequired: false, isSensitive: true,
+      hasDefault: false, requiresRestart: true, hasValue: true, source: 'persisted',
+      value: null,
+    }
+    mocks.api.getSettings.mockResolvedValue({
+      snapshot: { version: 2, values: [lokiUri, lokiAuthorization] },
+      runningVersion: 2,
+    })
+    mocks.api.getSettingDiagnostics.mockResolvedValue({
+      version: 2, runningVersion: 2, issues: [
+        { key: 'loki.uri', errorCode: 'signacore.setting.https_required' },
+        { key: 'loki.authorization', errorCode: 'signacore.setting.required' },
+      ],
+    })
+    await state.loadSettings()
+    await flushMicrotasks()
+
+    // Drafting the disable restores the loaded values so no string change competes with it,
+    // and an empty sensitive draft still means "keep".
+    state.settingsDraft['loki.uri'] = 'https://loki.example.com'
+    state.draftLokiDisable()
+    expect(state.lokiDisablePending.value).toBe(true)
+    expect(state.isRemovalPending('loki.uri')).toBe(true)
+    expect(state.isRemovalPending('loki.authorization')).toBe(true)
+    expect(state.settingsDraft['loki.uri']).toBe('http://loki.example.com')
+    expect(state.changedSettings.value).toEqual([])
+
+    // The two keys are submitted as null in one batch; a 409 keeps the whole draft.
+    mocks.api.updateSettings.mockRejectedValue({
+      isAxiosError: true, response: { status: 409, data: {} }, message: 'conflict',
+    })
+    await state.saveSettings(['loki.uri', 'loki.authorization'])
+    expect(mocks.api.updateSettings).toHaveBeenCalledWith(2, [
+      { key: 'loki.uri', value: null },
+      { key: 'loki.authorization', value: null },
+    ])
+    expect(state.lokiDisablePending.value).toBe(true)
+
+    // Undo restores editing; a committed save clears exactly the submitted removals.
+    state.cancelRemoval('loki.uri')
+    expect(state.isRemovalPending('loki.uri')).toBe(false)
+    expect(state.isRemovalPending('loki.authorization')).toBe(true)
+
+    state.draftLokiDisable()
+    mocks.api.updateSettings.mockResolvedValue({ version: 3 })
+    mocks.api.getSettings.mockResolvedValue({
+      snapshot: { version: 3, values: [] }, runningVersion: 2,
+    })
+    await state.saveSettings(['loki.uri', 'loki.authorization'])
+    expect(state.lokiDisablePending.value).toBe(false)
+    expect(state.isRemovalPending('loki.authorization')).toBe(false)
+  })
+
+  it('maps a definite 400 to the closed per-key messages and preserves drafts', async () => {
+    const state = useAdminSettings()
+    const lokiUri: AdminSettingValue = {
+      key: 'loki.uri', valueType: 'string', isRequired: false, isSensitive: false,
+      hasDefault: false, requiresRestart: true, hasValue: true, source: 'persisted',
+      value: 'http://loki.example.com',
+    }
+    mocks.api.getSettings.mockResolvedValue({
+      snapshot: { version: 5, values: [lokiUri] },
+      runningVersion: 5,
+    })
+    await state.loadSettings()
+    await flushMicrotasks()
+
+    state.settingsDraft['loki.uri'] = 'http://other-loki.example.com'
+    mocks.api.updateSettings.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 400,
+        data: {
+          errorCode: 'management.request.invalid',
+          validationErrors: [
+            { key: 'loki.uri', errorCode: 'signacore.setting.https_required' },
+          ],
+        },
+      },
+      message: 'bad request',
+    })
+
+    await state.saveSettings(['loki.uri'])
+
+    expect(state.saveValidationErrors.value).toEqual([
+      { key: 'loki.uri', errorCode: 'signacore.setting.https_required' },
+    ])
+    expect(state.validationErrorDescription(
+      { key: 'loki.uri', errorCode: 'signacore.setting.https_required' }),
+    ).toContain('loki.uri')
+    expect(state.validationErrorDescription(
+      { key: 'loki.uri', errorCode: 'signacore.setting.https_required' }),
+    ).toContain('HTTPS')
+    expect(state.validationErrorDescription(
+      { key: null, errorCode: 'signacore.setting.runtime_invalid' }),
+    ).toContain('a setting')
+    // The draft survives a validation rejection; the shared error handler is not used.
+    expect(state.settingsDraft['loki.uri']).toBe('http://other-loki.example.com')
+    expect(mocks.handleApiError).not.toHaveBeenCalled()
+
+    // The next save clears the stale rejection list before it runs.
+    mocks.api.updateSettings.mockResolvedValue({ version: 6 })
+    await state.saveSettings(['loki.uri'])
+    expect(state.saveValidationErrors.value).toBeNull()
   })
 })
 

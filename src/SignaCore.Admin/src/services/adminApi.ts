@@ -530,7 +530,8 @@ class AdminApiClient {
 
   /**
    * 提交一批设置变更。changes 为空时调用方不应发起请求；expectedVersion 必须来自加载时的
-   * 快照版本。成功返回提交后的新版本；409 表示版本冲突。
+   * 快照版本。成功返回提交后的新版本；409 表示版本冲突。确定的校验拒绝（400）由调用方从
+   * axios 错误响应里用 parseValidationErrors 解析。
    */
   async updateSettings(expectedVersion: number, changes: AdminSettingChange[]) {
     const response = await this.client.post<AdminSettingsUpdateResult>(
@@ -538,6 +539,21 @@ class AdminApiClient {
       { expectedVersion, changes },
     )
     return response.data
+  }
+
+  /**
+   * Reads the saved-version diagnostics. `version` and `runningVersion` are server longs; either
+   * is null when it cannot be represented exactly, and the caller must treat that as unknown
+   * instead of guessing. A failed read rejects — it is never "no issues".
+   */
+  async getSettingDiagnostics(): Promise<AdminSettingDiagnostics> {
+    const response = await this.client.get(
+      '/management/v1/settings/diagnostics',
+      {
+        transformResponse: [(raw: unknown) => parseSettingDiagnostics(raw)],
+      },
+    )
+    return response.data as AdminSettingDiagnostics
   }
 
   async getBootstrapSettings() {
@@ -669,6 +685,28 @@ export interface AdminSettingsUpdateResult {
   version: number
 }
 
+/** null key 的固定归类：JSON null，映射时给通用英文说明。 */
+export interface AdminSettingValidationError {
+  key: string | null
+  errorCode: string
+}
+
+export interface AdminSettingDiagnosticIssue {
+  key: string | null
+  errorCode: string
+}
+
+/**
+ * 诊断响应：version 是本次完整保存观察到的版本，runningVersion 是本进程启动时激活的版本；
+ * null 表示无法精确表达，调用方不得推断。issues 只描述该保存版本的不可用可选规则，
+ * 不代表运行中的 sink。
+ */
+export interface AdminSettingDiagnostics {
+  version: number | null
+  runningVersion: number | null
+  issues: AdminSettingDiagnosticIssue[]
+}
+
 export type AdminSettingValueType = 'string' | 'number' | 'boolean' | 'json'
 
 /** 运行版本来自产品响应头；null 表示缺失或无法解析，绝不推断为"已生效"。 */
@@ -705,6 +743,58 @@ export function parseRunningVersion(raw: unknown): AdminRunningConfigurationVers
   if (!/^-?\d+$/.test(trimmed)) return null
   const parsed = Number(trimmed)
   return Number.isSafeInteger(parsed) ? parsed : null
+}
+
+/**
+ * 解析诊断响应。与快照 version 同理，version/runningVersion 先按文本校验再转数字：
+ * 超出安全整数范围时为 null，调用方不得把 null 当作任何版本。
+ */
+export function parseSettingDiagnostics(raw: unknown): AdminSettingDiagnostics {
+  const text = typeof raw === 'string' ? raw : ''
+  const parsed = JSON.parse(text) as AdminSettingDiagnostics
+  const safeNumber = (name: string): number | null => {
+    const match = new RegExp(`"${name}"\\s*:\\s*(-?\\d+)`).exec(text)
+    const rawValue = match?.[1]
+    return rawValue !== undefined && Number.isSafeInteger(Number(rawValue))
+      ? Number(rawValue)
+      : null
+  }
+  return {
+    version: safeNumber('version'),
+    runningVersion: safeNumber('runningVersion'),
+    issues: Array.isArray(parsed.issues)
+      ? parsed.issues
+          .filter(
+            (issue): issue is AdminSettingDiagnosticIssue =>
+              issue !== null &&
+              typeof issue === 'object' &&
+              (issue.key === null || typeof issue.key === 'string') &&
+              typeof issue.errorCode === 'string',
+          )
+          .map((issue) => ({ key: issue.key, errorCode: issue.errorCode }))
+      : [],
+  }
+}
+
+/**
+ * 解析 400 校验拒绝里的兼容字段；不是该形状（或为空）时返回 null，调用方回落到通用
+ * 错误处理。数组之外的任意字段一律忽略，键与错误码由产品闭集保证。
+ */
+export function parseValidationErrors(raw: unknown): AdminSettingValidationError[] | null {
+  if (raw === null || typeof raw !== 'object') return null
+  const candidate = raw as { validationErrors?: unknown }
+  if (!Array.isArray(candidate.validationErrors)) return null
+  const errors = candidate.validationErrors
+    .filter(
+      (error): error is AdminSettingValidationError =>
+        error !== null &&
+        typeof error === 'object' &&
+        ((error as AdminSettingValidationError).key === null ||
+          typeof (error as AdminSettingValidationError).key === 'string') &&
+        typeof (error as AdminSettingValidationError).errorCode === 'string',
+    )
+    .map((error) => ({ key: error.key, errorCode: error.errorCode }))
+  return errors.length ? errors : null
 }
 
 export function getErrorMessage(error: unknown) {

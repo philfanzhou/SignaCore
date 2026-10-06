@@ -66,10 +66,22 @@ internal static class ManagementSettingUpdateExecutor
                     var result = await updateService.UpdateAsync(command, cancellationToken);
                     if (!result.Succeeded)
                     {
+                        // A definite validation failure is the one outcome the product rewrites
+                        // into the compatibility body: the closed key + fixed-code pairs are staged
+                        // as request-scoped safe metadata for the group filter. They carry no
+                        // values, and every other failure (storage, conflict, cancellation,
+                        // exception) leaves no metadata behind.
+                        if (result.Status == ServiceSettingUpdateStatus.ValidationFailed
+                            && result.Errors.Count > 0)
+                        {
+                            httpContext.Items[ManagementSettingValidationErrorsFilter.ItemsKey] =
+                                result.Errors;
+                        }
+
                         // The shared transaction already restored its savepoint; disposing the
                         // transaction rolls the attempt back whole.
                         return result.Status == ServiceSettingUpdateStatus.StorageFailed
-                            && concurrency.SerializationFailed
+                               && concurrency.SerializationFailed
                             ? ServiceSettingUpdateResult.Failure(ServiceSettingUpdateStatus.VersionConflict)
                             : result;
                     }

@@ -157,6 +157,47 @@ inputs with pinned verdicts captured from the retired validator's baseline, and 
   the JavaScript safe-integer range is treated as inexpressible: the console refuses to submit
   rather than send a rounded `expectedVersion`.
 
+### Settings diagnostics (#530)
+
+The normal host also maps a product read on the same protected group:
+`GET /management/v1/settings/diagnostics`. It performs exactly one complete tolerant
+materialization of the stored aggregate — the same isolated management loader the current-values
+query uses, never the runtime authority — and answers, only when that load fully succeeds:
+
+```json
+{ "version": 4, "runningVersion": 3, "issues": [ { "key": "loki.uri", "errorCode": "signacore.setting.https_required" } ] }
+```
+
+`version` is the version the complete save was observed at, `runningVersion` is what this process
+activated at bootstrap (the same fixed startup source as the response header), and `issues` names
+the saved version's unusable optional telemetry rules as closed key + error-code pairs over the
+registered keys (`loki.uri`, `loki.authorization`, `opentelemetry.otlp_endpoint`) and the three
+fixed product codes (`signacore.setting.required`, `signacore.setting.https_required`,
+`signacore.setting.runtime_invalid`). A healthy saved version answers `[]`. Issues describe the
+saved version only — they make no claim about the running sink, network reachability, or sink
+health. Any load, decrypt, or critical failure keeps the shared fixed
+`503 {"errorCode":"management.settings.unavailable"}` with no partial or stale result, and no
+endpoint, credential, exception, or arbitrary value is ever returned. The endpoint has no query
+parameters — any query string is a fixed `400 management.request.invalid` — and no other HTTP
+method is mapped. Caller cancellation propagates the request token instead of a success or error
+classification. Older HTTP clients ignore the endpoint entirely.
+
+The update endpoint's definite validation rejection (`ValidationFailed`, status 400) additionally
+carries the product compatibility field, produced by a group-level endpoint filter that matches
+exactly `POST /management/v1/settings` and reads only the safe metadata the consumer-owned executor
+staged for that outcome:
+
+```json
+{ "errorCode": "management.request.invalid", "validationErrors": [ { "key": "loki.uri", "errorCode": "signacore.setting.https_required" } ] }
+```
+
+The top-level error code and status stay as they were, `validationErrors` is the shared closed
+key + fixed-code list (a null key stays an explicit JSON null), and every other outcome is
+untouched: parse rejections happen before the executor runs and stage nothing, so malformed or
+unknown-key requests keep the generic 400 body; 409, 503, and 200 keep their existing shapes.
+Nothing in either body reflects a secret, Authorization value, connection string, root key, raw
+exception, or the complete values object.
+
 ## Legacy optional telemetry recovery
 
 A protected settings GET loads and decrypts the complete stored snapshot with the same core rules
@@ -185,6 +226,17 @@ in the same batch (`value=null`). Partial repair/deletion that leaves the group 
 Repair OTLP with a valid HTTPS endpoint or delete its key. A valid repair or complete deletion of
 one group can preserve the other untouched unusable group. No HTTP or unauthenticated Loki
 capability is enabled by this recovery.
+
+The admin console supports the whole recovery flow on the observability settings page: the
+diagnostics panel shows the saved version's issues with fixed English explanations plus the
+saved-versus-running version pair, and a failed diagnostics read is reported as unavailable —
+never as "no issues". A diagnostics answer taken at a different saved version than the loaded
+settings is shown as stale rather than as the current version's verdict. **Disable Loki** drafts
+the atomic disable — both Loki keys submitted as `null` in one save batch — and **Remove OTLP
+endpoint** drafts the same for the single OTLP key; a normal empty sensitive input still means
+"keep the current value" and never deletes. Removal drafts can be undone before saving, survive a
+409 conflict or a validation rejection without retry, and clear only after the save committed.
+A rejected save lists the per-key `validationErrors` with the same fixed English explanations.
 
 Each successful update increments the aggregate version once and writes only the submitted keys'
 audit rows. Failures and caller cancellation roll back the whole attempt. PostgreSQL serialization

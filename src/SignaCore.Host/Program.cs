@@ -740,9 +740,16 @@ ManagementBearerSessionEndpoints.Map(app);
 // single-attempt serializable transaction instead of the legacy controller. The Bootstrap and
 // Setup hosts never map this group, so those phases expose no settings surface.
 var managementApi = app.MapServiceMantleManagementApiV1();
+// The product validation-errors filter rides the shared group so exactly the shared update route's
+// definite validation rejection gains the closed validationErrors field; every other endpoint of
+// the group — including the diagnostics read below — passes through untouched.
+managementApi.AddEndpointFilter(new ManagementSettingValidationErrorsFilter());
 managementApi.MapServiceMantleRuntimeInfo();
 managementApi.MapServiceMantleSettingQueries();
 managementApi.MapServiceMantleSettingUpdates(ManagementSettingUpdateExecutor.ExecuteAsync);
+// The product diagnostics read rides the same protected group: one complete tolerant
+// materialization of the stored aggregate plus the fixed startup running version.
+ManagementSettingDiagnosticsEndpoints.Map(managementApi);
 // The admin console's audit page reads the shared restricted query from here on; the legacy
 // /api/admin/audit-logs endpoint is gone. The audit_logs table stays as a retained, unwritten
 // legacy store for pre-switch history rows.

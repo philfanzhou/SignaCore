@@ -36,7 +36,9 @@ import {
   createAdminApiClient,
   getErrorMessage,
   parseRunningVersion,
+  parseSettingDiagnostics,
   parseSettingsSnapshot,
+  parseValidationErrors,
 } from './adminApi'
 
 beforeEach(() => {
@@ -220,6 +222,66 @@ describe('AdminApiClient', () => {
       ],
     })
     expect(result).toEqual({ version: 3 })
+  })
+
+  it('reads the diagnostics with safe-integer versions and closed issues', async () => {
+    mocks.http.get.mockResolvedValue({
+      data: {
+        version: 2,
+        runningVersion: 1,
+        issues: [{ key: 'loki.uri', errorCode: 'signacore.setting.https_required' }],
+      },
+    })
+
+    const result = await createAdminApiClient().getSettingDiagnostics()
+
+    expect(mocks.http.get).toHaveBeenCalledWith('/management/v1/settings/diagnostics', {
+      transformResponse: [expect.any(Function)],
+    })
+    expect(result).toEqual({
+      version: 2,
+      runningVersion: 1,
+      issues: [{ key: 'loki.uri', errorCode: 'signacore.setting.https_required' }],
+    })
+
+    // Versions beyond the safe-integer range become null — unknown, never rounded.
+    expect(parseSettingDiagnostics(
+      '{"version":9223372036854775807,"runningVersion":1,"issues":[]}').version,
+    ).toBeNull()
+    expect(parseSettingDiagnostics(
+      '{"version":2,"runningVersion":9007199254740993,"issues":[]}').runningVersion,
+    ).toBeNull()
+
+    // The issue list stays the closed shape; anything else is dropped, a null key is kept.
+    const parsed = parseSettingDiagnostics(
+      '{"version":2,"runningVersion":1,"issues":[' +
+      '{"key":null,"errorCode":"signacore.setting.runtime_invalid"},' +
+      '{"key":"loki.uri","errorCode":"signacore.setting.https_required"},' +
+      '{"key":"loki.uri"},' +
+      '42]}')
+    expect(parsed.issues).toEqual([
+      { key: null, errorCode: 'signacore.setting.runtime_invalid' },
+      { key: 'loki.uri', errorCode: 'signacore.setting.https_required' },
+    ])
+  })
+
+  it('parses the 400 compatibility field only when it is the closed array', () => {
+    expect(parseValidationErrors({
+      errorCode: 'management.request.invalid',
+      validationErrors: [
+        { key: 'loki.uri', errorCode: 'signacore.setting.https_required' },
+        { key: null, errorCode: 'signacore.setting.runtime_invalid' },
+      ],
+    })).toEqual([
+      { key: 'loki.uri', errorCode: 'signacore.setting.https_required' },
+      { key: null, errorCode: 'signacore.setting.runtime_invalid' },
+    ])
+
+    // The generic 400 body, a non-array, or an empty list all fall back to null.
+    expect(parseValidationErrors({ errorCode: 'management.request.invalid' })).toBeNull()
+    expect(parseValidationErrors('management.request.invalid')).toBeNull()
+    expect(parseValidationErrors({ validationErrors: 'nope' })).toBeNull()
+    expect(parseValidationErrors({ validationErrors: [] })).toBeNull()
   })
 
   it('reads the interactive OIDC configuration of one application', async () => {

@@ -5,7 +5,10 @@ import { currentGeneration, isCurrentGeneration } from "../../services/managemen
 import { adminClient } from "../../services/apiClient";
 import {
   getErrorMessage,
+  parseValidationErrors,
   type AdminSettingChange,
+  type AdminSettingDiagnostics,
+  type AdminSettingValidationError,
   type AdminSettingValue,
   type BootstrapSettings,
   type BootstrapTestPayload,
@@ -95,6 +98,39 @@ export const adminSettingsSections: AdminSettingsSection[] = [
 ];
 
 const settings = ref<AdminSettingValue[]>([]);
+/** Disable Loki 的两键原子组合；OTLP 只有一个键。 */
+const LokiDisableKeys = ["loki.uri", "loki.authorization"] as const;
+const OtlpRemoveKey = "opentelemetry.otlp_endpoint";
+
+/**
+ * Fixed English descriptions for the product's closed validation error codes. Unknown codes fall
+ * back to the generic sentence; the mapping never interpolates values.
+ */
+const settingErrorCodeDescriptions: Record<string, string> = {
+  "signacore.setting.required":
+    "A value for this key is required by the current combination of settings.",
+  "signacore.setting.https_required":
+    "The endpoint must be an absolute HTTPS URL without user info, query, or fragment.",
+  "signacore.setting.runtime_invalid":
+    "The stored value cannot be used as this kind of setting.",
+  "signacore.setting.integer": "The value must be an integer.",
+  "signacore.setting.base_url_invalid":
+    "The public base URL is not a valid absolute URL.",
+  "signacore.setting.issuer_mismatch":
+    "The token issuer must equal the normalized public base URL.",
+};
+
+function settingErrorCodeDescription(errorCode: string): string {
+  return (
+    settingErrorCodeDescriptions[errorCode] ??
+    "The value was rejected by a fixed settings rule."
+  );
+}
+
+function validationErrorDescription(error: AdminSettingValidationError): string {
+  const key = error.key === null ? "a setting" : `“${error.key}”`;
+  return `${key}: ${settingErrorCodeDescription(error.errorCode)}`;
+}
 const settingsLoading = ref(false);
 const settingsSaving = ref(false);
 const settingsError = ref("");
@@ -103,6 +139,17 @@ const settingsDraft = reactive<Record<string, string>>({});
 const configurationVersion = ref<number | null>(null);
 /** 本进程启动时激活的运行版本，来自产品响应头；null 表示未知，绝不推断为已生效。 */
 const runningConfigurationVersion = ref<number | null>(null);
+/**
+ * 显式移除草稿（value 提交为 null）。Disable Loki 会同时阶段 loki.uri 与
+ * loki.authorization 两键；普通空敏感草稿仍是"保持"，绝不悄悄删除。
+ */
+const pendingRemovals = ref<ReadonlySet<string>>(new Set<string>());
+/** 最近一次保存的确定性校验拒绝（closed key+code）；null 表示没有可展示的逐键说明。 */
+const saveValidationErrors = ref<AdminSettingValidationError[] | null>(null);
+/** 保存版本诊断；null 表示尚未加载或读取失败——失败绝不虚构成"无问题"。 */
+const diagnostics = ref<AdminSettingDiagnostics | null>(null);
+const diagnosticsLoading = ref(false);
+const diagnosticsError = ref("");
 const bootstrapSettings = ref<BootstrapSettings | null>(null);
 const bootstrapLoading = ref(false);
 const bootstrapSaving = ref(false);
@@ -127,6 +174,7 @@ const bootstrapForm = reactive({
 
 const changedSettings = computed(() =>
   settings.value.filter((setting) => {
+    if (pendingRemovals.value.has(setting.key)) return false;
     if (!(setting.key in settingsDraft)) return false;
     const value = settingsDraft[setting.key] ?? "";
     // 敏感值不回显：空草稿表示"不修改"，绝不转成 null（null 是"移除显式值"）。
@@ -149,6 +197,25 @@ const restartPending = computed(
     configurationVersion.value !== null &&
     runningConfigurationVersion.value !== null &&
     configurationVersion.value !== runningConfigurationVersion.value,
+);
+/** 诊断版本与已加载设置版本都已知且一致，才允许把 issues 展示为同版本的结论。 */
+const diagnosticsCurrent = computed(
+  () =>
+    diagnostics.value !== null &&
+    diagnostics.value.version !== null &&
+    configurationVersion.value !== null &&
+    diagnostics.value.version === configurationVersion.value,
+);
+/** Disable Loki 草稿必须两键同批；部分键不算。 */
+const lokiDisablePending = computed(() => {
+  const removals = pendingRemovals.value;
+  return (
+    removals.has(LokiDisableKeys[0]) &&
+    removals.has(LokiDisableKeys[1])
+  );
+});
+const otlpRemovalPending = computed(() =>
+  pendingRemovals.value.has(OtlpRemoveKey),
 );
 const hasBootstrapForm = computed(() =>
   Boolean(bootstrapSettings.value?.editable),
@@ -189,6 +256,9 @@ async function loadSettings() {
     for (const key of Object.keys(settingsDraft)) delete settingsDraft[key];
     for (const setting of snapshot.values)
       if (!setting.isSensitive) settingsDraft[setting.key] = setting.value ?? "";
+    // The diagnostics describe the saved version just loaded; refresh them together so the
+    // console never shows a stale verdict next to a newer snapshot.
+    void loadDiagnostics();
   } catch (error) {
     if (!isCurrentGeneration(sessionGeneration)) return;
     settingsError.value = getErrorMessage(error);
@@ -196,6 +266,78 @@ async function loadSettings() {
   } finally {
     if (isCurrentGeneration(sessionGeneration)) settingsLoading.value = false;
   }
+}
+
+/**
+ * 读取保存版本诊断。失败绝不虚构成"无问题"：diagnostics 保持 null 并记录错误说明。
+ */
+async function loadDiagnostics() {
+  const sessionGeneration = currentGeneration();
+  diagnosticsLoading.value = true;
+  diagnosticsError.value = "";
+  try {
+    const result = await adminClient.getSettingDiagnostics();
+    if (!isCurrentGeneration(sessionGeneration)) return;
+    diagnostics.value = result;
+  } catch (error) {
+    if (!isCurrentGeneration(sessionGeneration)) return;
+    diagnostics.value = null;
+    diagnosticsError.value = getErrorMessage(error);
+  } finally {
+    if (isCurrentGeneration(sessionGeneration)) diagnosticsLoading.value = false;
+  }
+}
+
+/**
+ * 起草 Disable Loki：两键在同一保存批次提交为 null（原子禁用）。起草时恢复两键的加载
+ * 原值，普通空敏感草稿的"保持"语义不变。
+ */
+function draftLokiDisable() {
+  const removals = new Set(pendingRemovals.value);
+  for (const key of LokiDisableKeys) {
+    removals.add(key);
+    const original = settings.value.find((setting) => setting.key === key);
+    settingsDraft[key] =
+      original && !original.isSensitive ? (original.value ?? "") : "";
+  }
+  pendingRemovals.value = removals;
+  notify(
+    "Disable Loki drafted: loki.uri and loki.authorization will be removed together in the next save.",
+  );
+}
+
+/** 起草移除 OTLP 上报地址（提交为 null，明确关闭）。 */
+function draftOtlpRemoval() {
+  const removals = new Set(pendingRemovals.value);
+  removals.add(OtlpRemoveKey);
+  const original = settings.value.find((setting) => setting.key === OtlpRemoveKey);
+  settingsDraft[OtlpRemoveKey] = original ? (original.value ?? "") : "";
+  pendingRemovals.value = removals;
+  notify(
+    "OTLP endpoint removal drafted: it will be removed in the next save.",
+  );
+}
+
+function cancelRemoval(key: string) {
+  if (!pendingRemovals.value.has(key)) return;
+  const removals = new Set(pendingRemovals.value);
+  removals.delete(key);
+  pendingRemovals.value = removals;
+  const original = settings.value.find((setting) => setting.key === key);
+  settingsDraft[key] = original?.isSensitive ? "" : (original?.value ?? "");
+  notify("Removal draft cancelled.");
+}
+
+function isRemovalPending(key: string) {
+  return pendingRemovals.value.has(key);
+}
+
+/** 本次保存范围内的移除草稿键（section 保存只提交本 section 的移除）。 */
+function removalKeysInScope(keys?: string[]) {
+  const keySet = keys ? new Set(keys) : null;
+  return [...pendingRemovals.value].filter(
+    (key) => !keySet || keySet.has(key),
+  );
 }
 
 async function saveSettings(keys?: string[]) {
@@ -207,23 +349,38 @@ async function saveSettings(keys?: string[]) {
   const pending = changedSettings.value.filter(
     (setting) => !keySet || keySet.has(setting.key),
   );
-  if (!pending.length) return;
-  const savedKeys = new Set(pending.map((setting) => setting.key));
+  const removals = removalKeysInScope(keys);
+  if (!pending.length && !removals.length) return;
+  const savedKeys = new Set([
+    ...pending.map((setting) => setting.key),
+    ...removals,
+  ]);
   const draftsToPreserve = new Map(
     changedSettings.value
       .filter((setting) => !savedKeys.has(setting.key))
       .map((setting) => [setting.key, settingsDraft[setting.key] ?? ""]),
   );
   settingsSaving.value = true;
+  saveValidationErrors.value = null;
   try {
-    const changes: AdminSettingChange[] = pending.map((setting) => ({
-      key: setting.key,
-      value: settingsDraft[setting.key] ?? "",
-    }));
+    const changes: AdminSettingChange[] = [
+      ...pending.map((setting) => ({
+        key: setting.key,
+        value: settingsDraft[setting.key] ?? "",
+      })),
+      // Explicit removal drafts submit as null in the same batch — an empty sensitive draft
+      // still means "keep" and never deletes.
+      ...removals.map((key) => ({ key, value: null as string | null })),
+    ];
     const result = await adminClient.updateSettings(
       configurationVersion.value,
       changes,
     );
+    if (removals.length) {
+      const remaining = new Set(pendingRemovals.value);
+      for (const key of removals) remaining.delete(key);
+      pendingRemovals.value = remaining;
+    }
     notify(`设置已保存（版本 v${result.version}）；重启实例后生效。`);
     await loadSettings();
     const availableKeys = new Set(settings.value.map((setting) => setting.key));
@@ -231,8 +388,19 @@ async function saveSettings(keys?: string[]) {
       if (availableKeys.has(key)) settingsDraft[key] = value;
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 409) {
-      // 版本冲突：保留草稿，提示刷新核对，禁止自动覆盖重试。
+      // 版本冲突：保留草稿与移除草稿，提示刷新核对，禁止自动覆盖重试。
       notify("配置已被其他会话修改（版本冲突）。草稿已保留，请刷新核对后再提交。");
+    } else if (axios.isAxiosError(error) && error.response?.status === 400) {
+      // 确定性校验拒绝：保留草稿，展示 closed 逐键英文说明；无兼容字段时回落通用错误。
+      const validation = parseValidationErrors(error.response?.data);
+      if (validation) {
+        saveValidationErrors.value = validation;
+        notify(
+          `The change was rejected by settings validation (${validation.length} issue(s)). Drafts are preserved.`,
+        );
+      } else {
+        handleApiError("保存运行配置失败", error);
+      }
     } else {
       handleApiError("保存运行配置失败", error);
     }
@@ -247,6 +415,13 @@ function discardSettings(keys?: string[]) {
     if (keySet && !keySet.has(setting.key)) continue;
     settingsDraft[setting.key] = setting.isSensitive ? "" : (setting.value ?? "");
   }
+  if (pendingRemovals.value.size) {
+    const removals = new Set(pendingRemovals.value);
+    for (const key of [...removals])
+      if (!keySet || keySet.has(key)) removals.delete(key);
+    pendingRemovals.value = removals;
+  }
+  saveValidationErrors.value = null;
   notify("已撤销未保存修改");
 }
 
@@ -430,6 +605,14 @@ export function useAdminSettings() {
     configurationVersion,
     runningConfigurationVersion,
     restartPending,
+    pendingRemovals,
+    saveValidationErrors,
+    diagnostics,
+    diagnosticsLoading,
+    diagnosticsError,
+    diagnosticsCurrent,
+    lokiDisablePending,
+    otlpRemovalPending,
     bootstrapSettings,
     bootstrapLoading,
     bootstrapSaving,
@@ -444,7 +627,14 @@ export function useAdminSettings() {
     getSettingsForSection,
     hasBootstrapForm,
     formatValue,
+    validationErrorDescription,
     loadSettings,
+    loadDiagnostics,
+    draftLokiDisable,
+    draftOtlpRemoval,
+    cancelRemoval,
+    isRemovalPending,
+    removalKeysInScope,
     saveSettings,
     discardSettings,
     loadBootstrap,
