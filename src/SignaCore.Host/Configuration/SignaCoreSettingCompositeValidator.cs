@@ -73,12 +73,21 @@ internal sealed class SignaCoreSettingCompositeValidator(
     // Both strict updates and recovery use these exact optional rules. Recovery selects groups
     // before evaluation; it never filters arbitrary core or null-key validation errors.
     internal static IEnumerable<ServiceSettingValidationError> ValidateOptionalSettings(
-        ServiceSettingValidationContext context, bool preserveLoki = false, bool preserveOtlp = false)
+        ServiceSettingValidationContext context, bool preserveLoki = false, bool preserveOtlp = false) =>
+        ValidateOptionalSettings(BuildLegacySnapshot(context), preserveLoki, preserveOtlp);
+
+    /// <summary>
+    /// The same optional rules over an already materialized legacy-keyed value dictionary — the
+    /// diagnostics read path's entry point. It delegates to the exact private rule methods the
+    /// candidate path uses, so there is no second state rule: the same inputs keep the same
+    /// outcomes whether they come from a candidate context or a stored snapshot.
+    /// </summary>
+    internal static IEnumerable<ServiceSettingValidationError> ValidateOptionalSettings(
+        IReadOnlyDictionary<string, string> legacyValues, bool preserveLoki = false, bool preserveOtlp = false)
     {
-        var legacy = BuildLegacySnapshot(context);
         var errors = new List<ServiceSettingValidationError>();
-        if (!preserveOtlp) ValidateOtlpEndpoint(legacy, errors);
-        if (!preserveLoki) ValidateLoki(legacy, errors);
+        if (!preserveOtlp) ValidateOtlpEndpoint(legacyValues, errors);
+        if (!preserveLoki) ValidateLoki(legacyValues, errors);
         return errors;
     }
 
@@ -88,23 +97,25 @@ internal sealed class SignaCoreSettingCompositeValidator(
     /// default was not migrated) fall back to the legacy default, which is exactly the value the
     /// legacy validator would have seen.
     /// </summary>
-    private static Dictionary<string, string> BuildLegacySnapshot(ServiceSettingValidationContext context)
+    private static Dictionary<string, string> BuildLegacySnapshot(ServiceSettingValidationContext context) =>
+        BuildLegacySnapshot(context.Values);
+
+    /// <summary>
+    /// The same legacy-keyed rebuild over an already materialized value dictionary — shared by the
+    /// candidate path (through the validation context) and the stored-snapshot diagnostics path.
+    /// The rendered dictionary is a transient local: it may contain decrypted sensitive values, so
+    /// it never leaves the calling method's stack.
+    /// </summary>
+    internal static Dictionary<string, string> BuildLegacySnapshot(
+        IReadOnlyDictionary<string, ServiceSettingValue> values)
     {
         var snapshot = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var definition in ServiceSettingDefinitions.Table)
         {
             var legacyKey = ServiceSettingDefinitions.LegacyKeyOf(definition);
-            if (context.TryGetValue(definition.Key, out var value) && value.HasValue)
+            if (values.TryGetValue(definition.Key, out var value) && value.HasValue)
             {
-                snapshot[legacyKey] = definition.ValueType switch
-                {
-                    ServiceSettingValueType.String => value.GetString(),
-                    ServiceSettingValueType.Number => value.GetNumber().ToString("G29", CultureInfo.InvariantCulture),
-                    ServiceSettingValueType.Boolean => value.GetBoolean() ? "true" : "false",
-                    ServiceSettingValueType.Json => JsonSerializer.Serialize(value.GetJson()),
-                    _ => throw new InvalidOperationException(
-                        $"Unsupported setting value type: {definition.ValueType}")
-                };
+                snapshot[legacyKey] = RenderLegacyValue(definition, value);
             }
             else
             {
@@ -114,6 +125,17 @@ internal sealed class SignaCoreSettingCompositeValidator(
 
         return snapshot;
     }
+
+    private static string RenderLegacyValue(ProductSettingDefinition definition, ServiceSettingValue value) =>
+        definition.ValueType switch
+        {
+            ServiceSettingValueType.String => value.GetString(),
+            ServiceSettingValueType.Number => value.GetNumber().ToString("G29", CultureInfo.InvariantCulture),
+            ServiceSettingValueType.Boolean => value.GetBoolean() ? "true" : "false",
+            ServiceSettingValueType.Json => JsonSerializer.Serialize(value.GetJson()),
+            _ => throw new InvalidOperationException(
+                $"Unsupported setting value type: {definition.ValueType}")
+        };
 
     private static void ValidatePublicBaseUrl(
         IReadOnlyDictionary<string, string> values,

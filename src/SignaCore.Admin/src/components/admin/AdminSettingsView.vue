@@ -5,7 +5,10 @@ import {
   useAdminSettings,
   type SettingsSectionKey,
 } from "../../composables/admin/useAdminSettings";
-import type { AdminSettingValue } from "../../services/adminApi";
+import type {
+  AdminSettingValue,
+  AdminSettingValidationError,
+} from "../../services/adminApi";
 
 const props = defineProps<{
   section: SettingsSectionKey;
@@ -19,22 +22,61 @@ const {
   configurationVersion,
   runningConfigurationVersion,
   restartPending,
+  saveValidationErrors,
+  diagnostics,
+  diagnosticsLoading,
+  diagnosticsError,
+  diagnosticsCurrent,
+  lokiDisablePending,
+  otlpRemovalPending,
   changedSettings,
   formatValue,
+  validationErrorDescription,
   getSettingsSection,
   getSettingsForSection,
   loadSettings,
+  loadDiagnostics,
+  draftLokiDisable,
+  draftOtlpRemoval,
+  cancelRemoval,
+  isRemovalPending,
+  removalKeysInScope,
   saveSettings,
   discardSettings,
+  settings,
 } = useAdminSettings();
 
 const sectionInfo = computed(() => getSettingsSection(props.section));
 const sectionItems = computed(() => getSettingsForSection(props.section));
+const sectionKeys = computed(() =>
+  sectionItems.value.map((setting) => setting.key),
+);
 const sectionChangedItems = computed(() => {
   const keys = new Set(sectionItems.value.map((setting) => setting.key));
   return changedSettings.value.filter((setting) => keys.has(setting.key));
 });
+const sectionRemovalKeys = computed(() =>
+  removalKeysInScope(sectionKeys.value),
+);
+const sectionPendingCount = computed(
+  () => sectionChangedItems.value.length + sectionRemovalKeys.value.length,
+);
 const isBootstrap = computed(() => props.section === "settings-bootstrap");
+const isObservability = computed(
+  () => props.section === "settings-observability",
+);
+/** Loki/OTLP 是否已有配置（决定显式禁用/移除操作是否有意义）。 */
+const lokiConfigured = computed(() =>
+  settings.value.some(
+    (setting) =>
+      setting.key.startsWith("loki.") && setting.hasValue,
+  ),
+);
+const otlpConfigured = computed(
+  () =>
+    settings.value.find((setting) => setting.key === "opentelemetry.otlp_endpoint")
+      ?.hasValue ?? false,
+);
 
 const settingLabels: Record<string, string> = {
   "endpoints.public_base_url": "公开基础地址",
@@ -75,7 +117,7 @@ const settingLabels: Record<string, string> = {
   "consul.token": "Consul 令牌",
   "consul.discovery.enabled": "启用服务发现",
   "consul.discovery.register": "注册当前服务",
-  "consul.discovery.deregister": "停止时注销服务",
+  "consul.discovery.deregister": "停止时注销",
   "consul.discovery.service_name": "服务名称",
   "consul.discovery.health_check_path": "健康检查路径",
   "consul.discovery.prefer_ip_address": "优先使用 IP 地址",
@@ -94,11 +136,15 @@ function settingHint(setting: AdminSettingValue) {
 }
 
 function saveCurrentSection() {
-  void saveSettings(sectionItems.value.map((setting) => setting.key));
+  void saveSettings(sectionKeys.value);
 }
 
 function discardCurrentSection() {
-  discardSettings(sectionItems.value.map((setting) => setting.key));
+  discardSettings(sectionKeys.value);
+}
+
+function validationErrorKey(error: AdminSettingValidationError) {
+  return error.key ?? "unknown";
 }
 </script>
 
@@ -112,19 +158,19 @@ function discardCurrentSection() {
       <div v-if="!isBootstrap" class="heading-actions">
         <button
           class="console-button secondary"
-          :disabled="!sectionChangedItems.length || settingsSaving"
+          :disabled="!sectionPendingCount || settingsSaving"
           @click="discardCurrentSection"
         >
           撤销修改</button
         ><button
           class="console-button primary"
-          :disabled="!sectionChangedItems.length || settingsSaving"
+          :disabled="!sectionPendingCount || settingsSaving"
           @click="saveCurrentSection"
         >
           {{
             settingsSaving
               ? "保存中…"
-              : `保存 ${sectionChangedItems.length || ""}`
+              : `保存 ${sectionPendingCount || ""}`
           }}
         </button>
       </div>
@@ -155,6 +201,28 @@ function discardCurrentSection() {
     </div>
 
     <div
+      v-if="!isBootstrap && saveValidationErrors"
+      class="console-warning-banner"
+    >
+      <span>!</span>
+      <div>
+        <b>The last save was rejected by settings validation</b>
+        <p>
+          Drafts are preserved. Fix the listed keys and save again — an empty
+          sensitive field still means “keep the current value”.
+        </p>
+        <ul class="settings-validation-errors">
+          <li
+            v-for="(error, index) in saveValidationErrors"
+            :key="`${validationErrorKey(error)}-${index}`"
+          >
+            {{ validationErrorDescription(error) }}
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <div
       v-if="!isBootstrap && settingsLoading"
       class="console-panel console-table-state"
     >
@@ -178,48 +246,169 @@ function discardCurrentSection() {
           </div>
           <span class="panel-note"
             >{{ sectionItems.length }} 项 · 未保存
-            {{ sectionChangedItems.length }} 项</span
+            {{ sectionPendingCount }} 项</span
           >
         </div>
-        <div v-if="sectionItems.length" class="settings-list">
-          <label
-            v-for="setting in sectionItems"
-            :key="setting.key"
-            class="setting-row"
-          >
-            <span>
-              <b>{{ settingLabel(setting) }}</b>
-              <small>{{ settingHint(setting) }}</small>
-            </span>
-            <select
-              v-if="setting.valueType === 'boolean' && !setting.isSensitive"
-              v-model="settingsDraft[setting.key]"
-              class="console-input"
+
+        <div
+          v-if="isObservability"
+          class="settings-diagnostics settings-diagnostics-panel"
+        >
+          <div class="panel-heading">
+            <div>
+              <h2>Optional telemetry diagnostics</h2>
+              <p>
+                Saved version
+                <b>v{{ diagnostics?.version ?? configurationVersion ?? "?" }}</b>
+                · running version
+                <b>v{{ runningConfigurationVersion ?? "unknown" }}</b>
+                — issues describe the saved version, not the running sink.
+              </p>
+            </div>
+            <button
+              class="console-button secondary"
+              :disabled="diagnosticsLoading"
+              @click="loadDiagnostics"
             >
-              <option value="true">启用</option>
-              <option value="false">停用</option>
-            </select>
-            <textarea
-              v-else-if="setting.valueType === 'json'"
-              v-model="settingsDraft[setting.key]"
-              class="console-input settings-json-input"
-              rows="2"
-              :placeholder="setting.isSensitive ? '留空表示不变' : '输入 JSON 配置值'"
-            ></textarea>
-            <input
-              v-else
-              v-model="settingsDraft[setting.key]"
-              class="console-input"
-              :type="
-                setting.isSensitive
-                  ? 'password'
-                  : setting.valueType === 'number'
-                    ? 'number'
-                    : 'text'
-              "
-              :placeholder="setting.isSensitive ? '留空表示不变' : '输入配置值'"
-            />
-          </label>
+              {{ diagnosticsLoading ? "Running…" : "Re-run diagnostics" }}
+            </button>
+          </div>
+          <div
+            v-if="diagnosticsLoading"
+            class="console-table-state settings-section-state"
+          >
+            <span class="console-spinner"></span>Running diagnostics…
+          </div>
+          <div
+            v-else-if="diagnosticsError"
+            class="console-table-state settings-section-state error"
+          >
+            Diagnostics are unavailable ({{ diagnosticsError }}). This page
+            does not claim the saved settings are healthy — fix or disable via
+            the fields below and restart.
+          </div>
+          <div
+            v-else-if="!diagnostics"
+            class="console-table-state settings-section-state"
+          >
+            Diagnostics have not run yet.
+          </div>
+          <div
+            v-else-if="!diagnosticsCurrent"
+            class="console-table-state settings-section-state"
+          >
+            The diagnostics were taken at saved version v{{
+              diagnostics.version ?? "?"
+            }}
+            while the loaded settings are v{{
+              configurationVersion ?? "?"
+            }}; re-run them before treating the result as current.
+          </div>
+          <template v-else>
+            <p
+              v-if="!diagnostics.issues.length"
+              class="settings-diagnostics-ok"
+            >
+              No optional telemetry issues in saved version v{{
+                diagnostics.version
+              }}. Restart is still required for saved changes to take
+              effect.
+            </p>
+            <ul v-else class="settings-diagnostics-issues">
+              <li
+                v-for="(issue, index) in diagnostics.issues"
+                :key="`${issue.key ?? 'setting'}-${index}`"
+              >
+                <b>{{ issue.key ?? "a setting" }}</b> —
+                {{ validationErrorDescription(issue) }}
+              </li>
+            </ul>
+          </template>
+          <div class="settings-diagnostics-actions">
+            <button
+              v-if="lokiConfigured && !lokiDisablePending"
+              class="console-button secondary"
+              :disabled="settingsSaving"
+              @click="draftLokiDisable"
+            >
+              Disable Loki (remove both keys on save)</button
+            ><button
+              v-if="otlpConfigured && !otlpRemovalPending"
+              class="console-button secondary"
+              :disabled="settingsSaving"
+              @click="draftOtlpRemoval"
+            >
+              Remove OTLP endpoint (on save)
+            </button>
+            <span
+              v-if="lokiDisablePending"
+              class="settings-diagnostics-drafted"
+            >
+              Loki disable drafted: both keys will be removed in the next
+              save.</span
+            >
+            <span
+              v-if="otlpRemovalPending"
+              class="settings-diagnostics-drafted"
+            >
+              OTLP endpoint removal drafted for the next save.</span
+            >
+          </div>
+        </div>
+
+        <div v-if="sectionItems.length" class="settings-list">
+          <template v-for="setting in sectionItems" :key="setting.key">
+            <div v-if="isRemovalPending(setting.key)" class="setting-row">
+              <span>
+                <b>{{ settingLabel(setting) }}</b>
+                <small>
+                  Marked for removal — submitted as null in the next save.
+                  Undo to keep editing; sensitive values are never echoed.
+                </small>
+              </span>
+              <button
+                class="console-button secondary"
+                :disabled="settingsSaving"
+                @click="cancelRemoval(setting.key)"
+              >
+                Undo removal</button
+              >
+            </div>
+            <label v-else class="setting-row">
+              <span>
+                <b>{{ settingLabel(setting) }}</b>
+                <small>{{ settingHint(setting) }}</small>
+              </span>
+              <select
+                v-if="setting.valueType === 'boolean' && !setting.isSensitive"
+                v-model="settingsDraft[setting.key]"
+                class="console-input"
+              >
+                <option value="true">启用</option>
+                <option value="false">停用</option>
+              </select>
+              <textarea
+                v-else-if="setting.valueType === 'json'"
+                v-model="settingsDraft[setting.key]"
+                class="console-input settings-json-input"
+                rows="2"
+                :placeholder="setting.isSensitive ? '留空表示不变' : '输入 JSON 配置值'"
+              ></textarea>
+              <input
+                v-else
+                v-model="settingsDraft[setting.key]"
+                class="console-input"
+                :type="
+                  setting.isSensitive
+                    ? 'password'
+                    : setting.valueType === 'number'
+                      ? 'number'
+                      : 'text'
+                "
+                :placeholder="setting.isSensitive ? '留空表示不变' : '输入配置值'"
+              />
+            </label>
+          </template>
         </div>
         <div v-else class="console-table-state settings-section-state">
           当前服务没有返回这一配置域的可管理项。

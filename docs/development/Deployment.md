@@ -383,12 +383,33 @@ sinks disabled with fixed warnings. Protected management reads remain available 
 sensitive values. A valid unrelated settings update preserves the untouched unusable group and its
 protected values; it neither deletes them nor activates logging, telemetry, or login policy.
 
+To locate the unusable groups, an authenticated administrator can call
+`GET /management/v1/settings/diagnostics` (no query parameters). It reports the saved version's
+unusable optional telemetry rules as closed `key` + `errorCode` pairs together with the saved
+version and the running version this process activated at bootstrap — for example
+`{ "version": 4, "runningVersion": 3, "issues": [ { "key": "loki.uri", "errorCode": "signacore.setting.https_required" } ] }`.
+The issues describe the saved settings, not sink health or network reachability. A load, decrypt,
+or critical failure answers the shared fixed 503 with no partial result. The admin console's
+observability settings page shows the same panel with fixed English explanations, an explicit
+saved-versus-running version pair, and the recovery actions below; older HTTP clients can use the
+endpoint directly through the official API.
+
 Explicitly changing any Loki group key requires a valid HTTPS endpoint and usable Authorization,
 or deletion of both `loki.uri` and `loki.authorization` in one batch with `value=null`. Repair OTLP
 with a valid HTTPS endpoint or delete `opentelemetry.otlp_endpoint`. An unchanged value included in
-a command still counts as a change to its group and must pass strict validation. Use the observed
-`expectedVersion`, then restart to activate the final configuration. The running-version header
-continues to describe the current process until restart.
+a command still counts as a change to its group and must pass strict validation. A definite
+validation rejection (HTTP 400) keeps the fixed `management.request.invalid` error code and adds a
+`validationErrors` array naming each rejected key with its fixed code, so a failed save can be
+diagnosed per key without echoing any value. Use the observed `expectedVersion`, then restart to
+activate the final configuration. The running-version header continues to describe the current
+process until restart.
+
+In the console, **Disable Loki** drafts the atomic disable — both Loki keys submitted as `null` in
+the next save batch — and **Remove OTLP endpoint** drafts the same for the OTLP key. A normal
+empty sensitive input still means "keep the current value", so nothing is deleted silently. Drafts
+can be undone before saving and survive conflicts and rejections; restart after saving to
+activate. Old UI or HTTP-only clients keep working: both ignore the new panel/field and can
+perform the same repair or disable through the official settings API.
 
 Core validation, root-key/decryption failures, and database failures remain closed; recovery does
 not add HTTP or unauthenticated Loki support. See [Shared settings recovery](SharedSettings.md#legacy-optional-telemetry-recovery).

@@ -193,6 +193,7 @@
 @media (prefers-reduced-motion: reduce) { .console-view, .console-drawer, .console-modal, .console-toast { animation: none; }.console-spinner { animation-duration: 1.8s; } }
 
 .settings-single-panel { overflow: hidden; }.settings-single-panel .settings-list { padding-bottom: 18px; }.settings-json-input { min-height: 55px; padding-top: 9px; resize: vertical; }.settings-section-state { min-height: 170px; }
+.settings-diagnostics-panel { margin: 0 0 4px; padding: 15px 21px 17px; border-bottom: 1px solid #eef2f1; background: #fafbfb; }.settings-diagnostics-panel .panel-heading { margin-bottom: 9px; }.settings-diagnostics-ok { margin: 0; color: var(--console-teal); font-size: 11px; line-height: 1.6; }.settings-diagnostics-issues, .settings-validation-errors { margin: 0; padding: 0 0 0 16px; color: var(--console-muted); font-size: 11px; line-height: 1.7; }.settings-diagnostics-issues b { color: var(--console-ink); overflow-wrap: anywhere; }.settings-validation-errors { margin-top: 6px; color: #805b2f; }.settings-diagnostics-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 12px; }.settings-diagnostics-drafted { color: var(--console-amber); font-size: 10px; font-weight: 700; }
 .settings-menu-group { margin-top: 14px; }.settings-menu-group .console-nav-item { padding-block: 8px; }
 @media (max-width: 850px) {
   .console-sidebar { position: absolute; min-height: 100vh; height: auto; }
