@@ -617,6 +617,8 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
     public async Task Discovery_AdvertisesOfflineAccessAndNothingElseNew(string path)
     {
         using var http = _fixture.CreateHttpClient();
+        // This fixture explicitly configures an HTTP public discovery origin.
+        http.BaseAddress = new Uri("http://localhost");
         var document = await http.GetFromJsonAsync<JsonElement>(path, TestContext.Current.CancellationToken);
 
         Assert.Equal(

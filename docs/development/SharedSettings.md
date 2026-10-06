@@ -189,7 +189,7 @@ inputs with pinned verdicts captured from the retired validator's baseline, and 
 - The PostgreSQL concurrency contract (exactly one winner per version) runs in CI under
   `RUN_SIGNACORE_DATABASE_CONTRACTS=true`; the SQLite contract tests run in every build.
 
-## Hosted-login HTTP test policy foundation
+## Hosted-login HTTP test policy
 
 `security.hosted_login_http_test_origins` is an optional, non-sensitive JSON array with
 `requiresRestart=true`, no shared default and a legacy input default of `[]`. Missing/empty keeps
@@ -199,6 +199,8 @@ independently of configuration overlays. Shared updates do not activate the new 
 current process; storing a nonempty list outside Testing makes the next normal startup fail.
 
 See [Private-network HTTP testing](../oidc/HttpTesting.md) for literal-IP syntax, issuer/authority
-checks and the staged capability boundary. The URI stage accepts exact allowlisted complete HTTP registrations and rechecks current trust
-at runtime; Cookie transport is a separate stage. Before a binary rollback, remove the explicit key with a shared update `value=null`;
+checks and the release acceptance boundary. Exact allowlisted complete HTTP registrations and
+current trust revalidation operate together with the isolated HTTP identity/CSRF Cookie carrier.
+Both stages are implemented; official dual-end published-image/browser release acceptance remains
+pending. Before a binary rollback, remove the explicit key with a shared update `value=null`;
 `[]` is not removal. No PostgreSQL or SQLite migration is needed.

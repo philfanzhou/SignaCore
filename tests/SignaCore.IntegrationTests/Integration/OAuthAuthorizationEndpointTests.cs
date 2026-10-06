@@ -460,8 +460,7 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
         await SeedAsync();
         using var factory = _fixture.WithTestServices(services =>
             services.AddSingleton<IStartupFilter>(new PathBaseStartupFilter("/signacore")));
-        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
 
@@ -487,8 +486,7 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
         await SeedAsync();
         using var factory = _fixture.WithTestServices(services =>
             services.AddSingleton<IStartupFilter>(new PathBaseStartupFilter("//outside.example.test")));
-        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
 
@@ -551,8 +549,7 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
         await SeedAsync();
         var interceptor = new ContinuationInsertFailureInterceptor();
         using var factory = CreateHostWithDbInterceptor(interceptor);
-        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
 
@@ -600,8 +597,7 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
         using var factory = CreateHostWithDbInterceptor(
             new ArmOnContinuationInsertInterceptor(gate),
             new ContinuationCommitCancellationInterceptor(gate, cancellation, afterCommit));
-        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
 
@@ -727,8 +723,7 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
         var handle = await AssertLoginRedirectAsync(response);
 
         using var factory = _fixture.WithTestServices(_ => { });
-        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
         using var loginPage = await http.GetAsync(
@@ -759,8 +754,7 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
                 logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
             }));
         });
-        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var http = factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
 
@@ -809,7 +803,7 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
     {
         using var factory = _fixture.WithTestServices(_ => { });
         using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        { HandleCookies = false,
             BaseAddress = new Uri("https://localhost")
         });
         using var login = new HttpRequestMessage(

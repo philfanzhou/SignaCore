@@ -70,7 +70,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     {
         using var host = CreateLogoutHost();
         var (accountId, sessionId, _) = await LoginAndCaptureSessionAsync(host);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
 
         var idToken = await MintIdTokenAsync(accountId, sessionId);
         var response = await PrepareAsync(
@@ -113,7 +113,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     {
         using var host = CreateLogoutHost();
         var (accountId, sessionId, _) = await LoginAndCaptureSessionAsync(host);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var idToken = await MintIdTokenAsync(accountId, sessionId, variant: variant);
 
         var response = await PrepareAsync(http, [("id_token_hint", idToken)]);
@@ -135,7 +135,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         // here, and the token is still validated in full otherwise.
         using var host = CreateLogoutHost();
         var (accountId, sessionId, _) = await LoginAndCaptureSessionAsync(host);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var idToken = await MintIdTokenAsync(accountId, sessionId, expired: true);
 
         var response = await PrepareAsync(http, [("id_token_hint", idToken)]);
@@ -154,7 +154,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         _ = label;
         using var host = CreateLogoutHost();
         var (accountId, sessionId, _) = await LoginAndCaptureSessionAsync(host);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var idToken = await MintIdTokenAsync(accountId, sessionId);
 
         var response = await PrepareAsync(
@@ -176,7 +176,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         _ = label;
         using var host = CreateLogoutHost();
         var (accountId, sessionId, _) = await LoginAndCaptureSessionAsync(host);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var idToken = await MintIdTokenAsync(accountId, sessionId);
 
         var response = await PrepareAsync(
@@ -193,7 +193,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     {
         using var host = CreateLogoutHost();
         var (accountId, sessionId, _) = await LoginAndCaptureSessionAsync(host);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Authorization = BasicHeader();
         var idToken = await MintIdTokenAsync(accountId, sessionId);
 
@@ -222,7 +222,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     {
         using var host = CreateLogoutHost();
         var (accountId, sessionId, _) = await LoginAndCaptureSessionAsync(host);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var idToken = await MintIdTokenAsync(accountId, sessionId);
 
         var response = await SendRawPrepareAsync(
@@ -236,7 +236,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     public async Task Prepare_WithoutClientAuthentication_IsRejected()
     {
         using var host = CreateLogoutHost();
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var response = await http.PostAsync(
             "/oauth2/logout/requests",
             new FormUrlEncodedContent(new Dictionary<string, string> { ["id_token_hint"] = "x" }),
@@ -252,8 +252,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         using var host = CreateLogoutHost();
         var (accountId, sessionId, cookieValue) = await LoginAndCaptureSessionAsync(host);
         var familyRootId = await SeedInteractiveFamilyAsync(accountId, sessionId);
-        using var http = host.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var http = host.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         });
@@ -304,8 +303,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     {
         using var host = CreateLogoutHost();
         var (accountId, sessionId, cookieValue) = await LoginAndCaptureSessionAsync(host);
-        using var http = host.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var http = host.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         });
@@ -335,13 +333,11 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         // same external shape — no session-state oracle — while only the cookie path revokes.
         using var host = CreateLogoutHost();
         var (accountId, sessionId, cookieValue) = await LoginAndCaptureSessionAsync(host);
-        using var cookieClient = host.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var cookieClient = host.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         });
-        using var cookielessClient = host.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var cookielessClient = host.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
 
@@ -384,8 +380,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         using var host = CreateLogoutHost();
         var (accountId, sessionId, _) = await LoginAndCaptureSessionAsync(host);
         var (_, otherSessionId, otherCookie) = await LoginAndCaptureSessionAsync(host);
-        using var http = host.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var http = host.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         });
@@ -409,7 +404,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     {
         using var host = CreateLogoutHost();
         var (accountId, sessionId, cookieValue) = await LoginAndCaptureSessionAsync(host);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Add(
             "Cookie", $"{IdentitySessionDefaults.CookieName}={cookieValue}");
 
@@ -430,7 +425,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     {
         using var host = CreateLogoutHost();
         var (accountId, sessionId, cookieValue) = await LoginAndCaptureSessionAsync(host);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Add(
             "Cookie", $"{IdentitySessionDefaults.CookieName}={cookieValue}");
 
@@ -466,7 +461,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
             await dbContext.LogoutRequests.AsNoTracking()
                 .CountAsync(row => row.ConsumedAt != null, TestContext.Current.CancellationToken));
         using var host = CreateLogoutHost();
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         using var completion = await http.GetAsync(url, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, completion.StatusCode);
@@ -482,7 +477,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     {
         using var host = CreateLogoutHost();
         var (accountId, sessionId, _) = await LoginAndCaptureSessionAsync(host);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
 
         // A row whose stored sub cannot belong to the live session row under the stored sid.
         var handle = await PrepareHandleAsync(host, accountId, sessionId, withRedirect: false);
@@ -514,7 +509,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         using var host = CreateLogoutHost();
         var (accountId, sessionId, cookieValue) = await LoginAndCaptureSessionAsync(host);
         var code = await SeedCodeAsync(accountId, sessionId);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Add(
             "Cookie", $"{IdentitySessionDefaults.CookieName}={cookieValue}");
 
@@ -524,7 +519,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
 
         // SC-05: redemption after logout fails the live-session check with the generic
         // invalid_grant, consumes nothing, and writes no replay audit.
-        using var redeem = host.CreateClient();
+        using var redeem = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         redeem.DefaultRequestHeaders.Authorization = BasicHeader();
         var response = await redeem.PostAsync(
             "/oauth2/token",
@@ -555,7 +550,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         var familyRootId = await SeedInteractiveFamilyAsync(accountId, sessionId);
         var code = await SeedCodeAsync(accountId, sessionId);
 
-        using var redeem = host.CreateClient();
+        using var redeem = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         redeem.DefaultRequestHeaders.Authorization = BasicHeader();
         var response = await redeem.PostAsync(
             "/oauth2/token",
@@ -569,7 +564,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Add(
             "Cookie", $"{IdentitySessionDefaults.CookieName}={cookieValue}");
         var handle = await PrepareHandleAsync(host, accountId, sessionId, withRedirect: false);
@@ -591,7 +586,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     public async Task Discovery_DoesNotAdvertiseEndSessionEndpoint()
     {
         using var host = CreateLogoutHost();
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var document = await http.GetFromJsonAsync<JsonElement>(
             "/.well-known/openid-configuration", TestContext.Current.CancellationToken);
         Assert.False(document.TryGetProperty("end_session_endpoint", out _));
@@ -617,7 +612,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         var idToken = await MintIdTokenAsync(accountId, sessionId);
 
         string handle;
-        using (var client = factory.CreateClient())
+        using (var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false }))
         {
             client.DefaultRequestHeaders.Authorization = BasicHeader();
             using var prepared = await client.PostAsync(
@@ -634,8 +629,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
             handle = body.GetProperty("logout_uri").GetString()!["/oauth2/logout?logout_handle=".Length..];
         }
 
-        using (var browser = factory.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using (var browser = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         }))
@@ -739,8 +733,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     {
         var username = $"{Username}_{Guid.NewGuid():N}";
         var accountId = await OAuthLoginTestSupport.SeedUserAsync(_fixture.Services, username, Password);
-        using var client = host.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var client = host.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         });
@@ -813,7 +806,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         // The prepare endpoint's client authentication needs the application row; seed it here so
         // the helper stands on its own under any test-case order.
         await SeedLogoutAppAsync();
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Authorization = BasicHeader();
         var idToken = await MintIdTokenAsync(accountId, sessionId);
         var fields = new List<KeyValuePair<string, string>>

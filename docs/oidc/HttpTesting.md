@@ -1,10 +1,14 @@
-# Private-network HTTP testing: policy foundation
+# Private-network HTTP testing
 
-The shared `security.hosted_login_http_test_origins` setting establishes a policy foundation for
-staged hosted-login HTTP support. **This foundation alone does not enable HTTP hosted login:**
-private-network HTTP redirect registration is supported through the current-policy checks in the
-[canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust), while identity/antiforgery Cookie support remains a separate stage. Existing HTTPS, Secure `__Host-` Cookies and the Development numeric-loopback
-redirect exception keep their behavior. Management Bearer authentication does not change.
+The shared `security.hosted_login_http_test_origins` setting activates private-network HTTP
+callback/logout URI support and an isolated identity/antiforgery HTTP Cookie carrier in the actual
+`Testing` Host. Exact complete URI registration and current-policy revalidation follow the
+[canonical redirect trust contract](./CanonicalSemanticModel.md#current-redirect-transport-trust).
+The canonical [PS-18 / PS-19 carrier contract](./CanonicalSemanticModel.md#testing-http-cookie-carrier-ps-18--ps-19)
+defines Cookie names, protection purposes, attributes, request forwarding and logout cleanup at an
+exact allowed request origin. Both stages are implemented; official dual-end published-image/browser
+acceptance remains the complete-capability release gate. Existing HTTPS Secure `__Host-` Cookies,
+management authentication and Development numeric-loopback URI behavior retain their contracts.
 
 ## Configuration and activation
 
@@ -59,9 +63,10 @@ HTTP client registration; its HTTPS Cookie profile remains Secure.
 ## Deployment and rollback
 
 HTTP provides no transport confidentiality or integrity. Private addresses do not prove trust:
-use an isolated test network and enforce access controls. Configure all instances of the test
+use an isolated test host/IP and network and enforce access controls. Cookies are not isolated by
+port, so never share this HTTP host with high-trust HTTPS. Configure all instances of the test
 deployment consistently and restart them. Existing trusted-forwarding rules remain authoritative
-for effective request addresses. Later URI stages must still require exact complete-URI registration;
+for effective request addresses. The URI stage requires exact complete-URI registration;
 an origin entry alone never authorizes a callback.
 
 No schema, migration, dependency, token or key format changes are introduced. Preserve the database,
@@ -69,7 +74,10 @@ bootstrap root key and Data Protection keyring. Before rolling back to a binary 
 only 44 keys, remove the explicit new entry through the authenticated shared update API by sending
 its `value` as `null`, verify the removal, then replace the image. Writing `[]` disables the new
 policy but does not remove an unknown key for an older binary. Existing aggregate versions and
-audits remain intact. Official dual-end browser/image acceptance belongs to the later complete
-HTTP capability, not this policy foundation.
+audits remain intact. Existing HTTP test cookies are never imported into HTTPS. Official dual-end
+published-image/browser acceptance remains the complete-capability release gate.
 
-The URI stage preserves exact complete callback/logout registration and rejects old artifacts after policy narrowing. IPv6 ULA origin/URI registration does not promise cross-origin IPv6 form navigation: retain the [login CSP limitations](./IdentityLogin.md) and use RFC1918 IPv4 for browser acceptance. Remove HTTP registrations and require a new login before rollback; artifacts are never converted.
+The URI stage preserves exact complete callback/logout registration and rejects old artifacts after
+policy narrowing. IPv6 ULA origin/URI registration does not promise cross-origin IPv6 form navigation:
+retain the [login CSP limitations](./IdentityLogin.md) and use RFC1918 IPv4 for browser acceptance.
+Remove HTTP registrations and require a new login before rollback; artifacts are never converted.

@@ -24,16 +24,19 @@ internal sealed class IdentitySessionCookiePostConfigureOptions(
 {
     public void PostConfigure(string? name, CookieAuthenticationOptions options)
     {
-        if (!string.Equals(
-                name,
-                IdentitySessionDefaults.AuthenticationScheme,
-                StringComparison.Ordinal))
+        var purpose = name switch
+        {
+            IdentitySessionDefaults.AuthenticationScheme => IdentitySessionDefaults.DataProtectionPurpose,
+            IdentityCookieProfile.TestScheme => IdentityCookieProfile.TestIdentityPurpose,
+            _ => null
+        };
+        if (purpose is null)
         {
             return;
         }
 
         options.TicketDataFormat = new TicketDataFormat(
             dataProtectionProvider.CreateProtector(
-                IdentitySessionDefaults.DataProtectionPurpose));
+                purpose));
     }
 }

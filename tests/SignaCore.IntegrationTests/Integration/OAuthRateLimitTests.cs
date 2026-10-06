@@ -47,7 +47,7 @@ public sealed partial class OAuthRateLimitTests : IClassFixture<IdentityServerFi
     public async Task Token_WithinTheBudget_BehavesIdentically_AndThenRejectsOverload()
     {
         using var host = CreateHost();
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Authorization = BasicHeader("unknown-client", "wrong-secret");
         var content = InvalidGrantForm();
 
@@ -85,7 +85,7 @@ public sealed partial class OAuthRateLimitTests : IClassFixture<IdentityServerFi
     {
         var seeded = await SeedAccountAndCodeAsync();
         using var host = CreateHost();
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Authorization = BasicHeader("unknown-client", "wrong-secret");
         var content = InvalidGrantForm();
 
@@ -122,8 +122,7 @@ public sealed partial class OAuthRateLimitTests : IClassFixture<IdentityServerFi
     {
         await SeedClientAsync();
         using var host = CreateHost();
-        using var http = host.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var http = host.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
 
@@ -167,8 +166,7 @@ public sealed partial class OAuthRateLimitTests : IClassFixture<IdentityServerFi
                     .Create<Microsoft.AspNetCore.Http.HttpContext, string>(_ =>
                         System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("test")));
         });
-        using var http = host.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var http = host.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false,
             HandleCookies = false
         });
@@ -213,7 +211,7 @@ public sealed partial class OAuthRateLimitTests : IClassFixture<IdentityServerFi
     public async Task UserInfo_AndLogout_AndRevoke_EachCarryTheirOwnBudget()
     {
         using var host = CreateHost();
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
 
         HttpStatusCode last = 0;
         for (var i = 0; i < SignaCore.Database.IdentityConstants.OidcUserInfoRateLimitPerMinute; i++)
@@ -231,7 +229,7 @@ public sealed partial class OAuthRateLimitTests : IClassFixture<IdentityServerFi
         Assert.Equal(HttpStatusCode.TooManyRequests, userinfoRejected.StatusCode);
 
         using var logoutHost = CreateHost();
-        using var logoutClient = logoutHost.CreateClient();
+        using var logoutClient = logoutHost.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         for (var i = 0; i < SignaCore.Database.IdentityConstants.OidcLogoutRateLimitPerMinute; i++)
         {
             using var within = await logoutClient.PostAsync(
@@ -249,7 +247,7 @@ public sealed partial class OAuthRateLimitTests : IClassFixture<IdentityServerFi
         Assert.Equal(HttpStatusCode.TooManyRequests, logoutRejected.StatusCode);
 
         using var revokeHost = CreateHost();
-        using var revokeClient = revokeHost.CreateClient();
+        using var revokeClient = revokeHost.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         revokeClient.DefaultRequestHeaders.Authorization = BasicHeader("unknown-client", "wrong-secret");
         for (var i = 0; i < SignaCore.Database.IdentityConstants.OidcRevokeRateLimitPerMinute; i++)
         {
@@ -277,7 +275,7 @@ public sealed partial class OAuthRateLimitTests : IClassFixture<IdentityServerFi
     public async Task OnSqlite_ThePoliciesStayInProcess_AndTheGlobalLimiterChargesSynchronously()
     {
         using var host = CreateHost();
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Authorization = BasicHeader("unknown-client", "wrong-secret");
 
         // No shared store, no partitioner, and no deferral of the global permit (#381).

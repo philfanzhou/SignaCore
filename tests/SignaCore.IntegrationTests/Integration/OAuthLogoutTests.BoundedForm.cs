@@ -85,7 +85,7 @@ public sealed partial class OAuthLogoutTests
         var (accountId, sessionId, _) = await LoginAndCaptureSessionAsync(host);
         await SeedLogoutAppAsync();
         var hint = await MintIdTokenAsync(accountId, sessionId);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         using var request = new HttpRequestMessage(HttpMethod.Post, "/oauth2/logout/requests");
         request.Headers.Authorization = BasicHeader();
         request.Content = new ByteArrayContent(Encoding.UTF8.GetBytes("id_token_hint=" + hint));
@@ -117,7 +117,7 @@ public sealed partial class OAuthLogoutTests
             services.RemoveAll<IAppRegistrationRepository>();
             services.AddSingleton(repository.Object);
         });
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var beforeRows = await QueryAsync(db => db.LogoutRequests.CountAsync(TestContext.Current.CancellationToken));
         var beforeAudit = (await QueryAsync(db => SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken))).Count;
         var payload = mode switch
@@ -173,7 +173,7 @@ public sealed partial class OAuthLogoutTests
     public async Task Prepare_MalformedInput_ConsumesSourceBudgetBeforeItsMarkerAnswer()
     {
         using var host = CreateLogoutHost();
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         for (var i = 0; i <= IdentityConstants.OidcLogoutRateLimitPerMinute; i++)
         {
             using var content = new StringContent("id_token_hint=%FF", Encoding.UTF8, "application/x-www-form-urlencoded");
@@ -195,7 +195,7 @@ public sealed partial class OAuthLogoutTests
             services.RemoveAll<IServiceHealthSnapshotSource>();
             services.AddSingleton(source.Object);
         });
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         using var response = await http.PostAsync("/oauth2/logout/requests",
             new StringContent("id_token_hint=%FF", Encoding.UTF8, "application/x-www-form-urlencoded"),
             TestContext.Current.CancellationToken);
@@ -211,7 +211,7 @@ public sealed partial class OAuthLogoutTests
         var (account, session, _) = await LoginAndCaptureSessionAsync(host);
         await SeedLogoutAppAsync();
         var hint = await MintIdTokenAsync(account, session);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Authorization = BasicHeader();
         var states = new[] { "first-state-0123456789012345", "second-state-012345678901234" };
         var sends = states.Select(state => http.PostAsync("/oauth2/logout/requests",

@@ -374,7 +374,7 @@ public sealed class OAuthAuthorizationSessionReuseTests : IClassFixture<Identity
             services.AddScoped<IAuthorizationCodeStore>(_ => new ThrowingCodeStore());
         });
         using var client = factory.CreateClient(
-            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = false });
+            new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false, HandleCookies = false });
         using var response = await client.SendAsync(
             AuthorizeRequest(BuildSuccessAuthorizeUrl(), cookieValue),
             TestContext.Current.CancellationToken);
@@ -403,14 +403,14 @@ public sealed class OAuthAuthorizationSessionReuseTests : IClassFixture<Identity
             }));
         });
         using var loginClient = factory.CreateClient(
-            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = false });
+            new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false, HandleCookies = false });
         var cookieValue = await CompleteSuccessLoginAndGetIdentityCookieValueAsync(
             _fixture.Services, loginClient, ReuseUser, ReusePassword);
         var accountId = await GetAccountIdOfAsync(ReuseUser);
         var session = await GetLatestSessionAsync(accountId);
 
         using var client = factory.CreateClient(
-            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = false });
+            new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false, HandleCookies = false });
         using var response = await client.SendAsync(
             AuthorizeRequest(BuildSuccessAuthorizeUrl(), cookieValue),
             TestContext.Current.CancellationToken);

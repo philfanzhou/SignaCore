@@ -276,7 +276,7 @@ public sealed partial class OidcMultiInstanceAcceptanceTests
 
     private static async Task<HttpResponseMessage> StateCompleteLogoutAsync(WebApplicationFactory<Program> host, string uri, string? cookie)
     {
-        using var http = host.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = false });
+        using var http = host.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), AllowAutoRedirect = false, HandleCookies = false });
         if (cookie is not null) http.DefaultRequestHeaders.Add("Cookie", IdentitySessionDefaults.CookieName + "=" + cookie);
         return await http.GetAsync(uri, TestContext.Current.CancellationToken);
     }

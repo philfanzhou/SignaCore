@@ -234,7 +234,7 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
     {
         var counter = new CountingPasswordValidator();
         using var factory = _fixture.CreateHostWithCountingValidator(counter);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var session = await BeginLoginAsync(factory.Services, client);
         var before = await DumpLoginTablesAsync(factory.Services);
         var validBody = BuildEscapedBody(LoginFields(session, "structure_user", "Structure-Pw-1!"));
@@ -318,7 +318,7 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
     {
         var counter = new CountingPasswordValidator();
         using var factory = _fixture.CreateHostWithCountingValidator(counter);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var first = await BeginLoginAsync(factory.Services, client);
         var second = await BeginLoginAsync(factory.Services, client);
         var before = await DumpLoginTablesAsync(factory.Services);
@@ -384,7 +384,7 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
     {
         var counter = new CountingPasswordValidator();
         using var factory = _fixture.CreateHostWithCountingValidator(counter);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var session = await BeginLoginAsync(factory.Services, client);
         var before = await DumpLoginTablesAsync(factory.Services);
 
@@ -422,7 +422,7 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
     {
         var counter = new CountingPasswordValidator();
         using var factory = _fixture.CreateHostWithCountingValidator(counter);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var session = await BeginLoginAsync(factory.Services, client);
         var before = await DumpLoginTablesAsync(factory.Services);
 
@@ -478,7 +478,7 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
     {
         var counter = new CountingPasswordValidator();
         using var factory = _fixture.CreateHostWithCountingValidator(counter);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var session = await BeginLoginAsync(factory.Services, client);
         var before = await DumpLoginTablesAsync(factory.Services);
 
@@ -530,7 +530,7 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
     {
         var counter = new CountingPasswordValidator();
         using var factory = _fixture.CreateHostWithCountingValidator(counter);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var session = await BeginLoginAsync(factory.Services, client);
         const string paddedUsername = "  Login_Raw_User  ";
         const string paddedPassword = "  Raw-Password-1  ";
@@ -565,7 +565,7 @@ public sealed class OAuthLoginEndpointTests : IClassFixture<IdentityServerFixtur
         // A '+' inside the raw form body decodes to a space before reaching the validator.
         var plusCounter = new CountingPasswordValidator();
         using var plusFactory = _fixture.CreateHostWithCountingValidator(plusCounter);
-        using var plusClient = plusFactory.CreateClient();
+        using var plusClient = plusFactory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var plusSession = await BeginLoginAsync(plusFactory.Services, plusClient);
         using var plusRequest = CreateLoginPost(rawBody: BuildRawBody(
             ("login_handle", plusSession.Handle),

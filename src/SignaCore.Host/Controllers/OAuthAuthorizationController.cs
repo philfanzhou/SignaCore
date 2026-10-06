@@ -107,6 +107,8 @@ public sealed class OAuthAuthorizationController : ControllerBase
     public async Task<IActionResult> Authorize(CancellationToken cancellationToken)
     {
         ApplyBrowserSecurityHeaders();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (IdentityCookieProfile.Resolve(HttpContext) is null) return LocalError();
 
         var parameters = new OidcAuthorizationParameters(
             Request.Query.Select(entry =>

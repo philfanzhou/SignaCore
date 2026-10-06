@@ -73,6 +73,8 @@ public sealed class OAuthLoginSensitiveValueScanTests : IClassFixture<IdentitySe
         using var client = factory.CreateClient(
             new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
             {
+                BaseAddress = new Uri("https://localhost"),
+                HandleCookies = false,
                 AllowAutoRedirect = false
             });
 

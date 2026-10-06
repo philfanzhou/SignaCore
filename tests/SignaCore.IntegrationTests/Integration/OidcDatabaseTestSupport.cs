@@ -24,6 +24,7 @@ using SignaCore.Database.Entity;
 using SignaCore.Database.RateLimiting;
 using SignaCore.Domain.Services;
 using SignaCore.Host;
+using SignaCore.Host.Configuration;
 using SignaCore.Host.Security;
 using SignaCore.Host.Startup;
 using Testcontainers.PostgreSql;
@@ -364,9 +365,10 @@ internal static class OidcDatabaseTestSupport
 
     internal sealed record SeededCode(string Code, Guid Id);
 
-    internal sealed class Harness(DatabaseOptions database, string bootstrapDirectory, string bootstrapFilePath, PostgreSqlContainer container) : IAsyncDisposable
+    internal sealed class Harness(DatabaseOptions database, string bootstrapDirectory, string bootstrapFilePath, PostgreSqlContainer container, bool testing) : IAsyncDisposable
     {
         public string ConnectionString => database.ConnectionString;
+        internal string BootstrapFilePath => bootstrapFilePath;
 
         public static async Task<Harness> CreateAsync(IReadOnlyDictionary<string, string>? settings = null)
         {
@@ -384,7 +386,7 @@ internal static class OidcDatabaseTestSupport
                 };
                 var bootstrapFilePath = await InstallationTestSupport.PrepareCompletedInstallationAsync(
                     directory, database, RootSecret, AdminUsername, AdminPassword, settings, cancellationToken: Ct);
-                var harness = new Harness(database, directory, bootstrapFilePath, container);
+                var harness = new Harness(database, directory, bootstrapFilePath, container, settings?.ContainsKey(SystemSettingKeys.SecurityHostedLoginHttpTestOrigins) == true);
                 await harness.SeedClientAsync();
                 return harness;
             }
@@ -401,6 +403,7 @@ internal static class OidcDatabaseTestSupport
             var probe = new HostProbe();
             var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             {
+                builder.UseEnvironment(testing ? "Testing" : "Development");
                 builder.UseSetting("Bootstrap:FilePath", bootstrapFilePath);
                 builder.UseSetting("Endpoints:Http", "0");
                 builder.ConfigureTestServices(services =>
@@ -430,6 +433,7 @@ internal static class OidcDatabaseTestSupport
             });
             var client = factory.CreateClient(new WebApplicationFactoryClientOptions
             {
+                BaseAddress = new Uri("https://localhost"),
                 AllowAutoRedirect = false,
                 HandleCookies = false
             });

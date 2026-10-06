@@ -70,7 +70,7 @@ public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
                 builder.UseSetting("Bootstrap:FilePath", _sharedBootstrapFilePath!));
         _factories.Add(factory);
         // Materialize the host so its startup validators have run.
-        factory.CreateClient();
+        factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         return factory;
     }
 
@@ -78,8 +78,7 @@ public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
     public async Task AnAnonymousRender_SurvivesAManagementSessionPost_AndTheReverse()
     {
         using var instance = CreateInstance();
-        using var client = instance.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var client = instance.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
         var managementCookieHeader = await LoginManagementAsync(instance);
@@ -115,8 +114,7 @@ public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
     public async Task AnIdentityCookieOnEitherSide_DoesNotDisturbTheAntiforgeryPair()
     {
         using var instance = CreateInstance();
-        using var client = instance.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var client = instance.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
         var identityCookieHeader = await IssueIdentityCookieAsync(instance, Guid.NewGuid());
@@ -141,13 +139,11 @@ public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
         using var first = CreateInstance();
         using var second = CreateInstance();
 
-        using var firstClient = first.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var firstClient = first.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
         var session = await BeginLegalLoginAsync(first.Services, firstClient);
-        using var secondClient = second.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        using var secondClient = second.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
         using var post = await secondClient.SendAsync(CreateLoginPost(
@@ -162,12 +158,12 @@ public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
     public async Task TheAntiforgeryCookie_SatisfiesNoSessionPolicy()
     {
         using var instance = CreateInstance();
-        var session = await BeginLoginAsync(instance.Services, instance.CreateClient());
+        var session = await BeginLoginAsync(instance.Services, instance.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false }));
         var csrfCookieHeader = $"{CookieName}={session.CookieValue}";
 
         // End to end: the admin console rejects the antiforgery cookie.
         using var client = instance.CreateClient(new WebApplicationFactoryClientOptions
-        {
+        { HandleCookies = false,
             BaseAddress = new Uri("https://localhost")
         });
         client.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", csrfCookieHeader);
@@ -209,7 +205,7 @@ public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
     public async Task SessionCookies_AreNotAntiforgeryCookies()
     {
         using var instance = CreateInstance();
-        using var client = instance.CreateClient();
+        using var client = instance.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var session = await BeginLoginAsync(instance.Services, client);
         var managementCookieHeader = await LoginManagementAsync(instance);
         var identityCookieHeader = await IssueIdentityCookieAsync(instance, Guid.NewGuid());
@@ -238,7 +234,7 @@ public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
 
     private static async Task<string> LoginManagementAsync(WebApplicationFactory<Program> factory)
     {
-        using var client = factory.CreateClient();
+        using var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         using var request = new HttpRequestMessage(HttpMethod.Post, "/management/v1/session/login")
         {
             Content = JsonContent.Create(new

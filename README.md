@@ -104,10 +104,12 @@ file at `/app/config/signacore.bootstrap.json`: the database provider, server ve
 string, plus the inline external root key. The whole file is a mode-`0600` secret on persistent
 storage and must be backed up with the database.
 
-An optional [private-network HTTP testing policy foundation](docs/oidc/HttpTesting.md) is available
+An optional [private-network HTTP testing policy](docs/oidc/HttpTesting.md) is available
 through the shared `security.hosted_login_http_test_origins` JSON setting (missing/`[]` disables it).
 A nonempty list requires the actual `Testing` Host environment and restart. Exact allowlisted HTTP callback/logout registration and current-policy runtime revalidation are
-supported. HTTP identity/CSRF Cookies remain a separate stage; HTTPS defaults remain in force.
+supported, together with the isolated HTTP identity/CSRF Cookie carrier at exact allowed request
+origins. Both stages are implemented; official dual-end published-image/browser release acceptance
+remains pending. HTTPS defaults remain in force.
 
 Important defaults, all stored in the database and editable after installation:
 

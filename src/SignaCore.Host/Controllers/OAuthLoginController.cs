@@ -248,6 +248,8 @@ public sealed partial class OAuthLoginController : ControllerBase
     public async Task<IActionResult> ShowLoginForm()
     {
         ApplyBrowserSecurityHeaders();
+        HttpContext.RequestAborted.ThrowIfCancellationRequested();
+        if (IdentityCookieProfile.Resolve(HttpContext) is null) return RejectLocally("transport_unavailable");
         var cancellationToken = HttpContext.RequestAborted;
 
         var query = Request.Query;
@@ -268,13 +270,14 @@ public sealed partial class OAuthLoginController : ControllerBase
             return RejectLocally(ReasonContinuationUnavailable);
         }
 
-        var pair = _antiforgery.IssuePair(Request.Cookies[LoginAntiforgeryDefaults.CookieName]);
+        var profile = IdentityCookieProfile.Resolve(HttpContext)!;
+        var pair = _antiforgery.IssuePair(Request.Cookies[profile.CsrfCookie], profile.HttpTest);
         if (!pair.ReusedExistingCookie)
         {
             Response.Cookies.Append(
-                LoginAntiforgeryDefaults.CookieName,
+                profile.CsrfCookie,
                 pair.CookieValue,
-                CreateAntiforgeryCookieOptions());
+                profile.CsrfOptions());
         }
 
         // IN-19 is read from the current application row at every render. A missing row cannot
@@ -320,6 +323,8 @@ public sealed partial class OAuthLoginController : ControllerBase
     {
         var stopwatch = Stopwatch.StartNew();
         ApplyBrowserSecurityHeaders();
+        HttpContext.RequestAborted.ThrowIfCancellationRequested();
+        if (IdentityCookieProfile.Resolve(HttpContext) is null) return RejectLocally("transport_unavailable");
         var cancellationToken = HttpContext.RequestAborted;
 
         // ① Structure: no query string, the exact form content type, the bounded body, and the
@@ -844,6 +849,8 @@ public sealed partial class OAuthLoginController : ControllerBase
     private async Task<(IActionResult Result, string Outcome)> ProcessSmsCodeFormAsync()
     {
         ApplyBrowserSecurityHeaders();
+        HttpContext.RequestAborted.ThrowIfCancellationRequested();
+        if (IdentityCookieProfile.Resolve(HttpContext) is null) return (RejectLocally("transport_unavailable"), OidcSmsCodeSendOutcomes.LocalRejected);
         var cancellationToken = HttpContext.RequestAborted;
 
         // ① Structure (IN-16): no query string, the exact form content type, the bounded body,
@@ -953,12 +960,13 @@ public sealed partial class OAuthLoginController : ControllerBase
         IReadOnlyDictionary<string, string> fields,
         out string requestToken)
     {
-        if (fields.TryGetValue(LoginAntiforgeryDefaults.TokenFieldName, out var token)
+        var profile = IdentityCookieProfile.Resolve(HttpContext);
+        if (profile is not null && fields.TryGetValue(LoginAntiforgeryDefaults.TokenFieldName, out var token)
             && token.Length > 0
             && token.Length <= LoginAntiforgeryDefaults.MaxTokenLength
             && token.All(char.IsAscii)
-            && Request.Cookies.TryGetValue(LoginAntiforgeryDefaults.CookieName, out var cookieValue)
-            && _antiforgery.IsValidPair(cookieValue!, token))
+            && Request.Cookies.TryGetValue(profile.CsrfCookie, out var cookieValue)
+            && _antiforgery.IsValidPair(cookieValue!, token, profile.HttpTest))
         {
             requestToken = token;
             return true;
@@ -1410,18 +1418,4 @@ public sealed partial class OAuthLoginController : ControllerBase
     /// </summary>
     [GeneratedRegex(@"\Ahttps?://[a-z0-9.-]+(:[0-9]{1,5})?\z", RegexOptions.CultureInvariant)]
     private static partial Regex FormActionOriginPattern();
-
-    /// <summary>
-    /// The <c>PS-19</c> cookie attributes: host-only, secure, strict same-site, root path, no
-    /// domain, and no expiry — a browser session cookie written only by a successful form render.
-    /// </summary>
-    private static CookieOptions CreateAntiforgeryCookieOptions() => new()
-    {
-        Secure = true,
-        HttpOnly = true,
-        SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Strict,
-        Path = "/",
-        Domain = null,
-        IsEssential = true
-    };
 }

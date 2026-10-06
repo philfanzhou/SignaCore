@@ -61,7 +61,7 @@ public sealed class OAuthSmsSessionAdmissionTests : IClassFixture<IdentityServer
         var logs = new ConcurrentQueue<string>();
         await using var host = CreateCapturingHost(logs);
         var seed = await SeedAsync(host.Services, passwordUsername: "sms_session_named_" + Guid.NewGuid().ToString("N")[..8]);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var bodies = new List<string>();
 
         var code = await CreateCodeAsync(host.Services, seed, seed.AppA);
@@ -128,7 +128,7 @@ public sealed class OAuthSmsSessionAdmissionTests : IClassFixture<IdentityServer
         var logs = new ConcurrentQueue<string>();
         await using var host = CreateCapturingHost(logs);
         var seed = await SeedAsync(host.Services);
-        using var http = host.CreateClient();
+        using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var familyA = await RedeemFamilyAsync(host.Services, http, seed, seed.AppA);
         var familyB = await RedeemFamilyAsync(host.Services, http, seed, seed.AppB);
         var pendingCode = await CreateCodeAsync(host.Services, seed, seed.AppA);

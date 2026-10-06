@@ -531,6 +531,7 @@ public static class ServiceCollectionExtensions
             // in effect — and is separated from the management cookie solely by its own purpose.
             .AddCookie(IdentitySessionDefaults.AuthenticationScheme, options =>
             {
+                options.ForwardDefaultSelector = IdentityCookieProfile.Forward;
                 options.Cookie.Name = IdentitySessionDefaults.CookieName;
                 options.Cookie.HttpOnly = true;
                 options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
@@ -539,6 +540,19 @@ public static class ServiceCollectionExtensions
                 options.Cookie.Domain = null;
                 options.Cookie.IsEssential = true;
             })
+            .AddCookie(IdentityCookieProfile.TestScheme, options =>
+            {
+                options.ForwardDefaultSelector = context => IdentityCookieProfile.Resolve(context)?.HttpTest == true
+                    ? null : IdentityCookieProfile.UnavailableScheme;
+                options.Cookie.Name = IdentityCookieProfile.TestIdentityCookie;
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SecurePolicy = CookieSecurePolicy.None;
+                options.Cookie.SameSite = SameSiteMode.Lax;
+                options.Cookie.Path = "/";
+                options.Cookie.Domain = null;
+                options.Cookie.IsEssential = true;
+            })
+            .AddScheme<AuthenticationSchemeOptions, UnavailableIdentitySessionHandler>(IdentityCookieProfile.UnavailableScheme, _ => { })
             .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
             {
                 options.Events = new JwtBearerEvents
