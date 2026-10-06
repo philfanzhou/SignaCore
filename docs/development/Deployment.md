@@ -9,6 +9,12 @@ Current database support is PostgreSQL 15+ and local-file SQLite (single-instanc
 MySQL, MariaDB, SQL Server and Oracle deployments remain deferred under the
 [database provider support decision](../database/provider-support-decision.md).
 
+Runtime instance identifiers use the shared `InstanceId.CreateRandom` generator with the
+`signacore-` prefix for each Bootstrap, Setup, or normal host build. The suffix remains 32
+lowercase hexadecimal characters, generated anew as diagnostic metadata. Core-only startup
+database composition creates no isolated runtime identity; its migration service identity remains
+the stable `signacore` value.
+
 ## Build
 
 ```bash
