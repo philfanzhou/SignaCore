@@ -1,0 +1,122 @@
+using ServiceMantle;
+using ServiceMantle.Audit;
+using ServiceMantle.Configuration;
+using ServiceMantle.Diagnostics.Export.Otlp;
+using ServiceMantle.Logging.Remote;
+using SignaCore.Host.Configuration;
+
+namespace SignaCore.Host.Management;
+
+/// <summary>
+/// A single update's baseline-aware validation, captured by the shared service's transaction load.
+/// No pre-read, additional transaction, retry, or runtime publication is performed.
+/// </summary>
+internal sealed class ManagementSettingRecovery : IServiceSettingUpdateTransaction
+{
+    private readonly IServiceSettingUpdateTransaction transaction;
+    private readonly IServiceSettingRootKeySource rootKey;
+    private readonly ServiceSettingDefinitionRegistry baselineRegistry;
+    private readonly ServiceSettingUpdateCommand command;
+    private readonly RecoveryValidator validator;
+
+    internal ManagementSettingRecovery(
+        IServiceSettingUpdateTransaction transaction, IServiceSettingRootKeySource rootKey,
+        bool isDevelopment, ServiceSettingUpdateCommand command)
+    {
+        this.transaction = transaction;
+        this.rootKey = rootKey;
+        this.command = command;
+        baselineRegistry = SharedSettingComposition.CreateRegistry(isDevelopment);
+        validator = new RecoveryValidator(isDevelopment, command.Changes.Keys.Select(key =>
+            baselineRegistry.TryGetDefinition(key, out var definition) ? definition!.Key : key));
+        Registry = new ServiceSettingDefinitionRegistry(
+            SharedSettingComposition.CreateDefinitionProviders(), [validator]);
+    }
+
+    internal ServiceSettingDefinitionRegistry Registry { get; }
+
+    public async ValueTask<ServiceSettingStoreSnapshot> LoadAsync(
+        ServiceId serviceId, CancellationToken cancellationToken)
+    {
+        var current = await transaction.LoadAsync(serviceId, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        // Preserve the shared service's version/mismatch/exhaustion priority. An absent aggregate
+        // has no legacy group to preserve and uses the default strict candidate validation.
+        if (current.ServiceId == serviceId && current.Version == command.ExpectedVersion
+            && current.Version > 0 && current.Version < long.MaxValue)
+        {
+            using var loader = new ServiceSettingSnapshotLoader(serviceId,
+                new BaselineSource(current, baselineRegistry), baselineRegistry,
+                new ServiceSettingCurrentSnapshotAccessor(), rootKey);
+            var loaded = await loader.RefreshAsync(cancellationToken);
+            if (!loaded.Succeeded)
+                throw new InvalidOperationException("The stored setting baseline is unavailable.");
+            validator.SetBaseline(loaded.Snapshot!);
+        }
+        return current;
+    }
+
+    public ValueTask<ServiceSettingUpdateResult> ApplyAsync(
+        ServiceId serviceId, ServiceSettingStoreUpdate update,
+        IReadOnlyList<ManagementAuditEvent> auditEvents, CancellationToken cancellationToken) =>
+        transaction.ApplyAsync(serviceId, update, auditEvents, cancellationToken);
+
+    private sealed class BaselineSource(
+        ServiceSettingStoreSnapshot baseline, ServiceSettingDefinitionRegistry registry)
+        : IServiceSettingSnapshotSource
+    {
+        public ValueTask<ServiceSettingSnapshotRead> LoadAsync(
+            ServiceId serviceId, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var values = baseline.Values.Select(pair =>
+            {
+                if (!registry.TryGetDefinition(pair.Key, out var definition))
+                    throw new InvalidOperationException("The stored setting baseline is unavailable.");
+                return new PersistedServiceSettingValue(
+                    pair.Key, baseline.Version, definition!.ValueType, pair.Value);
+            });
+            return ValueTask.FromResult(new ServiceSettingSnapshotRead(
+                baseline.ServiceId, baseline.Version, values));
+        }
+    }
+
+    // This validator belongs only to this invocation. Decrypted group values never enter DI,
+    // request metadata, logs, errors, or audit payloads.
+    private sealed class RecoveryValidator(bool isDevelopment, IEnumerable<string> changedKeys)
+        : IServiceSettingCompositeValidator
+    {
+        private readonly HashSet<string> touched = new(changedKeys, StringComparer.OrdinalIgnoreCase);
+        private readonly SignaCoreSettingCompositeValidator core = new(isDevelopment);
+        private string? uri, authorization, endpoint;
+        private bool preserveLoki, preserveOtlp;
+
+        internal void SetBaseline(ServiceSettingSnapshot baseline)
+        {
+            uri = Read(baseline.Values, GrafanaLokiSettingDefinitions.Endpoint);
+            authorization = Read(baseline.Values, GrafanaLokiSettingDefinitions.Authorization);
+            endpoint = Read(baseline.Values, OtlpSettingDefinitions.Endpoint);
+            preserveLoki = !touched.Overlaps(
+                [GrafanaLokiSettingDefinitions.Endpoint, GrafanaLokiSettingDefinitions.Authorization])
+                && GrafanaLokiSettingState.Classify(uri, authorization).IsUnusable;
+            preserveOtlp = !touched.Contains(OtlpSettingDefinitions.Endpoint)
+                && OtlpSettingState.Classify(endpoint).IsUnusable;
+        }
+
+        public IEnumerable<ServiceSettingValidationError> Validate(ServiceSettingValidationContext context)
+        {
+            var errors = core.Validate(context).ToList();
+            bool Same(string key, string? original) => string.Equals(
+                context.TryGetValue(key, out var value) && value!.HasValue ? value.GetString() : null,
+                original, StringComparison.Ordinal);
+            errors.AddRange(SignaCoreSettingCompositeValidator.ValidateOptionalSettings(context,
+                preserveLoki && Same(GrafanaLokiSettingDefinitions.Endpoint, uri)
+                    && Same(GrafanaLokiSettingDefinitions.Authorization, authorization),
+                preserveOtlp && Same(OtlpSettingDefinitions.Endpoint, endpoint)));
+            return errors;
+        }
+
+        private static string? Read(IReadOnlyDictionary<string, ServiceSettingValue> values, string key) =>
+            values.TryGetValue(key, out var value) && value.HasValue ? value.GetString() : null;
+    }
+}

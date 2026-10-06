@@ -375,3 +375,23 @@ acceptance remains the complete-capability release gate. See [Private-network HT
 syntax, isolated-network responsibilities, release acceptance and rollback. Remove the explicit
 new key through shared updates with `value=null` before running an older 44-key binary; retain
 the database and external keys. No schema migration or deployment default changes are needed.
+
+## Recovering legacy optional telemetry settings
+
+An older deployment may contain unusable Loki or OTLP settings. Startup keeps those optional
+sinks disabled with fixed warnings. Protected management reads remain available and redact all
+sensitive values. A valid unrelated settings update preserves the untouched unusable group and its
+protected values; it neither deletes them nor activates logging, telemetry, or login policy.
+
+Explicitly changing any Loki group key requires a valid HTTPS endpoint and usable Authorization,
+or deletion of both `loki.uri` and `loki.authorization` in one batch with `value=null`. Repair OTLP
+with a valid HTTPS endpoint or delete `opentelemetry.otlp_endpoint`. An unchanged value included in
+a command still counts as a change to its group and must pass strict validation. Use the observed
+`expectedVersion`, then restart to activate the final configuration. The running-version header
+continues to describe the current process until restart.
+
+Core validation, root-key/decryption failures, and database failures remain closed; recovery does
+not add HTTP or unauthenticated Loki support. See [Shared settings recovery](SharedSettings.md#legacy-optional-telemetry-recovery).
+There are no new keys, schema changes, or data conversions. Preserve the database and root key
+when restoring an older binary; its original management blockage may return unless the optional
+groups were repaired or explicitly disabled before rollback.

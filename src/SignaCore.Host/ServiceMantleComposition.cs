@@ -12,6 +12,7 @@ using SignaCore.Host.Configuration;
 using SignaCore.Host.HealthChecks;
 using SignaCore.Host.Http;
 using SignaCore.Host.Installation;
+using SignaCore.Host.Management;
 
 namespace SignaCore.Host;
 
@@ -93,12 +94,10 @@ internal static class ServiceMantleComposition
     /// update path, the root key source, and the snapshot/query services.
     /// </summary>
     /// <remarks>
-    /// This is a parallel addition: the legacy <c>system_settings</c> read path of the admin
-    /// console and the legacy import stay untouched. The update transaction and update service are
-    /// scoped over the same scoped <c>IdentityDbContext</c> the host already registers; the store
-    /// owns its contexts through the factory. When the bootstrap phase pre-registered its activated
-    /// <see cref="ServiceSettingCurrentSnapshotAccessor"/> instance, the snapshot registrations
-    /// adopt that instance instead of building a second one.
+    /// The default update service is scoped over the host's <c>IdentityDbContext</c>; management
+    /// recovery owns a fresh context and per-call baseline. The store owns its contexts through
+    /// the factory. Snapshot registrations adopt the bootstrap-activated runtime accessor, while
+    /// management queries use an independent tolerant loader/accessor and safe shared projection.
     /// </remarks>
     internal static IServiceCollection AddSignaCoreSharedSettings(
         this IServiceCollection services,
@@ -116,6 +115,13 @@ internal static class ServiceMantleComposition
                 serviceProvider.GetRequiredService<IDbContextFactory<IdentityDbContext>>()));
 
         services.AddServiceMantleSettingSnapshots();
+        // Management observes a complete tolerant snapshot on an isolated accessor. Refreshing
+        // the settings page must never publish into the bootstrap/runtime authority.
+        services.AddSingleton(serviceProvider => new ManagementSettingQuerySnapshot(
+            serviceProvider.GetRequiredService<IServiceSettingStore>(),
+            serviceProvider.GetRequiredService<IServiceSettingRootKeySource>(), isDevelopment));
+        services.Replace(ServiceDescriptor.Singleton(serviceProvider =>
+            serviceProvider.GetRequiredService<ManagementSettingQuerySnapshot>().Query));
         return services;
     }
 
@@ -137,8 +143,8 @@ internal static class ServiceMantleComposition
         bool isDevelopment)
     {
         services.AddSingleton<IServiceSettingDefinitionProvider, ServiceSettingDefinitions>();
-        // The update registry also enforces the OTLP and Loki rules; the snapshot load does not (see
-        // the validator remarks), so values an older release stored never block a start.
+        // Setup and default updates enforce optional telemetry rules. Management recovery builds
+        // a per-call registry from its transaction baseline; startup and query loads are tolerant.
         services.AddSingleton<IServiceSettingCompositeValidator>(_ =>
             new SignaCoreSettingCompositeValidator(isDevelopment, validateManagementUpdateRules: true));
         services.AddSingleton<IServiceSettingRootKeySource, MasterKeyRootKeySource>();

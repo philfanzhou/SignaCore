@@ -589,6 +589,9 @@ jobs:
           [ "$protected" -ge 2 ] \
             || { echo "expected rotated refresh-token digests, found $protected"; exit 1; }
 
+      - name: Legacy optional settings recovery container smoke
+        run: python3 .github/scripts/smoke_optional_settings_recovery.py
+
       - name: Dump container logs
         if: failure()
         run: |

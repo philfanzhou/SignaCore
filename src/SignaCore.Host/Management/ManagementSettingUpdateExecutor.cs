@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Npgsql;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
 using ServiceMantle.Configuration;
 using ServiceMantle.Persistence.Relational.Stores;
 using SignaCore.Database;
@@ -38,8 +41,10 @@ internal static class ManagementSettingUpdateExecutor
         {
             var services = scope.ServiceProvider;
             var databaseOptions = services.GetRequiredService<DatabaseOptions>();
+            var concurrency = new SerializationConflictInterceptor();
             var contextOptionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
             contextOptionsBuilder.UseIdentityDatabase(databaseOptions, enableRetryOnFailure: false);
+            contextOptionsBuilder.AddInterceptors(concurrency);
             var contextOptions = contextOptionsBuilder.Options;
 
             var logger = services.GetRequiredService<ILoggerFactory>()
@@ -51,18 +56,22 @@ internal static class ManagementSettingUpdateExecutor
                                  IsolationLevel.Serializable,
                                  cancellationToken))
                 {
+                    var rootKey = services.GetRequiredService<IServiceSettingRootKeySource>();
+                    var recovery = new ManagementSettingRecovery(
+                        new EfCoreServiceSettingUpdateTransaction<IdentityDbContext>(db), rootKey,
+                        services.GetRequiredService<IHostEnvironment>().IsDevelopment(), command);
                     var updateService = new ServiceSettingUpdateService(
-                        InstallationStores.ServiceId,
-                        services.GetRequiredService<ServiceSettingDefinitionRegistry>(),
-                        new EfCoreServiceSettingUpdateTransaction<IdentityDbContext>(db),
-                        services.GetRequiredService<IServiceSettingRootKeySource>());
+                        InstallationStores.ServiceId, recovery.Registry, recovery, rootKey);
 
                     var result = await updateService.UpdateAsync(command, cancellationToken);
                     if (!result.Succeeded)
                     {
                         // The shared transaction already restored its savepoint; disposing the
                         // transaction rolls the attempt back whole.
-                        return result;
+                        return result.Status == ServiceSettingUpdateStatus.StorageFailed
+                            && concurrency.SerializationFailed
+                            ? ServiceSettingUpdateResult.Failure(ServiceSettingUpdateStatus.VersionConflict)
+                            : result;
                     }
 
                     await transaction.CommitAsync(cancellationToken);
@@ -79,12 +88,33 @@ internal static class ManagementSettingUpdateExecutor
                 // shared endpoint classifies it. The transaction was disposed uncommitted.
                 throw;
             }
+            catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.SerializationFailure)
+            {
+                return ServiceSettingUpdateResult.Failure(ServiceSettingUpdateStatus.VersionConflict);
+            }
             catch
             {
                 // Database, cryptographic, and provider failures carry constraint names and values
                 // in their messages; the endpoint reports only the fixed safe failure.
                 return ServiceSettingUpdateResult.Failure(ServiceSettingUpdateStatus.StorageFailed);
             }
+        }
+    }
+
+    // The shared EF adapter closes provider errors into StorageFailed. Keep only the non-secret
+    // serializable conflict category on this caller-owned context so competing writes get the
+    // existing 409 without replaying the transaction or exposing exception details.
+    private sealed class SerializationConflictInterceptor : SaveChangesInterceptor
+    {
+        internal bool SerializationFailed { get; private set; }
+
+        public override Task SaveChangesFailedAsync(
+            DbContextErrorEventData eventData, CancellationToken cancellationToken = default)
+        {
+            for (var failure = eventData.Exception; failure is not null; failure = failure.InnerException)
+                if (failure is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure })
+                    SerializationFailed = true;
+            return Task.CompletedTask;
         }
     }
 }
