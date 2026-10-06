@@ -271,18 +271,20 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
             Assert.DoesNotContain(authorization, capture.Output, StringComparison.Ordinal);
         }
 
-        // Reading a legacy row is tolerant; a management update over that same candidate is strict.
-        // Capability-injected validators must neither block startup nor change product error codes.
+        // Legacy optional logging remains readable and cannot block unrelated valid saves.
+        // Explicitly touching its group remains strict; capability validators do not change codes.
         using var admin = await CreateAdminClientAsync(factory);
         await using var db = CreateDbContext();
         var version = (await SharedSettingTestDatabase.LoadAggregateAsync(
             db, TestContext.Current.CancellationToken))!.Version;
         var audits = await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken);
-        using var rejected = await PostSettingsAsync(admin, version, [("jwt.audience", "unchanged-contract")]);
-        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
-        Assert.Equal(version, (await SharedSettingTestDatabase.LoadAggregateAsync(
+        Assert.Equal(version, await ReadVersionAsync(admin));
+        using var accepted = await PostSettingsAsync(admin, version, [("jwt.audience", "recovered-audience")]);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(version + 1, await ReadVersionAsync(admin));
+        Assert.Equal(version + 1, (await SharedSettingTestDatabase.LoadAggregateAsync(
             db, TestContext.Current.CancellationToken))!.Version);
-        Assert.Equal(audits.Count, (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+        Assert.Equal(audits.Count + 1, (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
             db, TestContext.Current.CancellationToken)).Count);
     }
 

@@ -28,7 +28,7 @@ namespace SignaCore.Host.Configuration;
 /// host enables from the snapshot: the OTLP endpoint (empty, or an absolute HTTPS URL without user
 /// info, query, or fragment) and the Loki pair (an absolute HTTPS endpoint without user info,
 /// query, or fragment, and an endpoint and Authorization value that are either both set or both
-/// empty). Only the management update registry sets it: the startup snapshot load, the legacy
+/// empty). The default management update registry sets it: startup, management queries, legacy
 /// import, and the bootstrap target probe must keep accepting values an older release stored,
 /// which the normal host then switches off with a warning instead of failing.
 /// </para>
@@ -64,10 +64,21 @@ internal sealed class SignaCoreSettingCompositeValidator(
         ValidateRuntimeOptions(legacy, errors);
         if (validateManagementUpdateRules)
         {
-            ValidateOtlpEndpoint(legacy, errors);
-            ValidateLoki(legacy, errors);
+            errors.AddRange(ValidateOptionalSettings(context));
         }
 
+        return errors;
+    }
+
+    // Both strict updates and recovery use these exact optional rules. Recovery selects groups
+    // before evaluation; it never filters arbitrary core or null-key validation errors.
+    internal static IEnumerable<ServiceSettingValidationError> ValidateOptionalSettings(
+        ServiceSettingValidationContext context, bool preserveLoki = false, bool preserveOtlp = false)
+    {
+        var legacy = BuildLegacySnapshot(context);
+        var errors = new List<ServiceSettingValidationError>();
+        if (!preserveOtlp) ValidateOtlpEndpoint(legacy, errors);
+        if (!preserveLoki) ValidateLoki(legacy, errors);
         return errors;
     }
 

@@ -470,7 +470,8 @@ builder.Services.AddSingleton(bootstrapResult.RuntimeState);
 
 // The bootstrap phase activated the runtime snapshot on this exact accessor instance. Registering
 // it before the shared setting stack lets the stack's TryAdd adoption keep the activated snapshot
-// visible to IServiceSettingCurrentSnapshotAccessor and ServiceSettingQueryService consumers.
+// visible to IServiceSettingCurrentSnapshotAccessor consumers. Management queries use a separate
+// accessor and cannot replace this runtime authority.
 builder.Services.AddSingleton(bootstrapResult.CurrentSnapshotAccessor);
 
 // ---- Shared ServiceMantle setting stack (the runtime snapshot authority since #548) ----

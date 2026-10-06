@@ -322,21 +322,23 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         Assert.DoesNotContain(logs.Lines, line => line.Contains("otlp-legacy", StringComparison.Ordinal));
         Assert.DoesNotContain(logs.Lines, line => line.Contains("fixture", StringComparison.Ordinal));
 
-        // A legacy row stays readable, while the same candidate must be rejected for updates.
+        // Legacy optional telemetry stays readable and no longer blocks unrelated valid updates.
         using var admin = await CreateAdminClientAsync(factory);
         await using var db = CreateDbContext();
         var version = (await SharedSettingTestDatabase.LoadAggregateAsync(
             db, TestContext.Current.CancellationToken))!.Version;
         var audits = await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken);
-        using var rejected = await admin.PostAsJsonAsync(Root + "/settings", new
+        Assert.Equal(version, await ReadVersionAsync(admin));
+        using var accepted = await admin.PostAsJsonAsync(Root + "/settings", new
         {
             expectedVersion = version,
-            changes = new[] { new { key = "jwt.audience", value = "unchanged-contract" } }
+            changes = new[] { new { key = "jwt.audience", value = "recovered-audience" } }
         }, TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
-        Assert.Equal(version, (await SharedSettingTestDatabase.LoadAggregateAsync(
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(version + 1, await ReadVersionAsync(admin));
+        Assert.Equal(version + 1, (await SharedSettingTestDatabase.LoadAggregateAsync(
             db, TestContext.Current.CancellationToken))!.Version);
-        Assert.Equal(audits.Count, (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+        Assert.Equal(audits.Count + 1, (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
             db, TestContext.Current.CancellationToken)).Count);
     }
 

@@ -24,12 +24,13 @@ issue #556); see [System settings retirement](../database/system-settings-retire
 | Store (single aggregate per service) | `EfCoreServiceSettingStore<IdentityDbContext>` over `IDbContextFactory<IdentityDbContext>` |
 | Transactional updates + audits | `EfCoreServiceSettingUpdateTransaction<IdentityDbContext>` + `ServiceSettingUpdateService` (scoped) |
 | Sensitive-value root key | `MasterKeyRootKeySource : IServiceSettingRootKeySource` (Base64 of the bootstrap master key) |
-| Query / snapshot services | `AddServiceMantleSettingSnapshots()` |
+| Query / snapshot services | `AddServiceMantleSettingSnapshots()` plus an isolated `ManagementSettingQuerySnapshot` for management observations |
 
-Everything lives in `src/SignaCore.Host/Configuration/` and is internal; no public API is added.
+Product definitions live in `src/SignaCore.Host/Configuration/` and management composition in
+`src/SignaCore.Host/Management/`; both are internal and add no public API.
 `SharedSettingComposition.CreateRegistry` explicitly selects the runtime definition providers and
-product composite validator for both direct and DI composition. Startup, legacy import, and
-bootstrap probing use the tolerant validator; management updates add the product error-code
+product composite validator for both direct and DI composition. Startup, management queries, legacy import, and
+bootstrap probing use the tolerant validator; setup and default updates add the product error-code
 adapter over shared Loki endpoint/header and OTLP endpoint primitives. The automatic strict
 validators contributed by `AddServiceMantleGrafanaLokiFromSettings` and
 `AddOpenTelemetryOtlpExporterFromSettings` are not loaded into the product registry.
@@ -69,9 +70,11 @@ every Number key, the three numeric ranges, the fixed JSON root kinds, and every
 (base URL normalization, HTTPS policy, issuer equality, non-blank keys, SMS/LDAP/WeChat binder
 validation, reverse-proxy IP parsing) in `SignaCoreSettingCompositeValidator`. The Loki pair rules
 (an absolute `https` `loki.uri` without user info, query, or fragment, set together with
-`loki.authorization`) run only in the management update registry, so a value stored by an older
-release never blocks the startup snapshot load, the legacy import, or the bootstrap target probe;
-the normal host switches Loki off with a warning instead. The retired legacy
+`loki.authorization`), and the HTTPS-only OTLP endpoint rules, are strict for setup and default
+updates. Startup, management reads, legacy import, and bootstrap probing accept older unusable
+optional telemetry values; the normal host keeps the affected sink/exporter disabled with a fixed,
+value-free warning. Management recovery applies the same optional rules with the narrowly scoped
+baseline exception below. The retired legacy
 snapshot validator left behind two input-form duties, now carried by a thin adapter instead of a
 second rule set:
 
@@ -94,8 +97,8 @@ inputs with pinned verdicts captured from the retired validator's baseline, and 
 
 - The bootstrap phase activates the snapshot with a bootstrap-owned
   `ServiceSettingSnapshotLoader` and publishes it on one `ServiceSettingCurrentSnapshotAccessor`
-  instance, which is pre-registered with DI so the composed snapshot services observe the same
-  process-local snapshot instead of building a second, empty one.
+  instance, pre-registered with DI as the runtime authority. Management queries refresh a separate
+  accessor, so neither a read nor a persisted update replaces the process's activated snapshot.
 - The activated snapshot is projected back onto the legacy colon-keyed configuration shape
   (`SharedSettingConfigurationProjection`): every normalized key maps through
   `SharedSettingKeys`, JSON values expand into `IConfiguration` sub-keys exactly like the legacy
@@ -153,6 +156,47 @@ inputs with pinned verdicts captured from the retired validator's baseline, and 
   header renders "running version unknown" and never infers activation. A server version beyond
   the JavaScript safe-integer range is treated as inexpressible: the console refuses to submit
   rather than send a rounded `expectedVersion`.
+
+## Legacy optional telemetry recovery
+
+A protected settings GET loads and decrypts the complete stored snapshot with the same core rules
+as startup, then uses ServiceMantle's safe projection (every sensitive value is null). Group filters
+only shape the successful response; they never hide a failed complete load. This observation uses
+an independent loader/accessor and cannot change running logging, telemetry, or login policy.
+Unknown keys, bad types/constraints, invalid core configuration, unavailable root keys, and damaged
+envelopes still fail closed with the existing fixed 503 response and no partial or stale values.
+
+The management update executor captures its baseline from the shared update service's one load in
+the existing serializable transaction. It does not pre-read, retry, or use another transaction.
+Version conflict and exhaustion are checked before baseline materialization. All type, constraint,
+identity, issuer, origin, account, and SMS/LDAP/WeChat/proxy rules still validate the complete
+candidate. The only optional groups are Loki (`loki.uri`, `loki.authorization`) and OTLP
+(`opentelemetry.otlp_endpoint`), evaluated independently. An optional group can retain its older
+unusable values only when the complete baseline successfully loaded/decrypted, the shared runtime
+classifier says the baseline group is unusable, the command names no key in that group, and the
+candidate group equals the baseline. The original stored values and protected envelopes remain
+unchanged, and the group stays disabled at the next restart.
+
+Naming any group key counts as touching the whole group, including case-equivalent names,
+explicit unchanged values, and deletion. Touched groups must satisfy the full strict rules; a new
+invalid group, invalid ordinary/core setting, or null-key runtime validation error is never waived.
+Repair Loki with an absolute HTTPS URL plus usable Authorization, or explicitly delete both keys
+in the same batch (`value=null`). Partial repair/deletion that leaves the group unusable is rejected.
+Repair OTLP with a valid HTTPS endpoint or delete its key. A valid repair or complete deletion of
+one group can preserve the other untouched unusable group. No HTTP or unauthenticated Loki
+capability is enabled by this recovery.
+
+Each successful update increments the aggregate version once and writes only the submitted keys'
+audit rows. Failures and caller cancellation roll back the whole attempt. PostgreSQL serialization
+conflicts in this caller-owned settings transaction use the existing 409 version-conflict result,
+including conflicts at commit; unrelated provider errors remain fixed 503. There is no retry.
+Reads and saves leave the running-version header and actual runtime settings unchanged; restart
+the service to activate a repaired or disabled group.
+
+This change adds no keys, dependencies, tables, migrations, or persistent data transformation.
+Keep the database and root key for rollback. Restoring the older binary may restore its management
+read/update blockage on legacy unusable telemetry; repair or explicitly disable the groups before
+rollback when possible. No envelope conversion or data rollback is needed.
 
 ## Protected legacy configuration import (#146)
 
