@@ -94,6 +94,24 @@ public sealed class SignaCoreHostedLoginOptions
     public Func<HttpContext, string?>? SchemeSelector { get; set; }
 
     /// <summary>
+    /// Extension point — return URL validation. Receives the raw single <c>returnUrl</c> value
+    /// presented to the sign-in start and returns the normalized local absolute path the
+    /// completed sign-in may land on, or <see langword="null"/> to reject it. Configure it to
+    /// constrain sign-in targets to your own routes (a whitelist); without it, every local
+    /// absolute path on your origin is accepted. The delegate must be synchronous, fast,
+    /// side-effect free, and must not throw; a throwing delegate is treated as a rejection, and
+    /// the request's own cancellation is never swallowed into one. Its answer is final input,
+    /// never the destination itself: the package re-checks it against the same local-path rule
+    /// (exactly one leading slash), so a validator can accept less than the default rule but
+    /// never more. Every rejection — by the default rule, the delegate, or that final check —
+    /// answers the one bounded <c>invalid_return_url</c> reason. Default <see langword="null"/>
+    /// keeps the package's local-path rule byte for byte. A start without a
+    /// <c>returnUrl</c> keeps the fixed application-root default and does not consult the
+    /// delegate.
+    /// </summary>
+    public Func<string, string?>? ReturnUrlValidator { get; set; }
+
+    /// <summary>
     /// The request-header name the antiforgery validation accepts. Every session-authenticated
     /// unsafe method (anything but GET, HEAD, OPTIONS, and TRACE) must present the token from
     /// <c>GET &lt;prefix&gt;/csrf</c> in this header; a missing or wrong token fails the request.

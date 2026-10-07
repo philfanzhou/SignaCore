@@ -4,7 +4,6 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Primitives;
 
 namespace SignaCore.Client.AspNetCore;
 
@@ -41,10 +40,28 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             return;
         }
 
-        // A missing returnUrl defaults to the application root; a present one must be a single
-        // local absolute path.
+        // A missing returnUrl defaults to the application root and never consults the consumer's
+        // validator; a present one must be a single value and a local absolute path the
+        // configured validator — if any — accepts.
         var returnUrlValues = context.Request.Query["returnUrl"];
-        var returnUrl = returnUrlValues.Count == 0 ? "/" : ReadSingleReturnUrl(returnUrlValues);
+        string? returnUrl;
+        if (returnUrlValues.Count == 0)
+        {
+            returnUrl = "/";
+        }
+        else if (returnUrlValues.Count != 1)
+        {
+            returnUrl = null;
+        }
+        else if (current.ReturnUrlValidator is { } validator)
+        {
+            returnUrl = ValidateReturnUrl(validator, returnUrlValues.ToString(), cancellationToken);
+        }
+        else
+        {
+            returnUrl = AsLocalPath(returnUrlValues.ToString());
+        }
+
         if (returnUrl is null)
         {
             await RejectAsync(context, SignaCoreSignInReason.InvalidReturnUrl, cancellationToken);
@@ -437,11 +454,35 @@ internal sealed class SignaCoreHostedLoginEndpointService(
     }
 
     /// <summary>
-    /// The <c>returnUrl</c> must be one value and a local absolute path: it starts with exactly
-    /// one slash, so no scheme, no protocol-relative origin, and no other host can be smuggled in.
+    /// The consumer validator's return-URL decision: its answer, re-checked against the package's
+    /// own local-path rule. A validator that returns <see langword="null"/>, that answers with
+    /// anything not a local absolute path, or that throws is one uniform rejection — after the
+    /// request's own cancellation has propagated — so no failure shape of the validator is
+    /// distinguishable from the default rule's rejection.
     /// </summary>
-    private static string? ReadSingleReturnUrl(StringValues values) =>
-        values.Count != 1 ? null : AsLocalPath(values.ToString());
+    private static string? ValidateReturnUrl(
+        Func<string, string?> validator,
+        string rawValue,
+        CancellationToken cancellationToken)
+    {
+        string? validated;
+        try
+        {
+            validated = validator(rawValue);
+        }
+        catch (Exception)
+        {
+            // A throwing consumer validator is a rejection, but the request's own cancellation is
+            // never swallowed into one.
+            cancellationToken.ThrowIfCancellationRequested();
+            return null;
+        }
+
+        // The validator's answer is final input, never the destination itself: whatever it
+        // returns must still be a local absolute path, so a validator cannot open the redirect
+        // it was configured to close.
+        return AsLocalPath(validated);
+    }
 
     internal static string? AsLocalPath(string? value)
     {
