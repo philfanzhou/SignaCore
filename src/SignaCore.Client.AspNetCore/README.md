@@ -86,6 +86,20 @@ Once the session reaches the access token's expiry, the endpoint answers the fix
 `requiresReauthentication` status; the package never refreshes silently — the next sign-in goes
 through the hosted page again.
 
+`options.SessionEndpointRequireAuthorization` (default `false`) adds an authenticated-user
+requirement to this one endpoint. When on, an unauthenticated read is rejected by the host's
+authorization pipeline before the endpoint runs: with the package's scheme as the host default
+the challenge is a 302 to the sign-in start; a 401 JSON envelope is a policy-scheme or writer
+combination of yours. Every other package endpoint keeps its historical accessibility.
+
+The session-status writer has a four-argument overload —
+`WriteSessionStatusAsync(context, status, principal, cancellationToken)` — that additionally
+receives the verified session principal, including any claims your custom `ITicketStore` added
+at storage time (for example roles re-verified from the access token; the SignaCore ID token is
+a closed set without roles). The principal is `null` for anonymous or expired sessions, is
+presentation input only, and the default implementation forwards to the three-argument
+overload, so existing writers keep working.
+
 ### Optional sign-in mode
 
 Some deployments must run before SignaCore is wired up. `options.AllowUnconfiguredStartup`

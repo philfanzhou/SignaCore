@@ -52,7 +52,7 @@ public static class SignaCoreHostedLoginEndpointExtensions
             }
 
             options.Prefix = normalizedPrefix;
-            return MapEndpoints(endpoints, normalizedPrefix, expectedCallbackPath);
+            return MapEndpoints(endpoints, normalizedPrefix, expectedCallbackPath, options);
         }
 
         if (!Uri.TryCreate(options.RedirectUri, UriKind.Absolute, out var redirectUri))
@@ -82,7 +82,7 @@ public static class SignaCoreHostedLoginEndpointExtensions
                 "SignaCoreHostedLoginOptions.PostLogoutRedirectUri does not match the hosted-login logout-return path; the redirect URI's path must be exactly <prefix>/logout/return.");
         }
 
-        return MapEndpoints(endpoints, normalizedPrefix, redirectUri.AbsolutePath.TrimEnd('/'));
+        return MapEndpoints(endpoints, normalizedPrefix, redirectUri.AbsolutePath.TrimEnd('/'), options);
     }
 
     /// <summary>
@@ -93,7 +93,8 @@ public static class SignaCoreHostedLoginEndpointExtensions
     private static SignaCoreHostedLoginEndpointGroup MapEndpoints(
         IEndpointRouteBuilder endpoints,
         string normalizedPrefix,
-        string callbackPath)
+        string callbackPath,
+        SignaCoreHostedLoginOptions options)
     {
         return new SignaCoreHostedLoginEndpointGroup(
         [
@@ -112,7 +113,8 @@ public static class SignaCoreHostedLoginEndpointExtensions
                 normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.SessionPathSegment,
                 static context => context.RequestServices
                     .GetRequiredService<SignaCoreHostedLoginEndpointService>()
-                    .HandleSessionAsync(context)),
+                    .HandleSessionAsync(context))
+                .RequireAuthorizationWhenRequested(options),
             endpoints.MapGet(
                 normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.FailurePathSegment,
                 static context => context.RequestServices
@@ -145,6 +147,23 @@ public static class SignaCoreHostedLoginEndpointExtensions
         }
 
         return trimmed[0] == '/' ? trimmed : "/" + trimmed;
+    }
+
+    /// <summary>
+    /// Applies the session endpoint's optional authorization requirement: only the session
+    /// endpoint is affected, and only when the option is on — every other package endpoint keeps
+    /// its historical accessibility.
+    /// </summary>
+    private static IEndpointConventionBuilder RequireAuthorizationWhenRequested(
+        this IEndpointConventionBuilder endpoint,
+        SignaCoreHostedLoginOptions options)
+    {
+        if (options.SessionEndpointRequireAuthorization)
+        {
+            endpoint.RequireAuthorization();
+        }
+
+        return endpoint;
     }
 }
 
