@@ -15,9 +15,7 @@ and no long-lived publishing credential in this repository.
    git push origin 1.2.0
    ```
 
-3. Watch the **CI** workflow. Before the NuGet push, approve the deployment to the
-   `nuget.org` environment after checking the tag and package version. A successful run ends
-   with three published artifacts: the GHCR
+3. Watch the **CI** workflow. A successful run ends with three published artifacts: the GHCR
    image, the `SignaCore.Client.AspNetCore` package on NuGet.org, and the GitHub Release whose
    notes quote the image digest and the package version.
 
@@ -94,9 +92,11 @@ recover, confirm the version is visible on NuGet.org and re-run only that job.
 
 These are account-side settings that cannot be changed from this repository:
 
-1. GitHub: create the environment **`nuget.org`** on `philfanzhou/SignaCore`, require a
-   maintainer reviewer, and keep self-review enabled for a single-maintainer repository. Add the
-   repository variable `NUGET_USER` (the NuGet.org account name that owns the package).
+1. GitHub: create the environment **`nuget.org`** on `philfanzhou/SignaCore` with no required
+   reviewers. The environment exists only to bind the NuGet.org trusted-publishing policy; a
+   release tag is itself the explicit maintainer decision, so no deployment review is
+   interposed. Add the repository variable `NUGET_USER` (the NuGet.org account name that owns
+   the package).
 2. nuget.org: under *Account settings → Trusted Publishing*, add a policy binding repository
    `philfanzhou/SignaCore`, workflow `ci.yml`, and environment `nuget.org`.
 3. Confirm the package id `SignaCore.Client.AspNetCore` is available (it was unregistered as of
