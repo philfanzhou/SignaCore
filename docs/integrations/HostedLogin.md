@@ -21,10 +21,11 @@ verification, the authorization request with server-side `state`/`nonce` and PKC
 hardened callback, strict ID-token validation, a capacity-bounded server-side session with its
 CSRF boundary, and the prepared logout of step 7 — with every token kept server-side. Its
 [README](https://github.com/philfanzhou/SignaCore/blob/main/src/SignaCore.Client.AspNetCore/README.md)
-documents the registration, the four extension points (authorization decision, route prefix,
-response format, scheme selection), and the session-store replacement for multi-instance
-deployments. The steps below remain the authoritative description of the wire contract the
-package speaks, and they are what a service on another stack implements directly.
+documents the registration, the five extension points (authorization decision, return URL
+validation, route prefix, response format, scheme selection), and the session-store replacement
+for multi-instance deployments. The steps below remain the authoritative description of the
+wire contract the package speaks, and they are what a service on another stack implements
+directly.
 
 ## Choose a client type
 

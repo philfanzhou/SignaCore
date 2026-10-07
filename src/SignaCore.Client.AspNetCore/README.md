@@ -137,7 +137,7 @@ Every dimension can be relaxed independently; relaxing removes a guarantee and i
 consumer's own risk call. SignaCore's own normal responses (legal scope echo, no duplicates,
 present-day `iat`) pass the strict defaults unchanged.
 
-## The four extension points
+## The five extension points
 
 1. **Authorization decision** — decide what a verified subject may do, by matching the verified
    `iss` plus `sub` against your own bindings:
@@ -182,6 +182,30 @@ present-day `iat`) pass the strict defaults unchanged.
            ? JwtBearerDefaults.AuthenticationScheme   // your own Bearer handler
            : null;                                    // null keeps the package's session scheme
    ```
+
+5. **Return URL validation** — constrain where a completed sign-in may land, by validating the
+   start's `returnUrl` against your own route whitelist:
+
+   ```csharp
+   private static readonly HashSet<string> ReturnTargets = new(StringComparer.Ordinal)
+   { "/dashboard", "/orders" };
+
+   options.ReturnUrlValidator = returnUrl =>
+       ReturnTargets.Contains(returnUrl) ? returnUrl : null;
+   // A synchronous, fast, side-effect-free delegate: it receives the raw single returnUrl
+   //     value, returns the normalized local absolute path to land on (or null to reject),
+   //     and should not throw — a throwing delegate is treated as a rejection.
+   ```
+
+   Without a validator every local absolute path is accepted — the default rule, unchanged. With
+   one, only an approved path can complete start → callback → redirect; the authorize challenge
+   of a protected route builds its `returnUrl` from the route itself, so challenges answer by
+   the same whitelist. The package re-checks every answer against its own local-path rule
+   (exactly one leading slash), so a validator can accept less than the default rule but never
+   more. Every rejection — the default rule, the delegate, or that final check — answers the one
+   bounded `invalid_return_url` reason, so no failure shape is distinguishable from outside. A
+   start without a `returnUrl` keeps the fixed application-root default and does not consult the
+   delegate.
 
 ### Optional authorization before sign-in
 
