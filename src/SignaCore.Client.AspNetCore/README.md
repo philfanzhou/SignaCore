@@ -12,7 +12,10 @@ authorization, token, and JWKS endpoint must sit on the verified issuer's own or
 (scheme, host, port), so a tampered Discovery document can never move token or key traffic
 to a second host — an authorization request that
 carries exactly `response_type=code`, `state`, `nonce`, and an S256 PKCE challenge, a hardened
-single-valued callback that validates `state` and `iss` before anything else, a one-time,
+single-valued callback that validates `state` and `iss` before anything else and additionally
+binds every pending sign-in to the browser that started it through a one-time
+`<SessionCookieName>-login-binding.<state>` cookie (HttpOnly, Secure, SameSite=Lax, scoped to
+`<prefix>/callback`, five-minute lifetime), a one-time,
 never-retried code redemption with HTTP Basic client authentication, strict ID-token validation
 (RS256 via JWKS `kid`, `typ: JWT`, `iss`, `aud`, lifetime, `nonce`), a capacity-bounded
 server-side ticket store with periodic expiry sweep, a session CSRF boundary, a local-session-first
