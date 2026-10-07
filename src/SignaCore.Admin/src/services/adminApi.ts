@@ -523,7 +523,7 @@ class AdminApiClient {
     return {
       snapshot: response.data,
       runningVersion: parseRunningVersion(
-        response.headers?.[RunningConfigurationVersionHeader],
+        readResponseHeader(response.headers, RunningConfigurationVersionHeader),
       ),
     }
   }
@@ -734,6 +734,28 @@ export function parseSettingsSnapshot(raw: unknown): AdminSettingsSnapshot {
       ? Number(rawVersion)
       : null
   return { ...parsed, version }
+}
+
+/**
+ * Case-insensitive response-header lookup. Browser adapters normalize response header
+ * names to lower case (fetch `Headers` iteration and XHR `getAllResponseHeaders()` both
+ * do), so a direct property access with the canonical header name misses and the running
+ * version would always read as unknown. AxiosHeaders.get() is already case-insensitive;
+ * plain-object header shapes are scanned with the same rule. Anything else resolves to
+ * undefined, which parseRunningVersion maps to "running version unknown".
+ */
+function readResponseHeader(headers: unknown, name: string): unknown {
+  if (headers === null || typeof headers !== 'object') return undefined
+  const getter = (headers as { get?: unknown }).get
+  if (typeof getter === 'function') {
+    return (getter as (headerName: string) => unknown).call(headers, name)
+  }
+  const record = headers as Record<string, unknown>
+  const normalized = name.toLowerCase()
+  for (const key of Object.keys(record)) {
+    if (key === name || key.toLowerCase() === normalized) return record[key]
+  }
+  return undefined
 }
 
 /** 运行版本头缺失、非数字或超出安全整数范围时返回 null（运行版本未知）。 */

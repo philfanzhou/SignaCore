@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AxiosHeaders } from 'axios'
 
 const mocks = vi.hoisted(() => ({
   http: {
@@ -18,12 +19,18 @@ const mocks = vi.hoisted(() => ({
   credential: { token: 'scm1.' + 'a'.repeat(43), generation: 1, expiresAtMs: Date.now() + 900000 },
 }))
 
-vi.mock('axios', () => ({
-  default: {
-    create: mocks.create,
-    isAxiosError: mocks.isAxiosError,
-  },
-}))
+vi.mock('axios', async () => {
+  // Keep the real AxiosHeaders so response-header mocks can mirror the exact shape the
+  // browser adapters hand to the client instead of a plain object.
+  const actual = await vi.importActual<typeof import('axios')>('axios')
+  return {
+    AxiosHeaders: actual.AxiosHeaders,
+    default: {
+      create: mocks.create,
+      isAxiosError: mocks.isAxiosError,
+    },
+  }
+})
 
 vi.mock('./httpTransport', () => ({ credentialFreeClient: mocks.publicHttp }))
 vi.mock('./managementBearer', () => ({
@@ -148,9 +155,11 @@ describe('AdminApiClient', () => {
   it('reads settings from the shared setting query with the running-version header', async () => {
     // The mock answers with what the response transform produced (real axios would run
     // parseSettingsSnapshot on the raw body; its behavior is covered directly below).
+    // Browser adapters (fetch and XHR) lower-case response header names, so the mock
+    // mirrors the real client: an AxiosHeaders instance holding only the lower-case key.
     mocks.http.get.mockResolvedValue({
       data: { version: 2, values: [] },
-      headers: { 'X-SignaCore-Running-Configuration-Version': '1' },
+      headers: AxiosHeaders.from({ 'x-signacore-running-configuration-version': '1' }),
     })
 
     const { snapshot, runningVersion } = await createAdminApiClient().getSettings()
@@ -161,6 +170,18 @@ describe('AdminApiClient', () => {
     // The snapshot body stays the shared contract; the transform only validates the version.
     expect(snapshot).toEqual({ version: 2, values: [] })
     expect(runningVersion).toBe(1)
+  })
+
+  it('reads the running version from a lower-case plain-object header shape too', async () => {
+    mocks.http.get.mockResolvedValue({
+      data: { version: 2, values: [] },
+      headers: { 'x-signacore-running-configuration-version': '4' },
+    })
+
+    await expect(createAdminApiClient().getSettings()).resolves.toEqual({
+      snapshot: { version: 2, values: [] },
+      runningVersion: 4,
+    })
   })
 
   it('parses the snapshot version from the raw body without silent rounding', () => {
@@ -177,7 +198,7 @@ describe('AdminApiClient', () => {
   it('marks the running version unknown when the header is missing or invalid', async () => {
     mocks.http.get.mockResolvedValue({
       data: { version: 2, values: [] },
-      headers: {},
+      headers: AxiosHeaders.from({ 'content-type': 'application/json' }),
     })
     await expect(createAdminApiClient().getSettings()).resolves.toEqual({
       snapshot: { version: 2, values: [] },
@@ -186,7 +207,7 @@ describe('AdminApiClient', () => {
 
     mocks.http.get.mockResolvedValue({
       data: { version: 2, values: [] },
-      headers: { 'X-SignaCore-Running-Configuration-Version': 'not-a-number' },
+      headers: AxiosHeaders.from({ 'x-signacore-running-configuration-version': 'not-a-number' }),
     })
     await expect(createAdminApiClient().getSettings()).resolves.toEqual({
       snapshot: { version: 2, values: [] },
