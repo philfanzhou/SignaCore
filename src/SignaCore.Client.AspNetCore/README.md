@@ -91,7 +91,26 @@ option — never the value.
 2. **Route prefix** — where the package's endpoints are mounted: `app.MapSignaCoreHostedLogin("/auth")`.
 
 3. **Response format** — replace the default failure page and session-status body by implementing
-   `ISignaCoreHostedLoginResponseWriter` and assigning `options.ResponseWriter`.
+   `ISignaCoreHostedLoginResponseWriter` and assigning `options.ResponseWriter`. The writer also
+   owns the three logout presentations — a completed prepared logout
+   (`WriteLogoutPreparedAsync`, default: `302` to the package-verified logout URI), the fixed
+   local-only outcome (`WriteLogoutLocalOnlyAsync`, default: `200 {"outcome":"local_only"}`),
+   and a failed logout return (`WriteLogoutReturnFailedAsync`, default: a fixed `400` HTML
+   page). The protocol outcomes are the package's; only the envelopes are yours. An SPA calling
+   `POST <prefix>/logout` with `fetch` answers `200` JSON carrying the URL instead of following
+   the redirect:
+
+   ```csharp
+   options.ResponseWriter = new SpaLogoutWriter();
+   // ... implements WriteLogoutPreparedAsync as: 200 {"logoutUrl": <logoutUri>} and the front
+   //     end navigates with window.location.assign; WriteLogoutLocalOnlyAsync as an empty 200;
+   //     WriteLogoutReturnFailedAsync as a 302 to /#/login?reason=logout_failed.
+   ```
+
+   The prepared `logoutUri` is the package's verified choice — present it, never substitute
+   another destination. On custom paths you own `Cache-Control` (keep responses `no-store`) and
+   you must not leak correlation ids or tokens; a custom writer's failure propagates after the
+   local revocation and is never retried.
 
 4. **Session and Bearer scheme selection** — per request, pick which authentication scheme serves
    it: the package's session scheme (the default) or a host-owned scheme such as your Bearer
