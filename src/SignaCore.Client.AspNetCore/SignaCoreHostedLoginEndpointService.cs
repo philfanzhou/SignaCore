@@ -299,9 +299,9 @@ internal sealed class SignaCoreHostedLoginEndpointService(
     {
         var cancellationToken = context.RequestAborted;
         var current = options.CurrentValue;
-        var status = await ReadSessionStatusAsync(context, current, cancellationToken);
+        var (status, principal) = await ReadSessionStatusAsync(context, current, cancellationToken);
         SignaCoreClientLog.SessionStatus(logger, status.Authenticated, cancellationToken);
-        await current.ResponseWriter.WriteSessionStatusAsync(context, status, cancellationToken);
+        await current.ResponseWriter.WriteSessionStatusAsync(context, status, principal, cancellationToken);
     }
 
     internal async Task HandleFailurePageAsync(HttpContext context)
@@ -310,15 +310,16 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         await options.CurrentValue.ResponseWriter.WriteFailurePageAsync(context, reason, context.RequestAborted);
     }
 
-    private async Task<SignaCoreSessionStatus> ReadSessionStatusAsync(
-        HttpContext context,
-        SignaCoreHostedLoginOptions current,
-        CancellationToken cancellationToken)
+    private async Task<(SignaCoreSessionStatus Status, System.Security.Claims.ClaimsPrincipal? Principal)>
+        ReadSessionStatusAsync(
+            HttpContext context,
+            SignaCoreHostedLoginOptions current,
+            CancellationToken cancellationToken)
     {
         if (!context.Request.Cookies.TryGetValue(current.SessionCookieName, out var key)
             || string.IsNullOrEmpty(key))
         {
-            return SignaCoreSessionStatus.Expired;
+            return (SignaCoreSessionStatus.Expired, null);
         }
 
         var ticket = await ticketStore.RetrieveAsync(key, cancellationToken);
@@ -326,13 +327,15 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         {
             // The fixed answer of an expired or unknown session: re-authentication is the only
             // way forward, and the package never refreshes silently.
-            return SignaCoreSessionStatus.Expired;
+            return (SignaCoreSessionStatus.Expired, null);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
         var decision = await current.AuthorizationDecision.DecideAsync(ticket.Principal, cancellationToken);
         var displayName = ticket.Principal.FindFirst("name")?.Value;
-        return SignaCoreSessionStatus.AuthenticatedSession(displayName, decision);
+        // The principal reaches the writer exactly as the ticket holds it — including claims a
+        // custom store added at storage time. Anonymous and expired sessions carry null.
+        return (SignaCoreSessionStatus.AuthenticatedSession(displayName, decision), ticket.Principal);
     }
 
     private async Task RejectAsync(

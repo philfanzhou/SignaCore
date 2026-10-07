@@ -44,6 +44,22 @@ public interface ISignaCoreHostedLoginResponseWriter
         HttpContext context,
         SignaCoreSessionStatus status,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Answers the session-status endpoint with the verified session principal beside the status
+    /// fields. The principal is the server-side ticket's — including any claims a custom
+    /// <see cref="ITicketStore"/> added at storage time (for example roles re-verified from the
+    /// access token) — and is <see langword="null"/> for an anonymous or expired session. It is
+    /// presentation input only: the writer must not mutate or write back the session. The
+    /// default implementation forwards to the three-argument overload, so writers written before
+    /// this overload keep working unchanged.
+    /// </summary>
+    Task WriteSessionStatusAsync(
+        HttpContext context,
+        SignaCoreSessionStatus status,
+        System.Security.Claims.ClaimsPrincipal? principal,
+        CancellationToken cancellationToken) =>
+        WriteSessionStatusAsync(context, status, cancellationToken);
 }
 
 /// <summary>

@@ -78,7 +78,8 @@ public static class SignaCoreHostedLoginEndpointExtensions
             normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.SessionPathSegment,
             static context => context.RequestServices
                 .GetRequiredService<SignaCoreHostedLoginEndpointService>()
-                .HandleSessionAsync(context));
+                .HandleSessionAsync(context))
+            .RequireAuthorizationWhenRequested(options);
         endpoints.MapGet(
             normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.FailurePathSegment,
             static context => context.RequestServices
@@ -110,5 +111,22 @@ public static class SignaCoreHostedLoginEndpointExtensions
         }
 
         return trimmed[0] == '/' ? trimmed : "/" + trimmed;
+    }
+
+    /// <summary>
+    /// Applies the session endpoint's optional authorization requirement: only the session
+    /// endpoint is affected, and only when the option is on — every other package endpoint keeps
+    /// its historical accessibility.
+    /// </summary>
+    private static IEndpointConventionBuilder RequireAuthorizationWhenRequested(
+        this IEndpointConventionBuilder endpoint,
+        SignaCoreHostedLoginOptions options)
+    {
+        if (options.SessionEndpointRequireAuthorization)
+        {
+            endpoint.RequireAuthorization();
+        }
+
+        return endpoint;
     }
 }

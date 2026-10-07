@@ -123,4 +123,16 @@ public sealed class SignaCoreHostedLoginOptions
     /// <summary>The route prefix the endpoints are mapped under; set by
     /// <c>MapSignaCoreHostedLogin</c>, not by consumer code.</summary>
     public string? Prefix { get; internal set; }
+
+    /// <summary>
+    /// Whether the session-status endpoint requires an authenticated user (endpoint
+    /// authorization). Default false keeps the endpoint anonymous — anyone may learn whether the
+    /// browser holds a live session, exactly as before. When true, an unauthenticated request is
+    /// rejected by the host's authorization pipeline before the endpoint runs: the challenge is
+    /// the host's to present (with the package's scheme as the host default it is a 302 to the
+    /// sign-in start; a 401 JSON envelope is a policy-scheme or writer combination of the
+    /// consumer's). Only this endpoint gains the requirement; start, callback, csrf, logout, and
+    /// the failure page stay as they are.
+    /// </summary>
+    public bool SessionEndpointRequireAuthorization { get; set; }
 }
