@@ -7,7 +7,10 @@ browser holds only one opaque cookie.
 
 The package owns the protocol and security duties of the client side (see
 [ADR 0007](https://github.com/philfanzhou/SignaCore/blob/main/docs/adr/0007-official-hosted-login-client-package.md)):
-Discovery-driven endpoint resolution with `issuer` verification, an authorization request that
+Discovery-driven endpoint resolution with `issuer` verification — every published
+authorization, token, and JWKS endpoint must sit on the verified issuer's own origin
+(scheme, host, port), so a tampered Discovery document can never move token or key traffic
+to a second host — an authorization request that
 carries exactly `response_type=code`, `state`, `nonce`, and an S256 PKCE challenge, a hardened
 single-valued callback that validates `state` and `iss` before anything else, a one-time,
 never-retried code redemption with HTTP Basic client authentication, strict ID-token validation
