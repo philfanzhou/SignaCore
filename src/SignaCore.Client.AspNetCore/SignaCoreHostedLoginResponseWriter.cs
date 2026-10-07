@@ -15,6 +15,24 @@ namespace SignaCore.Client.AspNetCore;
 public interface ISignaCoreHostedLoginResponseWriter
 {
     /// <summary>
+    /// Presents the sign-in surface's optional-login degradation: the host started with
+    /// <see cref="SignaCoreHostedLoginOptions.AllowUnconfiguredStartup"/> and the protocol
+    /// options left blank, so no sign-in can start. Default: <c>503</c> with the JSON body
+    /// <c>{"outcome":"sign_in_unavailable"}</c> and <c>no-store</c>. A challenge redirected here
+    /// surfaces the same fixed answer; the mode ends only when the host is configured and
+    /// restarted.
+    /// </summary>
+    Task WriteSignInUnavailableAsync(
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        context.Response.ContentType = "application/json";
+        context.Response.Headers.CacheControl = "no-store";
+        return context.Response.WriteAsync("""{"outcome":"sign_in_unavailable"}""", cancellationToken);
+    }
+
+    /// <summary>
     /// Answers a failed sign-in or start request. The default redirects to the package's fixed
     /// failure page under the mapped prefix with the bounded <c>reason</c> as its only query
     /// parameter.

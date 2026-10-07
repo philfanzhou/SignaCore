@@ -30,6 +30,17 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         var cancellationToken = context.RequestAborted;
         var current = options.CurrentValue;
 
+        // Optional sign-in mode: with the protocol options left blank the host runs, but no
+        // sign-in can start — the fixed degraded answer, before any other work, in the
+        // presenter the consumer can reshape. Configured-but-illegal values never reach here;
+        // they fail startup.
+        if (current.AllowUnconfiguredStartup && IsUnconfigured(current))
+        {
+            SignaCoreClientLog.SignInUnavailable(logger, cancellationToken);
+            await current.ResponseWriter.WriteSignInUnavailableAsync(context, cancellationToken);
+            return;
+        }
+
         // A missing returnUrl defaults to the application root; a present one must be a single
         // local absolute path.
         var returnUrlValues = context.Request.Query["returnUrl"];
@@ -342,6 +353,16 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         var displayName = ticket.Principal.FindFirst("name")?.Value;
         return SignaCoreSessionStatus.AuthenticatedSession(displayName, decision);
     }
+
+    /// <summary>
+    /// Whether any required protocol option is blank — exactly the validator's missing-vs-illegal
+    /// split: a blank member degrades in optional mode, a configured illegal one fails startup.
+    /// </summary>
+    private static bool IsUnconfigured(SignaCoreHostedLoginOptions current) =>
+        string.IsNullOrWhiteSpace(current.Authority)
+        || string.IsNullOrWhiteSpace(current.ClientId)
+        || string.IsNullOrWhiteSpace(current.ClientSecret)
+        || string.IsNullOrWhiteSpace(current.RedirectUri);
 
     private async Task RejectAsync(
         HttpContext context,
