@@ -34,6 +34,39 @@ public interface ITicketStore
     Task RemoveAsync(string key, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Stores one ticket and revokes a previous session key in a single replacement: the store
+    /// either takes the new ticket and drops <paramref name="oldKey"/> together, or refuses the
+    /// whole operation (capacity reached) and touches nothing — a full store never sacrifices the
+    /// previous session. A null, empty, unknown, or already-expired <paramref name="oldKey"/> is
+    /// equivalent to <see cref="StoreAsync"/>, never an error. Called by the sign-in callback
+    /// with the browser's previous session cookie, so a fresh sign-in atomically ends the session
+    /// it replaces. The default implementation is <see cref="StoreAsync"/> followed by
+    /// <see cref="RemoveAsync"/> — correct, but not atomic; custom multi-instance stores that
+    /// need the atomic guarantee (audit rows included, written in the same transaction as the
+    /// swap) must override this method.
+    /// </summary>
+    /// <returns>The new ticket's opaque key, or <see langword="null"/> when the store refused the
+    /// replacement — the caller then fails closed.</returns>
+    async Task<string?> ReplaceAsync(
+        string? oldKey,
+        SignaCoreSessionTicket ticket,
+        CancellationToken cancellationToken)
+    {
+        var key = await StoreAsync(ticket, cancellationToken);
+        if (key is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrEmpty(oldKey))
+        {
+            await RemoveAsync(oldKey, cancellationToken);
+        }
+
+        return key;
+    }
+
+    /// <summary>
     /// Drops every ticket whose <see cref="SignaCoreSessionTicket.ExpiresUtc"/> has passed and
     /// returns the number removed, so expired sessions are reclaimed even when no request ever
     /// presents their key again.

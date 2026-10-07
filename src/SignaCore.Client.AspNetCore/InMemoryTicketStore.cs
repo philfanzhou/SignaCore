@@ -43,6 +43,42 @@ public sealed class InMemoryTicketStore(TimeProvider? timeProvider = null) : ITi
     }
 
     /// <inheritdoc />
+    /// <remarks>The in-memory override is atomic: one capacity check, then the new key is added
+    /// and the old key removed in the same swap — a concurrent reader can never observe both the
+    /// old and the new session as live, and a refused replacement changes nothing.</remarks>
+    public Task<string?> ReplaceAsync(
+        string? oldKey,
+        SignaCoreSessionTicket ticket,
+        CancellationToken cancellationToken)
+    {
+        if (_tickets.Count >= Capacity)
+        {
+            return Task.FromResult<string?>(null);
+        }
+
+        var key = NewKey();
+        if (!_tickets.TryAdd(key, ticket))
+        {
+            return Task.FromResult<string?>(null);
+        }
+
+        // An absent or expired old key is not an error: the replacement degrades to a plain store.
+        if (!string.IsNullOrEmpty(oldKey))
+        {
+            _tickets.TryRemove(oldKey, out _);
+        }
+
+        return Task.FromResult<string?>(key);
+
+        static string NewKey()
+        {
+            Span<byte> entropy = stackalloc byte[32];
+            RandomNumberGenerator.Fill(entropy);
+            return Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        }
+    }
+
+    /// <inheritdoc />
     public Task<SignaCoreSessionTicket?> RetrieveAsync(string key, CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(key) || !_tickets.TryGetValue(key, out var ticket))

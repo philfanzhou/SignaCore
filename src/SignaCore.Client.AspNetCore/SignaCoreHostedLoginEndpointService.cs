@@ -241,7 +241,15 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             identity.Principal.Claims, "SignaCoreHostedLogin", nameType: "name", roleType: "role"));
         var ticket = new SignaCoreSessionTicket(
             principal, now, expiresAt, exchange.AccessToken, exchange.IdToken);
-        var key = await ticketStore.StoreAsync(ticket, cancellationToken);
+        // A fresh sign-in replaces the session this browser held before, atomically: the store
+        // takes the new ticket and revokes the old key in one call, so a re-login ends the
+        // previous session the moment the new one exists. No previous cookie degrades to a plain
+        // store; a full store refuses the whole replacement and keeps the old session.
+        context.Request.Cookies.TryGetValue(current.SessionCookieName, out var previousSessionKey);
+        var key = await ticketStore.ReplaceAsync(
+            string.IsNullOrEmpty(previousSessionKey) ? null : previousSessionKey,
+            ticket,
+            cancellationToken);
         if (key is null)
         {
             await RejectAsync(context, SignaCoreSignInReason.SessionStoreFull, cancellationToken);
