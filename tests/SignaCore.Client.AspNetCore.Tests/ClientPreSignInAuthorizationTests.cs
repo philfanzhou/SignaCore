@@ -42,7 +42,9 @@ public sealed class ClientPreSignInAuthorizationTests
         };
         using var response = await harness.CallbackAsync(await harness.BeginAsync());
         Assert.Equal("/dashboard", response.Headers.Location?.ToString());
-        var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie"));
+        // The success writes the session cookie and finishes the one-time binding cookie.
+        var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie").Where(value =>
+            value.StartsWith(SignaCoreHostedLoginDefaults.SessionCookieName + "=", StringComparison.Ordinal)));
         foreach (var attribute in new[] { "httponly", "secure", "samesite=lax", "path=/" })
             Assert.Contains(attribute, cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, harness.Decision.Calls);
@@ -271,7 +273,18 @@ public sealed class ClientPreSignInAuthorizationTests
     {
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         Assert.Equal("/auth/signin-failed?reason=" + reason, response.Headers.Location?.ToString());
-        Assert.False(response.Headers.Contains("Set-Cookie"));
+        // A failed callback never writes a session cookie; the only Set-Cookie it may carry is
+        // the finished binding cookie's deletion.
+        if (response.Headers.TryGetValues("Set-Cookie", out var cookies))
+        {
+            var cookie = Assert.Single(cookies);
+            Assert.StartsWith(
+                SignaCoreHostedLoginDefaults.SessionCookieName
+                    + SignaCoreHostedLoginDefaults.LoginBindingCookieSuffix + ".",
+                cookie,
+                StringComparison.Ordinal);
+            Assert.Contains("expires=Thu, 01 Jan 1970", cookie, StringComparison.Ordinal);
+        }
     }
 
     private sealed class Decision : ISignaCorePreSignInAuthorizationDecision
