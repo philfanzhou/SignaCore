@@ -135,4 +135,12 @@ public sealed class SignaCoreHostedLoginOptions
     /// requires a restart, consistent with the protocol-settings consistency requirement.
     /// </summary>
     public bool AllowUnconfiguredStartup { get; set; }
+
+    /// <summary>
+    /// The validation strictness policy of the ID-token, access-token, and backchannel response
+    /// checks. The defaults are the strict profile (zero clock skew, scope-echo subset check,
+    /// duplicate JSON members rejected, bounded response bodies, future <c>iat</c> rejected);
+    /// every dimension can be relaxed independently through this group.
+    /// </summary>
+    public SignaCoreValidationOptions Validation { get; set; } = new();
 }

@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -112,25 +111,26 @@ internal sealed class SignaCoreTokenClient(
                 return SignaCoreTokenExchangeResult.Failed(SignaCoreTokenExchangeFailure.Rejected);
             }
 
-            JsonDocument? document;
+            JsonDocument document;
             try
             {
-                document = await response.Content.ReadFromJsonAsync<JsonDocument>(
+                // The body is read under the configured byte ceiling and must not repeat a
+                // top-level member name; both defect shapes are the same closed failure.
+                document = await SignaCoreBoundedJson.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken),
+                    current.Validation.MaxTokenResponseBytes,
+                    current.Validation.RejectDuplicateJsonMembers,
                     cancellationToken);
             }
-            catch (JsonException)
+            catch (Exception exception) when (exception is JsonException
+                or SignaCoreResponseLimitException or HttpRequestException)
             {
-                return SignaCoreTokenExchangeResult.Failed(SignaCoreTokenExchangeFailure.MalformedResponse);
+                return SignaCoreTokenExchangeResult.Failed(
+                    SignaCoreTokenExchangeFailure.MalformedResponse);
             }
 
             using (document)
             {
-                if (document is null)
-                {
-                    return SignaCoreTokenExchangeResult.Failed(
-                        SignaCoreTokenExchangeFailure.MalformedResponse);
-                }
-
                 var root = document.RootElement;
                 if (root.ValueKind != JsonValueKind.Object)
                 {
@@ -141,6 +141,18 @@ internal sealed class SignaCoreTokenClient(
                 if (root.TryGetProperty("error", out _))
                 {
                     return SignaCoreTokenExchangeResult.Failed(SignaCoreTokenExchangeFailure.Rejected);
+                }
+
+                // A present scope echo must be a subset of what the sign-in requested: an
+                // authority answering with more than was asked for is a closed failure. An
+                // absent member is the contract's optional form and stays accepted.
+                if (current.Validation.RequireScopeEchoSubset
+                    && root.TryGetProperty("scope", out var scopeElement)
+                    && (scopeElement.ValueKind != JsonValueKind.String
+                        || !IsScopeEchoSubset(scopeElement.GetString(), current.Scope)))
+                {
+                    return SignaCoreTokenExchangeResult.Failed(
+                        SignaCoreTokenExchangeFailure.MalformedResponse);
                 }
 
                 if (!TryReadString(root, "access_token", out var accessToken)
@@ -169,6 +181,29 @@ internal sealed class SignaCoreTokenClient(
                 return SignaCoreTokenExchangeResult.Success(accessToken, idToken, expiresIn);
             }
         }
+    }
+
+    /// <summary>Whether every space-separated value of an echoed scope was part of the requested
+    /// scope; an empty echo claims nothing beyond the request.</summary>
+    private static bool IsScopeEchoSubset(string? echoed, string requested)
+    {
+        if (string.IsNullOrEmpty(echoed))
+        {
+            return true;
+        }
+
+        requested = requested ?? string.Empty;
+        var requestedValues = new HashSet<string>(
+            requested.Split(' ', StringSplitOptions.RemoveEmptyEntries), StringComparer.Ordinal);
+        foreach (var value in echoed.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!requestedValues.Contains(value))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool TryReadString(JsonElement root, string member, out string value)

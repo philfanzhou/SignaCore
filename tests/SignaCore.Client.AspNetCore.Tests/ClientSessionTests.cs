@@ -72,7 +72,9 @@ public sealed class ClientSessionTests
     public async Task AnExpiredSession_AnswersTheFixedRequiresReauthenticationBody_AndChallengesAgain()
     {
         var clock = new ManualTimeProvider();
-        await using var authority = await FakeIdentityProvider.StartAsync();
+        // The authority mints on the same clock the consumer validates with: a split clock
+        // would mint an iat the consumer's frozen "now" sees as future.
+        await using var authority = await FakeIdentityProvider.StartAsync(clock);
         var (consumer, browser) = await CreateAsync(authority, timeProvider: clock);
         await using var _ = consumer;
         using var __ = browser;

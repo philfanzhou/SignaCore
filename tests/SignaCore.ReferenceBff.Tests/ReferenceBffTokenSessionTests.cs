@@ -210,7 +210,11 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
     [Fact]
     public async Task AnExpiredLocalTicket_IsRemoved_AndTheProtectedEndpointChallengesAgain()
     {
-        var clock = new ManipulableClock(DateTimeOffset.UtcNow);
+        // The clock runs deliberately ahead of the wall clock: the real host stamps tokens
+        // with the wall clock, and the strict default profile (zero skew, future iat
+        // rejected) only accepts them while the verifying clock is not behind it. The
+        // nine-hour advance below is unaffected by the head start.
+        var clock = new ManipulableClock(DateTimeOffset.UtcNow.AddSeconds(30));
         await using var session = await SignInAsync(clock);
         Assert.Equal(1, BffTickets.Count(session.Bff));
 

@@ -121,8 +121,10 @@ public sealed class ClientDiscoverySameOriginTests
     {
         // The controlled clock also drives the package's Discovery cache refresh interval.
         var clock = new ManualTimeProvider();
+        // The authority mints on the same clock the consumer validates with; a split clock
+        // could stamp an iat the consumer's "now" sees as future.
         await using var authority = await FakeIdentityProvider.StartAsync(
-            baseAddress: "http://127.0.0.1:5099");
+            clock, baseAddress: "http://127.0.0.1:5099");
         var consumer = ConsumerAppTestServer.Create(
             "http://127.0.0.1:5099",
             ClientId,
