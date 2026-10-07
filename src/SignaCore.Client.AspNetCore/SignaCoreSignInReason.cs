@@ -17,9 +17,25 @@ public enum SignaCoreSignInReason
     /// missing, duplicated, or otherwise not usable.</summary>
     InvalidResponse,
 
-    /// <summary>The user cancelled the sign-in, or the optional pre-sign-in authorization
-    /// gate denied the new session (including decision failure or timeout).</summary>
+    /// <summary>
+    /// Legacy: a sign-in denial that the current package versions never produce. The paths that
+    /// used to answer this value now distinguish <see cref="UserCanceled"/> (the user rejected
+    /// the authorization at the hosted page) from <see cref="PreSignInDenied"/> (the optional
+    /// pre-sign-in authorization gate denied, timed out, or failed). The value stays parseable
+    /// so old failure-page links keep rendering.
+    /// </summary>
     AccessDenied,
+
+    /// <summary>The user cancelled the sign-in at the authority's authorization page (the
+    /// upstream <c>error=access_denied</c> echo).</summary>
+    UserCanceled,
+
+    /// <summary>
+    /// The optional pre-sign-in authorization gate denied the new session — the decision
+    /// returned <c>Denied</c>, timed out, or failed; the gate never distinguishes its internal
+    /// failure shapes to the browser.
+    /// </summary>
+    PreSignInDenied,
 
     /// <summary>The response's <c>state</c> did not match a pending sign-in.</summary>
     StateMismatch,

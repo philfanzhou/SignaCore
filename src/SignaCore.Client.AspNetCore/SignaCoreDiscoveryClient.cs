@@ -117,6 +117,16 @@ internal sealed class SignaCoreDiscoveryClient(
                 throw new SignaCoreAuthorityDocumentException(
                     "A discovery endpoint is not an absolute HTTPS URI.");
             }
+
+            // Every endpoint must also sit on the verified issuer's own origin (scheme, host,
+            // port — the path may differ, SignaCore publishes endpoints under the issuer's root):
+            // a tampered document must not move authorization, token, or key traffic to a second
+            // host the consumer never chose. There is no partial acceptance.
+            if (!SignaCoreAuthorityUriRules.SameOriginTriple(issuer, endpoint))
+            {
+                throw new SignaCoreAuthorityDocumentException(
+                    "A discovery endpoint is not same-origin with the issuer.");
+            }
         }
 
         using var jwksResponse = await client.GetAsync(jwksUri, cancellationToken);

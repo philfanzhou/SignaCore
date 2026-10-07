@@ -63,6 +63,10 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
     public TimeSpan AccessTimeOffset { get => _state.AccessTimeOffset; set => _state.AccessTimeOffset = value; }
     public void RotateSigningKey() => _state.SigningKey = AuthorityState.CreateKey("rotated-key");
 
+    /// <summary>The authority's own base address; defaults to <see cref="BaseAddress"/>, tests may
+    /// start the fake on an explicit loopback HTTP origin instead.</summary>
+    public string Base => _state.BaseAddress;
+
     /// <summary>The token response's scope echo; null omits the member entirely.</summary>
     public string? TokenResponseScope
     {
@@ -106,6 +110,34 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         WrongTokenType,
         NonPositiveExpiresIn,
         NonJsonBody
+    }
+
+    /// <summary>The injectable endpoint shapes of the Discovery document: every non-normal shape
+    /// points one or more endpoints somewhere the document must not be trusted for.</summary>
+    public enum DiscoveryEndpointShape
+    {
+        /// <summary>Every endpoint on the authority's own origin: the trusted shape.</summary>
+        Normal,
+
+        /// <summary>The authorization endpoint on another host (still absolute HTTPS).</summary>
+        AuthorizationCrossHost,
+
+        /// <summary>The token endpoint on another host (still absolute HTTPS).</summary>
+        TokenCrossHost,
+
+        /// <summary>The JWKS URI on another host (still absolute HTTPS).</summary>
+        JwksCrossHost,
+
+        /// <summary>The authorization endpoint on the same host but a different port.</summary>
+        AuthorizationCrossPort,
+
+        /// <summary>The token endpoint as loopback HTTP — acceptable in Development by shape,
+        /// but never same-origin with an HTTPS issuer.</summary>
+        TokenCrossSchemeLoopback,
+
+        /// <summary>The authorization endpoint on the same origin under a deeper path: a legal
+        /// shape the same-origin rule must not reject.</summary>
+        AuthorizationDeeperPath
     }
 
     public enum AuthorizeEcho
@@ -178,6 +210,14 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         set => _state.LogoutPrepare = value;
     }
 
+    /// <summary>The Discovery document's endpoint shape; corrupting it breaks the endpoint
+    /// trust checks without touching the document's issuer.</summary>
+    public DiscoveryEndpointShape EndpointShape
+    {
+        get => _state.EndpointShape;
+        set => _state.EndpointShape = value;
+    }
+
     /// <summary>Every preparation request's form body, in order.</summary>
     public ConcurrentQueue<string> LogoutPrepareBodies => _state.LogoutPrepareBodies;
 
@@ -217,27 +257,55 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
 
     public Task TokenArrived => _state.TokenArrived?.Task ?? Task.CompletedTask;
 
-    public static async Task<FakeIdentityProvider> StartAsync(TimeProvider? timeProvider = null)
+    public static async Task<FakeIdentityProvider> StartAsync(
+        TimeProvider? timeProvider = null,
+        string? baseAddress = null)
     {
-        var state = new AuthorityState(timeProvider ?? TimeProvider.System);
+        var state = new AuthorityState(timeProvider ?? TimeProvider.System)
+        {
+            BaseAddress = baseAddress ?? BaseAddress
+        };
+        // The document's issuer defaults to the base the fake actually serves on.
+        state.DiscoveryIssuer = state.BaseAddress;
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
-        builder.WebHost.UseUrls(BaseAddress);
+        builder.WebHost.UseUrls(state.BaseAddress);
 
         var app = builder.Build();
 
-        app.MapGet("/.well-known/openid-configuration", () => Results.Json(new
+        app.MapGet("/.well-known/openid-configuration", () =>
         {
-            issuer = state.DiscoveryIssuer,
-            authorization_endpoint = $"{BaseAddress}/authorize",
-            token_endpoint = $"{BaseAddress}/token",
-            userinfo_endpoint = $"{BaseAddress}/userinfo",
-            jwks_uri = $"{BaseAddress}/jwks",
-            response_types_supported = new[] { "code" },
-            subject_types_supported = new[] { "public" },
-            id_token_signing_alg_values_supported = new[] { "RS256" },
-            code_challenge_methods_supported = new[] { "S256" }
-        }));
+            var authorizationEndpoint = state.EndpointShape switch
+            {
+                DiscoveryEndpointShape.AuthorizationCrossHost => "https://evil.example/authorize",
+                DiscoveryEndpointShape.AuthorizationCrossPort => state.BaseAddress + ":8443/authorize",
+                DiscoveryEndpointShape.AuthorizationDeeperPath => state.BaseAddress + "/oauth2/authorize",
+                _ => state.BaseAddress + "/authorize"
+            };
+            var tokenEndpoint = state.EndpointShape switch
+            {
+                DiscoveryEndpointShape.TokenCrossHost => "https://evil.example/token",
+                DiscoveryEndpointShape.TokenCrossSchemeLoopback => "http://127.0.0.1/token",
+                _ => state.BaseAddress + "/token"
+            };
+            var jwksUri = state.EndpointShape switch
+            {
+                DiscoveryEndpointShape.JwksCrossHost => "https://evil.example/jwks",
+                _ => state.BaseAddress + "/jwks"
+            };
+            return Results.Json(new
+            {
+                issuer = state.DiscoveryIssuer,
+                authorization_endpoint = authorizationEndpoint,
+                token_endpoint = tokenEndpoint,
+                userinfo_endpoint = $"{state.BaseAddress}/userinfo",
+                jwks_uri = jwksUri,
+                response_types_supported = new[] { "code" },
+                subject_types_supported = new[] { "public" },
+                id_token_signing_alg_values_supported = new[] { "RS256" },
+                code_challenge_methods_supported = new[] { "S256" }
+            });
+        });
 
         app.MapGet("/jwks", () =>
         {
@@ -259,9 +327,14 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
             });
         });
 
-        app.MapGet("/authorize", (HttpRequest http) =>
+        // The same authorize handler serves both the default path and the deeper same-origin
+        // path the DiscoveryEndpointShape.AuthorizationDeeperPath document publishes.
+        app.MapGet("/authorize", AuthorizeHandler);
+        app.MapGet("/oauth2/authorize", AuthorizeHandler);
+
+        IResult AuthorizeHandler(HttpRequest http)
         {
-            state.AuthorizeRequests.Enqueue(new Uri(BaseAddress + http.Path + http.QueryString));
+            state.AuthorizeRequests.Enqueue(new Uri(state.BaseAddress + http.Path + http.QueryString));
             state.LastNonce = http.Query["nonce"].ToString();
             var normalCode = Guid.NewGuid().ToString("N");
             state.CodeNonces[normalCode] = state.LastNonce;
@@ -287,7 +360,7 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
                 _ => Results.Redirect(
                     $"{redirectUri}{separator}code={normalCode}&state={Uri.EscapeDataString(redirectState)}&iss={state.DiscoveryIssuer}")
             };
-        });
+        }
 
         app.MapPost("/token", async (HttpContext context) =>
         {
@@ -465,7 +538,7 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
 
         await app.StartAsync(TestContext.Current.CancellationToken);
         var server = app.GetTestServer();
-        server.BaseAddress = new Uri(BaseAddress);
+        server.BaseAddress = new Uri(state.BaseAddress);
         return new FakeIdentityProvider(app, server, state);
 
         // One fresh 43-character base64url handle, exactly the completion contract's shape.
@@ -500,7 +573,7 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
             {
                 Issuer = state.Defect == TokenDefect.WrongIssuer
                     ? "https://someone-else.example"
-                    : BaseAddress,
+                    : state.BaseAddress,
                 Audience = state.Defect == TokenDefect.WrongAudience
                     ? "a-different-client"
                     : "client-pack-app",
@@ -531,7 +604,7 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         if (defect == AccessDefect.MissingKid) header.Remove("kid");
         var payload = new Dictionary<string, object?>
         {
-            ["iss"] = defect == AccessDefect.Issuer ? "https://other.example" : BaseAddress,
+            ["iss"] = defect == AccessDefect.Issuer ? "https://other.example" : state.BaseAddress,
             ["aud"] = defect == AccessDefect.SingleArrayAudience ? new[] { "client-pack-app" }
                 : defect == AccessDefect.Audience ? "other-client"
                 : defect == AccessDefect.AdditionalAudience ? new[] { "client-pack-app", "other-client" }
@@ -618,8 +691,10 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         /// positive).</summary>
         public TimeSpan IdTokenTimeOffset { get; set; }
 
-        /// <summary>Shifts only the minted ID token's iat by this offset (future is positive).</summary>
+        /// <summary>Shifts only the minted ID token's iat by this offset (future values are positive).</summary>
         public TimeSpan IdTokenIatOnlyOffset { get; set; }
+
+        public DiscoveryEndpointShape EndpointShape { get; set; }
 
         public ConcurrentQueue<string> LogoutPrepareBodies { get; } = [];
 
@@ -629,7 +704,9 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
 
         public ConcurrentQueue<(string Handle, string PostLogoutRedirectUri, string EchoedState)> PreparedLogouts { get; } = [];
 
-        public string DiscoveryIssuer { get; set; } = BaseAddress;
+        public string BaseAddress { get; set; } = FakeIdentityProvider.BaseAddress;
+
+        public string DiscoveryIssuer { get; set; } = FakeIdentityProvider.BaseAddress;
 
         public string LastNonce { get; set; } = string.Empty;
 

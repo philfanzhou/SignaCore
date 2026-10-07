@@ -80,7 +80,7 @@ internal sealed class SignaCoreHostedLogoutService(
         {
             // No session cookie means there is nothing to revoke locally and no ID token to
             // prepare with: the fixed local-only result.
-            await WriteLocalOnlyAsync(context, cancellationToken);
+            await WriteLocalOnlyAsync(context, current, cancellationToken);
             return;
         }
 
@@ -95,7 +95,7 @@ internal sealed class SignaCoreHostedLogoutService(
             {
                 // Another request already revoked this session (or it expired): local-only, no
                 // second preparation.
-                await WriteLocalOnlyAsync(context, cancellationToken);
+                await WriteLocalOnlyAsync(context, current, cancellationToken);
                 return;
             }
 
@@ -115,7 +115,7 @@ internal sealed class SignaCoreHostedLogoutService(
             }
             catch (Exception)
             {
-                await WriteLocalOnlyAsync(context, cancellationToken);
+                await WriteLocalOnlyAsync(context, current, cancellationToken);
                 return;
             }
 
@@ -134,7 +134,7 @@ internal sealed class SignaCoreHostedLogoutService(
                 // Upstream failure, timeout, cancellation, or an unverifiable logout_uri: the
                 // local sign-out stands, there is no retry, and the browser is told the fixed
                 // local-only result.
-                await WriteLocalOnlyAsync(context, cancellationToken);
+                await WriteLocalOnlyAsync(context, current, cancellationToken);
                 return;
             }
 
@@ -144,7 +144,8 @@ internal sealed class SignaCoreHostedLogoutService(
             }
 
             SignaCoreClientLog.Logout(logger, SignaCoreClientLog.Outcome.Prepared, cancellationToken);
-            context.Response.Redirect(preparation.LogoutUri);
+            await current.ResponseWriter.WriteLogoutPreparedAsync(
+                context, preparation.LogoutUri, cancellationToken);
         }
         finally
         {
@@ -177,22 +178,7 @@ internal sealed class SignaCoreHostedLogoutService(
         DeleteLogoutReturnCookie(context, current);
         if (!completed)
         {
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            context.Response.ContentType = "text/html; charset=utf-8";
-            context.Response.Headers.CacheControl = "no-store";
-            await context.Response.WriteAsync(
-                """
-                <!doctype html>
-                <html lang="en">
-                <head><title>Sign-out could not be confirmed</title></head>
-                <body>
-                <h1>Sign-out could not be confirmed</h1>
-                <p>The sign-out result could not be matched. Sign in again if you were trying to use the application.</p>
-                <p><a href="/">Back</a></p>
-                </body>
-                </html>
-                """,
-                cancellationToken);
+            await current.ResponseWriter.WriteLogoutReturnFailedAsync(context, cancellationToken);
             return;
         }
 
@@ -200,12 +186,13 @@ internal sealed class SignaCoreHostedLogoutService(
         context.Response.Redirect(current.PostLogoutReturnPath);
     }
 
-    private async Task WriteLocalOnlyAsync(HttpContext context, CancellationToken cancellationToken)
+    private async Task WriteLocalOnlyAsync(
+        HttpContext context,
+        SignaCoreHostedLoginOptions current,
+        CancellationToken cancellationToken)
     {
         SignaCoreClientLog.Logout(logger, SignaCoreClientLog.Outcome.LocalOnly, cancellationToken);
-        context.Response.ContentType = "application/json";
-        context.Response.Headers.CacheControl = "no-store";
-        await context.Response.WriteAsync("""{"outcome":"local_only"}""", cancellationToken);
+        await current.ResponseWriter.WriteLogoutLocalOnlyAsync(context, cancellationToken);
     }
 
     private static void DeleteSessionCookie(HttpContext context, string cookieName) =>
@@ -254,8 +241,20 @@ internal sealed class SignaCoreHostedLogoutService(
 /// <summary>Package-internal helpers shared by the logout surface.</summary>
 internal static class SignaCoreLogoutCookieExtensions
 {
-    /// <summary>The logout-return cookie name derives from the configured session-cookie name, so
-    /// distinct consumers on one host never read each other's correlation ids.</summary>
+    /// <summary>
+    /// The logout-return cookie name derives from the configured session-cookie name, so
+    /// distinct consumers on one host never read each other's correlation ids. A
+    /// <c>__Host-</c>-prefixed session name cannot simply gain the suffix: <c>__Host-</c>
+    /// requires Path=/, while this cookie is scoped to the logout endpoints, so the derived name
+    /// would be rejected by every browser. Such names instead derive
+    /// <c>__Secure-&lt;rest&gt;-logout-return</c> — the only prefix that keeps a browser-enforced
+    /// signal (Secure, hence HTTPS) while allowing the non-root path. Every other session name
+    /// keeps the byte-for-byte historical <c>&lt;name&gt;-logout-return</c> derivation.
+    /// </summary>
     internal static string LogoutReturnCookieName(this SignaCoreHostedLoginOptions options) =>
-        options.SessionCookieName + SignaCoreHostedLoginDefaults.LogoutReturnCookieSuffix;
+        options.SessionCookieName.StartsWith(SignaCoreHostedLoginDefaults.HostCookiePrefix, StringComparison.Ordinal)
+            ? SignaCoreHostedLoginDefaults.SecureCookiePrefix
+                + options.SessionCookieName[SignaCoreHostedLoginDefaults.HostCookiePrefix.Length..]
+                + SignaCoreHostedLoginDefaults.LogoutReturnCookieSuffix
+            : options.SessionCookieName + SignaCoreHostedLoginDefaults.LogoutReturnCookieSuffix;
 }
