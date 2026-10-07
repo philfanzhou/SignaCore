@@ -206,6 +206,13 @@ other session write:
    package accepts the state only once, only with the browser's correlation cookie, and only
    within five minutes, then redirects to `options.PostLogoutReturnPath` (default `/`).
 
+The correlation cookie is named `<SessionCookieName>-logout-return`. When your session cookie
+carries the `__Host-` prefix, that naive derivation would produce an illegal name (`__Host-`
+demands Path=/ while this cookie is scoped to the logout endpoints), so the package derives
+`__Secure-<rest>-logout-return` instead — the `__Secure-` prefix keeps a browser-enforced Secure
+guarantee and works with the package's path scope. Every other session name keeps the historical
+derivation byte for byte; cookies under a previous package version's name simply age out.
+
 If the upstream preparation fails, times out, is cancelled, or answers an unverifiable URI, the
 endpoint answers the fixed local-only result — `200 {"outcome":"local_only"}` — and the browser
 stays signed out locally. Access tokens already issued remain valid downstream until they expire;

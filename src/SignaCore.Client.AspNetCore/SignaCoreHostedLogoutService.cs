@@ -254,8 +254,20 @@ internal sealed class SignaCoreHostedLogoutService(
 /// <summary>Package-internal helpers shared by the logout surface.</summary>
 internal static class SignaCoreLogoutCookieExtensions
 {
-    /// <summary>The logout-return cookie name derives from the configured session-cookie name, so
-    /// distinct consumers on one host never read each other's correlation ids.</summary>
+    /// <summary>
+    /// The logout-return cookie name derives from the configured session-cookie name, so
+    /// distinct consumers on one host never read each other's correlation ids. A
+    /// <c>__Host-</c>-prefixed session name cannot simply gain the suffix: <c>__Host-</c>
+    /// requires Path=/, while this cookie is scoped to the logout endpoints, so the derived name
+    /// would be rejected by every browser. Such names instead derive
+    /// <c>__Secure-&lt;rest&gt;-logout-return</c> — the only prefix that keeps a browser-enforced
+    /// signal (Secure, hence HTTPS) while allowing the non-root path. Every other session name
+    /// keeps the byte-for-byte historical <c>&lt;name&gt;-logout-return</c> derivation.
+    /// </summary>
     internal static string LogoutReturnCookieName(this SignaCoreHostedLoginOptions options) =>
-        options.SessionCookieName + SignaCoreHostedLoginDefaults.LogoutReturnCookieSuffix;
+        options.SessionCookieName.StartsWith(SignaCoreHostedLoginDefaults.HostCookiePrefix, StringComparison.Ordinal)
+            ? SignaCoreHostedLoginDefaults.SecureCookiePrefix
+                + options.SessionCookieName[SignaCoreHostedLoginDefaults.HostCookiePrefix.Length..]
+                + SignaCoreHostedLoginDefaults.LogoutReturnCookieSuffix
+            : options.SessionCookieName + SignaCoreHostedLoginDefaults.LogoutReturnCookieSuffix;
 }
