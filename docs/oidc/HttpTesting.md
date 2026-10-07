@@ -15,7 +15,7 @@ management authentication and Development numeric-loopback URI behavior retain t
 The setting is a non-sensitive JSON array in the shared `service_settings` aggregate. It is optional,
 requires restart, and has no materialized shared default. A missing key or `[]` disables the policy;
 existing aggregates need no backfill. First-run and legacy-import complete candidates include `[]`
-through the catalog's input defaults. The runtime definition catalog now contains 45 keys.
+through the catalog's input defaults. The runtime definition catalog now contains 47 keys.
 
 Edit it through the existing authenticated settings page/API, for example:
 

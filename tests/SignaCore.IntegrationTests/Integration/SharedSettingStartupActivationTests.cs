@@ -55,7 +55,10 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
     /// <summary>
     /// Expands the seeded corpus into configuration entries exactly the way the retired legacy
     /// snapshot loader did — scalars verbatim, JSON settings flattened — so the comparison keeps
-    /// proving the projection preserves the legacy configuration shape.
+    /// proving the projection preserves the legacy configuration shape. Empty sensitive values are
+    /// skipped the same way the seeding write path skips them: the shared contract treats a
+    /// sensitive key as unset when absent, so a first aggregate never stores an encrypted empty
+    /// string.
     /// </summary>
     private static Dictionary<string, string?> ExpectedEntries()
     {
@@ -64,6 +67,11 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
         {
             var definition = ServiceSettingDefinitions.Find(
                 SharedSettingKeys.NormalizedByLegacyKey[legacyKey])!;
+            if (definition.IsSensitive && value.Length == 0)
+            {
+                continue;
+            }
+
             if (definition.ValueType == ServiceSettingValueType.Json)
             {
                 JsonSettingFlattener.Flatten(legacyKey, value, entries);

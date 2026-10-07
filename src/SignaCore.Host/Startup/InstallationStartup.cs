@@ -253,11 +253,7 @@ internal static class InstallationStartup
         var (legacyValues, importedKeyCount) = LegacyConfigurationInput.ReadCompleteInput(
             configuration, logger);
 
-        var changes = new Dictionary<string, string?>(StringComparer.Ordinal);
-        foreach (var (legacyKey, value) in legacyValues)
-        {
-            changes[SharedSettingKeys.NormalizedByLegacyKey[legacyKey]] = value;
-        }
+        var changes = SharedSettingComposition.BuildSeedChanges(legacyValues);
 
         var updateService = new ServiceSettingUpdateService(
             InstallationStores.ServiceId,

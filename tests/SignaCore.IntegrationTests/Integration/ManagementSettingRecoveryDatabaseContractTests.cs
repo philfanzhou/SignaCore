@@ -197,6 +197,70 @@ public sealed partial class ManagementSettingRecoveryDatabaseContractTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task ExplicitOptInKeys_SelectTheWholeGroupForStrictEvaluation(bool postgres)
+    {
+        // A legacy HTTP endpoint with a stored credential: unusable, so an untouched group keeps
+        // its waiver for unrelated updates — but touching an opt-in key selects the whole group.
+        await using var fixture = await Fixture.CreateAsync(postgres,
+            "http://loki.example.com:3100", ValidAuthorization, LegacyOtlp);
+        await using var factory = fixture.Host();
+        using var admin = await LoginAsync(factory);
+        var before = await fixture.StoredAsync();
+        var auditCount = (await fixture.AuditsAsync()).Count;
+
+        // The no-authentication switch conflicts with the stored credential; without the group
+        // selection this batch would have smuggled an invalid combination past the legacy waiver.
+        using var conflicted = await PostAsync(admin, before.Version,
+            new() { ["loki.allow_no_authentication"] = "true" });
+        Assert.Equal(HttpStatusCode.BadRequest, conflicted.StatusCode);
+        Assert.Equal(before.Version, (await fixture.StoredAsync()).Version);
+        Assert.Equal(auditCount, (await fixture.AuditsAsync()).Count);
+
+        // A typed rejection on an opt-in key is likewise a group-touching strict failure.
+        using var badBoolean = await PostAsync(admin, before.Version,
+            new() { ["loki.allow_insecure_http"] = "bad-boolean" });
+        Assert.Equal(HttpStatusCode.BadRequest, badBoolean.StatusCode);
+        Assert.Equal(before.Version, (await fixture.StoredAsync()).Version);
+
+        // The HTTP opt-in repairs the whole group in one batch while OTLP keeps its waiver.
+        using var repaired = await PostAsync(admin, before.Version,
+            new() { ["loki.allow_insecure_http"] = "true" });
+        Assert.Equal(HttpStatusCode.OK, repaired.StatusCode);
+        var repairedValues = SharedSettingTestDatabase.ParseValues(await fixture.StoredAsync());
+        Assert.Equal("http://loki.example.com:3100", repairedValues["loki.uri"]);
+        // The stored credential stays protected; only its presence is observable in the raw row.
+        Assert.Contains("loki.authorization", repairedValues.Keys);
+        Assert.NotEqual(ValidAuthorization, repairedValues["loki.authorization"]);
+        Assert.Equal("true", repairedValues["loki.allow_insecure_http"]);
+        Assert.Equal(LegacyOtlp, repairedValues["opentelemetry.otlp_endpoint"]);
+        await using (var httpHost = fixture.Host())
+        {
+            Assert.Single(httpHost.Services.GetServices<IRemoteLogAuthorizationResolver>());
+            Assert.Null(httpHost.Services.GetService(OtlpRuntime));
+        }
+
+        // The no-authentication switch requires deleting the credential in the same batch.
+        using var noAuthentication = await PostAsync(admin, before.Version + 1, new()
+        {
+            ["loki.authorization"] = null,
+            ["loki.allow_no_authentication"] = "true"
+        });
+        Assert.Equal(HttpStatusCode.OK, noAuthentication.StatusCode);
+        var finalValues = SharedSettingTestDatabase.ParseValues(await fixture.StoredAsync());
+        Assert.DoesNotContain("loki.authorization", finalValues.Keys);
+        Assert.Equal("true", finalValues["loki.allow_no_authentication"]);
+        // The no-authentication mode registers no resolver at all, on both providers.
+        await using (var noAuthHost = fixture.Host())
+        {
+            Assert.Empty(noAuthHost.Services.GetServices<IRemoteLogAuthorizationResolver>());
+            Assert.Null(noAuthHost.Services.GetService(OtlpRuntime));
+        }
+        Assert.Equal(auditCount + 3, (await fixture.AuditsAsync()).Count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task RecoveryExecutor_ConcurrentExpectedVersionHasOneWinner(bool postgres)
     {
         await using var fixture = await Fixture.CreateAsync(postgres,

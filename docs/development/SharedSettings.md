@@ -68,19 +68,24 @@ Everything else lives exactly once, in the shared stack: value types, the "must 
 requirement for keys with real defaults, `requiresRestart` (all keys), the integer semantics of
 every Number key, the three numeric ranges, the fixed JSON root kinds, and every cross-key rule
 (base URL normalization, HTTPS policy, issuer equality, non-blank keys, SMS/LDAP/WeChat binder
-validation, reverse-proxy IP parsing) in `SignaCoreSettingCompositeValidator`. The Loki pair rules
-(an absolute `https` `loki.uri` without user info, query, or fragment, set together with
-`loki.authorization`), and the HTTPS-only OTLP endpoint rules, are strict for setup and default
-updates. Startup, management reads, legacy import, and bootstrap probing accept older unusable
-optional telemetry values; the normal host keeps the affected sink/exporter disabled with a fixed,
-value-free warning. Management recovery applies the same optional rules with the narrowly scoped
+validation, reverse-proxy IP parsing) in `SignaCoreSettingCompositeValidator`. The Loki group rules
+— the shared ServiceMantle combination evaluation over `loki.uri` (an absolute `https` URL without
+user info, query, or fragment; plain HTTP only behind the explicit `loki.allow_insecure_http`
+opt-in), `loki.authorization` (set for the authenticated modes; absent when the explicit
+`loki.allow_no_authentication` opt-in is selected, which also requires deleting any stored
+credential in the same batch) — and the HTTPS-only OTLP endpoint rules, are strict for setup and
+default updates; SignaCore translates the shared outcomes into its closed
+`signacore.setting.*` codes instead of keeping a second state rule. Startup, management reads,
+legacy import, and bootstrap probing accept older unusable optional telemetry values; the normal
+host keeps the affected sink/exporter disabled with a fixed, value-free warning. Management
+recovery applies the same optional rules with the narrowly scoped
 baseline exception below. The retired legacy
 snapshot validator left behind two input-form duties, now carried by a thin adapter instead of a
 second rule set:
 
 - `SettingCandidateValidation` (entry: `SharedSettingComposition.ValidateCompleteCandidate`) is
   the pre-validation used by first-run setup, the legacy import, and the test installation
-  fixtures. It checks that the complete legacy-keyed candidate carries every one of the 45
+  fixtures. It checks that the complete legacy-keyed candidate carries every one of the 47
   definition-table keys — completeness precedes defaults, so a missing key is never silently filled in by the
   registry — and that every Number value is integer text (`IntegerSettingConstraint.IsIntegerText`,
   the legacy `NumberStyles.Integer` form), then maps through `SharedSettingKeys` onto the shared
@@ -211,7 +216,8 @@ The management update executor captures its baseline from the shared update serv
 the existing serializable transaction. It does not pre-read, retry, or use another transaction.
 Version conflict and exhaustion are checked before baseline materialization. All type, constraint,
 identity, issuer, origin, account, and SMS/LDAP/WeChat/proxy rules still validate the complete
-candidate. The only optional groups are Loki (`loki.uri`, `loki.authorization`) and OTLP
+candidate. The only optional groups are Loki (`loki.uri`, `loki.authorization`,
+`loki.allow_insecure_http`, `loki.allow_no_authentication`) and OTLP
 (`opentelemetry.otlp_endpoint`), evaluated independently. An optional group can retain its older
 unusable values only when the complete baseline successfully loaded/decrypted, the shared runtime
 classifier says the baseline group is unusable, the command names no key in that group, and the
@@ -219,20 +225,25 @@ candidate group equals the baseline. The original stored values and protected en
 unchanged, and the group stays disabled at the next restart.
 
 Naming any group key counts as touching the whole group, including case-equivalent names,
-explicit unchanged values, and deletion. Touched groups must satisfy the full strict rules; a new
-invalid group, invalid ordinary/core setting, or null-key runtime validation error is never waived.
-Repair Loki with an absolute HTTPS URL plus usable Authorization, or explicitly delete both keys
-in the same batch (`value=null`). Partial repair/deletion that leaves the group unusable is rejected.
-Repair OTLP with a valid HTTPS endpoint or delete its key. A valid repair or complete deletion of
-one group can preserve the other untouched unusable group. No HTTP or unauthenticated Loki
-capability is enabled by this recovery.
+explicit unchanged values, and deletion — and touching either explicit opt-in switch
+(`loki.allow_insecure_http`, `loki.allow_no_authentication`) selects the whole Loki group for the
+strict rules exactly like the two legacy keys. Touched groups must satisfy the full strict rules;
+a new invalid group, invalid ordinary/core setting, or null-key runtime validation error is never
+waived. Repair Loki with an absolute HTTPS URL plus usable Authorization, with an explicitly
+opted-in HTTP endpoint, or with the explicit no-authentication opt-in and no stored credential;
+or explicitly delete the whole group in the same batch (`value=null`). Partial repair/deletion
+that leaves the group unusable is rejected. Repair OTLP with a valid HTTPS endpoint or delete its
+key. A valid repair or complete deletion of one group can preserve the other untouched unusable
+group. Recovery itself never enables any transport or authentication mode implicitly: both opt-ins
+default to `false` and change only through an explicit management update.
 
 The admin console supports the whole recovery flow on the observability settings page: the
 diagnostics panel shows the saved version's issues with fixed English explanations plus the
 saved-versus-running version pair, and a failed diagnostics read is reported as unavailable —
 never as "no issues". A diagnostics answer taken at a different saved version than the loaded
 settings is shown as stale rather than as the current version's verdict. **Disable Loki** drafts
-the atomic disable — both Loki keys submitted as `null` in one save batch — and **Remove OTLP
+the atomic disable — the whole group (`loki.uri`, `loki.authorization`, and both explicit opt-in
+switches) submitted as `null` in one save batch — and **Remove OTLP
 endpoint** drafts the same for the single OTLP key; a normal empty sensitive input still means
 "keep the current value" and never deletes. Removal drafts can be undone before saving, survive a
 409 conflict or a validation rejection without retry, and clear only after the save committed.
@@ -245,10 +256,12 @@ including conflicts at commit; unrelated provider errors remain fixed 503. There
 Reads and saves leave the running-version header and actual runtime settings unchanged; restart
 the service to activate a repaired or disabled group.
 
-This change adds no keys, dependencies, tables, migrations, or persistent data transformation.
-Keep the database and root key for rollback. Restoring the older binary may restore its management
-read/update blockage on legacy unusable telemetry; repair or explicitly disable the groups before
-rollback when possible. No envelope conversion or data rollback is needed.
+The two opt-in keys add no schema change on either provider: both default to `false`, an older
+aggregate without them loads with `false`, and the legacy HTTPS-plus-authorization behavior is
+unchanged. Before rolling back to a release that does not know the two keys, atomically delete
+them through this version's management interface (or the whole Loki group) and restore a
+combination the older release supports — an older release may refuse to start on unknown
+persisted keys. Keep the database and root key across the rollback.
 
 ## Protected legacy configuration import (#146)
 

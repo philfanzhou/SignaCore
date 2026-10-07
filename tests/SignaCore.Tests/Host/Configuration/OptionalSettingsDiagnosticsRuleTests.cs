@@ -122,6 +122,47 @@ public sealed class OptionalSettingsDiagnosticsRuleTests
                 [SystemSettingKeys.OpenTelemetryOtlpEndpoint] = "https://collector.example.com:4317"
             },
             Array.Empty<(string, string)>()
+        },
+        {
+            "explicit-http-opt-in-with-authorization",
+            new Dictionary<string, string>
+            {
+                [SystemSettingKeys.LokiUri] = "http://loki.example.com:3100",
+                [SystemSettingKeys.LokiAuthorization] = "Basic dGVzdDpjYW5hcnk=",
+                [SystemSettingKeys.LokiAllowInsecureHttp] = "true"
+            },
+            Array.Empty<(string, string)>()
+        },
+        {
+            "explicit-no-authentication-opt-in",
+            new Dictionary<string, string>
+            {
+                [SystemSettingKeys.LokiUri] = "http://loki.example.com:3100",
+                [SystemSettingKeys.LokiAllowInsecureHttp] = "true",
+                [SystemSettingKeys.LokiAllowNoAuthentication] = "true"
+            },
+            Array.Empty<(string, string)>()
+        },
+        {
+            "http-opt-in-still-requires-https-without-the-switch",
+            new Dictionary<string, string>
+            {
+                [SystemSettingKeys.LokiUri] = "http://loki.example.com:3100",
+                [SystemSettingKeys.LokiAllowNoAuthentication] = "true"
+            },
+            [
+                ("loki.uri", SignaCoreSettingCompositeValidator.HttpsRequiredCode)
+            ]
+        },
+        {
+            "no-authentication-conflicts-with-a-stored-credential",
+            new Dictionary<string, string>
+            {
+                [SystemSettingKeys.LokiUri] = "https://loki.example.com",
+                [SystemSettingKeys.LokiAuthorization] = "Basic dGVzdDpjYW5hcnk=",
+                [SystemSettingKeys.LokiAllowNoAuthentication] = "true"
+            },
+            [("loki.authorization", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
         }
     };
 

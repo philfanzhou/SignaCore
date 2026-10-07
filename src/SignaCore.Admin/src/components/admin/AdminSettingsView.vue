@@ -109,8 +109,10 @@ const settingLabels: Record<string, string> = {
   "ldap.default_directory_key": "默认目录标识",
   "ldap.max_concurrent_operations": "最大并发操作数",
   "ldap.directories": "LDAP 目录",
-  "loki.uri": "Loki 地址（HTTPS）",
+  "loki.uri": "Loki 地址",
   "loki.authorization": "Loki 授权头",
+  "loki.allow_insecure_http": "允许 Loki 使用 HTTP",
+  "loki.allow_no_authentication": "Loki 无认证模式",
   "opentelemetry.otlp_endpoint": "OpenTelemetry 地址（HTTPS）",
   "consul.host": "Consul 主机",
   "consul.port": "Consul 端口",
@@ -129,7 +131,16 @@ function settingLabel(setting: AdminSettingValue) {
   return settingLabels[setting.key] ?? setting.key;
 }
 
+/** English purpose notes for the keys whose meaning is not obvious from the label alone. */
+const settingHints: Record<string, string> = {
+  "loki.allow_insecure_http":
+    "Explicitly permits a plain-HTTP Loki endpoint; an HTTPS endpoint needs no switch. Requires a restart.",
+  "loki.allow_no_authentication":
+    "Explicitly selects no authentication: no Authorization header is sent, and any stored Loki authorization must be deleted in the same save. Requires a restart.",
+};
+
 function settingHint(setting: AdminSettingValue) {
+  if (settingHints[setting.key]) return settingHints[setting.key];
   if (setting.isSensitive)
     return setting.hasValue ? "已配置；不会回显，留空保持当前值" : "未配置；不会回显";
   return `键 ${setting.key} · ${setting.valueType} · 当前：${formatValue(setting)}`;
@@ -331,7 +342,7 @@ function validationErrorKey(error: AdminSettingValidationError) {
               :disabled="settingsSaving"
               @click="draftLokiDisable"
             >
-              Disable Loki (remove both keys on save)</button
+              Disable Loki (remove the whole group on save)</button
             ><button
               v-if="otlpConfigured && !otlpRemovalPending"
               class="console-button secondary"
@@ -344,8 +355,8 @@ function validationErrorKey(error: AdminSettingValidationError) {
               v-if="lokiDisablePending"
               class="settings-diagnostics-drafted"
             >
-              Loki disable drafted: both keys will be removed in the next
-              save.</span
+              Loki disable drafted: the whole group (endpoint, authorization,
+              and both opt-in switches) will be removed in the next save.</span
             >
             <span
               v-if="otlpRemovalPending"

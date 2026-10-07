@@ -203,11 +203,7 @@ internal static class SetupCompletionExecutor
         // administrator contributor stages its entities afterwards. The shared validation and
         // sensitive re-protection are authoritative; a refusal here is discarded whole with the
         // transaction, so the safe outcome is the fixed unavailable answer.
-        var normalizedChanges = new Dictionary<string, string?>(StringComparer.Ordinal);
-        foreach (var (settingKey, value) in values)
-        {
-            normalizedChanges[SharedSettingKeys.NormalizedByLegacyKey[settingKey]] = value;
-        }
+        var normalizedChanges = SharedSettingComposition.BuildSeedChanges(values);
 
         var settingsOperator = ManagementAuditOperator.Create(
             SetupCodeOperatorSource,

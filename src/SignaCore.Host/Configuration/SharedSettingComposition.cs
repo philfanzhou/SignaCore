@@ -52,4 +52,29 @@ internal static class SharedSettingComposition
     /// <summary>Adapts the bootstrap master key to the shared sensitive-value root key contract.</summary>
     internal static MasterKeyRootKeySource CreateRootKeySource(IMasterKeyProvider masterKeyProvider) =>
         new(masterKeyProvider);
+
+    /// <summary>
+    /// Converts a complete legacy-keyed candidate into the shared update changes of a first
+    /// aggregate write (first-run setup, the legacy import, and the test seeding). Sensitive keys
+    /// whose value is empty are omitted: the shared contract defines a sensitive key as unset when
+    /// absent, so a brand-new aggregate never stores an encrypted empty string that the shared
+    /// no-authentication classification would later read as a stored credential.
+    /// </summary>
+    internal static Dictionary<string, string?> BuildSeedChanges(
+        IReadOnlyDictionary<string, string> legacyValues)
+    {
+        var changes = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var (legacyKey, value) in legacyValues)
+        {
+            var normalizedKey = SharedSettingKeys.NormalizedByLegacyKey[legacyKey];
+            if (ServiceSettingDefinitions.Find(normalizedKey)?.IsSensitive == true && value.Length == 0)
+            {
+                continue;
+            }
+
+            changes[normalizedKey] = value;
+        }
+
+        return changes;
+    }
 }

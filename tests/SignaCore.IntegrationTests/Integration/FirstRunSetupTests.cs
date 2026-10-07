@@ -404,12 +404,23 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             .Select(definition => definition.Key)
             .ToList();
         Assert.NotEmpty(sensitiveKeys);
+        var envelopedKeys = 0;
         foreach (var sensitiveKey in sensitiveKeys)
         {
-            // Stored form is an opaque shared-protector envelope; only the configured root key
-            // recovers the value.
-            Assert.StartsWith("sm:v1:", aggregateValues[sensitiveKey], StringComparison.Ordinal);
+            // The setup form supplies no secret setting, so every empty sensitive value is written
+            // as unset (absent) instead of an encrypted empty string; a key that is stored must be
+            // an opaque shared-protector envelope recoverable only with the configured root key.
+            if (!aggregateValues.TryGetValue(sensitiveKey, out var stored))
+            {
+                continue;
+            }
+
+            envelopedKeys++;
+            Assert.StartsWith("sm:v1:", stored, StringComparison.Ordinal);
         }
+
+        // The non-empty sensitive defaults (the JSON secrets) still commit as envelopes.
+        Assert.NotEqual(0, envelopedKeys);
     }
 
     /// <summary>
@@ -516,10 +527,16 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             db, TestContext.Current.CancellationToken);
         Assert.NotNull(aggregate);
         Assert.Equal(1, aggregate!.Version);
-        Assert.Equal(45, SharedSettingTestDatabase.ParseValues(aggregate).Count);
+        // The deployment supplied no secret value, so the import commits the whole catalog except
+        // the empty sensitive defaults, which stay unset (absent) instead of encrypted empty
+        // strings; the two non-empty JSON secrets still commit.
+        var importedValues = SharedSettingTestDatabase.ParseValues(aggregate);
+        var expectedCommittedKeys = ServiceSettingDefinitions.Table.Count(definition =>
+            !definition.IsSensitive || definition.LegacyDefault is { Length: > 0 });
+        Assert.Equal(expectedCommittedKeys, importedValues.Count);
         Assert.Equal(
             "legacy_admin",
-            SharedSettingTestDatabase.ParseValues(aggregate)["admin.username"]);
+            importedValues["admin.username"]);
         Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(
             db, TestContext.Current.CancellationToken));
 
@@ -527,14 +544,14 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         // the import; neither carries any value.
         var sharedAudits = await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
             db, TestContext.Current.CancellationToken);
-        // 45 per-key configuration audits plus the import event itself, which now also lives in
-        // the shared table instead of the retired legacy audit row.
-        Assert.Equal(46, sharedAudits.Count);
+        // One per-key configuration audit per committed key plus the import event itself, which
+        // now also lives in the shared table instead of the retired legacy audit row.
+        Assert.Equal(expectedCommittedKeys + 1, sharedAudits.Count);
         var importAudit = Assert.Single(
             (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(db, TestContext.Current.CancellationToken))
             .Where(entry => entry.Action == "installation.legacy_import.completed"));
         // The product audit carries the deployment-supplied key count and the version, never a
-        // value: three keys came from the launcher, the whole 45-key candidate was committed.
+        // value: three keys came from the launcher, the whole non-empty candidate was committed.
         Assert.Contains("Imported 3 legacy settings", importAudit.SecurityDescription, StringComparison.Ordinal);
         Assert.Contains("ConfigurationVersion=1", importAudit.SecurityDescription, StringComparison.Ordinal);
         Assert.DoesNotContain("legacy_admin", importAudit.SecurityDescription, StringComparison.Ordinal);
@@ -578,9 +595,13 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(
             db, TestContext.Current.CancellationToken);
         Assert.Equal(1, aggregate!.Version);
-        // 45 per-key configuration audits plus the single import event in the shared table.
-        Assert.Equal(46, (await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
-            db, TestContext.Current.CancellationToken)).Count);
+        // One per-key configuration audit per committed key plus the single import event in the
+        // shared table; the empty sensitive defaults commit as unset, not as rows.
+        Assert.Equal(
+            ServiceSettingDefinitions.Table.Count(definition =>
+                !definition.IsSensitive || definition.LegacyDefault is { Length: > 0 }) + 1,
+            (await SharedSettingTestDatabase.LoadSharedAuditJsonAsync(
+                db, TestContext.Current.CancellationToken)).Count);
         Assert.Equal(1, (await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
                 db, TestContext.Current.CancellationToken))
             .Count(entry => entry.Action == "installation.legacy_import.completed"));

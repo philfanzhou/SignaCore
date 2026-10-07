@@ -394,25 +394,33 @@ observability settings page shows the same panel with fixed English explanations
 saved-versus-running version pair, and the recovery actions below; older HTTP clients can use the
 endpoint directly through the official API.
 
-Explicitly changing any Loki group key requires a valid HTTPS endpoint and usable Authorization,
-or deletion of both `loki.uri` and `loki.authorization` in one batch with `value=null`. Repair OTLP
-with a valid HTTPS endpoint or delete `opentelemetry.otlp_endpoint`. An unchanged value included in
-a command still counts as a change to its group and must pass strict validation. A definite
+Explicitly changing any Loki group key requires a combination the strict rules accept: a valid
+HTTPS endpoint with usable Authorization, an explicitly opted-in plain-HTTP endpoint
+(`loki.allow_insecure_http`), or the explicit no-authentication opt-in
+(`loki.allow_no_authentication`) with any stored `loki.authorization` deleted in the same batch —
+or deletion of the whole Loki group in one batch with `value=null`. Repair OTLP
+with a valid HTTPS endpoint or delete `opentelemetry.otlp_endpoint`. Touching either explicit
+opt-in switch selects the whole Loki group for the strict rules, exactly like the two legacy keys.
+An unchanged value included in a command still counts as a change to its group and must pass
+strict validation. A definite
 validation rejection (HTTP 400) keeps the fixed `management.request.invalid` error code and adds a
 `validationErrors` array naming each rejected key with its fixed code, so a failed save can be
 diagnosed per key without echoing any value. Use the observed `expectedVersion`, then restart to
 activate the final configuration. The running-version header continues to describe the current
 process until restart.
 
-In the console, **Disable Loki** drafts the atomic disable — both Loki keys submitted as `null` in
+In the console, **Disable Loki** drafts the atomic disable — the whole Loki group (endpoint,
+authorization, and both explicit opt-in switches) submitted as `null` in
 the next save batch — and **Remove OTLP endpoint** drafts the same for the OTLP key. A normal
 empty sensitive input still means "keep the current value", so nothing is deleted silently. Drafts
 can be undone before saving and survive conflicts and rejections; restart after saving to
 activate. Old UI or HTTP-only clients keep working: both ignore the new panel/field and can
 perform the same repair or disable through the official settings API.
 
-Core validation, root-key/decryption failures, and database failures remain closed; recovery does
-not add HTTP or unauthenticated Loki support. See [Shared settings recovery](SharedSettings.md#legacy-optional-telemetry-recovery).
-There are no new keys, schema changes, or data conversions. Preserve the database and root key
-when restoring an older binary; its original management blockage may return unless the optional
-groups were repaired or explicitly disabled before rollback.
+Core validation, root-key/decryption failures, and database failures remain closed; recovery never
+enables a transport or authentication mode implicitly — both opt-ins default to `false` and change
+only through an explicit management update. See [Shared settings recovery](SharedSettings.md#legacy-optional-telemetry-recovery).
+The two opt-in keys add no schema change on either provider. Before restoring an older binary
+that does not know them, atomically delete both keys through this version's management interface
+(or the whole Loki group) and leave a combination the older release accepts; an older release may
+refuse to start on unknown persisted keys. Preserve the database and root key across the rollback.

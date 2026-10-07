@@ -57,6 +57,8 @@ public sealed partial class SharedSettingDefinitionMappingTests
         // ---- Observability ----
         { "Loki:Uri", "loki.uri" },
         { "Loki:Authorization", "loki.authorization" },
+        { "Loki:AllowInsecureHttp", "loki.allow_insecure_http" },
+        { "Loki:AllowNoAuthentication", "loki.allow_no_authentication" },
         { "OpenTelemetry:OtlpEndpoint", "opentelemetry.otlp_endpoint" },
         // ---- Consul service discovery ----
         { "Consul:Host", "consul.host" },
@@ -120,6 +122,8 @@ public sealed partial class SharedSettingDefinitionMappingTests
         // ---- Observability ----
         { "loki.uri", "String", false, false, null },
         { "loki.authorization", "String", true, false, null },
+        { "loki.allow_insecure_http", "Boolean", false, false, "false" },
+        { "loki.allow_no_authentication", "Boolean", false, false, "false" },
         { "opentelemetry.otlp_endpoint", "String", false, false, null },
         // ---- Consul service discovery ----
         { "consul.host", "String", false, true, "host.docker.internal" },

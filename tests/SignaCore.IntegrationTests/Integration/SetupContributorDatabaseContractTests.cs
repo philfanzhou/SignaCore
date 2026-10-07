@@ -659,13 +659,16 @@ public sealed class SetupContributorDatabaseContractTests
             cancellationToken: TestContext.Current.CancellationToken));
 
         // The shared aggregate is the first version and carries the complete catalog: the rendered
-        // setup values plus defaults, with secrets as shared-protector envelopes.
+        // setup values plus defaults. The setup form supplies no secret, so every empty sensitive
+        // default stays unset (absent) instead of an encrypted empty string, while the stored
+        // secrets are shared-protector envelopes.
         var aggregate = await SharedSettingTestDatabase.LoadAggregateAsync(context);
         Assert.NotNull(aggregate);
         Assert.Equal(1, aggregate!.Version);
         Assert.Equal(username, aggregate.UpdatedBy);
         var aggregateValues = SharedSettingTestDatabase.ParseValues(aggregate);
         var expectedKeys = ServiceSettingDefinitions.Table
+            .Where(definition => !definition.IsSensitive || definition.LegacyDefault is { Length: > 0 })
             .Select(definition => definition.Key)
             .ToHashSet(StringComparer.Ordinal);
         Assert.Equal(expectedKeys, aggregateValues.Keys.ToHashSet(StringComparer.Ordinal));
@@ -677,10 +680,22 @@ public sealed class SetupContributorDatabaseContractTests
             .Select(definition => definition.Key)
             .ToHashSet(StringComparer.Ordinal);
         Assert.NotEmpty(sensitiveKeys);
+        var envelopedKeys = 0;
         foreach (var sensitiveKey in sensitiveKeys)
         {
-            Assert.StartsWith("sm:v1:", aggregateValues[sensitiveKey], StringComparison.Ordinal);
+            // A stored secret must be an opaque shared-protector envelope; the empty defaults are
+            // simply not stored.
+            if (!aggregateValues.TryGetValue(sensitiveKey, out var stored))
+            {
+                continue;
+            }
+
+            envelopedKeys++;
+            Assert.StartsWith("sm:v1:", stored, StringComparison.Ordinal);
         }
+
+        // The two non-empty JSON secrets still commit as envelopes.
+        Assert.NotEqual(0, envelopedKeys);
 
         // The retired legacy table is gone; the switched completion wrote the aggregate only.
         Assert.False(await SharedSettingTestDatabase.LegacyTableExistsAsync(

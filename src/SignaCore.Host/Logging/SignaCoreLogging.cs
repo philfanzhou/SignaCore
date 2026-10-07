@@ -25,9 +25,12 @@ internal static class SignaCoreLogging
         builder.AddServiceMantleSerilog(ConfigureSerilog);
 
     /// <summary>
-    /// The normal host's pipeline. Loki is enabled only for an absolute HTTPS endpoint together with
-    /// a usable Authorization value; every other stored combination keeps Loki off, and the caller
-    /// reports an unusable one through <see cref="WriteLokiWarning"/> once the host is built.
+    /// The normal host's pipeline. Loki is enabled only for an allowed absolute HTTP(S) endpoint —
+    /// HTTPS by default, plain HTTP behind the explicit <c>loki.allow_insecure_http</c> opt-in —
+    /// together with either a usable Authorization value or the explicit
+    /// <c>loki.allow_no_authentication</c> opt-in and no stored credential; every other stored
+    /// combination keeps Loki off, and the caller reports an unusable one through
+    /// <see cref="WriteLokiWarning"/> once the host is built.
     /// </summary>
     /// <remarks>
     /// The values are read from the activated setting snapshot itself, never from
@@ -56,9 +59,10 @@ internal static class SignaCoreLogging
 
         logger.LogWarning(
             "Remote log shipping to Loki is disabled because the stored Loki settings are not usable " +
-            "({LokiSettingProblem}). Loki requires an absolute https URL and an Authorization value; " +
-            "correct both in the settings page and restart the service.",
-            state.Status == GrafanaLokiSettingStatus.EndpointInvalid ? "endpoint_not_https" : state.Category);
+            "({LokiSettingProblem}). Loki needs an allowed absolute http(s) URL and either a usable " +
+            "Authorization value or the explicit no-authentication opt-in without a stored " +
+            "credential; correct the group in the settings page and restart the service.",
+            state.Category);
     }
 
     private static void ConfigureSerilog(SerilogOptions options) =>

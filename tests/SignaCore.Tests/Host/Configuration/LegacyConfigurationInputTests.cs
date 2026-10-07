@@ -32,7 +32,7 @@ public class LegacyConfigurationInputTests
     };
 
     [Fact]
-    public void Read_CompletesAllFortyFourKeysFromDefaultsAndTheDeployment()
+    public void Read_CompletesAllFortySixKeysFromDefaultsAndTheDeployment()
     {
         var (values, importedCount) = Read(new Dictionary<string, string?>
         {
@@ -42,11 +42,11 @@ public class LegacyConfigurationInputTests
             [SystemSettingKeys.LegacyAdminBootstrapUsername] = "legacy_admin"
         });
 
-        // Exactly the four required keys came from the deployment; the other 39 keep the definition
-        // table's legacy defaults, so the complete candidate always covers all 45 keys.
+        // Exactly the four required keys came from the deployment; the other 41 keep the definition
+        // table's legacy defaults, so the complete candidate always covers all 47 keys.
         Assert.Equal(4, importedCount);
         Assert.Equal(ServiceSettingDefinitions.Table.Count, values.Count);
-        Assert.Equal(45, values.Count);
+        Assert.Equal(47, values.Count);
 
         // Deployment values are trimmed; defaults are untouched.
         Assert.Equal(BaseUrl, values[SystemSettingKeys.PublicBaseUrl]);

@@ -98,8 +98,13 @@ export const adminSettingsSections: AdminSettingsSection[] = [
 ];
 
 const settings = ref<AdminSettingValue[]>([]);
-/** Disable Loki 的两键原子组合；OTLP 只有一个键。 */
-const LokiDisableKeys = ["loki.uri", "loki.authorization"] as const;
+/** Disable Loki 的整组原子组合：端点、授权头与两个显式 opt-in 在同一保存批次提交为 null。 */
+const LokiDisableKeys = [
+  "loki.uri",
+  "loki.authorization",
+  "loki.allow_insecure_http",
+  "loki.allow_no_authentication",
+] as const;
 const OtlpRemoveKey = "opentelemetry.otlp_endpoint";
 
 /**
@@ -140,8 +145,8 @@ const configurationVersion = ref<number | null>(null);
 /** 本进程启动时激活的运行版本，来自产品响应头；null 表示未知，绝不推断为已生效。 */
 const runningConfigurationVersion = ref<number | null>(null);
 /**
- * 显式移除草稿（value 提交为 null）。Disable Loki 会同时阶段 loki.uri 与
- * loki.authorization 两键；普通空敏感草稿仍是"保持"，绝不悄悄删除。
+ * 显式移除草稿（value 提交为 null）。Disable Loki 会同时阶段整组四个 Loki 键；
+ * 普通空敏感草稿仍是"保持"，绝不悄悄删除。
  */
 const pendingRemovals = ref<ReadonlySet<string>>(new Set<string>());
 /** 最近一次保存的确定性校验拒绝（closed key+code）；null 表示没有可展示的逐键说明。 */
@@ -206,13 +211,10 @@ const diagnosticsCurrent = computed(
     configurationVersion.value !== null &&
     diagnostics.value.version === configurationVersion.value,
 );
-/** Disable Loki 草稿必须两键同批；部分键不算。 */
+/** Disable Loki 草稿必须整组同批；部分键不算。 */
 const lokiDisablePending = computed(() => {
   const removals = pendingRemovals.value;
-  return (
-    removals.has(LokiDisableKeys[0]) &&
-    removals.has(LokiDisableKeys[1])
-  );
+  return LokiDisableKeys.every((key) => removals.has(key));
 });
 const otlpRemovalPending = computed(() =>
   pendingRemovals.value.has(OtlpRemoveKey),
@@ -289,8 +291,8 @@ async function loadDiagnostics() {
 }
 
 /**
- * 起草 Disable Loki：两键在同一保存批次提交为 null（原子禁用）。起草时恢复两键的加载
- * 原值，普通空敏感草稿的"保持"语义不变。
+ * 起草 Disable Loki：整组四个键（端点、授权头、两个显式 opt-in）在同一保存批次提交为
+ * null（原子禁用）。起草时恢复各键的加载原值，普通空敏感草稿的"保持"语义不变。
  */
 function draftLokiDisable() {
   const removals = new Set(pendingRemovals.value);
@@ -302,7 +304,7 @@ function draftLokiDisable() {
   }
   pendingRemovals.value = removals;
   notify(
-    "Disable Loki drafted: loki.uri and loki.authorization will be removed together in the next save.",
+    "Disable Loki drafted: the whole group (endpoint, authorization, and both opt-in switches) will be removed together in the next save.",
   );
 }
 
