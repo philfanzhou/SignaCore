@@ -15,6 +15,24 @@ namespace SignaCore.Client.AspNetCore;
 public interface ISignaCoreHostedLoginResponseWriter
 {
     /// <summary>
+    /// Presents the sign-in surface's optional-login degradation: the host started with
+    /// <see cref="SignaCoreHostedLoginOptions.AllowUnconfiguredStartup"/> and the protocol
+    /// options left blank, so no sign-in can start. Default: <c>503</c> with the JSON body
+    /// <c>{"outcome":"sign_in_unavailable"}</c> and <c>no-store</c>. A challenge redirected here
+    /// surfaces the same fixed answer; the mode ends only when the host is configured and
+    /// restarted.
+    /// </summary>
+    Task WriteSignInUnavailableAsync(
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        context.Response.ContentType = "application/json";
+        context.Response.Headers.CacheControl = "no-store";
+        return context.Response.WriteAsync("""{"outcome":"sign_in_unavailable"}""", cancellationToken);
+    }
+
+    /// <summary>
     /// Answers a failed sign-in or start request. The default redirects to the package's fixed
     /// failure page under the mapped prefix with the bounded <c>reason</c> as its only query
     /// parameter.
@@ -44,6 +62,68 @@ public interface ISignaCoreHostedLoginResponseWriter
         HttpContext context,
         SignaCoreSessionStatus status,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Presents a completed prepared logout: the local session is already revoked and the
+    /// browser must be handed to the authority-side <paramref name="logoutUri"/> the package
+    /// verified. Default: one <c>302</c> redirect to exactly that URI. A custom writer may
+    /// present the URI differently (an SPA answering <c>200</c> JSON with the URL for
+    /// <c>window.location.assign</c>), but must not substitute another destination — the
+    /// redirect target is the package's decision, the presentation is the writer's. The default
+    /// redirect sets no <c>Cache-Control</c>; a custom writer owns its own caching headers.
+    /// </summary>
+    Task WriteLogoutPreparedAsync(
+        HttpContext context,
+        string logoutUri,
+        CancellationToken cancellationToken)
+    {
+        context.Response.Redirect(logoutUri);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Presents the fixed local-only logout outcome: the local session was revoked (or there
+    /// was none) and the upstream preparation did not return a usable completion. Default:
+    /// <c>200</c> with the JSON body <c>{"outcome":"local_only"}</c> and <c>no-store</c>. A
+    /// custom writer owns the envelope's shape and caching headers, but never a retry — the
+    /// protocol outcome is fixed.
+    /// </summary>
+    Task WriteLogoutLocalOnlyAsync(
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        context.Response.ContentType = "application/json";
+        context.Response.Headers.CacheControl = "no-store";
+        return context.Response.WriteAsync("""{"outcome":"local_only"}""", cancellationToken);
+    }
+
+    /// <summary>
+    /// Presents a logout-return that could not be confirmed: the one-time correlation did not
+    /// match. Default: <c>400</c> with a fixed English HTML page and <c>no-store</c>. A custom
+    /// writer may route the browser to its own landing path instead; no request input is ever
+    /// available to echo, and the correlation cookie is already finished.
+    /// </summary>
+    Task WriteLogoutReturnFailedAsync(
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        context.Response.ContentType = "text/html; charset=utf-8";
+        context.Response.Headers.CacheControl = "no-store";
+        return context.Response.WriteAsync(
+            """
+            <!doctype html>
+            <html lang="en">
+            <head><title>Sign-out could not be confirmed</title></head>
+            <body>
+            <h1>Sign-out could not be confirmed</h1>
+            <p>The sign-out result could not be matched. Sign in again if you were trying to use the application.</p>
+            <p><a href="/">Back</a></p>
+            </body>
+            </html>
+            """,
+            cancellationToken);
+    }
 }
 
 /// <summary>
@@ -115,6 +195,8 @@ public sealed class SignaCoreDefaultResponseWriter : ISignaCoreHostedLoginRespon
         SignaCoreSignInReason.InvalidReturnUrl => "invalid_return_url",
         SignaCoreSignInReason.InvalidResponse => "invalid_response",
         SignaCoreSignInReason.AccessDenied => "access_denied",
+        SignaCoreSignInReason.UserCanceled => "user_canceled",
+        SignaCoreSignInReason.PreSignInDenied => "pre_sign_in_denied",
         SignaCoreSignInReason.StateMismatch => "state_mismatch",
         SignaCoreSignInReason.IssuerMismatch => "issuer_mismatch",
         SignaCoreSignInReason.TokenExchangeFailed => "token_exchange_failed",
@@ -134,6 +216,10 @@ public sealed class SignaCoreDefaultResponseWriter : ISignaCoreHostedLoginRespon
             "The sign-in response was not usable.",
         SignaCoreSignInReason.AccessDenied =>
             "Access was denied.",
+        SignaCoreSignInReason.UserCanceled =>
+            "The sign-in was cancelled.",
+        SignaCoreSignInReason.PreSignInDenied =>
+            "Access was denied before the session could be created.",
         SignaCoreSignInReason.StateMismatch =>
             "The sign-in response did not match the pending sign-in.",
         SignaCoreSignInReason.IssuerMismatch =>

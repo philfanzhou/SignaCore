@@ -37,15 +37,30 @@ public static class SignaCoreHostedLoginEndpointExtensions
             .GetRequiredService<IOptionsMonitor<SignaCoreHostedLoginOptions>>()
             .CurrentValue;
 
-        if (string.IsNullOrEmpty(options.RedirectUri)
-            || !Uri.TryCreate(options.RedirectUri, UriKind.Absolute, out var redirectUri))
+        var expectedCallbackPath = normalizedPrefix + "/"
+            + SignaCoreHostedLoginDefaults.CallbackPathSegment;
+        if (string.IsNullOrWhiteSpace(options.RedirectUri))
+        {
+            // Optional sign-in mode: a blank RedirectUri maps the callback at the canonical
+            // <prefix>/callback path — the only path a later configured RedirectUri may carry —
+            // so the endpoint set exists while the host runs degraded. Outside that mode a blank
+            // value keeps failing the mapping exactly as before.
+            if (!options.AllowUnconfiguredStartup)
+            {
+                throw new InvalidOperationException(
+                    "SignaCoreHostedLoginOptions.RedirectUri must be configured by AddSignaCoreHostedLogin before MapSignaCoreHostedLogin runs.");
+            }
+
+            options.Prefix = normalizedPrefix;
+            return MapEndpoints(endpoints, normalizedPrefix, expectedCallbackPath);
+        }
+
+        if (!Uri.TryCreate(options.RedirectUri, UriKind.Absolute, out var redirectUri))
         {
             throw new InvalidOperationException(
                 "SignaCoreHostedLoginOptions.RedirectUri must be configured by AddSignaCoreHostedLogin before MapSignaCoreHostedLogin runs.");
         }
 
-        var expectedCallbackPath = normalizedPrefix + "/"
-            + SignaCoreHostedLoginDefaults.CallbackPathSegment;
         if (!string.Equals(
                 redirectUri.AbsolutePath.TrimEnd('/'),
                 expectedCallbackPath,
@@ -67,6 +82,19 @@ public static class SignaCoreHostedLoginEndpointExtensions
                 "SignaCoreHostedLoginOptions.PostLogoutRedirectUri does not match the hosted-login logout-return path; the redirect URI's path must be exactly <prefix>/logout/return.");
         }
 
+        return MapEndpoints(endpoints, normalizedPrefix, redirectUri.AbsolutePath.TrimEnd('/'));
+    }
+
+    /// <summary>
+    /// Maps the package's seven endpoints and returns them as one convention group: whatever the
+    /// configured path of the callback turned out to be, every endpoint of the mapping shares the
+    /// returned builder's conventions.
+    /// </summary>
+    private static SignaCoreHostedLoginEndpointGroup MapEndpoints(
+        IEndpointRouteBuilder endpoints,
+        string normalizedPrefix,
+        string callbackPath)
+    {
         return new SignaCoreHostedLoginEndpointGroup(
         [
             endpoints.MapGet(
@@ -76,7 +104,7 @@ public static class SignaCoreHostedLoginEndpointExtensions
                     .HandleStartAsync(context)),
             // The callback is mapped at the redirect URI's own path so the two can never drift apart.
             endpoints.MapGet(
-                redirectUri.AbsolutePath.TrimEnd('/'),
+                callbackPath,
                 static context => context.RequestServices
                     .GetRequiredService<SignaCoreHostedLoginEndpointService>()
                     .HandleCallbackAsync(context)),

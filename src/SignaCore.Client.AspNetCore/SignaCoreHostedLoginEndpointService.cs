@@ -30,6 +30,17 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         var cancellationToken = context.RequestAborted;
         var current = options.CurrentValue;
 
+        // Optional sign-in mode: with the protocol options left blank the host runs, but no
+        // sign-in can start — the fixed degraded answer, before any other work, in the
+        // presenter the consumer can reshape. Configured-but-illegal values never reach here;
+        // they fail startup.
+        if (current.AllowUnconfiguredStartup && IsUnconfigured(current))
+        {
+            SignaCoreClientLog.SignInUnavailable(logger, cancellationToken);
+            await current.ResponseWriter.WriteSignInUnavailableAsync(context, cancellationToken);
+            return;
+        }
+
         // A missing returnUrl defaults to the application root; a present one must be a single
         // local absolute path.
         var returnUrlValues = context.Request.Query["returnUrl"];
@@ -121,7 +132,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             await RejectAsync(
                 context,
                 error == "access_denied"
-                    ? SignaCoreSignInReason.AccessDenied
+                    ? SignaCoreSignInReason.UserCanceled
                     : SignaCoreSignInReason.InvalidResponse,
                 cancellationToken);
             return;
@@ -220,7 +231,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
                 current.PreSignInAuthorizationTimeout, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await RejectAsync(context, SignaCoreSignInReason.AccessDenied, cancellationToken);
+                await RejectAsync(context, SignaCoreSignInReason.PreSignInDenied, cancellationToken);
                 return;
             }
 
@@ -241,7 +252,15 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             identity.Principal.Claims, "SignaCoreHostedLogin", nameType: "name", roleType: "role"));
         var ticket = new SignaCoreSessionTicket(
             principal, now, expiresAt, exchange.AccessToken, exchange.IdToken);
-        var key = await ticketStore.StoreAsync(ticket, cancellationToken);
+        // A fresh sign-in replaces the session this browser held before, atomically: the store
+        // takes the new ticket and revokes the old key in one call, so a re-login ends the
+        // previous session the moment the new one exists. No previous cookie degrades to a plain
+        // store; a full store refuses the whole replacement and keeps the old session.
+        context.Request.Cookies.TryGetValue(current.SessionCookieName, out var previousSessionKey);
+        var key = await ticketStore.ReplaceAsync(
+            string.IsNullOrEmpty(previousSessionKey) ? null : previousSessionKey,
+            ticket,
+            cancellationToken);
         if (key is null)
         {
             await RejectAsync(context, SignaCoreSignInReason.SessionStoreFull, cancellationToken);
@@ -335,6 +354,16 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         return SignaCoreSessionStatus.AuthenticatedSession(displayName, decision);
     }
 
+    /// <summary>
+    /// Whether any required protocol option is blank — exactly the validator's missing-vs-illegal
+    /// split: a blank member degrades in optional mode, a configured illegal one fails startup.
+    /// </summary>
+    private static bool IsUnconfigured(SignaCoreHostedLoginOptions current) =>
+        string.IsNullOrWhiteSpace(current.Authority)
+        || string.IsNullOrWhiteSpace(current.ClientId)
+        || string.IsNullOrWhiteSpace(current.ClientSecret)
+        || string.IsNullOrWhiteSpace(current.RedirectUri);
+
     private async Task RejectAsync(
         HttpContext context,
         SignaCoreSignInReason reason,
@@ -369,6 +398,8 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         "invalid_return_url" => SignaCoreSignInReason.InvalidReturnUrl,
         "invalid_response" => SignaCoreSignInReason.InvalidResponse,
         "access_denied" => SignaCoreSignInReason.AccessDenied,
+        "user_canceled" => SignaCoreSignInReason.UserCanceled,
+        "pre_sign_in_denied" => SignaCoreSignInReason.PreSignInDenied,
         "state_mismatch" => SignaCoreSignInReason.StateMismatch,
         "issuer_mismatch" => SignaCoreSignInReason.IssuerMismatch,
         "token_exchange_failed" => SignaCoreSignInReason.TokenExchangeFailed,

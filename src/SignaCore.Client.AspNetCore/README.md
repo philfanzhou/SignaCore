@@ -7,7 +7,10 @@ browser holds only one opaque cookie.
 
 The package owns the protocol and security duties of the client side (see
 [ADR 0007](https://github.com/philfanzhou/SignaCore/blob/main/docs/adr/0007-official-hosted-login-client-package.md)):
-Discovery-driven endpoint resolution with `issuer` verification, an authorization request that
+Discovery-driven endpoint resolution with `issuer` verification — every published
+authorization, token, and JWKS endpoint must sit on the verified issuer's own origin
+(scheme, host, port), so a tampered Discovery document can never move token or key traffic
+to a second host — an authorization request that
 carries exactly `response_type=code`, `state`, `nonce`, and an S256 PKCE challenge, a hardened
 single-valued callback that validates `state` and `iss` before anything else, a one-time,
 never-retried code redemption with HTTP Basic client authentication, strict ID-token validation
@@ -80,6 +83,18 @@ Once the session reaches the access token's expiry, the endpoint answers the fix
 `requiresReauthentication` status; the package never refreshes silently — the next sign-in goes
 through the hosted page again.
 
+### Optional sign-in mode
+
+Some deployments must run before SignaCore is wired up. `options.AllowUnconfiguredStartup`
+(default `false`) lets the host start with Authority, ClientId, ClientSecret, or RedirectUri
+left blank: the sign-in surface then degrades — `GET <prefix>/start` answers one fixed `503
+{"outcome":"sign_in_unavailable"}` (presentable through the response writer's
+`WriteSignInUnavailableAsync`), the session endpoint keeps its anonymous expired answer, logout
+is local-only, and CSRF tokens are issued as usual. A protected route's challenge redirects to
+start and surfaces the same 503. A **configured but illegal** value still fails startup in this
+mode — half-configuration is an error, never a silent downgrade — and the mode does not
+hot-reload: configuring the values takes effect after a restart.
+
 The options are validated at startup: the Authority must be absolute HTTPS without a path (an
 explicit loopback HTTP origin `http://127.0.0.1` / `http://[::1]` is accepted only in the
 Development and Testing environments), and the RedirectUri must be an absolute HTTPS URI whose
@@ -100,7 +115,26 @@ option — never the value.
 2. **Route prefix** — where the package's endpoints are mounted: `app.MapSignaCoreHostedLogin("/auth")`.
 
 3. **Response format** — replace the default failure page and session-status body by implementing
-   `ISignaCoreHostedLoginResponseWriter` and assigning `options.ResponseWriter`.
+   `ISignaCoreHostedLoginResponseWriter` and assigning `options.ResponseWriter`. The writer also
+   owns the three logout presentations — a completed prepared logout
+   (`WriteLogoutPreparedAsync`, default: `302` to the package-verified logout URI), the fixed
+   local-only outcome (`WriteLogoutLocalOnlyAsync`, default: `200 {"outcome":"local_only"}`),
+   and a failed logout return (`WriteLogoutReturnFailedAsync`, default: a fixed `400` HTML
+   page). The protocol outcomes are the package's; only the envelopes are yours. An SPA calling
+   `POST <prefix>/logout` with `fetch` answers `200` JSON carrying the URL instead of following
+   the redirect:
+
+   ```csharp
+   options.ResponseWriter = new SpaLogoutWriter();
+   // ... implements WriteLogoutPreparedAsync as: 200 {"logoutUrl": <logoutUri>} and the front
+   //     end navigates with window.location.assign; WriteLogoutLocalOnlyAsync as an empty 200;
+   //     WriteLogoutReturnFailedAsync as a 302 to /#/login?reason=logout_failed.
+   ```
+
+   The prepared `logoutUri` is the package's verified choice — present it, never substitute
+   another destination. On custom paths you own `Cache-Control` (keep responses `no-store`) and
+   you must not leak correlation ids or tokens; a custom writer's failure propagates after the
+   local revocation and is never retried.
 
 4. **Session and Bearer scheme selection** — per request, pick which authentication scheme serves
    it: the package's session scheme (the default) or a host-owned scheme such as your Bearer
@@ -142,7 +176,11 @@ PerApplication code-flow tokens; it is not a general Bearer validator or a third
 
 Only timely `Allowed` passes the final cancellation and actual-expiry checkpoints and writes a
 new ticket and cookie. Denied, an unknown result, consumer exceptions, non-request cancellation,
-or asynchronous timeout produce `access_denied`; existing tickets and cookies are unchanged.
+or asynchronous timeout produce `pre_sign_in_denied`; existing tickets and cookies are unchanged.
+The bounded failure reasons are distinct values: a user rejecting the authorization at the
+hosted page answers `user_canceled`, while the pre-sign-in gate answers `pre_sign_in_denied`
+(its timeout and failure shapes are never distinguished to the browser). `access_denied` is a
+legacy value the current package never produces but still renders for old links.
 Request cancellation propagates without a failure redirect or new session. Timeout cancels the
 decision token; late completion cannot sign in. The ticket expires at the earlier of the verified
 access-token expiry and `expires_in` measured at completed redemption, so decision wait cannot
@@ -172,6 +210,14 @@ builder.Services.AddSingleton<ITicketStore>(new RedisTicketStore(/* ... */));
 
 The session cookie is HttpOnly, Secure, and SameSite=Lax, and the session never outlives the
 access token's expiry.
+
+When a browser signs in again, the new ticket replaces the session it held before in one atomic
+swap (`ITicketStore.ReplaceAsync`): the previous session key is revoked the moment the new one is
+stored, and a full store refuses the whole replacement rather than sacrificing the previous
+session. A null, empty, unknown, or expired old key degrades to a plain store. Custom stores get
+the method as a source- and binary-compatible default (store-then-remove); multi-instance stores
+that need the atomic guarantee — or want to write their sign-in audit row in the same transaction
+as the swap — must override it.
 
 ## The session CSRF boundary
 
@@ -214,6 +260,13 @@ other session write:
 4. When SignaCore finishes, it returns the browser to `<prefix>/logout/return?state=...`. The
    package accepts the state only once, only with the browser's correlation cookie, and only
    within five minutes, then redirects to `options.PostLogoutReturnPath` (default `/`).
+
+The correlation cookie is named `<SessionCookieName>-logout-return`. When your session cookie
+carries the `__Host-` prefix, that naive derivation would produce an illegal name (`__Host-`
+demands Path=/ while this cookie is scoped to the logout endpoints), so the package derives
+`__Secure-<rest>-logout-return` instead — the `__Secure-` prefix keeps a browser-enforced Secure
+guarantee and works with the package's path scope. Every other session name keeps the historical
+derivation byte for byte; cookies under a previous package version's name simply age out.
 
 If the upstream preparation fails, times out, is cancelled, or answers an unverifiable URI, the
 endpoint answers the fixed local-only result — `200 {"outcome":"local_only"}` — and the browser

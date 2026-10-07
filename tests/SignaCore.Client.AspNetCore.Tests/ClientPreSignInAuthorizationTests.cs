@@ -73,7 +73,7 @@ public sealed class ClientPreSignInAuthorizationTests
             _ => throw new OperationCanceledException("private-decision-detail")
         };
         using var response = await harness.CallbackAsync(await harness.BeginAsync());
-        AssertFailure(response, "access_denied");
+        AssertFailure(response, "pre_sign_in_denied");
         Assert.Equal(existing, harness.Browser.Cookies.GetCookieHeader(harness.Browser.ConsumerBase));
         Assert.Same(original, harness.Store.LastTicket);
         Assert.Equal(1, harness.Store.Writes);
@@ -95,7 +95,7 @@ public sealed class ClientPreSignInAuthorizationTests
         await harness.Clock.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         harness.Clock.Advance(TimeSpan.FromSeconds(11));
         using var response = await callback;
-        AssertFailure(response, "access_denied");
+        AssertFailure(response, "pre_sign_in_denied");
         Assert.True(decisionToken.IsCancellationRequested);
         if (lateFault) late.SetException(new InvalidOperationException("private-late-detail"));
         else late.SetResult(SignaCoreAuthorizationDecisionResult.Allowed);
@@ -226,7 +226,7 @@ public sealed class ClientPreSignInAuthorizationTests
         Assert.Equal("/dashboard", second.Headers.Location?.ToString());
         release.SetResult();
         using var denied = await first;
-        AssertFailure(denied, "access_denied");
+        AssertFailure(denied, "pre_sign_in_denied");
         Assert.Equal(2, harness.Authority.RedeemedCodes.Count);
         Assert.Equal(2, harness.Decision.Calls);
         Assert.Equal(1, harness.Store.Writes);
