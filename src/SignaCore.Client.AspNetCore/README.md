@@ -51,6 +51,15 @@ app.UseAuthorization();
 // /auth/logout, /auth/logout/return, and /auth/signin-failed.
 app.MapSignaCoreHostedLogin("/auth");
 
+// The mapping returns a convention builder over all seven endpoints, so a consumer's
+// convention - here a rate-limiting partition - applies to the whole surface at once:
+//
+//     app.UseRateLimiter();
+//     app.MapSignaCoreHostedLogin("/auth").RequireRateLimiting("admin-login");
+//
+// Ignoring the return value maps the endpoints exactly as before. The granularity is the
+// group; map the prefix once per application.
+
 // The consumer's own routes authenticate against the package's session scheme.
 app.MapGet("/orders", () => "Signed-in content")
     .RequireAuthorization(policy =>
