@@ -27,7 +27,10 @@ internal sealed class SignaCoreHostedLoginOptionsValidator(IHostEnvironment envi
 
         if (string.IsNullOrWhiteSpace(options.Authority))
         {
-            failures.Add($"{OptionsName}.Authority is required.");
+            if (!options.AllowUnconfiguredStartup)
+            {
+                failures.Add($"{OptionsName}.Authority is required.");
+            }
         }
         else if (!SignaCoreAuthorityUriRules.IsAcceptableAuthority(options.Authority, allowInsecureLoopback))
         {
@@ -35,19 +38,22 @@ internal sealed class SignaCoreHostedLoginOptionsValidator(IHostEnvironment envi
                 $"{OptionsName}.Authority must be an absolute HTTPS URI without a path, query, fragment, or user info. An explicit loopback HTTP origin (127.0.0.1 or [::1]) is accepted only in the Development and Testing environments.");
         }
 
-        if (string.IsNullOrWhiteSpace(options.ClientId))
+        if (string.IsNullOrWhiteSpace(options.ClientId) && !options.AllowUnconfiguredStartup)
         {
             failures.Add($"{OptionsName}.ClientId is required.");
         }
 
-        if (string.IsNullOrWhiteSpace(options.ClientSecret))
+        if (string.IsNullOrWhiteSpace(options.ClientSecret) && !options.AllowUnconfiguredStartup)
         {
             failures.Add($"{OptionsName}.ClientSecret is required.");
         }
 
         if (string.IsNullOrWhiteSpace(options.RedirectUri))
         {
-            failures.Add($"{OptionsName}.RedirectUri is required.");
+            if (!options.AllowUnconfiguredStartup)
+            {
+                failures.Add($"{OptionsName}.RedirectUri is required.");
+            }
         }
         else if (!SignaCoreAuthorityUriRules.IsAcceptableRedirectUri(options.RedirectUri, allowInsecureLoopback))
         {

@@ -71,6 +71,18 @@ Once the session reaches the access token's expiry, the endpoint answers the fix
 `requiresReauthentication` status; the package never refreshes silently — the next sign-in goes
 through the hosted page again.
 
+### Optional sign-in mode
+
+Some deployments must run before SignaCore is wired up. `options.AllowUnconfiguredStartup`
+(default `false`) lets the host start with Authority, ClientId, ClientSecret, or RedirectUri
+left blank: the sign-in surface then degrades — `GET <prefix>/start` answers one fixed `503
+{"outcome":"sign_in_unavailable"}` (presentable through the response writer's
+`WriteSignInUnavailableAsync`), the session endpoint keeps its anonymous expired answer, logout
+is local-only, and CSRF tokens are issued as usual. A protected route's challenge redirects to
+start and surfaces the same 503. A **configured but illegal** value still fails startup in this
+mode — half-configuration is an error, never a silent downgrade — and the mode does not
+hot-reload: configuring the values takes effect after a restart.
+
 The options are validated at startup: the Authority must be absolute HTTPS without a path (an
 explicit loopback HTTP origin `http://127.0.0.1` / `http://[::1]` is accepted only in the
 Development and Testing environments), and the RedirectUri must be an absolute HTTPS URI whose

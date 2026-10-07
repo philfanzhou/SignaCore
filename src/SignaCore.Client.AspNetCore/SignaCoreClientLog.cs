@@ -23,6 +23,7 @@ internal static class SignaCoreClientLog
     internal static class Outcome
     {
         internal const string Started = "started";
+        internal const string Unavailable = "unavailable";
         internal const string Succeeded = "succeeded";
         internal const string Rejected = "rejected";
         internal const string Authenticated = "authenticated";
@@ -42,6 +43,14 @@ internal static class SignaCoreClientLog
         logger.LogInformation(
             "SignaCore hosted login sign-in started. Operation: {Operation} Outcome: {Outcome}",
             Operation.SignInStarted, Outcome.Started);
+    }
+
+    internal static void SignInUnavailable(ILogger logger, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        logger.LogInformation(
+            "SignaCore hosted login sign-in unavailable: the host is running unconfigured. Operation: {Operation} Outcome: {Outcome}",
+            Operation.SignInStarted, Outcome.Unavailable);
     }
 
     internal static void SignInSucceeded(ILogger logger, CancellationToken cancellationToken)
