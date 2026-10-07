@@ -125,6 +125,18 @@ public sealed class SignaCoreHostedLoginOptions
     public string? Prefix { get; internal set; }
 
     /// <summary>
+    /// Allows the host to start with the protocol options (Authority, ClientId, ClientSecret,
+    /// RedirectUri) left blank: optional sign-in mode. Default false keeps the historical
+    /// behavior — a missing required option fails startup. When true, a blank required option
+    /// starts the host and the sign-in surface degrades to a fixed 503 (the session endpoint
+    /// answers the anonymous expired status, logout is local-only, and CSRF tokens are issued
+    /// as usual); a configured but illegal value still fails startup — half-configuration is an
+    /// error, never a silent downgrade. The mode does not hot-reload: configuring the values
+    /// requires a restart, consistent with the protocol-settings consistency requirement.
+    /// </summary>
+    public bool AllowUnconfiguredStartup { get; set; }
+
+    /// <summary>
     /// Whether the session-status endpoint requires an authenticated user (endpoint
     /// authorization). Default false keeps the endpoint anonymous — anyone may learn whether the
     /// browser holds a live session, exactly as before. When true, an unauthenticated request is

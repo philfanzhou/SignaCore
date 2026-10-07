@@ -94,6 +94,31 @@ internal static class SignaCoreAuthorityUriRules
                 StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Whether two absolute URI strings share one origin triple — scheme, host, and port —
+    /// with no path comparison. This is the trust boundary for the authority's Discovery
+    /// endpoints: SignaCore publishes its endpoints under the issuer's root, so differing paths
+    /// are a legal document shape, while any differing origin component would move token or key
+    /// traffic to a second host the consumer never validated.
+    /// </summary>
+    internal static bool SameOriginTriple(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+        {
+            return false;
+        }
+
+        if (!Uri.TryCreate(left.TrimEnd('/'), UriKind.Absolute, out var leftUri)
+            || !Uri.TryCreate(right.TrimEnd('/'), UriKind.Absolute, out var rightUri))
+        {
+            return false;
+        }
+
+        return string.Equals(leftUri.Scheme, rightUri.Scheme, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(leftUri.Host, rightUri.Host, StringComparison.OrdinalIgnoreCase)
+            && leftUri.Port == rightUri.Port;
+    }
+
     private static bool IsExplicitLoopbackHttp(Uri uri) =>
         uri.Scheme == Uri.UriSchemeHttp
         && (uri.Host is "127.0.0.1" or "::1");
