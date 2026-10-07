@@ -55,7 +55,19 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         var startResponse = session.BffResponses.Single(response =>
             response.Method == HttpMethod.Get
             && response.Uri.AbsolutePath == "/bff/start");
-        Assert.Empty(startResponse.SetCookies);
+        // The sign-in start sets exactly one browser cookie: the one-time, per-state login
+        // binding that binds the callback to this browser. It is opaque (no token material)
+        // and the callback finishes it.
+        var startCookie = Assert.Single(startResponse.SetCookies);
+        Assert.StartsWith(SessionCookieName + "-login-binding.", startCookie, StringComparison.Ordinal);
+        Assert.DoesNotContain("eyJ", startCookie, StringComparison.Ordinal);
+        var callbackResponse = session.BffResponses.Single(response =>
+            response.Method == HttpMethod.Get
+            && response.Uri.AbsolutePath == "/bff/callback");
+        Assert.Contains(
+            callbackResponse.SetCookies,
+            cookie => cookie.StartsWith(SessionCookieName + "-login-binding.", StringComparison.Ordinal)
+                && cookie.Contains("expires=Thu, 01 Jan 1970", StringComparison.Ordinal));
 
         // The tokens live in the server-side store instead: exactly one ticket, and the cookie
         // carries none of the issued material.

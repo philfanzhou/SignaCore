@@ -201,7 +201,8 @@ public sealed class ReferenceBffMultiInstanceTests
     {
         // The two local hops of the entry: /bff/login redirects to the package's start endpoint,
         // whose answer is the Discovery-resolved authorization redirect. The handshake's pending
-        // state lives server-side, so the start endpoint sets no protocol cookie at all.
+        // state lives server-side; the only protocol cookie the start sets is the one-time
+        // per-state browser binding that the callback must present and finish.
         using var login = await browser.Bff.GetAsync("/bff/login", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Found, login.StatusCode);
         Assert.True(login.Headers.Location!.ToString().StartsWith("/bff/start", StringComparison.Ordinal), "The login entry must route into the package's start endpoint.");
@@ -305,7 +306,8 @@ public sealed class ReferenceBffMultiInstanceTests
                     {
                         var name = cookie[..cookie.IndexOf('=')];
                         Assert.True((allowProtocolCookies && (name == "signacore-bff-session" || name.StartsWith(".AspNetCore.OpenIdConnect.Nonce.", StringComparison.Ordinal)
-                            || name.StartsWith("signacore-bff-correlation", StringComparison.Ordinal)))
+                            || name.StartsWith("signacore-bff-correlation", StringComparison.Ordinal)
+                            || name.StartsWith("signacore-bff-session-login-binding.", StringComparison.Ordinal)))
                             || (allowFormCsrf && name.StartsWith(".AspNetCore.Antiforgery.", StringComparison.Ordinal)), "Unexpected protocol cookie name.");
                         var end = cookie.IndexOf(';');
                         var value = cookie[(cookie.IndexOf('=') + 1)..(end < 0 ? cookie.Length : end)];

@@ -176,11 +176,13 @@ public sealed class ReferenceBffValidationTests
     {
         // No code was ever presented: the handshake failed before the exchange.
         Assert.Empty(authority.RedeemedCodes);
-        // And no BFF session cookie was issued.
+        // And no BFF session cookie was issued. The one-time login-binding cookie the start
+        // sets (its name extends the session cookie name) is not a session: the exact
+        // name=value form is matched.
         Assert.DoesNotContain(
             browser.BffRequests,
             request => request.Request.Headers.TryGetValues("Cookie", out var cookies)
-                && cookies.Any(cookie => cookie.Contains("signacore-bff-session", StringComparison.Ordinal)));
+                && cookies.Any(cookie => cookie.Contains("signacore-bff-session=", StringComparison.Ordinal)));
     }
 
     private static string ExtractSubject(string html)
