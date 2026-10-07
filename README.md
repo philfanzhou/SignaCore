@@ -14,7 +14,7 @@ SignaCore is a .NET 10 identity and authentication service. It centralizes accou
 - PostgreSQL and SQLite through EF Core provider-specific migrations
 - Database-backed global configuration with web-based first-run setup
 - Optional Consul service discovery
-- OpenTelemetry, Prometheus, sanitized structured logging through the ServiceMantle Serilog pipeline, and optional authenticated HTTPS Loki export
+- OpenTelemetry, Prometheus, sanitized structured logging through the ServiceMantle Serilog pipeline, and optional authenticated Loki export (HTTPS by default, with explicit opt-ins for plain HTTP and no authentication)
 
 ## Repository layout
 

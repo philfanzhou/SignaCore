@@ -97,11 +97,7 @@ internal static class InstallationTestSupport
         // The shared aggregate is seeded through the real shared update service — the same write
         // path first-run setup and the legacy import use — with a clean change tracker inside its
         // own transaction, so a test host never depends on startup migrating legacy rows.
-        var changes = new Dictionary<string, string?>(StringComparer.Ordinal);
-        foreach (var (legacyKey, value) in values)
-        {
-            changes[SharedSettingKeys.NormalizedByLegacyKey[legacyKey]] = value;
-        }
+        var changes = SharedSettingComposition.BuildSeedChanges(values);
 
         var masterKeyProvider = new BootstrapMasterKeyProvider(rootSecret);
         var updateService = new ServiceSettingUpdateService(

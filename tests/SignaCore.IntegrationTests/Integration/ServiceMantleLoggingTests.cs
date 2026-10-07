@@ -217,6 +217,79 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         Assert.DoesNotContain(LokiWarning, capture.Output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ExplicitInsecureHttpWithoutAuthentication_DeliversRealHttpWithNoAuthorizationHeader()
+    {
+        // The normal production path — a real Production environment, not the hosted-login Testing
+        // policy: a plain-HTTP loopback endpoint behind the two explicit opt-ins, with no
+        // credential stored, no resolver registered, and no test-only switch.
+        await using var loki = await FakeLoki.StartAsync();
+        using var capture = new ConsoleCapture();
+        var decided = new List<(bool Enabled, Uri? Endpoint, string? ResolverName)>();
+        var factory = await StartNormalHostAsync(
+            new Dictionary<string, string>
+            {
+                [SystemSettingKeys.LokiUri] = loki.HttpAddress,
+                [SystemSettingKeys.LokiAllowInsecureHttp] = "true",
+                [SystemSettingKeys.LokiAllowNoAuthentication] = "true"
+            },
+            services => decided.Add((RegisteredLokiOptions(services).Enabled,
+                RegisteredLokiOptions(services).Endpoint,
+                RegisteredLokiOptions(services).AuthorizationHeaderResolverName)),
+            environment: Environments.Production);
+        using var client = factory.CreateClient();
+
+        using var ready = await client.GetAsync("/health/ready", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
+
+        var decision = Assert.Single(decided);
+        Assert.True(decision.Enabled);
+        Assert.Equal(new Uri(loki.HttpAddress), decision.Endpoint);
+        Assert.Null(decision.ResolverName);
+        Assert.Empty(factory.Services.GetServices<IRemoteLogAuthorizationResolver>());
+        Assert.DoesNotContain(LokiWarning, capture.Output, StringComparison.Ordinal);
+
+        var canary = "canary-" + Guid.NewGuid().ToString("N");
+        var marker = "probe-" + Guid.NewGuid().ToString("N");
+        WriteProbe(factory.Services, marker, canary);
+
+        var batch = await loki.WaitForBodyContainingAsync(marker);
+        // No authentication: the request carries no Authorization header at all.
+        Assert.Equal(string.Empty, batch.Authorization);
+        Assert.Contains(marker, batch.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain(canary, batch.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain(canary, capture.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UnreachableExplicitLokiEndpoint_NeverBlocksTheIdentityService()
+    {
+        // The explicit opt-ins never make delivery a readiness concern: an endpoint nothing
+        // listens on keeps the identity service ready, the probe write never throws, and the
+        // Console keeps receiving the sanitized line.
+        using var capture = new ConsoleCapture();
+        var factory = await StartNormalHostAsync(new Dictionary<string, string>
+        {
+            [SystemSettingKeys.LokiUri] = "http://127.0.0.1:9/loki/api/v1/push",
+            [SystemSettingKeys.LokiAllowInsecureHttp] = "true",
+            [SystemSettingKeys.LokiAllowNoAuthentication] = "true"
+        });
+        using var client = factory.CreateClient();
+
+        using var ready = await client.GetAsync("/health/ready", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
+
+        var canary = "canary-" + Guid.NewGuid().ToString("N");
+        var marker = "probe-" + Guid.NewGuid().ToString("N");
+        WriteProbe(factory.Services, marker, canary);
+        // Leave the doomed batch a delivery-attempt window; neither readiness nor the Console
+        // depends on it.
+        await Task.Delay(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken);
+        Assert.Contains(marker, capture.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(canary, capture.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(LokiWarning, capture.Output, StringComparison.Ordinal);
+    }
+
     // ---- The configuration-state table ----
 
     [Fact]
@@ -237,24 +310,39 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData("http://loki-legacy.example.com:3100", "Basic bGVnYWN5OnZhbHVl", "endpoint_not_https")]
-    [InlineData("http://loki-legacy.example.com:3100", "", "endpoint_not_https")]
-    [InlineData("https://loki-legacy.example.com", "", "authorization_missing")]
-    [InlineData("", "Bearer fixture", "endpoint_missing")]
-    [InlineData("https://loki-legacy.example.com", "Bearer a\nb", "authorization_invalid")]
+    [InlineData("http://loki-legacy.example.com:3100", "Basic bGVnYWN5OnZhbHVl", false, false, "endpoint_invalid")]
+    [InlineData("http://loki-legacy.example.com:3100", "", false, false, "endpoint_invalid")]
+    [InlineData("http://loki-legacy.example.com:3100", "Basic bGVnYWN5OnZhbHVl", false, true, "endpoint_invalid")]
+    [InlineData("https://loki-legacy.example.com", "", false, false, "authorization_missing")]
+    [InlineData("", "Bearer fixture", false, false, "endpoint_missing")]
+    [InlineData("https://loki-legacy.example.com", "Bearer a\nb", false, false, "authorization_invalid")]
+    [InlineData("https://loki-legacy.example.com", "Bearer fixture", false, true, "authorization_invalid")]
     public async Task StoredValuesLokiCannotUse_StartWithLokiOffAndAFixedWarning(
         string uri,
         string authorization,
+        bool allowInsecureHttp,
+        bool allowNoAuthentication,
         string category)
     {
         using var capture = new ConsoleCapture();
         bool? enabled = null;
+        var overrides = new Dictionary<string, string>
+        {
+            [SystemSettingKeys.LokiUri] = uri,
+            [SystemSettingKeys.LokiAuthorization] = authorization
+        };
+        if (allowInsecureHttp)
+        {
+            overrides[SystemSettingKeys.LokiAllowInsecureHttp] = "true";
+        }
+
+        if (allowNoAuthentication)
+        {
+            overrides[SystemSettingKeys.LokiAllowNoAuthentication] = "true";
+        }
+
         var factory = await StartNormalHostAsync(
-            new Dictionary<string, string>
-            {
-                [SystemSettingKeys.LokiUri] = uri,
-                [SystemSettingKeys.LokiAuthorization] = authorization
-            },
+            overrides,
             services => enabled = RegisteredLokiOptions(services).Enabled);
         using var client = factory.CreateClient();
 
@@ -306,7 +394,15 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
             [("loki.uri", "https://loki.example.com/?tenant=a"), ("loki.authorization", authorization)],
             [("loki.uri", "https://loki.example.com/#fragment"), ("loki.authorization", authorization)],
             [("loki.uri", "https://loki.example.com")],
-            [("loki.authorization", authorization)]
+            [("loki.authorization", authorization)],
+            // The no-authentication opt-in cannot coexist with a stored credential in the same batch.
+            [("loki.uri", "https://loki.example.com"), ("loki.authorization", authorization),
+             ("loki.allow_no_authentication", "true")],
+            // The HTTP opt-in alone does not legitimize a plain-HTTP endpoint without the switch.
+            [("loki.uri", "http://loki.example.com:3100"), ("loki.authorization", authorization),
+             ("loki.allow_no_authentication", "true")],
+            // The two opt-ins are Boolean keys: anything else is a typed rejection.
+            [("loki.allow_insecure_http", "bad-boolean")]
         ];
         foreach (var changes in rejected)
         {
@@ -642,14 +738,21 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     {
         private readonly TextWriter _original = Console.Out;
         private readonly StringWriter _buffer = new();
+        // The same synchronized wrapper Console.Out uses: reading the buffer takes the writer's
+        // own lock, so a snapshot never races a concurrent pipeline write and corrupt the builder.
+        private readonly TextWriter _captured;
 
-        public ConsoleCapture() => Console.SetOut(TextWriter.Synchronized(_buffer));
+        public ConsoleCapture()
+        {
+            _captured = TextWriter.Synchronized(_buffer);
+            Console.SetOut(_captured);
+        }
 
         public string Output
         {
             get
             {
-                lock (_buffer)
+                lock (_captured)
                 {
                     return _buffer.ToString();
                 }

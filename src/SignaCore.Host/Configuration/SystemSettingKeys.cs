@@ -56,6 +56,8 @@ internal static class SystemSettingKeys
 
     public const string LokiUri = "Loki:Uri";
     public const string LokiAuthorization = "Loki:Authorization";
+    public const string LokiAllowInsecureHttp = "Loki:AllowInsecureHttp";
+    public const string LokiAllowNoAuthentication = "Loki:AllowNoAuthentication";
     public const string OpenTelemetryOtlpEndpoint = "OpenTelemetry:OtlpEndpoint";
 
     public const string ConsulHost = "Consul:Host";

@@ -86,19 +86,32 @@ internal sealed class ManagementSettingRecovery : IServiceSettingUpdateTransacti
     private sealed class RecoveryValidator(bool isDevelopment, IEnumerable<string> changedKeys)
         : IServiceSettingCompositeValidator
     {
+        // Touching any Loki key — including the two explicit opt-ins — selects the whole group for
+        // strict evaluation; the legacy waiver never applies to an explicitly changed group.
+        private static readonly string[] LokiGroupKeys =
+        [
+            GrafanaLokiSettingDefinitions.Endpoint,
+            GrafanaLokiSettingDefinitions.Authorization,
+            GrafanaLokiSettingDefinitions.AllowInsecureHttp,
+            GrafanaLokiSettingDefinitions.AllowNoAuthentication
+        ];
+
         private readonly HashSet<string> touched = new(changedKeys, StringComparer.OrdinalIgnoreCase);
         private readonly SignaCoreSettingCompositeValidator core = new(isDevelopment);
         private string? uri, authorization, endpoint;
+        private bool allowInsecureHttp, allowNoAuthentication;
         private bool preserveLoki, preserveOtlp;
 
-        internal void SetBaseline(ServiceSettingSnapshot baseline)
+        internal void SetBaseline(ServiceSettingSnapshot snapshot)
         {
-            uri = Read(baseline.Values, GrafanaLokiSettingDefinitions.Endpoint);
-            authorization = Read(baseline.Values, GrafanaLokiSettingDefinitions.Authorization);
-            endpoint = Read(baseline.Values, OtlpSettingDefinitions.Endpoint);
-            preserveLoki = !touched.Overlaps(
-                [GrafanaLokiSettingDefinitions.Endpoint, GrafanaLokiSettingDefinitions.Authorization])
-                && GrafanaLokiSettingState.Classify(uri, authorization).IsUnusable;
+            uri = Read(snapshot.Values, GrafanaLokiSettingDefinitions.Endpoint);
+            authorization = Read(snapshot.Values, GrafanaLokiSettingDefinitions.Authorization);
+            allowInsecureHttp = ReadBoolean(snapshot.Values, GrafanaLokiSettingDefinitions.AllowInsecureHttp);
+            allowNoAuthentication = ReadBoolean(snapshot.Values, GrafanaLokiSettingDefinitions.AllowNoAuthentication);
+            endpoint = Read(snapshot.Values, OtlpSettingDefinitions.Endpoint);
+            preserveLoki = !touched.Overlaps(LokiGroupKeys)
+                && GrafanaLokiSettingState.Classify(uri, authorization, allowInsecureHttp, allowNoAuthentication)
+                    .IsUnusable;
             preserveOtlp = !touched.Contains(OtlpSettingDefinitions.Endpoint)
                 && OtlpSettingState.Classify(endpoint).IsUnusable;
         }
@@ -109,14 +122,25 @@ internal sealed class ManagementSettingRecovery : IServiceSettingUpdateTransacti
             bool Same(string key, string? original) => string.Equals(
                 context.TryGetValue(key, out var value) && value!.HasValue ? value.GetString() : null,
                 original, StringComparison.Ordinal);
+            // A Boolean key missing from the complete candidate keeps the registered default
+            // (false), which is exactly what an older-release baseline stored.
+            bool SameBoolean(string key, bool original) =>
+                context.TryGetValue(key, out var value) && value!.HasValue
+                    ? value.GetBoolean() == original
+                    : !original;
             errors.AddRange(SignaCoreSettingCompositeValidator.ValidateOptionalSettings(context,
                 preserveLoki && Same(GrafanaLokiSettingDefinitions.Endpoint, uri)
-                    && Same(GrafanaLokiSettingDefinitions.Authorization, authorization),
+                    && Same(GrafanaLokiSettingDefinitions.Authorization, authorization)
+                    && SameBoolean(GrafanaLokiSettingDefinitions.AllowInsecureHttp, allowInsecureHttp)
+                    && SameBoolean(GrafanaLokiSettingDefinitions.AllowNoAuthentication, allowNoAuthentication),
                 preserveOtlp && Same(OtlpSettingDefinitions.Endpoint, endpoint)));
             return errors;
         }
 
         private static string? Read(IReadOnlyDictionary<string, ServiceSettingValue> values, string key) =>
             values.TryGetValue(key, out var value) && value.HasValue ? value.GetString() : null;
+
+        private static bool ReadBoolean(IReadOnlyDictionary<string, ServiceSettingValue> values, string key) =>
+            values.TryGetValue(key, out var value) && value.HasValue && value.GetBoolean();
     }
 }

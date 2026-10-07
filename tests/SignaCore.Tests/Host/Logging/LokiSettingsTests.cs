@@ -66,6 +66,44 @@ public sealed class LokiSettingsTests
         Assert.Equal(GrafanaLokiSettingStatus.AuthorizationInvalid, state.Status);
     }
 
+    [Theory]
+    [InlineData("https://loki.example.com", "Basic bG9raTpjYW5hcnk=", false, false)]
+    [InlineData("http://loki.example.com:3100", "Basic bG9raTpjYW5hcnk=", true, false)]
+    [InlineData("https://loki.example.com", null, false, true)]
+    [InlineData("http://loki.example.com:3100", null, true, true)]
+    public void Classify_ExplicitOptIns_CoverAllFourTransportCombinations(
+        string uri, string? authorization, bool allowInsecureHttp, bool allowNoAuthentication)
+    {
+        var state = GrafanaLokiSettingState.Classify(uri, authorization, allowInsecureHttp, allowNoAuthentication);
+
+        Assert.Equal(GrafanaLokiSettingStatus.Enabled, state.Status);
+        Assert.Equal(allowInsecureHttp, state.AllowInsecureHttp);
+        // The no-authentication mode carries no credential; the authenticated mode keeps it.
+        Assert.Equal(allowNoAuthentication ? null : authorization, state.Authorization);
+    }
+
+    [Theory]
+    [InlineData("http://loki.example.com:3100", "Basic bG9raTpjYW5hcnk=", true, false)]
+    [InlineData("https://loki.example.com", null, false, true)]
+    [InlineData("http://loki.example.com:3100", null, true, true)]
+    public void UpdateValidation_ExplicitOptIns_AcceptTheMatchingCombinations(
+        string uri, string? authorization, bool allowInsecureHttp, bool allowNoAuthentication)
+    {
+        Assert.Empty(Validate(uri, authorization, allowInsecureHttp, allowNoAuthentication, true));
+    }
+
+    [Fact]
+    public void UpdateValidation_NoAuthenticationWithAStoredCredential_IsRejected()
+    {
+        var errors = Validate(
+            Endpoint, "Basic bG9raTpjYW5hcnk=", allowInsecureHttp: false, allowNoAuthentication: true,
+            validateManagementUpdateRules: true);
+
+        var error = Assert.Single(errors);
+        Assert.Equal("loki.authorization", error.Key);
+        Assert.Equal(SignaCoreSettingCompositeValidator.RuntimeInvalidCode, error.ErrorCode);
+    }
+
     [Fact]
     public void State_NeverRendersTheEndpointOrTheCredential()
     {
@@ -170,11 +208,33 @@ public sealed class LokiSettingsTests
         string? uri,
         string? authorization,
         bool validateManagementUpdateRules) =>
-        new ServiceSettingDefinitionRegistry(
+        Validate(uri, authorization, allowInsecureHttp: false, allowNoAuthentication: false,
+            validateManagementUpdateRules);
+
+    private static IReadOnlyList<ServiceSettingValidationError> Validate(
+        string? uri,
+        string? authorization,
+        bool allowInsecureHttp,
+        bool allowNoAuthentication,
+        bool validateManagementUpdateRules)
+    {
+        var candidate = Candidate(uri, authorization);
+        if (allowInsecureHttp)
+        {
+            candidate["loki.allow_insecure_http"] = "true";
+        }
+
+        if (allowNoAuthentication)
+        {
+            candidate["loki.allow_no_authentication"] = "true";
+        }
+
+        return new ServiceSettingDefinitionRegistry(
                 SharedSettingComposition.CreateDefinitionProviders(),
                 [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules)])
-            .Validate(Candidate(uri, authorization))
+            .Validate(candidate)
             .Errors;
+    }
 
     private static Dictionary<string, string?> Candidate(string? uri, string? authorization)
     {
