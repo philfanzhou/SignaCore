@@ -155,7 +155,11 @@ PerApplication code-flow tokens; it is not a general Bearer validator or a third
 
 Only timely `Allowed` passes the final cancellation and actual-expiry checkpoints and writes a
 new ticket and cookie. Denied, an unknown result, consumer exceptions, non-request cancellation,
-or asynchronous timeout produce `access_denied`; existing tickets and cookies are unchanged.
+or asynchronous timeout produce `pre_sign_in_denied`; existing tickets and cookies are unchanged.
+The bounded failure reasons are distinct values: a user rejecting the authorization at the
+hosted page answers `user_canceled`, while the pre-sign-in gate answers `pre_sign_in_denied`
+(its timeout and failure shapes are never distinguished to the browser). `access_denied` is a
+legacy value the current package never produces but still renders for old links.
 Request cancellation propagates without a failure redirect or new session. Timeout cancels the
 decision token; late completion cannot sign in. The ticket expires at the earlier of the verified
 access-token expiry and `expires_in` measured at completed redemption, so decision wait cannot

@@ -121,7 +121,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             await RejectAsync(
                 context,
                 error == "access_denied"
-                    ? SignaCoreSignInReason.AccessDenied
+                    ? SignaCoreSignInReason.UserCanceled
                     : SignaCoreSignInReason.InvalidResponse,
                 cancellationToken);
             return;
@@ -220,7 +220,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
                 current.PreSignInAuthorizationTimeout, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await RejectAsync(context, SignaCoreSignInReason.AccessDenied, cancellationToken);
+                await RejectAsync(context, SignaCoreSignInReason.PreSignInDenied, cancellationToken);
                 return;
             }
 
@@ -377,6 +377,8 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         "invalid_return_url" => SignaCoreSignInReason.InvalidReturnUrl,
         "invalid_response" => SignaCoreSignInReason.InvalidResponse,
         "access_denied" => SignaCoreSignInReason.AccessDenied,
+        "user_canceled" => SignaCoreSignInReason.UserCanceled,
+        "pre_sign_in_denied" => SignaCoreSignInReason.PreSignInDenied,
         "state_mismatch" => SignaCoreSignInReason.StateMismatch,
         "issuer_mismatch" => SignaCoreSignInReason.IssuerMismatch,
         "token_exchange_failed" => SignaCoreSignInReason.TokenExchangeFailed,
