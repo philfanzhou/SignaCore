@@ -123,4 +123,12 @@ public sealed class SignaCoreHostedLoginOptions
     /// <summary>The route prefix the endpoints are mapped under; set by
     /// <c>MapSignaCoreHostedLogin</c>, not by consumer code.</summary>
     public string? Prefix { get; internal set; }
+
+    /// <summary>
+    /// The validation strictness policy of the ID-token, access-token, and backchannel response
+    /// checks. The defaults are the strict profile (zero clock skew, scope-echo subset check,
+    /// duplicate JSON members rejected, bounded response bodies, future <c>iat</c> rejected);
+    /// every dimension can be relaxed independently through this group.
+    /// </summary>
+    public SignaCoreValidationOptions Validation { get; set; } = new();
 }

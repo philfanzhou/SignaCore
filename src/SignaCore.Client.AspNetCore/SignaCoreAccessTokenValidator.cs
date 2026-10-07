@@ -43,8 +43,13 @@ internal sealed class SignaCoreAccessTokenValidator(
                 || !ReadTime(payload.RootElement, "iat", out var issued)) return null;
 
             var now = timeProvider.GetUtcNow();
-            var skew = SignaCoreIdTokenValidator.ClockSkew;
-            if (expires <= now || notBefore > expires || notBefore > now + skew || issued > now + skew) return null;
+            var validation = options.CurrentValue.Validation;
+            var skew = validation.ClockSkew;
+            var rejectFutureIssuedAt = validation.RejectFutureIssuedAt;
+            if (expires <= now
+                || notBefore > expires
+                || notBefore > now + skew
+                || (rejectFutureIssuedAt && issued > now + skew)) return null;
             var keys = configuration.SigningKeys.Where(key =>
                 string.Equals(key.KeyId, kid, StringComparison.Ordinal)).ToArray();
             if (keys.Length == 0) return null;
@@ -59,7 +64,7 @@ internal sealed class SignaCoreAccessTokenValidator(
                 ValidateLifetime = true, RequireExpirationTime = true, ClockSkew = skew,
                 LifetimeValidator = (_, _, _, _) => expires > timeProvider.GetUtcNow()
                     && notBefore <= timeProvider.GetUtcNow() + skew
-                    && issued <= timeProvider.GetUtcNow() + skew
+                    && (!rejectFutureIssuedAt || issued <= timeProvider.GetUtcNow() + skew)
             });
             cancellationToken.ThrowIfCancellationRequested();
             return result.IsValid && result.ClaimsIdentity is { } identity

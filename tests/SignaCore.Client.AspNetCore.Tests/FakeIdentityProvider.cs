@@ -63,6 +63,41 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
     public TimeSpan AccessTimeOffset { get => _state.AccessTimeOffset; set => _state.AccessTimeOffset = value; }
     public void RotateSigningKey() => _state.SigningKey = AuthorityState.CreateKey("rotated-key");
 
+    /// <summary>The token response's scope echo; null omits the member entirely.</summary>
+    public string? TokenResponseScope
+    {
+        get => _state.TokenResponseScope;
+        set => _state.TokenResponseScope = value;
+    }
+
+    /// <summary>When set, the token response repeats this top-level member verbatim.</summary>
+    public string? TokenResponseDuplicateMember
+    {
+        get => _state.TokenResponseDuplicateMember;
+        set => _state.TokenResponseDuplicateMember = value;
+    }
+
+    /// <summary>When set, the token response body is padded to exactly this many bytes.</summary>
+    public int? TokenResponseTargetBytes
+    {
+        get => _state.TokenResponseTargetBytes;
+        set => _state.TokenResponseTargetBytes = value;
+    }
+
+    /// <summary>Shifts the minted ID token's iat/nbf/exp by this offset (future is positive).</summary>
+    public TimeSpan IdTokenTimeOffset
+    {
+        get => _state.IdTokenTimeOffset;
+        set => _state.IdTokenTimeOffset = value;
+    }
+
+    /// <summary>Shifts only the minted ID token's iat by this offset (future is positive).</summary>
+    public TimeSpan IdTokenIatOnlyOffset
+    {
+        get => _state.IdTokenIatOnlyOffset;
+        set => _state.IdTokenIatOnlyOffset = value;
+    }
+
     public enum TokenResponseShape
     {
         Normal,
@@ -107,7 +142,14 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         Unreachable,
 
         /// <summary>A timeout: the response never arrives within the client's patience.</summary>
-        Timeout
+        Timeout,
+
+        /// <summary>A 200 whose body repeats the <c>logout_uri</c> member verbatim.</summary>
+        DuplicatedUriMember,
+
+        /// <summary>A 200 whose body carries one padding member past the default 4 KB ceiling
+        /// (and any smaller ceiling a test configures).</summary>
+        OversizedBody
     }
 
     public TestServer Server { get; }
@@ -296,7 +338,35 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
                     : MintAccess(state);
             }
 
-            await Results.Json(payload).ExecuteAsync(context);
+            // The real SignaCore token endpoint echoes the granted scope; the fake does the same
+            // unless a test opts out or substitutes an injectable echo.
+            if (state.TokenResponseScope is { } scope)
+            {
+                payload["scope"] = scope;
+            }
+
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            context.Response.ContentType = "application/json";
+            var json = System.Text.Json.JsonSerializer.Serialize(payload);
+            // A duplicated top-level member, when requested, is appended verbatim — the raw
+            // writer keeps what a serializer would silently collapse.
+            if (state.TokenResponseDuplicateMember is { } duplicated
+                && payload.ContainsKey(duplicated))
+            {
+                json = json[..^1] + ",\"" + duplicated + "\":"
+                    + System.Text.Json.JsonSerializer.Serialize(payload[duplicated]) + "}";
+            }
+
+            // An exact byte target, when requested, is reached with one padding member:
+            // body = prefix + "p":"<padding>"}, so the padding length is the remainder.
+            if (state.TokenResponseTargetBytes is { } target)
+            {
+                var prefix = json[..^1] + ",";
+                var padding = Math.Max(0, target - prefix.Length - "\"p\":\"\"}".Length);
+                json = prefix + "\"p\":\"" + new string('a', padding) + "\"}";
+            }
+
+            await context.Response.WriteAsync(json, TestContext.Current.CancellationToken);
         });
 
         app.MapGet("/userinfo", () => Results.Json(new { sub = DefaultSubject }));
@@ -354,6 +424,23 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
             }
 
             context.Response.Headers.CacheControl = "no-store";
+            context.Response.ContentType = "application/json";
+            if (state.LogoutPrepare == LogoutPrepareShape.DuplicatedUriMember)
+            {
+                var raw = "{\"logout_uri\":" + System.Text.Json.JsonSerializer.Serialize(logoutUri)
+                    + ",\"logout_uri\":" + System.Text.Json.JsonSerializer.Serialize(logoutUri) + "}";
+                await context.Response.WriteAsync(raw, TestContext.Current.CancellationToken);
+                return;
+            }
+
+            if (state.LogoutPrepare == LogoutPrepareShape.OversizedBody)
+            {
+                var raw = "{\"logout_uri\":" + System.Text.Json.JsonSerializer.Serialize(logoutUri)
+                    + ",\"p\":\"" + new string('a', 8192) + "\"}";
+                await context.Response.WriteAsync(raw, TestContext.Current.CancellationToken);
+                return;
+            }
+
             await Results.Json(new { logout_uri = logoutUri }).ExecuteAsync(context);
         });
 
@@ -395,7 +482,8 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
                 return string.Empty;
             }
 
-            var now = state.TimeProvider.GetUtcNow();
+            var now = DateTimeOffset.FromUnixTimeSeconds(
+                state.TimeProvider.GetUtcNow().ToUnixTimeSeconds());
             var signingKey = state.Defect == TokenDefect.SigningKeyAbsentFromJwks
                 ? state.UnlistedKey
                 : state.SigningKey;
@@ -407,6 +495,7 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
                     : nonce),
                 new("name", "client_pack_user")
             };
+            var offset = state.IdTokenTimeOffset;
             var descriptor = new SecurityTokenDescriptor
             {
                 Issuer = state.Defect == TokenDefect.WrongIssuer
@@ -415,9 +504,9 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
                 Audience = state.Defect == TokenDefect.WrongAudience
                     ? "a-different-client"
                     : "client-pack-app",
-                IssuedAt = now.UtcDateTime,
-                NotBefore = now.UtcDateTime,
-                Expires = now.UtcDateTime.AddMinutes(5),
+                IssuedAt = now.UtcDateTime + offset + state.IdTokenIatOnlyOffset,
+                NotBefore = now.UtcDateTime + offset,
+                Expires = now.UtcDateTime.AddMinutes(5) + offset,
                 SigningCredentials = new SigningCredentials(signingKey, SecurityAlgorithms.RsaSha256),
                 Subject = new ClaimsIdentity(claims)
             };
@@ -431,7 +520,8 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         if (defect == AccessDefect.NonCompact) return "not-a-jwt";
         if (defect == AccessDefect.TooLong) return new string('a', 8193);
         if (defect == AccessDefect.NonAscii) return "é.a.b";
-        var now = state.TimeProvider.GetUtcNow();
+        var now = DateTimeOffset.FromUnixTimeSeconds(
+            state.TimeProvider.GetUtcNow().ToUnixTimeSeconds());
         var header = new Dictionary<string, object?>
         {
             ["alg"] = defect == AccessDefect.Alg ? "HS256" : "RS256",
@@ -514,6 +604,22 @@ public sealed class FakeIdentityProvider : IAsyncDisposable
         public AuthorizeEcho Echo { get; set; }
 
         public LogoutPrepareShape LogoutPrepare { get; set; }
+
+        /// <summary>The token response's scope echo; null omits the member entirely.</summary>
+        public string? TokenResponseScope { get; set; } = "openid profile";
+
+        /// <summary>When set, the token response repeats this top-level member verbatim.</summary>
+        public string? TokenResponseDuplicateMember { get; set; }
+
+        /// <summary>When set, the token response body is padded to exactly this many bytes.</summary>
+        public int? TokenResponseTargetBytes { get; set; }
+
+        /// <summary>Shifts the minted ID token's iat/nbf/exp by this offset (future values are
+        /// positive).</summary>
+        public TimeSpan IdTokenTimeOffset { get; set; }
+
+        /// <summary>Shifts only the minted ID token's iat by this offset (future is positive).</summary>
+        public TimeSpan IdTokenIatOnlyOffset { get; set; }
 
         public ConcurrentQueue<string> LogoutPrepareBodies { get; } = [];
 

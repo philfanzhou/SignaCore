@@ -23,11 +23,17 @@ internal sealed record SignaCoreVerifiedIdentity(
 /// <c>sub</c>. Any other shape fails the sign-in; no identity is inferred or repaired.
 /// </summary>
 internal sealed class SignaCoreIdTokenValidator(
-    IOptionsMonitor<SignaCoreHostedLoginOptions> options)
+    IOptionsMonitor<SignaCoreHostedLoginOptions> options,
+    TimeProvider timeProvider)
 {
     private static readonly JsonWebTokenHandler Handler = new();
 
-    /// <summary>The accepted clock skew of the lifetime validation; deliberately tight.</summary>
+    /// <summary>
+    /// The historical accepted clock skew of the lifetime validation — thirty seconds. The live
+    /// validation reads <see cref="SignaCoreValidationOptions.ClockSkew"/> instead, whose default
+    /// is the strict zero; this constant remains only as the documented upper bound the options
+    /// validator enforces.
+    /// </summary>
     internal static readonly TimeSpan ClockSkew = TimeSpan.FromSeconds(30);
 
     internal async Task<SignaCoreVerifiedIdentity?> ValidateAsync(
@@ -38,6 +44,7 @@ internal sealed class SignaCoreIdTokenValidator(
     {
         cancellationToken.ThrowIfCancellationRequested();
         var current = options.CurrentValue;
+        var skew = current.Validation.ClockSkew;
         var validationParameters = new TokenValidationParameters
         {
             ValidAlgorithms = ["RS256"],
@@ -50,7 +57,7 @@ internal sealed class SignaCoreIdTokenValidator(
             ValidateLifetime = true,
             RequireExpirationTime = true,
             IssuerSigningKeys = configuration.SigningKeys,
-            ClockSkew = ClockSkew
+            ClockSkew = skew
         };
 
         TokenValidationResult result;
@@ -66,6 +73,16 @@ internal sealed class SignaCoreIdTokenValidator(
         if (!result.IsValid
             || result.SecurityToken is not JsonWebToken token
             || result.ClaimsIdentity is not { } validatedIdentity)
+        {
+            return null;
+        }
+
+        // A future issued-at (beyond the configured skew) is not a usable token: no honest
+        // authority issues ahead of its own clock, and the claim is how an issuance-time policy
+        // would be bypassed. Optional by contract, so an absent iat is not itself a failure.
+        if (current.Validation.RejectFutureIssuedAt
+            && token.IssuedAt != DateTime.MinValue
+            && token.IssuedAt > timeProvider.GetUtcNow().UtcDateTime + skew)
         {
             return null;
         }

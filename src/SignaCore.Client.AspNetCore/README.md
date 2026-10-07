@@ -77,6 +77,25 @@ Development and Testing environments), and the RedirectUri must be an absolute H
 path is exactly `<prefix>/callback`. A violation fails startup, and the diagnostics name the
 option — never the value.
 
+### Validation strictness
+
+The `options.Validation` group (a `SignaCoreValidationOptions`) controls five dimensions of the
+token and backchannel response checks. **The defaults are the strict profile** — a
+zero-configuration consumer gets the tightest behavior the package supports:
+
+| Option | Default | Strict behavior / effect of relaxing |
+| --- | --- | --- |
+| `ClockSkew` | `0` (0–30 s allowed) | Lifetime windows are exact; relaxing accepts tokens whose `nbf`/`exp` overlap the skew — upstream clock drift belongs here, never in disabling a check |
+| `RequireScopeEchoSubset` | `true` | A token response `scope` echo must be a subset of the requested scopes (an absent member stays accepted); relaxing accepts silently broadened grants |
+| `RejectDuplicateJsonMembers` | `true` | Token and logout responses must not repeat a top-level member; relaxing lets a parser disagreement decide the value |
+| `MaxTokenResponseBytes` | `64 KB` | Larger token responses fail closed; raising the ceiling accepts larger bodies |
+| `MaxLogoutResponseBytes` | `4 KB` | Larger logout preparations end local-only; raising the ceiling accepts larger bodies |
+| `RejectFutureIssuedAt` | `true` | ID and gated access tokens with a future `iat` (beyond the skew) fail; relaxing accepts future issuance times |
+
+Every dimension can be relaxed independently; relaxing removes a guarantee and is the
+consumer's own risk call. SignaCore's own normal responses (legal scope echo, no duplicates,
+present-day `iat`) pass the strict defaults unchanged.
+
 ## The four extension points
 
 1. **Authorization decision** — decide what a verified subject may do, by matching the verified
