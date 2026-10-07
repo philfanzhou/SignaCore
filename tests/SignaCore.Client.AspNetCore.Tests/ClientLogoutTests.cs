@@ -329,8 +329,10 @@ public sealed class ClientLogoutTests(SignaCoreHostFixture fixture)
     [Fact]
     public async Task TheReturnState_IsWrongRepeatedOrExpired_AndAnswersTheFixedInvalidResult()
     {
-        await using var authority = await FakeIdentityProvider.StartAsync();
+        // The authority mints on the same clock the consumer validates with; a split clock
+        // could stamp an iat the consumer's "now" sees as future.
         var time = new ManualTimeProvider();
+        await using var authority = await FakeIdentityProvider.StartAsync(time);
         var (consumer, browser) = await SignInOnFakeAuthorityAsync(authority, time);
         await using var _ = consumer;
         using var __ = browser;
@@ -380,8 +382,10 @@ public sealed class ClientLogoutTests(SignaCoreHostFixture fixture)
     [Fact]
     public async Task AnExpiredReturnState_AnswersTheFixedInvalidResult()
     {
-        await using var authority = await FakeIdentityProvider.StartAsync();
+        // The authority mints on the same clock the consumer validates with; a split clock
+        // could stamp an iat the consumer's "now" sees as future.
         var time = new ManualTimeProvider();
+        await using var authority = await FakeIdentityProvider.StartAsync(time);
         var (consumer, browser) = await SignInOnFakeAuthorityAsync(authority, time);
         await using var _ = consumer;
         using var __ = browser;
@@ -410,8 +414,10 @@ public sealed class ClientLogoutTests(SignaCoreHostFixture fixture)
     [Fact]
     public async Task ALateBrowserCompletion_AfterTheWindowState_EndsInvalidAtThePackageOnly()
     {
-        await using var authority = await FakeIdentityProvider.StartAsync();
+        // The authority mints on the same clock the consumer validates with; a split clock
+        // could stamp an iat the consumer's "now" sees as future.
         var time = new ManualTimeProvider();
+        await using var authority = await FakeIdentityProvider.StartAsync(time);
         var (consumer, browser) = await SignInOnFakeAuthorityAsync(authority, time);
         await using var _ = consumer;
         using var __ = browser;

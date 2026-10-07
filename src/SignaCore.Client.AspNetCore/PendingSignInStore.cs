@@ -1,14 +1,15 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace SignaCore.Client.AspNetCore;
 
 /// <summary>
 /// The server-side state of a pending sign-in: the authorization request's <c>state</c> maps to
-/// its <c>nonce</c>, PKCE verifier, and return address until the callback presents the same
-/// value. A state is consumed exactly once, expires after five minutes, and the store holds at
-/// most a bounded number of pending sign-ins — a flood of start requests can neither pin memory
-/// nor keep old handshakes redeemable.
+/// its <c>nonce</c>, PKCE verifier, return address, and browser-binding hash until the callback
+/// presents the same value. A state is consumed exactly once, expires after five minutes, and the
+/// store holds at most a bounded number of pending sign-ins — a flood of start requests can
+/// neither pin memory nor keep old handshakes redeemable.
 /// </summary>
 internal sealed class PendingSignInStore(TimeProvider? timeProvider = null)
 {
@@ -21,11 +22,12 @@ internal sealed class PendingSignInStore(TimeProvider? timeProvider = null)
     internal int Count => _pending.Count;
 
     /// <summary>
-    /// Creates and stores one pending sign-in and returns its fresh state value, or
+    /// Creates and stores one pending sign-in and returns its fresh state value together with
+    /// the browser-binding value the caller must set as the binding cookie, or
     /// <see langword="null"/> when the store has reached its capacity — the caller then fails
     /// closed rather than evicting a live handshake.
     /// </summary>
-    internal string? Create(string nonce, string codeVerifier, string returnUrl)
+    internal PendingSignInCreation? Create(string nonce, string codeVerifier, string returnUrl)
     {
         if (_pending.Count >= Capacity)
         {
@@ -35,9 +37,13 @@ internal sealed class PendingSignInStore(TimeProvider? timeProvider = null)
         Span<byte> entropy = stackalloc byte[32];
         RandomNumberGenerator.Fill(entropy);
         var state = Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        RandomNumberGenerator.Fill(entropy);
+        var browserBinding = Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         var now = _time.GetUtcNow();
-        _pending[state] = new PendingSignIn(nonce, codeVerifier, returnUrl, now + Lifetime);
-        return state;
+        _pending[state] = new PendingSignIn(
+            nonce, codeVerifier, returnUrl,
+            SHA256.HashData(Encoding.UTF8.GetBytes(browserBinding)), now + Lifetime);
+        return new PendingSignInCreation(state, browserBinding);
     }
 
     /// <summary>
@@ -66,9 +72,12 @@ internal sealed class PendingSignInStore(TimeProvider? timeProvider = null)
         }
     }
 
+    internal sealed record PendingSignInCreation(string State, string BrowserBinding);
+
     internal sealed record PendingSignIn(
         string Nonce,
         string CodeVerifier,
         string ReturnUrl,
+        byte[] BrowserBindingHash,
         DateTimeOffset ExpiresUtc);
 }

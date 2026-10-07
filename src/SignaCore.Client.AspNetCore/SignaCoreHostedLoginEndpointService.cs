@@ -68,12 +68,29 @@ internal sealed class SignaCoreHostedLoginEndpointService(
 
         var nonce = NewToken();
         var codeVerifier = NewToken();
-        var state = pendingSignInStore.Create(nonce, codeVerifier, returnUrl);
-        if (state is null)
+        var creation = pendingSignInStore.Create(nonce, codeVerifier, returnUrl);
+        if (creation is null)
         {
             await RejectAsync(context, SignaCoreSignInReason.SessionStoreFull, cancellationToken);
             return;
         }
+
+        // The browser binding ties this pending sign-in to the browser that started it: the
+        // per-state cookie carries the random value, the store keeps only its hash, and the
+        // callback must present both halves before anything else is trusted. Store failure
+        // writes no cookie.
+        context.Response.Cookies.Append(
+            LoginBindingCookieName(current, creation.State),
+            creation.BrowserBinding,
+            new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.Lax,
+                Path = (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.CallbackPathSegment,
+                Expires = timeProvider.GetUtcNow() + PendingSignInStore.Lifetime,
+                IsEssential = true
+            });
 
         SignaCoreClientLog.SignInStarted(logger, cancellationToken);
         var codeChallenge = Convert.ToBase64String(
@@ -86,7 +103,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             current.ClientId!,
             current.RedirectUri!,
             current.Scope,
-            state,
+            creation.State,
             nonce,
             codeChallenge));
 
@@ -124,6 +141,12 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             await RejectAsync(context, SignaCoreSignInReason.InvalidResponse, cancellationToken);
             return;
         }
+
+        // The binding cookie is single-use like the pending state itself: every callback that
+        // names one usable state — success, failure, or error — finishes that state's cookie.
+        // A duplicated or empty state names no cookie; such a response was rejected above and
+        // the browser's leftover cookie dies at its own five-minute expiry.
+        DeleteLoginBindingCookie(context, current, state);
 
         // The error shape (the user's cancel, or a request error) carries state and iss but no
         // code; it is classified before the code's presence is required.
@@ -180,6 +203,20 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         // The state is consumed exactly once, whatever happens next.
         var pending = pendingSignInStore.Consume(state);
         if (pending is null)
+        {
+            await RejectAsync(context, SignaCoreSignInReason.StateMismatch, cancellationToken);
+            return;
+        }
+
+        // The callback must come from the browser that started the sign-in: the binding cookie's
+        // value is hashed and compared in constant time against the hash the start stored for
+        // exactly this pending sign-in. A missing or wrong cookie answers the same bounded
+        // state-mismatch reason as an unknown state, so the failure reveals nothing.
+        var browserBinding = context.Request.Cookies[LoginBindingCookieName(current, state)];
+        if (string.IsNullOrEmpty(browserBinding)
+            || !CryptographicOperations.FixedTimeEquals(
+                SHA256.HashData(Encoding.UTF8.GetBytes(browserBinding)),
+                pending.BrowserBindingHash))
         {
             await RejectAsync(context, SignaCoreSignInReason.StateMismatch, cancellationToken);
             return;
@@ -356,6 +393,29 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         // custom store added at storage time. Anonymous and expired sessions carry null.
         return (SignaCoreSessionStatus.AuthenticatedSession(displayName, decision), ticket.Principal);
     }
+
+    /// <summary>The name of the binding cookie of one pending sign-in: the base name plus the
+    /// pending state itself, so concurrent sign-ins of one browser each keep their own binding
+    /// and no handshake can be completed with another one's cookie.</summary>
+    private static string LoginBindingCookieName(SignaCoreHostedLoginOptions current, string state) =>
+        current.SessionCookieName + SignaCoreHostedLoginDefaults.LoginBindingCookieSuffix + "." + state;
+
+    private static void DeleteLoginBindingCookie(
+        HttpContext context,
+        SignaCoreHostedLoginOptions current,
+        string state) =>
+        context.Response.Cookies.Append(
+            LoginBindingCookieName(current, state),
+            string.Empty,
+            new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.Lax,
+                Path = (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.CallbackPathSegment,
+                Expires = DateTimeOffset.UnixEpoch,
+                IsEssential = true
+            });
 
     /// <summary>
     /// Whether any required protocol option is blank — exactly the validator's missing-vs-illegal

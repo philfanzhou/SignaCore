@@ -48,11 +48,17 @@ public sealed partial class SignaCoreHostFixture : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
+        var temp = Path.GetTempPath();
+        if (temp.StartsWith("/var/", StringComparison.Ordinal) && Directory.Exists("/private" + temp))
+        {
+            temp = "/private" + temp;
+        }
+
         _bootstrapDirectory = Path.Combine(
-            Path.GetTempPath(),
+            temp,
             $"signacore-bff-{Guid.NewGuid():N}");
         _databasePath = Path.Combine(
-            Path.GetTempPath(),
+            temp,
             $"signacore-bff-{Guid.NewGuid():N}.db");
         var connectionString = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
         {

@@ -12,7 +12,10 @@ authorization, token, and JWKS endpoint must sit on the verified issuer's own or
 (scheme, host, port), so a tampered Discovery document can never move token or key traffic
 to a second host — an authorization request that
 carries exactly `response_type=code`, `state`, `nonce`, and an S256 PKCE challenge, a hardened
-single-valued callback that validates `state` and `iss` before anything else, a one-time,
+single-valued callback that validates `state` and `iss` before anything else and additionally
+binds every pending sign-in to the browser that started it through a one-time
+`<SessionCookieName>-login-binding.<state>` cookie (HttpOnly, Secure, SameSite=Lax, scoped to
+`<prefix>/callback`, five-minute lifetime), a one-time,
 never-retried code redemption with HTTP Basic client authentication, strict ID-token validation
 (RS256 via JWKS `kid`, `typ: JWT`, `iss`, `aud`, lifetime, `nonce`), a capacity-bounded
 server-side ticket store with periodic expiry sweep, a session CSRF boundary, a local-session-first
@@ -53,6 +56,15 @@ app.UseAuthorization();
 // Mount the package's endpoints: /auth/start, /auth/callback, /auth/session, /auth/csrf,
 // /auth/logout, /auth/logout/return, and /auth/signin-failed.
 app.MapSignaCoreHostedLogin("/auth");
+
+// The mapping returns a convention builder over all seven endpoints, so a consumer's
+// convention - here a rate-limiting partition - applies to the whole surface at once:
+//
+//     app.UseRateLimiter();
+//     app.MapSignaCoreHostedLogin("/auth").RequireRateLimiting("admin-login");
+//
+// Ignoring the return value maps the endpoints exactly as before. The granularity is the
+// group; map the prefix once per application.
 
 // The consumer's own routes authenticate against the package's session scheme.
 app.MapGet("/orders", () => "Signed-in content")
@@ -105,6 +117,25 @@ explicit loopback HTTP origin `http://127.0.0.1` / `http://[::1]` is accepted on
 Development and Testing environments), and the RedirectUri must be an absolute HTTPS URI whose
 path is exactly `<prefix>/callback`. A violation fails startup, and the diagnostics name the
 option — never the value.
+
+### Validation strictness
+
+The `options.Validation` group (a `SignaCoreValidationOptions`) controls five dimensions of the
+token and backchannel response checks. **The defaults are the strict profile** — a
+zero-configuration consumer gets the tightest behavior the package supports:
+
+| Option | Default | Strict behavior / effect of relaxing |
+| --- | --- | --- |
+| `ClockSkew` | `0` (0–30 s allowed) | Lifetime windows are exact; relaxing accepts tokens whose `nbf`/`exp` overlap the skew — upstream clock drift belongs here, never in disabling a check |
+| `RequireScopeEchoSubset` | `true` | A token response `scope` echo must be a subset of the requested scopes (an absent member stays accepted); relaxing accepts silently broadened grants |
+| `RejectDuplicateJsonMembers` | `true` | Token and logout responses must not repeat a top-level member; relaxing lets a parser disagreement decide the value |
+| `MaxTokenResponseBytes` | `64 KB` | Larger token responses fail closed; raising the ceiling accepts larger bodies |
+| `MaxLogoutResponseBytes` | `4 KB` | Larger logout preparations end local-only; raising the ceiling accepts larger bodies |
+| `RejectFutureIssuedAt` | `true` | ID and gated access tokens with a future `iat` (beyond the skew) fail; relaxing accepts future issuance times |
+
+Every dimension can be relaxed independently; relaxing removes a guarantee and is the
+consumer's own risk call. SignaCore's own normal responses (legal scope echo, no duplicates,
+present-day `iat`) pass the strict defaults unchanged.
 
 ## The four extension points
 

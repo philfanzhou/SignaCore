@@ -55,7 +55,19 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         var startResponse = session.BffResponses.Single(response =>
             response.Method == HttpMethod.Get
             && response.Uri.AbsolutePath == "/bff/start");
-        Assert.Empty(startResponse.SetCookies);
+        // The sign-in start sets exactly one browser cookie: the one-time, per-state login
+        // binding that binds the callback to this browser. It is opaque (no token material)
+        // and the callback finishes it.
+        var startCookie = Assert.Single(startResponse.SetCookies);
+        Assert.StartsWith(SessionCookieName + "-login-binding.", startCookie, StringComparison.Ordinal);
+        Assert.DoesNotContain("eyJ", startCookie, StringComparison.Ordinal);
+        var callbackResponse = session.BffResponses.Single(response =>
+            response.Method == HttpMethod.Get
+            && response.Uri.AbsolutePath == "/bff/callback");
+        Assert.Contains(
+            callbackResponse.SetCookies,
+            cookie => cookie.StartsWith(SessionCookieName + "-login-binding.", StringComparison.Ordinal)
+                && cookie.Contains("expires=Thu, 01 Jan 1970", StringComparison.Ordinal));
 
         // The tokens live in the server-side store instead: exactly one ticket, and the cookie
         // carries none of the issued material.
@@ -198,7 +210,11 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
     [Fact]
     public async Task AnExpiredLocalTicket_IsRemoved_AndTheProtectedEndpointChallengesAgain()
     {
-        var clock = new ManipulableClock(DateTimeOffset.UtcNow);
+        // The clock runs deliberately ahead of the wall clock: the real host stamps tokens
+        // with the wall clock, and the strict default profile (zero skew, future iat
+        // rejected) only accepts them while the verifying clock is not behind it. The
+        // nine-hour advance below is unaffected by the head start.
+        var clock = new ManipulableClock(DateTimeOffset.UtcNow.AddSeconds(30));
         await using var session = await SignInAsync(clock);
         Assert.Equal(1, BffTickets.Count(session.Bff));
 

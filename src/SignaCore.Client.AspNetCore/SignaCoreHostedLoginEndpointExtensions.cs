@@ -20,7 +20,11 @@ public static class SignaCoreHostedLoginEndpointExtensions
     /// </summary>
     /// <param name="endpoints">The route builder.</param>
     /// <param name="prefix">The consumer's route prefix, for example <c>/auth</c>.</param>
-    public static void MapSignaCoreHostedLogin(
+    /// <returns>A convention builder that applies every convention — metadata such as
+    /// <c>RequireRateLimiting</c> or <c>WithMetadata</c> — to all seven endpoints this mapping
+    /// created, at group granularity. Ignoring the return value maps the endpoints exactly as
+    /// before. The mapping writes one prefix into the options: map it once per application.</returns>
+    public static IEndpointConventionBuilder MapSignaCoreHostedLogin(
         this IEndpointRouteBuilder endpoints,
         string prefix = "/auth")
     {
@@ -48,8 +52,7 @@ public static class SignaCoreHostedLoginEndpointExtensions
             }
 
             options.Prefix = normalizedPrefix;
-            MapEndpoints(endpoints, normalizedPrefix, expectedCallbackPath, options);
-            return;
+            return MapEndpoints(endpoints, normalizedPrefix, expectedCallbackPath, options);
         }
 
         if (!Uri.TryCreate(options.RedirectUri, UriKind.Absolute, out var redirectUri))
@@ -79,52 +82,60 @@ public static class SignaCoreHostedLoginEndpointExtensions
                 "SignaCoreHostedLoginOptions.PostLogoutRedirectUri does not match the hosted-login logout-return path; the redirect URI's path must be exactly <prefix>/logout/return.");
         }
 
-        MapEndpoints(endpoints, normalizedPrefix, redirectUri.AbsolutePath.TrimEnd('/'), options);
+        return MapEndpoints(endpoints, normalizedPrefix, redirectUri.AbsolutePath.TrimEnd('/'), options);
     }
 
-    private static void MapEndpoints(
+    /// <summary>
+    /// Maps the package's seven endpoints and returns them as one convention group: whatever the
+    /// configured path of the callback turned out to be, every endpoint of the mapping shares the
+    /// returned builder's conventions.
+    /// </summary>
+    private static SignaCoreHostedLoginEndpointGroup MapEndpoints(
         IEndpointRouteBuilder endpoints,
         string normalizedPrefix,
         string callbackPath,
         SignaCoreHostedLoginOptions options)
     {
-        endpoints.MapGet(
-            normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.StartPathSegment,
-            static context => context.RequestServices
-                .GetRequiredService<SignaCoreHostedLoginEndpointService>()
-                .HandleStartAsync(context));
-        // The callback is mapped at the redirect URI's own path so the two can never drift apart.
-        endpoints.MapGet(
-            callbackPath,
-            static context => context.RequestServices
-                .GetRequiredService<SignaCoreHostedLoginEndpointService>()
-                .HandleCallbackAsync(context));
-        endpoints.MapGet(
-            normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.SessionPathSegment,
-            static context => context.RequestServices
-                .GetRequiredService<SignaCoreHostedLoginEndpointService>()
-                .HandleSessionAsync(context))
-            .RequireAuthorizationWhenRequested(options);
-        endpoints.MapGet(
-            normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.FailurePathSegment,
-            static context => context.RequestServices
-                .GetRequiredService<SignaCoreHostedLoginEndpointService>()
-                .HandleFailurePageAsync(context));
-        endpoints.MapGet(
-            normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.CsrfPathSegment,
-            static context => context.RequestServices
-                .GetRequiredService<SignaCoreHostedLogoutService>()
-                .HandleCsrfAsync(context));
-        endpoints.MapPost(
-            normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.LogoutPathSegment,
-            static context => context.RequestServices
-                .GetRequiredService<SignaCoreHostedLogoutService>()
-                .HandleLogoutAsync(context));
-        endpoints.MapGet(
-            normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.LogoutReturnPathSegment,
-            static context => context.RequestServices
-                .GetRequiredService<SignaCoreHostedLogoutService>()
-                .HandleLogoutReturnAsync(context));
+        return new SignaCoreHostedLoginEndpointGroup(
+        [
+            endpoints.MapGet(
+                normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.StartPathSegment,
+                static context => context.RequestServices
+                    .GetRequiredService<SignaCoreHostedLoginEndpointService>()
+                    .HandleStartAsync(context)),
+            // The callback is mapped at the redirect URI's own path so the two can never drift apart.
+            endpoints.MapGet(
+                callbackPath,
+                static context => context.RequestServices
+                    .GetRequiredService<SignaCoreHostedLoginEndpointService>()
+                    .HandleCallbackAsync(context)),
+            endpoints.MapGet(
+                normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.SessionPathSegment,
+                static context => context.RequestServices
+                    .GetRequiredService<SignaCoreHostedLoginEndpointService>()
+                    .HandleSessionAsync(context))
+                .RequireAuthorizationWhenRequested(options),
+            endpoints.MapGet(
+                normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.FailurePathSegment,
+                static context => context.RequestServices
+                    .GetRequiredService<SignaCoreHostedLoginEndpointService>()
+                    .HandleFailurePageAsync(context)),
+            endpoints.MapGet(
+                normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.CsrfPathSegment,
+                static context => context.RequestServices
+                    .GetRequiredService<SignaCoreHostedLogoutService>()
+                    .HandleCsrfAsync(context)),
+            endpoints.MapPost(
+                normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.LogoutPathSegment,
+                static context => context.RequestServices
+                    .GetRequiredService<SignaCoreHostedLogoutService>()
+                    .HandleLogoutAsync(context)),
+            endpoints.MapGet(
+                normalizedPrefix + "/" + SignaCoreHostedLoginDefaults.LogoutReturnPathSegment,
+                static context => context.RequestServices
+                    .GetRequiredService<SignaCoreHostedLogoutService>()
+                    .HandleLogoutReturnAsync(context))
+        ]);
     }
 
     private static string NormalizePrefix(string prefix)
@@ -153,5 +164,24 @@ public static class SignaCoreHostedLoginEndpointExtensions
         }
 
         return endpoint;
+    }
+}
+
+/// <summary>
+/// The group builder <see cref="SignaCoreHostedLoginEndpointExtensions.MapSignaCoreHostedLogin"/>
+/// returns: every convention is forwarded to all seven endpoints of the mapping — start,
+/// callback, session, the failure page, csrf, logout, and logout/return — so a consumer's
+/// <c>RequireRateLimiting</c> or <c>WithMetadata</c> applies to the whole surface at once. The
+/// granularity is the group; per-endpoint builders are not exposed.
+/// </summary>
+internal sealed class SignaCoreHostedLoginEndpointGroup(
+    IReadOnlyList<IEndpointConventionBuilder> endpoints) : IEndpointConventionBuilder
+{
+    public void Add(Action<EndpointBuilder> convention)
+    {
+        foreach (var endpoint in endpoints)
+        {
+            endpoint.Add(convention);
+        }
     }
 }

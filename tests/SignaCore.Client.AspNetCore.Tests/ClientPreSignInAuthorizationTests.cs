@@ -42,7 +42,9 @@ public sealed class ClientPreSignInAuthorizationTests
         };
         using var response = await harness.CallbackAsync(await harness.BeginAsync());
         Assert.Equal("/dashboard", response.Headers.Location?.ToString());
-        var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie"));
+        // The success writes the session cookie and finishes the one-time binding cookie.
+        var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie").Where(value =>
+            value.StartsWith(SignaCoreHostedLoginDefaults.SessionCookieName + "=", StringComparison.Ordinal)));
         foreach (var attribute in new[] { "httponly", "secure", "samesite=lax", "path=/" })
             Assert.Contains(attribute, cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, harness.Decision.Calls);
@@ -154,7 +156,12 @@ public sealed class ClientPreSignInAuthorizationTests
     [Fact]
     public async Task ActualExpiryDuringDecision_Fails_AndWaitTimeNeverExtendsTicketLifetime()
     {
-        await using var harness = await Harness.CreateAsync();
+        // The harness clock runs ahead of the wall clock once the decision advances it, so the
+        // ID token's not-before needs the historical thirty-second skew bound to stay valid;
+        // the ticket-expiry assertions below are independent of skew.
+        await using var harness = await Harness.CreateAsync(extraConfigure: services => services
+            .PostConfigure<SignaCoreHostedLoginOptions>(
+                options => options.Validation.ClockSkew = TimeSpan.FromSeconds(30)));
         harness.Authority.AccessLifetime = TimeSpan.FromSeconds(5);
         harness.Decision.Run = (_, _) =>
         {
@@ -237,7 +244,12 @@ public sealed class ClientPreSignInAuthorizationTests
     [InlineData(30)]
     public async Task PublishedRotatedKey_AndAllowedClockSkew_AreAccepted(int offsetSeconds)
     {
-        await using var harness = await Harness.CreateAsync();
+        // The accepted skew is the configured validation clock skew, whose upper bound is the
+        // historical thirty seconds; the test configures that bound explicitly because the
+        // default profile is the strict zero.
+        await using var harness = await Harness.CreateAsync(extraConfigure: services => services
+            .PostConfigure<SignaCoreHostedLoginOptions>(
+                options => options.Validation.ClockSkew = TimeSpan.FromSeconds(30)));
         harness.Authority.RotateSigningKey();
         harness.Authority.AccessTimeOffset = TimeSpan.FromSeconds(offsetSeconds);
         var expectedTime = harness.Clock.GetUtcNow().AddSeconds(offsetSeconds).ToUnixTimeSeconds();
@@ -254,11 +266,25 @@ public sealed class ClientPreSignInAuthorizationTests
     }
 
     [Fact]
-    public async Task ClockSkewBeyondThirtySeconds_IsRejectedBeforeDecision()
+    public async Task ClockSkewBeyondTheConfiguredBound_IsRejectedBeforeDecision()
+    {
+        await using var harness = await Harness.CreateAsync(extraConfigure: services => services
+            .PostConfigure<SignaCoreHostedLoginOptions>(
+                options => options.Validation.ClockSkew = TimeSpan.FromSeconds(30)));
+        harness.Authority.RotateSigningKey();
+        harness.Authority.AccessTimeOffset = TimeSpan.FromSeconds(31);
+        using var response = await harness.CallbackAsync(await harness.BeginAsync());
+        AssertFailure(response, "invalid_token");
+        Assert.Equal(0, harness.Decision.Calls);
+        Assert.Equal(0, harness.Store.Writes);
+    }
+
+    [Fact]
+    public async Task AnyFutureIssuedAt_IsRejectedUnderTheDefaultZeroSkew()
     {
         await using var harness = await Harness.CreateAsync();
         harness.Authority.RotateSigningKey();
-        harness.Authority.AccessTimeOffset = TimeSpan.FromSeconds(31);
+        harness.Authority.AccessTimeOffset = TimeSpan.FromSeconds(5);
         using var response = await harness.CallbackAsync(await harness.BeginAsync());
         AssertFailure(response, "invalid_token");
         Assert.Equal(0, harness.Decision.Calls);
@@ -271,7 +297,18 @@ public sealed class ClientPreSignInAuthorizationTests
     {
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         Assert.Equal("/auth/signin-failed?reason=" + reason, response.Headers.Location?.ToString());
-        Assert.False(response.Headers.Contains("Set-Cookie"));
+        // A failed callback never writes a session cookie; the only Set-Cookie it may carry is
+        // the finished binding cookie's deletion.
+        if (response.Headers.TryGetValues("Set-Cookie", out var cookies))
+        {
+            var cookie = Assert.Single(cookies);
+            Assert.StartsWith(
+                SignaCoreHostedLoginDefaults.SessionCookieName
+                    + SignaCoreHostedLoginDefaults.LoginBindingCookieSuffix + ".",
+                cookie,
+                StringComparison.Ordinal);
+            Assert.Contains("expires=Thu, 01 Jan 1970", cookie, StringComparison.Ordinal);
+        }
     }
 
     private sealed class Decision : ISignaCorePreSignInAuthorizationDecision
@@ -331,7 +368,9 @@ public sealed class ClientPreSignInAuthorizationTests
         public required Decision Decision { get; init; }
         public required RecordingStore Store { get; init; }
         public required Clock Clock { get; init; }
-        public static async Task<Harness> CreateAsync(CapturingLoggerProvider? capture = null)
+        public static async Task<Harness> CreateAsync(
+            CapturingLoggerProvider? capture = null,
+            Action<IServiceCollection>? extraConfigure = null)
         {
             var clock = new Clock(); var decision = new Decision(); var store = new RecordingStore(clock);
             var authority = await FakeIdentityProvider.StartAsync(clock);
@@ -343,6 +382,7 @@ public sealed class ClientPreSignInAuthorizationTests
                 {
                     services.AddSingleton<ITicketStore>(store);
                     services.PostConfigure<SignaCoreHostedLoginOptions>(options => options.PreSignInAuthorizationDecision = decision);
+                    extraConfigure?.Invoke(services);
                 });
             return new Harness { Authority = authority, Consumer = consumer,
                 Browser = ConsumerAppTestServer.CreateBrowserOverAuthority(consumer, authority.Server.CreateHandler(), new Uri(FakeIdentityProvider.BaseAddress)),

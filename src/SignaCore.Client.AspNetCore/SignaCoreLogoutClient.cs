@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -120,20 +119,27 @@ internal sealed class SignaCoreLogoutClient(
                 return SignaCoreLogoutPreparationResult.Failed(SignaCoreLogoutFailure.Rejected);
             }
 
-            JsonDocument? document;
+            JsonDocument document;
             try
             {
-                document = await response.Content.ReadFromJsonAsync<JsonDocument>(cancellationToken);
+                // The body is read under the configured byte ceiling and must not repeat a
+                // top-level member name; both defect shapes are the same closed failure.
+                document = await SignaCoreBoundedJson.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken),
+                    current.Validation.MaxLogoutResponseBytes,
+                    current.Validation.RejectDuplicateJsonMembers,
+                    cancellationToken);
             }
-            catch (JsonException)
+            catch (Exception exception) when (exception is JsonException
+                or SignaCoreResponseLimitException or HttpRequestException)
             {
-                return SignaCoreLogoutPreparationResult.Failed(SignaCoreLogoutFailure.MalformedResponse);
+                return SignaCoreLogoutPreparationResult.Failed(
+                    SignaCoreLogoutFailure.MalformedResponse);
             }
 
             using (document)
             {
-                if (document is null
-                    || document.RootElement.ValueKind != JsonValueKind.Object
+                if (document.RootElement.ValueKind != JsonValueKind.Object
                     || !document.RootElement.TryGetProperty("logout_uri", out var uriElement)
                     || uriElement.ValueKind != JsonValueKind.String
                     || string.IsNullOrEmpty(uriElement.GetString()))

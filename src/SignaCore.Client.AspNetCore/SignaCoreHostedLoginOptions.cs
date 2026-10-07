@@ -137,6 +137,14 @@ public sealed class SignaCoreHostedLoginOptions
     public bool AllowUnconfiguredStartup { get; set; }
 
     /// <summary>
+    /// The validation strictness policy of the ID-token, access-token, and backchannel response
+    /// checks. The defaults are the strict profile (zero clock skew, scope-echo subset check,
+    /// duplicate JSON members rejected, bounded response bodies, future <c>iat</c> rejected);
+    /// every dimension can be relaxed independently through this group.
+    /// </summary>
+    public SignaCoreValidationOptions Validation { get; set; } = new();
+
+    /// <summary>
     /// Whether the session-status endpoint requires an authenticated user (endpoint
     /// authorization). Default false keeps the endpoint anonymous — anyone may learn whether the
     /// browser holds a live session, exactly as before. When true, an unauthenticated request is

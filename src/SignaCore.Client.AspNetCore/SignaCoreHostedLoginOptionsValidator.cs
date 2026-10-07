@@ -115,6 +115,23 @@ internal sealed class SignaCoreHostedLoginOptionsValidator(IHostEnvironment envi
                 $"{OptionsName}.PostLogoutReturnPath must be a local absolute path that starts with exactly one slash.");
         }
 
+        if (options.Validation.ClockSkew < TimeSpan.Zero
+            || options.Validation.ClockSkew > TimeSpan.FromSeconds(30))
+        {
+            failures.Add(
+                $"{OptionsName}.Validation.ClockSkew is invalid; it must be zero to thirty seconds.");
+        }
+
+        if (options.Validation.MaxTokenResponseBytes <= 0)
+        {
+            failures.Add($"{OptionsName}.Validation.MaxTokenResponseBytes must be positive.");
+        }
+
+        if (options.Validation.MaxLogoutResponseBytes <= 0)
+        {
+            failures.Add($"{OptionsName}.Validation.MaxLogoutResponseBytes must be positive.");
+        }
+
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
             : ValidateOptionsResult.Success;
