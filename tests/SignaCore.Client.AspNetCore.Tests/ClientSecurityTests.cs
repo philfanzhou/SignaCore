@@ -255,7 +255,7 @@ public sealed class ClientSecurityTests
         await using var _ = consumer;
         using var __ = browser;
 
-        await AssertRejectedAsync(browser, "access_denied", authority, expectedTokenRequests: 0);
+        await AssertRejectedAsync(browser, "user_canceled", authority, expectedTokenRequests: 0);
     }
 
     [Fact]
@@ -385,6 +385,31 @@ public sealed class ClientSecurityTests
         {
             Assert.DoesNotContain(forbidden, authorizeUri.Query, StringComparison.Ordinal);
         }
+    }
+
+    [Theory]
+    [InlineData("user_canceled", "The sign-in was cancelled.")]
+    [InlineData("pre_sign_in_denied", "Access was denied before the session could be created.")]
+    [InlineData("access_denied", "Access was denied.")]
+    public async Task TheFailurePage_RendersTheNewReasons_AndKeepsTheLegacyOne(
+        string reason,
+        string expectedText)
+    {
+        await using var authority = await FakeIdentityProvider.StartAsync();
+        var (_, consumer, browser) = await CreateAsync(authority);
+        await using var _ = consumer;
+        using var __ = browser;
+
+        // The closed reason set is extensible: the two new values render their fixed English
+        // descriptions, and a legacy access_denied link keeps rendering — never a 500.
+        using var page = new HttpRequestMessage(
+            HttpMethod.Get,
+            new Uri(browser.ConsumerBase, "/auth/signin-failed?reason=" + reason));
+        using var response = await browser.SendOnConsumerAsync(
+            page, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        Assert.Contains(expectedText, body, StringComparison.Ordinal);
     }
 
     [Fact]

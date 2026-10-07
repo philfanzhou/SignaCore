@@ -115,6 +115,8 @@ public sealed class SignaCoreDefaultResponseWriter : ISignaCoreHostedLoginRespon
         SignaCoreSignInReason.InvalidReturnUrl => "invalid_return_url",
         SignaCoreSignInReason.InvalidResponse => "invalid_response",
         SignaCoreSignInReason.AccessDenied => "access_denied",
+        SignaCoreSignInReason.UserCanceled => "user_canceled",
+        SignaCoreSignInReason.PreSignInDenied => "pre_sign_in_denied",
         SignaCoreSignInReason.StateMismatch => "state_mismatch",
         SignaCoreSignInReason.IssuerMismatch => "issuer_mismatch",
         SignaCoreSignInReason.TokenExchangeFailed => "token_exchange_failed",
@@ -134,6 +136,10 @@ public sealed class SignaCoreDefaultResponseWriter : ISignaCoreHostedLoginRespon
             "The sign-in response was not usable.",
         SignaCoreSignInReason.AccessDenied =>
             "Access was denied.",
+        SignaCoreSignInReason.UserCanceled =>
+            "The sign-in was cancelled.",
+        SignaCoreSignInReason.PreSignInDenied =>
+            "Access was denied before the session could be created.",
         SignaCoreSignInReason.StateMismatch =>
             "The sign-in response did not match the pending sign-in.",
         SignaCoreSignInReason.IssuerMismatch =>
