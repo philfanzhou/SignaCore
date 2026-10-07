@@ -164,6 +164,14 @@ builder.Services.AddSingleton<ITicketStore>(new RedisTicketStore(/* ... */));
 The session cookie is HttpOnly, Secure, and SameSite=Lax, and the session never outlives the
 access token's expiry.
 
+When a browser signs in again, the new ticket replaces the session it held before in one atomic
+swap (`ITicketStore.ReplaceAsync`): the previous session key is revoked the moment the new one is
+stored, and a full store refuses the whole replacement rather than sacrificing the previous
+session. A null, empty, unknown, or expired old key degrades to a plain store. Custom stores get
+the method as a source- and binary-compatible default (store-then-remove); multi-instance stores
+that need the atomic guarantee — or want to write their sign-in audit row in the same transaction
+as the swap — must override it.
+
 ## The session CSRF boundary
 
 Every session-authenticated unsafe method — anything but GET, HEAD, OPTIONS, and TRACE on a route
