@@ -64,6 +64,7 @@ public static class SignaCoreHostedLoginDefaults
     public const string LogoutReturnCookieSuffix = "-logout-return";
 
     /// <summary>
+    /// <summary>
     /// The suffix appended to <see cref="SessionCookieName"/> (plus the pending sign-in's
     /// <c>state</c> value after a dot) to name the one-time login browser-binding cookies:
     /// HttpOnly, Secure, SameSite=Lax, scoped to the package's callback path, and alive for the
@@ -73,6 +74,22 @@ public static class SignaCoreHostedLoginDefaults
     /// other's binding.
     /// </summary>
     public const string LoginBindingCookieSuffix = "-login-binding";
+
+    /// <summary>
+    /// The browser cookie prefix that demands Path=/ and no Domain. A session cookie named with
+    /// this prefix must never leak it into a derived name: the logout-return cookie's path is the
+    /// logout endpoints', not "/", so a derived <c>__Host-</c> name would be rejected by every
+    /// browser and the return chain would break.
+    /// </summary>
+    public const string HostCookiePrefix = "__Host-";
+
+    /// <summary>
+    /// The browser cookie prefix that demands only Secure (and therefore HTTPS). It is the one
+    /// compliant replacement prefix for derived cookie names when the session cookie carries
+    /// <see cref="HostCookiePrefix"/>: it keeps a browser-enforced signal on the cookie while
+    /// allowing the package's non-root path scope.
+    /// </summary>
+    public const string SecureCookiePrefix = "__Secure-";
 
     /// <summary>The lifetime of one prepared logout and of its return state: five minutes.</summary>
     public static readonly TimeSpan LogoutReturnLifetime = TimeSpan.FromMinutes(5);
