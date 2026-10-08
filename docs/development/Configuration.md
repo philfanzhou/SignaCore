@@ -125,7 +125,7 @@ Origin union and exact method and header. No new configuration key is required.
 | --- | --- | --- |
 | `Callback:AllowedDomains` | `[]` | Explicit allowlist, preferred over relying on address filtering alone |
 | `Callback:AllowPrivateAddresses` | `false` | |
-| `Callback:RequireHttps` | `true` | |
+| `Callback:RequireHttps` | `false` | |
 
 Callback connections reject local, private, link-local, multicast, reserved, and cloud metadata
 address ranges. The address is checked in the actual TCP connection path to prevent DNS rebinding
