@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -27,7 +26,6 @@ internal sealed record SignaCoreAuthorityConfiguration(
 internal sealed class SignaCoreDiscoveryClient(
     System.Net.Http.IHttpClientFactory httpClientFactory,
     IOptionsMonitor<SignaCoreHostedLoginOptions> options,
-    IHostEnvironment environment,
     TimeProvider timeProvider,
     ILogger<SignaCoreDiscoveryClient> logger)
 {
@@ -107,24 +105,12 @@ internal sealed class SignaCoreDiscoveryClient(
                 "The discovery document issuer does not match the configured authority.");
         }
 
-        var environmentName = environment.EnvironmentName;
-        var allowInsecureLoopback = environmentName == Environments.Development
-            || environmentName == "Testing";
-        // The intranet opt-in is environment-independent; an illegal list (which startup rejects)
-        // observed here because of an unvalidated reload fails closed to HTTPS-only endpoints.
-        if (!IntranetHttpOrigin.TryResolve(
-                options.CurrentValue.IntranetHttpOrigins, out var intranetHttpOrigins))
-        {
-            intranetHttpOrigins = [];
-        }
-
         foreach (var endpoint in new[] { authorizationEndpoint, tokenEndpoint, jwksUri })
         {
-            if (!SignaCoreAuthorityUriRules.IsAcceptableEndpointUri(
-                    endpoint, allowInsecureLoopback, intranetHttpOrigins))
+            if (!SignaCoreAuthorityUriRules.IsAcceptableEndpointUri(endpoint))
             {
                 throw new SignaCoreAuthorityDocumentException(
-                    "A discovery endpoint is not an absolute HTTPS URI.");
+                    "A discovery endpoint is not an absolute http or https URI.");
             }
 
             // Every endpoint must also sit on the verified issuer's own origin (scheme, host,

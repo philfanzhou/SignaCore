@@ -16,8 +16,8 @@ single-valued callback that validates `state` and `iss` before anything else and
 binds every pending sign-in to the browser that started it through a one-time
 `<SessionCookieName>-login-binding.<state>` cookie (HttpOnly, Secure, SameSite=Lax, scoped to
 `<prefix>/callback`, five-minute lifetime; the derived name goes through the same prefix-safe
-derivation as the logout-return cookie, and loses the Secure attribute only in the explicit
-[intranet HTTP profile](#intranet-http-deployments-explicit-opt-in)), a one-time,
+derivation as the logout-return cookie, and loses the Secure attribute only in the plain
+[HTTP profile](#http-deployments)), a one-time,
 never-retried code redemption with HTTP Basic client authentication, strict ID-token validation
 (RS256 via JWKS `kid`, `typ: JWT`, `iss`, `aud`, lifetime, `nonce`), a capacity-bounded
 server-side ticket store with periodic expiry sweep, a session CSRF boundary, a local-session-first
@@ -114,55 +114,47 @@ start and surfaces the same 503. A **configured but illegal** value still fails 
 mode — half-configuration is an error, never a silent downgrade — and the mode does not
 hot-reload: configuring the values takes effect after a restart.
 
-The options are validated at startup: the Authority must be absolute HTTPS without a path (an
-explicit loopback HTTP origin `http://127.0.0.1` / `http://[::1]` is accepted only in the
-Development and Testing environments), and the RedirectUri must be an absolute HTTPS URI whose
-path is exactly `<prefix>/callback`. A violation fails startup, and the diagnostics name the
-option — never the value.
+The options are validated at startup: the Authority must be an absolute `http` or `https` URI
+without a path, and the RedirectUri must be an absolute `http` or `https` URI whose path is
+exactly `<prefix>/callback` — the two schemes are equal inputs in every environment name (see
+[HTTP deployments](#http-deployments) and
+[ADR 0008](https://github.com/philfanzhou/SignaCore/blob/main/docs/adr/0008-transport-security-is-a-deployment-decision.md)).
+A violation fails startup, and the diagnostics name the option — never the value.
 
-### Intranet HTTP deployments (explicit opt-in)
+### HTTP deployments
 
-Some deployments run on a controlled, segmented network that is never exposed to the public
-internet — a VLAN-protected internal management service, for example — where TLS termination
-does not exist and the production topology is plain HTTP by design. For those, and only those,
-`options.IntranetHttpOrigins` is the explicit opt-in:
+`http` and `https` are equal inputs everywhere: the Authority, the RedirectUri, the
+PostLogoutRedirectUri, and every Discovery endpoint accept either scheme in every environment
+name, with no allowlist to configure and no environment-name privilege — whether TLS reaches the
+service and the browser is a deployment decision made in front of the application (a reverse
+proxy, a TLS terminator, or a segmented network; see ADR 0008). Every structural rule is
+unchanged: no path on the Authority, no user info, query, or fragment anywhere, the exact
+callback-path match, and the same-origin triple of the Discovery endpoints.
 
-```csharp
-options.Authority = "http://192.168.55.10:5002";                    // the SignaCore host, in the list
-options.RedirectUri = "http://192.168.55.10:5020/auth/callback";    // this consumer, in the list
-options.IntranetHttpOrigins =
-[
-    "http://192.168.55.10:5002",   // the SignaCore host's intranet origin
-    "http://192.168.55.10:5020"    // this consumer's intranet origin
-];
-```
-
-The list is the intent signal, not the environment name: it is honored identically in every
-environment, including Production, and it contains **exact origins** — `http://` plus a private
-IPv4 literal (10/8, 172.16/12, or 192.168/16) or a bracketed IPv6 Unique Local Address literal,
-plus an explicit port 1–65535. Public addresses, domain names, user info, paths, queries,
-fragments, percent escapes, whitespace, and duplicates are rejected at startup with a fixed
-error that names the option and never echoes the value. Only a URI whose origin (scheme, host,
-port) is listed gains the HTTP exception — for the Authority, the RedirectUri, the
-PostLogoutRedirectUri, and every Discovery endpoint — and every full-URI rule (path shape, no
-query/fragment/user info, the callback-path match, the same-origin triple of the Discovery
-endpoints) still applies unchanged. An origin outside the list keeps the historical HTTPS
-rejection, byte for byte.
-
-While the list is non-empty the package writes all its cookies for plain HTTP: the session,
-login-binding, logout-return, and antiforgery cookies carry no `Secure` attribute and no
+The package's cookies follow the configured RedirectUri's scheme, because the browser reaches
+the consumer exactly at that URI: with an `https` RedirectUri every carrier cookie (session,
+login binding, logout return, antiforgery) keeps the historical Secure profile byte for byte,
+while a plain-`http` RedirectUri selects the neutral profile — no `Secure` attribute and no
 cookie-name prefix (a `SessionCookieName` with the `__Host-` or `__Secure-` prefix fails startup
 in this profile, because those prefixes require the Secure attribute a browser would then
 refuse). HttpOnly, SameSite, and path scopes are unchanged, and the protocol semantics — PKCE,
 state/nonce, single-use codes, the CSRF boundary — are exactly the HTTPS ones.
 
-**This is not a test backdoor and not a security feature.** Plain HTTP provides no
-confidentiality or integrity on the wire; the deployment's network isolation (VLAN, access
-control) is the transport security, and the list declares that intent rather than providing
-protection. Deployments reachable from the public internet must stay on HTTPS. Do not share a
-host or cookie domain with a high-trust HTTPS deployment: the HTTP profile's cookies are
-deliberately not interchangeable with Secure ones, and switching profiles requires signing in
-again. Rollback is clearing the list and restarting — no migration, no state conversion.
+**Plain HTTP is not a security feature.** It provides no confidentiality or integrity on the
+wire; the deployment's network isolation (VLAN, access control) or a TLS terminator in front of
+the service is the transport security. Deployments reachable from the public internet should
+stay on HTTPS. Do not share a host or cookie domain with a high-trust HTTPS deployment: the
+HTTP profile's cookies are deliberately not interchangeable with Secure ones, and switching
+schemes requires signing in again. Rollback is pinning package version 0.1.15 — no migration,
+no state conversion.
+
+#### Migrating from 0.1.15
+
+Version 0.2.0 is a breaking change: `options.IntranetHttpOrigins` and its parser are gone. An
+`http` Authority or RedirectUri needs no opt-in anymore, so delete the `IntranetHttpOrigins`
+assignment from your configuration and keep the URIs as they are. A consumer that never used
+the list needs no change at all; consumers that need the previous HTTPS-only rejection can
+enforce it at their own configuration layer before the options reach the package.
 
 ### Validation strictness
 
@@ -373,8 +365,8 @@ demands Path=/ while this cookie is scoped to the logout endpoints), so the pack
 `__Secure-<rest>-logout-return` instead — the `__Secure-` prefix keeps a browser-enforced Secure
 guarantee and works with the package's path scope. Every other session name keeps the historical
 derivation byte for byte; cookies under a previous package version's name simply age out. In the
-[intranet HTTP profile](#intranet-http-deployments-explicit-opt-in) no rewrite happens and the
-cookie is written without the Secure attribute.
+plain [HTTP profile](#http-deployments) no rewrite happens and the cookie is written without the
+Secure attribute.
 
 If the upstream preparation fails, times out, is cancelled, or answers an unverifiable URI, the
 endpoint answers the fixed local-only result — `200 {"outcome":"local_only"}` — and the browser

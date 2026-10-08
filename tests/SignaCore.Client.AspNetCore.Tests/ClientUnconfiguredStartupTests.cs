@@ -183,7 +183,8 @@ public sealed class ClientUnconfiguredStartupTests
     }
 
     [Theory]
-    [InlineData("http://signacore.example", "", "")]         // illegal authority (plain HTTP)
+    [InlineData("http://signacore.example/identity", "", "")] // illegal authority (a path on a plain-http URI)
+    [InlineData("ftp://signacore.example", "", "")]           // illegal authority (a non-http scheme)
     [InlineData("https://signacore.example", "https://bff.localhost/auth/callback?tenant=a", "")] // illegal redirect URI
     public void InOptionalMode_ConfiguredButIllegalValues_StillFailStartup(
         string authority,

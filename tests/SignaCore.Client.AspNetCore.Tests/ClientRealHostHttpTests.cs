@@ -16,15 +16,14 @@ using Xunit;
 namespace SignaCore.Client.AspNetCore.Tests;
 
 /// <summary>
-/// The intranet HTTP deployment against the real SignaCore host, in memory: the host serves its
-/// hosted login over plain HTTP in any environment (transport is a deployment decision, ADR 0008),
-/// while the consumer runs in Production with the package's
-/// <c>IntranetHttpOrigins</c> list — proving the package's opt-in is honored under a Production
-/// environment name exactly as under any other. The full password sign-in, callback, session,
-/// CSRF boundary, and prepared logout complete over the two intranet origins, and every package
-/// cookie is written without the Secure attribute.
+/// The plain-HTTP deployment against the real SignaCore host, in memory: the consumer runs in
+/// Production with plain-<c>http</c> Authority and RedirectUri values and no opt-in list —
+/// proving the package honors them under a Production environment name exactly as under any
+/// other (ADR 0008). The full password sign-in, callback, session, CSRF boundary, and prepared
+/// logout complete over the two HTTP origins, and every package cookie is written without the
+/// Secure attribute.
 /// </summary>
-public sealed class ClientRealHostIntranetHttpTests : IAsyncLifetime
+public sealed class ClientRealHostHttpTests : IAsyncLifetime
 {
     private const string Authority = "http://192.168.55.10:5002";
     private const string ConsumerOrigin = "http://192.168.55.10:5020";
@@ -44,14 +43,14 @@ public sealed class ClientRealHostIntranetHttpTests : IAsyncLifetime
             temp = "/private" + temp;
         }
 
-        _bootstrapDirectory = Path.Combine(temp, $"signacore-intranet-{Guid.NewGuid():N}");
-        _databasePath = Path.Combine(temp, $"signacore-intranet-{Guid.NewGuid():N}.db");
+        _bootstrapDirectory = Path.Combine(temp, $"signacore-realhost-http-{Guid.NewGuid():N}");
+        _databasePath = Path.Combine(temp, $"signacore-realhost-http-{Guid.NewGuid():N}.db");
         var connectionString = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
         {
             DataSource = _databasePath
         }.ConnectionString;
 
-        // The host side of the intranet deployment: an HTTP public origin accepted structurally
+        // The host side of the plain-HTTP deployment: an HTTP public origin accepted structurally
         // in any environment — no allowlist, no Testing environment (ADR 0008).
         var bootstrapFilePath = await InstallationTestSupport.PrepareCompletedInstallationAsync(
             _bootstrapDirectory,
@@ -60,9 +59,9 @@ public sealed class ClientRealHostIntranetHttpTests : IAsyncLifetime
                 Provider = "SQLite",
                 ConnectionString = connectionString
             },
-            "test-master-key-for-intranet-tests-only",
-            "intranet_admin",
-            "IntranetAdmin-123!",
+            "test-master-key-for-realhost-http-tests-only",
+            "realhost_http_admin",
+            "RealHostHttpAdmin-123!",
             new Dictionary<string, string>
             {
                 [SystemSettingKeys.PublicBaseUrl] = Authority,
@@ -107,7 +106,7 @@ public sealed class ClientRealHostIntranetHttpTests : IAsyncLifetime
             Id = Guid.NewGuid(),
             AppId = SignaCoreHostFixture.ClientId,
             AppSecretHash = BCrypt.Net.BCrypt.HashPassword(SignaCoreHostFixture.ClientSecret),
-            AppName = "Intranet Client App",
+            AppName = "Real-Host HTTP Client App",
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,
             AudienceMode = AudienceMode.PerApplication,
@@ -138,7 +137,7 @@ public sealed class ClientRealHostIntranetHttpTests : IAsyncLifetime
             Id = accountId,
             IsActive = true,
             CreatedAt = DateTimeOffset.UtcNow,
-            Nickname = "intranet-nickname"
+            Nickname = "realhost-http-nickname"
         });
         dbContext.PasswordCredentials.Add(new PasswordCredentialEntity
         {
@@ -152,7 +151,7 @@ public sealed class ClientRealHostIntranetHttpTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TheProductionConsumer_CompletesHostedLoginOverTheIntranetHttpHost()
+    public async Task TheProductionConsumer_CompletesHostedLoginOverThePlainHttpHost()
     {
         Assert.NotNull(_host);
         var consumer = ConsumerAppTestServer.Create(
@@ -162,15 +161,15 @@ public sealed class ClientRealHostIntranetHttpTests : IAsyncLifetime
             RedirectUri,
             _host.Server.CreateHandler(),
             postLogoutRedirectUri: PostLogoutRedirectUri,
-            environment: "Production",
-            configureTestServices: services => services.PostConfigure<SignaCoreHostedLoginOptions>(
-                options => options.IntranetHttpOrigins = [Authority, ConsumerOrigin]));
+            // No opt-in list and no environment privilege: the plain-http URIs are accepted
+            // as configured (ADR 0008).
+            environment: "Production");
         await using var _ = consumer;
         var browser = ConsumerAppTestServer.CreateBrowser(
             _host, consumer, new Uri(Authority), new Uri(ConsumerOrigin));
         using var __ = browser;
 
-        // 1. The start resolves Discovery over the intranet HTTP origin and redirects to the
+        // 1. The start resolves Discovery over the plain-HTTP origin and redirects to the
         //    real authorize endpoint; the binding cookie carries no Secure attribute.
         using var start = new HttpRequestMessage(
             HttpMethod.Get, new Uri(browser.ConsumerBase, "/auth/start?returnUrl=/dashboard"));
@@ -222,7 +221,7 @@ public sealed class ClientRealHostIntranetHttpTests : IAsyncLifetime
         Assert.Contains("\"authenticated\":true", sessionBody, StringComparison.Ordinal);
         Assert.Contains(SignaCoreHostFixture.Username, sessionBody, StringComparison.Ordinal);
 
-        // 5. The prepared logout and its return complete over the intranet origins.
+        // 5. The prepared logout and its return complete over the plain-HTTP origins.
         using var csrf = new HttpRequestMessage(
             HttpMethod.Get, new Uri(browser.ConsumerBase, "/auth/csrf"));
         using var csrfResponse = await browser.SendOnConsumerAsync(

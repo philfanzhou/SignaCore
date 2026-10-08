@@ -11,10 +11,10 @@ public sealed class SignaCoreHostedLoginOptions
 {
     /// <summary>
     /// The SignaCore base address, for example <c>https://signacore.example</c>. Must be an
-    /// absolute HTTPS URI without a path, query, or fragment; only the Development and Testing
-    /// environments additionally accept an explicit loopback origin
-    /// (<c>http://127.0.0.1</c> or <c>http://[::1]</c>). The package verifies the Discovery
-    /// document's <c>issuer</c> against this value.
+    /// absolute <c>http</c> or <c>https</c> URI without a path, query, or fragment; the schemes
+    /// are equal inputs in every environment (ADR 0008 — whether TLS reaches the service is a
+    /// deployment decision). The package verifies the Discovery document's <c>issuer</c> against
+    /// this value.
     /// </summary>
     public string? Authority { get; set; }
 
@@ -29,8 +29,8 @@ public sealed class SignaCoreHostedLoginOptions
 
     /// <summary>
     /// The exact, pre-registered callback URI, for example
-    /// <c>https://orders.example/bff/callback</c>. Must be an absolute HTTPS URI whose path is
-    /// byte-for-byte the callback path of the mapped prefix
+    /// <c>https://orders.example/bff/callback</c>. Must be an absolute <c>http</c> or
+    /// <c>https</c> URI whose path is byte-for-byte the callback path of the mapped prefix
     /// (<see cref="M:SignaCore.Client.AspNetCore.SignaCoreHostedLoginEndpointExtensions.MapSignaCoreHostedLogin(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder,string)"/>).
     /// </summary>
     public string? RedirectUri { get; set; }
@@ -43,32 +43,10 @@ public sealed class SignaCoreHostedLoginOptions
 
     /// <summary>The name of the opaque session cookie. The default is
     /// <see cref="SignaCoreHostedLoginDefaults.SessionCookieName"/>. The name must not carry the
-    /// <c>__Host-</c> or <c>__Secure-</c> cookie prefix while <see cref="IntranetHttpOrigins"/>
-    /// is configured: those prefixes demand the Secure attribute, which an intranet HTTP
+    /// <c>__Host-</c> or <c>__Secure-</c> cookie prefix while <see cref="RedirectUri"/> is served
+    /// over plain <c>http</c>: those prefixes demand the Secure attribute, which an HTTP
     /// deployment cannot set, so the combination fails startup.</summary>
     public string SessionCookieName { get; set; } = SignaCoreHostedLoginDefaults.SessionCookieName;
-
-    /// <summary>
-    /// The explicit intranet HTTP deployment opt-in: an exact list of private-network HTTP
-    /// origins, for example <c>http://192.168.55.10:5002</c>, that this deployment intentionally
-    /// serves or calls over plain HTTP from a controlled network that is not exposed to the
-    /// public internet. Each entry is <c>http://</c> plus an RFC 1918 IPv4 literal
-    /// (10/8, 172.16/12, 192.168/16) or a bracketed IPv6 Unique Local Address literal
-    /// (<c>fc00::/7</c>) plus an explicit port 1–65535; user info, paths, queries, fragments,
-    /// percent escapes, whitespace, domain names, public addresses, and duplicates are rejected
-    /// at startup. The list may name the SignaCore Authority's origin and this consumer's own
-    /// redirect origins; only those exact origins (scheme, host, port) gain the HTTP exception —
-    /// every other URI rule is unchanged and any address outside the list keeps requiring HTTPS.
-    /// The list is a deployment intent signal, not a network access control: it is honored in
-    /// every environment name, including Production, because an environment name is not a trust
-    /// boundary; keeping the deployment reachable only inside the controlled network is the
-    /// deployer's responsibility. Default empty keeps the historical behavior byte for byte:
-    /// HTTPS everywhere except the Development/Testing loopback exception. While the list is
-    /// non-empty the package's cookies (session, login binding, logout return, antiforgery) are
-    /// written without the Secure attribute and without cookie-name prefixes; clearing the list
-    /// and restarting returns to the HTTPS profile with no migration.
-    /// </summary>
-    public List<string> IntranetHttpOrigins { get; set; } = [];
 
     /// <summary>
     /// The maximum number of concurrent server-side session tickets the default in-memory store

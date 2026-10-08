@@ -50,28 +50,38 @@ public sealed class ClientOptionsValidationTests
     }
 
     [Fact]
-    public void AnHttpAuthorityOutsideDevelopment_FailsStartup()
+    public void AnHttpAuthorityOutsideDevelopment_Starts()
     {
-        var diagnostics = StartupDiagnostics("http://signacore.example", environment: "Production");
-        Assert.Contains("SignaCoreHostedLoginOptions.Authority", diagnostics, StringComparison.Ordinal);
-        Assert.DoesNotContain("signacore.example", diagnostics, StringComparison.Ordinal);
+        using var factory = ConsumerAppTestServer.Create(
+            "http://signacore.example",
+            "client-pack-app",
+            "test-secret",
+            "http://bff.localhost/auth/callback",
+            Handler,
+            environment: "Production");
+        using var client = factory.CreateClient();
+        Assert.NotNull(client);
     }
 
     [Fact]
-    public void ALoopbackHttpAuthorityInProduction_FailsStartup()
+    public void ALoopbackHttpAuthorityInProduction_Starts()
     {
-        var diagnostics = StartupDiagnostics("http://127.0.0.1:5099", environment: "Production");
-        Assert.Contains("SignaCoreHostedLoginOptions.Authority", diagnostics, StringComparison.Ordinal);
-        // The message names the option and the rule (which mentions the loopback form by name);
-        // it must not echo the configured value's own port.
-        Assert.DoesNotContain("5099", diagnostics, StringComparison.Ordinal);
+        using var factory = ConsumerAppTestServer.Create(
+            "http://127.0.0.1:5099",
+            "client-pack-app",
+            "test-secret",
+            "http://127.0.0.1:5090/auth/callback",
+            Handler,
+            environment: "Production");
+        using var client = factory.CreateClient();
+        Assert.NotNull(client);
     }
 
     [Fact]
-    public void LocalhostHttpIsNeverAccepted() =>
+    public void AnHttpAuthorityWithAPath_FailsStartup() =>
         Assert.Contains(
             "SignaCoreHostedLoginOptions.Authority",
-            StartupDiagnostics("http://localhost:5099", environment: "Production"),
+            StartupDiagnostics("http://signacore.example/identity", environment: "Production"),
             StringComparison.Ordinal);
 
     [Fact]
@@ -131,20 +141,6 @@ public sealed class ClientOptionsValidationTests
                     .PostConfigure<SignaCoreHostedLoginOptions>(options => options.Scope = "profile"),
                 environment: "Production"),
             StringComparison.Ordinal);
-
-    [Fact]
-    public void ALoopbackHttpAuthorityInTesting_StartsSuccessfully()
-    {
-        using var factory = ConsumerAppTestServer.Create(
-            "http://127.0.0.1:5099",
-            "client-pack-app",
-            "test-secret",
-            "http://127.0.0.1:5090/auth/callback",
-            Handler,
-            environment: "Testing");
-        using var client = factory.CreateClient();
-        Assert.NotNull(client);
-    }
 
     [Fact]
     public void ARedirectUriPathThatDoesNotMatchTheMappedCallback_FailsStartup()

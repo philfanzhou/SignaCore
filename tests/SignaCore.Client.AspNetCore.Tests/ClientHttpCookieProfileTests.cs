@@ -10,15 +10,15 @@ using Xunit;
 namespace SignaCore.Client.AspNetCore.Tests;
 
 /// <summary>
-/// The cookie profile matrix of the explicit intranet HTTP deployment, in the Production
-/// environment: with the origin list configured, the whole sign-in, session, CSRF, and prepared
-/// logout chain runs over plain intranet HTTP — Discovery's endpoints resolve on the listed
-/// origin — and every carrier cookie (session, login binding, logout return, antiforgery) is
-/// written, read, and finished under its intranet profile: no Secure attribute, no cookie-name
-/// prefix, unchanged HttpOnly/SameSite/Path scope. The protocol semantics (single-use state,
-/// browser binding, one-time code, CSRF validation) are exactly the HTTPS ones.
+/// The cookie profile matrix of a plain-HTTP deployment, in the Production environment with no
+/// opt-in list (ADR 0008): the whole sign-in, session, CSRF, and prepared logout chain runs over
+/// plain HTTP — Discovery's endpoints resolve on the plain-http origin — and every carrier
+/// cookie (session, login binding, logout return, antiforgery) is written, read, and finished
+/// under its plain-HTTP profile: no Secure attribute, no cookie-name prefix, unchanged
+/// HttpOnly/SameSite/Path scope. The protocol semantics (single-use state, browser binding,
+/// one-time code, CSRF validation) are exactly the HTTPS ones.
 /// </summary>
-public sealed class ClientIntranetHttpProfileTests
+public sealed class ClientHttpCookieProfileTests
 {
     private const string ClientId = "client-pack-app";
     private const string ClientSecret = "client-pack-test-secret";
@@ -31,8 +31,9 @@ public sealed class ClientIntranetHttpProfileTests
     private const string LogoutReturnName = SessionName + "-logout-return";
 
     private static async Task<(WebApplicationFactory<ConsumerApp.Program> Consumer, CrossServerBrowser Browser)>
-        CreateIntranetAppAsync(FakeIdentityProvider authority)
+        CreatePlainHttpAppAsync(FakeIdentityProvider authority)
     {
+        // No opt-in list: the plain-http Authority and RedirectUri are accepted as configured.
         var consumer = ConsumerAppTestServer.Create(
             Authority,
             ClientId,
@@ -40,9 +41,7 @@ public sealed class ClientIntranetHttpProfileTests
             RedirectUri,
             authority.Server.CreateHandler(),
             postLogoutRedirectUri: PostLogoutRedirectUri,
-            environment: "Production",
-            configureTestServices: services => services.PostConfigure<SignaCoreHostedLoginOptions>(
-                options => options.IntranetHttpOrigins = [Authority, ConsumerOrigin]));
+            environment: "Production");
         var browser = ConsumerAppTestServer.CreateBrowserOverAuthority(
             consumer,
             authority.Server.CreateHandler(),
@@ -76,8 +75,8 @@ public sealed class ClientIntranetHttpProfileTests
             binding[..binding.IndexOf('=')],
             StringComparison.Ordinal);
 
-        // The listed origin admits the authority: the authorize redirect targets the intranet
-        // HTTP discovery endpoints.
+        // The plain-http authority is admitted as configured: the authorize redirect targets
+        // its HTTP discovery endpoints.
         var authorizeUrl = startResponse.Headers.Location!.ToString();
         Assert.StartsWith(Authority + "/authorize", authorizeUrl, StringComparison.Ordinal);
 
@@ -87,7 +86,7 @@ public sealed class ClientIntranetHttpProfileTests
         Assert.Equal(HttpStatusCode.Found, authorizeResponse.StatusCode);
 
         // The callback finishes the one-time binding cookie and writes the session cookie under
-        // the intranet profile.
+        // the plain-HTTP profile.
         using var callback = new HttpRequestMessage(
             HttpMethod.Get, authorizeResponse.Headers.Location!);
         var callbackResponse = await browser.SendOnConsumerAsync(
@@ -115,7 +114,7 @@ public sealed class ClientIntranetHttpProfileTests
             csrf, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        // The antiforgery cookie of the intranet profile: no Secure attribute, everything else
+        // The antiforgery cookie of the plain-HTTP profile: no Secure attribute, everything else
         // unchanged.
         Assert.True(response.Headers.TryGetValues("Set-Cookie", out var cookies));
         var antiforgery = Assert.Single(cookies);
@@ -129,10 +128,10 @@ public sealed class ClientIntranetHttpProfileTests
     }
 
     [Fact]
-    public async Task TheIntranetProfile_ServesTheWholeSurfaceWithUnsecuredScopedCookies()
+    public async Task ThePlainHttpProfile_ServesTheWholeSurfaceWithUnsecuredScopedCookies()
     {
         await using var authority = await FakeIdentityProvider.StartAsync(baseAddress: Authority);
-        var (consumer, browser) = await CreateIntranetAppAsync(authority);
+        var (consumer, browser) = await CreatePlainHttpAppAsync(authority);
         await using var _ = consumer;
         using var __ = browser;
 
@@ -198,18 +197,16 @@ public sealed class ClientIntranetHttpProfileTests
     }
 
     [Fact]
-    public async Task AnUnlistedConsumerOrigin_IsRejectedAtStartupEvenWithAnIntranetList()
+    public async Task AStructurallyIllegalHttpAuthority_IsStillRejectedAtStartup()
     {
         await using var authority = await FakeIdentityProvider.StartAsync(baseAddress: Authority);
         using var consumer = ConsumerAppTestServer.Create(
-            Authority,
+            Authority + "/identity",
             ClientId,
             ClientSecret,
             RedirectUri,
             authority.Server.CreateHandler(),
-            environment: "Production",
-            configureTestServices: services => services.PostConfigure<SignaCoreHostedLoginOptions>(
-                options => options.IntranetHttpOrigins = [Authority]));
+            environment: "Production");
         var exception = Assert.ThrowsAny<Exception>(() => consumer.CreateClient());
         var text = exception.ToString();
         for (var inner = exception; inner is not null; inner = inner.InnerException)
@@ -217,26 +214,6 @@ public sealed class ClientIntranetHttpProfileTests
             text += Environment.NewLine + inner.Message;
         }
 
-        Assert.Contains("SignaCoreHostedLoginOptions.RedirectUri", text, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task AnEmptyListOverTheSameWire_KeepsTheHttpsOnlyGate()
-    {
-        await using var authority = await FakeIdentityProvider.StartAsync(baseAddress: Authority);
-        using var consumer = ConsumerAppTestServer.Create(
-            Authority,
-            ClientId,
-            ClientSecret,
-            RedirectUri,
-            authority.Server.CreateHandler(),
-            environment: "Production",
-            configureTestServices: services => services.PostConfigure<SignaCoreHostedLoginOptions>(
-                options => options.IntranetHttpOrigins = []));
-        var exception = Assert.ThrowsAny<Exception>(() => consumer.CreateClient());
-        Assert.Contains(
-            "SignaCoreHostedLoginOptions.Authority",
-            exception.ToString(),
-            StringComparison.Ordinal);
+        Assert.Contains("SignaCoreHostedLoginOptions.Authority", text, StringComparison.Ordinal);
     }
 }
