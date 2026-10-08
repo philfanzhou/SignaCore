@@ -83,6 +83,8 @@ def run(args):
         logs = docker("logs", "--since", since, args.app)
         require(("Remote log shipping to Loki is disabled" in logs) == loki_disabled,
                 "The restart Loki classification did not match the saved fixture.")
+        # Since ServiceMantle 0.3.2 the "disabled" warning fires only for a stored but unusable
+        # endpoint: a structurally valid http endpoint is accepted, and an unset one is silent.
         require(("OTLP trace export is disabled" in logs) == otlp_disabled,
                 "The restart OTLP classification did not match the saved fixture.")
         return api()
@@ -93,7 +95,9 @@ def run(args):
         "|| '{\"loki.uri\":\"http://loki.example.com:3100\","
         "\"opentelemetry.otlp_endpoint\":\"http://collector.example.com:4317\"}'::jsonb)::text, "
         "version=version+1 WHERE service_id='signacore'")
-    status, current, headers = restart()
+    # The fixture's plain-http OTLP endpoint is structurally accepted since ServiceMantle 0.3.2,
+    # so the restart logs carry no OTLP disabled warning while the stored value is present.
+    status, current, headers = restart(otlp_disabled=False)
     require(status == 200, "Legacy optional settings were not readable.")
     require(api(authenticated=False)[0] == 401, "Anonymous settings query was accepted.")
     for value in current["values"]:
@@ -112,13 +116,13 @@ def run(args):
     require(api("POST", {"LOKI.URI": "http://loki.example.com:3100"}, after["version"])[0] == 400,
             "Explicit unchanged invalid Loki was accepted.")
     require(stored() == after and audits() == count + 1, "Invalid update left partial writes.")
-    status, current, headers = restart()
+    status, current, headers = restart(otlp_disabled=False)
     require(status == 200 and headers["X-SignaCore-Running-Configuration-Version"] == str(after["version"]),
             "Restart did not activate the saved version while leaving legacy sinks disabled.")
     status, repaired, _ = api("POST", {"loki.uri": "https://127.0.0.1:3100",
         "loki.authorization": "Basic dGVzdDpjYW5hcnk="}, current["version"])
     require(status == 200, "Loki repair was blocked by the other legacy optional group.")
-    restart(loki_disabled=False)
+    restart(loki_disabled=False, otlp_disabled=False)
     status, disabled, _ = api("POST", {"loki.uri": None, "loki.authorization": None,
         "opentelemetry.otlp_endpoint": None}, repaired["version"])
     require(status == 200, "Explicit optional group disable failed.")
