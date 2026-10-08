@@ -57,13 +57,14 @@ registered, and neither failure repairs the configuration.
    [step 2](#2-migrate-the-access-token-audience).
 3. **Register the exact callback.** `POST /api/admin/apps/{appId}/oidc/redirect-uris` with
    `{"kind":"Redirect","uris":["https://orders.example/signin-oidc"]}`. A redirect URI is an
-   absolute HTTPS URI of at most 500 ASCII characters with no fragment, user info, or wildcard, and
-   at most ten are registered per kind. Registration lowercases the scheme and host, removes a
-   default port, and turns an empty path into `/`; requests are then compared with the stored value
-   byte for byte, so a trailing slash, path case, or query difference does not match. Custom URI
-   schemes are rejected. Development alone also accepts `http://127.0.0.1:<port>` and
-   `http://[::1]:<port>`; `localhost` is always rejected. To return users somewhere after sign-out,
-   register a post-logout URI the same way with `"kind":"PostLogout"`.
+   absolute `http` or `https` URI of at most 500 ASCII characters with no fragment, user info, or
+   wildcard, and at most ten are registered per kind. Registration lowercases the scheme and host,
+   removes a default port, and turns an empty path into `/`; requests are then compared with the
+   stored value byte for byte, so a trailing slash, path case, or query difference does not match.
+   Custom URI schemes are rejected and `localhost` is always rejected; every other host, including
+   the loopback IP literals `127.0.0.1` and `[::1]`, is accepted over either scheme in every
+   environment. To return users somewhere after sign-out, register a post-logout URI the same way
+   with `"kind":"PostLogout"`.
 4. **Enable the Code flow.** `PUT /api/admin/apps/{appId}/oidc-policy` with
    `{"clientType":"Confidential","allowAuthorizationCode":true,"allowedScopes":["openid","profile"],"allowRefreshToken":false,"identitySessionMaxAgeSeconds":null}`.
    - `allowedScopes` always contains `openid`; add `profile` to receive the username and nickname,
@@ -326,20 +327,22 @@ the SignaCore session, and token issuance.
 Redirect URIs over `http` and `https` are accepted equally in every environment — transport is a
 deployment decision ([ADR 0008](../adr/0008-transport-security-is-a-deployment-decision.md)); see
 [plain-HTTP deployments](../oidc/HttpTesting.md) and the
-[redirect canonical form](../oidc/CanonicalSemanticModel.md#product-stages).
-The isolated HTTP identity/CSRF Cookie carrier is also implemented at exact allowed request origins;
-official dual-end published-image/browser acceptance remains the complete-capability release gate.
+[redirect canonical form](../oidc/CanonicalSemanticModel.md#artifact--persistence-relationship).
+The identity and login antiforgery cookies are derived the same way, with no allowlist and no
+environment name: each request rides the Secure `__Host-` carriers over `https` or the neutral
+non-Secure carriers over plain `http`, selected from the trusted effective request scheme alone
+([cookie carrier](../oidc/CanonicalSemanticModel.md#plain-http-cookie-carrier-ps-18--ps-19)).
+The dual-end official published-image browser acceptance for plain HTTP is still pending, now
+sequenced behind the upcoming 0.2.0 release.
 
-Applications integrating through the official
+The official
 [`SignaCore.Client.AspNetCore`](https://www.nuget.org/packages/SignaCore.Client.AspNetCore) package
-can additionally declare an explicit intranet HTTP deployment on the client side:
-`options.IntranetHttpOrigins` holds the exact private-network HTTP origins of the SignaCore host
-and of the consumer itself (for example `http://192.168.55.10:5002` and
-`http://192.168.55.10:5020`), and the package then accepts those origins — and only those — for
-the Authority, the redirect URIs, and every Discovery endpoint, in every environment name
-including Production, while writing all its cookies for plain HTTP. The client-side list is the
-consumer's own deployment statement and is independent of the host-side Testing-gated list above;
-the host must still admit the consumer's HTTP redirect origin from its side. See the package
-README's
-[intranet HTTP deployments](https://github.com/philfanzhou/SignaCore/blob/main/src/SignaCore.Client.AspNetCore/README.md#intranet-http-deployments-explicit-opt-in)
-section for the exact origin grammar, the cookie profile, and the caller responsibilities.
+follows the same decision: its Authority, redirect URIs, post-logout redirect URIs, and Discovery
+endpoints accept `http` and `https` equally in every environment name with no allowlist to
+configure, and its cookies follow the configured redirect URI's scheme — the historical Secure
+profile byte for byte over `https`, the neutral profile without name prefixes over plain `http`.
+See the package README's
+[HTTP deployments](https://github.com/philfanzhou/SignaCore/blob/main/src/SignaCore.Client.AspNetCore/README.md#http-deployments)
+section for the structural rules, the cookie profile, and the caller responsibilities, or
+[Migrating from 0.1.15](https://github.com/philfanzhou/SignaCore/blob/main/src/SignaCore.Client.AspNetCore/README.md#migrating-from-0115)
+when upgrading from the retired intranet HTTP opt-in.
