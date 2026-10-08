@@ -26,11 +26,10 @@ internal static class SignaCoreLogging
 
     /// <summary>
     /// The normal host's pipeline. Loki is enabled only for an allowed absolute HTTP(S) endpoint —
-    /// HTTPS by default, plain HTTP behind the explicit <c>loki.allow_insecure_http</c> opt-in —
-    /// together with either a usable Authorization value or the explicit
-    /// <c>loki.allow_no_authentication</c> opt-in and no stored credential; every other stored
-    /// combination keeps Loki off, and the caller reports an unusable one through
-    /// <see cref="WriteLokiWarning"/> once the host is built.
+    /// plain <c>http</c> and <c>https</c> are accepted alike — together with either a usable
+    /// Authorization value or the explicit <c>loki.allow_no_authentication</c> opt-in and no stored
+    /// credential; every other stored combination keeps Loki off, and the caller reports an
+    /// unusable one through <see cref="WriteLokiWarning"/> once the host is built.
     /// </summary>
     /// <remarks>
     /// The values are read from the activated setting snapshot itself, never from

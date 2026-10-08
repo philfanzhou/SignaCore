@@ -54,7 +54,7 @@ public sealed class ConsulDiscoveryRegistrationTests : IAsyncLifetime
     private const string AdminUsername = "consul_admin";
     private const string AdminPassword = "ConsulAdmin123";
     private const string ConsulToken = "consul-acl-token-for-characterization";
-    private const string ManagementCookieName = "__Host-ServiceMantle.Management";
+    private const string ManagementCookieName = "ServiceMantle.Management";
     private const string AdvertisementAddress = "10.9.8.7";
     private const int AdvertisementPort = 41234;
 

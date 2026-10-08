@@ -8,7 +8,9 @@ namespace SignaCore.Tests.Host.Configuration;
 /// <summary>
 /// The diagnostics overload of <c>ValidateOptionalSettings</c> must be the same state rule the
 /// candidate path uses: the same legacy-keyed inputs produce the same closed key + fixed-code
-/// issues, over exactly the three optional telemetry keys and the three fixed codes.
+/// issues, over exactly the three optional telemetry keys and the two fixed codes they can still
+/// emit (the endpoints accept plain http and https alike, so no optional rule carries the
+/// https-required code any more).
 /// </summary>
 public sealed class OptionalSettingsDiagnosticsRuleTests
 {
@@ -20,7 +22,6 @@ public sealed class OptionalSettingsDiagnosticsRuleTests
     private static readonly IReadOnlyList<string> ClosedCodes =
     [
         SignaCoreSettingCompositeValidator.RequiredCode,
-        SignaCoreSettingCompositeValidator.HttpsRequiredCode,
         SignaCoreSettingCompositeValidator.RuntimeInvalidCode
     ];
 
@@ -42,13 +43,21 @@ public sealed class OptionalSettingsDiagnosticsRuleTests
             Array.Empty<(string, string)>()
         },
         {
-            "loki-http-uri",
+            "plain-http-with-authorization",
             new Dictionary<string, string>
             {
                 [SystemSettingKeys.LokiUri] = "http://loki.example.com:3100",
                 [SystemSettingKeys.LokiAuthorization] = "Basic dGVzdDpjYW5hcnk="
             },
-            [("loki.uri", SignaCoreSettingCompositeValidator.HttpsRequiredCode)]
+            Array.Empty<(string, string)>()
+        },
+        {
+            "plain-http-without-authorization",
+            new Dictionary<string, string>
+            {
+                [SystemSettingKeys.LokiUri] = "http://loki.example.com:3100"
+            },
+            [("loki.authorization", SignaCoreSettingCompositeValidator.RequiredCode)]
         },
         {
             "loki-non-absolute-uri",
@@ -90,7 +99,15 @@ public sealed class OptionalSettingsDiagnosticsRuleTests
             {
                 [SystemSettingKeys.OpenTelemetryOtlpEndpoint] = "http://collector.example.com:4317"
             },
-            [("opentelemetry.otlp_endpoint", SignaCoreSettingCompositeValidator.HttpsRequiredCode)]
+            Array.Empty<(string, string)>()
+        },
+        {
+            "otlp-wrong-scheme-endpoint",
+            new Dictionary<string, string>
+            {
+                [SystemSettingKeys.OpenTelemetryOtlpEndpoint] = "ftp://collector.example.com:4317"
+            },
+            [("opentelemetry.otlp_endpoint", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
         },
         {
             "otlp-non-absolute-endpoint",
@@ -104,13 +121,13 @@ public sealed class OptionalSettingsDiagnosticsRuleTests
             "both-groups-invalid",
             new Dictionary<string, string>
             {
-                [SystemSettingKeys.LokiUri] = "http://loki.example.com",
-                [SystemSettingKeys.OpenTelemetryOtlpEndpoint] = "http://collector.example.com"
+                [SystemSettingKeys.LokiUri] = "loki.example.com/loki/api/v1/push",
+                [SystemSettingKeys.OpenTelemetryOtlpEndpoint] = "ftp://collector.example.com"
             },
             [
-                ("loki.uri", SignaCoreSettingCompositeValidator.HttpsRequiredCode),
+                ("loki.uri", SignaCoreSettingCompositeValidator.RuntimeInvalidCode),
                 ("loki.authorization", SignaCoreSettingCompositeValidator.RequiredCode),
-                ("opentelemetry.otlp_endpoint", SignaCoreSettingCompositeValidator.HttpsRequiredCode)
+                ("opentelemetry.otlp_endpoint", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)
             ]
         },
         {
@@ -124,35 +141,13 @@ public sealed class OptionalSettingsDiagnosticsRuleTests
             Array.Empty<(string, string)>()
         },
         {
-            "explicit-http-opt-in-with-authorization",
-            new Dictionary<string, string>
-            {
-                [SystemSettingKeys.LokiUri] = "http://loki.example.com:3100",
-                [SystemSettingKeys.LokiAuthorization] = "Basic dGVzdDpjYW5hcnk=",
-                [SystemSettingKeys.LokiAllowInsecureHttp] = "true"
-            },
-            Array.Empty<(string, string)>()
-        },
-        {
             "explicit-no-authentication-opt-in",
             new Dictionary<string, string>
             {
                 [SystemSettingKeys.LokiUri] = "http://loki.example.com:3100",
-                [SystemSettingKeys.LokiAllowInsecureHttp] = "true",
                 [SystemSettingKeys.LokiAllowNoAuthentication] = "true"
             },
             Array.Empty<(string, string)>()
-        },
-        {
-            "http-opt-in-still-requires-https-without-the-switch",
-            new Dictionary<string, string>
-            {
-                [SystemSettingKeys.LokiUri] = "http://loki.example.com:3100",
-                [SystemSettingKeys.LokiAllowNoAuthentication] = "true"
-            },
-            [
-                ("loki.uri", SignaCoreSettingCompositeValidator.HttpsRequiredCode)
-            ]
         },
         {
             "no-authentication-conflicts-with-a-stored-credential",
@@ -190,8 +185,8 @@ public sealed class OptionalSettingsDiagnosticsRuleTests
         var issues = SignaCoreSettingCompositeValidator.ValidateOptionalSettings(
             new Dictionary<string, string>
             {
-                [SystemSettingKeys.LokiUri] = "http://loki.example.com",
-                [SystemSettingKeys.LokiAuthorization] = "Basic dGVzdDpjYW5hcnk=",
+                [SystemSettingKeys.LokiUri] = "http://loki.example.com:3100",
+                [SystemSettingKeys.LokiAuthorization] = "bad\nheader",
                 [SystemSettingKeys.OpenTelemetryOtlpEndpoint] = "not a url"
             }).ToList();
 
@@ -208,9 +203,8 @@ public sealed class OptionalSettingsDiagnosticsRuleTests
     {
         var legacy = new Dictionary<string, string>
         {
-            [SystemSettingKeys.LokiUri] = "http://loki.example.com",
-            [SystemSettingKeys.LokiAuthorization] = "Basic dGVzdDpjYW5hcnk=",
-            [SystemSettingKeys.OpenTelemetryOtlpEndpoint] = "http://collector.example.com"
+            [SystemSettingKeys.LokiUri] = "loki.example.com/loki/api/v1/push",
+            [SystemSettingKeys.OpenTelemetryOtlpEndpoint] = "ftp://collector.example.com"
         };
 
         var both = SignaCoreSettingCompositeValidator
@@ -222,7 +216,10 @@ public sealed class OptionalSettingsDiagnosticsRuleTests
 
         Assert.Empty(both);
         Assert.Equal(
-            [("loki.uri", SignaCoreSettingCompositeValidator.HttpsRequiredCode)],
+            [
+                ("loki.uri", SignaCoreSettingCompositeValidator.RuntimeInvalidCode),
+                ("loki.authorization", SignaCoreSettingCompositeValidator.RequiredCode)
+            ],
             lokiOnly.Select(error => (error.Key!, error.ErrorCode)).ToList());
     }
 }

@@ -28,7 +28,7 @@ namespace SignaCore.Tests.Integration;
 [UsesProcessWideSqlitePoolClearing]
 public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
 {
-    private const string ManagementCookieName = "__Host-ServiceMantle.Management";
+    private const string ManagementCookieName = "ServiceMantle.Management";
     private const string AdminUsername = "login_antiforgery_admin";
     private const string AdminPassword = "LoginAntiforgery123!";
 

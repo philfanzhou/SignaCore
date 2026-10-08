@@ -22,10 +22,11 @@ public sealed class OtlpEndpointStateTests
     [InlineData("  ", false, false)]
     [InlineData("https://collector.example.com:4317", true, false)]
     [InlineData("https://collector.example.com:4317/", true, false)]
-    [InlineData("http://collector.example.com:4317", false, true)]
+    [InlineData("http://collector.example.com:4317", true, false)]
     [InlineData("https://user:pass@collector.example.com", false, true)]
     [InlineData("https://collector.example.com/?x=1", false, true)]
     [InlineData("https://collector.example.com/#x", false, true)]
+    [InlineData("ftp://collector.example.com:4317", false, true)]
     [InlineData("collector.example.com:4317", false, true)]
     public void Classify_YieldsOneStatePerStoredValue(string? value, bool enabled, bool unusable)
     {
@@ -37,10 +38,10 @@ public sealed class OtlpEndpointStateTests
     }
 
     [Theory]
-    [InlineData("http://collector.example.com:4317", SignaCoreSettingCompositeValidator.HttpsRequiredCode)]
     [InlineData("https://user:pass@collector.example.com", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
     [InlineData("https://collector.example.com/?x=1", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
     [InlineData("https://collector.example.com/#x", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
+    [InlineData("ftp://collector.example.com:4317", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
     [InlineData("collector.example.com:4317", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
     public void UpdateValidation_RejectsUnusableEndpointsWithClosedCodes(string endpoint, string code)
     {
@@ -53,7 +54,8 @@ public sealed class OtlpEndpointStateTests
     [Theory]
     [InlineData(null)]
     [InlineData("https://collector.example.com:4317")]
-    public void UpdateValidation_AcceptsEmptyOrHttpsEndpoints(string? endpoint)
+    [InlineData("http://collector.example.com:4317")]
+    public void UpdateValidation_AcceptsEmptyOrHttpOrHttpsEndpoints(string? endpoint)
     {
         Assert.Empty(Validate(endpoint, validateManagementUpdateRules: true));
     }
@@ -61,6 +63,8 @@ public sealed class OtlpEndpointStateTests
     [Fact]
     public void SnapshotValidation_KeepsAcceptingAPlainHttpEndpointAnOlderReleaseStored()
     {
+        // Plain http used to be tolerated only at startup; since ServiceMantle 0.3.2 it is a
+        // first-class usable endpoint everywhere.
         const string endpoint = "http://collector.example.com:4317";
 
         Assert.Empty(Validate(endpoint, validateManagementUpdateRules: false));
@@ -71,7 +75,7 @@ public sealed class OtlpEndpointStateTests
 
     [Theory]
     [InlineData(null, false)]
-    [InlineData("http://collector.example.com:4317", false)]
+    [InlineData("http://collector.example.com:4317", true)]
     [InlineData("https://collector.example.com:4317", true)]
     public void Composition_OnlyUsableSnapshotEnablesGrpcTraces(string? endpoint, bool enabled)
     {

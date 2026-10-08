@@ -265,7 +265,7 @@ public sealed class OAuthAuthorizationSessionReuseTests : IClassFixture<Identity
             _fixture.Services, client, ReuseUser, ReusePassword);
 
         using var response = await client.SendAsync(
-            AuthorizeRequest(BuildSuccessAuthorizeUrl(), managementCookie: "__Host-ServiceMantle.Management=management-value"),
+            AuthorizeRequest(BuildSuccessAuthorizeUrl(), managementCookie: "ServiceMantle.Management=management-value"),
             TestContext.Current.CancellationToken);
 
         await AssertLoginFallbackAsync(response);

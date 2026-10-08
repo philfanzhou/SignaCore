@@ -420,7 +420,9 @@ internal static class InstallationStartup
             new BootstrapDbContextFactory(databaseOptions));
         using var loader = new ServiceSettingSnapshotLoader(
             InstallationStores.ServiceId,
-            new ServiceSettingStoreSnapshotSource(store, registry),
+            // Retired keys are dropped from the stored read: a leftover row from an older release
+            // must not fail the activation with an unknown-key error (RetiredSettingKeys).
+            new RetiredSettingKeyFilterSource(new ServiceSettingStoreSnapshotSource(store, registry)),
             registry,
             accessor,
             SharedSettingComposition.CreateRootKeySource(masterKeyProvider));

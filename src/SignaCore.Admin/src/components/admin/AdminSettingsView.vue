@@ -111,9 +111,8 @@ const settingLabels: Record<string, string> = {
   "ldap.directories": "LDAP 目录",
   "loki.uri": "Loki 地址",
   "loki.authorization": "Loki 授权头",
-  "loki.allow_insecure_http": "允许 Loki 使用 HTTP",
   "loki.allow_no_authentication": "Loki 无认证模式",
-  "opentelemetry.otlp_endpoint": "OpenTelemetry 地址（HTTPS）",
+  "opentelemetry.otlp_endpoint": "OpenTelemetry 地址",
   "consul.host": "Consul 主机",
   "consul.port": "Consul 端口",
   "consul.token": "Consul 令牌",
@@ -133,8 +132,6 @@ function settingLabel(setting: AdminSettingValue) {
 
 /** English purpose notes for the keys whose meaning is not obvious from the label alone. */
 const settingHints: Record<string, string> = {
-  "loki.allow_insecure_http":
-    "Explicitly permits a plain-HTTP Loki endpoint; an HTTPS endpoint needs no switch. Requires a restart.",
   "loki.allow_no_authentication":
     "Explicitly selects no authentication: no Authorization header is sent, and any stored Loki authorization must be deleted in the same save. Requires a restart.",
 };

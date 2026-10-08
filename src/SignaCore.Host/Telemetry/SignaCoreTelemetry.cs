@@ -113,8 +113,8 @@ internal static class SignaCoreTelemetry
 
         logger.LogWarning(
             "OTLP trace export is disabled because the stored OpenTelemetry:OtlpEndpoint is not an " +
-            "absolute https URL without user info, query, or fragment. Correct it in the settings " +
-            "page and restart the service.");
+            "absolute http or https URL without user info, query, or fragment. Correct it in the " +
+            "settings page and restart the service.");
     }
 
     /// <summary>Meters SignaCore selects for export through the shared ServiceMantle meter provider.</summary>

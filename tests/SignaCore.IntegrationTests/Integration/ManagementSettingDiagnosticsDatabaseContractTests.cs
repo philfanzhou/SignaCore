@@ -27,11 +27,10 @@ public sealed class ManagementSettingDiagnosticsDatabaseContractTests
 {
     private const string Root = "/management/v1/settings";
     private const string Diagnostics = Root + "/diagnostics";
-    private const string LegacyOtlp = "http://collector.example.com:4317";
+    private const string LegacyOtlp = "ftp://collector.example.com:4317";
     private const string ValidAuthorization = "Basic dGVzdDpjYW5hcnk=";
     private const string RunningHeader = "X-SignaCore-Running-Configuration-Version";
 
-    private static readonly string HttpsRequired = SignaCoreSettingCompositeValidator.HttpsRequiredCode;
     private static readonly string Required = SignaCoreSettingCompositeValidator.RequiredCode;
     private static readonly string RuntimeInvalid = SignaCoreSettingCompositeValidator.RuntimeInvalidCode;
 
@@ -39,7 +38,8 @@ public sealed class ManagementSettingDiagnosticsDatabaseContractTests
     {
         { false, null, null, null, [] },
         { false, "http://loki.example.com:3100", null, null,
-            [("loki.uri", HttpsRequired), ("loki.authorization", Required)] },
+            [("loki.authorization", Required)] },
+        { false, "http://loki.example.com:3100", ValidAuthorization, null, [] },
         { false, "https://loki.example.com", null, null,
             [("loki.authorization", Required)] },
         { false, null, ValidAuthorization, null,
@@ -47,12 +47,13 @@ public sealed class ManagementSettingDiagnosticsDatabaseContractTests
         { false, "https://loki.example.com", "Basic bad\nheader", null,
             [("loki.authorization", RuntimeInvalid)] },
         { false, null, null, LegacyOtlp,
-            [("opentelemetry.otlp_endpoint", HttpsRequired)] },
-        { false, "http://loki.example.com:3100", ValidAuthorization, LegacyOtlp,
-            [("loki.uri", HttpsRequired), ("opentelemetry.otlp_endpoint", HttpsRequired)] },
+            [("opentelemetry.otlp_endpoint", RuntimeInvalid)] },
+        { false, "http://loki.example.com:3100", null, LegacyOtlp,
+            [("loki.authorization", Required), ("opentelemetry.otlp_endpoint", RuntimeInvalid)] },
         { true, null, null, null, [] },
         { true, "http://loki.example.com:3100", null, null,
-            [("loki.uri", HttpsRequired), ("loki.authorization", Required)] },
+            [("loki.authorization", Required)] },
+        { true, "http://loki.example.com:3100", ValidAuthorization, null, [] },
         { true, "https://loki.example.com", null, null,
             [("loki.authorization", Required)] },
         { true, null, ValidAuthorization, null,
@@ -60,9 +61,9 @@ public sealed class ManagementSettingDiagnosticsDatabaseContractTests
         { true, "https://loki.example.com", "Basic bad\nheader", null,
             [("loki.authorization", RuntimeInvalid)] },
         { true, null, null, LegacyOtlp,
-            [("opentelemetry.otlp_endpoint", HttpsRequired)] },
-        { true, "http://loki.example.com:3100", ValidAuthorization, LegacyOtlp,
-            [("loki.uri", HttpsRequired), ("opentelemetry.otlp_endpoint", HttpsRequired)] }
+            [("opentelemetry.otlp_endpoint", RuntimeInvalid)] },
+        { true, "http://loki.example.com:3100", null, LegacyOtlp,
+            [("loki.authorization", Required), ("opentelemetry.otlp_endpoint", RuntimeInvalid)] }
     };
 
     [Theory]
@@ -227,7 +228,7 @@ public sealed class ManagementSettingDiagnosticsDatabaseContractTests
         // Touching the OTLP group with another unusable endpoint is a definite validation
         // failure: fixed top-level code plus the closed per-key list.
         using var touched = await PostAsync(admin, before.Version,
-            new() { ["opentelemetry.otlp_endpoint"] = "http://new-collector.example.com" });
+            new() { ["opentelemetry.otlp_endpoint"] = "https://new-collector.example.com/#fragment" });
         Assert.Equal(HttpStatusCode.BadRequest, touched.StatusCode);
         var touchedBody = await touched.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("management.request.invalid", touchedBody, StringComparison.Ordinal);
@@ -235,7 +236,7 @@ public sealed class ManagementSettingDiagnosticsDatabaseContractTests
         var touchedJson = touchedDocument.RootElement;
         Assert.Equal(["errorCode", "validationErrors"],
             touchedJson.EnumerateObject().Select(property => property.Name).OrderBy(name => name).ToList());
-        Assert.Equal([("opentelemetry.otlp_endpoint", HttpsRequired)],
+        Assert.Equal([("opentelemetry.otlp_endpoint", RuntimeInvalid)],
             touchedJson.GetProperty("validationErrors").EnumerateArray().Select(issue =>
                 (issue.GetProperty("key").GetString()!, issue.GetProperty("errorCode").GetString()!)).ToList());
 

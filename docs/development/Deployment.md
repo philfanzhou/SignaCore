@@ -395,12 +395,14 @@ saved-versus-running version pair, and the recovery actions below; older HTTP cl
 endpoint directly through the official API.
 
 Explicitly changing any Loki group key requires a combination the strict rules accept: a valid
-HTTPS endpoint with usable Authorization, an explicitly opted-in plain-HTTP endpoint
-(`loki.allow_insecure_http`), or the explicit no-authentication opt-in
-(`loki.allow_no_authentication`) with any stored `loki.authorization` deleted in the same batch —
-or deletion of the whole Loki group in one batch with `value=null`. Repair OTLP
-with a valid HTTPS endpoint or delete `opentelemetry.otlp_endpoint`. Touching either explicit
-opt-in switch selects the whole Loki group for the strict rules, exactly like the two legacy keys.
+absolute `http` or `https` endpoint with usable Authorization (the scheme is a deployment
+decision), or the explicit no-authentication opt-in (`loki.allow_no_authentication`) with any
+stored `loki.authorization` deleted in the same batch — or deletion of the whole Loki group in
+one batch with `value=null`. Repair OTLP with a valid absolute `http` or `https` endpoint or
+delete `opentelemetry.otlp_endpoint`. Touching the explicit opt-in switch selects the whole Loki
+group for the strict rules, exactly like the two legacy keys. The retired
+`loki.allow_insecure_http` row is ignored by every read and rejected as an unknown key on
+updates; dropping the stored row with `value=null` after upgrading is optional housekeeping.
 An unchanged value included in a command still counts as a change to its group and must pass
 strict validation. A definite
 validation rejection (HTTP 400) keeps the fixed `management.request.invalid` error code and adds a
@@ -410,7 +412,7 @@ activate the final configuration. The running-version header continues to descri
 process until restart.
 
 In the console, **Disable Loki** drafts the atomic disable — the whole Loki group (endpoint,
-authorization, and both explicit opt-in switches) submitted as `null` in
+authorization, and the explicit opt-in switch) submitted as `null` in
 the next save batch — and **Remove OTLP endpoint** drafts the same for the OTLP key. A normal
 empty sensitive input still means "keep the current value", so nothing is deleted silently. Drafts
 can be undone before saving and survive conflicts and rejections; restart after saving to
@@ -418,9 +420,20 @@ activate. Old UI or HTTP-only clients keep working: both ignore the new panel/fi
 perform the same repair or disable through the official settings API.
 
 Core validation, root-key/decryption failures, and database failures remain closed; recovery never
-enables a transport or authentication mode implicitly — both opt-ins default to `false` and change
-only through an explicit management update. See [Shared settings recovery](SharedSettings.md#legacy-optional-telemetry-recovery).
-The two opt-in keys add no schema change on either provider. Before restoring an older binary
-that does not know them, atomically delete both keys through this version's management interface
+enables an authentication mode implicitly — the opt-in defaults to `false` and changes only
+through an explicit management update. See [Shared settings recovery](SharedSettings.md#legacy-optional-telemetry-recovery).
+The opt-in key adds no schema change on either provider. Before restoring an older binary
+that does not know it, atomically delete the key through this version's management interface
 (or the whole Loki group) and leave a combination the older release accepts; an older release may
 refuse to start on unknown persisted keys. Preserve the database and root key across the rollback.
+
+## ServiceMantle 0.3.2 upgrade notes
+
+The shared management session now follows the ServiceMantle.Web 0.3.2 defaults: the console's
+session cookie is named `ServiceMantle.Management` (previously `__Host-ServiceMantle.Management`)
+and its `Secure` attribute follows the request scheme (`SameAsRequest`, previously always
+`Secure`). Existing management sessions end once at the upgrade — every administrator signs in
+again on the first visit — and that one-time re-login is expected; nothing else about the session
+changes. Deployments that need the previous transport posture terminate TLS at a reverse proxy in
+front of the service. The Loki and OTLP endpoints accept plain `http` and `https` alike since the
+same upgrade; treat transport security as a deployment decision there too.

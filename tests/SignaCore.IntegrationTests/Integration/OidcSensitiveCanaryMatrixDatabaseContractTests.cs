@@ -39,18 +39,12 @@ public sealed partial class OidcSensitiveCanaryMatrixDatabaseContractTests
         using var console = new ConsoleCapture();
         await using var harness = await Harness.CreateAsync(new Dictionary<string, string>
         {
-            [SystemSettingKeys.LokiUri] = loki.HttpsAddress,
+            [SystemSettingKeys.LokiUri] = loki.HttpAddress,
             [SystemSettingKeys.LokiAuthorization] = "Bearer " + Guid.NewGuid().ToString("N")
         });
         await EnableFlowsAsync(harness);
-        void Configure(IServiceCollection services)
-        {
-            var options = RegisteredLokiOptions(services);
-            options.Endpoint = new Uri(loki.HttpAddress);
-            options.AllowInsecureLoopbackForTesting = true;
-        }
-        var a = harness.CreateHost(Configure, captureLogs: false);
-        var b = harness.CreateHost(Configure, captureLogs: false);
+        var a = harness.CreateHost(captureLogs: false);
+        var b = harness.CreateHost(captureLogs: false);
         var marker = "matrix-probe-" + Guid.NewGuid().ToString("N");
         try
         {
@@ -135,7 +129,6 @@ public sealed partial class OidcSensitiveCanaryMatrixDatabaseContractTests
             await harness.ExecuteAsync("DELETE FROM oidc_rate_limit_buckets");
             using (var fault = harness.CreateHost(services =>
                    {
-                       Configure(services);
                        services.Replace(ServiceDescriptor.Singleton<IAuditService>(new OidcSensitiveValueMatrixTests.ThrowingAuditService(exception => scan.Capture("exception", exception.ToString()), failLogin: true)));
                    }, captureLogs: false))
                 await AuditRollbackAsync(harness, a, fault, scan);

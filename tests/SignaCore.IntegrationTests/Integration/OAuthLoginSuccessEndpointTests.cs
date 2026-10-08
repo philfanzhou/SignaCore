@@ -198,7 +198,7 @@ public sealed class OAuthLoginSuccessEndpointTests : IClassFixture<IdentityServe
         var identitySetCookie = Assert.Single(setCookies);
         Assert.StartsWith(
             IdentitySessionDefaults.CookieName + "=", identitySetCookie, StringComparison.Ordinal);
-        Assert.Null(GetSetCookieHeader(response, "__Host-ServiceMantle.Management"));
+        Assert.Null(GetSetCookieHeader(response, "ServiceMantle.Management"));
 
         // The PS-18 wire attributes: host-only, secure, http-only, lax, root path, no domain, and
         // no expiry (IsPersistent = false keeps it a browser session cookie).

@@ -98,11 +98,10 @@ export const adminSettingsSections: AdminSettingsSection[] = [
 ];
 
 const settings = ref<AdminSettingValue[]>([]);
-/** Disable Loki 的整组原子组合：端点、授权头与两个显式 opt-in 在同一保存批次提交为 null。 */
+/** Disable Loki 的整组原子组合：端点、授权头与显式 opt-in 在同一保存批次提交为 null。 */
 const LokiDisableKeys = [
   "loki.uri",
   "loki.authorization",
-  "loki.allow_insecure_http",
   "loki.allow_no_authentication",
 ] as const;
 const OtlpRemoveKey = "opentelemetry.otlp_endpoint";

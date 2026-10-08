@@ -62,7 +62,6 @@ internal static class SharedSettingKeys
             // ---- Observability ----
             [SystemSettingKeys.LokiUri] = "loki.uri",
             [SystemSettingKeys.LokiAuthorization] = "loki.authorization",
-            [SystemSettingKeys.LokiAllowInsecureHttp] = "loki.allow_insecure_http",
             [SystemSettingKeys.LokiAllowNoAuthentication] = "loki.allow_no_authentication",
             [SystemSettingKeys.OpenTelemetryOtlpEndpoint] = "opentelemetry.otlp_endpoint",
 

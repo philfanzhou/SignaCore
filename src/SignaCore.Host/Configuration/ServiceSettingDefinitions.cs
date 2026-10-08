@@ -150,9 +150,9 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
         // The complete Authorization header value sent to Loki (for example "Basic ..." or
         // "Bearer ..."); it is a credential, so it is protected and never returned by queries.
         new("loki.authorization", ServiceSettingValueType.String, IsSensitive: true, LegacyDefault: ""),
-        // The two explicit transport/authentication opt-ins shared with ServiceMantle: both default
-        // to false, both require a restart, and neither is sensitive.
-        new("loki.allow_insecure_http", ServiceSettingValueType.Boolean, IsSensitive: false, LegacyDefault: "false"),
+        // The explicit no-authentication opt-in shared with ServiceMantle: it defaults to false,
+        // requires a restart, and is not sensitive. (The former loki.allow_insecure_http switch is
+        // retired — see RetiredSettingKeys.)
         new("loki.allow_no_authentication", ServiceSettingValueType.Boolean, IsSensitive: false, LegacyDefault: "false"),
         new("opentelemetry.otlp_endpoint", ServiceSettingValueType.String, IsSensitive: false, LegacyDefault: ""),
 
@@ -208,7 +208,6 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
             // Shared definitions own runtime metadata; these rows remain for legacy/UI mapping.
             if (product.Key is GrafanaLokiSettingDefinitions.Endpoint
                 or GrafanaLokiSettingDefinitions.Authorization
-                or GrafanaLokiSettingDefinitions.AllowInsecureHttp
                 or GrafanaLokiSettingDefinitions.AllowNoAuthentication
                 or OtlpSettingDefinitions.Endpoint)
             {

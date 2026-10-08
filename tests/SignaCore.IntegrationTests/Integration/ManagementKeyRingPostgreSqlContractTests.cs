@@ -44,7 +44,7 @@ public sealed class ManagementKeyRingPostgreSqlContractTests
     private const string AdminUsername = "keyring_contract_admin";
     private const string AdminPassword = "KeyRingContract123";
     private const string PublicBaseUrl = "https://identity.example.test";
-    private const string CookieName = "__Host-ServiceMantle.Management";
+    private const string CookieName = "ServiceMantle.Management";
     private const string UnsafeRequestHeader = "X-ServiceMantle-Request";
     private const string SetupEntryPath = "/management/v1/setup";
     private const string SessionRoot = "/management/v1";

@@ -32,7 +32,7 @@ namespace SignaCore.Tests.Integration;
 public sealed class ConfigurationRecoveryAcceptanceTests : IAsyncLifetime
 {
     private const string Root = "/management/v1";
-    private const string CookieName = "__Host-ServiceMantle.Management";
+    private const string CookieName = "ServiceMantle.Management";
     private const string RootSecret = "configuration-recovery-root-secret";
     private const string AdminUsername = "config_admin";
     private const string AdminPassword = "ConfigAdmin123";

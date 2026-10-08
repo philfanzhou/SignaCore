@@ -23,7 +23,7 @@ namespace SignaCore.Tests.Integration;
 public sealed class ManagementSessionCookieSharingTests : IAsyncLifetime
 {
     private const string Root = "/management/v1";
-    private const string CookieName = "__Host-ServiceMantle.Management";
+    private const string CookieName = "ServiceMantle.Management";
     private const string AdminUsername = "sharing_admin";
     private const string AdminPassword = "SharingAdmin123!";
 
