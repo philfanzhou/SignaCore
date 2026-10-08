@@ -102,7 +102,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             new CookieOptions
             {
                 HttpOnly = true,
-                Secure = true,
+                Secure = SignaCoreCookieProfile.SecureCookies(current),
                 SameSite = SameSiteMode.Lax,
                 Path = (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.CallbackPathSegment,
                 Expires = timeProvider.GetUtcNow() + PendingSignInStore.Lifetime,
@@ -327,7 +327,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             new CookieOptions
             {
                 HttpOnly = true,
-                Secure = true,
+                Secure = SignaCoreCookieProfile.SecureCookies(current),
                 SameSite = SameSiteMode.Lax,
                 Path = "/",
                 Expires = expiresAt,
@@ -411,11 +411,17 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         return (SignaCoreSessionStatus.AuthenticatedSession(displayName, decision), ticket.Principal);
     }
 
-    /// <summary>The name of the binding cookie of one pending sign-in: the base name plus the
-    /// pending state itself, so concurrent sign-ins of one browser each keep their own binding
-    /// and no handshake can be completed with another one's cookie.</summary>
+    /// <summary>The name of the binding cookie of one pending sign-in: the session cookie's
+    /// derived name plus the pending state itself, so concurrent sign-ins of one browser each
+    /// keep their own binding and no handshake can be completed with another one's cookie. The
+    /// name goes through the shared prefix-safe derivation: a <c>__Host-</c>-prefixed session
+    /// name cannot keep its prefix on this cookie — the binding cookie is scoped to the callback
+    /// path, not "/", so a browser would refuse the prefixed name outright — and instead derives
+    /// a <c>__Secure-</c> name, exactly like the logout-return cookie.</summary>
     private static string LoginBindingCookieName(SignaCoreHostedLoginOptions current, string state) =>
-        current.SessionCookieName + SignaCoreHostedLoginDefaults.LoginBindingCookieSuffix + "." + state;
+        SignaCoreCookieProfile.DerivedCookieName(
+            current,
+            SignaCoreHostedLoginDefaults.LoginBindingCookieSuffix + "." + state);
 
     private static void DeleteLoginBindingCookie(
         HttpContext context,
@@ -427,7 +433,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             new CookieOptions
             {
                 HttpOnly = true,
-                Secure = true,
+                Secure = SignaCoreCookieProfile.SecureCookies(current),
                 SameSite = SameSiteMode.Lax,
                 Path = (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.CallbackPathSegment,
                 Expires = DateTimeOffset.UnixEpoch,

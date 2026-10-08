@@ -262,7 +262,11 @@ public sealed class CrossServerBrowser(
     }
 
     private HttpClient ClientFor(Uri uri) =>
-        string.Equals(uri.Host, ConsumerBase.Host, StringComparison.Ordinal) ? consumer : identityServer;
+        // Authority, not bare host: an intranet deployment runs the consumer and the authority on
+        // one host under different ports, and the two must never swap handlers.
+        string.Equals(uri.Authority, ConsumerBase.Authority, StringComparison.Ordinal)
+            ? consumer
+            : identityServer;
 
     public void Dispose()
     {
@@ -327,19 +331,23 @@ public static class ConsumerAppTestServer
     /// <summary>One browser over the SignaCore host and the consumer, sharing one cookie container.</summary>
     public static CrossServerBrowser CreateBrowser(
         WebApplicationFactory<Program> identity,
-        WebApplicationFactory<ConsumerApp.Program> consumer)
+        WebApplicationFactory<ConsumerApp.Program> consumer) =>
+        CreateBrowser(identity, consumer, new Uri(SignaCoreHostFixture.Authority), new Uri("https://bff.localhost"));
+
+    /// <summary>
+    /// One browser over the SignaCore host and the consumer on explicit bases — the intranet
+    /// shape runs both on one host under different ports.
+    /// </summary>
+    public static CrossServerBrowser CreateBrowser(
+        WebApplicationFactory<Program> identity,
+        WebApplicationFactory<ConsumerApp.Program> consumer,
+        Uri identityBase,
+        Uri consumerBase)
     {
         var container = new CookieContainer();
-        var identityClient = CreateClientWithCookies(
-            identity.Server.CreateHandler(), new Uri(SignaCoreHostFixture.Authority), container);
-        var consumerClient = CreateClientWithCookies(
-            consumer.Server.CreateHandler(), new Uri("https://bff.localhost"), container);
-        return new CrossServerBrowser(
-            identityClient,
-            consumerClient,
-            new Uri(SignaCoreHostFixture.Authority),
-            new Uri("https://bff.localhost"),
-            container);
+        var identityClient = CreateClientWithCookies(identity.Server.CreateHandler(), identityBase, container);
+        var consumerClient = CreateClientWithCookies(consumer.Server.CreateHandler(), consumerBase, container);
+        return new CrossServerBrowser(identityClient, consumerClient, identityBase, consumerBase, container);
 
         static HttpClient CreateClientWithCookies(
             HttpMessageHandler handler, Uri baseAddress, CookieContainer container) =>
@@ -350,7 +358,8 @@ public static class ConsumerAppTestServer
     public static CrossServerBrowser CreateBrowserOverAuthority(
         WebApplicationFactory<ConsumerApp.Program> consumer,
         HttpMessageHandler authorityHandler,
-        Uri authorityBase)
+        Uri authorityBase,
+        Uri? consumerBase = null)
     {
         var container = new CookieContainer();
         var identityClient = new HttpClient(new SharedCookieHandler(authorityHandler, container))
@@ -359,10 +368,10 @@ public static class ConsumerAppTestServer
         };
         var consumerClient = new HttpClient(new SharedCookieHandler(consumer.Server.CreateHandler(), container))
         {
-            BaseAddress = new Uri("https://bff.localhost")
+            BaseAddress = consumerBase ?? new Uri("https://bff.localhost")
         };
         return new CrossServerBrowser(
-            identityClient, consumerClient, authorityBase, new Uri("https://bff.localhost"), container);
+            identityClient, consumerClient, authorityBase, consumerBase ?? new Uri("https://bff.localhost"), container);
     }
 
     /// <summary>A delegating handler that shares one cookie container across both servers.</summary>

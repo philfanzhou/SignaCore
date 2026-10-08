@@ -25,6 +25,26 @@ internal sealed class SignaCoreHostedLoginOptionsValidator(IHostEnvironment envi
         var allowInsecureLoopback = environmentName == Environments.Development
             || environmentName == "Testing";
 
+        // The intranet opt-in is environment-independent: a non-empty, legal list admits exactly
+        // its origins in every environment name, and an illegal entry is a startup failure that
+        // names the option without echoing the configured value.
+        if (!IntranetHttpOrigin.TryResolve(options.IntranetHttpOrigins, out var intranetHttpOrigins))
+        {
+            failures.Add(
+                $"{OptionsName}.IntranetHttpOrigins must be a list of exact intranet HTTP origins: 'http://' plus a private IPv4 literal (10/8, 172.16/12, or 192.168/16) or a bracketed IPv6 Unique Local Address literal, plus an explicit port from 1 to 65535, without user info, path, query, fragment, percent escapes, whitespace, domain names, or duplicates.");
+        }
+
+        var intranetHttpEnabled = intranetHttpOrigins.Count > 0;
+        if (intranetHttpEnabled
+            && (options.SessionCookieName.StartsWith(
+                    SignaCoreHostedLoginDefaults.HostCookiePrefix, StringComparison.OrdinalIgnoreCase)
+                || options.SessionCookieName.StartsWith(
+                    SignaCoreHostedLoginDefaults.SecureCookiePrefix, StringComparison.OrdinalIgnoreCase)))
+        {
+            failures.Add(
+                $"{OptionsName}.SessionCookieName cannot carry the __Host- or __Secure- cookie prefix while {OptionsName}.IntranetHttpOrigins is configured: those prefixes require the Secure attribute, which an intranet HTTP deployment cannot set, so every cookie of the session would be refused by the browser.");
+        }
+
         if (string.IsNullOrWhiteSpace(options.Authority))
         {
             if (!options.AllowUnconfiguredStartup)
@@ -32,8 +52,11 @@ internal sealed class SignaCoreHostedLoginOptionsValidator(IHostEnvironment envi
                 failures.Add($"{OptionsName}.Authority is required.");
             }
         }
-        else if (!SignaCoreAuthorityUriRules.IsAcceptableAuthority(options.Authority, allowInsecureLoopback))
+        else if (!SignaCoreAuthorityUriRules.IsAcceptableAuthority(
+                     options.Authority, allowInsecureLoopback, intranetHttpOrigins))
         {
+            // The message is the historical one byte for byte, whatever the intranet list holds:
+            // an unmatched origin takes the existing rejection path and wording.
             failures.Add(
                 $"{OptionsName}.Authority must be an absolute HTTPS URI without a path, query, fragment, or user info. An explicit loopback HTTP origin (127.0.0.1 or [::1]) is accepted only in the Development and Testing environments.");
         }
@@ -55,7 +78,8 @@ internal sealed class SignaCoreHostedLoginOptionsValidator(IHostEnvironment envi
                 failures.Add($"{OptionsName}.RedirectUri is required.");
             }
         }
-        else if (!SignaCoreAuthorityUriRules.IsAcceptableRedirectUri(options.RedirectUri, allowInsecureLoopback))
+        else if (!SignaCoreAuthorityUriRules.IsAcceptableRedirectUri(
+                     options.RedirectUri, allowInsecureLoopback, intranetHttpOrigins))
         {
             failures.Add(
                 $"{OptionsName}.RedirectUri must be an absolute HTTPS URI with a path and without a query, fragment, or user info. An explicit loopback HTTP origin (127.0.0.1 or [::1]) is accepted only in the Development and Testing environments.");
@@ -95,7 +119,7 @@ internal sealed class SignaCoreHostedLoginOptionsValidator(IHostEnvironment envi
         if (options.PostLogoutRedirectUri is not null)
         {
             if (!SignaCoreAuthorityUriRules.IsAcceptableRedirectUri(
-                    options.PostLogoutRedirectUri, allowInsecureLoopback))
+                    options.PostLogoutRedirectUri, allowInsecureLoopback, intranetHttpOrigins))
             {
                 failures.Add(
                     $"{OptionsName}.PostLogoutRedirectUri must be an absolute HTTPS URI with a path and without a query, fragment, or user info. An explicit loopback HTTP origin (127.0.0.1 or [::1]) is accepted only in the Development and Testing environments.");

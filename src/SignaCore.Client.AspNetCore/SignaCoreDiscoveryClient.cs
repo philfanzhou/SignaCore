@@ -110,9 +110,18 @@ internal sealed class SignaCoreDiscoveryClient(
         var environmentName = environment.EnvironmentName;
         var allowInsecureLoopback = environmentName == Environments.Development
             || environmentName == "Testing";
+        // The intranet opt-in is environment-independent; an illegal list (which startup rejects)
+        // observed here because of an unvalidated reload fails closed to HTTPS-only endpoints.
+        if (!IntranetHttpOrigin.TryResolve(
+                options.CurrentValue.IntranetHttpOrigins, out var intranetHttpOrigins))
+        {
+            intranetHttpOrigins = [];
+        }
+
         foreach (var endpoint in new[] { authorizationEndpoint, tokenEndpoint, jwksUri })
         {
-            if (!SignaCoreAuthorityUriRules.IsAcceptableEndpointUri(endpoint, allowInsecureLoopback))
+            if (!SignaCoreAuthorityUriRules.IsAcceptableEndpointUri(
+                    endpoint, allowInsecureLoopback, intranetHttpOrigins))
             {
                 throw new SignaCoreAuthorityDocumentException(
                     "A discovery endpoint is not an absolute HTTPS URI.");

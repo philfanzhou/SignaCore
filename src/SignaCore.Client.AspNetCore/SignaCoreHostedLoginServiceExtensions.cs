@@ -46,7 +46,10 @@ public static class SignaCoreHostedLoginServiceExtensions
         // The CSRF boundary's token store and validator. The package's header name is the
         // configuration point for session-authenticated unsafe methods; an application that
         // needs its own name either sets the package option or post-configures AntiforgeryOptions
-        // after this registration, which then runs later and wins.
+        // after this registration, which then runs later and wins. The cookie stays Secure in the
+        // default HTTPS profile and drops the Secure attribute only in the explicit intranet
+        // HTTP profile, where a Secure cookie would be refused by the browser; an application's
+        // own later AntiforgeryOptions configuration still wins over both.
         services.AddAntiforgery(static options =>
         {
             options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
@@ -57,7 +60,12 @@ public static class SignaCoreHostedLoginServiceExtensions
         services.AddOptions<Microsoft.AspNetCore.Antiforgery.AntiforgeryOptions>()
             .PostConfigure<IOptions<SignaCoreHostedLoginOptions>>(
                 static (antiforgery, login) =>
-                    antiforgery.HeaderName = login.Value.AntiforgeryHeaderName);
+                {
+                    antiforgery.HeaderName = login.Value.AntiforgeryHeaderName;
+                    antiforgery.Cookie.SecurePolicy = SignaCoreCookieProfile.IsIntranetHttp(login.Value)
+                        ? Microsoft.AspNetCore.Http.CookieSecurePolicy.None
+                        : Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
+                });
 
         // The backchannel carries the client secret and, at logout, the ID token: it never
         // follows a redirect, never carries a cookie, writes no request/response log line, and is
