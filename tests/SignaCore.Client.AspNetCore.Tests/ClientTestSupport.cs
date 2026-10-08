@@ -70,9 +70,9 @@ public sealed partial class SignaCoreHostFixture : IAsyncLifetime
             "test-master-key-for-client-pack-tests-only",
             "client_pack_admin",
             "ClientPackAdmin-123!",
-            // The package resolves every endpoint from Discovery and enforces HTTPS addresses, so
-            // the installed settings carry an HTTPS public origin; the in-memory TestServer
-            // serves both schemes identically.
+            // The package resolves every endpoint from Discovery; the installed settings carry
+            // an HTTPS public origin for the HTTPS regression paths, and http and https are
+            // equal inputs (ADR 0008); the in-memory TestServer serves both schemes identically.
             new Dictionary<string, string>
             {
                 [SystemSettingKeys.PublicBaseUrl] = Authority,
