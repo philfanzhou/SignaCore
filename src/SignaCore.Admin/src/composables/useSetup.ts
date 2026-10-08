@@ -18,7 +18,6 @@ export const setupError = ref('')
 
 export const setupForm = reactive({
   publicBaseUrl: '',
-  allowNonHttpsIssuer: false,
   jwtAudience: 'SignaCore.Services',
   username: '',
   password: '',
@@ -132,7 +131,6 @@ export async function submitSetup() {
         code: setupForm.setupCode.trim(),
         input: {
           publicBaseUrl: setupForm.publicBaseUrl.trim(),
-          allowNonHttpsIssuer: setupForm.allowNonHttpsIssuer,
           jwtAudience: setupForm.jwtAudience.trim(),
           username: setupForm.username.trim(),
           password: setupForm.password,

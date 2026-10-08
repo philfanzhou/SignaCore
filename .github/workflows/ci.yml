@@ -377,7 +377,7 @@ jobs:
             -H 'Content-Type: application/json' \
             -H 'X-ServiceMantle-Request: 1' \
             -d "$(jq -n --arg password "$ADMIN_PASSWORD" \
-              '{code:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",input:{publicBaseUrl:"https://signacore.test",allowNonHttpsIssuer:false,jwtAudience:"SignaCore.Services",username:"smoke_admin",password:$password}}')")"
+              '{code:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",input:{publicBaseUrl:"https://signacore.test",jwtAudience:"SignaCore.Services",username:"smoke_admin",password:$password}}')")"
           [ "$bad_status" = '401' ] || { echo "wrong setup code returned $bad_status"; exit 1; }
 
           # A completion request without the fixed cross-site request header is refused before
@@ -386,7 +386,7 @@ jobs:
             -X POST http://localhost:5002/management/v1/setup \
             -H 'Content-Type: application/json' \
             -d "$(jq -n --arg password "$ADMIN_PASSWORD" --arg code "$SETUP_CODE" \
-              '{code:$code,input:{publicBaseUrl:"https://signacore.test",allowNonHttpsIssuer:false,jwtAudience:"SignaCore.Services",username:"smoke_admin",password:$password}}')")"
+              '{code:$code,input:{publicBaseUrl:"https://signacore.test",jwtAudience:"SignaCore.Services",username:"smoke_admin",password:$password}}')")"
           [ "$headerless_status" = '400' ] || { echo "headerless setup returned $headerless_status"; exit 1; }
 
           status="$(curl -sS --max-time 10 -o /tmp/setup.json -w '%{http_code}' \
@@ -394,7 +394,7 @@ jobs:
             -H 'Content-Type: application/json' \
             -H 'X-ServiceMantle-Request: 1' \
             -d "$(jq -n --arg password "$ADMIN_PASSWORD" --arg code "$SETUP_CODE" \
-              '{code:$code,input:{publicBaseUrl:"https://signacore.test",allowNonHttpsIssuer:false,jwtAudience:"SignaCore.Services",username:"smoke_admin",password:$password}}')")"
+              '{code:$code,input:{publicBaseUrl:"https://signacore.test",jwtAudience:"SignaCore.Services",username:"smoke_admin",password:$password}}')")"
           [ "$status" = '204' ] || { echo "setup returned $status: $(cat /tmp/setup.json)"; exit 1; }
 
       - name: Wait for readiness after the restart
@@ -428,7 +428,7 @@ jobs:
             -X POST http://localhost:5002/management/v1/setup \
             -H 'Content-Type: application/json' \
             -H 'X-ServiceMantle-Request: 1' \
-            -d '{"code":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","input":{"publicBaseUrl":"https://attacker.test","allowNonHttpsIssuer":false,"jwtAudience":"SignaCore.Services","username":"attacker","password":"Attacker1234"}}')"
+            -d '{"code":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","input":{"publicBaseUrl":"https://attacker.test","jwtAudience":"SignaCore.Services","username":"attacker","password":"Attacker1234"}}')"
           [ "$status" = '409' ] || { echo "completed installation accepted setup: $status"; exit 1; }
 
           # The normal host redirects browser navigation away from the completed setup page.

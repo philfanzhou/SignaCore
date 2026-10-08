@@ -1,44 +1,21 @@
-using System.Collections.Frozen;
-
 namespace SignaCore.Domain.Validators;
 
-/// <summary>Immutable transport trust from the activated host policy; registration remains exact.</summary>
+/// <summary>
+/// The structural redirect-URI revalidation seam. Transport security is a deployment decision
+/// (ADR 0008): <c>http</c> and <c>https</c> redirect URIs are accepted equally everywhere, so the
+/// policy carries no scheme allowlist, environment privilege, or opt-in list — only the structural
+/// rules of <see cref="OidcRedirectUriValidator"/>, which it re-applies to stored values at the
+/// points a code is issued or a session completes.
+/// </summary>
 public sealed class OidcRedirectUriPolicy
 {
-    private readonly FrozenSet<string> _httpOrigins;
-    public static OidcRedirectUriPolicy Default { get; } = new(false, []);
-    public bool IsDevelopment { get; }
-    public OidcRedirectUriPolicy(bool isDevelopment, IEnumerable<string> httpOrigins)
-    {
-        IsDevelopment = isDevelopment;
-        _httpOrigins = httpOrigins.ToFrozenSet(StringComparer.Ordinal);
-    }
-    internal bool AllowsHttpAuthority(string authority)
-    {
-        var hasPort = authority.StartsWith('[') ? !authority.EndsWith(']') : authority.Contains(':');
-        return HostedLoginHttpTestOrigin.TryCanonicalize("http://" + authority + (hasPort ? "" : ":80"), out var origin)
-            && _httpOrigins.Contains(origin);
-    }
-    /// <summary>Validation-only policy for an operation that removes one row and adds none.</summary>
-    public OidcRedirectUriPolicy ForRegistrationRemoval(IEnumerable<string> retainedUris)
-    {
-        var origins = _httpOrigins.ToHashSet(StringComparer.Ordinal);
-        foreach (var uri in retainedUris)
-        {
-            if (!uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) continue;
-            var authority = uri[7..].Split(['/', '?'])[0];
-            var hasPort = authority.StartsWith('[') ? !authority.EndsWith(']') : authority.Contains(':');
-            if (HostedLoginHttpTestOrigin.TryCanonicalize("http://" + authority + (hasPort ? "" : ":80"), out var origin))
-                origins.Add(origin);
-        }
-        return new(true, origins);
-    }
+    public static OidcRedirectUriPolicy Default { get; } = new();
 
     public bool Allows(string uri)
     {
         try
         {
-            OidcRedirectUriValidator.ValidateAndCanonicalize(uri, IsDevelopment, this);
+            OidcRedirectUriValidator.ValidateAndCanonicalize(uri);
             return true;
         }
         catch (OidcClientConfigurationException) { return false; }

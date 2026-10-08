@@ -223,7 +223,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             "missing-password",
             "missing-publicBaseUrl",
             "extra-field",
-            "wrong-type-allowNonHttpsIssuer",
+            "retired-allowNonHttpsIssuer",
             "wrong-type-username",
         ];
     }
@@ -252,7 +252,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         return
         [
             "weak-password",
-            "plain-http-publicBaseUrl",
+            "non-absolute-publicBaseUrl",
             "empty-jwtAudience",
             "overlong-username",
             "taken-username",
@@ -287,7 +287,7 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Setup_WithExplicitHttpOptIn_AcceptsHttpWithoutClassifyingTheHost()
+    public async Task Setup_WithAPlainHttpBaseUrl_AcceptsItAsIsWithoutAnyOptIn()
     {
         using var http = await StartHostAsync();
         var code = await RotateSetupCodeAsync();
@@ -295,13 +295,15 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
         var response = await PostSetupAsync(
             http,
             code,
-            publicBaseUrl: "http://identity.example.test",
-            allowNonHttpsIssuer: true);
+            publicBaseUrl: "http://identity.example.test");
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
 
         await using var db = OpenDatabase();
-        Assert.Equal("true", (await ReadAggregateValuesAsync(db))["security.allow_non_https_issuer"]);
+        var values = await ReadAggregateValuesAsync(db);
+        Assert.Equal("http://identity.example.test", values["endpoints.public_base_url"]);
+        Assert.Equal("http://identity.example.test", values["jwt.issuer"]);
+        Assert.DoesNotContain("security.allow_non_https_issuer", values.Keys);
     }
 
     [Fact]
@@ -822,7 +824,6 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
     private async Task<HttpResponseMessage> PostSetupAsync(
         HttpClient http,
         string setupCode,
-        bool allowNonHttpsIssuer = false,
         string password = AdminPassword,
         string publicBaseUrl = PublicBaseUrl,
         string jwtAudience = "SignaCore.Services",
@@ -835,13 +836,11 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             ("missing-password", _) => new
             {
                 publicBaseUrl,
-                allowNonHttpsIssuer,
                 jwtAudience,
                 username = AdminUsername,
             },
             ("missing-publicBaseUrl", _) => new
             {
-                allowNonHttpsIssuer,
                 jwtAudience,
                 username = AdminUsername,
                 password,
@@ -849,34 +848,32 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
             ("extra-field", _) => new
             {
                 publicBaseUrl,
-                allowNonHttpsIssuer,
                 jwtAudience,
                 username = AdminUsername,
                 password,
                 confirmPassword = password,
             },
-            ("wrong-type-allowNonHttpsIssuer", _) => new
+            ("retired-allowNonHttpsIssuer", _) => new
             {
                 publicBaseUrl,
-                allowNonHttpsIssuer = "true",
                 jwtAudience,
                 username = AdminUsername,
                 password,
+                allowNonHttpsIssuer = true,
             },
             ("wrong-type-username", _) => new
             {
                 publicBaseUrl,
-                allowNonHttpsIssuer,
                 jwtAudience,
                 username = 42,
                 password,
             },
-            (_, "weak-password") => ValidInput(publicBaseUrl, allowNonHttpsIssuer, jwtAudience, AdminUsername, "short"),
-            (_, "plain-http-publicBaseUrl") => ValidInput("http://identity.example.test", allowNonHttpsIssuer, jwtAudience, AdminUsername, password),
-            (_, "empty-jwtAudience") => ValidInput(publicBaseUrl, allowNonHttpsIssuer, "", AdminUsername, password),
-            (_, "overlong-username") => ValidInput(publicBaseUrl, allowNonHttpsIssuer, jwtAudience, new string('u', 101), password),
-            (_, "taken-username") => ValidInput(publicBaseUrl, allowNonHttpsIssuer, jwtAudience, "existing_admin", password),
-            _ => ValidInput(publicBaseUrl, allowNonHttpsIssuer, jwtAudience, AdminUsername, password),
+            (_, "weak-password") => ValidInput(publicBaseUrl, jwtAudience, AdminUsername, "short"),
+            (_, "non-absolute-publicBaseUrl") => ValidInput("identity.example.test", jwtAudience, AdminUsername, password),
+            (_, "empty-jwtAudience") => ValidInput(publicBaseUrl, "", AdminUsername, password),
+            (_, "overlong-username") => ValidInput(publicBaseUrl, jwtAudience, new string('u', 101), password),
+            (_, "taken-username") => ValidInput(publicBaseUrl, jwtAudience, "existing_admin", password),
+            _ => ValidInput(publicBaseUrl, jwtAudience, AdminUsername, password),
         };
 
         var request = new HttpRequestMessage(HttpMethod.Post, SetupEntryPath)
@@ -893,13 +890,11 @@ public sealed class FirstRunSetupTests : IAsyncLifetime
 
     private static object ValidInput(
         string publicBaseUrl,
-        bool allowNonHttpsIssuer,
         string jwtAudience,
         string username,
         string password) => new
     {
         publicBaseUrl,
-        allowNonHttpsIssuer,
         jwtAudience,
         username,
         password,

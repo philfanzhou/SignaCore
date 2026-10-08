@@ -56,7 +56,7 @@ public sealed class LoginAntiforgeryService : ILoginAntiforgeryService
             LoginAntiforgeryDefaults.DataProtectionPurpose);
         _cookieProtector = root.CreateProtector("cookie");
         _requestProtector = root.CreateProtector("request");
-        var testRoot = dataProtectionProvider.CreateProtector(IdentityCookieProfile.TestCsrfPurpose);
+        var testRoot = dataProtectionProvider.CreateProtector(IdentityCookieProfile.HttpCsrfPurpose);
         _httpCookieProtector = testRoot.CreateProtector("cookie");
         _httpRequestProtector = testRoot.CreateProtector("request");
     }

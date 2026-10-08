@@ -271,7 +271,7 @@ public sealed partial class OAuthLoginController : ControllerBase
         }
 
         var profile = IdentityCookieProfile.Resolve(HttpContext)!;
-        var pair = _antiforgery.IssuePair(Request.Cookies[profile.CsrfCookie], profile.HttpTest);
+        var pair = _antiforgery.IssuePair(Request.Cookies[profile.CsrfCookie], profile.PlainHttp);
         if (!pair.ReusedExistingCookie)
         {
             Response.Cookies.Append(
@@ -966,7 +966,7 @@ public sealed partial class OAuthLoginController : ControllerBase
             && token.Length <= LoginAntiforgeryDefaults.MaxTokenLength
             && token.All(char.IsAscii)
             && Request.Cookies.TryGetValue(profile.CsrfCookie, out var cookieValue)
-            && _antiforgery.IsValidPair(cookieValue!, token, profile.HttpTest))
+            && _antiforgery.IsValidPair(cookieValue!, token, profile.PlainHttp))
         {
             requestToken = token;
             return true;

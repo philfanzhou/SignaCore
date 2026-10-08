@@ -28,9 +28,7 @@ public static class OidcClientConfigurationApplier
     /// </exception>
     public static OidcClientConfigurationChange Apply(
         AppRegistrationEntity application,
-        OidcClientConfigurationInput input,
-        bool isDevelopment,
-        OidcRedirectUriPolicy? policy = null)
+        OidcClientConfigurationInput input)
     {
         ArgumentNullException.ThrowIfNull(application);
         ArgumentNullException.ThrowIfNull(input);
@@ -53,10 +51,9 @@ public static class OidcClientConfigurationApplier
             audienceMode,
             input.RedirectUris ?? [],
             input.PostLogoutRedirectUris ?? [],
-            isDevelopment,
             currentClientType,
             application.IsActive,
-            !string.IsNullOrEmpty(application.AppSecretHash), policy);
+            !string.IsNullOrEmpty(application.AppSecretHash));
 
         application.ClientType = validated.ClientType;
         application.AllowAuthorizationCode = validated.AllowAuthorizationCode;

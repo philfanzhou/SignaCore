@@ -27,7 +27,7 @@ internal sealed class IdentitySessionCookiePostConfigureOptions(
         var purpose = name switch
         {
             IdentitySessionDefaults.AuthenticationScheme => IdentitySessionDefaults.DataProtectionPurpose,
-            IdentityCookieProfile.TestScheme => IdentityCookieProfile.TestIdentityPurpose,
+            IdentityCookieProfile.HttpScheme => IdentityCookieProfile.HttpIdentityPurpose,
             _ => null
         };
         if (purpose is null)

@@ -85,7 +85,6 @@ const settingLabels: Record<string, string> = {
   "jwt.token_expiration_hours": "访问令牌有效期（小时）",
   "refresh_token.expiration_days": "刷新令牌有效期（天）",
   "password_hasher.work_factor": "密码哈希工作因子",
-  "security.allow_non_https_issuer": "允许非 HTTPS 签发地址",
   "admin_web.allowed_origins": "管理端允许来源",
   "admin.username": "管理员标识",
   "callback.allowed_domains": "回调允许域名",

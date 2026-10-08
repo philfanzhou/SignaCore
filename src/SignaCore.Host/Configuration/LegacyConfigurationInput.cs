@@ -11,17 +11,11 @@ namespace SignaCore.Host.Configuration;
 /// <para>
 /// This adapter owns exactly the product input rules the old importer owned — the legacy
 /// defaults of the definition table, trimming, the fixed key aliases with canonical-key
-/// precedence, JSON section and scalar reading, the plain-HTTP compatibility opt-in, and the
-/// required-key completeness check with key names only. It never persists anything and never
+/// precedence, JSON section and scalar reading, and the required-key completeness check with
+/// key names only. It never persists anything and never
 /// opens a transaction: mapping through <see cref="SharedSettingKeys"/>, validation,
 /// sensitive-value protection, and the single transactional write all belong to the shared update
 /// path that consumes its output.
-/// </para>
-/// <para>
-/// A pre-change deployment that served plain HTTP had no HTTPS requirement to opt out of, so
-/// importing it as-is would fail closed on an upgrade that changed nothing. The adapter records the
-/// insecure transport the deployment was already using, loudly, rather than silently relaxing the
-/// rule; the setting is visible and editable in the administration console afterwards.
 /// </para>
 /// </remarks>
 internal static class LegacyConfigurationInput
@@ -74,25 +68,8 @@ internal static class LegacyConfigurationInput
                 missing);
         }
 
-        // See the class remarks: preserve the deployment's existing plain-HTTP behavior, loudly.
-        if (values.TryGetValue(SystemSettingKeys.PublicBaseUrl, out var importedBaseUrl) &&
-            PublicBaseUrlNormalizer.TryNormalizeBaseUrl(importedBaseUrl, out var normalizedBaseUrl, out _) &&
-            normalizedBaseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-            !IsExplicitlyTrue(values, SystemSettingKeys.SecurityAllowNonHttpsIssuer))
-        {
-            values[SystemSettingKeys.SecurityAllowNonHttpsIssuer] = "true";
-            logger.LogWarning(
-                "The imported deployment advertises a plain-HTTP public base URL, so {Key} has been " +
-                "enabled to preserve its existing behavior. Move this deployment to HTTPS and turn " +
-                "the setting off.",
-                SystemSettingKeys.SecurityAllowNonHttpsIssuer);
-        }
-
         return (values, imported.Count);
     }
-
-    private static bool IsExplicitlyTrue(IReadOnlyDictionary<string, string> values, string key) =>
-        values.TryGetValue(key, out var raw) && bool.TryParse(raw, out var parsed) && parsed;
 
     /// <summary>
     /// Keys whose pre-change name differs from the catalog name. Read in order, first hit wins.

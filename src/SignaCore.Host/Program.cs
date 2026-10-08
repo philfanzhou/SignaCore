@@ -389,11 +389,10 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
     return 0;
 }
 
-// Construct before any application seeding or requests. Only the activated snapshot and the
-// actual host environment authorize this policy; later IConfiguration overlays cannot alter it.
-var httpTestPolicy = HostedLoginHttpTestPolicy.Create(bootstrapResult.SharedSnapshot!, builder.Environment);
-builder.Services.AddSingleton(httpTestPolicy);
-builder.Services.AddSingleton(httpTestPolicy.ToRedirectUriPolicy(builder.Environment.IsDevelopment()));
+// The one structural redirect-URI policy: http and https redirect URIs are accepted equally
+// (ADR 0008), so there is no environment privilege or allowlist to activate — only the structural
+// rules, re-applied wherever a stored URI is revalidated.
+builder.Services.AddSingleton(SignaCore.Domain.Validators.OidcRedirectUriPolicy.Default);
 
 // ---- Consul Service Discovery (optional, snapshot-driven shared lifecycle) ----
 // The product snapshot activated by the bootstrap phase is projected in memory onto the shared
@@ -519,14 +518,15 @@ if (legacyOverrides.Count > 0)
 }
 
 // ---- Discovery conformance diagnostics ----
-// The snapshot validator accepts a non-HTTPS issuer only after an explicit operator opt-in.
+// Transport is a deployment decision (ADR 0008), so an http issuer is legal; the diagnostic still
+// names the operational reality so a public deployment notices an unintended plain-HTTP issuer.
 var configuredIssuer = app.Services.GetRequiredService<JwtOptions>().Issuer;
-if (!Uri.TryCreate(configuredIssuer, UriKind.Absolute, out var issuerUri) ||
-    issuerUri.Scheme != Uri.UriSchemeHttps)
+if (Uri.TryCreate(configuredIssuer, UriKind.Absolute, out var issuerUri)
+    && issuerUri.Scheme == Uri.UriSchemeHttp)
 {
     app.Logger.LogWarning(
-        "Jwt:Issuer is {Issuer}, which is not an absolute https URL. OAuth/OIDC clients that validate "
-        + "the issuer against the discovery URL will reject tokens issued by this service.",
+        "Jwt:Issuer is {Issuer}, an http URL. Plain HTTP provides no transport confidentiality; " +
+        "for public deployments terminate TLS in front of the service.",
         configuredIssuer);
 }
 
@@ -555,8 +555,7 @@ using (var seedScope = app.Services.CreateScope())
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger(typeof(BootstrapAppSeeder).FullName!),
         seedScope.ServiceProvider.GetRequiredService<IHostEnvironment>().IsDevelopment(),
-        app.Lifetime.ApplicationStopping,
-        seedScope.ServiceProvider.GetRequiredService<SignaCore.Domain.Validators.OidcRedirectUriPolicy>());
+        app.Lifetime.ApplicationStopping);
 }
 
 // ---- Wait for KeyManager initialization before accepting requests ----

@@ -40,7 +40,6 @@ beforeEach(() => {
   setupError.value = ''
   Object.assign(setupForm, {
     publicBaseUrl: 'https://identity.example.test',
-    allowNonHttpsIssuer: false,
     jwtAudience: 'SignaCore.Services',
     username: 'admin',
     password: 'AdminPassword123',
@@ -119,7 +118,6 @@ describe('setup submission', () => {
       code: 'SentinelSetupCode0123456789_-ABC',
       input: {
         publicBaseUrl: 'https://identity.example.test',
-        allowNonHttpsIssuer: false,
         jwtAudience: 'Orders',
         username: 'admin',
         password: 'AdminPassword123',

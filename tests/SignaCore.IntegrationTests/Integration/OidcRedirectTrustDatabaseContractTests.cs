@@ -14,7 +14,7 @@ public sealed class OidcRedirectTrustDatabaseContractTests
 {
     private const string Redirect = "http://10.20.30.40:5008/callback";
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
-    private static OidcRedirectUriPolicy Policy => new(false, ["http://10.20.30.40:5008"]);
+    private static OidcRedirectUriPolicy Policy => OidcRedirectUriPolicy.Default;
 
     [Fact]
     public async Task Sqlite_TransactionRechecksExactRegistrationAndPolicy_AndPreservesCancellation()
@@ -27,7 +27,6 @@ public sealed class OidcRedirectTrustDatabaseContractTests
         var app = await SeedAsync(db);
         await using var transaction = await db.Database.BeginTransactionAsync(Ct);
         Assert.True(await AllowsAsync(db, app));
-        Assert.False(await OidcCurrentRedirectTrust.AllowsAsync(db, app, RedirectUriKind.Redirect, Redirect, OidcRedirectUriPolicy.Default, Ct));
         Assert.False(await OidcCurrentRedirectTrust.AllowsAsync(db, app, RedirectUriKind.Redirect, Redirect + "/", Policy, Ct));
         await db.AppRedirectUris.ExecuteDeleteAsync(Ct);
         Assert.False(await AllowsAsync(db, app));

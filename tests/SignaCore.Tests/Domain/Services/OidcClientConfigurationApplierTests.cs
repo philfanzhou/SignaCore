@@ -30,8 +30,7 @@ public class OidcClientConfigurationApplierTests
                 AudienceMode = "PerApplication",
                 RedirectUris = ["HTTPS://BFF.Example.Test:443/Callback"],
                 PostLogoutRedirectUris = ["https://bff.example.test"]
-            },
-            isDevelopment: false);
+            });
 
         Assert.Empty(change.RemovedRegistrations);
         Assert.Equal("openid profile offline_access", app.AllowedScopes);
@@ -61,13 +60,12 @@ public class OidcClientConfigurationApplierTests
     {
         var app = Application();
 
-        OidcClientConfigurationApplier.Apply(app, Policy(submitted), isDevelopment: false);
+        OidcClientConfigurationApplier.Apply(app, Policy(submitted));
 
         Assert.Equal(expected, Single(app, RedirectUriKind.Redirect));
     }
 
     [Theory]
-    [InlineData("http://bff.example.test/cb")]
     [InlineData("https://localhost/cb")]
     [InlineData("https://user:pass@bff.example.test/cb")]
     [InlineData("https://bff.example.test/cb#fragment")]
@@ -152,7 +150,7 @@ public class OidcClientConfigurationApplierTests
             AllowedScopes = ["openid"],
             AudienceMode = "PerApplication",
             RedirectUris = ["https://bff.example.test/cb"]
-        }, isDevelopment: false);
+        });
         Assert.True(app.AllowAuthorizationCode);
         Assert.Equal(string.Empty, app.AppSecretHash);
     }
@@ -215,8 +213,7 @@ public class OidcClientConfigurationApplierTests
 
         OidcClientConfigurationApplier.Apply(
             app,
-            new OidcClientConfigurationInput { ClientType = "confidential", AllowedScopes = ["openid"] },
-            isDevelopment: false);
+            new OidcClientConfigurationInput { ClientType = "confidential", AllowedScopes = ["openid"] });
 
         Assert.Equal(OidcClientType.Confidential, app.ClientType);
     }
@@ -234,15 +231,13 @@ public class OidcClientConfigurationApplierTests
 
         OidcClientConfigurationApplier.Apply(
             publicApp,
-            new OidcClientConfigurationInput { AllowedScopes = ["openid"] },
-            isDevelopment: false);
+            new OidcClientConfigurationInput { AllowedScopes = ["openid"] });
         Assert.Equal(OidcClientType.Public, publicApp.ClientType);
 
         var confidentialApp = Application();
         OidcClientConfigurationApplier.Apply(
             confidentialApp,
-            new OidcClientConfigurationInput { AllowedScopes = ["openid"] },
-            isDevelopment: false);
+            new OidcClientConfigurationInput { AllowedScopes = ["openid"] });
         Assert.Equal(OidcClientType.Confidential, confidentialApp.ClientType);
     }
 
@@ -254,8 +249,7 @@ public class OidcClientConfigurationApplierTests
         Assert.Throws<OidcClientConfigurationException>(() =>
             OidcClientConfigurationApplier.Apply(
                 app,
-                new OidcClientConfigurationInput { ClientType = "Public", AllowedScopes = ["openid"] },
-                isDevelopment: false));
+                new OidcClientConfigurationInput { ClientType = "Public", AllowedScopes = ["openid"] }));
 
         Assert.Equal(OidcClientType.Confidential, app.ClientType);
     }
@@ -268,8 +262,7 @@ public class OidcClientConfigurationApplierTests
 
         OidcClientConfigurationApplier.Apply(
             app,
-            new OidcClientConfigurationInput { ClientType = "Confidential", AllowedScopes = ["openid"] },
-            isDevelopment: false);
+            new OidcClientConfigurationInput { ClientType = "Confidential", AllowedScopes = ["openid"] });
 
         Assert.Equal(OidcClientType.Confidential, app.ClientType);
     }
@@ -316,8 +309,7 @@ public class OidcClientConfigurationApplierTests
                 AllowedScopes = ["openid"],
                 AudienceMode = "PerApplication",
                 RedirectUris = ["https://bff.example.test/first"]
-            },
-            isDevelopment: false);
+            });
 
         Assert.Throws<OidcClientConfigurationException>(() =>
             OidcClientConfigurationApplier.Apply(
@@ -336,8 +328,7 @@ public class OidcClientConfigurationApplierTests
                         "http://insecure.example.test/second",
                         "https://bff.example.test/third"
                     ]
-                },
-                isDevelopment: false));
+                }));
 
         Assert.True(app.AllowAuthorizationCode);
         Assert.False(app.AllowRefreshToken);
@@ -356,7 +347,7 @@ public class OidcClientConfigurationApplierTests
     public void Apply_KeepsTheIdentifierOfAnUnchangedRegistration()
     {
         var app = Application();
-        OidcClientConfigurationApplier.Apply(app, Policy("https://bff.example.test/cb"), isDevelopment: false);
+        OidcClientConfigurationApplier.Apply(app, Policy("https://bff.example.test/cb"));
         var originalId = app.RedirectUris.Single().Id;
 
         var change = OidcClientConfigurationApplier.Apply(
@@ -367,8 +358,7 @@ public class OidcClientConfigurationApplierTests
                 AllowedScopes = ["openid", "profile"],
                 AudienceMode = "PerApplication",
                 RedirectUris = ["https://bff.example.test/cb"]
-            },
-            isDevelopment: false);
+            });
 
         Assert.Empty(change.RemovedRegistrations);
         Assert.Empty(change.AddedRegistrations);
@@ -387,32 +377,24 @@ public class OidcClientConfigurationApplierTests
                 AllowedScopes = ["openid"],
                 AudienceMode = "PerApplication",
                 RedirectUris = ["https://bff.example.test/a", "https://bff.example.test/b"]
-            },
-            isDevelopment: false);
+            });
 
-        var change = OidcClientConfigurationApplier.Apply(app, Policy("https://bff.example.test/a"), isDevelopment: false);
+        var change = OidcClientConfigurationApplier.Apply(app, Policy("https://bff.example.test/a"));
 
         Assert.Equal("https://bff.example.test/b", Assert.Single(change.RemovedRegistrations).CanonicalUri);
         Assert.Single(app.RedirectUris);
     }
 
-    /// <summary>Development alone may register a loopback literal over HTTP; never <c>localhost</c>.</summary>
+    /// <summary>Plain-HTTP registrations, loopback included, are accepted in every environment.</summary>
     [Fact]
-    public void Apply_AcceptsALoopbackLiteralOnlyInDevelopment()
+    public void Apply_AcceptsALoopbackLiteralInEveryEnvironment()
     {
-        var development = Application();
-        OidcClientConfigurationApplier.Apply(
-            development,
-            Policy("http://127.0.0.1:5173/cb"),
-            isDevelopment: true);
-        Assert.Equal("http://127.0.0.1:5173/cb", Single(development, RedirectUriKind.Redirect));
-
-        var production = Application();
+        var host = Application();
+        OidcClientConfigurationApplier.Apply(host, Policy("http://127.0.0.1:5173/cb"));
+        Assert.Equal("http://127.0.0.1:5173/cb", Single(host, RedirectUriKind.Redirect));
+        // The DNS name localhost stays refused in every scheme (a browser resolves it locally).
         Assert.Throws<OidcClientConfigurationException>(() =>
-            OidcClientConfigurationApplier.Apply(
-                production,
-                Policy("http://127.0.0.1:5173/cb"),
-                isDevelopment: false));
+            OidcClientConfigurationApplier.Apply(Application(), Policy("http://localhost:5173/cb")));
     }
 
     [Fact]
@@ -423,8 +405,7 @@ public class OidcClientConfigurationApplierTests
 
         OidcClientConfigurationApplier.Apply(
             app,
-            new OidcClientConfigurationInput { AllowedScopes = ["openid"] },
-            isDevelopment: false);
+            new OidcClientConfigurationInput { AllowedScopes = ["openid"] });
 
         Assert.Equal(AudienceMode.PerApplication, app.AudienceMode);
     }
@@ -437,8 +418,7 @@ public class OidcClientConfigurationApplierTests
 
         OidcClientConfigurationApplier.Apply(
             app,
-            new OidcClientConfigurationInput(),
-            isDevelopment: false);
+            new OidcClientConfigurationInput());
 
         Assert.Equal(OidcClientType.Confidential, app.ClientType);
         Assert.False(app.AllowAuthorizationCode);
@@ -453,7 +433,7 @@ public class OidcClientConfigurationApplierTests
         var app = Application();
 
         Assert.Throws<OidcClientConfigurationException>(() =>
-            OidcClientConfigurationApplier.Apply(app, input, isDevelopment: false));
+            OidcClientConfigurationApplier.Apply(app, input));
 
         Assert.Empty(app.RedirectUris);
         Assert.False(app.AllowAuthorizationCode);

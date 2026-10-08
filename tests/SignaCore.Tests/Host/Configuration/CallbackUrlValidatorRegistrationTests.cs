@@ -13,14 +13,15 @@ namespace SignaCore.Tests.Host.Configuration;
 public class CallbackUrlValidatorRegistrationTests
 {
     [Fact]
-    public void AddIdentityInfrastructure_InProductionByDefault_RejectsNonHttpsCallbacks()
+    public void AddIdentityInfrastructure_ByDefault_AcceptsPlainHttpCallbacks()
     {
+        // RequireHttps defaults to false (ADR 0008): the transport is a deployment decision, and
+        // the SSRF gate (private-address refusal) carries the protection.
         var validator = ResolveValidator(allowPrivateAddresses: null);
 
-        var result = validator.Validate("http://10.0.0.1/callback");
+        var result = validator.Validate("http://93.184.216.34/callback");
 
-        Assert.False(result.IsValid);
-        Assert.Contains("HTTPS", result.ErrorMessage);
+        Assert.True(result.IsValid);
     }
 
     [Fact]

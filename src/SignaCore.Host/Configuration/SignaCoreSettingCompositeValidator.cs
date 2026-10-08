@@ -53,12 +53,6 @@ internal sealed class SignaCoreSettingCompositeValidator(
         var legacy = BuildLegacySnapshot(context);
         var errors = new List<ServiceSettingValidationError>();
 
-        if (context.TryGetValue(HostedLoginHttpTestOrigins.SettingKey, out var httpOrigins) && httpOrigins.HasValue
-            && !HostedLoginHttpTestOrigins.TryParseJson(httpOrigins.GetJson().GetRawText(), out _))
-        {
-            errors.Add(new ServiceSettingValidationError(
-                HostedLoginHttpTestOrigins.SettingKey, HostedLoginHttpTestOrigins.InvalidCode));
-        }
         ValidatePublicBaseUrl(legacy, errors);
         RequireNonBlank(legacy, SystemSettingKeys.JwtAudience, errors);
         RequireNonBlank(legacy, SystemSettingKeys.AdminUsername, errors);
@@ -155,18 +149,9 @@ internal sealed class SignaCoreSettingCompositeValidator(
             return;
         }
 
-        var allowNonHttps = values.TryGetValue(SystemSettingKeys.SecurityAllowNonHttpsIssuer, out var raw)
-            && bool.TryParse(raw, out var parsed)
-            && parsed;
-
-        // Deliberately unconditional, exactly as in the legacy validator: plain HTTP is either
-        // explicitly accepted by the operator or it is not; the environment name is not a
-        // substitute for that decision.
-        if (!allowNonHttps && !normalized.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            errors.Add(new ServiceSettingValidationError(PublicBaseUrl, HttpsRequiredCode));
-        }
-
+        // Plain http and https base URLs are accepted equally (ADR 0008): whether TLS reaches the
+        // browser is a deployment decision, so only the structural shape and the issuer equality
+        // below are validated here.
         if (!values.TryGetValue(SystemSettingKeys.JwtIssuer, out var issuer) ||
             string.IsNullOrWhiteSpace(issuer))
         {

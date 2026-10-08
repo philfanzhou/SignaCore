@@ -32,7 +32,7 @@ public class LegacyConfigurationInputTests
     };
 
     [Fact]
-    public void Read_CompletesAllFortySixKeysFromDefaultsAndTheDeployment()
+    public void Read_CompletesEveryTableKeyFromDefaultsAndTheDeployment()
     {
         var (values, importedCount) = Read(new Dictionary<string, string?>
         {
@@ -42,12 +42,12 @@ public class LegacyConfigurationInputTests
             [SystemSettingKeys.LegacyAdminBootstrapUsername] = "legacy_admin"
         });
 
-        // Exactly the four required keys came from the deployment; the other 42 keep the definition
-        // table's legacy defaults, so the complete candidate always covers all 46 keys (the retired
-        // loki.allow_insecure_http row no longer exists).
+        // Exactly the four required keys came from the deployment; the other 40 keep the definition
+        // table's legacy defaults, so the complete candidate always covers all 44 keys (the retired
+        // loki.allow_insecure_http and ADR 0008 transport rows no longer exist).
         Assert.Equal(4, importedCount);
         Assert.Equal(ServiceSettingDefinitions.Table.Count, values.Count);
-        Assert.Equal(46, values.Count);
+        Assert.Equal(44, values.Count);
 
         // Deployment values are trimmed; defaults are untouched.
         Assert.Equal(BaseUrl, values[SystemSettingKeys.PublicBaseUrl]);
@@ -126,7 +126,7 @@ public class LegacyConfigurationInputTests
     }
 
     [Fact]
-    public void Read_EnablesThePlainHttpCompatibilityOptInForAPlainHttpDeployment()
+    public void Read_AcceptsAPlainHttpDeploymentAsIs()
     {
         var plainHttp = new Dictionary<string, string?>
         {
@@ -138,19 +138,11 @@ public class LegacyConfigurationInputTests
 
         var (values, _) = Read(plainHttp);
 
-        // The deployment already served plain HTTP; the import records that loudly instead of
-        // failing closed on an upgrade that changed nothing.
-        Assert.Equal("true", values[SystemSettingKeys.SecurityAllowNonHttpsIssuer]);
-
-        // An explicit deployment opt-in and an HTTPS deployment are both left untouched.
-        var explicitOptIn = plainHttp.ToDictionary(
-            entry => entry.Key,
-            entry => (string?)entry.Value);
-        explicitOptIn[SystemSettingKeys.SecurityAllowNonHttpsIssuer] = "true";
-        Assert.Equal("true", Read(explicitOptIn).Values[SystemSettingKeys.SecurityAllowNonHttpsIssuer]);
-
-        var https = RequiredOnly();
-        Assert.NotEqual("true", Read(https).Values[SystemSettingKeys.SecurityAllowNonHttpsIssuer]);
+        // The deployment already served plain HTTP and keeps serving it: http and https base URLs
+        // import as-is, with no opt-in to record and no upgrade-time rejection (ADR 0008).
+        Assert.Equal("http://accounts.example.com", values[SystemSettingKeys.PublicBaseUrl]);
+        Assert.Equal("http://accounts.example.com", values[SystemSettingKeys.JwtIssuer]);
+        Assert.DoesNotContain("Security:AllowNonHttpsIssuer", values.Keys);
     }
 
     /// <summary>

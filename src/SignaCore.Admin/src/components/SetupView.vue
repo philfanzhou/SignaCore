@@ -52,21 +52,7 @@ onMounted(prefillPublicBaseUrl)
             >
           </div>
           <div class="auth-subtitle" style="margin-top: 6px">
-            下游服务据此获取发现文档与 JWKS，同时作为 JWT 的 issuer。默认必须使用 HTTPS。
-          </div>
-        </div>
-
-        <div class="field">
-          <label style="display: flex; gap: 8px; align-items: center">
-            <input
-              v-model="setupForm.allowNonHttpsIssuer"
-              type="checkbox"
-              :disabled="setupPhase === 'saving'"
-            >
-            明确允许使用不安全的 HTTP issuer
-          </label>
-          <div class="auth-subtitle" style="margin-top: 6px">
-            默认关闭。系统不会根据 IP、主机名或 Docker 网络自动判断例外。
+            下游服务据此获取发现文档与 JWKS，同时作为 JWT 的 issuer。HTTP 与 HTTPS 均可填写；公网部署建议使用 HTTPS（由反向代理或 TLS 终止层实施）。
           </div>
         </div>
 

@@ -94,7 +94,7 @@ After restart, a new empty database reports `"status":"pending"` from `/manageme
 `/setup`, and exposes no identity endpoint: reads of other APIs are `404`, and writes are the
 shared phase gate's `503 service.phase.unavailable`. Complete setup with the one-time code from the
 container log by posting
-`{"code":"...","input":{"publicBaseUrl":...,"allowNonHttpsIssuer":false,"jwtAudience":...,
+`{"code":"...","input":{"publicBaseUrl":...,"jwtAudience":...,
 "username":...,"password":...}}` with the `X-ServiceMantle-Request: 1` header; a wrong code is
 answered `401`, success is `204`, and a replay against the restarted host is `409`. Wait for the
 container to restart, then verify the normal surface:

@@ -359,22 +359,21 @@ network; business proxy trust becomes active only after setup and restart into t
 No setting key or database migration is added. A binary rollback restores the previous local
 middleware and the same snapshot setting; do not run both middleware implementations together.
 
-## Hosted-login HTTP testing foundation
+## Plain-HTTP deployments
 
-The optional shared `security.hosted_login_http_test_origins` JSON list can be activated only by
-a normal Host whose actual environment is exactly `Testing`. Missing/empty keeps it disabled;
-all changes require restart. It is stored in the existing aggregate, never in launcher settings.
-An HTTP public base URL must have its exact origin listed and must independently retain the
-existing non-HTTPS issuer opt-in and issuer equality. Non-Testing Hosts refuse nonempty lists
-on their next startup, even if an authenticated administrator previously saved the value.
-
-The exact allowed Testing request origin can use the isolated HTTP identity/CSRF Cookie carrier.
-Exact allowlisted complete HTTP callback/logout registrations also require current-policy
-revalidation at runtime. Both stages are implemented; official dual-end published-image/browser
-acceptance remains the complete-capability release gate. See [Private-network HTTP testing](../oidc/HttpTesting.md) for strict private literal-IP
-syntax, isolated-network responsibilities, release acceptance and rollback. Remove the explicit
-new key through shared updates with `value=null` before running an older 44-key binary; retain
-the database and external keys. No schema migration or deployment default changes are needed.
+Since [ADR 0008](../adr/0008-transport-security-is-a-deployment-decision.md) removed the code-level
+transport policies, a plain-HTTP deployment works end-to-end in any environment name with zero
+extra configuration: `http` and `https` redirect URIs, public base URLs, issuers, hosted-login
+requests, and outbound callbacks (the `Callback:RequireHttps` default is now `false`) are accepted
+equally, and the identity/CSRF cookie carriers follow the request scheme (`https` selects the
+Secure prefixed carriers, plain `http` the neutral non-Secure carriers). The former
+`security.hosted_login_http_test_origins` allowlist, its `Testing` environment gate, and the
+`Security:AllowNonHttpsIssuer` opt-in are retired: their stored rows are ignored by every read,
+updates naming them are rejected as unknown keys, and dropping the rows after an upgrade is
+optional housekeeping. Confidentiality and integrity on a plain-HTTP link are the deployment's
+responsibility — terminate TLS in front of the service for public deployments, and forward the
+effective scheme (`X-Forwarded-Proto` with the trusted-proxy configuration) when you do. The SSRF
+callback gates (`Callback:AllowedDomains`, `Callback:AllowPrivateAddresses`) are unchanged.
 
 ## Recovering legacy optional telemetry settings
 

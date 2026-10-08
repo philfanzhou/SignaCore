@@ -26,9 +26,28 @@ internal static class RetiredSettingKeys
     /// </summary>
     internal const string LokiAllowInsecureHttp = "loki.allow_insecure_http";
 
+    /// <summary>
+    /// Retired by ADR 0008: the hosted-login HTTP test-origin allowlist and its Testing
+    /// environment gate are gone — plain-HTTP redirect URIs and public base URLs are accepted
+    /// structurally, so the list has nothing left to admit.
+    /// </summary>
+    internal const string HostedLoginHttpTestOrigins = "security.hosted_login_http_test_origins";
+
+    /// <summary>
+    /// Retired by ADR 0008: an http issuer no longer needs an explicit opt-in — http and https
+    /// issuers are accepted equally, with issuer equality to the public base URL carrying the
+    /// guarantee the switch used to gate.
+    /// </summary>
+    internal const string SecurityAllowNonHttpsIssuer = "security.allow_non_https_issuer";
+
     /// <summary>Every retired normalized key, compared case-sensitively like the definition table.</summary>
     internal static readonly IReadOnlySet<string> All =
-        new HashSet<string>(StringComparer.Ordinal) { LokiAllowInsecureHttp };
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            LokiAllowInsecureHttp,
+            HostedLoginHttpTestOrigins,
+            SecurityAllowNonHttpsIssuer
+        };
 
     internal static bool IsRetired(string key) => All.Contains(key);
 }

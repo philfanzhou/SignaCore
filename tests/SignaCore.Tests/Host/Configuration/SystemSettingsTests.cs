@@ -77,10 +77,10 @@ public class ProductSettingDefinitionTableTests
         Assert.Equal("false", defaults[SystemSettingKeys.ConsulDiscoveryEnabled]);
         Assert.Equal("{}", defaults[SystemSettingKeys.SmsProfiles]);
         Assert.Equal(string.Empty, defaults[SystemSettingKeys.WechatAppId]);
-        // Callback policy ships closed: HTTPS required, private addresses refused.
-        Assert.Equal("true", defaults[SystemSettingKeys.CallbackRequireHttps]);
+        // Callback SSRF gates ship closed (private addresses refused); transport is a deployment
+        // decision, so RequireHttps defaults to false (ADR 0008).
+        Assert.Equal("false", defaults[SystemSettingKeys.CallbackRequireHttps]);
         Assert.Equal("false", defaults[SystemSettingKeys.CallbackAllowPrivateAddresses]);
-        Assert.Equal("false", defaults[SystemSettingKeys.SecurityAllowNonHttpsIssuer]);
     }
 }
 
@@ -115,29 +115,26 @@ public class SettingCandidateValidationTests
     }
 
     [Fact]
-    public void Validate_OutsideDevelopment_RequiresHttpsPublicBaseUrl()
+    public void Validate_AcceptsAPlainHttpPublicBaseUrlInEveryEnvironment()
     {
         var values = CompleteSnapshot();
         values[SystemSettingKeys.PublicBaseUrl] = "http://identity.example.test";
         values[SystemSettingKeys.JwtIssuer] = "http://identity.example.test";
 
-        var errors = SharedSettingComposition.ValidateCompleteCandidate(values);
-
-        Assert.Contains(errors, error =>
-            error.Key == "endpoints.public_base_url" &&
-            error.ErrorCode == SignaCoreSettingCompositeValidator.HttpsRequiredCode);
+        // No https_required code exists for the base URL any more (ADR 0008): only the
+        // structural shape and issuer equality are validated.
+        Assert.Empty(SharedSettingComposition.ValidateCompleteCandidate(values));
     }
 
     /// <summary>
-    /// HTTP is accepted only when the operator explicitly opts in, independent of address shape.
+    /// Plain HTTP is accepted as-is, in every environment, with no opt-in (ADR 0008).
     /// </summary>
     [Fact]
-    public void Validate_WithAllowNonHttpsIssuer_AcceptsPlainHttp()
+    public void Validate_AcceptsPlainHttpWithoutAnyOptIn()
     {
         var values = CompleteSnapshot();
         values[SystemSettingKeys.PublicBaseUrl] = "http://identity.example.test";
         values[SystemSettingKeys.JwtIssuer] = "http://identity.example.test";
-        values[SystemSettingKeys.SecurityAllowNonHttpsIssuer] = "true";
 
         Assert.Empty(SharedSettingComposition.ValidateCompleteCandidate(values));
     }

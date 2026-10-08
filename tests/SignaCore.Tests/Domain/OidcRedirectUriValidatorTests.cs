@@ -15,9 +15,7 @@ public sealed class OidcRedirectUriValidatorTests
         string value,
         string expected)
     {
-        var result = OidcRedirectUriValidator.ValidateAndCanonicalize(
-            value,
-            isDevelopment: true);
+        var result = OidcRedirectUriValidator.ValidateAndCanonicalize(value);
 
         Assert.Equal(expected, result.Value);
     }
@@ -28,9 +26,7 @@ public sealed class OidcRedirectUriValidatorTests
     [InlineData("https://example.com/callback/")]
     public void ValidateAndCanonicalize_PreservesRequestSignificantText(string value)
     {
-        var result = OidcRedirectUriValidator.ValidateAndCanonicalize(
-            value,
-            isDevelopment: false);
+        var result = OidcRedirectUriValidator.ValidateAndCanonicalize(value);
 
         Assert.Equal(value, result.Value);
     }
@@ -41,7 +37,6 @@ public sealed class OidcRedirectUriValidatorTests
     [InlineData("/relative")]
     [InlineData("mailto:admin@example.com")]
     [InlineData("ftp://example.com/callback")]
-    [InlineData("http://example.com/callback")]
     [InlineData("http://localhost/callback")]
     [InlineData("https://localhost/callback")]
     [InlineData("https://localhost./callback")]
@@ -56,9 +51,7 @@ public sealed class OidcRedirectUriValidatorTests
     public void ValidateAndCanonicalize_RejectsInvalidRegistrations(string value)
     {
         var exception = Assert.Throws<OidcClientConfigurationException>(() =>
-            OidcRedirectUriValidator.ValidateAndCanonicalize(
-                value,
-                isDevelopment: false));
+            OidcRedirectUriValidator.ValidateAndCanonicalize(value));
 
         if (value.Length > 0)
         {
@@ -66,29 +59,12 @@ public sealed class OidcRedirectUriValidatorTests
         }
     }
 
-    [Theory]
-    [InlineData("http://127.0.0.1/callback")]
-    [InlineData("http://[::1]/callback")]
-    public void ValidateAndCanonicalize_AllowsLiteralLoopbackHttpOnlyInDevelopment(string value)
-    {
-        var result = OidcRedirectUriValidator.ValidateAndCanonicalize(
-            value,
-            isDevelopment: true);
-
-        Assert.Equal(value, result.Value);
-        Assert.Throws<OidcClientConfigurationException>(() =>
-            OidcRedirectUriValidator.ValidateAndCanonicalize(
-                value,
-                isDevelopment: false));
-    }
-
     [Fact]
     public void ValidateAndCanonicalize_RejectsCanonicalDuplicates()
     {
         Assert.Throws<OidcClientConfigurationException>(() =>
             OidcRedirectUriValidator.ValidateAndCanonicalize(
-                ["https://example.com", "HTTPS://EXAMPLE.COM:443/"],
-                isDevelopment: false));
+                ["https://example.com", "HTTPS://EXAMPLE.COM:443/"]));
     }
 
     [Fact]
@@ -106,9 +82,7 @@ public sealed class OidcRedirectUriValidatorTests
             "https://example.com:8443/callback"
         };
 
-        var result = OidcRedirectUriValidator.ValidateAndCanonicalize(
-            values,
-            isDevelopment: false);
+        var result = OidcRedirectUriValidator.ValidateAndCanonicalize(values);
 
         Assert.Equal(values, result.Select(uri => uri.Value));
     }
@@ -120,15 +94,10 @@ public sealed class OidcRedirectUriValidatorTests
             .Select(index => $"https://example.com/callback/{index}")
             .ToArray();
 
-        Assert.Equal(
-            10,
-            OidcRedirectUriValidator.ValidateAndCanonicalize(
-                ten,
-                isDevelopment: false).Count);
+        Assert.Equal(10, OidcRedirectUriValidator.ValidateAndCanonicalize(ten).Count);
         Assert.Throws<OidcClientConfigurationException>(() =>
             OidcRedirectUriValidator.ValidateAndCanonicalize(
-                [.. ten, "https://example.com/callback/10"],
-                isDevelopment: false));
+                [.. ten, "https://example.com/callback/10"]));
     }
 
     [Fact]
@@ -138,9 +107,7 @@ public sealed class OidcRedirectUriValidatorTests
 
         Assert.Equal(501, value.Length);
         Assert.Throws<OidcClientConfigurationException>(() =>
-            OidcRedirectUriValidator.ValidateAndCanonicalize(
-                value,
-                isDevelopment: false));
+            OidcRedirectUriValidator.ValidateAndCanonicalize(value));
     }
 
     [Fact]
@@ -149,9 +116,7 @@ public sealed class OidcRedirectUriValidatorTests
         var value = "https://example.com?" + new string('a', 480);
 
         Assert.Equal(500, value.Length);
-        var result = OidcRedirectUriValidator.ValidateAndCanonicalize(
-            value,
-            isDevelopment: false);
+        var result = OidcRedirectUriValidator.ValidateAndCanonicalize(value);
 
         Assert.Equal(501, result.Value.Length);
         Assert.StartsWith("https://example.com/?", result.Value, StringComparison.Ordinal);

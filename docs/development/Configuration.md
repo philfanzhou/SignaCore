@@ -93,13 +93,12 @@ new installation, and live in versioned application code.
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `Endpoints:PublicBaseUrl` | collected by setup | Canonical base URL used to build discovery endpoints. Must be HTTPS unless the operator explicitly opts in to HTTP |
+| `Endpoints:PublicBaseUrl` | collected by setup | Canonical base URL used to build discovery endpoints. `http` and `https` are both accepted; use TLS for public deployments (ADR 0008) |
 | `Jwt:Issuer` | collected by setup | Initialized to the normalized public base URL; must keep matching it |
 | `Jwt:Audience` | `SignaCore.Services` | Must match downstream validation |
 | `Jwt:TokenExpirationHours` | `2` | Access-token lifetime, 1–24 |
 | `RefreshToken:ExpirationDays` | `7` | Refresh-token lifetime, 1–365 |
 | `PasswordHasher:WorkFactor` | `11` | BCrypt work factor, 10–15 |
-| `Security:AllowNonHttpsIssuer` | `false` | Explicit insecure-transport opt-in; no IP/host/network-zone inference |
 
 ### Administrative console
 

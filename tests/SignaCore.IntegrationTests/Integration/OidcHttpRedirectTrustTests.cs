@@ -24,16 +24,18 @@ public sealed class OidcHttpRedirectTrustTests(IdentityServerFixture fixture) : 
     private const string Verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
     private const string Challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
-    private static OidcRedirectUriPolicy Allowed => new(false, ["http://10.20.30.40:5008"]);
+    private static OidcRedirectUriPolicy Allowed => OidcRedirectUriPolicy.Default;
 
     [Fact]
-    public async Task Admin_UsesSamePolicy_RejectsWithoutWrites_AndCanRemoveAfterPolicyCloses()
+    public async Task Admin_AcceptsPlainHttpRegistrations_AndCanRemoveThem()
     {
         using var allowed = Host(Allowed);
         using var disabled = Host(OidcRedirectUriPolicy.Default);
         var app = await SeedAsync(allowed.Services);
         using var a = allowed.CreateClient(new() { BaseAddress = new("https://localhost") });
         using var b = disabled.CreateClient(new() { BaseAddress = new("https://localhost") });
+        // The policy is the same structural rule on every host: plain-http registrations are
+        // accepted and removable in any environment, with no per-host allowlist input.
         foreach (var client in new[] { a, b })
         {
             using var login = new HttpRequestMessage(HttpMethod.Post, "/management/v1/session/login")
@@ -45,7 +47,8 @@ public sealed class OidcHttpRedirectTrustTests(IdentityServerFixture fixture) : 
         var route = "/api/admin/apps/" + app.AppId + "/oidc/redirect-uris";
         using var accepted = await a.PostAsync(route, System.Net.Http.Json.JsonContent.Create(new { kind = "Redirect", uris = new[] { Redirect + "/second" } }), Ct);
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
-        using var rejected = await b.PostAsync(route, System.Net.Http.Json.JsonContent.Create(new { kind = "Redirect", uris = new[] { Redirect + "/third" } }), Ct);
+        // A structurally invalid registration is still rejected without any write.
+        using var rejected = await b.PostAsync(route, System.Net.Http.Json.JsonContent.Create(new { kind = "Redirect", uris = new[] { "https://user:pass@10.20.30.40:5008/third" } }), Ct);
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
         using var scope = allowed.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
@@ -62,18 +65,13 @@ public sealed class OidcHttpRedirectTrustTests(IdentityServerFixture fixture) : 
     [InlineData("cancel")]
     [InlineData("password")]
     [InlineData("sms")]
-    public async Task RestartWithRemovedOrigin_RejectsAuthorizeAndContinuationWithoutConsumption(string action)
+    public async Task RemovedRegistration_RejectsAuthorizeAndContinuationWithoutConsumption(string action)
     {
         using var permitted = Host(Allowed);
-        using var disabled = Host(OidcRedirectUriPolicy.Default);
         using var a = Client(permitted);
-        using var b = Client(disabled);
         var app = await SeedAsync(permitted.Services);
         using var authorize = await a.GetAsync(Authorize(app.AppId), Ct);
         Assert.Equal(HttpStatusCode.Found, authorize.StatusCode);
-        using var rejectedAuthorize = await b.GetAsync(Authorize(app.AppId), Ct);
-        Assert.Equal(HttpStatusCode.BadRequest, rejectedAuthorize.StatusCode);
-        Assert.Null(rejectedAuthorize.Headers.Location);
         using var page = await a.GetAsync(authorize.Headers.Location, Ct);
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
         var body = await page.Content.ReadAsStringAsync(Ct);
@@ -91,26 +89,34 @@ public sealed class OidcHttpRedirectTrustTests(IdentityServerFixture fixture) : 
         if (action == "cancel") fields["action"] = "cancel";
         else if (action == "password") { fields["action"] = "login"; fields["username"] = IdentityServerFixture.AdminUsername; fields["password"] = IdentityServerFixture.AdminPassword; }
         else { fields["action"] = "sms_login"; fields["phone"] = "+8613800000000"; fields["otp"] = "123456"; }
+        // The stored registration is removed behind the host: the still-open continuation is
+        // refused without consumption, and a fresh authorize is refused locally.
+        using (var removalScope = permitted.Services.CreateScope())
+        {
+            var db = removalScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            await db.AppRedirectUris.Where(x => x.AppRegistrationId == app.Id).ExecuteDeleteAsync(Ct);
+        }
         using var request = new HttpRequestMessage(HttpMethod.Post, "/oauth2/login") { Content = new FormUrlEncodedContent(fields) };
         request.Headers.Add("Cookie", cookie.Split(';')[0]);
-        using var result = await b.SendAsync(request, Ct);
+        using var result = await a.SendAsync(request, Ct);
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
         Assert.Null(result.Headers.Location);
-        using var scope = disabled.Services.CreateScope();
+        using var rejectedAuthorize = await a.GetAsync(Authorize(app.AppId), Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, rejectedAuthorize.StatusCode);
+        Assert.Null(rejectedAuthorize.Headers.Location);
+        using var scope = permitted.Services.CreateScope();
         var continuation = await scope.ServiceProvider.GetRequiredService<IAuthorizationRequestStore>().GetActiveAsync(handle, DateTimeOffset.UtcNow, Ct);
         Assert.NotNull(continuation);
         Assert.Equal(0, await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().AuthorizationCodes.CountAsync(row => row.AppRegistrationId == app.Id, Ct));
     }
 
     [Theory]
-    [InlineData("policy")]
-    [InlineData("port")]
     [InlineData("registration")]
     [InlineData("inactive")]
-    public async Task OldCodeAndLogoutRequest_RejectDriftWithoutAnyConsumption(string drift)
+    public async Task OldCodeAndLogoutRequest_RejectDataDriftWithoutAnyConsumption(string drift)
     {
         using var allowed = Host(Allowed);
-        using var changed = Host(drift == "policy" ? OidcRedirectUriPolicy.Default : drift == "port" ? new(false, ["http://10.20.30.40:5009"]) : Allowed);
+        using var changed = Host(Allowed);
         var app = await SeedAsync(allowed.Services);
         string code, handle;
         Guid codeId, logoutId, sessionId;
@@ -146,7 +152,7 @@ public sealed class OidcHttpRedirectTrustTests(IdentityServerFixture fixture) : 
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
         var app = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "http-trust-" + Guid.NewGuid().ToString("N"), IsActive = true, AppSecretHash = BCrypt.Net.BCrypt.HashPassword("Synthetic123!"), CreatedAt = DateTimeOffset.UtcNow };
-        OidcClientConfigurationApplier.Apply(app, new() { AllowAuthorizationCode = true, AllowedScopes = ["openid"], AudienceMode = "PerApplication", RedirectUris = [Redirect], PostLogoutRedirectUris = [Logout] }, false, Allowed);
+        OidcClientConfigurationApplier.Apply(app, new() { AllowAuthorizationCode = true, AllowedScopes = ["openid"], AudienceMode = "PerApplication", RedirectUris = [Redirect], PostLogoutRedirectUris = [Logout] });
         db.AppRegistrations.Add(app);
         await db.SaveChangesAsync(Ct);
         return app;

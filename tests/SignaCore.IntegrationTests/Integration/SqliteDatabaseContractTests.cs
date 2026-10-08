@@ -77,9 +77,7 @@ public sealed class SqliteDatabaseContractTests
 
             var boundaryInput = "https://example.com?" + new string('a', 480);
             Assert.Equal(500, boundaryInput.Length);
-            var boundaryCanonicalUri = OidcRedirectUriValidator.ValidateAndCanonicalize(
-                boundaryInput,
-                isDevelopment: false).Value;
+            var boundaryCanonicalUri = OidcRedirectUriValidator.ValidateAndCanonicalize(boundaryInput).Value;
             Assert.Equal(501, boundaryCanonicalUri.Length);
             context.AppRedirectUris.Add(new AppRedirectUriEntity
             {

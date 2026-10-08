@@ -277,7 +277,6 @@ public sealed class SetupRecoveryAcceptanceTests : IAsyncLifetime
         JsonSerializer.SerializeToElement(new
         {
             publicBaseUrl = PublicBaseUrl,
-            allowNonHttpsIssuer = false,
             jwtAudience = "SignaCore.Services",
             username = AdminUsername,
             password = AdminPassword
@@ -310,14 +309,12 @@ public sealed class SetupRecoveryAcceptanceTests : IAsyncLifetime
             "missing-password" => new
             {
                 publicBaseUrl = PublicBaseUrl,
-                allowNonHttpsIssuer = false,
                 jwtAudience = "SignaCore.Services",
                 username = AdminUsername
             },
             _ => new
             {
                 publicBaseUrl = PublicBaseUrl,
-                allowNonHttpsIssuer = false,
                 jwtAudience = "SignaCore.Services",
                 username = AdminUsername,
                 password = AdminPassword

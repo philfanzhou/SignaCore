@@ -7,9 +7,7 @@ namespace SignaCore.Domain.Validators;
 public static class OidcRedirectUriValidator
 {
     public static IReadOnlyList<OidcRedirectUri> ValidateAndCanonicalize(
-        IEnumerable<string> values,
-        bool isDevelopment,
-        OidcRedirectUriPolicy? policy = null)
+        IEnumerable<string> values)
     {
         ArgumentNullException.ThrowIfNull(values);
 
@@ -24,7 +22,7 @@ public static class OidcRedirectUriValidator
                     "A redirect URI set cannot contain more than ten values.");
             }
 
-            var canonical = Canonicalize(value, isDevelopment, policy);
+            var canonical = Canonicalize(value);
             if (!uniqueValues.Add(canonical))
             {
                 throw new OidcClientConfigurationException(
@@ -37,15 +35,12 @@ public static class OidcRedirectUriValidator
         return canonicalUris;
     }
 
-    public static OidcRedirectUri ValidateAndCanonicalize(
-        string value,
-        bool isDevelopment,
-        OidcRedirectUriPolicy? policy = null)
+    public static OidcRedirectUri ValidateAndCanonicalize(string value)
     {
-        return new OidcRedirectUri(Canonicalize(value, isDevelopment, policy));
+        return new OidcRedirectUri(Canonicalize(value));
     }
 
-    private static string Canonicalize(string value, bool isDevelopment, OidcRedirectUriPolicy? policy)
+    private static string Canonicalize(string value)
     {
         if (string.IsNullOrEmpty(value)
             || value.Length > IdentityConstants.MaxOidcRedirectUriLength
@@ -104,13 +99,6 @@ public static class OidcRedirectUriValidator
 
         var host = rawHost.ToLowerInvariant();
         if (host.TrimEnd('.').Equals("localhost", StringComparison.OrdinalIgnoreCase))
-        {
-            throw InvalidUri();
-        }
-
-        if (scheme == "http"
-            && !(isDevelopment && (host == "127.0.0.1" || host == "[::1]"))
-            && !(policy?.AllowsHttpAuthority(rawAuthority) ?? false))
         {
             throw InvalidUri();
         }

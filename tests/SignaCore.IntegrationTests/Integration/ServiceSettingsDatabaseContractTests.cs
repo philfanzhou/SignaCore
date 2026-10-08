@@ -437,7 +437,7 @@ public sealed class ServiceSettingsDatabaseContractTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task CancellationAfterLoad_PropagatesCleanlyAndRollsBack(bool includeHttpTestOrigins)
+    public async Task CancellationAfterLoad_PropagatesCleanlyAndRollsBack(bool includeJsonListKey)
     {
         var options = await CreateMigratedSqliteAsync();
         await using var context = new IdentityDbContext(options);
@@ -446,8 +446,8 @@ public sealed class ServiceSettingsDatabaseContractTests
         using var cancellation = new CancellationTokenSource();
 
         var changes = SeedChanges();
-        if (includeHttpTestOrigins)
-            changes["security.hosted_login_http_test_origins"] = "[\"http://10.0.0.1:5002\"]";
+        if (includeJsonListKey)
+            changes["callback.allowed_domains"] = "[\"orders.example.com\"]";
         var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             UpdateInTransactionAsync(
                 context,
