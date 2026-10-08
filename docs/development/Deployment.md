@@ -86,18 +86,20 @@ accumulate and are pruned by hand when they become inconvenient.
 Releases are driven entirely by pushing a tag. No release is published by hand.
 
 ```bash
-git tag -a 0.1.4 -m "SignaCore 0.1.4"
-git push origin 0.1.4
+git tag v0.1.4 <commit-on-main>
+git push origin v0.1.4
 ```
 
 Release candidates use the same process with an `-rc.NUMBER` suffix:
 
 ```bash
-git tag -a 0.1.8-rc.1 -m "SignaCore 0.1.8-rc.1"
-git push origin 0.1.8-rc.1
+git tag v0.1.8-rc.1 <commit-on-main>
+git push origin v0.1.8-rc.1
 ```
 
-The tag must use `MAJOR.MINOR.PATCH` or `MAJOR.MINOR.PATCH-rc.NUMBER`; CI rejects anything else.
+The tag must use `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-rc.NUMBER`; CI rejects anything
+else. The GitHub Release is titled after the tag, and the package and image versions are the tag
+without the `v` prefix.
 Pushing it runs the full
 pipeline — build, unit tests, integration and HTTP contract tests, the image vulnerability scan, the
 containerised first-run and smoke assertions, and the database contract matrix — and only if all of

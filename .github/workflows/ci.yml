@@ -7,7 +7,7 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ['*.*.*']
+    tags: ['v*.*.*']
   pull_request:
     branches: [main]
 
@@ -178,16 +178,16 @@ jobs:
             --results-directory reports \
             --no-restore
 
-      # Pack the client package after its tests have passed. A tag packs the tag's exact version;
-      # a branch push or pull request packs a non-publishable edge build that exists only for the
-      # consumption smoke. Nothing is published from this job, on any ref.
+      # Pack the client package after its tests have passed. A tag packs the tag's exact version
+      # (without the `v` prefix); a branch push or pull request packs a non-publishable edge build
+      # that exists only for the consumption smoke. Nothing is published from this job, on any ref.
       - name: Resolve client package version
         id: package_version
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            version="${GITHUB_REF_NAME}"
+            version="${GITHUB_REF_NAME#v}"
             if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
-              echo "Tag ${version} is not a canonical NuGet version (MAJOR.MINOR.PATCH[-rc.NUMBER], no build metadata)." >&2
+              echo "Tag ${GITHUB_REF_NAME} is not a canonical release tag (vMAJOR.MINOR.PATCH[-rc.NUMBER], no build metadata)." >&2
               exit 1
             fi
           else
@@ -764,8 +764,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
-            echo "Release tag must use MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-rc.NUMBER." >&2
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "Release tag must use vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.NUMBER." >&2
             exit 1
           fi
 
@@ -793,14 +793,15 @@ jobs:
             # each push leaves the previous manifest, with its provenance and SBOM attestations,
             # behind as an untagged package version, which GHCR does not prune on its own.
             type=edge,branch=${{ github.event.repository.default_branch }}
-            # The semver rules read the tag name and yield nothing on a branch ref.
+            # The semver rules read the tag name and yield nothing on a branch ref. They strip the
+            # leading `v`, so the image keeps its bare MAJOR.MINOR.PATCH tags.
             # A pre-release gets only its exact immutable version. Stable releases additionally
             # move the minor channel and latest; an RC must never replace either production tag.
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') }}
-            # Release tags carry no `v` prefix here, so the gate must not require one. Without
-            # this gate the rule is unconditional and the first default-branch push would move
-            # `latest` onto a development build.
+            # The `latest` gate keys on the tag ref and the prerelease dash rather than the `v`
+            # prefix. Without this gate the rule is unconditional and the first default-branch
+            # push would move `latest` onto a development build.
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') }}
 
       - name: Build and publish image
@@ -871,7 +872,8 @@ jobs:
 
       - name: Resolve package version
         id: package_version
-        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+        # The artifact uploaded by build-test carries the tag without its `v` prefix.
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       # The exact bytes that passed the tests and the smoke are what get pushed. Rebuilding here
       # would publish an artifact no gate has seen.
@@ -973,11 +975,15 @@ jobs:
             exit 0
           fi
 
-          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+          # The package version and the image's semver tags are the tag without its `v` prefix;
+          # the release title is the tag itself.
+          version="${GITHUB_REF_NAME#v}"
+
+          if [[ "${version}" == *-* ]]; then
             release_flags=(--prerelease)
             channel_note="Pre-release image and package; the stable minor channel and latest tag were not changed."
           else
-            minor="${GITHUB_REF_NAME%.*}"
+            minor="${version%.*}"
             release_flags=(--latest)
             channel_note="Also tagged ${minor} and latest."
           fi
@@ -985,17 +991,17 @@ jobs:
           # printf keeps the Markdown backticks literal; a heredoc would need them escaped.
           {
             printf '## Container image\n\n'
-            printf '```\n%s:%s\n```\n\n' "${REGISTRY_IMAGE}" "${GITHUB_REF_NAME}"
+            printf '```\n%s:%s\n```\n\n' "${REGISTRY_IMAGE}" "${version}"
             printf 'Digest: `%s`\n\n' "${IMAGE_DIGEST}"
             printf '%s\n\n' "${channel_note}"
             printf '## NuGet package\n\n'
             printf '[%s %s](https://www.nuget.org/packages/%s/%s)\n\n' \
-              "${PACKAGE_ID}" "${GITHUB_REF_NAME}" "${PACKAGE_ID}" "${GITHUB_REF_NAME}"
+              "${PACKAGE_ID}" "${version}" "${PACKAGE_ID}" "${version}"
           } > release-notes.md
 
           # --generate-notes appends GitHub's commit and pull-request changelog underneath.
           gh release create "${GITHUB_REF_NAME}" \
-            --title "SignaCore ${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
             --generate-notes \
             --verify-tag \
