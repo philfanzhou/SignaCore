@@ -321,7 +321,7 @@ public class AdminOidcClientTests : IDisposable
             new AdminAddRedirectUrisRequest(nameof(RedirectUriKind.Redirect),
             [
                 "https://bff.example.test/first",
-                "http://insecure.example.test/second",
+                "https://user:pass@insecure.example.test/second",
                 "https://bff.example.test/third"
             ]),
             _repository,
@@ -430,9 +430,12 @@ public class AdminOidcClientTests : IDisposable
         await SeedAsync();
         var app = await LoadAsync();
 
+        // A structurally invalid URI carrying a recognizable secret shape: the rejection must
+        // never echo the value (plain http alone is no longer a rejection at all).
         var rejected = await _controller.AddOidcRedirectUris(
             AppId,
-            new AdminAddRedirectUrisRequest(nameof(RedirectUriKind.Redirect), ["http://" + canaryUri[8..]]),
+            new AdminAddRedirectUrisRequest(nameof(RedirectUriKind.Redirect),
+                ["https://user:CANARY-SECRET-VALUE@attacker.example.test/cb"]),
             _repository,
             _unitOfWork,
             _auditServiceMock.Object,

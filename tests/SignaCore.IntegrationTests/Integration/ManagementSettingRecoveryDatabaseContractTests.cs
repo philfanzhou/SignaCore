@@ -71,8 +71,7 @@ public sealed partial class ManagementSettingRecoveryDatabaseContractTests
         foreach (var change in new[]
         {
             new Dictionary<string, string?> { ["jwt.audience"] = "recovered-audience" },
-            new Dictionary<string, string?>
-                { ["security.hosted_login_http_test_origins"] = "[\"http://10.0.0.1:5002\"]" }
+            new Dictionary<string, string?> { ["sms.max_sends_per_day"] = "9" }
         })
         {
             var version = (await fixture.StoredAsync()).Version;
@@ -94,13 +93,16 @@ public sealed partial class ManagementSettingRecoveryDatabaseContractTests
         }
         var afterAudits = await fixture.AuditsAsync();
         Assert.Equal(audits.Count + 2, afterAudits.Count);
-        foreach (var key in new[] { "jwt.audience", "security.hosted_login_http_test_origins" })
+        foreach (var key in new[] { "jwt.audience", "sms.max_sends_per_day" })
             Assert.Equal(audits.Count(audit => audit.Contains(key, StringComparison.Ordinal)) + 1,
                 afterAudits.Count(audit => audit.Contains(key, StringComparison.Ordinal)));
-        // Restore the valid empty HTTP policy before restarting a non-Testing host.
-        using var reset = await PostAsync(admin, (await fixture.StoredAsync()).Version,
-            new() { ["security.hosted_login_http_test_origins"] = null });
-        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+        // The retired transport keys are unknown keys: rejected without any write.
+        foreach (var key in new[] { "security.hosted_login_http_test_origins", "security.allow_non_https_issuer" })
+        {
+            using var retired = await PostAsync(admin, (await fixture.StoredAsync()).Version,
+                new() { [key] = "true" });
+            Assert.Equal(HttpStatusCode.BadRequest, retired.StatusCode);
+        }
         await using var restarted = fixture.Host();
         AssertDisabled(restarted);
         using var restartedAdmin = await LoginAsync(restarted);
@@ -138,8 +140,6 @@ public sealed partial class ManagementSettingRecoveryDatabaseContractTests
             new() { ["jwt.token_expiration_hours"] = "bad-number" },
             new() { ["security.allow_non_https_issuer"] = "bad-boolean" },
             new() { ["security.hosted_login_http_test_origins"] = "[\"http://localhost:5002\"]" },
-            new() { ["security.hosted_login_http_test_origins"] = "{}" },
-            new() { ["security.hosted_login_http_test_origins"] = "bad-json" },
             new() { ["sms.otp_hmac_key"] = "bad-key" },
             new() { ["unknown.key"] = "bad" },
             new(StringComparer.Ordinal) { ["jwt.audience"] = "a", ["JWT.AUDIENCE"] = "b" }

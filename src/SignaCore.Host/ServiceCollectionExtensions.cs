@@ -80,25 +80,24 @@ public static class ServiceCollectionExtensions
             TokenExpirationHours = int.Parse(configuration["Jwt:TokenExpirationHours"] ?? "2")
         });
         jwtOptions.Validate();
-        var allowNonHttpsIssuer = configuration.GetValue("Security:AllowNonHttpsIssuer", false);
-        if (!environment.IsDevelopment() && !allowNonHttpsIssuer &&
-            (!Uri.TryCreate(jwtOptions.Issuer, UriKind.Absolute, out var issuerUri) ||
-             issuerUri.Scheme != Uri.UriSchemeHttps))
+        // Transport security is a deployment decision (ADR 0008): the issuer must be an absolute
+        // http or https URL — nothing more — and it must equal the public base URL, because every
+        // conforming client compares the `iss` claim with the URL it fetched discovery from.
+        if (!Uri.TryCreate(jwtOptions.Issuer, UriKind.Absolute, out var issuerUri)
+            || (issuerUri.Scheme != Uri.UriSchemeHttp && issuerUri.Scheme != Uri.UriSchemeHttps))
         {
             throw new InvalidOperationException(
-                "Jwt:Issuer must be an absolute HTTPS URL outside the Development environment. " +
-                "Set Security:AllowNonHttpsIssuer=true only for a deliberate legacy migration.");
+                "Jwt:Issuer must be an absolute http or https URL.");
         }
         var publicBaseUrl = configuration[PublicOrigin.ConfigurationKey];
-        if (!environment.IsDevelopment() && !allowNonHttpsIssuer &&
-            !string.IsNullOrWhiteSpace(publicBaseUrl) &&
+        if (!string.IsNullOrWhiteSpace(publicBaseUrl) &&
             !string.Equals(
                 jwtOptions.Issuer.TrimEnd('/'),
                 publicBaseUrl.Trim().TrimEnd('/'),
                 StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                $"Jwt:Issuer must match {PublicOrigin.ConfigurationKey} outside the Development environment.");
+                $"Jwt:Issuer must match {PublicOrigin.ConfigurationKey}.");
         }
 
         // ---- Token Service ----
@@ -135,9 +134,9 @@ public static class ServiceCollectionExtensions
         var callbackAllowPrivateAddresses = configuration.GetValue(
             "Callback:AllowPrivateAddresses",
             environment.IsDevelopment());
-        var callbackRequireHttps = configuration.GetValue(
-            "Callback:RequireHttps",
-            !environment.IsDevelopment());
+        // Off by default since ADR 0008: transport is a deployment decision, and the SSRF gates
+        // (allowed domains, private-address refusal) carry the real protection.
+        var callbackRequireHttps = configuration.GetValue("Callback:RequireHttps", false);
         services.AddSingleton(new CallbackUrlValidator(
             callbackAllowedDomains,
             callbackAllowPrivateAddresses,
@@ -540,11 +539,11 @@ public static class ServiceCollectionExtensions
                 options.Cookie.Domain = null;
                 options.Cookie.IsEssential = true;
             })
-            .AddCookie(IdentityCookieProfile.TestScheme, options =>
+            .AddCookie(IdentityCookieProfile.HttpScheme, options =>
             {
-                options.ForwardDefaultSelector = context => IdentityCookieProfile.Resolve(context)?.HttpTest == true
+                options.ForwardDefaultSelector = context => IdentityCookieProfile.Resolve(context)?.PlainHttp == true
                     ? null : IdentityCookieProfile.UnavailableScheme;
-                options.Cookie.Name = IdentityCookieProfile.TestIdentityCookie;
+                options.Cookie.Name = IdentityCookieProfile.HttpIdentityCookie;
                 options.Cookie.HttpOnly = true;
                 options.Cookie.SecurePolicy = CookieSecurePolicy.None;
                 options.Cookie.SameSite = SameSiteMode.Lax;

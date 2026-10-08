@@ -28,14 +28,12 @@ public class AdminController : ControllerBase
 {
     private readonly ILogger<AdminController> _logger;
     private readonly ManagementOperatorReader _operatorReader;
-    private readonly OidcRedirectUriPolicy? _uriPolicy;
 
     // The operator reader is an internal type, so it comes from the request scope rather than from
     // a declared constructor parameter — MVC activates controllers through a public constructor.
     public AdminController(ILogger<AdminController> logger, IServiceProvider services)
     {
         _logger = logger;
-        _uriPolicy = services.GetService<OidcRedirectUriPolicy>();
         _operatorReader = services.GetRequiredService<ManagementOperatorReader>();
     }
 
@@ -1020,8 +1018,7 @@ public class AdminController : ControllerBase
                         IdentitySessionMaxAgeSeconds = request.IdentitySessionMaxAgeSeconds,
                         RedirectUris = RegisteredUris(app, RedirectUriKind.Redirect),
                         PostLogoutRedirectUris = RegisteredUris(app, RedirectUriKind.PostLogout)
-                    },
-                    environment.IsDevelopment(), _uriPolicy);
+                    });
             }
             catch (OidcClientConfigurationException exception)
             {
@@ -1155,7 +1152,7 @@ public class AdminController : ControllerBase
             unitOfWork,
             auditWriter,
             environment,
-            cancellationToken, removingRegistration: true);
+            cancellationToken);
     }
 
     /// <summary>
@@ -1174,16 +1171,12 @@ public class AdminController : ControllerBase
         IUnitOfWork unitOfWork,
         IManagementAuditWriter auditWriter,
         IWebHostEnvironment environment,
-        CancellationToken cancellationToken,
-        bool removingRegistration = false)
+        CancellationToken cancellationToken)
     {
         OidcClientConfigurationChange change;
         try
         {
-            var policy = _uriPolicy ?? new OidcRedirectUriPolicy(environment.IsDevelopment(), []);
-            if (removingRegistration)
-                policy = policy.ForRegistrationRemoval((input.RedirectUris ?? []).Concat(input.PostLogoutRedirectUris ?? []));
-            change = OidcClientConfigurationApplier.Apply(app, input, environment.IsDevelopment(), policy);
+            change = OidcClientConfigurationApplier.Apply(app, input);
         }
         catch (OidcClientConfigurationException exception)
         {

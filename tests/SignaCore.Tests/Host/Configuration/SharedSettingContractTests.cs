@@ -58,16 +58,10 @@ public sealed class SharedSettingContractTests
             {
                 [SystemSettingKeys.PublicBaseUrl] = "https://accounts.example.com/?x=1"
             }, isDevelopment: false, expectedValid: false);
-            Add("base-url-http-without-opt-in", new Dictionary<string, string>
+            Add("base-url-http", new Dictionary<string, string>
             {
                 [SystemSettingKeys.PublicBaseUrl] = "http://accounts.example.com",
                 [SystemSettingKeys.JwtIssuer] = "http://accounts.example.com"
-            }, isDevelopment: false, expectedValid: false);
-            Add("base-url-http-with-explicit-opt-in", new Dictionary<string, string>
-            {
-                [SystemSettingKeys.PublicBaseUrl] = "http://accounts.example.com",
-                [SystemSettingKeys.JwtIssuer] = "http://accounts.example.com",
-                [SystemSettingKeys.SecurityAllowNonHttpsIssuer] = "true"
             }, isDevelopment: false, expectedValid: true);
             Add("issuer-mismatch", new Dictionary<string, string>
             {
@@ -280,16 +274,16 @@ public sealed class SharedSettingContractTests
     public void CompositeErrors_AreClosedKeyScopedCodes()
     {
         var legacy = ServiceSettingDefinitions.BuildLegacyDefaults();
-        legacy[SystemSettingKeys.PublicBaseUrl] = "http://accounts.example.com";
-        legacy[SystemSettingKeys.JwtIssuer] = "http://accounts.example.com";
+        legacy[SystemSettingKeys.PublicBaseUrl] = "https://accounts.example.com";
+        legacy[SystemSettingKeys.JwtIssuer] = "https://other.example.com";
 
         var result = SharedSettingComposition.CreateRegistry(isDevelopment: false)
             .Validate(ToSharedInput(legacy));
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, error =>
-            error.Key == "endpoints.public_base_url" &&
-            error.ErrorCode == SignaCoreSettingCompositeValidator.HttpsRequiredCode);
+            error.Key == "jwt.issuer" &&
+            error.ErrorCode == SignaCoreSettingCompositeValidator.IssuerMismatchCode);
         foreach (var error in result.Errors)
         {
             Assert.DoesNotContain("accounts.example.com", error.ErrorCode, StringComparison.Ordinal);

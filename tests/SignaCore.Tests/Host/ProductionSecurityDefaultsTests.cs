@@ -68,26 +68,24 @@ public class ProductionSecurityDefaultsTests
     }
 
     [Fact]
-    public void ProductionStartup_RejectsNonHttpsIssuer()
+    public void ProductionStartup_RejectsANonAbsoluteIssuer()
     {
         var exception = Assert.Throws<InvalidOperationException>(() =>
             BuildServices(
                 Environments.Production,
                 new Dictionary<string, string?> { ["Jwt:Issuer"] = "SignaCore" }));
 
-        Assert.Contains("absolute HTTPS URL", exception.Message);
+        Assert.Contains("absolute http or https URL", exception.Message);
     }
 
     [Fact]
-    public void ProductionStartup_AllowsExplicitLegacyIssuerCompatibilitySwitch()
+    public void ProductionStartup_AcceptsAPlainHttpIssuerInEveryEnvironment()
     {
+        // Transport is a deployment decision (ADR 0008): a plain-http issuer needs no switch, and
+        // the retired Security:AllowNonHttpsIssuer key no longer exists to set.
         using var provider = BuildServices(
             Environments.Production,
-            new Dictionary<string, string?>
-            {
-                ["Jwt:Issuer"] = "SignaCore",
-                ["Security:AllowNonHttpsIssuer"] = "true"
-            });
+            new Dictionary<string, string?> { ["Jwt:Issuer"] = "http://accounts.example.com" });
 
         Assert.NotNull(provider);
     }

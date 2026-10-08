@@ -17,7 +17,7 @@ namespace SignaCore.Client.AspNetCore.Tests;
 
 /// <summary>
 /// The intranet HTTP deployment against the real SignaCore host, in memory: the host serves its
-/// hosted login over its own explicit HTTP-origin allowlist (the Testing-environment carrier),
+/// hosted login over plain HTTP in any environment (transport is a deployment decision, ADR 0008),
 /// while the consumer runs in Production with the package's
 /// <c>IntranetHttpOrigins</c> list — proving the package's opt-in is honored under a Production
 /// environment name exactly as under any other. The full password sign-in, callback, session,
@@ -51,8 +51,8 @@ public sealed class ClientRealHostIntranetHttpTests : IAsyncLifetime
             DataSource = _databasePath
         }.ConnectionString;
 
-        // The host side of the intranet deployment: an HTTP public origin carried by the shared
-        // hosted-login HTTP origin allowlist, exactly as the Testing carrier contract requires.
+        // The host side of the intranet deployment: an HTTP public origin accepted structurally
+        // in any environment — no allowlist, no Testing environment (ADR 0008).
         var bootstrapFilePath = await InstallationTestSupport.PrepareCompletedInstallationAsync(
             _bootstrapDirectory,
             new DatabaseOptions
@@ -66,15 +66,13 @@ public sealed class ClientRealHostIntranetHttpTests : IAsyncLifetime
             new Dictionary<string, string>
             {
                 [SystemSettingKeys.PublicBaseUrl] = Authority,
-                [SystemSettingKeys.JwtIssuer] = Authority,
-                [SystemSettingKeys.SecurityHostedLoginHttpTestOrigins] =
-                    $$"""["{{Authority}}","{{ConsumerOrigin}}"]"""
+                [SystemSettingKeys.JwtIssuer] = Authority
             });
 
         _host = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
-                builder.UseEnvironment("Testing");
+                builder.UseEnvironment("Production");
                 builder.UseSetting("Bootstrap:FilePath", bootstrapFilePath);
                 builder.UseSetting("Endpoints:Http", "0");
             });

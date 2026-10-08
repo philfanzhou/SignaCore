@@ -323,7 +323,10 @@ browsers, logs, and URLs; validates every callback and ID token as described abo
 authorization decision it makes from `iss` plus `sub`. SignaCore owns credentials, the login page,
 the SignaCore session, and token issuance.
 
-For the explicit Testing URI exception and required runtime revalidation, see [current redirect transport trust](../oidc/CanonicalSemanticModel.md#current-redirect-transport-trust) and [HTTP testing](../oidc/HttpTesting.md).
+Redirect URIs over `http` and `https` are accepted equally in every environment — transport is a
+deployment decision ([ADR 0008](../adr/0008-transport-security-is-a-deployment-decision.md)); see
+[plain-HTTP deployments](../oidc/HttpTesting.md) and the
+[redirect canonical form](../oidc/CanonicalSemanticModel.md#product-stages).
 The isolated HTTP identity/CSRF Cookie carrier is also implemented at exact allowed request origins;
 official dual-end published-image/browser acceptance remains the complete-capability release gate.
 

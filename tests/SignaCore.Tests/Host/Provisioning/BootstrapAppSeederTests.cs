@@ -36,19 +36,19 @@ public class BootstrapAppSeederTests : IDisposable
             new EfCoreManagementAuditWriter<IdentityDbContext>(_dbContext));
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task HttpRegistration_UsesActivatedPolicy_AndRejectsWithoutAnyGraphOrAudit(bool allowed)
+    [Fact]
+    public async Task HttpRegistration_IsSeededStructurally_WithoutAnyPolicyInput()
     {
+        // Plain-HTTP bootstrap seeds register structurally, like every other registration path:
+        // there is no allowlist to consult (ADR 0008).
         await SeedAsync("""
             { "Apps": [{ "AppId": "http-bootstrap", "AppSecret": "synthetic",
               "Oidc": { "AllowAuthorizationCode": true, "AudienceMode": "PerApplication",
                 "RedirectUris": ["http://10.20.30.40:5008/callback"],
                 "PostLogoutRedirectUris": ["http://10.20.30.40:5008/logout"] } }] }
-            """, uriPolicy: allowed ? new(false, ["http://10.20.30.40:5008"]) : SignaCore.Domain.Validators.OidcRedirectUriPolicy.Default);
-        Assert.Equal(allowed ? 1 : 0, await _dbContext.AppRegistrations.CountAsync(TestContext.Current.CancellationToken));
-        Assert.Equal(allowed ? 1 : 0, _auditService.Events.Count);
+            """);
+        Assert.Equal(1, await _dbContext.AppRegistrations.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(1, _auditService.Events.Count);
     }
 
     [Fact]
@@ -317,8 +317,7 @@ public class BootstrapAppSeederTests : IDisposable
     private async Task SeedAsync(
         string json,
         IManagementAuditWriter? auditWriter = null,
-        CancellationToken cancellationToken = default,
-        SignaCore.Domain.Validators.OidcRedirectUriPolicy? uriPolicy = null)
+        CancellationToken cancellationToken = default)
     {
         var path = Path.Combine(Path.GetTempPath(), $"bootstrap-apps-{Guid.NewGuid():N}.json");
         await File.WriteAllTextAsync(path, json, TestContext.Current.CancellationToken);
@@ -338,7 +337,7 @@ public class BootstrapAppSeederTests : IDisposable
                 _passwordHasher,
                 _logger,
                 isDevelopment: false,
-                cancellationToken: cancellationToken, uriPolicy: uriPolicy);
+                cancellationToken: cancellationToken);
             _dbContext.ChangeTracker.Clear();
         }
         finally

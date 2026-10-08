@@ -316,12 +316,12 @@ public sealed class IdentitySessionCookieTests(SqliteKeyStoreFixture fixture)
     }
 
     [Fact]
-    public void HttpTestIdentityCookie_HasDistinctAttributesAndPurpose()
+    public void PlainHttpIdentityCookie_HasDistinctAttributesAndPurpose()
     {
         using var provider = BuildServices();
         var normal = GetCookieOptions(provider, IdentitySessionDefaults.AuthenticationScheme);
-        var test = GetCookieOptions(provider, IdentityCookieProfile.TestScheme);
-        Assert.Equal("signacore_http_test_identity", test.Cookie.Name);
+        var test = GetCookieOptions(provider, IdentityCookieProfile.HttpScheme);
+        Assert.Equal("signacore_http_identity", test.Cookie.Name);
         Assert.Equal(CookieSecurePolicy.None, test.Cookie.SecurePolicy);
         Assert.True(test.Cookie.HttpOnly);
         Assert.Equal(SameSiteMode.Lax, test.Cookie.SameSite);
@@ -335,14 +335,18 @@ public sealed class IdentitySessionCookieTests(SqliteKeyStoreFixture fixture)
             ManagementPrincipal(ManagementPermission.Admin), ManagementSessionDefaults.AuthenticationScheme))));
         Assert.Null(test.TicketDataFormat.Unprotect(normal.TicketDataFormat.Protect(IdentityTicket(SessionId))));
         var pinned = new TicketDataFormat(provider.GetRequiredService<IDataProtectionProvider>()
-            .CreateProtector("SignaCore.IdentitySession.HttpTest.v1"));
+            .CreateProtector("SignaCore.IdentitySession.Http.v1"));
         Assert.Equal(SessionId.ToString(), pinned.Unprotect(payload)!.Principal.FindFirstValue(IdentitySessionDefaults.SessionIdClaim));
+        // Scheme-driven carrier selection (ADR 0008): https rides the Secure carrier, plain http
+        // rides the neutral carrier on any host, and no other scheme is served at all.
         var https = new DefaultHttpContext { RequestServices = provider };
         https.Request.Scheme = "https";
         Assert.Null(normal.ForwardDefaultSelector!(https));
         Assert.Equal(IdentityCookieProfile.UnavailableScheme, test.ForwardDefaultSelector!(https));
         https.Request.Scheme = "http";
         https.Request.Host = new HostString("10.20.30.40", 5002);
+        Assert.Equal(IdentityCookieProfile.HttpScheme, normal.ForwardDefaultSelector!(https));
+        https.Request.Scheme = "ftp";
         Assert.Equal(IdentityCookieProfile.UnavailableScheme, normal.ForwardDefaultSelector!(https));
     }
 

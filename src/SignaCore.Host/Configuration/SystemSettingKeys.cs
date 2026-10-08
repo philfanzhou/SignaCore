@@ -14,8 +14,6 @@ internal static class SystemSettingKeys
     public const string JwtTokenExpirationHours = "Jwt:TokenExpirationHours";
     public const string RefreshTokenExpirationDays = "RefreshToken:ExpirationDays";
     public const string PasswordHasherWorkFactor = "PasswordHasher:WorkFactor";
-    public const string SecurityHostedLoginHttpTestOrigins = "Security:HostedLoginHttpTestOrigins";
-    public const string SecurityAllowNonHttpsIssuer = "Security:AllowNonHttpsIssuer";
 
     public const string AdminWebAllowedOrigins = "AdminWeb:AllowedOrigins";
 

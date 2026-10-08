@@ -15,11 +15,9 @@ public static class OidcClientConfigurationValidator
         AudienceMode audienceMode,
         IEnumerable<string> redirectUris,
         IEnumerable<string> postLogoutRedirectUris,
-        bool isDevelopment,
         OidcClientType? currentClientType = null,
         bool applicationIsActive = true,
-        bool hasAppSecret = false,
-        OidcRedirectUriPolicy? policy = null)
+        bool hasAppSecret = false)
     {
         if (!Enum.IsDefined(clientType))
         {
@@ -38,11 +36,9 @@ public static class OidcClientConfigurationValidator
             allowedScopes,
             allowRefreshToken);
         var canonicalRedirectUris = OidcRedirectUriValidator.ValidateAndCanonicalize(
-            redirectUris,
-            isDevelopment, policy);
+            redirectUris);
         var canonicalPostLogoutRedirectUris = OidcRedirectUriValidator.ValidateAndCanonicalize(
-            postLogoutRedirectUris,
-            isDevelopment, policy);
+            postLogoutRedirectUris);
 
         if (clientType == OidcClientType.Public && allowRefreshToken
             && (!applicationIsActive

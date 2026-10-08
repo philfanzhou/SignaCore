@@ -347,7 +347,6 @@ public sealed class MultiInstanceAcceptanceTests : IAsyncLifetime
                 input = new
                 {
                     publicBaseUrl = PublicBaseUrl,
-                    allowNonHttpsIssuer = false,
                     jwtAudience = "SignaCore.Services",
                     username = AdminUsername,
                     password = AdminPassword

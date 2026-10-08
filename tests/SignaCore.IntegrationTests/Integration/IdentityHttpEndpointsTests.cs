@@ -636,8 +636,8 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var definitions = body.GetProperty("definitions").EnumerateArray().ToList();
 
-        // All 46 product keys, in the pinned order of the shared contract.
-        Assert.Equal(46, definitions.Count);
+        // All 44 product keys, in the pinned order of the shared contract.
+        Assert.Equal(44, definitions.Count);
         Assert.Equal(
             definitions.Select(item => item.GetProperty("key").GetString()).ToList(),
             definitions.Select(item => item.GetProperty("key").GetString())

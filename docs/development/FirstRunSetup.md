@@ -176,9 +176,11 @@ bootstrap file.
 
 `POST /management/v1/setup` performs the completion in one serializable transaction. The request
 carries the fixed cross-site request header `X-ServiceMantle-Request: 1` and a JSON body of exactly
-`{"code":"...","input":{...}}`, where `input` holds exactly the five form values: `publicBaseUrl`
-(string), `allowNonHttpsIssuer` (bool), `jwtAudience` (string), `username` (string), and `password`
-(string). The password confirmation is compared only in the browser and never travels. A missing,
+`{"code":"...","input":{...}}`, where `input` holds exactly the four form values: `publicBaseUrl`
+(string), `jwtAudience` (string), `username` (string), and `password`
+(string); the retired `allowNonHttpsIssuer` property is rejected as an extra field (ADR 0008: an
+http public base URL needs no opt-in). The password confirmation is compared only in the browser
+and never travels. A missing,
 extra, or wrongly typed field, or an HTTP shape the shared entry refuses, is answered with the fixed
 management `400` before the executor runs.
 

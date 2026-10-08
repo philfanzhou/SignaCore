@@ -37,11 +37,10 @@ internal static class InstallationTestSupport
         IReadOnlyDictionary<string, string>? settingOverrides = null)
     {
         var values = ServiceSettingDefinitions.BuildLegacyDefaults();
-        // TestServer serves plain HTTP on http://localhost, so the snapshot has to permit a
-        // non-HTTPS issuer the way a deliberate legacy migration would.
+        // TestServer serves plain HTTP on http://localhost, which the snapshot accepts as-is:
+        // http and https public base URLs are equal inputs (ADR 0008).
         values[SystemSettingKeys.PublicBaseUrl] = "http://localhost";
         values[SystemSettingKeys.JwtIssuer] = "http://localhost";
-        values[SystemSettingKeys.SecurityAllowNonHttpsIssuer] = "true";
         values[SystemSettingKeys.AdminUsername] = adminUsername;
 
         foreach (var (key, value) in settingOverrides ?? new Dictionary<string, string>())

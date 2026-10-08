@@ -580,14 +580,12 @@ public sealed class SetupContributorDatabaseContractTests
 
     private static JsonElement CreateInput(
         string publicBaseUrl = PublicBaseUrl,
-        bool allowNonHttpsIssuer = false,
         string jwtAudience = "SignaCore.Services",
         string username = Username,
         string password = Password) =>
         JsonSerializer.SerializeToElement(new
         {
             publicBaseUrl,
-            allowNonHttpsIssuer,
             jwtAudience,
             username,
             password,

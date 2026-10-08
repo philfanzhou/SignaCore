@@ -135,32 +135,32 @@ implementation tasks; this document itself changes neither history.
 | `PS-17` | Authorization response | Success is 302 to the verified exact redirect URI with query fields `code`, byte-for-byte `state`, and issuer `iss`. Safe protocol errors use `error`, closed-set English `error_description`, `state`, and `iss`. Fragment and form-post responses do not exist | No response artifact is stored. Local failures never set `Location`; every response is no-store/no-cache/no-referrer |
 | `PS-18` | Identity cookie | Separate scheme and Data Protection purpose; name `__Host-signacore_identity`; protected value contains only the opaque session id; `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, no `Domain` | New id on every login. Deletion repeats the same path/security attributes. It and the shared ServiceMantle management session (scheme `ServiceMantle.ManagementCookie`, cookie `__Host-ServiceMantle.Management`; issuance, logout, lifetime, and CSRF rules owned by the ServiceMantle management-session contract) are never accepted by each other's endpoints. Because the shared package sets every default authentication scheme to the management scheme, every identity authentication, challenge, forbid, sign-in, sign-out, and identity authorization policy must name the identity scheme explicitly and must never rely on the default scheme or the default-populated `HttpContext.User`. Both cookies are protected under the fixed ServiceMantle Data Protection application discriminator with the key ring in the ServiceMantle shared store, so the identity scheme must not set a second application name and isolation exists only through distinct Data Protection purposes |
 | `PS-19` | Login antiforgery cookie | Separate Data Protection purpose; name `__Host-signacore_login_csrf`; `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/`, no `Domain`; paired with `IN-14` | It authorizes only the login form POST and never establishes or extends identity/admin authority |
-| `PS-20` | Redirect-URI canonical form | Registration accepts 1–500 ASCII characters, an absolute URI with authority, HTTPS, no userinfo/fragment/wildcard, and at most ten values of each kind. Testing with an activated nonempty shared HTTP test policy additionally accepts exact allowlisted RFC1918/ULA origins (effective port included); the strict origin parser rejects IPv4 aliases. Development alone also accepts literal `127.0.0.1` or `[::1]` over HTTP; `localhost` is always rejected. Query is allowed. Registration lowercases scheme/host, removes a scheme-default port, changes empty path to `/`, and leaves path case, percent encoding, query, and trailing slash unchanged | Stored/displayed canonical string is the comparison value. Requests are never normalized. The same syntax and comparison apply independently to redirect and post-logout URI sets |
+| `PS-20` | Redirect-URI canonical form | Registration accepts 1–500 ASCII characters, an absolute URI with authority over `http` or `https` (the schemes are equal inputs in every environment; transport is a deployment decision, ADR 0008), no userinfo/fragment/wildcard, and at most ten values of each kind. `localhost` is always rejected. Query is allowed. Registration lowercases scheme/host, removes a scheme-default port, changes empty path to `/`, and leaves path case, percent encoding, query, and trailing slash unchanged | Stored/displayed canonical string is the comparison value. Requests are never normalized. The same syntax and comparison apply independently to redirect and post-logout URI sets |
 | `PS-21` | Interactive client-policy shape | `allow_authorization_code=false`, `client_type=Confidential`, `allowed_scopes={openid}`, `allow_refresh_token=false`, empty URI sets, and no application max-age are upgrade defaults. Supported scopes are exactly `openid`, `profile`, `offline_access`; `openid` is mandatory; `offline_access` requires refresh enabled. Application max-age is positive and no greater than 12 hours | Public clients have no secret or hash and default to code and refresh disabled. Explicit Public Code + S256 requires `PerApplication`, a registered redirect, and `openid`; `offline_access` additionally requires refresh opt-in and a 1–43200-second maximum session age. Code flow requires `PerApplication` for both client types. PKCE S256, query response mode, mandatory state/nonce, and no consent are not configurable |
 | `PS-22` | Provider concurrency boundary | PostgreSQL supports multiple SignaCore instances against shared rows and uses database row locks plus conditional writes. SQLite supports the same state machine with one SignaCore instance and one database writer; multi-instance SQLite is unsupported | Both providers must prove double-code redemption and double-refresh rotation outcomes. Each explicit transaction runs inside the provider execution strategy and is safe to retry as a unit; PostgreSQL and SQLite migration shapes are symmetric |
 | `PS-23` | Reference introduction phase | Every persisted reference in this table is created by the same provider migration that creates its own column, and that migration runs only after the referenced authority table already exists in both histories. `authorization_codes` is therefore created complete: #50 creates the table with its non-null restrictive `PS-04` session reference and runs after #95. The single named exception is the nullable `authorization_codes.refresh_family_id` column, created by #50 without a reference because no family root shape exists yet and added as a restrictive reference by #97 after its backfill | No history state exists in which a stored artifact can name an authority the schema cannot resolve, so no domain-only substitute for a missing reference is ever written. PostgreSQL and SQLite carry the same one-migration shape and the same `Down` boundary: a reference introduced with its table is removed only by dropping that table, and the one deferred reference is removed by the migration that added it |
 | `PS-24` | Shared OIDC rate-limit budget | `oidc_rate_limit_buckets` has composite primary key `(policy, partition_digest)`, `policy` varchar(32)/SQLite TEXT, `partition_digest` varchar(64)/TEXT, `window_expires_at` UTC DateTimeOffset (PostgreSQL timestamptz / SQLite Unix microseconds INTEGER), and `permit_count` INTEGER. Expiry index; CHECK constraints admit only `oidc-authorize`, `oidc-login`, `oidc-token`, `oidc-userinfo`, `oidc-logout`, `oidc-revoke`, `oidc-sms-code` (added by #443), digest length 64, and count 1–90. No foreign keys, raw client/IP/credential fields, or per-request business audit rows | One row per policy/partition, not per window. Lowercase hex and HMAC input validation belong to the future store boundary, not this schema. #379 installs the table on both providers. On PostgreSQL, #381 admits the interactive policies of every replica through one auto-committed statement per request (`503` when the store cannot decide); partitions are stored as HMAC digests keyed from the root key. SQLite registers no writer and retains its single-instance in-memory limiter. Admission events and sensitive partition derivation remain in [#71](https://github.com/philfanzhou/SignaCore/issues/71); the rest of AC-13 is unchanged. `oidc-sms-code` has a fixed budget of 20 per 60-second window in `OidcRateLimitBudgets`, is partitioned only by source network (the send route has no trusted client carrier and its body is never read by the resolver), and is registered on the send route by #444; rollback of the policy value requires that no `oidc-sms-code` bucket row remains |
 
-### Testing HTTP cookie carrier (PS-18 / PS-19)
+### Plain-HTTP cookie carrier (PS-18 / PS-19)
 
 HTTPS always retains the original identity scheme, `__Host-signacore_identity`,
 `SignaCore.IdentitySession.v1` purpose, and Secure attributes. All explicit identity authenticate,
-challenge, forbid, sign-in and sign-out calls select one immutable request profile. HTTP is admitted
-only when the actual Host is `Testing` and its trusted effective request scheme plus literal IP and
-effective port exactly match the activated shared HTTP test origins. Raw forwarding headers have
-no authority. Other HTTP requests fail locally before credential, OTP, continuation, session or code
-writes and cannot issue, read or delete either identity profile.
+challenge, forbid, sign-in and sign-out calls select one immutable request profile derived from
+the trusted effective request scheme alone (ADR 0008): `https` selects the original Secure
+carriers, plain `http` selects the neutral carriers. There is no allowlist, environment name, or
+opt-in behind the selection; requests over any other scheme fail locally before credential, OTP,
+continuation, session or code writes and cannot issue, read or delete either identity profile.
 
-The admitted HTTP carrier uses scheme `SignaCore.IdentitySession.HttpTest`, identity cookie
-`signacore_http_test_identity`, and purpose `SignaCore.IdentitySession.HttpTest.v1`. It retains
+The plain-HTTP carrier uses scheme `SignaCore.IdentitySession.Http`, identity cookie
+`signacore_http_identity`, and purpose `SignaCore.IdentitySession.Http.v1`. It retains
 HttpOnly, SameSite=Lax, Path=/, no Domain, and the opaque session-id-only payload; Secure is false.
 Its principal still carries the original explicit identity authentication type and satisfies only the
 identity policy. Management authentication and the shared Data Protection discriminator/keyring do
 not change. Distinct purpose protection rejects renamed cookie payloads in both directions.
 
 The same profile selects antiforgery issue, cookie read, request-token validation and deletion.
-HTTP uses `signacore_http_test_login_csrf` and root purpose
-`SignaCore.LoginAntiforgery.HttpTest.v1`, with separate cookie/request sub-purposes. It retains
+Plain HTTP uses `signacore_http_login_csrf` and root purpose
+`SignaCore.LoginAntiforgery.Http.v1`, with separate cookie/request sub-purposes. It retains
 HttpOnly, SameSite=Strict, Path=/ and no Domain; Secure is false. HTTPS retains the original
 `__Host-signacore_login_csrf` and purpose. Concurrent requests never mutate global options or
 singleton profile state. A pair from either profile is invalid in the other, including renamed
@@ -169,12 +169,13 @@ cookies. Reusable secrets for parallel tabs remain profile-local and independent
 After a committed prepared logout, both current-profile identity and login CSRF cookies are deleted
 with their original attributes, on both the matching-session and indistinguishable no-cookie
 success paths. Failed, canceled and replayed completions do not perform successful deletion.
-HTTPS and a disabled HTTP policy never import HTTP cookies or convert their session authority;
-database expiry and revocation remain authoritative. Cookies have no port isolation: an allowlisted
-port restricts server admission, not browser cookie visibility. Deploy HTTP testing on an isolated
-host/IP and network, separate from high-trust HTTPS. HTTP provides no confidentiality or integrity.
-Rollback first disables/removes the shared policy, removes HTTP URI registrations, and requires a
-fresh login; preserve the database and keyring, and never copy test cookies into HTTPS.
+HTTPS never imports plain-HTTP cookies or converts their session authority; database expiry and
+revocation remain authoritative. Cookies have no port isolation: browser visibility is governed by
+the host-only cookie rules, not by the server. Plain HTTP provides no confidentiality or integrity;
+deployments that need TLS terminate it in front of the service and forward the effective scheme.
+Renamed carriers from the retired allowlist era end existing plain-HTTP sessions exactly once at
+the upgrade; a fresh login restores them. Preserve the database and keyring, and never copy
+plain-HTTP cookies into HTTPS.
 
 Cleanup removes expired continuation/logout requests, expired unconsumed codes after the retention
 window, consumed codes after the same window, and sessions after their retention policy. Cleanup must

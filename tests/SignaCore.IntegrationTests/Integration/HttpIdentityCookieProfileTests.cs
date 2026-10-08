@@ -29,21 +29,22 @@ public sealed class HttpIdentityCookieProfileTests : IAsyncLifetime
     private readonly string _directory = Path.Combine(PhysicalTempPath.Root(), "http-cookie-" + Guid.NewGuid().ToString("N"));
     private readonly List<WebApplicationFactory<Program>> _hosts = [];
     private string _bootstrap = null!;
-    public async ValueTask InitializeAsync() => _bootstrap = await PrepareAsync("[\"" + Origin + "\"]");
+    public async ValueTask InitializeAsync() => _bootstrap = await PrepareAsync();
     public async ValueTask DisposeAsync()
     {
         foreach (var host in _hosts) await host.DisposeAsync();
         SqliteConnection.ClearAllPools();
         Directory.Delete(_directory, true);
     }
-    private Task<string> PrepareAsync(string origins)
+    private Task<string> PrepareAsync()
     {
+        // No origins key, no Testing environment: plain HTTP works in any deployment shape
+        // because the carrier is derived from the request scheme alone (ADR 0008).
         var path = Path.Combine(_directory, Guid.NewGuid().ToString("N"));
         return InstallationTestSupport.PrepareCompletedInstallationAsync(path,
             new DatabaseOptions { Provider = "SQLite", ConnectionString = "Data Source=" + path + "/identity.db" },
             "http-cookie-synthetic-root", "cookie_admin", "CookieTests-123!",
             new Dictionary<string, string> {
-                [SystemSettingKeys.SecurityHostedLoginHttpTestOrigins] = origins,
                 [SystemSettingKeys.PublicBaseUrl] = "https://accounts.example.test",
                 [SystemSettingKeys.JwtIssuer] = "https://accounts.example.test"
             }, Ct);
@@ -51,7 +52,7 @@ public sealed class HttpIdentityCookieProfileTests : IAsyncLifetime
     private WebApplicationFactory<Program> Host(string? bootstrap = null, Action<IServiceCollection>? configure = null)
     {
         var host = new WebApplicationFactory<Program>().WithWebHostBuilder(builder => {
-            builder.UseEnvironment("Testing"); builder.UseSetting("Bootstrap:FilePath", bootstrap ?? _bootstrap);
+            builder.UseEnvironment("Production"); builder.UseSetting("Bootstrap:FilePath", bootstrap ?? _bootstrap);
             builder.UseSetting("Endpoints:Http", "0");
             if (configure is not null) builder.ConfigureTestServices(configure);
         });
@@ -66,7 +67,7 @@ public sealed class HttpIdentityCookieProfileTests : IAsyncLifetime
         var (handle, _) = await OAuthLoginSmsCodeTestSupport.SeedContinuationAsync(host.Services, app);
         using var response = await client.GetAsync("/oauth2/login?login_handle=" + handle, Ct);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var name = client.BaseAddress!.Scheme == "http" ? IdentityCookieProfile.TestCsrfCookie : LoginAntiforgeryDefaults.CookieName;
+        var name = client.BaseAddress!.Scheme == "http" ? IdentityCookieProfile.HttpCsrfCookie : LoginAntiforgeryDefaults.CookieName;
         var header = OAuthLoginTestSupport.GetSetCookieHeader(response, name)!;
         Assert.NotNull(header);
         Assert.Contains("; path=/", header, StringComparison.OrdinalIgnoreCase);
@@ -175,47 +176,23 @@ public sealed class HttpIdentityCookieProfileTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RestartedSqliteHost_ReadsOnlyTheMatchingProfile_AndRejectsRenamedPayloads()
+    public async Task RestartedSqliteHost_ReadsOnlyTheMatchingScheme_AndRejectsRenamedPayloads()
     {
         var first = Host();
         using var initialize = Client(first, Origin);
-        var test = await IssueAsync(first, Origin, Guid.NewGuid());
+        var plainHttp = await IssueAsync(first, Origin, Guid.NewGuid());
         var secure = await IssueAsync(first, "https://10.20.30.40:5002", Guid.NewGuid());
         await first.DisposeAsync();
         var second = Host();
-        Assert.True(await ReadAsync(second, Origin, test));
+        Assert.True(await ReadAsync(second, Origin, plainHttp));
         Assert.True(await ReadAsync(second, "https://10.20.30.40:5002", secure));
-        Assert.False(await ReadAsync(second, Origin, secure.Replace(IdentitySessionDefaults.CookieName, IdentityCookieProfile.TestIdentityCookie)));
-        Assert.False(await ReadAsync(second, "https://10.20.30.40:5002", test.Replace(IdentityCookieProfile.TestIdentityCookie, IdentitySessionDefaults.CookieName)));
-        Assert.False(await ReadAsync(second, "http://10.20.30.40:5008", test));
-        Assert.False(await ReadAsync(second, "http://10.20.30.41:5002", test));
-        var disabled = Host(await PrepareAsync("[]"));
-        Assert.False(await ReadAsync(disabled, Origin, test));
-        using var scope = second.Services.CreateScope();
-        var unavailable = Context(scope.ServiceProvider, "http://10.20.30.40:5008", test);
-        await unavailable.SignOutAsync(IdentitySessionDefaults.AuthenticationScheme);
-        Assert.False(unavailable.Response.Headers.ContainsKey("Set-Cookie"));
-    }
-    [Theory]
-    [InlineData("http://10.20.30.40:5008")]
-    [InlineData("http://10.20.30.41:5002")]
-    [InlineData("http://127.0.0.1:5002")]
-    public async Task UnavailableTransport_RejectsAllBrowserActionsWithoutCookies(string origin)
-    {
-        var host = Host(); using var client = Client(host, origin);
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Forwarded-Proto","https");
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Forwarded-Host","10.20.30.40:5002");
-        foreach (var path in new[] { "/oauth2/authorize", "/oauth2/login?login_handle=" + new string('a', 43), "/oauth2/logout?logout_handle=" + new string('a', 43) })
-        {
-            using var response = await client.GetAsync(path, Ct);
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-            Assert.False(response.Headers.Contains("Location")); Assert.False(response.Headers.Contains("Set-Cookie"));
-        }
-        foreach (var path in new[] { "/oauth2/login", "/oauth2/login/sms-code" })
-        {
-            using var response = await client.PostAsync(path, new FormUrlEncodedContent(new Dictionary<string,string>()), Ct);
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode); Assert.False(response.Headers.Contains("Set-Cookie"));
-        }
+        // The two carriers stay isolated by purpose: a renamed cookie never satisfies the other.
+        Assert.False(await ReadAsync(second, Origin, secure.Replace(IdentitySessionDefaults.CookieName, IdentityCookieProfile.HttpIdentityCookie)));
+        Assert.False(await ReadAsync(second, "https://10.20.30.40:5002", plainHttp.Replace(IdentityCookieProfile.HttpIdentityCookie, IdentitySessionDefaults.CookieName)));
+        // Plain HTTP follows the scheme on any authority: host-only cookie scoping is the
+        // browser's rule, not a server-side allowlist (ADR 0008).
+        Assert.True(await ReadAsync(second, "http://10.20.30.40:5008", plainHttp));
+        Assert.True(await ReadAsync(second, "http://10.20.30.41:5002", plainHttp));
     }
     [Fact]
     public async Task ConcurrentProfiles_KeepCsrfPairsIsolatedOnOneSqliteHost()
@@ -226,10 +203,10 @@ public sealed class HttpIdentityCookieProfileTests : IAsyncLifetime
         // Render existing continuations concurrently: no fixture database writes are introduced.
         var rendered = await Task.WhenAll(http.GetAsync("/oauth2/login?login_handle="+pages[0].Handle,Ct),https.GetAsync("/oauth2/login?login_handle="+pages[1].Handle,Ct));
         using var httpPage = rendered[0]; using var httpsPage = rendered[1];
-        Assert.NotNull(OAuthLoginTestSupport.GetSetCookieHeader(httpPage,IdentityCookieProfile.TestCsrfCookie));
+        Assert.NotNull(OAuthLoginTestSupport.GetSetCookieHeader(httpPage,IdentityCookieProfile.HttpCsrfCookie));
         Assert.NotNull(OAuthLoginTestSupport.GetSetCookieHeader(httpsPage,LoginAntiforgeryDefaults.CookieName));
         Assert.Null(OAuthLoginTestSupport.GetSetCookieHeader(httpPage,LoginAntiforgeryDefaults.CookieName));
-        Assert.Null(OAuthLoginTestSupport.GetSetCookieHeader(httpsPage,IdentityCookieProfile.TestCsrfCookie));
+        Assert.Null(OAuthLoginTestSupport.GetSetCookieHeader(httpsPage,IdentityCookieProfile.HttpCsrfCookie));
         var service = first.Services.GetRequiredService<ILoginAntiforgeryService>();
         Assert.True(service.IsValidPair(pages[0].Cookie.Split('=',2)[1], pages[0].Token, true));
         Assert.True(service.IsValidPair(pages[1].Cookie.Split('=',2)[1], pages[1].Token));
@@ -241,7 +218,7 @@ public sealed class HttpIdentityCookieProfileTests : IAsyncLifetime
                     ["login_handle"] = selected.Handle, ["__RequestVerificationToken"] = source.Token, ["action"] = "cancel"
                 })
             };
-            request.Headers.TryAddWithoutValidation("Cookie", (index==0 ? LoginAntiforgeryDefaults.CookieName : IdentityCookieProfile.TestCsrfCookie)+"="+source.Cookie.Split('=',2)[1]);
+            request.Headers.TryAddWithoutValidation("Cookie", (index==0 ? LoginAntiforgeryDefaults.CookieName : IdentityCookieProfile.HttpCsrfCookie)+"="+source.Cookie.Split('=',2)[1]);
             using var response = await target.SendAsync(request,Ct);
             Assert.Equal(HttpStatusCode.BadRequest,response.StatusCode); Assert.False(response.Headers.Contains("Location"));
             Assert.False(response.Headers.Contains("Set-Cookie"));
@@ -251,7 +228,6 @@ public sealed class HttpIdentityCookieProfileTests : IAsyncLifetime
     public async Task PostgreSqlDatabaseContractTests_SharedReplicaHttpCookiesAndCsrfRemainProfileBound()
     {
         await using var harness = await OidcDatabaseTestSupport.Harness.CreateAsync(new Dictionary<string,string> {
-            [SystemSettingKeys.SecurityHostedLoginHttpTestOrigins] = "[\"" + Origin + "\"]",
             [SystemSettingKeys.PublicBaseUrl] = "https://accounts.example.test",
             [SystemSettingKeys.JwtIssuer] = "https://accounts.example.test"
         });
@@ -259,7 +235,7 @@ public sealed class HttpIdentityCookieProfileTests : IAsyncLifetime
         using var a = Client(first,Origin); using var b = Client(second,Origin);
         var cookie = await IssueAsync(first,Origin,Guid.NewGuid());
         Assert.True(await ReadAsync(second,Origin,cookie));
-        Assert.False(await ReadAsync(second,"https://10.20.30.40:5002",cookie.Replace(IdentityCookieProfile.TestIdentityCookie,IdentitySessionDefaults.CookieName)));
+        Assert.False(await ReadAsync(second,"https://10.20.30.40:5002",cookie.Replace(IdentityCookieProfile.HttpIdentityCookie,IdentitySessionDefaults.CookieName)));
         var pages = await Task.WhenAll(PageAsync(first,a),PageAsync(second,b));
         var csrf = second.Services.GetRequiredService<ILoginAntiforgeryService>();
         foreach(var page in pages) Assert.True(csrf.IsValidPair(page.Cookie.Split('=',2)[1],page.Token,true));
@@ -282,7 +258,7 @@ public sealed class HttpIdentityCookieProfileTests : IAsyncLifetime
         using var response = await client.GetAsync("/oauth2/logout?logout_handle="+request.LogoutHandle,Ct);
         Assert.Equal(HttpStatusCode.OK,response.StatusCode);
         var cookies = response.Headers.GetValues("Set-Cookie").ToArray(); Assert.Equal(2,cookies.Length);
-        foreach(var (name,sameSite) in new[] {(httpTest?IdentityCookieProfile.TestIdentityCookie:IdentitySessionDefaults.CookieName,"lax"),(httpTest?IdentityCookieProfile.TestCsrfCookie:LoginAntiforgeryDefaults.CookieName,"strict")})
+        foreach(var (name,sameSite) in new[] {(httpTest?IdentityCookieProfile.HttpIdentityCookie:IdentitySessionDefaults.CookieName,"lax"),(httpTest?IdentityCookieProfile.HttpCsrfCookie:LoginAntiforgeryDefaults.CookieName,"strict")})
         {
             var cookie = Assert.Single(cookies,value=>value.StartsWith(name+"=",StringComparison.Ordinal));
             Assert.Contains("; path=/",cookie,StringComparison.OrdinalIgnoreCase); Assert.Contains("; httponly",cookie,StringComparison.OrdinalIgnoreCase);

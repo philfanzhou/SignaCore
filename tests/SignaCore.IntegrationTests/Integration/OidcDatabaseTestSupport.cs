@@ -365,7 +365,7 @@ internal static class OidcDatabaseTestSupport
 
     internal sealed record SeededCode(string Code, Guid Id);
 
-    internal sealed class Harness(DatabaseOptions database, string bootstrapDirectory, string bootstrapFilePath, PostgreSqlContainer container, bool testing) : IAsyncDisposable
+    internal sealed class Harness(DatabaseOptions database, string bootstrapDirectory, string bootstrapFilePath, PostgreSqlContainer container) : IAsyncDisposable
     {
         public string ConnectionString => database.ConnectionString;
         internal string BootstrapFilePath => bootstrapFilePath;
@@ -386,7 +386,7 @@ internal static class OidcDatabaseTestSupport
                 };
                 var bootstrapFilePath = await InstallationTestSupport.PrepareCompletedInstallationAsync(
                     directory, database, RootSecret, AdminUsername, AdminPassword, settings, cancellationToken: Ct);
-                var harness = new Harness(database, directory, bootstrapFilePath, container, settings?.ContainsKey(SystemSettingKeys.SecurityHostedLoginHttpTestOrigins) == true);
+                var harness = new Harness(database, directory, bootstrapFilePath, container);
                 await harness.SeedClientAsync();
                 return harness;
             }
@@ -403,7 +403,7 @@ internal static class OidcDatabaseTestSupport
             var probe = new HostProbe();
             var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             {
-                builder.UseEnvironment(testing ? "Testing" : "Development");
+                builder.UseEnvironment("Development");
                 builder.UseSetting("Bootstrap:FilePath", bootstrapFilePath);
                 builder.UseSetting("Endpoints:Http", "0");
                 builder.ConfigureTestServices(services =>

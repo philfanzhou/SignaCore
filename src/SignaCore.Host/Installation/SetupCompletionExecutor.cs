@@ -161,7 +161,7 @@ internal static class SetupCompletionExecutor
             return SetupCompletionResult.CredentialInvalid();
         }
 
-        if (!TryReadInput(input, out var publicBaseUrl, out var allowNonHttpsIssuer,
+        if (!TryReadInput(input, out var publicBaseUrl,
                 out var jwtAudience, out var username, out var password))
         {
             return SetupCompletionResult.ValidationFailed();
@@ -192,7 +192,7 @@ internal static class SetupCompletionExecutor
 
         // Build and validate the whole proposed snapshot before staging anything: everything that
         // can be rejected from the request alone is a validation failure, not a failed transaction.
-        var values = BuildSnapshot(normalizedBaseUrl, allowNonHttpsIssuer, audience, administratorUsername);
+        var values = BuildSnapshot(normalizedBaseUrl, audience, administratorUsername);
         if (SharedSettingComposition.ValidateCompleteCandidate(values).Count > 0)
         {
             return SetupCompletionResult.ValidationFailed();
@@ -290,21 +290,20 @@ internal static class SetupCompletionExecutor
     }
 
     /// <summary>
-    /// Reads the fixed five-property input shape: exactly <c>publicBaseUrl</c> (string),
-    /// <c>allowNonHttpsIssuer</c> (bool), <c>jwtAudience</c> (string), <c>username</c> (string),
-    /// and <c>password</c> (string). A missing, extra, duplicated, or wrongly typed property is a
-    /// validation failure; values are returned verbatim (trimming is a semantic step).
+    /// Reads the fixed four-property input shape: exactly <c>publicBaseUrl</c> (string),
+    /// <c>jwtAudience</c> (string), <c>username</c> (string), and <c>password</c> (string). A
+    /// missing, extra, duplicated, or wrongly typed property is a validation failure; values are
+    /// returned verbatim (trimming is a semantic step). The former <c>allowNonHttpsIssuer</c>
+    /// property is retired by ADR 0008: an http public base URL needs no opt-in.
     /// </summary>
     private static bool TryReadInput(
         JsonElement input,
         out string publicBaseUrl,
-        out bool allowNonHttpsIssuer,
         out string jwtAudience,
         out string username,
         out string password)
     {
         publicBaseUrl = string.Empty;
-        allowNonHttpsIssuer = false;
         jwtAudience = string.Empty;
         username = string.Empty;
         password = string.Empty;
@@ -315,7 +314,6 @@ internal static class SetupCompletionExecutor
         }
 
         var seenBaseUrl = false;
-        var seenAllowNonHttps = false;
         var seenAudience = false;
         var seenUsername = false;
         var seenPassword = false;
@@ -331,16 +329,6 @@ internal static class SetupCompletionExecutor
 
                     publicBaseUrl = property.Value.GetString()!;
                     seenBaseUrl = true;
-                    break;
-                case "allowNonHttpsIssuer":
-                    if (seenAllowNonHttps ||
-                        property.Value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-                    {
-                        return false;
-                    }
-
-                    allowNonHttpsIssuer = property.Value.GetBoolean();
-                    seenAllowNonHttps = true;
                     break;
                 case "jwtAudience":
                     if (seenAudience || property.Value.ValueKind != JsonValueKind.String)
@@ -374,7 +362,7 @@ internal static class SetupCompletionExecutor
             }
         }
 
-        return seenBaseUrl && seenAllowNonHttps && seenAudience && seenUsername && seenPassword;
+        return seenBaseUrl && seenAudience && seenUsername && seenPassword;
     }
 
     /// <summary>
@@ -383,7 +371,6 @@ internal static class SetupCompletionExecutor
     /// </summary>
     private static Dictionary<string, string> BuildSnapshot(
         string publicBaseUrl,
-        bool allowNonHttpsIssuer,
         string jwtAudience,
         string username)
     {
@@ -393,8 +380,6 @@ internal static class SetupCompletionExecutor
         // and an `iss` claim naming another is rejected by every conforming client.
         values[SystemSettingKeys.JwtIssuer] = publicBaseUrl;
         values[SystemSettingKeys.JwtAudience] = jwtAudience;
-        values[SystemSettingKeys.SecurityAllowNonHttpsIssuer] =
-            allowNonHttpsIssuer ? "true" : "false";
         values[SystemSettingKeys.AdminWebAllowedOrigins] =
             $"[{System.Text.Json.JsonSerializer.Serialize(publicBaseUrl)}]";
         values[SystemSettingKeys.AdminUsername] = username;

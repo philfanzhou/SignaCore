@@ -106,8 +106,6 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
             ServiceSettingValueType.Number,
             IsSensitive: false,
             LegacyDefault: IdentityConstants.BCryptWorkFactor.ToString(System.Globalization.CultureInfo.InvariantCulture)),
-        new("security.hosted_login_http_test_origins", ServiceSettingValueType.Json, IsSensitive: false, LegacyDefault: "[]"),
-        new("security.allow_non_https_issuer", ServiceSettingValueType.Boolean, IsSensitive: false, LegacyDefault: "false"),
 
         // ---- Administrative console ----
         new("admin_web.allowed_origins", ServiceSettingValueType.Json, IsSensitive: false, LegacyDefault: "[]"),
@@ -116,7 +114,7 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
         // ---- Callback policy ----
         new("callback.allowed_domains", ServiceSettingValueType.Json, IsSensitive: false, LegacyDefault: "[]"),
         new("callback.allow_private_addresses", ServiceSettingValueType.Boolean, IsSensitive: false, LegacyDefault: "false"),
-        new("callback.require_https", ServiceSettingValueType.Boolean, IsSensitive: false, LegacyDefault: "true"),
+        new("callback.require_https", ServiceSettingValueType.Boolean, IsSensitive: false, LegacyDefault: "false"),
 
         new("reverse_proxy.known_proxies", ServiceSettingValueType.Json, IsSensitive: false, LegacyDefault: "[]"),
 
@@ -236,7 +234,6 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
     private static readonly IReadOnlyDictionary<string, JsonValueKind> JsonRootKinds =
         new Dictionary<string, JsonValueKind>(StringComparer.Ordinal)
         {
-            ["security.hosted_login_http_test_origins"] = JsonValueKind.Array,
             ["admin_web.allowed_origins"] = JsonValueKind.Array,
             ["callback.allowed_domains"] = JsonValueKind.Array,
             ["sms.bypass_phones"] = JsonValueKind.Array,

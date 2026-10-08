@@ -30,8 +30,7 @@ public sealed class OidcClientConfigurationValidatorTests
             identitySessionMaxAgeSeconds: 43_200,
             AudienceMode.PerApplication,
             ["https://example.com/callback"],
-            ["https://example.com/logout"],
-            isDevelopment: false);
+            ["https://example.com/logout"]);
 
         Assert.Equal("openid profile offline_access", result.AllowedScopes);
         Assert.Equal(43_200, result.IdentitySessionMaxAgeSeconds);
@@ -97,7 +96,7 @@ public sealed class OidcClientConfigurationValidatorTests
 
         var refresh = OidcClientConfigurationValidator.Validate(
             OidcClientType.Public, true, ["openid", "offline_access"], true, 3600,
-            AudienceMode.PerApplication, ["https://example.com/callback"], [], false);
+            AudienceMode.PerApplication, ["https://example.com/callback"], []);
         Assert.True(refresh.AllowRefreshToken);
         Assert.Equal(3600, refresh.IdentitySessionMaxAgeSeconds);
 
@@ -114,7 +113,7 @@ public sealed class OidcClientConfigurationValidatorTests
             Assert.Throws<OidcClientConfigurationException>(() =>
                 OidcClientConfigurationValidator.Validate(
                     OidcClientType.Public, code, scopes, true, maxAge, audience,
-                    ["https://example.com/callback"], [], false,
+                    ["https://example.com/callback"], [],
                     applicationIsActive: active, hasAppSecret: secret));
         }
     }
@@ -147,7 +146,6 @@ public sealed class OidcClientConfigurationValidatorTests
                 AudienceMode.Shared,
                 [],
                 [],
-                isDevelopment: false,
                 currentClientType: OidcClientType.Confidential));
         Assert.Contains("conversion", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -165,7 +163,6 @@ public sealed class OidcClientConfigurationValidatorTests
             AudienceMode.Shared,
             [],
             [],
-            isDevelopment: false,
             currentClientType: OidcClientType.Public);
 
         Assert.Equal(OidcClientType.Confidential, result.ClientType);
@@ -186,8 +183,7 @@ public sealed class OidcClientConfigurationValidatorTests
             identitySessionMaxAgeSeconds: null,
             AudienceMode.Shared,
             [],
-            [],
-            isDevelopment: false);
+            []);
 
         Assert.Equal(OidcClientType.Public, result.ClientType);
     }
@@ -205,8 +201,7 @@ public sealed class OidcClientConfigurationValidatorTests
             identitySessionMaxAgeSeconds: null,
             audienceMode,
             redirectUris ?? ["https://example.com/callback"],
-            [],
-            isDevelopment: false);
+            []);
     }
 
     private static SignaCore.Domain.Models.ValidatedOidcClientConfiguration ValidateDisabled(
@@ -223,7 +218,6 @@ public sealed class OidcClientConfigurationValidatorTests
             identitySessionMaxAgeSeconds,
             AudienceMode.Shared,
             [],
-            [],
-            isDevelopment: false);
+            []);
     }
 }

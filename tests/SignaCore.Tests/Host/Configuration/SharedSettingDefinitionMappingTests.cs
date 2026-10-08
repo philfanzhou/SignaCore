@@ -24,8 +24,6 @@ public sealed partial class SharedSettingDefinitionMappingTests
         { "Jwt:TokenExpirationHours", "jwt.token_expiration_hours" },
         { "RefreshToken:ExpirationDays", "refresh_token.expiration_days" },
         { "PasswordHasher:WorkFactor", "password_hasher.work_factor" },
-        { "Security:HostedLoginHttpTestOrigins", "security.hosted_login_http_test_origins" },
-        { "Security:AllowNonHttpsIssuer", "security.allow_non_https_issuer" },
         // ---- Administrative console ----
         { "AdminWeb:AllowedOrigins", "admin_web.allowed_origins" },
         { "Admin:Username", "admin.username" },
@@ -88,15 +86,13 @@ public sealed partial class SharedSettingDefinitionMappingTests
         { "jwt.token_expiration_hours", "Number", false, true, "2" },
         { "refresh_token.expiration_days", "Number", false, true, "7" },
         { "password_hasher.work_factor", "Number", false, true, "11" },
-        { "security.hosted_login_http_test_origins", "Json", false, false, null },
-        { "security.allow_non_https_issuer", "Boolean", false, true, "false" },
         // ---- Administrative console ----
         { "admin_web.allowed_origins", "Json", false, false, null },
         { "admin.username", "String", false, false, null },
         // ---- Callback policy ----
         { "callback.allowed_domains", "Json", false, false, null },
         { "callback.allow_private_addresses", "Boolean", false, true, "false" },
-        { "callback.require_https", "Boolean", false, true, "true" },
+        { "callback.require_https", "Boolean", false, true, "false" },
         { "reverse_proxy.known_proxies", "Json", false, false, null },
         // ---- SMS ----
         { "sms.otp_ttl_seconds", "Number", false, true, "300" },
@@ -222,7 +218,6 @@ public sealed partial class SharedSettingDefinitionMappingTests
     [InlineData("wechat.app_id", "")]
     [InlineData("ldap.default_directory_key", "")]
     [InlineData("consul.discovery.ip_address", "")]
-    [InlineData("security.hosted_login_http_test_origins", "[]")]
     [InlineData("admin_web.allowed_origins", "[]")]
     [InlineData("callback.allowed_domains", "[]")]
     [InlineData("reverse_proxy.known_proxies", "[]")]
@@ -281,7 +276,6 @@ public sealed partial class SharedSettingDefinitionMappingTests
     }
 
     [Theory]
-    [InlineData("security.hosted_login_http_test_origins", JsonValueKind.Array)]
     [InlineData("admin_web.allowed_origins", JsonValueKind.Array)]
     [InlineData("callback.allowed_domains", JsonValueKind.Array)]
     [InlineData("sms.bypass_phones", JsonValueKind.Array)]
