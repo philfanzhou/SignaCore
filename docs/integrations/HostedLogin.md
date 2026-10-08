@@ -326,3 +326,17 @@ the SignaCore session, and token issuance.
 For the explicit Testing URI exception and required runtime revalidation, see [current redirect transport trust](../oidc/CanonicalSemanticModel.md#current-redirect-transport-trust) and [HTTP testing](../oidc/HttpTesting.md).
 The isolated HTTP identity/CSRF Cookie carrier is also implemented at exact allowed request origins;
 official dual-end published-image/browser acceptance remains the complete-capability release gate.
+
+Applications integrating through the official
+[`SignaCore.Client.AspNetCore`](https://www.nuget.org/packages/SignaCore.Client.AspNetCore) package
+can additionally declare an explicit intranet HTTP deployment on the client side:
+`options.IntranetHttpOrigins` holds the exact private-network HTTP origins of the SignaCore host
+and of the consumer itself (for example `http://192.168.55.10:5002` and
+`http://192.168.55.10:5020`), and the package then accepts those origins — and only those — for
+the Authority, the redirect URIs, and every Discovery endpoint, in every environment name
+including Production, while writing all its cookies for plain HTTP. The client-side list is the
+consumer's own deployment statement and is independent of the host-side Testing-gated list above;
+the host must still admit the consumer's HTTP redirect origin from its side. See the package
+README's
+[intranet HTTP deployments](https://github.com/philfanzhou/SignaCore/blob/main/src/SignaCore.Client.AspNetCore/README.md#intranet-http-deployments-explicit-opt-in)
+section for the exact origin grammar, the cookie profile, and the caller responsibilities.

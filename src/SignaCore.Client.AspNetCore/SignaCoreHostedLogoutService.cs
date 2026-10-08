@@ -102,7 +102,7 @@ internal sealed class SignaCoreHostedLogoutService(
             // The local session ends first, always: the ticket is removed and the cookie is
             // deleted before any upstream call, and neither is ever restored.
             await ticketStore.RemoveAsync(key, cancellationToken);
-            DeleteSessionCookie(context, current.SessionCookieName);
+            DeleteSessionCookie(context, current);
 
             SignaCoreAuthorityConfiguration configuration;
             try
@@ -195,11 +195,11 @@ internal sealed class SignaCoreHostedLogoutService(
         await current.ResponseWriter.WriteLogoutLocalOnlyAsync(context, cancellationToken);
     }
 
-    private static void DeleteSessionCookie(HttpContext context, string cookieName) =>
-        context.Response.Cookies.Append(cookieName, string.Empty, new CookieOptions
+    private static void DeleteSessionCookie(HttpContext context, SignaCoreHostedLoginOptions current) =>
+        context.Response.Cookies.Append(current.SessionCookieName, string.Empty, new CookieOptions
         {
             HttpOnly = true,
-            Secure = true,
+            Secure = SignaCoreCookieProfile.SecureCookies(current),
             SameSite = SameSiteMode.Lax,
             Path = "/",
             Expires = DateTimeOffset.UnixEpoch,
@@ -216,7 +216,7 @@ internal sealed class SignaCoreHostedLogoutService(
             new CookieOptions
             {
                 HttpOnly = true,
-                Secure = true,
+                Secure = SignaCoreCookieProfile.SecureCookies(current),
                 SameSite = SameSiteMode.Lax,
                 Path = (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.LogoutPathSegment,
                 Expires = timeProvider.GetUtcNow() + SignaCoreHostedLoginDefaults.LogoutReturnLifetime,
@@ -230,7 +230,7 @@ internal sealed class SignaCoreHostedLogoutService(
             new CookieOptions
             {
                 HttpOnly = true,
-                Secure = true,
+                Secure = SignaCoreCookieProfile.SecureCookies(current),
                 SameSite = SameSiteMode.Lax,
                 Path = (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.LogoutPathSegment,
                 Expires = DateTimeOffset.UnixEpoch,
@@ -243,18 +243,16 @@ internal static class SignaCoreLogoutCookieExtensions
 {
     /// <summary>
     /// The logout-return cookie name derives from the configured session-cookie name, so
-    /// distinct consumers on one host never read each other's correlation ids. A
-    /// <c>__Host-</c>-prefixed session name cannot simply gain the suffix: <c>__Host-</c>
-    /// requires Path=/, while this cookie is scoped to the logout endpoints, so the derived name
-    /// would be rejected by every browser. Such names instead derive
-    /// <c>__Secure-&lt;rest&gt;-logout-return</c> — the only prefix that keeps a browser-enforced
-    /// signal (Secure, hence HTTPS) while allowing the non-root path. Every other session name
-    /// keeps the byte-for-byte historical <c>&lt;name&gt;-logout-return</c> derivation.
+    /// distinct consumers on one host never read each other's correlation ids. The name goes
+    /// through the shared prefix-safe derivation: a <c>__Host-</c>-prefixed session name cannot
+    /// simply gain the suffix — <c>__Host-</c> requires Path=/, while this cookie is scoped to
+    /// the logout endpoints, so the derived name would be rejected by every browser. Such names
+    /// instead derive <c>__Secure-&lt;rest&gt;-logout-return</c> — the only prefix that keeps a
+    /// browser-enforced signal (Secure, hence HTTPS) while allowing the non-root path. Every
+    /// other session name keeps the byte-for-byte historical <c>&lt;name&gt;-logout-return</c>
+    /// derivation, and the intranet HTTP profile never rewrites (its cookies are not Secure).
     /// </summary>
     internal static string LogoutReturnCookieName(this SignaCoreHostedLoginOptions options) =>
-        options.SessionCookieName.StartsWith(SignaCoreHostedLoginDefaults.HostCookiePrefix, StringComparison.Ordinal)
-            ? SignaCoreHostedLoginDefaults.SecureCookiePrefix
-                + options.SessionCookieName[SignaCoreHostedLoginDefaults.HostCookiePrefix.Length..]
-                + SignaCoreHostedLoginDefaults.LogoutReturnCookieSuffix
-            : options.SessionCookieName + SignaCoreHostedLoginDefaults.LogoutReturnCookieSuffix;
+        SignaCoreCookieProfile.DerivedCookieName(
+            options, SignaCoreHostedLoginDefaults.LogoutReturnCookieSuffix);
 }
