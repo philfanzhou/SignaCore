@@ -49,8 +49,18 @@ public sealed class ForwardedHeadersHostTests : IAsyncLifetime
         login.Content = JsonContent.Create(new { username = "proxy_test_admin", password = "ProxyTest123!" });
         using var loggedIn = await client.SendAsync(login, Ct);
         Assert.Equal(HttpStatusCode.NoContent, loggedIn.StatusCode);
-        var cookie = loggedIn.Headers.GetValues("Set-Cookie").Single(c => c.StartsWith("__Host-ServiceMantle.Management=", StringComparison.Ordinal));
-        Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
+        var cookie = loggedIn.Headers.GetValues("Set-Cookie").Single(c => c.StartsWith("ServiceMantle.Management=", StringComparison.Ordinal));
+        // Since ServiceMantle.Web 0.3.2 the management cookie's Secure attribute follows the
+        // request scheme: the trusted proxy's forwarded https scheme keeps it Secure, and an
+        // untrusted peer's plain-http request drops it.
+        if (trusted)
+        {
+            Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
+        }
+        else
+        {
+            Assert.DoesNotContain("secure", cookie, StringComparison.OrdinalIgnoreCase);
+        }
         Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
     }

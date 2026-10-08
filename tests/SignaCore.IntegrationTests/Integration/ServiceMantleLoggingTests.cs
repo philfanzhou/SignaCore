@@ -45,10 +45,9 @@ public sealed class HostConsoleCaptureCollection
 /// levels, and the one-time flush on shutdown.
 /// </summary>
 /// <remarks>
-/// Loki delivery is captured by a loopback fake. The product host never accepts a plain-HTTP
-/// endpoint, so the test enables the ServiceMantle test-only loopback option by adjusting the
-/// already-registered options before the host is built; everything the product decided (enabled,
-/// the stored HTTPS endpoint, the resolver name) is asserted before that adjustment.
+/// Loki delivery is captured by a loopback fake that speaks plain HTTP — the stored endpoint the
+/// product itself now accepts and delivers to, with no test-only adjustment of the registered
+/// options: plain http and https are equal inputs, so the stored value is the delivered value.
 /// </remarks>
 [Collection(HostConsoleCaptureCollection.Name)]
 public sealed class ServiceMantleLoggingTests : IAsyncLifetime
@@ -179,20 +178,18 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         var factory = await StartNormalHostAsync(
             new Dictionary<string, string>
             {
-                [SystemSettingKeys.LokiUri] = loki.HttpsAddress,
+                [SystemSettingKeys.LokiUri] = loki.HttpAddress,
                 [SystemSettingKeys.LokiAuthorization] = authorization
             },
             services =>
             {
                 var options = RegisteredLokiOptions(services);
                 decided.Add((options.Enabled, options.Endpoint, options.AuthorizationHeaderResolverName));
-                options.Endpoint = new Uri(loki.HttpAddress);
-                options.AllowInsecureLoopbackForTesting = true;
             });
 
         var decision = Assert.Single(decided);
         Assert.True(decision.Enabled);
-        Assert.Equal(new Uri(loki.HttpsAddress), decision.Endpoint);
+        Assert.Equal(new Uri(loki.HttpAddress), decision.Endpoint);
         Assert.Equal(ServiceMantleGrafanaLokiHostApplicationBuilderExtensions.SettingDrivenAuthorizationResolverName, decision.ResolverName);
 
         var canary = "canary-" + Guid.NewGuid().ToString("N");
@@ -218,11 +215,11 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ExplicitInsecureHttpWithoutAuthentication_DeliversRealHttpWithNoAuthorizationHeader()
+    public async Task PlainHttpWithoutAuthentication_DeliversRealHttpWithNoAuthorizationHeader()
     {
         // The normal production path — a real Production environment, not the hosted-login Testing
-        // policy: a plain-HTTP loopback endpoint behind the two explicit opt-ins, with no
-        // credential stored, no resolver registered, and no test-only switch.
+        // policy: a plain-HTTP loopback endpoint behind the explicit no-authentication opt-in,
+        // with no credential stored, no resolver registered, and no transport switch at all.
         await using var loki = await FakeLoki.StartAsync();
         using var capture = new ConsoleCapture();
         var decided = new List<(bool Enabled, Uri? Endpoint, string? ResolverName)>();
@@ -230,7 +227,6 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
             new Dictionary<string, string>
             {
                 [SystemSettingKeys.LokiUri] = loki.HttpAddress,
-                [SystemSettingKeys.LokiAllowInsecureHttp] = "true",
                 [SystemSettingKeys.LokiAllowNoAuthentication] = "true"
             },
             services => decided.Add((RegisteredLokiOptions(services).Enabled,
@@ -262,16 +258,15 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task UnreachableExplicitLokiEndpoint_NeverBlocksTheIdentityService()
+    public async Task UnreachablePlainHttpLokiEndpoint_NeverBlocksTheIdentityService()
     {
-        // The explicit opt-ins never make delivery a readiness concern: an endpoint nothing
+        // The explicit opt-in never makes delivery a readiness concern: an endpoint nothing
         // listens on keeps the identity service ready, the probe write never throws, and the
         // Console keeps receiving the sanitized line.
         using var capture = new ConsoleCapture();
         var factory = await StartNormalHostAsync(new Dictionary<string, string>
         {
             [SystemSettingKeys.LokiUri] = "http://127.0.0.1:9/loki/api/v1/push",
-            [SystemSettingKeys.LokiAllowInsecureHttp] = "true",
             [SystemSettingKeys.LokiAllowNoAuthentication] = "true"
         });
         using var client = factory.CreateClient();
@@ -310,17 +305,15 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData("http://loki-legacy.example.com:3100", "Basic bGVnYWN5OnZhbHVl", false, false, "endpoint_invalid")]
-    [InlineData("http://loki-legacy.example.com:3100", "", false, false, "endpoint_invalid")]
-    [InlineData("http://loki-legacy.example.com:3100", "Basic bGVnYWN5OnZhbHVl", false, true, "endpoint_invalid")]
-    [InlineData("https://loki-legacy.example.com", "", false, false, "authorization_missing")]
-    [InlineData("", "Bearer fixture", false, false, "endpoint_missing")]
-    [InlineData("https://loki-legacy.example.com", "Bearer a\nb", false, false, "authorization_invalid")]
-    [InlineData("https://loki-legacy.example.com", "Bearer fixture", false, true, "authorization_invalid")]
+    [InlineData("http://loki-legacy.example.com:3100", "", false, "authorization_missing")]
+    [InlineData("http://loki-legacy.example.com:3100", "Basic bGVnYWN5OnZhbHVl", true, "authorization_invalid")]
+    [InlineData("https://loki-legacy.example.com", "", false, "authorization_missing")]
+    [InlineData("", "Bearer fixture", false, "endpoint_missing")]
+    [InlineData("https://loki-legacy.example.com", "Bearer a\nb", false, "authorization_invalid")]
+    [InlineData("https://loki-legacy.example.com", "Bearer fixture", true, "authorization_invalid")]
     public async Task StoredValuesLokiCannotUse_StartWithLokiOffAndAFixedWarning(
         string uri,
         string authorization,
-        bool allowInsecureHttp,
         bool allowNoAuthentication,
         string category)
     {
@@ -331,11 +324,6 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
             [SystemSettingKeys.LokiUri] = uri,
             [SystemSettingKeys.LokiAuthorization] = authorization
         };
-        if (allowInsecureHttp)
-        {
-            overrides[SystemSettingKeys.LokiAllowInsecureHttp] = "true";
-        }
-
         if (allowNoAuthentication)
         {
             overrides[SystemSettingKeys.LokiAllowNoAuthentication] = "true";
@@ -389,8 +377,8 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
 
         (string Key, string Value)[][] rejected =
         [
-            [("loki.uri", "http://loki.example.com:3100"), ("loki.authorization", authorization)],
             [("loki.uri", "https://user:pass@loki.example.com"), ("loki.authorization", authorization)],
+            [("loki.uri", "http://user:pass@loki.example.com:3100"), ("loki.authorization", authorization)],
             [("loki.uri", "https://loki.example.com/?tenant=a"), ("loki.authorization", authorization)],
             [("loki.uri", "https://loki.example.com/#fragment"), ("loki.authorization", authorization)],
             [("loki.uri", "https://loki.example.com")],
@@ -398,11 +386,9 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
             // The no-authentication opt-in cannot coexist with a stored credential in the same batch.
             [("loki.uri", "https://loki.example.com"), ("loki.authorization", authorization),
              ("loki.allow_no_authentication", "true")],
-            // The HTTP opt-in alone does not legitimize a plain-HTTP endpoint without the switch.
-            [("loki.uri", "http://loki.example.com:3100"), ("loki.authorization", authorization),
-             ("loki.allow_no_authentication", "true")],
-            // The two opt-ins are Boolean keys: anything else is a typed rejection.
-            [("loki.allow_insecure_http", "bad-boolean")]
+            // The retired insecure-transport switch is an unknown key: rejected like any other
+            // retired name, with no typed rule behind it.
+            [("loki.allow_insecure_http", "true")]
         ];
         foreach (var changes in rejected)
         {
@@ -490,14 +476,8 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         var factory = await StartNormalHostAsync(
             new Dictionary<string, string>
             {
-                [SystemSettingKeys.LokiUri] = loki.HttpsAddress,
+                [SystemSettingKeys.LokiUri] = loki.HttpAddress,
                 [SystemSettingKeys.LokiAuthorization] = "Bearer " + Guid.NewGuid().ToString("N")
-            },
-            services =>
-            {
-                var options = RegisteredLokiOptions(services);
-                options.Endpoint = new Uri(loki.HttpAddress);
-                options.AllowInsecureLoopbackForTesting = true;
             },
             track: false);
         var runtime = factory.Services.GetRequiredService(ServiceMantleType("ServiceMantle.Logging.Pipeline.SerilogRuntime"));
@@ -778,13 +758,13 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
         {
             _app = app;
             HttpAddress = $"http://127.0.0.1:{port}/";
-            HttpsAddress = $"https://127.0.0.1:{port}/";
         }
 
+        /// <summary>
+        /// The real loopback address, stored verbatim as the product setting: the endpoint accepts
+        /// plain http, so the stored value is the delivered value.
+        /// </summary>
         public string HttpAddress { get; }
-
-        /// <summary>The address stored as the product setting; only the scheme differs.</summary>
-        public string HttpsAddress { get; }
 
         public IReadOnlyList<string> Bodies => _batches.Select(batch => batch.Body).ToList();
 

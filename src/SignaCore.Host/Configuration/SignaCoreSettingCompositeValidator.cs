@@ -25,14 +25,13 @@ namespace SignaCore.Host.Configuration;
 /// development-only SMS logging profile.
 /// <para>
 /// The <c>validateManagementUpdateRules</c> flag adds the rules for the remote sinks the normal
-/// host enables from the snapshot: the OTLP endpoint (empty, or an absolute HTTPS URL without user
-/// info, query, or fragment) and the Loki group — the shared strict combination evaluation over
-/// the endpoint, the Authorization value, and the two explicit opt-ins (<c>loki.allow_insecure_http</c>
-/// permits plain HTTP transport; <c>loki.allow_no_authentication</c> selects no authentication and
-/// requires that no Authorization value stays stored). The default management update registry sets
-/// it: startup, management queries, legacy import, and the bootstrap target probe must keep
-/// accepting values an older release stored, which the normal host then switches off with a
-/// warning instead of failing.
+/// host enables from the snapshot: the OTLP endpoint (empty, or an absolute HTTP(S) URL without
+/// user info, query, or fragment) and the Loki group — the shared strict combination evaluation
+/// over the endpoint, the Authorization value, and the explicit <c>loki.allow_no_authentication</c>
+/// opt-in (no authentication is sent, and no Authorization value may stay stored). The default
+/// management update registry sets it: startup, management queries, legacy import, and the
+/// bootstrap target probe must keep accepting values an older release stored, which the normal
+/// host then switches off with a warning instead of failing.
 /// </para>
 /// </remarks>
 internal sealed class SignaCoreSettingCompositeValidator(
@@ -195,9 +194,12 @@ internal sealed class SignaCoreSettingCompositeValidator(
             return;
         }
 
+        // The endpoint accepts absolute http and https alike, so a parse failure here is always a
+        // structural problem (relative, wrong scheme, user info, query, or fragment) — never a
+        // transport policy rejection.
         errors.Add(new ServiceSettingValidationError(
             SharedSettingKeys.NormalizedByLegacyKey[SystemSettingKeys.OpenTelemetryOtlpEndpoint],
-            IsAbsoluteHttp(endpoint) ? HttpsRequiredCode : RuntimeInvalidCode));
+            RuntimeInvalidCode));
     }
 
     /// <summary>
@@ -211,9 +213,9 @@ internal sealed class SignaCoreSettingCompositeValidator(
 
     /// <summary>
     /// The Loki group: the shared combination evaluation over the endpoint, the Authorization
-    /// value, and the two explicit opt-ins — the same rules the normal host applies before it
-    /// enables the sink, so a saved value is always one the next start can use. Only the error-code
-    /// translation is product-owned (the closed <c>signacore.setting.*</c> set).
+    /// value, and the explicit no-authentication opt-in — the same rules the normal host applies
+    /// before it enables the sink, so a saved value is always one the next start can use. Only the
+    /// error-code translation is product-owned (the closed <c>signacore.setting.*</c> set).
     /// </summary>
     private static void ValidateLoki(
         IReadOnlyDictionary<string, string> values,
@@ -221,7 +223,6 @@ internal sealed class SignaCoreSettingCompositeValidator(
     {
         values.TryGetValue(SystemSettingKeys.LokiUri, out var uri);
         values.TryGetValue(SystemSettingKeys.LokiAuthorization, out var authorization);
-        var allowInsecureHttp = TryParseBoolean(values, SystemSettingKeys.LokiAllowInsecureHttp);
         var allowNoAuthentication = TryParseBoolean(values, SystemSettingKeys.LokiAllowNoAuthentication);
 
         var candidate = new Dictionary<string, string?>(StringComparer.Ordinal);
@@ -235,33 +236,26 @@ internal sealed class SignaCoreSettingCompositeValidator(
             candidate[GrafanaLokiSettingDefinitions.Authorization] = authorization;
         }
 
-        candidate[GrafanaLokiSettingDefinitions.AllowInsecureHttp] = allowInsecureHttp ? "true" : "false";
         candidate[GrafanaLokiSettingDefinitions.AllowNoAuthentication] = allowNoAuthentication ? "true" : "false";
 
         foreach (var error in SharedLokiRules.Validate(candidate).Errors)
         {
-            errors.Add(new ServiceSettingValidationError(
-                error.Key, TranslateLokiCode(error, uri, allowInsecureHttp)));
+            errors.Add(new ServiceSettingValidationError(error.Key, TranslateLokiCode(error)));
         }
     }
 
-    private static string TranslateLokiCode(ServiceSettingValidationError error, string? uri, bool allowInsecureHttp) =>
+    // The endpoint accepts absolute http and https alike, so every shared Loki rejection that
+    // reaches this translation is a structural or combination problem — never a transport policy
+    // rejection — and keeps the generic runtime-invalid code.
+    private static string TranslateLokiCode(ServiceSettingValidationError error) =>
         error.ErrorCode switch
         {
             WellKnownServiceSettingValidationErrorCodes.Required => RequiredCode,
-            // A plain absolute HTTP endpoint keeps the dedicated https-required rejection unless
-            // HTTP was explicitly opted in, in which case the endpoint itself is malformed.
-            WellKnownGrafanaLokiErrorCodes.InvalidEndpoint
-                when !allowInsecureHttp && IsAbsoluteHttp(uri ?? string.Empty) => HttpsRequiredCode,
             _ => RuntimeInvalidCode
         };
 
     private static bool TryParseBoolean(IReadOnlyDictionary<string, string> values, string legacyKey) =>
         values.TryGetValue(legacyKey, out var raw) && bool.TryParse(raw, out var parsed) && parsed;
-
-    private static bool IsAbsoluteHttp(string value) =>
-        Uri.TryCreate(value.Trim(), UriKind.Absolute, out var parsed) &&
-        parsed.Scheme == Uri.UriSchemeHttp;
 
     private static void RequireNonBlank(
         IReadOnlyDictionary<string, string> values,

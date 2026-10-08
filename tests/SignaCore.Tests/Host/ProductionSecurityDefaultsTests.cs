@@ -21,7 +21,7 @@ namespace SignaCore.Tests.Host;
 public class ProductionSecurityDefaultsTests
 {
     [Fact]
-    public void AdminCookie_InProduction_IsAlwaysSecure()
+    public void AdminCookie_FollowsTheServiceMantleWebDefaults()
     {
         using var provider = BuildManagementSessionServices();
 
@@ -29,12 +29,16 @@ public class ProductionSecurityDefaultsTests
             .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
             .Get(ManagementSessionDefaults.AuthenticationScheme);
 
-        // The management cookie the admin console now rides is secure in every environment, with
-        // no Development downgrade and never the cross-site-null relaxation.
-        Assert.Equal(CookieSecurePolicy.Always, options.Cookie.SecurePolicy);
+        // Since ServiceMantle.Web 0.3.2 the management cookie keeps the shared defaults: the
+        // Secure attribute follows the request scheme (transport is a deployment decision, so no
+        // code-level Always policy is written back) and the name carries no __Host- prefix, which
+        // ends every existing admin session exactly once at the upgrade. HttpOnly stays on and
+        // SameSite is never relaxed to None.
+        Assert.Equal(CookieSecurePolicy.SameAsRequest, options.Cookie.SecurePolicy);
         Assert.True(options.Cookie.HttpOnly);
         Assert.NotEqual(SameSiteMode.None, options.Cookie.SameSite);
         Assert.Equal(ManagementSessionDefaults.CookieName, options.Cookie.Name);
+        Assert.Equal("ServiceMantle.Management", options.Cookie.Name);
     }
 
     [Fact]

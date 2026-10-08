@@ -23,7 +23,7 @@ namespace SignaCore.Tests.Integration;
 public sealed partial class ManagementSettingRecoveryDatabaseContractTests
 {
     private const string Root = "/management/v1/settings";
-    private const string LegacyOtlp = "http://collector.example.com:4317";
+    private const string LegacyOtlp = "collector.example.com:4317";
     private const string ValidAuthorization = "Basic dGVzdDpjYW5hcnk=";
     private const string RunningHeader = "X-SignaCore-Running-Configuration-Version";
 
@@ -34,13 +34,13 @@ public sealed partial class ManagementSettingRecoveryDatabaseContractTests
         { false, null, ValidAuthorization, null },
         { false, "https://loki.example.com", "Basic bad\nheader", null },
         { false, null, null, LegacyOtlp },
-        { false, "http://loki.example.com:3100", ValidAuthorization, LegacyOtlp },
+        { false, "http://loki.example.com:3100", null, LegacyOtlp },
         { true, "http://loki.example.com:3100", null, null },
         { true, "https://loki.example.com", null, null },
         { true, null, ValidAuthorization, null },
         { true, "https://loki.example.com", "Basic bad\nheader", null },
         { true, null, null, LegacyOtlp },
-        { true, "http://loki.example.com:3100", ValidAuthorization, LegacyOtlp }
+        { true, "http://loki.example.com:3100", null, LegacyOtlp }
     };
 
     [Theory]
@@ -116,19 +116,20 @@ public sealed partial class ManagementSettingRecoveryDatabaseContractTests
     public async Task TouchedGroupsAndCriticalErrorsStayStrict_IndependentRepairsAreAtomic(bool postgres)
     {
         await using var fixture = await Fixture.CreateAsync(postgres,
-            "http://loki.example.com:3100", ValidAuthorization, LegacyOtlp);
+            "http://loki.example.com:3100", "Basic bad\nheader", LegacyOtlp);
         await using var factory = fixture.Host();
         using var admin = await LoginAsync(factory);
         var before = await fixture.StoredAsync();
         var auditCount = (await fixture.AuditsAsync()).Count;
         var rejected = new Dictionary<string, string?>[]
         {
+            // Touching only the URI keeps the stored unusable authorization in the candidate.
             new() { ["loki.uri"] = "http://loki.example.com:3100" },
             new() { ["LOKI.URI"] = "http://loki.example.com:3100" },
             new() { [" loki.uri "] = "http://loki.example.com:3100" },
             new() { ["loki.uri"] = null },
             new() { ["loki.authorization"] = null },
-            new() { ["loki.authorization"] = ValidAuthorization },
+            new() { ["loki.uri"] = "https://loki.example.com" },
             new() { ["loki.uri"] = "https://loki.example.com", ["loki.authorization"] = "bad\nheader" },
             new() { ["opentelemetry.otlp_endpoint"] = LegacyOtlp },
             new() { ["jwt.issuer"] = "https://other.example.com" },
@@ -172,7 +173,7 @@ public sealed partial class ManagementSettingRecoveryDatabaseContractTests
         Assert.Equal(HttpStatusCode.OK, disableLoki.StatusCode);
         // A newly invalid group never receives a waiver merely because a different group is old.
         using var newlyInvalid = await PostAsync(admin, before.Version + 2,
-            new() { ["loki.uri"] = "http://new-loki.example.com" });
+            new() { ["loki.uri"] = "https://new-loki.example.com/#fragment" });
         Assert.Equal(HttpStatusCode.BadRequest, newlyInvalid.StatusCode);
         using var repairOtlp = await PostAsync(admin, before.Version + 2,
             new() { ["opentelemetry.otlp_endpoint"] = "https://127.0.0.1:4317" });
@@ -197,10 +198,11 @@ public sealed partial class ManagementSettingRecoveryDatabaseContractTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ExplicitOptInKeys_SelectTheWholeGroupForStrictEvaluation(bool postgres)
+    public async Task OptInKeys_SelectTheWholeGroupForStrictEvaluation(bool postgres)
     {
-        // A legacy HTTP endpoint with a stored credential: unusable, so an untouched group keeps
-        // its waiver for unrelated updates — but touching an opt-in key selects the whole group.
+        // A plain-HTTP endpoint with a stored credential is a usable pair now; the stored OTLP
+        // endpoint stays unusable, so an untouched group keeps its waiver for unrelated updates —
+        // but touching an opt-in key selects the whole Loki group for the strict rules.
         await using var fixture = await Fixture.CreateAsync(postgres,
             "http://loki.example.com:3100", ValidAuthorization, LegacyOtlp);
         await using var factory = fixture.Host();
@@ -216,22 +218,28 @@ public sealed partial class ManagementSettingRecoveryDatabaseContractTests
         Assert.Equal(before.Version, (await fixture.StoredAsync()).Version);
         Assert.Equal(auditCount, (await fixture.AuditsAsync()).Count);
 
-        // A typed rejection on an opt-in key is likewise a group-touching strict failure.
+        // A typed rejection on the no-authentication opt-in is likewise a group-touching strict
+        // failure; the retired insecure-transport switch is a plain unknown key.
         using var badBoolean = await PostAsync(admin, before.Version,
-            new() { ["loki.allow_insecure_http"] = "bad-boolean" });
+            new() { ["loki.allow_no_authentication"] = "bad-boolean" });
         Assert.Equal(HttpStatusCode.BadRequest, badBoolean.StatusCode);
+        using var retiredSwitch = await PostAsync(admin, before.Version,
+            new() { ["loki.allow_insecure_http"] = "true" });
+        Assert.Equal(HttpStatusCode.BadRequest, retiredSwitch.StatusCode);
         Assert.Equal(before.Version, (await fixture.StoredAsync()).Version);
 
-        // The HTTP opt-in repairs the whole group in one batch while OTLP keeps its waiver.
+        // Moving the endpoint to HTTPS keeps the stored credential and stays usable in one batch,
+        // while the untouched OTLP group keeps its waiver.
         using var repaired = await PostAsync(admin, before.Version,
-            new() { ["loki.allow_insecure_http"] = "true" });
+            new() { ["loki.uri"] = "https://loki.example.com" });
         Assert.Equal(HttpStatusCode.OK, repaired.StatusCode);
         var repairedValues = SharedSettingTestDatabase.ParseValues(await fixture.StoredAsync());
-        Assert.Equal("http://loki.example.com:3100", repairedValues["loki.uri"]);
+        Assert.Equal("https://loki.example.com", repairedValues["loki.uri"]);
         // The stored credential stays protected; only its presence is observable in the raw row.
         Assert.Contains("loki.authorization", repairedValues.Keys);
         Assert.NotEqual(ValidAuthorization, repairedValues["loki.authorization"]);
-        Assert.Equal("true", repairedValues["loki.allow_insecure_http"]);
+        // The retired switch never comes back, not even as a stored row.
+        Assert.DoesNotContain("loki.allow_insecure_http", repairedValues.Keys);
         Assert.Equal(LegacyOtlp, repairedValues["opentelemetry.otlp_endpoint"]);
         await using (var httpHost = fixture.Host())
         {
@@ -256,6 +264,48 @@ public sealed partial class ManagementSettingRecoveryDatabaseContractTests
             Assert.Null(noAuthHost.Services.GetService(OtlpRuntime));
         }
         Assert.Equal(auditCount + 3, (await fixture.AuditsAsync()).Count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RetiredKeyRows_NeverBlockStartupQueriesOrUpdates(bool postgres)
+    {
+        // An older release stored the retired insecure-transport switch. The row survives the
+        // upgrade (dropping it is the operator's one-row cleanup), so every read of the stored
+        // aggregate must ignore it: startup, the management query path, and unrelated updates.
+        await using var fixture = await Fixture.CreateAsync(postgres,
+            "https://loki.example.com", ValidAuthorization, null);
+        var seeded = await fixture.StoredAsync();
+        var values = SharedSettingTestDatabase.ParseValues(seeded);
+        values["loki.allow_insecure_http"] = "true";
+        await using (var context = fixture.Context())
+            await context.Database.ExecuteSqlAsync(
+                $"UPDATE service_settings SET values_json = {JsonSerializer.Serialize(values)} WHERE service_id = 'signacore'",
+                TestContext.Current.CancellationToken);
+
+        await using var factory = fixture.Host();
+        using var admin = await LoginAsync(factory);
+        using (var read = await admin.GetAsync(Root, TestContext.Current.CancellationToken))
+        {
+            Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+            // The retired key is not a catalog member any more: it never appears in the listing.
+            Assert.DoesNotContain("loki.allow_insecure_http",
+                await read.Content.ReadAsStringAsync(TestContext.Current.CancellationToken),
+                StringComparison.Ordinal);
+        }
+
+        var version = (await fixture.StoredAsync()).Version;
+        using var rejected = await PostAsync(admin, version,
+            new() { ["loki.allow_insecure_http"] = "true" });
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+
+        using var unrelated = await PostAsync(admin, version,
+            new() { ["jwt.audience"] = "retired-key-audience" });
+        Assert.Equal(HttpStatusCode.OK, unrelated.StatusCode);
+        var after = SharedSettingTestDatabase.ParseValues(await fixture.StoredAsync());
+        Assert.Equal("true", after["loki.allow_insecure_http"]);
+        Assert.Equal("retired-key-audience", after["jwt.audience"]);
     }
 
     [Theory]

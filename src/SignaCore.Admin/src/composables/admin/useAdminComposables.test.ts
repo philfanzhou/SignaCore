@@ -806,24 +806,18 @@ describe('admin security and runtime settings', () => {
       hasDefault: false, requiresRestart: true, hasValue: true, source: 'persisted',
       value: null,
     }
-    const allowInsecureHttp: AdminSettingValue = {
-      key: 'loki.allow_insecure_http', valueType: 'boolean', isRequired: false, isSensitive: false,
-      hasDefault: true, requiresRestart: true, hasValue: true, source: 'default',
-      value: 'false',
-    }
     const allowNoAuthentication: AdminSettingValue = {
       key: 'loki.allow_no_authentication', valueType: 'boolean', isRequired: false, isSensitive: false,
       hasDefault: true, requiresRestart: true, hasValue: true, source: 'default',
       value: 'false',
     }
-    const group = [lokiUri, lokiAuthorization, allowInsecureHttp, allowNoAuthentication]
+    const group = [lokiUri, lokiAuthorization, allowNoAuthentication]
     mocks.api.getSettings.mockResolvedValue({
       snapshot: { version: 2, values: group },
       runningVersion: 2,
     })
     mocks.api.getSettingDiagnostics.mockResolvedValue({
       version: 2, runningVersion: 2, issues: [
-        { key: 'loki.uri', errorCode: 'signacore.setting.https_required' },
         { key: 'loki.authorization', errorCode: 'signacore.setting.required' },
       ],
     })
@@ -835,7 +829,7 @@ describe('admin security and runtime settings', () => {
     state.settingsDraft['loki.uri'] = 'https://loki.example.com'
     state.draftLokiDisable()
     expect(state.lokiDisablePending.value).toBe(true)
-    for (const key of ['loki.uri', 'loki.authorization', 'loki.allow_insecure_http', 'loki.allow_no_authentication']) {
+    for (const key of ['loki.uri', 'loki.authorization', 'loki.allow_no_authentication']) {
       expect(state.isRemovalPending(key)).toBe(true)
     }
     expect(state.settingsDraft['loki.uri']).toBe('http://loki.example.com')
@@ -849,7 +843,6 @@ describe('admin security and runtime settings', () => {
     expect(mocks.api.updateSettings).toHaveBeenCalledWith(2, [
       { key: 'loki.uri', value: null },
       { key: 'loki.authorization', value: null },
-      { key: 'loki.allow_insecure_http', value: null },
       { key: 'loki.allow_no_authentication', value: null },
     ])
     expect(state.lokiDisablePending.value).toBe(true)
@@ -869,17 +862,12 @@ describe('admin security and runtime settings', () => {
     expect(state.isRemovalPending('loki.authorization')).toBe(false)
   })
 
-  it('submits the explicit opt-in switches as Boolean drafts beside the endpoint', async () => {
+  it('submits the explicit opt-in switch as a Boolean draft beside the endpoint', async () => {
     const state = useAdminSettings()
     const lokiUri: AdminSettingValue = {
       key: 'loki.uri', valueType: 'string', isRequired: false, isSensitive: false,
       hasDefault: false, requiresRestart: true, hasValue: false, source: 'default',
       value: null,
-    }
-    const allowInsecureHttp: AdminSettingValue = {
-      key: 'loki.allow_insecure_http', valueType: 'boolean', isRequired: false, isSensitive: false,
-      hasDefault: true, requiresRestart: true, hasValue: true, source: 'default',
-      value: 'false',
     }
     const allowNoAuthentication: AdminSettingValue = {
       key: 'loki.allow_no_authentication', valueType: 'boolean', isRequired: false, isSensitive: false,
@@ -887,22 +875,21 @@ describe('admin security and runtime settings', () => {
       value: 'false',
     }
     mocks.api.getSettings.mockResolvedValue({
-      snapshot: { version: 6, values: [lokiUri, allowInsecureHttp, allowNoAuthentication] },
+      snapshot: { version: 6, values: [lokiUri, allowNoAuthentication] },
       runningVersion: 6,
     })
     await state.loadSettings()
     await flushMicrotasks()
 
-    // Starting from no Loki configuration, the operator saves the endpoint plus both explicit
-    // opt-ins in one batch; the sensitive authorization draft stays empty ("keep", never null).
+    // Starting from no Loki configuration, the operator saves the plain-HTTP endpoint and the
+    // explicit no-authentication opt-in in one batch; the sensitive authorization draft stays
+    // empty ("keep", never null). Plain HTTP needs no transport switch any more.
     state.settingsDraft['loki.uri'] = 'http://loki.example.com:3100'
-    state.settingsDraft['loki.allow_insecure_http'] = 'true'
     state.settingsDraft['loki.allow_no_authentication'] = 'true'
     mocks.api.updateSettings.mockResolvedValue({ version: 7 })
-    await state.saveSettings(['loki.uri', 'loki.authorization', 'loki.allow_insecure_http', 'loki.allow_no_authentication'])
+    await state.saveSettings(['loki.uri', 'loki.authorization', 'loki.allow_no_authentication'])
     expect(mocks.api.updateSettings).toHaveBeenCalledWith(6, [
       { key: 'loki.uri', value: 'http://loki.example.com:3100' },
-      { key: 'loki.allow_insecure_http', value: 'true' },
       { key: 'loki.allow_no_authentication', value: 'true' },
     ])
   })

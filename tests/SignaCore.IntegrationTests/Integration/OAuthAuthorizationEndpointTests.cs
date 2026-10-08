@@ -820,7 +820,7 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
         loginResponse.EnsureSuccessStatusCode();
 
         var setCookie = loginResponse.Headers.GetValues("Set-Cookie")
-            .Single(value => value.StartsWith("__Host-ServiceMantle.Management=", StringComparison.Ordinal));
+            .Single(value => value.StartsWith("ServiceMantle.Management=", StringComparison.Ordinal));
         return setCookie.Split(';')[0];
     }
 

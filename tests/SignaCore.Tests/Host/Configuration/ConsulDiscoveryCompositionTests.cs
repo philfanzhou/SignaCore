@@ -295,7 +295,6 @@ public sealed class ConsulDiscoveryCompositionTests
         {
             [ConsulSettingDefinitions.Enabled] = ServiceSettingValueType.Boolean,
             [ConsulSettingDefinitions.Endpoint] = ServiceSettingValueType.String,
-            [ConsulSettingDefinitions.AllowInsecureHttp] = ServiceSettingValueType.Boolean,
             [ConsulSettingDefinitions.Token] = ServiceSettingValueType.String,
             [ConsulSettingDefinitions.ServiceName] = ServiceSettingValueType.String,
             [ConsulSettingDefinitions.Address] = ServiceSettingValueType.String,
@@ -308,9 +307,6 @@ public sealed class ConsulDiscoveryCompositionTests
             snapshot.Values.Keys.Order(StringComparer.Ordinal));
         Assert.All(expectedTypes, expected =>
             Assert.Equal(expected.Value, snapshot.Values[expected.Key].ValueType));
-        var allowInsecureHttp = snapshot.Values[ConsulSettingDefinitions.AllowInsecureHttp];
-        Assert.True(allowInsecureHttp.HasValue);
-        Assert.False(allowInsecureHttp.GetBoolean());
         Assert.DoesNotContain("consul.host", snapshot.Values.Keys, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain(snapshot.Values.Keys, key =>
             key.StartsWith("consul.", StringComparison.OrdinalIgnoreCase));
@@ -319,8 +315,12 @@ public sealed class ConsulDiscoveryCompositionTests
     [Theory]
     [InlineData("http://consul.internal:8500/")]
     [InlineData("http://192.0.2.7:8500/")]
-    public async Task Composition_NonLoopbackHttp_IsRefusedEvenWithASharedProcessSetting(string host)
+    public async Task Composition_NonLoopbackHttp_IsAcceptedByTheSharedCatalog(string host)
     {
+        // ServiceMantle 0.3.2 removed the insecure-transport switch: the shared catalog accepts a
+        // plain-HTTP agent endpoint structurally, so an explicit root URI registers as-is. The
+        // former switch name in the process configuration is not a shared catalog key any more
+        // and is simply ignored.
         var product = await BuildProductSnapshotAsync(
             [("consul.discovery.enabled", "true"),
              ("consul.discovery.register", "true"),
@@ -332,16 +332,21 @@ public sealed class ConsulDiscoveryCompositionTests
             {
                 [ConsulDiscoveryComposition.AdvertisementAddressKey] = "10.1.2.3",
                 [ConsulDiscoveryComposition.AdvertisementPortKey] = "9443",
-                // Shared catalog switches are not product or process configuration inputs.
-                [ConsulSettingDefinitions.AllowInsecureHttp] = "true"
+                // The retired switch name is not a shared catalog or process input.
+                ["discovery.allow-insecure-http"] = "true"
             }).Build();
 
-        var exception = await Assert.ThrowsAsync<ConsulDiscoveryConfigurationException>(() =>
-            services.AddConsulDiscoveryLifecycleAsync(
-                configuration, product, new BootstrapMasterKeyProvider(RootSecret)));
+        await services.AddConsulDiscoveryLifecycleAsync(
+            configuration, product, new BootstrapMasterKeyProvider(RootSecret));
 
-        Assert.Equal(ConsulDiscoveryConfigurationException.SnapshotInvalid, exception.ErrorCode);
-        Assert.Empty(services);
+        Assert.Contains(services, descriptor =>
+            descriptor.ServiceType == typeof(ConsulDiscoverySnapshotAccessor));
+        using var provider = services.BuildServiceProvider();
+        var activated = provider.GetRequiredService<ConsulDiscoverySnapshotAccessor>();
+        Assert.True(activated.TryGetCurrent(out var snapshot));
+        var endpoint = snapshot!.Values[ConsulSettingDefinitions.Endpoint];
+        Assert.True(endpoint.HasValue);
+        Assert.Equal(host, endpoint.GetString());
     }
 
     [Fact]

@@ -299,7 +299,7 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
     }
 
     [Theory]
-    [InlineData("http://otlp-legacy.example.com:4317")]
+    [InlineData("ftp://otlp-legacy.example.com:4317")]
     [InlineData("https://user:fixture@otlp-legacy.example.com:4317")]
     [InlineData("https://otlp-legacy.example.com:4317/?tenant=fixture")]
     [InlineData("https://otlp-legacy.example.com:4317/#fixture")]
@@ -343,7 +343,7 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ManagementUpdate_RejectsAPlainHttpOtlpEndpoint()
+    public async Task ManagementUpdate_RejectsStructurallyUnusableOtlpEndpoints()
     {
         var factory = await StartNormalHostAsync();
         using var admin = await CreateAdminClientAsync(factory);
@@ -351,7 +351,7 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
 
         foreach (var endpoint in new[]
                  {
-                     "http://collector.example.com:4317",
+                     "ftp://collector.example.com:4317",
                      "https://user:pass@collector.example.com",
                      "https://collector.example.com/?x=1"
                  })
@@ -368,6 +368,10 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         using var accepted = await PostSettingAsync(admin, version, "https://collector.example.com:4317");
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
         Assert.Equal(version + 1, await ReadVersionAsync(admin));
+        // Plain http is accepted as an equal input since ServiceMantle 0.3.2.
+        using var plainHttp = await PostSettingAsync(admin, version + 1, "http://collector.example.com:4317");
+        Assert.Equal(HttpStatusCode.OK, plainHttp.StatusCode);
+        Assert.Equal(version + 2, await ReadVersionAsync(admin));
     }
 
     // ---- Provider release ----

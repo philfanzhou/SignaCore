@@ -38,8 +38,20 @@ internal sealed class ManagementSettingRecovery : IServiceSettingUpdateTransacti
     public async ValueTask<ServiceSettingStoreSnapshot> LoadAsync(
         ServiceId serviceId, CancellationToken cancellationToken)
     {
-        var current = await transaction.LoadAsync(serviceId, cancellationToken);
+        var loaded = await transaction.LoadAsync(serviceId, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
+        // Retired keys (RetiredSettingKeys) are dropped from the baseline read: the shared update
+        // service fails closed on any stored key without a definition, so a leftover row from an
+        // older release must not turn every management update into a storage failure. The stored
+        // row itself is untouched; dropping it is the operator's one-row cleanup.
+        var current = new ServiceSettingStoreSnapshot(
+            loaded.ServiceId,
+            loaded.Version,
+            loaded.Values.Where(pair => !RetiredSettingKeys.IsRetired(pair.Key))
+                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal),
+            loaded.UpdatedAtUtc,
+            loaded.UpdatedBy,
+            loaded.RestartRequired);
         // Preserve the shared service's version/mismatch/exhaustion priority. An absent aggregate
         // has no legacy group to preserve and uses the default strict candidate validation.
         if (current.ServiceId == serviceId && current.Version == command.ExpectedVersion
@@ -48,10 +60,10 @@ internal sealed class ManagementSettingRecovery : IServiceSettingUpdateTransacti
             using var loader = new ServiceSettingSnapshotLoader(serviceId,
                 new BaselineSource(current, baselineRegistry), baselineRegistry,
                 new ServiceSettingCurrentSnapshotAccessor(), rootKey);
-            var loaded = await loader.RefreshAsync(cancellationToken);
-            if (!loaded.Succeeded)
+            var refresh = await loader.RefreshAsync(cancellationToken);
+            if (!refresh.Succeeded)
                 throw new InvalidOperationException("The stored setting baseline is unavailable.");
-            validator.SetBaseline(loaded.Snapshot!);
+            validator.SetBaseline(refresh.Snapshot!);
         }
         return current;
     }
@@ -86,31 +98,30 @@ internal sealed class ManagementSettingRecovery : IServiceSettingUpdateTransacti
     private sealed class RecoveryValidator(bool isDevelopment, IEnumerable<string> changedKeys)
         : IServiceSettingCompositeValidator
     {
-        // Touching any Loki key — including the two explicit opt-ins — selects the whole group for
-        // strict evaluation; the legacy waiver never applies to an explicitly changed group.
+        // Touching any Loki key — including the explicit no-authentication opt-in — selects the
+        // whole group for strict evaluation; the legacy waiver never applies to an explicitly
+        // changed group.
         private static readonly string[] LokiGroupKeys =
         [
             GrafanaLokiSettingDefinitions.Endpoint,
             GrafanaLokiSettingDefinitions.Authorization,
-            GrafanaLokiSettingDefinitions.AllowInsecureHttp,
             GrafanaLokiSettingDefinitions.AllowNoAuthentication
         ];
 
         private readonly HashSet<string> touched = new(changedKeys, StringComparer.OrdinalIgnoreCase);
         private readonly SignaCoreSettingCompositeValidator core = new(isDevelopment);
         private string? uri, authorization, endpoint;
-        private bool allowInsecureHttp, allowNoAuthentication;
+        private bool allowNoAuthentication;
         private bool preserveLoki, preserveOtlp;
 
         internal void SetBaseline(ServiceSettingSnapshot snapshot)
         {
             uri = Read(snapshot.Values, GrafanaLokiSettingDefinitions.Endpoint);
             authorization = Read(snapshot.Values, GrafanaLokiSettingDefinitions.Authorization);
-            allowInsecureHttp = ReadBoolean(snapshot.Values, GrafanaLokiSettingDefinitions.AllowInsecureHttp);
             allowNoAuthentication = ReadBoolean(snapshot.Values, GrafanaLokiSettingDefinitions.AllowNoAuthentication);
             endpoint = Read(snapshot.Values, OtlpSettingDefinitions.Endpoint);
             preserveLoki = !touched.Overlaps(LokiGroupKeys)
-                && GrafanaLokiSettingState.Classify(uri, authorization, allowInsecureHttp, allowNoAuthentication)
+                && GrafanaLokiSettingState.Classify(uri, authorization, allowNoAuthentication)
                     .IsUnusable;
             preserveOtlp = !touched.Contains(OtlpSettingDefinitions.Endpoint)
                 && OtlpSettingState.Classify(endpoint).IsUnusable;
@@ -131,7 +142,6 @@ internal sealed class ManagementSettingRecovery : IServiceSettingUpdateTransacti
             errors.AddRange(SignaCoreSettingCompositeValidator.ValidateOptionalSettings(context,
                 preserveLoki && Same(GrafanaLokiSettingDefinitions.Endpoint, uri)
                     && Same(GrafanaLokiSettingDefinitions.Authorization, authorization)
-                    && SameBoolean(GrafanaLokiSettingDefinitions.AllowInsecureHttp, allowInsecureHttp)
                     && SameBoolean(GrafanaLokiSettingDefinitions.AllowNoAuthentication, allowNoAuthentication),
                 preserveOtlp && Same(OtlpSettingDefinitions.Endpoint, endpoint)));
             return errors;

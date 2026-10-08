@@ -432,7 +432,7 @@ public sealed class ConsulRealAgentAcceptanceTests
             login.Headers.Add("X-ServiceMantle-Request", "1");
             using var response = await http.SendAsync(login, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-            var cookie = response.Headers.GetValues("Set-Cookie").Single(x => x.StartsWith("__Host-ServiceMantle.Management=", StringComparison.Ordinal)).Split(';')[0];
+            var cookie = response.Headers.GetValues("Set-Cookie").Single(x => x.StartsWith("ServiceMantle.Management=", StringComparison.Ordinal)).Split(';')[0];
             http.DefaultRequestHeaders.Remove("Cookie");
             http.DefaultRequestHeaders.Add("Cookie", cookie);
             var settings = await http.GetFromJsonAsync<JsonElement>("/management/v1/settings", TestContext.Current.CancellationToken);

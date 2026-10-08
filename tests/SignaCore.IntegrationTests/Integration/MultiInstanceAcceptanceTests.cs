@@ -37,7 +37,7 @@ public sealed class MultiInstanceAcceptanceTests : IAsyncLifetime
 {
     private const string Root = "/management/v1";
     private const string SetupEntryPath = "/management/v1/setup";
-    private const string CookieName = "__Host-ServiceMantle.Management";
+    private const string CookieName = "ServiceMantle.Management";
     private const string RootSecret = "multi-instance-acceptance-root-secret";
     private const string AdminUsername = "multi_admin";
     private const string AdminPassword = "MultiAdmin123";

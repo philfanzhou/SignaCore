@@ -26,8 +26,8 @@ public sealed class LokiSettingsTests
     [InlineData(" ", " ", "Disabled")]
     [InlineData(Endpoint, Authorization, "Enabled")]
     [InlineData("https://loki.example.com:3100/base/", Authorization, "Enabled")]
-    [InlineData("http://loki.example.com:3100", Authorization, "EndpointInvalid")]
-    [InlineData("http://loki.example.com:3100", "", "EndpointInvalid")]
+    [InlineData("http://loki.example.com:3100", Authorization, "Enabled")]
+    [InlineData("http://loki.example.com:3100", "", "AuthorizationMissing")]
     [InlineData("https://user:pass@loki.example.com", Authorization, "EndpointInvalid")]
     [InlineData("https://loki.example.com/?tenant=a", Authorization, "EndpointInvalid")]
     [InlineData("https://loki.example.com/#x", Authorization, "EndpointInvalid")]
@@ -48,7 +48,8 @@ public sealed class LokiSettingsTests
         Assert.Equal(expected is not (GrafanaLokiSettingStatus.Enabled or GrafanaLokiSettingStatus.Disabled), state.IsUnusable);
         if (expected == GrafanaLokiSettingStatus.Enabled)
         {
-            Assert.Equal(Uri.UriSchemeHttps, state.Endpoint!.Scheme);
+            // The endpoint keeps the stored scheme verbatim: plain http and https are equal.
+            Assert.Equal(new Uri(uri!).Scheme, state.Endpoint!.Scheme);
             Assert.Equal(authorization, state.Authorization);
         }
         else
@@ -67,36 +68,54 @@ public sealed class LokiSettingsTests
     }
 
     [Theory]
-    [InlineData("https://loki.example.com", "Basic bG9raTpjYW5hcnk=", false, false)]
-    [InlineData("http://loki.example.com:3100", "Basic bG9raTpjYW5hcnk=", true, false)]
-    [InlineData("https://loki.example.com", null, false, true)]
-    [InlineData("http://loki.example.com:3100", null, true, true)]
-    public void Classify_ExplicitOptIns_CoverAllFourTransportCombinations(
-        string uri, string? authorization, bool allowInsecureHttp, bool allowNoAuthentication)
+    [InlineData("https://loki.example.com", "Basic bG9raTpjYW5hcnk=", false)]
+    [InlineData("http://loki.example.com:3100", "Basic bG9raTpjYW5hcnk=", false)]
+    [InlineData("https://loki.example.com", null, true)]
+    [InlineData("http://loki.example.com:3100", null, true)]
+    public void Classify_PlainHttpAndHttpsAreEqualAcrossTheAuthenticationModes(
+        string uri, string? authorization, bool allowNoAuthentication)
     {
-        var state = GrafanaLokiSettingState.Classify(uri, authorization, allowInsecureHttp, allowNoAuthentication);
+        var state = GrafanaLokiSettingState.Classify(uri, authorization, allowNoAuthentication);
 
         Assert.Equal(GrafanaLokiSettingStatus.Enabled, state.Status);
-        Assert.Equal(allowInsecureHttp, state.AllowInsecureHttp);
+        Assert.Equal(new Uri(uri).Scheme, state.Endpoint!.Scheme);
         // The no-authentication mode carries no credential; the authenticated mode keeps it.
         Assert.Equal(allowNoAuthentication ? null : authorization, state.Authorization);
     }
 
     [Theory]
-    [InlineData("http://loki.example.com:3100", "Basic bG9raTpjYW5hcnk=", true, false)]
-    [InlineData("https://loki.example.com", null, false, true)]
-    [InlineData("http://loki.example.com:3100", null, true, true)]
-    public void UpdateValidation_ExplicitOptIns_AcceptTheMatchingCombinations(
-        string uri, string? authorization, bool allowInsecureHttp, bool allowNoAuthentication)
+    [InlineData("http://loki.example.com:3100", "Basic bG9raTpjYW5hcnk=", false)]
+    [InlineData("https://loki.example.com", null, true)]
+    [InlineData("http://loki.example.com:3100", null, true)]
+    public void UpdateValidation_PlainHttpAndNoAuthentication_AreAcceptedAsStored(
+        string uri, string? authorization, bool allowNoAuthentication)
     {
-        Assert.Empty(Validate(uri, authorization, allowInsecureHttp, allowNoAuthentication, true));
+        Assert.Empty(Validate(uri, authorization, allowNoAuthentication, true));
+    }
+
+    [Fact]
+    public void UpdateValidation_TheRetiredInsecureSwitch_IsAnUnknownKey()
+    {
+        // loki.allow_insecure_http is retired: updating it is the generic unknown-key rejection,
+        // never a typed Boolean rule, and the key never re-enters the catalog.
+        var candidate = Candidate(Endpoint, Authorization);
+        candidate[RetiredSettingKeys.LokiAllowInsecureHttp] = "true";
+
+        var result = new ServiceSettingDefinitionRegistry(
+                SharedSettingComposition.CreateDefinitionProviders(),
+                [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules: true)])
+            .Validate(candidate);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error =>
+            error.ErrorCode == WellKnownServiceSettingValidationErrorCodes.Unknown);
     }
 
     [Fact]
     public void UpdateValidation_NoAuthenticationWithAStoredCredential_IsRejected()
     {
         var errors = Validate(
-            Endpoint, "Basic bG9raTpjYW5hcnk=", allowInsecureHttp: false, allowNoAuthentication: true,
+            Endpoint, "Basic bG9raTpjYW5hcnk=", allowNoAuthentication: true,
             validateManagementUpdateRules: true);
 
         var error = Assert.Single(errors);
@@ -116,7 +135,7 @@ public sealed class LokiSettingsTests
 
     [Theory]
     [InlineData(null, null, false)]
-    [InlineData("http://loki.example.com", Authorization, false)]
+    [InlineData("http://loki.example.com", Authorization, true)]
     [InlineData(Endpoint, Authorization, true)]
     public void Composition_UsesSharedResolverOnlyWhenEnabled(string? endpoint, string? authorization, bool enabled)
     {
@@ -157,8 +176,8 @@ public sealed class LokiSettingsTests
 
     public static TheoryData<string?, string?, string?, string?> RejectedCandidates => new()
     {
-        { "http://loki.example.com:3100", Authorization, "loki.uri", SignaCoreSettingCompositeValidator.HttpsRequiredCode },
         { "https://user:pass@loki.example.com", Authorization, "loki.uri", SignaCoreSettingCompositeValidator.RuntimeInvalidCode },
+        { "http://user:pass@loki.example.com:3100", Authorization, "loki.uri", SignaCoreSettingCompositeValidator.RuntimeInvalidCode },
         { "https://loki.example.com/?tenant=a", Authorization, "loki.uri", SignaCoreSettingCompositeValidator.RuntimeInvalidCode },
         { "https://loki.example.com/#fragment", Authorization, "loki.uri", SignaCoreSettingCompositeValidator.RuntimeInvalidCode },
         { "loki.example.com", Authorization, "loki.uri", SignaCoreSettingCompositeValidator.RuntimeInvalidCode },
@@ -186,6 +205,7 @@ public sealed class LokiSettingsTests
     [Theory]
     [InlineData(null, null)]
     [InlineData(Endpoint, Authorization)]
+    [InlineData("http://loki.example.com:3100", Authorization)]
     public void UpdateValidation_AcceptsEmptyOrUsablePairs(string? uri, string? authorization)
     {
         Assert.Empty(Validate(uri, authorization, validateManagementUpdateRules: true));
@@ -193,6 +213,7 @@ public sealed class LokiSettingsTests
 
     [Theory]
     [InlineData("http://loki.example.com:3100", null)]
+    [InlineData("http://loki.example.com:3100", Authorization)]
     [InlineData(Endpoint, null)]
     public void SnapshotValidation_KeepsAcceptingValuesAnOlderReleaseStored(string? uri, string? authorization)
     {
@@ -208,22 +229,16 @@ public sealed class LokiSettingsTests
         string? uri,
         string? authorization,
         bool validateManagementUpdateRules) =>
-        Validate(uri, authorization, allowInsecureHttp: false, allowNoAuthentication: false,
+        Validate(uri, authorization, allowNoAuthentication: false,
             validateManagementUpdateRules);
 
     private static IReadOnlyList<ServiceSettingValidationError> Validate(
         string? uri,
         string? authorization,
-        bool allowInsecureHttp,
         bool allowNoAuthentication,
         bool validateManagementUpdateRules)
     {
         var candidate = Candidate(uri, authorization);
-        if (allowInsecureHttp)
-        {
-            candidate["loki.allow_insecure_http"] = "true";
-        }
-
         if (allowNoAuthentication)
         {
             candidate["loki.allow_no_authentication"] = "true";

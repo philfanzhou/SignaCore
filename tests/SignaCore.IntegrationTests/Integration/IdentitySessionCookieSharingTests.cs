@@ -29,7 +29,7 @@ namespace SignaCore.Tests.Integration;
 public sealed class IdentitySessionCookieSharingTests : IAsyncLifetime
 {
     private const string IdentityCookieName = "__Host-signacore_identity";
-    private const string ManagementCookieName = "__Host-ServiceMantle.Management";
+    private const string ManagementCookieName = "ServiceMantle.Management";
     private const string AdminUsername = "identity_cookie_admin";
     private const string AdminPassword = "IdentityCookie123!";
 

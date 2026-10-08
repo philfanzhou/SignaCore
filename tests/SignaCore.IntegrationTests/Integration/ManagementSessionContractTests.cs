@@ -31,7 +31,7 @@ namespace SignaCore.Tests.Integration;
 public sealed class ManagementSessionContractTests : IClassFixture<IdentityServerFixture>
 {
     private const string Root = "/management/v1";
-    private const string CookieName = "__Host-ServiceMantle.Management";
+    private const string CookieName = "ServiceMantle.Management";
     private const string UnsafeRequestHeader = "X-ServiceMantle-Request";
 
     private readonly IdentityServerFixture _fixture;
@@ -124,7 +124,11 @@ public sealed class ManagementSessionContractTests : IClassFixture<IdentityServe
         Assert.True(response.Headers.NonValidated.TryGetValues("Set-Cookie", out var setCookieValues));
         var setCookie = setCookieValues
             .Single(value => value.StartsWith($"{CookieName}=", StringComparison.Ordinal));
-        Assert.Contains("secure", setCookie, StringComparison.OrdinalIgnoreCase);
+        // Since ServiceMantle.Web 0.3.2 the Secure attribute follows the request scheme, so the
+        // plain-http TestServer request carries no Secure flag; HttpOnly, SameSite, and the path
+        // stay fixed. (The https side of the scheme-following rule is covered by
+        // ForwardedHeadersHostTests through a trusted forwarded https scheme.)
+        Assert.DoesNotContain("secure", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("httponly", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=strict", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("path=/", setCookie, StringComparison.OrdinalIgnoreCase);

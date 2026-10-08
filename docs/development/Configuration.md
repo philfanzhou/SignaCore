@@ -179,11 +179,10 @@ requests to WeChat with an empty appid.
 
 | Key | Default | Secret | Notes |
 | --- | --- | --- | --- |
-| `Loki:Uri` | empty | | Loki base URL; an absolute `https` URL without user info, query, or fragment — or plain `http` behind the explicit `Loki:AllowInsecureHttp` opt-in |
+| `Loki:Uri` | empty | | Loki base URL; an absolute `http` or `https` URL without user info, query, or fragment — the scheme is a deployment decision, not a setting |
 | `Loki:Authorization` | empty | yes | The complete `Authorization` header value sent to Loki, for example `Basic ...` or `Bearer ...`; must be absent when `Loki:AllowNoAuthentication` is on |
-| `Loki:AllowInsecureHttp` | `false` | | Explicitly permits a plain-HTTP Loki endpoint; off by default and never implied by the environment |
 | `Loki:AllowNoAuthentication` | `false` | | Explicitly selects no authentication: no Authorization header is sent, and any stored authorization must be deleted in the same update |
-| `OpenTelemetry:OtlpEndpoint` | empty | | OTLP trace export (gRPC); must be an absolute `https` URL without user info, query, or fragment |
+| `OpenTelemetry:OtlpEndpoint` | empty | | OTLP trace export (gRPC); must be an absolute `http` or `https` URL without user info, query, or fragment |
 
 #### Metrics and traces
 
@@ -255,19 +254,18 @@ they reach the Console or Loki, and the sanitization cannot be turned off. Reque
 carry the `ServiceName`, `ServiceVersion`, and `InstanceId` fields of the ServiceMantle log scope.
 The Console uses the ServiceMantle default output template.
 
-Loki export is enabled only on the normal host and only for a combination the explicit opt-ins
-allow: by default an absolute `https` `Loki:Uri` together with `Loki:Authorization` — or, behind
-the explicit `Loki:AllowInsecureHttp` opt-in, a plain `http` endpoint — or, behind the explicit
+Loki export is enabled only on the normal host and only for a usable combination: an absolute
+`http` or `https` `Loki:Uri` — both schemes are accepted equally, because transport security is a
+deployment decision — together with `Loki:Authorization`, or, behind the explicit
 `Loki:AllowNoAuthentication` opt-in, no credential at all (no Authorization header is sent and no
-authentication resolver is registered). Both switches default to `false`, are non-sensitive, and
-require a restart; an older aggregate without them loads as `false` with the previous
-HTTPS-plus-authorization behavior unchanged. The credential is stored encrypted with the root key
-like every other secret setting and is never returned by the settings API. The management API
-rejects an `http` URL without the opt-in, a URL with user info, a query, or a fragment, a URL or
-authorization value saved without the other (unless no authentication is explicitly selected), and
-a stored credential that conflicts with `Loki:AllowNoAuthentication`. Changes take effect after a
-restart. Bootstrap Configuration Mode and Setup Mode have no settings yet and only write to the
-Console.
+authentication resolver is registered). The remaining switch defaults to `false`, is
+non-sensitive, and requires a restart; an older aggregate without it loads as `false`. The
+credential is stored encrypted with the root key like every other secret setting and is never
+returned by the settings API. The management API rejects a URL with user info, a query, or a
+fragment, a URL or authorization value saved without the other (unless no authentication is
+explicitly selected), and a stored credential that conflicts with `Loki:AllowNoAuthentication`.
+Changes take effect after a restart. Bootstrap Configuration Mode and Setup Mode have no settings
+yet and only write to the Console.
 
 Loki streams carry only the level label of the shared sink (the former `service=SignaCore` label is
 gone); the service identity is in the log properties. Loki being unreachable or rejecting a batch
@@ -279,23 +277,35 @@ Category levels come from the standard `Logging:LogLevel` section of `appsetting
 framework categories in production, because framework log lines may then contain request URLs and
 query values that structured-field sanitization does not cover.
 
-**Upgrading.** A stored `http` Loki URL or a Loki URL without `Loki:Authorization` does not stop
-the service: Loki stays off and the start writes one Console warning naming only the problem
+**Upgrading.** A Loki URL without `Loki:Authorization` (or a structurally unusable URL) does not
+stop the service: Loki stays off and the start writes one Console warning naming only the problem
 category (`endpoint_invalid`, `endpoint_missing`, `authorization_missing`, or
-`authorization_invalid`). Sign in and either repair the group (an `https` URL plus the
-`Authorization` value, an explicitly opted-in `http` URL, or the explicit no-authentication
-opt-in with the credential deleted in the same batch) or disable it, then restart.
-Until the Loki group is corrected, saving any other setting still works — the recovery boundary
-keeps an untouched unusable group — while explicitly touching any Loki key (including the two
-opt-in switches) applies the full strict rules.
+`authorization_invalid`). A stored plain-`http` Loki URL is delivered to as-is since the
+ServiceMantle 0.3.2 upgrade — it is no longer an unusable combination by itself. Sign in and
+either repair the group (an `http` or `https` URL plus the `Authorization` value, or the explicit
+no-authentication opt-in with the credential deleted in the same batch) or disable it, then
+restart. Until the Loki group is corrected, saving any other setting still works — the recovery
+boundary keeps an untouched unusable group — while explicitly touching any Loki key (including
+the opt-in switch) applies the full strict rules.
+
+**The retired `Loki:AllowInsecureHttp` key.** The ServiceMantle 0.3.2 upgrade removed the
+insecure-transport switch: endpoints accept `http` and `https` alike, so the former
+`loki.allow_insecure_http` shared key (`Loki:AllowInsecureHttp`) is retired. An existing
+aggregate may still carry the row; every SignaCore read ignores it, and updates that name it are
+rejected as unknown keys — the row never blocks startup or management. Operators may drop the
+stored row in one management update after upgrading (`{ "key": "loki.allow_insecure_http",
+"value": null }`), but the drop is optional housekeeping, not a migration requirement.
 
 **Rolling back.** An older release refuses to load a settings aggregate that contains keys it
 does not know: the credential key `loki.authorization`, and — for releases before the explicit
-opt-ins — `loki.allow_insecure_http` and `loki.allow_no_authentication`. Before starting the
-older binary, stop every instance and delete the unknown keys through this version's management
-interface in one atomic update (deleting the whole Loki group with `value=null` also works); a
-direct rollback without that deletion may refuse to start on the unknown persisted keys. Preserve
-the database and root key.
+opt-ins — `loki.allow_no_authentication`. Before starting the older binary, stop every instance
+and delete the unknown keys through this version's management interface in one atomic update
+(deleting the whole Loki group with `value=null` also works); a direct rollback without that
+deletion may refuse to start on the unknown persisted keys. Preserve the database and root key.
+(The retired `loki.allow_insecure_http` row is the mirror case going forward: an older
+0.3.1-based release rejects it as an unknown key, so rolling back from this release to one before
+the switch existed is unchanged, while rolling back to a 0.3.1-based release that still knows the
+key keeps accepting the row.)
 
 The older release then ships to Loki again with its own `Serilog` appsettings section and
 `Loki:Uri`; the logging pipeline itself keeps no persistent state.

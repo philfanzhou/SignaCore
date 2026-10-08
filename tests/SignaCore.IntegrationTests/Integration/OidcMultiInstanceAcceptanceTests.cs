@@ -245,7 +245,7 @@ public sealed partial class OidcMultiInstanceAcceptanceTests : IAsyncLifetime
         using var a = CreateInstance();
         using var b = CreateInstance();
         var managementCookie = await LoginManagementAsync(a);
-        var managementValue = managementCookie[(("__Host-ServiceMantle.Management").Length + 1)..];
+        var managementValue = managementCookie[(("ServiceMantle.Management").Length + 1)..];
 
         using var bClient = NonRedirectingClient(b);
         using var response = await bClient.SendAsync(
@@ -615,7 +615,7 @@ public sealed partial class OidcMultiInstanceAcceptanceTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         Assert.True(response.Headers.NonValidated.TryGetValues("Set-Cookie", out var cookies));
         return cookies
-            .Single(value => value.StartsWith("__Host-ServiceMantle.Management=", StringComparison.Ordinal))
+            .Single(value => value.StartsWith("ServiceMantle.Management=", StringComparison.Ordinal))
             .Split(';')[0];
     }
 

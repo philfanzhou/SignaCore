@@ -14,7 +14,10 @@ internal sealed class ManagementSettingQuerySnapshot : IDisposable
     {
         var registry = SharedSettingComposition.CreateRegistry(isDevelopment);
         loader = new ServiceSettingSnapshotLoader(
-            InstallationStores.ServiceId, new ServiceSettingStoreSnapshotSource(store, registry),
+            InstallationStores.ServiceId,
+            // Retired keys are dropped from the stored read so a leftover row from an older
+            // release cannot fail the diagnostic load with an unknown-key error.
+            new RetiredSettingKeyFilterSource(new ServiceSettingStoreSnapshotSource(store, registry)),
             registry, new ServiceSettingCurrentSnapshotAccessor(), rootKey);
         Query = new ServiceSettingQueryService(registry, loader);
     }
