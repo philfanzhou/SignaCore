@@ -11,18 +11,18 @@ import { handleApiError } from "../useSession";
 import { notify } from "./useAdminFeedback";
 
 /**
- * 交互式 OIDC 客户端配置。
+ * Interactive OIDC client configuration calls the four existing management endpoints.
+ * Validation follows the server OidcClientConfigurationValidator; its rejection messages are
+ * shown verbatim to the administrator.
  *
- * 本模块只消费管理 API 已有的四个端点，不自行放宽或收紧任何规则：服务端的
- * OidcClientConfigurationValidator 是唯一校验权威，被拒绝的原因原样呈现给管理员。
- *
- * 两条固定不变量：
- * - Redirect URI 与 claims callback（AdminApp.callbackUrl）是两套独立注册，任何一侧都不会
- *   被复制、预填或写入另一侧。
- * - Public clients can explicitly enable code flow; the server always rejects Public refresh.
+ * - Redirect URIs and the claims callback (AdminApp.callbackUrl) are independent registrations.
+ *   Neither is copied, prefilled, or written into the other.
+ * - Public clients can explicitly enable Code flow. Explicit Public refresh also requires an active,
+ *   secretless Code client, PerApplication audience, offline_access, and a session maximum age
+ *   between 1 and 43200 seconds, as validated by the server.
  */
 
-/** 未配置过交互式 OIDC 的应用在服务端就是这套值，界面按「未启用」展示而不是空白。 */
+/** Show interactive configuration as disabled until the server values are loaded. */
 const emptyOidc: AdminAppOidc = {
   appId: "",
   clientType: "Confidential",
@@ -38,7 +38,7 @@ const emptyOidc: AdminAppOidc = {
 const oidcConfig = ref<AdminAppOidc>({ ...emptyOidc });
 const oidcLoading = ref(false);
 const oidcSaving = ref(false);
-/** 服务端 400 的原文，逐字呈现，不做改写或归纳。 */
+/** Display the server 400 message verbatim. */
 const oidcError = ref("");
 const oidcPolicyForm = reactive({
   allowAuthorizationCode: false,
@@ -79,7 +79,7 @@ export function useAdminAppOidc(selectedApp: Ref<AdminApp | null>) {
     }
   }
 
-  /** 取消编辑：本地状态回到服务端返回值，不残留未提交修改。 */
+  /** Cancel editing by restoring the server values and clearing unsaved drafts. */
   function resetPolicyForm() {
     syncPolicyForm(oidcConfig.value);
     redirectUriDraft.value = "";
@@ -110,7 +110,7 @@ export function useAdminAppOidc(selectedApp: Ref<AdminApp | null>) {
       await loadOidc(selectedApp.value.appId);
       notify("交互式 OIDC 策略已保存");
     } catch (error) {
-      // 服务端拒绝：原文呈现，并把本地状态退回到服务端当前值，不留下半提交的界面。
+      // Show the server rejection verbatim and restore the loaded server values.
       oidcError.value = getErrorMessage(error);
       handleApiError("保存交互式 OIDC 策略失败", error);
       syncPolicyForm(oidcConfig.value);
@@ -122,7 +122,7 @@ export function useAdminAppOidc(selectedApp: Ref<AdminApp | null>) {
   async function addRedirectUri(kind: AdminAppRedirectUri["kind"]) {
     if (!selectedApp.value) return;
     const draft = kind === "Redirect" ? redirectUriDraft : postLogoutUriDraft;
-    // 只去掉首尾空白：注册值按管理员输入的精确形式比较，界面不做任何规范化。
+    // Trim surrounding whitespace only; leave URI normalization to the server.
     const uri = draft.value.trim();
     if (!uri) {
       return notify(

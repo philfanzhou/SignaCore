@@ -20,7 +20,7 @@ is corrected before implementation.
 | [Identity Login](./IdentityLogin.md) | Isolated identity cookie, server-side continuation, Password login, SMS one-time-code login, CSRF, cancellation, and revalidation |
 | [Authorization Code Redemption](./TokenEndpoint.md) | Code storage, token request validation, atomic redemption, replay, and transaction boundaries |
 | [Interactive Tokens](./Tokens.md) | ID-token and access-token claims, lifetimes, consumers, validation duties, and response separation |
-| [Identity Sessions](./IdentitySession.md) | Database authority, lifetime, activity, revocation, cleanup, and endpoint projections |
+| [Identity Sessions](./IdentitySession.md) | Database authority, lifetime, activity, revocation, cleanup, and session checks at each endpoint |
 | [UserInfo](./UserInfo.md) | Bearer input, live-authority validation, claims, errors, and server-only response boundary |
 | [Prepared Logout](./Logout.md) | Authenticated preparation, browser handle completion, redirects, sensitive values, and races |
 | [Non-refresh State Propagation](./StatePropagation.md) | Verification ledger from state events to implementation and test owners |
@@ -29,7 +29,7 @@ is corrected before implementation.
 | [Security Contract](./Security.md) | Attack verification, audit, metrics, rate limits, sensitive-value canaries, and production gate |
 | [Discovery Activation](./Discovery.md) | Current metadata facts, real implementation dependencies, and staged publication |
 | [Ownership](./Ownership.md) | SignaCore, ServiceMantle, BFF, resource-service, and operator boundaries |
-| [Integration Audit](./IntegrationAudit.md) | Final semantic replay of every canonical end-to-end scenario |
+| [Integration Audit](./IntegrationAudit.md) | Step-by-step check of every canonical end-to-end scenario and its results |
 | [Multi-Instance Acceptance](./MultiInstanceAcceptance.md) | Two-instance OIDC acceptance base: A/B routing, per-dependency negative self-checks, and secret discipline |
 
 The architectural choice and rejected alternatives are recorded in

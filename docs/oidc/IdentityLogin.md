@@ -1,8 +1,10 @@
 # Identity Login and Continuation
 
-The isolated Testing HTTP identity/antiforgery carrier follows the canonical
-[PS-18 / PS-19 contract](./CanonicalSemanticModel.md#testing-http-cookie-carrier-ps-18--ps-19).
-HTTPS keeps its original Secure cookie names and purposes. Successful prepared logout clears both
+Identity and antiforgery cookies are selected by the trusted effective request scheme, following
+the canonical
+[PS-18 / PS-19 contract](./CanonicalSemanticModel.md#plain-http-cookie-carrier-ps-18--ps-19).
+HTTPS uses the original Secure cookies; plain HTTP uses separate non-Secure cookies and Data
+Protection purposes. Successful prepared logout clears both
 current-profile cookies; failed or replayed completion performs no successful cleanup.
 
 **Status: target design.** Read the [directory boundary](./README.md) and the

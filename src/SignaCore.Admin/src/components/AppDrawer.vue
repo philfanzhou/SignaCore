@@ -41,19 +41,19 @@ const {
   removeExchangeTrust,
 } = useApps()
 
-/** 准入来源的展示名。ExchangeGranted 必须和自动开户区分开——那条记录背后没有任何验证过程。 */
+/** Admission source labels: ExchangeGranted does not reverify credentials in this application. */
 const approvalSourceLabels: Record<string, string> = {
   Admin: '管理员',
   AutoProvision: '自动开户',
   SelfBind: '用户绑定',
-  ExchangeGranted: '跨应用换票',
+  ExchangeGranted: '跨应用刷新',
 }
 
 function approvalSourceLabel(source: string) {
   return approvalSourceLabels[source] ?? source
 }
 
-/** 可选的来源应用：除自己以外的全部应用，已经加过的边不再重复列出。 */
+/** Select other applications that are not already trusted sources. */
 const availableTrustSources = computed(() => {
   const current = appDrawerApp.value?.appId
   const existing = new Set(exchangeTrusts.value.map((trust) => trust.sourceAppId))
@@ -62,7 +62,7 @@ const availableTrustSources = computed(() => {
 </script>
 
 <template>
-  <!-- ============ 应用 Drawer ============ -->
+  <!-- Application drawer -->
   <template v-if="appDrawerVisible && appDrawerApp">
     <div class="overlay" :class="{ open: appDrawerOpen }" @click="closeAppDrawer"></div>
     <div class="drawer" :class="{ open: appDrawerOpen }">
@@ -112,16 +112,16 @@ const availableTrustSources = computed(() => {
         <div class="card section-gap" style="padding: 20px">
           <div class="card-title" style="margin-bottom: 16px">LDAP 登录</div>
           <div class="field">
-            <label>当前应用准入模式</label>
+            <label>当前应用登录许可模式</label>
             <select v-model="callbackForm.ldapLoginMode" class="select" style="width: 100%">
               <option value="Disabled">禁用 LDAP 登录</option>
-              <option value="ManualApproval">仅管理员授权用户</option>
+              <option value="ManualApproval">仅管理员批准的用户</option>
               <option value="AutoProvision">验证成功自动开户</option>
             </select>
-            <div class="hint">从自动模式切换为手动模式后，自动开户记录不会被视为管理员授权。</div>
+            <div class="hint">从自动模式切换为手动模式后，自动开户记录不会被视为管理员批准。</div>
           </div>
           <div class="field">
-            <label>为当前应用授权 LDAP 用户</label>
+            <label>批准 LDAP 用户登录当前应用</label>
             <div style="display: grid; grid-template-columns: 130px 1fr auto; gap: 8px">
               <select v-model="ldapUserForm.directoryKey" class="select">
                 <option v-for="directory in ldapDirectories" :key="directory.key" :value="directory.key">
@@ -129,11 +129,11 @@ const availableTrustSources = computed(() => {
                 </option>
               </select>
               <input v-model="ldapUserForm.username" class="input" placeholder="alice 或 alice@corp.example.com" @keyup.enter="addLdapUser">
-              <button class="btn btn-sm" :disabled="addingLdapUser || !ldapDirectories.length" @click="addLdapUser">授权</button>
+              <button class="btn btn-sm" :disabled="addingLdapUser || !ldapDirectories.length" @click="addLdapUser">批准</button>
             </div>
           </div>
-          <div v-if="loadingLdapUsers" class="hint">正在加载授权用户...</div>
-          <div v-else-if="ldapUsers.length === 0" class="hint">当前应用还没有 LDAP 用户授权记录。</div>
+          <div v-if="loadingLdapUsers" class="hint">正在加载登录许可...</div>
+          <div v-else-if="ldapUsers.length === 0" class="hint">当前应用还没有 LDAP 登录许可记录。</div>
           <div v-else class="table-wrap">
             <table class="data-table">
               <thead><tr><th>账号</th><th>目录</th><th>来源</th><th>状态</th><th></th></tr></thead>
@@ -152,13 +152,13 @@ const availableTrustSources = computed(() => {
         <div class="card section-gap" style="padding: 20px">
           <div class="card-title" style="margin-bottom: 16px">手机验证码登录</div>
           <div class="field">
-            <label>当前应用准入模式</label>
+            <label>当前应用登录许可模式</label>
             <select v-model="callbackForm.smsLoginMode" class="select" style="width: 100%">
               <option value="Disabled">禁用手机验证码登录</option>
-              <option value="ManualApproval">仅管理员授权用户</option>
+              <option value="ManualApproval">仅管理员批准的用户</option>
               <option value="AutoProvision">验证成功自动开户</option>
             </select>
-            <div class="hint">切回手工模式后，自动开户记录不会被视为管理员授权。</div>
+            <div class="hint">切回手工模式后，自动开户记录不会被视为管理员批准。</div>
           </div>
           <div class="field">
             <label>短信供应商配置</label>
@@ -174,14 +174,14 @@ const availableTrustSources = computed(() => {
             </div>
           </div>
           <div class="field">
-            <label>为当前应用授权手机用户</label>
+            <label>批准手机用户登录当前应用</label>
             <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px">
               <input v-model="smsUserForm.phone" class="input" placeholder="13800138000 或 +8613800138000" @keyup.enter="addSmsUser">
-              <button class="btn btn-sm" :disabled="addingSmsUser" @click="addSmsUser">授权</button>
+              <button class="btn btn-sm" :disabled="addingSmsUser" @click="addSmsUser">批准</button>
             </div>
           </div>
-          <div v-if="loadingSmsUsers" class="hint">正在加载授权用户...</div>
-          <div v-else-if="smsUsers.length === 0" class="hint">当前应用还没有手机用户授权记录。</div>
+          <div v-if="loadingSmsUsers" class="hint">正在加载登录许可...</div>
+          <div v-else-if="smsUsers.length === 0" class="hint">当前应用还没有短信登录许可记录。</div>
           <div v-else class="table-wrap">
             <table class="data-table">
               <thead><tr><th>手机号</th><th>来源</th><th>状态</th><th></th></tr></thead>
@@ -199,7 +199,7 @@ const availableTrustSources = computed(() => {
         <div class="card section-gap" style="padding: 20px">
           <div class="card-title" style="margin-bottom: 16px">微信登录</div>
           <div class="field">
-            <label>当前应用准入模式</label>
+            <label>当前应用登录许可模式</label>
             <select v-model="callbackForm.wechatLoginMode" class="select" style="width: 100%">
               <option value="Disabled">禁用微信登录</option>
               <option value="BindRequired">仅已绑定微信的账号</option>
@@ -231,9 +231,9 @@ const availableTrustSources = computed(() => {
           </div>
         </div>
         <div class="card section-gap" style="padding: 20px">
-          <div class="card-title" style="margin-bottom: 16px">跨应用换票信任</div>
+          <div class="card-title" style="margin-bottom: 16px">跨应用刷新信任</div>
           <div class="field">
-            <label>接受哪些应用签发的 refresh token</label>
+            <label>接受哪些应用签发的刷新令牌</label>
             <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px">
               <select v-model="exchangeTrustForm.sourceAppId" class="select">
                 <option value="">选择来源应用</option>
@@ -244,14 +244,15 @@ const availableTrustSources = computed(() => {
               <button class="btn btn-sm" :disabled="addingExchangeTrust || !exchangeTrustForm.sourceAppId" @click="addExchangeTrust">添加</button>
             </div>
             <div class="hint">
-              信任是有向的：这里配的是「当前应用接受谁的票」，反过来不成立。持有来源应用 refresh token
-              的人可以直接换到当前应用的会话，不需要重新登录——当前应用权限更高时，差异必须由回调和
-              授权规则守住。换票只签发新票，不会吊销来源应用手上那张；换出来的票不能再换第二次，
-              所以信任不会沿着两条边传递。
+              信任关系是单向的：当前应用接受所选来源应用签发的刷新令牌，不代表来源应用也接受当前应用的令牌。
+              使用有效的来源令牌可为同一账号创建当前应用会话，无需重新验证凭据，仍须通过账号状态、
+              令牌来源和当前应用登录许可等检查。业务权限由当前应用的回调和授权规则决定。
+              此操作签发新的刷新令牌，不轮换或撤销来源令牌。新令牌可在当前应用继续刷新，
+              但不能再用于其他应用，即使其他应用信任当前应用也不允许。
             </div>
           </div>
-          <div v-if="loadingExchangeTrusts" class="hint">正在加载换票信任...</div>
-          <div v-else-if="exchangeTrusts.length === 0" class="hint">当前应用不接受任何其他应用签发的 refresh token。</div>
+          <div v-if="loadingExchangeTrusts" class="hint">正在加载跨应用刷新信任...</div>
+          <div v-else-if="exchangeTrusts.length === 0" class="hint">当前应用不接受任何其他应用签发的刷新令牌。</div>
           <div v-else class="table-wrap">
             <table class="data-table">
               <thead><tr><th>来源应用</th><th>状态</th><th></th></tr></thead>

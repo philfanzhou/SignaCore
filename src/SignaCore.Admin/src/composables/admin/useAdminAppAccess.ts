@@ -44,7 +44,7 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
       appWechatUsers.value = wechat;
       appLdapUsers.value = ldap;
     } catch (error) {
-      handleApiError("加载应用准入列表失败", error);
+      handleApiError("加载应用登录许可列表失败", error);
     } finally {
       accessLoading.value = false;
     }
@@ -83,9 +83,9 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
       );
       accessForm.phone = "";
       await loadAppAccess(selectedApp.value.appId);
-      notify("短信准入已添加");
+      notify("短信登录许可已添加");
     } catch (error) {
-      handleApiError("添加短信准入失败", error);
+      handleApiError("添加短信登录许可失败", error);
     }
   }
 
@@ -94,7 +94,7 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
     try {
       await ElMessageBox.confirm(
         "撤销后该手机号不能通过当前应用的短信登录。",
-        "撤销短信准入",
+        "撤销短信登录许可",
         {
           confirmButtonText: "撤销",
           cancelButtonText: "取消",
@@ -103,10 +103,10 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
       );
       await adminClient.revokeAppSmsUser(selectedApp.value.appId, loginId);
       await loadAppAccess(selectedApp.value.appId);
-      notify("短信准入已撤销");
+      notify("短信登录许可已撤销");
     } catch (error) {
       if (error !== "cancel" && error !== "close")
-        handleApiError("撤销短信准入失败", error);
+        handleApiError("撤销短信登录许可失败", error);
     }
   }
 
@@ -125,9 +125,9 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
       );
       accessForm.username = "";
       await loadAppAccess(selectedApp.value.appId);
-      notify("LDAP 准入已添加");
+      notify("LDAP 登录许可已添加");
     } catch (error) {
-      handleApiError("添加 LDAP 准入失败", error);
+      handleApiError("添加 LDAP 登录许可失败", error);
     }
   }
 
@@ -136,7 +136,7 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
     try {
       await ElMessageBox.confirm(
         "撤销后该域账号不能通过当前应用的 LDAP 登录。",
-        "撤销 LDAP 准入",
+        "撤销 LDAP 登录许可",
         {
           confirmButtonText: "撤销",
           cancelButtonText: "取消",
@@ -148,10 +148,10 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
         credentialId,
       );
       await loadAppAccess(selectedApp.value.appId);
-      notify("LDAP 准入已撤销");
+      notify("LDAP 登录许可已撤销");
     } catch (error) {
       if (error !== "cancel" && error !== "close")
-        handleApiError("撤销 LDAP 准入失败", error);
+        handleApiError("撤销 LDAP 登录许可失败", error);
     }
   }
 
@@ -160,7 +160,7 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
     try {
       await ElMessageBox.confirm(
         "撤销后该微信账号不能通过当前应用登录，后续需要管理员手动恢复。",
-        "撤销微信准入",
+        "撤销微信登录许可",
         {
           confirmButtonText: "撤销",
           cancelButtonText: "取消",
@@ -169,10 +169,10 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
       );
       await adminClient.revokeAppWechatUser(selectedApp.value.appId, loginId);
       await loadAppAccess(selectedApp.value.appId);
-      notify("微信准入已撤销");
+      notify("微信登录许可已撤销");
     } catch (error) {
       if (error !== "cancel" && error !== "close")
-        handleApiError("撤销微信准入失败", error);
+        handleApiError("撤销微信登录许可失败", error);
     }
   }
 
@@ -181,9 +181,9 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
     try {
       await adminClient.restoreAppWechatUser(selectedApp.value.appId, loginId);
       await loadAppAccess(selectedApp.value.appId);
-      notify("微信准入已恢复");
+      notify("微信登录许可已恢复");
     } catch (error) {
-      handleApiError("恢复微信准入失败", error);
+      handleApiError("恢复微信登录许可失败", error);
     }
   }
 
@@ -192,8 +192,8 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
       return notify("请输入来源 App ID");
     try {
       await ElMessageBox.confirm(
-        "信任关系会让来源应用签发的 refresh token 可以换取当前应用会话，请确认权限边界已核对。",
-        "添加换票信任",
+        "添加信任后，可使用来源应用签发的有效刷新令牌为同一账号创建当前应用会话，仍须通过账号状态、令牌来源和当前应用登录许可等检查。业务权限由当前应用的回调和授权规则决定。",
+        "添加跨应用刷新信任",
         {
           confirmButtonText: "确认添加",
           cancelButtonText: "取消",
@@ -208,10 +208,10 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
       appTrusts.value = await adminClient.getExchangeTrusts(
         selectedApp.value.appId,
       );
-      notify("换票信任已添加");
+      notify("跨应用刷新信任已添加");
     } catch (error) {
       if (error !== "cancel" && error !== "close")
-        handleApiError("添加换票信任失败", error);
+        handleApiError("添加跨应用刷新信任失败", error);
     }
   }
 
@@ -219,8 +219,8 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
     if (!selectedApp.value) return;
     try {
       await ElMessageBox.confirm(
-        "撤销信任不会结束已经换出的当前应用会话。",
-        "撤销换票信任",
+        "撤销后不再接受该来源应用的刷新令牌，但通过该信任已创建的当前应用会话不会因此结束。",
+        "撤销跨应用刷新信任",
         {
           confirmButtonText: "撤销",
           cancelButtonText: "取消",
@@ -234,10 +234,10 @@ export function useAdminAppAccess(selectedApp: Ref<AdminApp | null>) {
       appTrusts.value = await adminClient.getExchangeTrusts(
         selectedApp.value.appId,
       );
-      notify("换票信任已撤销");
+      notify("跨应用刷新信任已撤销");
     } catch (error) {
       if (error !== "cancel" && error !== "close")
-        handleApiError("撤销换票信任失败", error);
+        handleApiError("撤销跨应用刷新信任失败", error);
     }
   }
 

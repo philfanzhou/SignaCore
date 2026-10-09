@@ -76,12 +76,12 @@ const {
               <td style="font-variant-numeric: tabular-nums">{{ formatTtl(app) }}</td>
               <td>
                 <span class="badge" :class="app.ldapLoginMode === 'Disabled' ? 'gray' : 'green'">
-                  <span class="dot"></span>{{ app.ldapLoginMode === 'Disabled' ? '禁用' : app.ldapLoginMode === 'ManualApproval' ? '人工准入' : '自动开户' }}
+                  <span class="dot"></span>{{ app.ldapLoginMode === 'Disabled' ? '禁用' : app.ldapLoginMode === 'ManualApproval' ? '管理员批准' : '自动开户' }}
                 </span>
               </td>
               <td>
                 <span class="badge" :class="app.smsLoginMode === 'Disabled' ? 'gray' : 'green'">
-                  <span class="dot"></span>{{ app.smsLoginMode === 'Disabled' ? '禁用' : app.smsLoginMode === 'ManualApproval' ? '人工准入' : '自动开户' }}
+                  <span class="dot"></span>{{ app.smsLoginMode === 'Disabled' ? '禁用' : app.smsLoginMode === 'ManualApproval' ? '管理员批准' : '自动开户' }}
                 </span>
               </td>
               <td>

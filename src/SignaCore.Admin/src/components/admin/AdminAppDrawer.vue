@@ -81,7 +81,7 @@ const { tokenModalOpen } = useAdminSecurity();
           :class="{ active: appTab === 'access' }"
           @click="appTab = 'access'"
         >
-          准入名单</button
+          登录许可名单</button
         ><button
           :class="{ active: appTab === 'oidc' }"
           @click="appTab = 'oidc'"
@@ -101,7 +101,7 @@ const { tokenModalOpen } = useAdminSecurity();
       </div>
       <div class="drawer-body">
         <div v-if="appDetailLoading" class="drawer-loading">
-          <span class="console-spinner"></span>加载策略与准入数据…
+          <span class="console-spinner"></span>加载策略与登录许可数据…
         </div>
         <template v-else-if="appTab === 'overview'"
           ><div class="detail-identity">
@@ -151,7 +151,7 @@ const { tokenModalOpen } = useAdminSecurity();
                   class="console-select"
                 >
                   <option value="Disabled">关闭</option>
-                  <option value="ManualApproval">人工准入</option>
+                  <option value="ManualApproval">管理员批准</option>
                   <option value="AutoProvision">自动开户</option>
                 </select></label
               ><label
@@ -160,7 +160,7 @@ const { tokenModalOpen } = useAdminSecurity();
                   class="console-select"
                 >
                   <option value="Disabled">关闭</option>
-                  <option value="ManualApproval">人工准入</option>
+                  <option value="ManualApproval">管理员批准</option>
                   <option value="AutoProvision">自动开户</option>
                 </select></label
               ><label v-if="appConfig.smsLoginMode !== 'Disabled'"
@@ -208,7 +208,7 @@ const { tokenModalOpen } = useAdminSecurity();
         <template v-else-if="appTab === 'access'"
           ><div class="drawer-section">
             <div class="section-heading">
-              <h3>短信准入</h3>
+              <h3>短信登录许可</h3>
               <span>{{ appSmsUsers.length }} 条</span>
             </div>
             <div class="drawer-inline-form">
@@ -241,7 +241,7 @@ const { tokenModalOpen } = useAdminSecurity();
           </div>
           <div class="drawer-section">
             <div class="section-heading">
-              <h3>LDAP 准入</h3>
+              <h3>LDAP 登录许可</h3>
               <span>{{ appLdapUsers.length }} 条</span>
             </div>
             <div class="drawer-inline-form">
@@ -286,11 +286,11 @@ const { tokenModalOpen } = useAdminSecurity();
           </div>
           <div class="drawer-section">
             <div class="section-heading">
-              <h3>微信准入</h3>
+              <h3>微信登录许可</h3>
               <span>{{ appWechatUsers.length }} 条</span>
             </div>
             <div v-if="!appWechatUsers.length" class="console-empty-inline">
-              暂无微信准入记录
+              暂无微信登录许可记录
             </div>
             <div
               v-for="item in appWechatUsers"
@@ -490,11 +490,14 @@ const { tokenModalOpen } = useAdminSecurity();
         <template v-else-if="appTab === 'trust'"
           ><div class="drawer-section risk-section">
             <div class="section-heading">
-              <h3>定向换票信任</h3>
-              <span>当前应用接受来源应用 token</span>
+              <h3>跨应用刷新信任</h3>
+              <span>允许使用来源应用的刷新令牌</span>
             </div>
             <p class="section-description">
-              添加信任会扩大当前应用的会话入口。撤销不会结束已经换出的会话。
+              信任关系是单向的。使用有效的来源刷新令牌可为同一账号创建当前应用会话，
+              仍须通过账号状态、令牌来源和当前应用登录许可等检查。业务权限由当前应用的回调和授权规则决定。
+              此操作不轮换或撤销来源令牌；新令牌可在当前应用继续刷新，但不能再用于其他应用。
+              撤销信任不会结束通过该信任已创建的当前应用会话。
             </p>
             <div class="drawer-inline-form">
               <input

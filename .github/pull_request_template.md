@@ -12,9 +12,9 @@ Closes #
 
 - **范围内，已完成：**
 
-## 契约与兼容性
+## 行为保证与兼容性
 
-- **保证与非保证：** 是否与 issue 一致；不适用写“无”。
+- **保证与不保证的内容：** 是否与 issue 一致；不适用写“无”。
 - **HTTP API、JSON、claims、JWT/JWKS 与认证：**
 - **PostgreSQL/SQLite schema、migration 与数据：**
 - **配置、管理端、容器与部署：**

@@ -15,12 +15,12 @@ and no long-lived publishing credential in this repository.
    git push origin v1.2.0
    ```
 
-3. Watch the **CI** workflow. A successful run ends with three published artifacts: the GHCR
+3. Watch the **CI** workflow. A successful run ends with three published outputs: the GHCR
    image, the `SignaCore.Client.AspNetCore` package on NuGet.org, and the GitHub Release whose
    notes quote the image digest and the package version.
 
 A push to `main` runs the same tests and packs the same package, but publishes no NuGet package
-or GitHub Release: the package exists only as a workflow artifact with a non-publishable `0.0.0-edge.*` version, and the
+or GitHub Release: the package exists only as a workflow build output with a non-publishable `0.0.0-edge.*` version, and the
 image is published only under the moving `edge` tag.
 
 ## Version rules
@@ -43,7 +43,7 @@ image is published only under the moving `edge` tag.
 | Pack + consumption smoke | The client package is packed from the tested sources, and a project that references nothing but the nupkg restores, builds, and boots against the pack output. |
 | `database-contracts` | The PostgreSQL/SQLite contract matrix passes (a dependency of the image job). |
 | `publish-container` | The image is on GHCR, pullable, with the digest recorded. |
-| `publish-nuget` | The exact artifact that passed the smoke is pushed; the published version then restores from NuGet.org itself through a clean cache. |
+| `publish-nuget` | The exact package that passed the smoke is pushed; the published version then restores from NuGet.org itself through a clean cache. |
 
 A failure or cancellation anywhere above leaves the later jobs unrun, so nothing reaches NuGet.org
 or the Release. `publish-nuget` is the only job that holds a credential, and it acquires a

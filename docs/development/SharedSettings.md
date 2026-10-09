@@ -2,8 +2,8 @@
 
 SignaCore registers its product configuration on the shared ServiceMantle setting contract. Since
 the runtime switch, this stack is the configuration authority: the bootstrap phase activates the
-shared snapshot, `IConfiguration` is fed through the reverse projection onto the legacy colon
-keys, first-run setup writes the shared aggregate, the admin console's settings page reads and
+shared snapshot, the shared settings are mapped to the existing colon-separated keys in
+`IConfiguration`, first-run setup writes the shared aggregate, the admin console's settings page reads and
 writes the shared aggregate through the shared management endpoints, and the protected legacy
 configuration import writes the aggregate's first version directly. The legacy
 `system_settings` table — together with its store, snapshot, one-shot migration, and legacy
@@ -242,8 +242,8 @@ diagnostics panel shows the saved version's issues with fixed English explanatio
 saved-versus-running version pair, and a failed diagnostics read is reported as unavailable —
 never as "no issues". A diagnostics answer taken at a different saved version than the loaded
 settings is shown as stale rather than as the current version's verdict. **Disable Loki** drafts
-the atomic disable — the whole group (`loki.uri`, `loki.authorization`, and both explicit opt-in
-switches) submitted as `null` in one save batch — and **Remove OTLP
+removal of all three Loki keys (`loki.uri`, `loki.authorization`, and
+`loki.allow_no_authentication`), submitted as `null` in one save request — and **Remove OTLP
 endpoint** drafts the same for the single OTLP key; a normal empty sensitive input still means
 "keep the current value" and never deletes. Removal drafts can be undone before saving, survive a
 409 conflict or a validation rejection without retry, and clear only after the save committed.

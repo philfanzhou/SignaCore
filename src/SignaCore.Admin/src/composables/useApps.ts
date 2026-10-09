@@ -347,7 +347,7 @@ async function loadLdapUsers(appId: string) {
       ldapUserForm.directoryKey = directories.find(item => item.isDefault)?.key ?? directories[0]?.key ?? ''
     }
   } catch (error) {
-    handleApiError('加载 LDAP 授权失败', error)
+    handleApiError('加载 LDAP 登录许可失败', error)
   } finally {
     loadingLdapUsers.value = false
   }
@@ -363,7 +363,7 @@ async function addLdapUser() {
   try {
     await adminClient.addAppLdapUser(app.appId, ldapUserForm.directoryKey, ldapUserForm.username.trim())
     ldapUserForm.username = ''
-    ElMessage.success('LDAP 用户已授权')
+    ElMessage.success('LDAP 登录许可已添加')
     await loadLdapUsers(app.appId)
   } catch (error) {
     handleApiError('添加 LDAP 用户失败', error)
@@ -376,7 +376,7 @@ async function revokeLdapUser(user: AdminLdapUser) {
   const app = appDrawerApp.value
   if (!app) return
   try {
-    await ElMessageBox.confirm(`确定撤销 ${user.username} 对当前应用的 LDAP 登录权限吗？`, '撤销 LDAP 授权', {
+    await ElMessageBox.confirm(`确定撤销 ${user.username} 对当前应用的 LDAP 登录许可吗？`, '撤销 LDAP 登录许可', {
       confirmButtonText: '撤销', cancelButtonText: '取消', type: 'warning',
     })
   } catch {
@@ -384,10 +384,10 @@ async function revokeLdapUser(user: AdminLdapUser) {
   }
   try {
     await adminClient.revokeAppLdapUser(app.appId, user.credentialId)
-    ElMessage.success('LDAP 授权已撤销')
+    ElMessage.success('LDAP 登录许可已撤销')
     await loadLdapUsers(app.appId)
   } catch (error) {
-    handleApiError('撤销 LDAP 授权失败', error)
+    handleApiError('撤销 LDAP 登录许可失败', error)
   }
 }
 
@@ -418,7 +418,7 @@ async function addSmsUser() {
   try {
     await adminClient.addAppSmsUser(app.appId, smsUserForm.phone.trim())
     smsUserForm.phone = ''
-    ElMessage.success('短信用户已授权')
+    ElMessage.success('短信登录许可已添加')
     await loadSmsUsers(app.appId)
   } catch (error) {
     handleApiError('添加短信用户失败', error)
@@ -431,16 +431,16 @@ async function revokeSmsUser(user: AdminSmsUser) {
   const app = appDrawerApp.value
   if (!app) return
   try {
-    await ElMessageBox.confirm(`确定撤销 ${user.phone} 对当前应用的短信登录权限吗？`, '撤销短信授权', {
+    await ElMessageBox.confirm(`确定撤销 ${user.phone} 对当前应用的短信登录许可吗？`, '撤销短信登录许可', {
       confirmButtonText: '撤销', cancelButtonText: '取消', type: 'warning',
     })
   } catch { return }
   try {
     await adminClient.revokeAppSmsUser(app.appId, user.loginId)
-    ElMessage.success('短信授权已撤销')
+    ElMessage.success('短信登录许可已撤销')
     await loadSmsUsers(app.appId)
   } catch (error) {
-    handleApiError('撤销短信授权失败', error)
+    handleApiError('撤销短信登录许可失败', error)
   }
 }
 
@@ -460,7 +460,7 @@ async function loadExchangeTrusts(appId: string) {
   try {
     exchangeTrusts.value = await adminClient.getExchangeTrusts(appId)
   } catch (error) {
-    handleApiError('加载换票信任配置失败', error)
+    handleApiError('加载跨应用刷新信任配置失败', error)
   } finally {
     loadingExchangeTrusts.value = false
   }
@@ -474,11 +474,11 @@ async function addExchangeTrust() {
     return
   }
   try {
-    // 加边等于把来源应用的会话直接接过来，权限差异只能由本应用自己守住——所以在这里说清楚。
+    // Trust permits a new target-application session; the target still owns business authorization.
     await ElMessageBox.confirm(
-      `加上这条信任后，任何持有「${sourceAppId}」refresh token 的人都能为同一账号换到当前应用的会话，` +
-      '不需要在当前应用重新登录。当前应用如果权限更高，差异必须由回调和授权规则守住。',
-      '添加换票信任',
+      `添加信任后，可使用「${sourceAppId}」签发的有效刷新令牌为同一账号创建当前应用会话，` +
+      '无需重新验证凭据，但仍须通过账号状态、令牌来源和当前应用登录许可等检查。业务权限由当前应用的回调和授权规则决定。',
+      '添加跨应用刷新信任',
       { confirmButtonText: '确认添加', cancelButtonText: '取消', type: 'warning' },
     )
   } catch { return }
@@ -486,10 +486,10 @@ async function addExchangeTrust() {
   try {
     await adminClient.addExchangeTrust(app.appId, sourceAppId)
     exchangeTrustForm.sourceAppId = ''
-    ElMessage.success('换票信任已添加')
+    ElMessage.success('跨应用刷新信任已添加')
     await loadExchangeTrusts(app.appId)
   } catch (error) {
-    handleApiError('添加换票信任失败', error)
+    handleApiError('添加跨应用刷新信任失败', error)
   } finally {
     addingExchangeTrust.value = false
   }
@@ -500,18 +500,18 @@ async function removeExchangeTrust(trust: AdminExchangeTrust) {
   if (!app) return
   try {
     await ElMessageBox.confirm(
-      `撤销后当前应用不再接受「${trust.sourceAppId}」签发的 refresh token。` +
-      '已经换出去的会话不会因此结束——它们绑定在当前应用上，要终止得按应用撤销准入或停用账号。',
-      '撤销换票信任',
+      `撤销后当前应用不再接受「${trust.sourceAppId}」签发的刷新令牌。` +
+      '通过该信任已创建的当前应用会话不会因此结束。需要停止继续刷新时，应撤销对应的应用登录许可或停用账号。已签发的访问令牌仍按有效期和下游校验规则处理。',
+      '撤销跨应用刷新信任',
       { confirmButtonText: '撤销', cancelButtonText: '取消', type: 'warning' },
     )
   } catch { return }
   try {
     await adminClient.removeExchangeTrust(app.appId, trust.sourceAppId)
-    ElMessage.success('换票信任已撤销')
+    ElMessage.success('跨应用刷新信任已撤销')
     await loadExchangeTrusts(app.appId)
   } catch (error) {
-    handleApiError('撤销换票信任失败', error)
+    handleApiError('撤销跨应用刷新信任失败', error)
   }
 }
 
@@ -519,16 +519,16 @@ async function revokeWechatUser(user: AdminWechatUser) {
   const app = appDrawerApp.value
   if (!app) return
   try {
-    await ElMessageBox.confirm(`确定撤销 ${user.openId} 对当前应用的微信登录权限吗？`, '撤销微信授权', {
+    await ElMessageBox.confirm(`确定撤销 ${user.openId} 对当前应用的微信登录许可吗？`, '撤销微信登录许可', {
       confirmButtonText: '撤销', cancelButtonText: '取消', type: 'warning',
     })
   } catch { return }
   try {
     await adminClient.revokeAppWechatUser(app.appId, user.loginId)
-    ElMessage.success('微信授权已撤销')
+    ElMessage.success('微信登录许可已撤销')
     await loadWechatUsers(app.appId)
   } catch (error) {
-    handleApiError('撤销微信授权失败', error)
+    handleApiError('撤销微信登录许可失败', error)
   }
 }
 
@@ -537,10 +537,10 @@ async function restoreWechatUser(user: AdminWechatUser) {
   if (!app) return
   try {
     await adminClient.restoreAppWechatUser(app.appId, user.loginId)
-    ElMessage.success('微信授权已恢复')
+    ElMessage.success('微信登录许可已恢复')
     await loadWechatUsers(app.appId)
   } catch (error) {
-    handleApiError('恢复微信授权失败', error)
+    handleApiError('恢复微信登录许可失败', error)
   }
 }
 

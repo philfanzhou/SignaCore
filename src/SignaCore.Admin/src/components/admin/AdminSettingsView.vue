@@ -351,8 +351,9 @@ function validationErrorKey(error: AdminSettingValidationError) {
               v-if="lokiDisablePending"
               class="settings-diagnostics-drafted"
             >
-              Loki disable drafted: the whole group (endpoint, authorization,
-              and both opt-in switches) will be removed in the next save.</span
+              Loki disable drafted: the endpoint, authorization, and no-authentication
+              opt-in will be removed together in the next save. Restart the service after saving
+              to apply the change.</span
             >
             <span
               v-if="otlpRemovalPending"

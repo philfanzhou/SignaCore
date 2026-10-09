@@ -116,7 +116,7 @@ export interface AdminWechatUser {
   createdAt: number
 }
 
-/** 一条有向信任边：本应用接受 sourceAppId 签发的 refresh token，反向不成立。 */
+/** A one-way trust: this application accepts sourceAppId refresh tokens; the reverse is not implied. */
 export interface AdminExchangeTrust {
   sourceAppId: string
   sourceAppName: string
@@ -182,8 +182,9 @@ export interface AdminLoginHistoryItem {
 }
 
 /**
- * 共享受限审计查询（GET /management/v1/audit）的一条记录。字段是共享端点的封闭投影：
- * 没有旧 audit_logs 的 before/after 快照，操作者带来源，outcome 是封闭枚举。
+ * One record returned by the bounded shared audit query (GET /management/v1/audit).
+ * Fields match that response: no legacy audit_logs before/after snapshots, an operator source,
+ * and only the predefined outcome values below.
  */
 export interface AdminAuditLogItem {
   id: string
@@ -203,8 +204,9 @@ export interface AdminAuditLogItem {
 }
 
 /**
- * 共享审计查询的分页响应。keyset 分页：page>1 必须携带上一页返回的 continuationCursor，
- * 因此前端翻页要自己记住每页的游标；totalCount 只是展示值，不代表快照一致性。
+ * The shared audit query uses keyset pagination: page>1 requires the previous continuationCursor.
+ * The console remembers each page cursor; totalCount is for display and does not promise a
+ * consistent snapshot across pages.
  */
 export interface AdminAuditLogPage {
   items: AdminAuditLogItem[]
