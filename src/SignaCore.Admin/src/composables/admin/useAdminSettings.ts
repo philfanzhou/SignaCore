@@ -98,7 +98,7 @@ export const adminSettingsSections: AdminSettingsSection[] = [
 ];
 
 const settings = ref<AdminSettingValue[]>([]);
-/** Disable Loki 的整组原子组合：端点、授权头与显式 opt-in 在同一保存批次提交为 null。 */
+/** Submit the Loki endpoint, authorization, and no-authentication opt-in as null in one save. */
 const LokiDisableKeys = [
   "loki.uri",
   "loki.authorization",
@@ -144,8 +144,8 @@ const configurationVersion = ref<number | null>(null);
 /** 本进程启动时激活的运行版本，来自产品响应头；null 表示未知，绝不推断为已生效。 */
 const runningConfigurationVersion = ref<number | null>(null);
 /**
- * 显式移除草稿（value 提交为 null）。Disable Loki 会同时阶段整组四个 Loki 键；
- * 普通空敏感草稿仍是"保持"，绝不悄悄删除。
+ * Explicit removal drafts submit value=null. Disable Loki drafts removal of all three Loki keys.
+ * An ordinary empty sensitive draft still means "keep", never delete.
  */
 const pendingRemovals = ref<ReadonlySet<string>>(new Set<string>());
 /** 最近一次保存的确定性校验拒绝（closed key+code）；null 表示没有可展示的逐键说明。 */
@@ -210,7 +210,7 @@ const diagnosticsCurrent = computed(
     configurationVersion.value !== null &&
     diagnostics.value.version === configurationVersion.value,
 );
-/** Disable Loki 草稿必须整组同批；部分键不算。 */
+/** Show a complete Loki disable draft only when all three removals are pending. */
 const lokiDisablePending = computed(() => {
   const removals = pendingRemovals.value;
   return LokiDisableKeys.every((key) => removals.has(key));
@@ -290,8 +290,9 @@ async function loadDiagnostics() {
 }
 
 /**
- * 起草 Disable Loki：整组四个键（端点、授权头、两个显式 opt-in）在同一保存批次提交为
- * null（原子禁用）。起草时恢复各键的加载原值，普通空敏感草稿的"保持"语义不变。
+ * Draft removal of all three Loki keys in one save request. Restore the loaded values while
+ * drafting; an ordinary empty sensitive draft still means "keep". The save commits or rolls back
+ * as a whole, and a committed removal takes effect after restart.
  */
 function draftLokiDisable() {
   const removals = new Set(pendingRemovals.value);
@@ -303,7 +304,7 @@ function draftLokiDisable() {
   }
   pendingRemovals.value = removals;
   notify(
-    "Disable Loki drafted: the whole group (endpoint, authorization, and both opt-in switches) will be removed together in the next save.",
+    "Disable Loki drafted: the endpoint, authorization, and no-authentication opt-in will be removed together in the next save. Restart the service after saving to apply the change.",
   );
 }
 

@@ -22,7 +22,7 @@ function formatMode(mode: string) {
     (
       {
         Disabled: "关闭",
-        ManualApproval: "人工准入",
+        ManualApproval: "管理员批准",
         AutoProvision: "自动开户",
         BindRequired: "需绑定",
       } as Record<string, string>
@@ -36,7 +36,7 @@ function formatMode(mode: string) {
     <div class="console-page-heading">
       <div>
         <h1>应用管理</h1>
-        <p>管理应用注册、回调地址、登录准入和换票信任。</p>
+        <p>管理应用注册、回调地址、应用登录许可和跨应用刷新信任。</p>
       </div>
       <div class="heading-actions">
         <button
@@ -70,10 +70,10 @@ function formatMode(mode: string) {
         ><select
           v-model="appQuery.mode"
           class="console-select"
-          aria-label="准入策略"
+          aria-label="登录许可策略"
         >
-          <option value="all">所有准入策略</option>
-          <option value="ManualApproval">人工准入</option>
+          <option value="all">所有登录许可策略</option>
+          <option value="ManualApproval">管理员批准</option>
           <option value="AutoProvision">自动开户</option>
           <option value="BindRequired">需绑定</option>
           <option value="Disabled">关闭</option>
@@ -96,7 +96,7 @@ function formatMode(mode: string) {
             <tr>
               <th>应用资源</th>
               <th>回调与受众</th>
-              <th>登录准入</th>
+              <th>应用登录许可</th>
               <th>状态</th>
               <th></th>
             </tr>

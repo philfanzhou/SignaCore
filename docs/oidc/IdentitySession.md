@@ -1,8 +1,10 @@
 # Identity Sessions
 
-The isolated Testing HTTP identity/antiforgery carrier follows the canonical
-[PS-18 / PS-19 contract](./CanonicalSemanticModel.md#testing-http-cookie-carrier-ps-18--ps-19).
-HTTPS keeps its original Secure cookie names and purposes. Successful prepared logout clears both
+Identity and antiforgery cookies are selected by the trusted effective request scheme, following
+the canonical
+[PS-18 / PS-19 contract](./CanonicalSemanticModel.md#plain-http-cookie-carrier-ps-18--ps-19).
+HTTPS uses the original Secure cookies; plain HTTP uses separate non-Secure cookies and Data
+Protection purposes. Successful prepared logout clears both
 current-profile cookies; failed or replayed completion performs no successful cleanup.
 
 **Status: target design.** Read the [directory boundary](./README.md) and the
@@ -48,7 +50,9 @@ causes no invented revocation or audit. Idle or absolute expiry is a time result
 write (`EV-04`). A revoked row retains its time and reason for enforcement, audit correlation, and
 retention.
 
-## Endpoint projection
+<a id="endpoint-projection"></a>
+
+## Session checks at each endpoint
 
 This table points to canonical outcomes; it does not redefine them.
 
@@ -86,7 +90,7 @@ to the refresh-family contract.
 All explicit transactions execute inside the provider execution strategy (`PS-22`). PostgreSQL
 locks shared rows across instances. SQLite provides the same state machine for concurrent requests
 to one SignaCore instance and one database writer; multi-instance SQLite is unsupported. Every path
-that combines session and another stateful artifact locks the session first.
+that combines session and a code, refresh family, or logout request locks the session first.
 
 A durable session write commits before a browser response can expose its result. Cancellation,
 persistence failure, or required audit failure before commit rolls the whole unit back; cancellation

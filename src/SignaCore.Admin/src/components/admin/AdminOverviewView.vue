@@ -98,7 +98,7 @@ const disabledApps = computed(
           <span>○</span>
           <div>
             <b>{{ disabledApps }} 个应用已停用</b>
-            <p>确认是否仍保留对应的回调和准入配置。</p>
+            <p>确认是否仍保留对应的回调和登录许可配置。</p>
           </div>
           <button @click="props.navigate('resources')">查看</button>
         </div>
