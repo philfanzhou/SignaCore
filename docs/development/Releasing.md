@@ -11,8 +11,8 @@ and no long-lived publishing credential in this repository.
 2. Tag it and push the tag:
 
    ```bash
-   git tag 1.2.0 <commit-on-main>      # or 1.2.0-rc.1 for a release candidate
-   git push origin 1.2.0
+   git tag v1.2.0 <commit-on-main>     # or v1.2.0-rc.1 for a release candidate
+   git push origin v1.2.0
    ```
 
 3. Watch the **CI** workflow. A successful run ends with three published artifacts: the GHCR
@@ -25,10 +25,11 @@ image is published only under the moving `edge` tag.
 
 ## Version rules
 
-- The tag **is** the package version and the image's semver tag: `1.2.0` publishes `1.2.0`;
-  `1.2.0-rc.1` publishes the pre-release `1.2.0-rc.1` (NuGet treats any prerelease label as a
-   pre-release, so nothing extra is needed).
-- A release tag must match `MAJOR.MINOR.PATCH` or `MAJOR.MINOR.PATCH-rc.NUMBER` exactly. The
+- A release tag starts with `v`, and the tag without the prefix **is** the package version and
+  the image's semver tag: `v1.2.0` publishes package and image version `1.2.0`; `v1.2.0-rc.1`
+  publishes the pre-release `1.2.0-rc.1` (NuGet treats any prerelease label as a pre-release, so
+  nothing extra is needed). The GitHub Release takes its title from the tag, `v1.2.0`.
+- A release tag must match `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-rc.NUMBER` exactly. The
   container job and the pack step both enforce the same regular expression, which also rules out
   build metadata (`+`), since NuGet discards it and two tags would collide on one package slot.
 - `rc` tags publish a pre-release package and a pre-release image and never move `latest`, the
