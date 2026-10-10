@@ -107,4 +107,8 @@ Current `/oauth2/token`, `/oauth2/revoke`, `/api/auth/*`, claims callbacks, mana
 Discovery documents, and the shared ServiceMantle management cookie (`PS-18`) remain unchanged.
 This document does not register a route or enable an application.
 
-The current transport-policy and complete-registration checks, including the explicit Testing HTTP exception and old-artifact rejection, are defined in [the canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust).
+The structural URI rules, current application state, complete-registration checks, and rejection of
+unconsumed artifacts after registration removal are defined in
+[the canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust).
+HTTP and HTTPS are accepted equally in every environment; transport protection is a deployment
+responsibility under ADR 0008.
