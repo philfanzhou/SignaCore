@@ -17,8 +17,10 @@ Discovery does not publish `end_session_endpoint` (`AC-10`).
 
 ## Step 1: authenticated preparation
 
-The BFF sends `POST /oauth2/logout/requests` over authenticated TLS. The request is a bounded UTF-8
-form of at most 16 KiB. The [shared outer read gate](./CanonicalSemanticModel.md#outer-bounded-form-read-of-token-revoke-and-logout-preparation)
+The BFF server sends `POST /oauth2/logout/requests` with client authentication. Both HTTP and
+HTTPS are accepted; TLS protection follows the canonical
+[deployment responsibility](./CanonicalSemanticModel.md#deployment-transport-responsibility).
+The request is a bounded UTF-8 form of at most 16 KiB. The [shared outer read gate](./CanonicalSemanticModel.md#outer-bounded-form-read-of-token-revoke-and-logout-preparation)
 owns the actual byte limit, strict decoding, request-local cached form, cancellation and failure
 classification before authentication. Unknown and duplicate fields are rejected. Confidential-client
 authentication is exactly the exclusive Basic-or-form contract in `IN-20`/`IN-30`; browser cookies are not client
@@ -119,4 +121,8 @@ ServiceMantle management-session contract and is unchanged by this design (`PS-1
 activation belongs to #68 and publishes no standard logout metadata (`AC-10`); this document itself
 changes no route or Discovery response (`AC-14`).
 
-The current transport-policy and complete-registration checks, including the explicit Testing HTTP exception and old-artifact rejection, are defined in [the canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust).
+The structural URI rules, current application state, complete-registration checks, and rejection of
+unconsumed artifacts after registration removal are defined in
+[the canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust).
+HTTP and HTTPS are accepted equally in every environment; transport protection is a deployment
+responsibility under ADR 0008.

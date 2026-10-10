@@ -76,11 +76,14 @@ reuse disposal before the current policy check. Origin and Cookie do not authent
 A code request without any client identifier or credentials is `400 invalid_request`; the
 confidential authentication failures of other grants remain `401 invalid_client`.
 
-The request `redirect_uri` is compared ordinally with the exact snapshot on the code, not normalized
-and not compared with the client's current registration set. This preserves the `EV-12` decision:
-removing a registration prevents new authorization but does not reinterpret an already issued
-60-second code. The `scope` parameter is rejected because the authorization snapshot is authoritative
-and cannot be narrowed during redemption.
+The request `redirect_uri` is compared ordinally with the exact snapshot on the code, without
+normalization. For an unconsumed code, a separate check applies the `PS-20` structural rules to that
+snapshot and requires its complete URI to remain exactly registered to the current active client.
+Under `EV-12`, removing that registration rejects even an unexpired code with generic
+`invalid_grant`, without consuming it or issuing tokens. A correctly authenticated and statically
+bound consumed code follows `EV-24` before the structural/current-registration check; registration
+drift cannot bypass replay disposal. The `scope` parameter is rejected because the authorization
+snapshot is authoritative and cannot be narrowed during redemption.
 
 ## Code authority and persistence
 
@@ -124,6 +127,12 @@ transaction then locks the session row before the code row and re-reads every au
 This two-stage lookup preserves the global lock order: code redemption, logout, and administrative
 revocation never take code/family state before the session authority.
 
+Before callback HTTP or key refresh, unconsumed-code prechecks reject unusable session/account/
+application state, removed registration, structurally invalid stored URI, and disallowed current
+policy. These reads avoid unnecessary external work but are not authoritative; the issuance
+transaction repeats current-state checks under its locks. A correctly bound consumed code enters
+the replay transaction before these prechecks.
+
 Within that boundary, the implementation distinguishes these decisions:
 
 1. Authenticate the client, select the code branch, validate cardinality/shape, and load the current
@@ -137,10 +146,11 @@ Within that boundary, the implementation distinguishes these decisions:
    expired-but-retained consumed code is still a replay. The restrictive reference and the no-cascade
    retention rule mean that row is normally still present, so this independence is a fail-closed
    requirement rather than a routine branch.
-6. For an unconsumed code, use one captured UTC time to check code expiry, current scope/refresh
-   policy, live session including application max-age, active account, and active application.
-   `EV-04`, `EV-05`, `EV-08`, `EV-09`, `EV-11`, and `EV-13` provide the state-specific result;
-   rejection follows `EV-23` and leaves `consumed_at` null.
+6. For an unconsumed code, recheck the stored URI's `PS-20` structure and complete ordinal
+   registration against the current active application. Use one captured UTC time to check code
+   expiry, current scope/refresh policy, live session including application max-age, active account,
+   and active application. `EV-04`, `EV-05`, `EV-08`, `EV-09`, `EV-11`, `EV-12`, and `EV-13`
+   provide the state-specific result; rejection follows `EV-23` and leaves `consumed_at` null.
 7. Build the token bytes request-locally, perform the conditional consumption, create and link an
    optional family root, and commit every promised issuance/audit write as `EV-20` or `EV-21`.
 8. Release the response only after commit. Signing, persistence, audit, cancellation before commit,
@@ -196,8 +206,9 @@ change that locks first is observed by the redemption, which then rejects withou
 redemption that locks first commits its root before the change proceeds, and the change's
 revocation statement revokes that root. The shared lock does not serialize concurrent redemptions
 or rotations of one application with each other. A Confidential code without `offline_access`
-writes no family and keeps a plain read. SQLite reaches the same outcomes through its single
-writer.
+writes no family and keeps a plain read for that later family-policy lookup; its current URI-trust
+check still share-locks the application and registration rows. SQLite reaches the same outcomes
+through its single writer.
 
 Provider contract tests run `SC-13` against PostgreSQL across shared-database instances and against
 SQLite as concurrent requests to its single instance. The same suites force both serial outcomes in
@@ -229,4 +240,8 @@ no consumption, and no family. Legacy validation, rotation, and revocation fail 
 interactive row (`EV-33`). This document itself activates no route or metadata beyond what its
 slices delivered (`AC-14`).
 
-The current transport-policy and complete-registration checks, including the explicit Testing HTTP exception and old-artifact rejection, are defined in [the canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust).
+The structural URI rules, current application state, complete-registration checks, and rejection of
+unconsumed artifacts after registration removal are defined in
+[the canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust).
+HTTP and HTTPS are accepted equally in every environment; transport protection is a deployment
+responsibility under ADR 0008.

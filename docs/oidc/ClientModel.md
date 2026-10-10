@@ -67,8 +67,10 @@ These non-normative examples illustrate one registration:
 | `https://orders.example/signin-oidc?source=one` | No match: query differs |
 | `https://orders.example.attacker.test/signin-oidc` | No match: authority differs |
 
-The Development-only loopback exception in `PS-20` applies to a registered BFF callback, not to a
-claims callback and not to a wildcard. `localhost`, fragments, userinfo, and patterns remain invalid.
+Under ADR 0008, `PS-20` accepts `http` and `https` equally in every environment, with no
+Development loopback privilege, origin allowlist, or opt-in. The structural rules still reject
+`localhost`, fragments, userinfo, and wildcards; query is allowed and participates in exact matching.
+A redirect registration remains independent of the claims callback.
 
 ## Scopes and configuration changes
 
@@ -94,4 +96,8 @@ by documentation alone. Existing applications, grants, callbacks, shared-audienc
 `bootstrap-apps.json`, and admin API responses retain their current behavior until their focused
 implementation tasks explicitly add disabled-by-default fields and provider-symmetric migrations.
 
-The current transport-policy and complete-registration checks, including the explicit Testing HTTP exception and old-artifact rejection, are defined in [the canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust).
+The structural URI rules, current application state, complete-registration checks, and rejection of
+unconsumed artifacts after registration removal are defined in
+[the canonical model](./CanonicalSemanticModel.md#current-redirect-transport-trust).
+HTTP and HTTPS are accepted equally in every environment; transport protection is a deployment
+responsibility under ADR 0008.

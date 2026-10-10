@@ -77,7 +77,7 @@ services do not query SignaCore state.
 | `EV-09` | Application is deactivated | Pending authorization/logout preparation fails current application lookup | Sessions remain usable for other applications | Redemption fails client authentication (`IN-20`), or returns `invalid_grant` when deactivation commits after authentication; never consumes | That application's families are revoked with the application change | Downstream tokens remain valid to `exp`; UserInfo returns `invalid_token` | New authorization is a local error because no redirect is trusted |
 | `EV-10` | `allow_authorization_code` becomes false | Pending authorization fails revalidation | Unchanged | That application's redemption returns `unauthorized_client`, does not consume | Existing families remain usable if refresh remains enabled and their scopes remain allowed | Existing tokens valid to `exp`; UserInfo unchanged | No new authorization; no implicit audience or redirect change |
 | `EV-11` | `allow_refresh_token` becomes false | Pending request containing `offline_access` fails `invalid_scope` after safe redirect revalidation | Unchanged | Code containing `offline_access` returns `invalid_grant`, does not consume | All interactive families for the application are revoked in the setting-change transaction | Existing tokens valid to `exp`; UserInfo ignores `offline_access` | New authorization without `offline_access` remains allowed |
-| `EV-12` | Redirect URI is removed | Pending request is revalidated: step 2 fails locally with no redirect | Unchanged | Already issued code retains its exact URI binding and remains redeemable during its 60-second life | Unchanged | Unchanged | New authorization for that URI is local 400; removal never causes a redirect to the removed URI |
+| `EV-12` | Redirect URI is removed | Pending request is revalidated: step 2 fails locally with no redirect | Unchanged | Already issued code retains its exact URI snapshot binding, but an unconsumed code fails current registration revalidation with generic `invalid_grant`; no consumption or token issuance | Unchanged | Unchanged | New authorization for that URI and completion of a prepared logout naming a removed post-logout URI are local 400; the logout request remains unconsumed with no revocation; removal never causes a redirect to the removed URI |
 | `EV-13` | Scope is removed from an allow list | Pending/new request containing it returns `invalid_scope`; never silently narrowed | Unchanged | Code containing it returns `invalid_grant`, does not consume | Next refresh returns `invalid_grant` and revokes the whole family; no scope narrowing | Downstream tokens valid to `exp`; UserInfo optional claims are the intersection of token scope and the current allow list | `openid` remains a mandatory configured scope; disabling refresh removes `offline_access` as in `EV-11` |
 | `EV-14` | `/oauth2/revoke` names a refresh token owned by the authenticated application | Unchanged | Unchanged | Unchanged | The named live token is revoked; family and siblings remain unchanged | Existing access/ID tokens valid to `exp` | Syntactically valid request is always 200 and reveals neither existence nor ownership |
 | `EV-15` | Administrator revokes one identity session | Unchanged | Named session revoked with reason `administrative` | Bound codes remain unconsumed and fail | Every bound interactive family explicitly revoked in the same transaction | Downstream tokens valid to `exp`; UserInfo fails | Other browser sessions remain live |
@@ -268,7 +268,7 @@ spot.
 | --- | --- | --- | --- | --- |
 | `IN-01` | `GET /oauth2/authorize`: `response_type` | Required ASCII; exactly `code`; no normalization | Public | After client/URI trust: redirect `unsupported_response_type` |
 | `IN-02` | `client_id` | Required 1–100 UTF-16 code units before and after NFC + invariant-uppercase lookup normalization | Public identifier | Unknown, inactive, malformed, or non-interactive: local 400, no redirect |
-| `IN-03` | `redirect_uri` | Required 1–500 ASCII characters; no request normalization; exact ordinal match to a registered normalized string and current transport policy (PS-20) | Sensitive configuration | Missing/unmatched/untrusted: local 400, no redirect |
+| `IN-03` | `redirect_uri` | Required 1–500 ASCII characters; no request normalization; `PS-20` structural rules plus exact ordinal match to a current registered canonical string on an active application | Sensitive configuration | Missing/unmatched/untrusted: local 400, no redirect |
 | `IN-04` | `scope` | Required 1–200 ASCII characters; U+0020-delimited unique members from `openid`, `profile`, `offline_access`; must include `openid`; stored in fixed normal order | Public policy | Safe redirect `invalid_scope`; never silently narrowed |
 | `IN-05` | `state` | Required 22–128 ASCII `[A-Za-z0-9._~-]`; opaque; no normalization; echoed byte-for-byte | Correlation-sensitive | Safe redirect `invalid_request` |
 | `IN-06` | `nonce` | Required 22–128 ASCII `[A-Za-z0-9._~-]`; opaque; no normalization; exact copy into the first ID token only | Correlation-sensitive | Safe redirect `invalid_request` |
@@ -402,7 +402,7 @@ requires, and never pass them into another grant's field mapping.
 | `IN-20` | `/oauth2/token` client authentication | Exactly one of `client_secret_basic` or `client_secret_post`; client id 1–100, secret 1–256 UTF-16 code units; no simultaneous methods; existing normalized client lookup and password-hash verification | Secret credential / header | `invalid_client`, HTTP 401, `WWW-Authenticate: Basic`; no body echoes |
 | `IN-21` | `grant_type=authorization_code` | Required ASCII exact value; form encoded | Public | Unknown: `unsupported_grant_type`; disabled client: `unauthorized_client` |
 | `IN-22` | `code` | Required exactly 43 ASCII `[A-Za-z0-9_-]`; SHA-256 digest lookup; 60-second record lifetime | Secret credential | Malformed: `invalid_request`; all lookup/state/binding failures: generic `invalid_grant` |
-| `IN-23` | Token `redirect_uri` | Required 1–500 ASCII; no normalization; ordinal equality to the code snapshot, not a fresh URI-set match | Sensitive configuration | Malformed: `invalid_request`; mismatch: generic `invalid_grant` |
+| `IN-23` | Token `redirect_uri` | Required 1–500 ASCII; no normalization; ordinal equality to the code snapshot; for an unconsumed code, separately recheck the snapshot against `PS-20` structure and the current complete URI registration on an active application (`EV-12`); correctly bound consumed codes follow `EV-24` first | Sensitive configuration | Malformed: `invalid_request`; snapshot mismatch or rejected current URI trust: generic `invalid_grant` |
 | `IN-24` | `code_verifier` | Required 43–128 ASCII `[A-Za-z0-9._~-]`; compute `BASE64URL(SHA256(ASCII(value)))`; constant-time compare to challenge | Secret credential | Malformed: `invalid_request`; mismatch: generic `invalid_grant` |
 | `IN-25` | Code-token `scope` | Must be absent; authorization snapshot is authoritative | Treat supplied value as sensitive input | `invalid_request` |
 | `IN-26` | `grant_type=refresh_token`: `refresh_token` | Required 1–256 ASCII; digest lookup. New interactive values are exactly 43 unpadded-base64url characters; legacy accepted shapes remain compatible | Secret token | Malformed: `invalid_request`; all token/family/binding failures: generic `invalid_grant` |
@@ -424,7 +424,7 @@ field other than `logout_handle`.
 | --- | --- | --- | --- | --- |
 | `IN-30` | `POST /oauth2/logout/requests` client authentication | Same exclusive confidential-client authentication as `IN-20` | Secret credential / header | `invalid_client`, HTTP 401; no logout row |
 | `IN-31` | `id_token_hint` | Required compact JWS, 1–8192 ASCII chars; validate RS256 signature, issuer, authenticated-client audience, `sub`, `sid`, and `iat` no older than 24 hours; ignore `exp` only for logout preparation | Secret token | Generic local JSON `invalid_request`, HTTP 400; token never stored |
-| `IN-32` | `post_logout_redirect_uri` | Optional 1–500 ASCII; no request normalization; exact ordinal match to that client's current registered post-logout set and transport policy (PS-20), rechecked at browser completion | Sensitive configuration | `invalid_request`, HTTP 400; no row and no redirect |
+| `IN-32` | `post_logout_redirect_uri` | Optional 1–500 ASCII; no request normalization; `PS-20` structural rules plus exact ordinal match to that active client's current registered post-logout set, rechecked at browser completion | Sensitive configuration | `invalid_request`, HTTP 400; no row and no redirect |
 | `IN-33` | Logout `state` | Optional 22–128 ASCII `[A-Za-z0-9._~-]`; opaque; stored and later echoed byte-for-byte | Correlation-sensitive | `invalid_request`, HTTP 400 |
 | `IN-34` | Preparation response | JSON contains one relative or same-origin `logout_uri` whose only query value is a new `logout_handle`; `Cache-Control: no-store` | Secret handle | Internal failure: 500; no partial row/handle exposure |
 | `IN-35` | `GET /oauth2/logout`: `logout_handle` | Sole supported query field; required exactly 43 ASCII `[A-Za-z0-9_-]`; digest lookup; expires in 5 minutes; single-use | Secret handle in browser URL | Missing/malformed/missing row/expired/consumed: local 400, no redirect |
@@ -443,27 +443,30 @@ absent from Discovery instead of claiming interoperability it does not provide.
 ## Sensitive value × trust boundary and data flow
 
 “No” means the value must not cross that boundary in plaintext. Digests and bounded non-secret ids
-are named explicitly where allowed.
+are named explicitly where allowed. The following rows constrain request carriers and process,
+storage, and logging boundaries; transport protection follows the
+[deployment responsibility](#deployment-transport-responsibility) below, including for credentials
+and tokens. Accepting HTTP does not permit an alternative carrier or move BFF secrets into the browser.
 
 | ID | Value | Browser | Confidential BFF | SignaCore process | Database | Logs, audit, metrics, traces | Downstream resource service |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `DF-01` | Password | Login form and TLS request only; never browser storage | No | Request-local validation only | Existing password hash only | Never | No |
-| `DF-02` | Client secret / client `Authorization` header | No | Server-side store and TLS back channel | Request-local authentication | Existing password hash only | Never; header redacted | No |
+| `DF-01` | Password | Login form and its POST body only; never browser storage | No | Request-local validation only | Existing password hash only | Never | No |
+| `DF-02` | Client secret / client `Authorization` header | No | Server-side store and authenticated server-to-server request only (`IN-20`/`IN-30`) | Request-local authentication | Existing password hash only | Never; header redacted | No |
 | `DF-03` | Authorization code | Authorization response URL and BFF callback only | Request-local until token exchange | Generated/validated request-locally | Versioned digest and public record id only | Never plaintext; callback query redacted | No |
 | `DF-04` | PKCE verifier / challenge | Challenge appears in the authorize URL; verifier never reaches the browser | Verifier and derived challenge stay in server-side request state | Request-local; challenge snapshot | Challenge is stored with request/code; verifier is never stored | Neither value logged | No |
 | `DF-05` | Continuation handle | Login URL/form only | No | Generated and digested | Digest only | Query/form value redacted | No |
 | `DF-06` | Identity cookie and session id | Protected cookie only | No | Cookie unprotected and row id used | Public row id and state; never cookie envelope | Cookie never; bounded session id allowed only in audit description | No |
 | `DF-07` | Access token | No; BFF's own browser session is unrelated | Server-side token store and Bearer use | Issued request-locally; accepted at UserInfo | No token row | Never; authorization header redacted | Bearer request and validation memory only |
 | `DF-08` | ID token | No, including logout | Server-side validation/store and logout preparation only | Issued or validated request-locally | No | Never | No |
-| `DF-09` | Refresh token | No | Server-side token store and TLS token request | Generated/validated request-locally | Versioned digest only | Never | No |
+| `DF-09` | Refresh token | No | Server-side token store and server-to-server token form request only | Generated/validated request-locally | Versioned digest only | Never | No |
 | `DF-10` | Logout handle | Logout URL only; no durable browser storage | Receives URI then redirects browser | Generated and digested | Digest plus verified non-token context | Query value redacted | No |
 | `DF-11` | `state` / `nonce` | Authorization URL; state returns to callback | Bound to BFF session; nonce used for ID-token validation | Validated and copied as specified | Request/code snapshots; nonce omitted from refreshed ID tokens | No raw values despite not being bearer credentials; use correlation id instead | No |
 | `DF-12` | Redirect and post-logout URI | Authorization/logout navigation | Client configuration | Validation and response construction | Registered and request snapshots | May log only a sanitized registered value; never an untrusted raw URI | No |
 | `DF-13` | Account/client/code/family record ids | No need to expose | Client id only | Used for joins and audits | Plain bounded identifiers | Allowed where needed; never metric labels except bounded registered client id | `sub` and `client_id` claims as specified |
 | `DF-14` | Signing private key / root key | No | No | Private signing operation / key unwrapping only | Existing encrypted private material; root key external | Never | No; only public JWKS material |
 | `DF-15` | UserInfo claims | No direct browser response from SignaCore | Server-side response, then BFF decides its own session/profile exposure | Current-account lookup and response | Existing account fields | No complete response or personal values | No unless BFF separately authorizes disclosure |
-| `DF-16` | Phone number (browser SMS) | Typed into the SMS form and sent only in the TLS form body; returned only as the normalized value of the re-rendered page's own phone input; never in a URL, cookie, or browser storage written by SignaCore | No; never in a code, token, UserInfo response, or redirect | Request-local normalization, eligibility lookup, OTP MAC input, and the provider request | Existing E.164 `user_logins.provider_user_id` and `otps.phone` only; `login_histories.username` holds only the masked form (first three characters, `****`, last four); never in `authorization_requests`, `identity_sessions`, codes, families, or `oidc_rate_limit_buckets` | Raw value never. The masked form only in the audit row and in the existing masked SMS/OTP-service log properties; never a metric label, span tag, exception message, or error body | No; never in an ID token, access token, or UserInfo response. The configured SMS provider receives it in the delivery request |
-| `DF-17` | SMS one-time code | Received out of band by SMS; typed into the SMS form and sent only in the TLS form body of `action=sms_login`; the `otp` input is always rendered empty | No | Generated from a CSPRNG for one delivery; request-local fixed-time verification against the stored MAC | `otps.code_mac` HMAC only; never plaintext | Never | No; only the SMS provider receives it in the delivery message |
+| `DF-16` | Phone number (browser SMS) | Typed into the SMS form and sent only in the form body; returned only as the normalized value of the re-rendered page's own phone input; never in a URL, cookie, or browser storage written by SignaCore | No; never in a code, token, UserInfo response, or redirect | Request-local normalization, eligibility lookup, OTP MAC input, and the provider request | Existing E.164 `user_logins.provider_user_id` and `otps.phone` only; `login_histories.username` holds only the masked form (first three characters, `****`, last four); never in `authorization_requests`, `identity_sessions`, codes, families, or `oidc_rate_limit_buckets` | Raw value never. The masked form only in the audit row and in the existing masked SMS/OTP-service log properties; never a metric label, span tag, exception message, or error body | No; never in an ID token, access token, or UserInfo response. The configured SMS provider receives it in the delivery request |
+| `DF-17` | SMS one-time code | Received out of band by SMS; typed into the SMS form and sent only in the form body of `action=sms_login`; the `otp` input is always rendered empty | No | Generated from a CSPRNG for one delivery; request-local fixed-time verification against the stored MAC | `otps.code_mac` HMAC only; never plaintext | Never | No; only the SMS provider receives it in the delivery message |
 
 All browser endpoints set `Referrer-Policy: no-referrer`; all credential or token responses set
 `Cache-Control: no-store`. Login pages additionally deny framing. Test fixtures use synthetic values
@@ -521,7 +524,7 @@ sensitive-data boundaries. These are expected outcomes, not claims about current
 | `SC-12` | Application is disabled after code issue and before redemption/refresh/UserInfo | Code is not consumed; no tokens are issued; family refresh and UserInfo fail; application families are revoked by the state-change transaction; other applications and the identity session remain usable |
 | `SC-13` | Two instances redeem the same code concurrently | Shared row/session locking and conditional consumption produce exactly one commit. The loser observes committed consumption, executes code-replay handling, and never produces a second token set |
 | `SC-14` | Two instances rotate the same interactive refresh token concurrently | Exactly one child commits. The other observes a consumed parent, revokes live descendants in the family, returns `invalid_grant`, and emits reuse audit without exposing a token |
-| `SC-15` | BFF initiates logout | ID token moves BFF-to-SignaCore only over authenticated TLS; database stores verified ids/URI/state but no token; browser receives only a one-time logout handle; matching cookie revokes, while mismatch has the same successful external shape and no revocation |
+| `SC-15` | BFF initiates logout | ID token moves BFF-server-to-SignaCore only in the authenticated preparation request; transport protection follows deployment responsibility below; database stores verified ids/URI/state but no token; browser receives only a one-time logout handle; matching cookie revokes, while mismatch has the same successful external shape and no revocation |
 | `SC-16` | Signing fails before issuance commit | Code consumption, family root/link, and audit roll back; no token bytes leave the process; later valid retry may succeed and is not classified as replay |
 | `SC-17` | Signing key rotates while issued tokens and a logout hint still need validation | New issues use the new key; old public key remains available through every token `exp` and the 24-hour logout-hint acceptance window; no session/family/code state changes |
 | `SC-18` | A continuation, code, refresh token, or logout handle lookup is missing | Each endpoint returns its generic local/protocol error; no consumed/revoked state is invented, no family/session is guessed, and no replay audit occurs |
@@ -564,7 +567,7 @@ resource services must validate access-token signature, issuer, audience, and li
 accept that account, application, session, or scope changes do not revoke a self-contained access
 token before `exp`.
 
-A Public caller must use HTTPS, isolate scripts, keep bearer tokens in memory for the shortest
+A Public caller must isolate scripts, keep bearer tokens in memory for the shortest
 practical time, and clear them on logout. Browser-readable tokens cannot prevent XSS, malicious
 scripts, or first use of a stolen bearer; high-privilege management should prefer a confidential
 BFF. Public refresh roots have the earliest deadline of seven days, the session absolute expiry,
@@ -579,6 +582,42 @@ phone that cannot sign in to the application also sees that a code may have been
 must accept `amr: ["sms"]` for applications that enable SMS, must not expect a phone number in any
 token or UserInfo response, and operators should monitor the closed SMS send metrics.
 
+### Deployment transport responsibility
+
+[ADR 0008](../adr/0008-transport-security-is-a-deployment-decision.md) accepts HTTP and HTTPS
+equally in every environment. TLS is recommended for public deployments, including Public browser
+clients and credential/token back channels. Deployments that need confidentiality, integrity, or
+listener authenticity must provide TLS and configure trusted proxies to forward the effective
+request scheme. Plain HTTP supplies none of those link protections; the service does not enforce a
+runtime HTTPS-only rejection. This decision preserves client authentication, PKCE, state/nonce,
+CSRF, exact URI registration, scheme-specific cookie/purpose isolation, and the server-only BFF
+sensitive-value boundaries in `DF-*` and `SC-15`.
+
 ### Current redirect transport trust
 
-`PS-20`, `IN-03`, and `IN-32` require both the current activated transport policy and the current application-specific complete URI registration. Continuation revalidation and issuance repeat that decision; code redemption checks it before external work and inside the issuance transaction. A prepared logout with a URI repeats it under the completion locks. Removing an origin, disabling the policy, removing the exact registration, or deactivating the application rejects old artifacts without consumption, new sessions, tokens, revocation, audit, or untrusted Location. A correctly bound replay of an already consumed code still follows `EV-24` disposal; policy drift cannot bypass replay revocation. A logout without a URI retains local completion. Registration removal can retain other now-unusable stored rows for incremental cleanup, but never makes them trusted at runtime.
+`PS-20`, `IN-03`, `IN-23`, and `IN-32` require structural validity, the current
+application-specific complete URI registration, and current active application state. HTTP and
+HTTPS are equal inputs in every environment, with no Development loopback privilege, Testing gate,
+origin allowlist, or opt-in. Other schemes remain structurally invalid. Query is allowed and is
+part of the ordinal match; registration canonicalization never normalizes request input.
+
+Continuation revalidation and code issuance repeat these checks. For an unconsumed code, the exact
+code-snapshot binding and current URI trust are separate checks: redemption checks current trust
+before callback HTTP/key refresh and repeats it authoritatively inside the issuance transaction.
+Removing the exact registration rejects new authorization or continuation locally with no
+`Location`, no continuation consumption, and no session/code issuance; an old unconsumed code is
+rejected with generic `invalid_grant`, without consumption, tokens, or replay audit (`EV-12/23`).
+Prepared logout checks a supplied URI before persistence and repeats current trust under the
+completion locks. A removed post-logout registration rejects the old request locally with no
+consumption, revocation, completion audit, or untrusted `Location`. Structural or current
+application-state rejection likewise fails these current-trust checks; an application already
+inactive at outer client authentication retains the existing `IN-20`/`IN-30` authentication error.
+A logout without a URI retains the local `EV-06/07` completion results.
+
+A correctly authenticated, statically bound, and PKCE-proven replay of an already consumed code
+follows `EV-24` before structural/current-registration checks, both at initial lookup and when
+consumption is discovered under the issuance locks. Registration drift cannot bypass proven replay
+revocation and its id-only audit; outer authentication failure does not invent a replay branch.
+The existing cancellation, rollback, committed-state, and provider concurrency rules (`EV-18/26/28`,
+`PS-22`) remain unchanged. Registration removal can retain now-unusable stored rows for incremental
+cleanup, but never makes them trusted at runtime.
