@@ -122,6 +122,8 @@ const settingErrorCodeDescriptions: Record<string, string> = {
     "The public base URL is not a valid absolute URL.",
   "signacore.setting.issuer_mismatch":
     "The token issuer must equal the normalized public base URL.",
+  "signacore.setting.bypass_phone_invalid":
+    "Every SMS bypass phone entry must be a valid mainland China mobile number, and the list is limited to 100 entries.",
 };
 
 function settingErrorCodeDescription(errorCode: string): string {
