@@ -257,7 +257,8 @@ public sealed class ServiceSettingsDatabaseContractTests
             var row = await context.Database.SqlQuery<string>($"""
                     SELECT values_json AS "Value" FROM service_settings WHERE service_id = 'signacore'
                     """).SingleAsync(TestContext.Current.CancellationToken);
-            var values = System.Text.Json.Nodes.JsonNode.Parse(row).AsObject();
+            var values = System.Text.Json.Nodes.JsonNode.Parse(
+                row ?? throw new InvalidOperationException("The seeded aggregate row is missing.")).AsObject();
             // The aggregate stores values as a JSON string map, so the list itself is a nested
             // JSON document inside the string value — assign the raw text, not a parsed node.
             values["sms.bypass_phones"] = """["1862895840"]""";
