@@ -946,6 +946,21 @@ describe('admin security and runtime settings', () => {
     await state.saveSettings(['loki.uri'])
     expect(state.saveValidationErrors.value).toBeNull()
   })
+
+  it('maps the sms bypass phone rejection code and keeps the unknown-code fallback', () => {
+    const state = useAdminSettings()
+
+    const description = state.validationErrorDescription(
+      { key: 'sms.bypass_phones', errorCode: 'signacore.setting.bypass_phone_invalid' },
+    )
+    expect(description).toContain('sms.bypass_phones')
+    expect(description).toContain('mainland China mobile number')
+
+    // Unknown codes keep the generic closed-rule sentence; the mapping never interpolates values.
+    expect(state.validationErrorDescription(
+      { key: 'sms.bypass_phones', errorCode: 'signacore.setting.unmapped_code' }),
+    ).toContain('The value was rejected by a fixed settings rule.')
+  })
 })
 
 describe('interactive OIDC client configuration', () => {

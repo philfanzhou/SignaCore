@@ -81,13 +81,21 @@ internal sealed record ProductSettingDefinition(
 /// updates. Number keys keep the legacy integer semantics through
 /// <see cref="IntegerSettingConstraint"/> and the legacy ranges through
 /// <see cref="NumberRangeSettingConstraint"/>; the JSON keys with a fixed root kind use
-/// <see cref="JsonRootKindSettingConstraint"/>. Cross-key rules stay in
+/// <see cref="JsonRootKindSettingConstraint"/>, and the SMS bypass allow-list additionally
+/// validates each entry through <see cref="SmsBypassPhonesSettingConstraint"/>. Cross-key rules stay in
 /// <see cref="SignaCoreSettingCompositeValidator"/>.
 /// </para>
 /// </remarks>
 internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvider
 {
     internal const string IntegerErrorCode = "signacore.setting.integer";
+
+    /// <summary>
+    /// The closed code for an SMS bypass allow-list candidate whose entries are not all valid
+    /// mainland China mobile numbers or exceed the entry cap; like every settings error code it
+    /// names only the key and the rule, never the submitted value.
+    /// </summary>
+    internal const string SmsBypassPhoneInvalidErrorCode = "signacore.setting.bypass_phone_invalid";
 
     private static readonly IReadOnlyList<ProductSettingDefinition> DefinitionTable =
     [
@@ -257,6 +265,10 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
                  JsonRootKinds.TryGetValue(definition.Key, out var rootKind))
         {
             yield return new JsonRootKindSettingConstraint([rootKind]);
+            if (definition.Key == SmsBypassPhonesSettingConstraint.SettingKey)
+            {
+                yield return new SmsBypassPhonesSettingConstraint();
+            }
         }
     }
 }

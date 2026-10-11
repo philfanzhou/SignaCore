@@ -220,6 +220,93 @@ public sealed class ServiceSettingsDatabaseContractTests
         await AssertZeroChangesAndZeroAuditsAsync(options);
     }
 
+    /// <summary>
+    /// A bypass allow-list candidate with a non-normalizable entry is a plain validation failure
+    /// (#580): nothing is stored and nothing is audited, like every other rejection.
+    /// </summary>
+    [Fact]
+    public async Task SmsBypassPhonesInvalidEntry_IsAValidationFailureWithZeroChanges()
+    {
+        var options = await CreateMigratedSqliteAsync();
+        var changes = SeedChanges();
+        changes["sms.bypass_phones"] = """["+8613800138000","1862895840"]""";
+
+        var result = await UpdateAsync(options, 0, changes);
+
+        Assert.Equal(ServiceSettingUpdateStatus.ValidationFailed, result.Status);
+        await AssertZeroChangesAndZeroAuditsAsync(options);
+    }
+
+    /// <summary>
+    /// An invalid bypass list stored before the entry rule existed keeps failing every update
+    /// after the upgrade (#580): the shared update service merges all stored values into the
+    /// validation candidate, so even an update that does not submit the key is rejected with the
+    /// closed key + code pair until the operator cleans the stored list. Submitting a valid list
+    /// for the key is the explicit unblock path.
+    /// </summary>
+    [Fact]
+    public async Task StoredInvalidBypassPhonesValue_BlocksSubsequentUpdatesUntilCleaned()
+    {
+        var options = await CreateMigratedSqliteAsync();
+        await UpdateAsync(options, 0, SeedChanges());
+
+        // Write the pre-rule value straight into the aggregate, exactly like a deployment that
+        // stored it before the constraint existed; no audit row and no version bump.
+        await using (var context = new IdentityDbContext(options))
+        {
+            var row = await context.Database.SqlQuery<string>($"""
+                    SELECT values_json AS "Value" FROM service_settings WHERE service_id = 'signacore'
+                    """).SingleAsync(TestContext.Current.CancellationToken);
+            var values = System.Text.Json.Nodes.JsonNode.Parse(
+                row ?? throw new InvalidOperationException("The seeded aggregate row is missing.")).AsObject();
+            // The aggregate stores values as a JSON string map, so the list itself is a nested
+            // JSON document inside the string value — assign the raw text, not a parsed node.
+            values["sms.bypass_phones"] = """["1862895840"]""";
+            await context.Database.ExecuteSqlAsync($"""
+                    UPDATE service_settings SET values_json = {values.ToJsonString()}
+                    WHERE service_id = 'signacore'
+                    """, TestContext.Current.CancellationToken);
+        }
+
+        // An unrelated update that does not submit the key is still rejected: the stored values
+        // join the validation candidate (pinned shared-stack behavior, ServiceMantle 0.3.2).
+        var rejected = await UpdateAsync(options, 1, new Dictionary<string, string?>
+        {
+            ["jwt.audience"] = "legacy-cleanup-audience"
+        });
+
+        Assert.Equal(ServiceSettingUpdateStatus.ValidationFailed, rejected.Status);
+        var rejection = Assert.Single(rejected.Errors);
+        Assert.Equal("sms.bypass_phones", rejection.Key);
+        Assert.Equal(ServiceSettingDefinitions.SmsBypassPhoneInvalidErrorCode, rejection.ErrorCode);
+
+        // Nothing changed: the invalid stored list survives verbatim and no audit was written for
+        // the rejected attempt (the four seed audits are all there is).
+        await using (var verify = new IdentityDbContext(options))
+        {
+            var stored = await verify.Database.SqlQuery<string>($"""
+                    SELECT values_json || '|' || version AS "Value" FROM service_settings
+                    WHERE service_id = 'signacore'
+                    """).SingleAsync(TestContext.Current.CancellationToken);
+            Assert.Contains("1862895840", stored, StringComparison.Ordinal);
+            Assert.DoesNotContain("legacy-cleanup-audience", stored, StringComparison.Ordinal);
+            Assert.EndsWith("|1", stored, StringComparison.Ordinal);
+            var audits = await verify.Database.SqlQuery<int>(
+                    $"""SELECT COUNT(*) AS "Value" FROM service_audit_logs""")
+                .SingleAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(4, audits);
+        }
+
+        // Submitting a valid list for the key clears the stored rejection and unblocks updates.
+        var cleaned = await UpdateAsync(options, 1, new Dictionary<string, string?>
+        {
+            ["sms.bypass_phones"] = """["+8613800138000"]"""
+        });
+
+        Assert.Equal(ServiceSettingUpdateStatus.Applied, cleaned.Status);
+        Assert.Equal(2, cleaned.Version);
+    }
+
     [Fact]
     public async Task MissingRootKey_IsAProtectionFailureWithZeroChanges()
     {

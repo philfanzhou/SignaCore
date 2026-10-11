@@ -18,6 +18,14 @@ public sealed class SharedSettingContractTests
     private static string HmacKey32 { get; } = Convert.ToBase64String(
         System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
 
+    /// <summary>
+    /// A JSON array of <paramref name="count"/> distinct, individually valid bypass phone entries
+    /// (+8613800138000 upward), for pinning the entry cap exactly at its boundary.
+    /// </summary>
+    private static string BuildBypassPhoneList(int count) =>
+        "[" + string.Join(",", Enumerable.Range(0, count)
+            .Select(index => $"\"+8613800138{index:D3}\"")) + "]";
+
     public static TheoryData<string, Dictionary<string, string>, bool, bool> SnapshotCases
     {
         get
@@ -110,6 +118,36 @@ public sealed class SharedSettingContractTests
             Add("json-invalid", new Dictionary<string, string>
             {
                 [SystemSettingKeys.SmsBypassPhones] = "[1, 2"
+            }, isDevelopment: false, expectedValid: false);
+            // The bypass allow-list turns an OTP bypass code into a complete login, so every entry
+            // must normalize as a mainland China mobile number at save time (#580). Mixed stored
+            // forms stay equivalent at match time; nothing rewrites them.
+            Add("sms-bypass-phones-empty", new Dictionary<string, string>
+            {
+                [SystemSettingKeys.SmsBypassPhones] = "[]"
+            }, isDevelopment: false, expectedValid: true);
+            Add("sms-bypass-phones-valid-mixed-forms", new Dictionary<string, string>
+            {
+                [SystemSettingKeys.SmsBypassPhones] =
+                    """["+8613800138000","13800138001","008613800138002","(+86) 138-0013-8003"]"""
+            }, isDevelopment: false, expectedValid: true);
+            Add("sms-bypass-phones-at-limit", new Dictionary<string, string>
+            {
+                [SystemSettingKeys.SmsBypassPhones] = BuildBypassPhoneList(100)
+            }, isDevelopment: false, expectedValid: true);
+            Add("sms-bypass-phones-over-limit", new Dictionary<string, string>
+            {
+                [SystemSettingKeys.SmsBypassPhones] = BuildBypassPhoneList(101)
+            }, isDevelopment: false, expectedValid: false);
+            // A digit was lost from an otherwise well-formed entry: exactly the typo shape the
+            // save-time rule exists to catch before it silently bypasses OTP.
+            Add("sms-bypass-phones-invalid-entry", new Dictionary<string, string>
+            {
+                [SystemSettingKeys.SmsBypassPhones] = """["+8613800138000","1862895840"]"""
+            }, isDevelopment: false, expectedValid: false);
+            Add("sms-bypass-phones-non-string-entry", new Dictionary<string, string>
+            {
+                [SystemSettingKeys.SmsBypassPhones] = """["+8613800138000",123456]"""
             }, isDevelopment: false, expectedValid: false);
             Add("json-array-root-violation", new Dictionary<string, string>
             {
@@ -289,6 +327,28 @@ public sealed class SharedSettingContractTests
             Assert.DoesNotContain("accounts.example.com", error.ErrorCode, StringComparison.Ordinal);
             Assert.Matches("^[a-z0-9][a-z0-9._-]*$", error.ErrorCode);
         }
+    }
+
+    /// <summary>
+    /// The bypass-phone rejection stays a closed key + code pair: exactly one error for the key,
+    /// the fixed rule code, and never the submitted entries (#580).
+    /// </summary>
+    [Fact]
+    public void SmsBypassPhones_InvalidEntriesAreRejectedWithTheClosedKeyCode()
+    {
+        var legacy = ServiceSettingDefinitions.BuildLegacyDefaults();
+        legacy[SystemSettingKeys.PublicBaseUrl] = "https://accounts.example.com";
+        legacy[SystemSettingKeys.JwtIssuer] = "https://accounts.example.com";
+        legacy[SystemSettingKeys.AdminUsername] = "root-admin";
+        legacy[SystemSettingKeys.SmsBypassPhones] = """["+8613800138000","1862895840"]""";
+
+        var errors = SharedSettingComposition.ValidateCompleteCandidate(legacy, isDevelopment: false);
+
+        var rejection = Assert.Single(errors, error => error.Key == "sms.bypass_phones");
+        Assert.Equal(ServiceSettingDefinitions.SmsBypassPhoneInvalidErrorCode, rejection.ErrorCode);
+        Assert.DoesNotContain("1862895840", rejection.ErrorCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("13800138000", rejection.ErrorCode, StringComparison.Ordinal);
+        Assert.Matches("^[a-z0-9][a-z0-9._-]*$", rejection.ErrorCode);
     }
 
     [Fact]

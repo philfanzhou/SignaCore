@@ -290,6 +290,23 @@ public sealed partial class SharedSettingDefinitionMappingTests
         Assert.Contains(kind, constraint.AllowedKinds);
     }
 
+    /// <summary>
+    /// The bypass allow-list carries the per-entry rule on top of its array root-kind constraint
+    /// (#580): the pinned code is the fixed closed rejection, and the pinned cap matches the
+    /// allow-list sizing precedent style of the product's other bounded lists.
+    /// </summary>
+    [Fact]
+    public void SmsBypassPhones_HasTheEntryValidationConstraintPinned()
+    {
+        var constraint = SharedDefinitions[SmsBypassPhonesSettingConstraint.SettingKey].Constraints
+            .OfType<SmsBypassPhonesSettingConstraint>()
+            .Single();
+        Assert.Equal(ServiceSettingValueType.Json, constraint.ValueType);
+        Assert.Equal(ServiceSettingDefinitions.SmsBypassPhoneInvalidErrorCode, constraint.ErrorCode);
+        Assert.Equal("signacore.setting.bypass_phone_invalid", constraint.ErrorCode);
+        Assert.Equal(100, SmsBypassPhonesSettingConstraint.MaxEntries);
+    }
+
     [Fact]
     public void TheRegistry_BuildsFromTheProviderAndRejectsDuplicates()
     {
