@@ -50,9 +50,6 @@ public class AuthMetrics
         }
     }
 
-    /// <summary>Legacy placeholder retained for source compatibility; unresolved requests omit the client label.</summary>
-    public const string UnregisteredClient = "unregistered";
-
     /// <summary>
     /// The fixed endpoint-class label values of <c>oidc.endpoint.outcome</c> and
     /// <c>oidc.endpoint.duration</c>: closed set, no free text.
