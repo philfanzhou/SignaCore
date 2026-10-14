@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import AdminResetPasswordModal from "./AdminResetPasswordModal.vue";
 import { useAdminUsers } from "../../composables/admin/useAdminUsers";
 import { formatDate, getInitials } from "../../utils/format";
 
 const {
+  openResetPassword,
   selectedUser,
   userDrawerOpen,
   userDrawerTab,
@@ -142,6 +144,8 @@ function sessionStatusClass(status: string) {
             </button></label
           >
           <div class="drawer-divider"></div>
+          <button v-if="selectedUser.hasPassword" class="console-button secondary"
+            @click="openResetPassword">Reset password</button>
           <button
             class="console-button"
             :class="selectedUser.isActive ? 'danger' : 'secondary'"
@@ -228,4 +232,5 @@ function sessionStatusClass(status: string) {
       </div>
     </aside>
   </div>
+  <AdminResetPasswordModal />
 </template>

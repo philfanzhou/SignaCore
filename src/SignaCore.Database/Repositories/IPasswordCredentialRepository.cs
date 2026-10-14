@@ -10,6 +10,10 @@ public interface IPasswordCredentialRepository
     Task<PasswordCredentialEntity?> GetByAccountIdAsync(
         Guid accountId,
         CancellationToken cancellationToken = default);
+    /// <summary>Reads at most two local credentials to distinguish zero, one and multiple.</summary>
+    Task<IReadOnlyList<PasswordCredentialEntity>> GetUpToTwoByAccountIdAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default);
     /// <summary>
     /// The username of the account's Password credential when the account has exactly one, read
     /// untracked; <c>null</c> when it has none or more than one. This is the <c>PS-12</c>/<c>PS-16</c>

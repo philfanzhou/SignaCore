@@ -300,6 +300,13 @@ class AdminApiClient {
     return response.data
   }
 
+  async resetUserPassword(userId: string, newPassword: string) {
+    const response = await this.client.post<{ success: boolean; message: string }>(
+      `/api/admin/users/${userId}/reset-password`, { newPassword },
+    )
+    return response.data
+  }
+
   async createPhoneUser(payload: AdminCreatePhoneUserRequest) {
     const response = await this.client.post<AdminUser>('/api/admin/users/phone', payload)
     return response.data

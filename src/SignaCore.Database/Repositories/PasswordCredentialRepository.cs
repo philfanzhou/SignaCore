@@ -32,6 +32,13 @@ public class PasswordCredentialRepository : IPasswordCredentialRepository
             .FirstOrDefaultAsync(c => c.AccountId == accountId, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<PasswordCredentialEntity>> GetUpToTwoByAccountIdAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default) =>
+        await _dbContext.PasswordCredentials.AsNoTracking()
+            .Where(credential => credential.AccountId == accountId)
+            .Take(2).ToListAsync(cancellationToken);
+
     public async Task<string?> GetSoleUsernameByAccountIdAsync(
         Guid accountId,
         CancellationToken cancellationToken = default)

@@ -142,7 +142,59 @@ async function saveUser() {
   }
 }
 
+const resetPasswordTarget = ref<{ userId: string; username: string } | null>(null);
+const resetPasswordForm = reactive({ newPassword: "", confirmation: "" });
+const resetPasswordSaving = ref(false);
+const resetPasswordError = ref("");
+let resetPasswordOperation = 0;
+
+function closeResetPassword() {
+  resetPasswordOperation++;
+  resetPasswordTarget.value = null;
+  resetPasswordForm.newPassword = "";
+  resetPasswordForm.confirmation = "";
+  resetPasswordError.value = "";
+  resetPasswordSaving.value = false;
+}
+
+function openResetPassword() {
+  closeResetPassword();
+  if (!selectedUser.value?.hasPassword) return;
+  resetPasswordTarget.value = {
+    userId: selectedUser.value.userId,
+    username: selectedUser.value.username,
+  };
+}
+
+async function resetUserPassword() {
+  const target = resetPasswordTarget.value;
+  if (!target || resetPasswordSaving.value) return;
+  if (!resetPasswordForm.newPassword || !resetPasswordForm.confirmation) {
+    resetPasswordError.value = "Enter and confirm the new password.";
+    return;
+  }
+  if (resetPasswordForm.newPassword !== resetPasswordForm.confirmation) {
+    resetPasswordError.value = "Passwords do not match.";
+    return;
+  }
+  const operation = resetPasswordOperation;
+  resetPasswordSaving.value = true;
+  resetPasswordError.value = "";
+  try {
+    await adminClient.resetUserPassword(target.userId, resetPasswordForm.newPassword);
+    if (operation !== resetPasswordOperation) return;
+    closeResetPassword();
+    notify("Password reset.");
+  } catch (error) {
+    if (operation === resetPasswordOperation)
+      resetPasswordError.value = getErrorMessage(error);
+  } finally {
+    if (operation === resetPasswordOperation) resetPasswordSaving.value = false;
+  }
+}
+
 function openUser(user: AdminUser) {
+  closeResetPassword();
   selectedUser.value = user;
   userDrawerTab.value = "profile";
   Object.assign(userMeta, {
@@ -266,12 +318,20 @@ async function toggleUser(user: AdminUser) {
 }
 
 function closeUserDrawer() {
+  closeResetPassword();
   userDrawerOpen.value = false;
   selectedUser.value = null;
 }
 
 export function useAdminUsers() {
   return {
+    resetPasswordTarget,
+    resetPasswordForm,
+    resetPasswordSaving,
+    resetPasswordError,
+    openResetPassword,
+    closeResetPassword,
+    resetUserPassword,
     users,
     userTotal,
     userPage,

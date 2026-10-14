@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
     getUsers: vi.fn(),
     createUser: vi.fn(),
     createPhoneUser: vi.fn(),
+    resetUserPassword: vi.fn(),
     updateUserNickname: vi.fn(),
     updateUserRemark: vi.fn(),
     updateUserStatus: vi.fn(),
@@ -1145,5 +1146,76 @@ describe('interactive OIDC client configuration', () => {
       '加载交互式 OIDC 配置失败',
       expect.objectContaining({ isAxiosError: true }),
     )
+  })
+})
+
+
+describe('administrator password reset', () => {
+  beforeEach(() => {
+    const state = useAdminUsers()
+    state.closeUserDrawer()
+    mocks.api.getUserLoginHistory.mockResolvedValue({ items: [], total: 0 })
+    mocks.api.getUserIdentitySessions.mockResolvedValue({ items: [], total: 0 })
+    mocks.api.resetUserPassword.mockReset()
+  })
+
+  it('rejects missing or mismatched confirmation, sends only the exact new password, and clears on success', async () => {
+    const state = useAdminUsers()
+    state.openUser(user())
+    state.openResetPassword()
+    await state.resetUserPassword()
+    expect(mocks.api.resetUserPassword).not.toHaveBeenCalled()
+    state.resetPasswordForm.newPassword = ' New-Password-123 '
+    state.resetPasswordForm.confirmation = 'different'
+    await state.resetUserPassword()
+    expect(state.resetPasswordError.value).toBe('Passwords do not match.')
+    state.resetPasswordForm.confirmation = state.resetPasswordForm.newPassword
+    mocks.api.resetUserPassword.mockResolvedValue({ success: true, message: 'Password reset.' })
+    await state.resetUserPassword()
+    expect(mocks.api.resetUserPassword).toHaveBeenCalledWith(user().userId, ' New-Password-123 ')
+    expect(state.resetPasswordTarget.value).toBeNull()
+    expect(state.resetPasswordForm).toEqual({ newPassword: '', confirmation: '' })
+  })
+
+  it('blocks duplicate submissions, fixes the target, and ignores old completions after switching accounts', async () => {
+    const state = useAdminUsers()
+    state.openUser(user())
+    state.openResetPassword()
+    state.resetPasswordForm.newPassword = state.resetPasswordForm.confirmation = 'First-Password-123'
+    let resolve!: (value: unknown) => void
+    mocks.api.resetUserPassword.mockReturnValue(new Promise(r => { resolve = r }))
+    const pending = state.resetUserPassword()
+    await state.resetUserPassword()
+    expect(mocks.api.resetUserPassword).toHaveBeenCalledTimes(1)
+    state.openUser(user({ userId: 'second', username: 'second' }))
+    expect(state.resetPasswordForm.newPassword).toBe('')
+    state.openResetPassword()
+    state.resetPasswordForm.newPassword = 'Second-Password-456'
+    resolve({ success: true })
+    await pending
+    expect(state.resetPasswordTarget.value?.userId).toBe('second')
+    expect(state.resetPasswordForm.newPassword).toBe('Second-Password-456')
+    expect(state.resetPasswordSaving.value).toBe(false)
+  })
+
+  it('shows the standard failure and clears on cancel, close and opening a non-password account', async () => {
+    const state = useAdminUsers()
+    state.openUser(user())
+    state.openResetPassword()
+    state.resetPasswordForm.newPassword = state.resetPasswordForm.confirmation = 'New-Password-123'
+    mocks.api.resetUserPassword.mockRejectedValue(new Error('Reset unavailable.'))
+    await state.resetUserPassword()
+    expect(state.resetPasswordError.value).toBe('Reset unavailable.')
+    expect(state.resetPasswordSaving.value).toBe(false)
+    state.closeResetPassword()
+    expect(state.resetPasswordForm.newPassword).toBe('')
+    state.openResetPassword()
+    state.resetPasswordForm.newPassword = 'Discard-Password-123'
+    state.closeUserDrawer()
+    expect(state.resetPasswordTarget.value).toBeNull()
+    expect(state.resetPasswordForm.newPassword).toBe('')
+    state.openUser(user({ hasPassword: false }))
+    state.openResetPassword()
+    expect(state.resetPasswordTarget.value).toBeNull()
   })
 })

@@ -2,6 +2,8 @@ using System.Text.Json.Serialization;
 
 namespace SignaCore.Host.Models;
 
+public record AdminResetPasswordRequest(string? NewPassword);
+
 // Requests and responses used only by the admin console (/api/admin/*). See ApiModels.cs for
 // common responses shared by all three API surfaces.
 

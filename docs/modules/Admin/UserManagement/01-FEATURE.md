@@ -3,6 +3,8 @@
 ## Purpose
 
 Administrators create, inspect, update, and deactivate local, phone, and LDAP-backed user accounts.
+They can also manually reset a unique local password from account details without its old password,
+while keeping existing sessions, tokens, disabled status, and login locks.
 
 ## Primary interface
 

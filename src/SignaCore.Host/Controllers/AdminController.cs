@@ -183,6 +183,54 @@ public class AdminController : ControllerBase
             account.CreatedAt.ToUnixTimeSeconds()));
     }
 
+    [HttpPost("users/{userId:guid}/reset-password")]
+    [Authorize(Policy = "AdminSession")]
+    public async Task<IActionResult> ResetUserPassword(
+        Guid userId,
+        [FromBody] AdminResetPasswordRequest request,
+        [FromServices] IPasswordPolicy passwordPolicy,
+        [FromServices] IPasswordHasher passwordHasher,
+        [FromServices] IAccountRepository accountRepository,
+        [FromServices] IPasswordCredentialRepository passwordCredentialRepository,
+        [FromServices] IUnitOfWork unitOfWork,
+        [FromServices] IManagementAuditWriter auditWriter,
+        [FromServices] IdentityDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.NewPassword))
+            return BadRequest(new ErrorResponse("New password cannot be empty."));
+        if (!passwordPolicy.Validate(request.NewPassword, out var policyError))
+            return BadRequest(new ErrorResponse(policyError));
+
+        var (actorId, actorName) = GetAdminIdentity();
+        var strategy = dbContext.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async operationToken =>
+        {
+            dbContext.ChangeTracker.Clear();
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(operationToken);
+            if (await accountRepository.GetByIdAsync(userId, operationToken) == null)
+                return (IActionResult)NotFound(new ErrorResponse("User not found."));
+            var credentials = await passwordCredentialRepository.GetUpToTwoByAccountIdAsync(userId, operationToken);
+            if (credentials.Count == 0)
+                return BadRequest(new ErrorResponse("User has no local password credential."));
+            if (credentials.Count != 1)
+                return Conflict(new ErrorResponse("User has multiple local password credentials."));
+
+            var affected = await passwordCredentialRepository.UpdatePasswordHashAsync(
+                credentials[0].Id, passwordHasher.HashPassword(request.NewPassword), operationToken);
+            if (affected != 1)
+                throw new DbUpdateConcurrencyException("Password credential changed during reset.");
+            await ManagementActionAudit.RecordAsync(
+                auditWriter, ManagementActionAudit.AdminSource,
+                "admin_password_reset", "Account", userId.ToString(),
+                actorId, actorName, "Admin reset local password", GetClientIp(), HttpContext.GetCorrelationId(),
+                cancellationToken: operationToken);
+            await unitOfWork.SaveChangesAsync(operationToken);
+            await transaction.CommitAsync(operationToken);
+            return Ok(new OperationResponse(true, "Password reset."));
+        }, cancellationToken);
+    }
+
     [HttpPost("users/phone")]
     [Authorize(Policy = "AdminSession")]
     public async Task<IActionResult> CreatePhoneUser(
