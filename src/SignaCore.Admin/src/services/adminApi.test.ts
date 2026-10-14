@@ -423,3 +423,15 @@ describe('getErrorMessage', () => {
     expect(getErrorMessage({ secret: 'do-not-render' })).toBe('Unknown error occurred.')
   })
 })
+
+
+it('posts only the exact new password to the captured administrator reset target', async () => {
+  const client = createAdminApiClient()
+  mocks.http.post.mockResolvedValue({ data: { success: true, message: 'Password reset.' } })
+  expect(await client.resetUserPassword('target-id', ' Exact-Password-123 ')).toEqual({
+    success: true, message: 'Password reset.',
+  })
+  expect(mocks.http.post).toHaveBeenCalledWith('/api/admin/users/target-id/reset-password', {
+    newPassword: ' Exact-Password-123 ',
+  })
+})
