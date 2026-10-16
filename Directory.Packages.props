@@ -39,6 +39,10 @@
     <PackageVersion Include="Swashbuckle.AspNetCore" Version="10.3.0" />
     <PackageVersion Include="System.DirectoryServices.Protocols" Version="10.0.13" />
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.23.0" />
+    <!-- Overrides the 10.0.11 that Microsoft.AspNetCore.DataProtection (via
+         ServiceMantle.Persistence.Relational) resolves transitively; see issue #592. -->
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.13" />
     <PackageVersion Include="TencentCloudSDK.Sms" Version="3.0.1499" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.16.0" />
     <PackageVersion Include="xunit.v3" Version="4.0.2" />
