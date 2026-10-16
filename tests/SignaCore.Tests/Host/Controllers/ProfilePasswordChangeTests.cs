@@ -27,8 +27,10 @@ namespace SignaCore.Tests.Host.Controllers;
 /// canonical reason <c>password_changed</c> including the caller's own, all interactive families,
 /// all legacy refresh tokens), and the audit row — plus the re-authentication boundary: a wrong
 /// current password is a generic failure on the shared failed-attempt path with no writes, and it
-/// is indistinguishable from an account without a password credential. No plaintext password or
-/// hash may reach the audit snapshot or the response.
+/// is indistinguishable from an account without a password credential. While the credential
+/// username is under a login lockout, the current password is never verified — the same generic
+/// failure runs on the decoy workload alone and the lockout is neither extended nor cleared. No
+/// plaintext password or hash may reach the audit snapshot or the response.
 /// </summary>
 public sealed class ProfilePasswordChangeTests
 {
@@ -153,6 +155,117 @@ public sealed class ProfilePasswordChangeTests
     }
 
     [Fact]
+    public async Task ChangePassword_WhileTheUsernameIsLockedOut_RejectsTheCorrectCurrentPasswordWithoutVerifyingIt()
+    {
+        await using var database = await MigratedSqliteTestDatabase.CreateAsync();
+        var seed = await SeedAsync(database.Context);
+        var lockoutUntil = DateTimeOffset.UtcNow.AddMinutes(IdentityConstants.LoginLockoutMinutes);
+        await SeedLockoutAsync(database.Context, seed.Username,
+            IdentityConstants.MaxFailedLoginAttempts, lockoutUntil);
+        var decoy = new PasswordDecoyHash(new PasswordHasherOptions { WorkFactor = 4 });
+        var hasher = new RecordingPasswordHasher(FastHasher());
+
+        var result = await InvokeAsync(database.Context, seed.AccountId, hasher,
+            new EfCoreManagementAuditWriter<IdentityDbContext>(database.Context),
+            new ChangePasswordRequest(CurrentPassword, NewPassword),
+            TestContext.Current.CancellationToken,
+            decoy);
+
+        // The locked branch answers with the same generic failure as a wrong current password.
+        var bad = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("Wrong current password.", Assert.IsType<ErrorResponse>(bad.Value).Message);
+
+        // The real credential hash was never verified: the only BCrypt workload of the request ran
+        // against the decoy hash, exactly like the locked-out branch of password login.
+        var credentialHash = await database.Context.PasswordCredentials.AsNoTracking()
+            .Where(row => row.Id == seed.CredentialId)
+            .Select(row => row.PasswordHash)
+            .SingleAsync(TestContext.Current.CancellationToken);
+        var verifiedHash = Assert.Single(hasher.VerifiedHashes);
+        Assert.Equal(decoy.Value, verifiedHash);
+        Assert.NotEqual(credentialHash, verifiedHash);
+
+        await AssertLockedOutStateUntouchedAsync(database.Context, seed,
+            IdentityConstants.MaxFailedLoginAttempts, lockoutUntil);
+    }
+
+    [Fact]
+    public async Task ChangePassword_WhileTheUsernameIsLockedOut_RejectsAWrongCurrentPasswordWithoutExtendingTheLockout()
+    {
+        await using var database = await MigratedSqliteTestDatabase.CreateAsync();
+        var seed = await SeedAsync(database.Context);
+        var lockoutUntil = DateTimeOffset.UtcNow.AddMinutes(IdentityConstants.LoginLockoutMinutes);
+        await SeedLockoutAsync(database.Context, seed.Username,
+            IdentityConstants.MaxFailedLoginAttempts, lockoutUntil);
+        var decoy = new PasswordDecoyHash(new PasswordHasherOptions { WorkFactor = 4 });
+        var hasher = new RecordingPasswordHasher(FastHasher());
+
+        var result = await InvokeAsync(database.Context, seed.AccountId, hasher,
+            new EfCoreManagementAuditWriter<IdentityDbContext>(database.Context),
+            new ChangePasswordRequest(WrongPassword, NewPassword),
+            TestContext.Current.CancellationToken,
+            decoy);
+
+        var bad = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("Wrong current password.", Assert.IsType<ErrorResponse>(bad.Value).Message);
+
+        // Same decoy-only workload, and the shared counter/lockout are neither incremented nor
+        // extended by the locked branch.
+        Assert.Equal(decoy.Value, Assert.Single(hasher.VerifiedHashes));
+        await AssertLockedOutStateUntouchedAsync(database.Context, seed,
+            IdentityConstants.MaxFailedLoginAttempts, lockoutUntil);
+    }
+
+    [Fact]
+    public async Task ChangePassword_AfterTheLockoutExpires_ChangesThePasswordAsUsual()
+    {
+        await using var database = await MigratedSqliteTestDatabase.CreateAsync();
+        var seed = await SeedAsync(database.Context);
+        var expiredLockout = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await SeedLockoutAsync(database.Context, seed.Username,
+            IdentityConstants.MaxFailedLoginAttempts, expiredLockout);
+        var hasher = FastHasher();
+
+        var result = await InvokeAsync(database.Context, seed.AccountId, hasher,
+            new EfCoreManagementAuditWriter<IdentityDbContext>(database.Context),
+            new ChangePasswordRequest(CurrentPassword, NewPassword),
+            TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var operation = Assert.IsType<OperationResponse>(ok.Value);
+        Assert.True(operation.Success);
+
+        database.Context.ChangeTracker.Clear();
+
+        // The full success contract of the change, identical to the unlocked path.
+        var credential = await database.Context.PasswordCredentials.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.CredentialId, TestContext.Current.CancellationToken);
+        Assert.True(hasher.VerifyPassword(NewPassword, credential.PasswordHash));
+        Assert.False(hasher.VerifyPassword(CurrentPassword, credential.PasswordHash));
+
+        var session = await database.Context.IdentitySessions.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.SessionId, TestContext.Current.CancellationToken);
+        Assert.NotNull(session.RevokedAt);
+        Assert.Equal("password_changed", session.RevocationReason);
+        var familyRoot = await database.Context.RefreshTokens.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.FamilyRootId, TestContext.Current.CancellationToken);
+        Assert.True(familyRoot.IsRevoked);
+        var legacy = await database.Context.RefreshTokens.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.LegacyTokenId, TestContext.Current.CancellationToken);
+        Assert.True(legacy.IsRevoked);
+
+        var audit = Assert.Single(await SharedAuditTable.ReadAsync(
+            database.Context, TestContext.Current.CancellationToken));
+        Assert.Equal("password_changed", audit.Action);
+
+        // A successful change does not clear the shared failed-attempt row (existing behavior).
+        var attempt = await database.Context.LoginAttempts.AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(IdentityConstants.MaxFailedLoginAttempts, attempt.FailedAttempts);
+        Assert.Equal(expiredLockout.UtcDateTime, attempt.LockoutUntil!.Value.UtcDateTime);
+    }
+
+    [Fact]
     public async Task ChangePassword_WithoutAPasswordCredential_IsIndistinguishableFromAWrongPassword()
     {
         await using var database = await MigratedSqliteTestDatabase.CreateAsync();
@@ -240,7 +353,8 @@ public sealed class ProfilePasswordChangeTests
         IPasswordHasher hasher,
         IManagementAuditWriter audit,
         ChangePasswordRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PasswordDecoyHash? decoyHash = null)
     {
         var controller = CreateController(CreateAuthenticatedUser(accountId));
         controller.HttpContext.Connection.RemoteIpAddress = IPAddress.Parse("192.0.2.46");
@@ -251,7 +365,7 @@ public sealed class ProfilePasswordChangeTests
             new PasswordCredentialRepository(context),
             hasher,
             new DefaultPasswordPolicy(),
-            new PasswordDecoyHash(new PasswordHasherOptions { WorkFactor = 4 }),
+            decoyHash ?? new PasswordDecoyHash(new PasswordHasherOptions { WorkFactor = 4 }),
             new LoginAttemptRepository(context),
             new IdentitySessionRepository(context),
             new RefreshTokenFamilyStore(
@@ -391,6 +505,80 @@ public sealed class ProfilePasswordChangeTests
         else
         {
             Assert.Empty(attempts);
+        }
+    }
+
+    /// <summary>Seeds the shared <c>LoginAttempt</c> row for the credential username in the exact
+    /// state the login paths leave behind after the lockout threshold.</summary>
+    private static async Task SeedLockoutAsync(
+        IdentityDbContext context,
+        string username,
+        int failedAttempts,
+        DateTimeOffset lockoutUntil)
+    {
+        context.LoginAttempts.Add(new LoginAttemptEntity
+        {
+            Id = Guid.NewGuid(),
+            Username = username,
+            UsernameNormalized = IdentityValueNormalizer.Normalize(username),
+            LastAttemptAt = DateTimeOffset.UtcNow,
+            FailedAttempts = failedAttempts,
+            LockoutUntil = lockoutUntil
+        });
+        await context.SaveChangesAsync(TestContext.Current.CancellationToken);
+        context.ChangeTracker.Clear();
+    }
+
+    /// <summary>The locked-out rejection wrote nothing: the hash, sessions, families, legacy tokens,
+    /// audit table, and the shared failed-attempt/lockout row are all byte-for-byte unchanged.
+    /// </summary>
+    private static async Task AssertLockedOutStateUntouchedAsync(
+        IdentityDbContext context,
+        Seed seed,
+        int expectedFailedAttempts,
+        DateTimeOffset expectedLockoutUntil)
+    {
+        context.ChangeTracker.Clear();
+        var hasher = FastHasher();
+
+        var credential = await context.PasswordCredentials.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.CredentialId, TestContext.Current.CancellationToken);
+        Assert.True(hasher.VerifyPassword(CurrentPassword, credential.PasswordHash));
+        Assert.False(hasher.VerifyPassword(NewPassword, credential.PasswordHash));
+
+        var session = await context.IdentitySessions.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.SessionId, TestContext.Current.CancellationToken);
+        Assert.Null(session.RevokedAt);
+        var familyRoot = await context.RefreshTokens.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.FamilyRootId, TestContext.Current.CancellationToken);
+        Assert.False(familyRoot.IsRevoked);
+        var legacy = await context.RefreshTokens.AsNoTracking()
+            .SingleAsync(row => row.Id == seed.LegacyTokenId, TestContext.Current.CancellationToken);
+        Assert.False(legacy.IsRevoked);
+
+        Assert.Empty(await SharedAuditTable.ReadAsync(context, TestContext.Current.CancellationToken));
+
+        var attempt = await context.LoginAttempts.AsNoTracking()
+            .SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(IdentityValueNormalizer.Normalize(seed.Username), attempt.UsernameNormalized);
+        Assert.Equal(expectedFailedAttempts, attempt.FailedAttempts);
+        Assert.Equal(expectedLockoutUntil.UtcDateTime, attempt.LockoutUntil!.Value.UtcDateTime);
+    }
+
+    /// <summary>A test double that records every hash it is asked to verify, so a test can prove
+    /// which BCrypt workloads a request actually performed.</summary>
+    private sealed class RecordingPasswordHasher(IPasswordHasher inner) : IPasswordHasher
+    {
+        private readonly List<string> _verifiedHashes = [];
+
+        public IReadOnlyList<string> VerifiedHashes => _verifiedHashes;
+
+        public string HashPassword(string password) => inner.HashPassword(password);
+
+        public bool VerifyPassword(string password, string hash)
+        {
+            _verifiedHashes.Add(hash);
+            return inner.VerifyPassword(password, hash);
         }
     }
 
