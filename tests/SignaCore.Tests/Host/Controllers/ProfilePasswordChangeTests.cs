@@ -262,7 +262,9 @@ public sealed class ProfilePasswordChangeTests
         var attempt = await database.Context.LoginAttempts.AsNoTracking()
             .SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal(IdentityConstants.MaxFailedLoginAttempts, attempt.FailedAttempts);
-        Assert.Equal(expiredLockout.UtcDateTime, attempt.LockoutUntil!.Value.UtcDateTime);
+        // Both providers persist timestamps with microsecond precision; compare at that
+        // contract rather than the raw 100ns clock ticks.
+        Assert.Equal(expiredLockout.UtcTicks / 10, attempt.LockoutUntil!.Value.UtcTicks / 10);
     }
 
     [Fact]
@@ -562,7 +564,9 @@ public sealed class ProfilePasswordChangeTests
             .SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal(IdentityValueNormalizer.Normalize(seed.Username), attempt.UsernameNormalized);
         Assert.Equal(expectedFailedAttempts, attempt.FailedAttempts);
-        Assert.Equal(expectedLockoutUntil.UtcDateTime, attempt.LockoutUntil!.Value.UtcDateTime);
+        // Both providers persist timestamps with microsecond precision; compare at that
+        // contract rather than the raw 100ns clock ticks.
+        Assert.Equal(expectedLockoutUntil.UtcTicks / 10, attempt.LockoutUntil!.Value.UtcTicks / 10);
     }
 
     /// <summary>A test double that records every hash it is asked to verify, so a test can prove
