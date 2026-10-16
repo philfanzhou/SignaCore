@@ -15,5 +15,9 @@
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
     <!-- Shared ServiceMantle installation/audit persistence, pinned to the audited release. -->
     <PackageReference Include="ServiceMantle.Persistence.Relational" />
+    <!-- Pins the vulnerable 10.0.11 transitive versions resolved through
+         ServiceMantle.Persistence.Relational -> Microsoft.AspNetCore.DataProtection; see issue #592. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
+    <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 </Project>
