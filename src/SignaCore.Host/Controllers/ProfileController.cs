@@ -84,7 +84,11 @@ public class ProfileController : ControllerBase
     /// Already-issued self-contained access/ID tokens are not remotely revoked and stay valid to
     /// <c>exp</c>, matching the existing <c>EV-08</c>/<c>EV-09</c>/<c>EV-11</c> non-guarantee.
     /// A wrong current password is indistinguishable from an account without a password
-    /// credential and enters the shared failed-attempt/lockout path.
+    /// credential and enters the shared failed-attempt/lockout path. While the credential's
+    /// username is under a login lockout, the current password is not verified at all: the
+    /// request fails with the same generic response after the same decoy BCrypt workload, so a
+    /// holder of a valid access token cannot outlast the lockout by guessing through this
+    /// endpoint.
     /// </summary>
     [HttpPost("password")]
     public async Task<IActionResult> ChangePassword(
@@ -120,6 +124,20 @@ public class ProfileController : ControllerBase
             // The decoy verification keeps this branch on the same BCrypt workload as the
             // wrong-password branch, and the generic failure never reveals that this account
             // carries no password credential.
+            _ = passwordHasher.VerifyPassword(request.CurrentPassword, decoyHash.Value);
+            return BadRequest(new ErrorResponse(genericFailure));
+        }
+
+        // The shared login-lockout state gates the re-authentication itself: while the credential's
+        // username is locked out, the real current password is never verified — only the decoy BCrypt
+        // workload runs, exactly like the locked-out branch of password login — so the failure stays
+        // indistinguishable from a wrong password and a token holder cannot keep guessing through
+        // this endpoint. Like password login, the locked branch records nothing: the lockout is
+        // neither extended nor cleared, and no hash, revocation, or audit write happens.
+        var loginAttempt = await loginAttemptRepository.GetByUsernameAsync(
+            credential.Username, cancellationToken);
+        if (loginAttempt?.LockoutUntil != null && loginAttempt.LockoutUntil > DateTimeOffset.UtcNow)
+        {
             _ = passwordHasher.VerifyPassword(request.CurrentPassword, decoyHash.Value);
             return BadRequest(new ErrorResponse(genericFailure));
         }

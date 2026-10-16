@@ -20,7 +20,10 @@ namespace SignaCore.Tests.Integration;
 /// identity session (reason <c>password_changed</c>), interactive family, and legacy refresh token
 /// of the account is revoked in the same committed transaction, the new password logs in and the
 /// old one does not, an already-issued access token still validates to <c>exp</c>, and neither a
-/// plaintext password nor a hash reaches the logs, the audit snapshot, or any response.
+/// plaintext password nor a hash reaches the logs, the audit snapshot, or any response. Five wrong
+/// current passwords lock the username through the shared failed-attempt counter, after which the
+/// change is rejected with the same generic failure without verifying even a correct current
+/// password, and password login of the same username is locked by the same counter.
 /// </summary>
 [Collection(SqliteProcessState.CollectionName)]
 [UsesProcessWideSqlitePoolClearing]
@@ -117,6 +120,72 @@ public sealed class ProfilePasswordChangeTests : IClassFixture<IdentityServerFix
                     TestContext.Current.CancellationToken);
             Assert.Equal(1, attempt.FailedAttempts);
 
+            var credential = await context.PasswordCredentials.AsNoTracking()
+                .SingleAsync(row => row.Id == seed.CredentialId, TestContext.Current.CancellationToken);
+            Assert.True(BCrypt.Net.BCrypt.Verify(OldPassword, credential.PasswordHash));
+            Assert.False(BCrypt.Net.BCrypt.Verify(NewPassword, credential.PasswordHash));
+
+            var sessions = await context.IdentitySessions.AsNoTracking()
+                .Where(row => row.AccountId == seed.AccountId)
+                .ToListAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(2, sessions.Count);
+            Assert.All(sessions, session => Assert.Null(session.RevokedAt));
+
+            Assert.Empty((await SharedSettingTestDatabase.LoadSharedAuditRowsAsync(
+                    context, TestContext.Current.CancellationToken))
+                .Where(row => row.Action == "password_changed"
+                    && row.TargetId == seed.AccountId.ToString()));
+        });
+    }
+
+    [Fact]
+    public async Task ChangePassword_FiveWrongAttempts_LockOutBothTheChangeAndPasswordLogin()
+    {
+        var seed = await SeedAccountAsync();
+        var token = await GetUserTokenAsync(seed.Username, OldPassword);
+
+        using var http = _fixture.CreateHttpClient();
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        // Five wrong current passwords exhaust the shared failed-attempt budget, exactly like
+        // five wrong logins, and lock the username.
+        for (var attempt = 1; attempt <= IdentityConstants.MaxFailedLoginAttempts; attempt++)
+        {
+            using var response = await http.PostAsJsonAsync(
+                "/api/profile/password",
+                new { currentPassword = WrongPassword, newPassword = NewPassword },
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var error = await response.Content.ReadFromJsonAsync<JsonElement>(
+                cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal("Wrong current password.", error.GetProperty("message").GetString());
+        }
+
+        // The sixth attempt carries the correct current password, but the lockout now gates the
+        // re-authentication: the same generic failure, no credential change — and password login
+        // with the same (correct) password is locked by the very same counter.
+        using var locked = await http.PostAsJsonAsync(
+            "/api/profile/password",
+            new { currentPassword = OldPassword, newPassword = NewPassword },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, locked.StatusCode);
+        var lockedError = await locked.Content.ReadFromJsonAsync<JsonElement>(
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal("Wrong current password.", lockedError.GetProperty("message").GetString());
+        Assert.False(await LoginSucceedsAsync(seed.Username, OldPassword));
+
+        await AssertDbAsync(async context =>
+        {
+            // The locked branch recorded nothing on top of the five counted failures.
+            var attempt = await context.LoginAttempts.AsNoTracking()
+                .SingleAsync(row => row.UsernameNormalized
+                    == IdentityValueNormalizer.Normalize(seed.Username),
+                    TestContext.Current.CancellationToken);
+            Assert.Equal(IdentityConstants.MaxFailedLoginAttempts, attempt.FailedAttempts);
+            Assert.NotNull(attempt.LockoutUntil);
+            Assert.True(attempt.LockoutUntil > DateTimeOffset.UtcNow);
+
+            // The stored hash is untouched, nothing was revoked, and no audit row exists.
             var credential = await context.PasswordCredentials.AsNoTracking()
                 .SingleAsync(row => row.Id == seed.CredentialId, TestContext.Current.CancellationToken);
             Assert.True(BCrypt.Net.BCrypt.Verify(OldPassword, credential.PasswordHash));
