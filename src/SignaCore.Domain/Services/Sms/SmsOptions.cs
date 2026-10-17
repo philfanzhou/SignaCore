@@ -15,7 +15,7 @@ public class SmsOptions
 
     /// <summary>
     /// SMS bypass code for development/staging. Empty or null = bypass disabled (production-safe default).
-    /// Set via Sms:BypassCode in configuration or SMS_BYPASS_CODE environment variable.
+    /// Set via Sms:BypassCode in configuration.
     /// </summary>
     public string? BypassCode { get; set; }
 
@@ -23,8 +23,7 @@ public class SmsOptions
     /// The allow-list of phone numbers that may use <see cref="BypassCode"/>.
     /// An empty list means the bypass is disabled entirely, even when <see cref="BypassCode"/> is
     /// configured.
-    /// Set via Sms:BypassPhones (a JSON array or a comma-separated string) or the SMS_BYPASS_PHONES
-    /// environment variable.
+    /// Set via Sms:BypassPhones (a JSON array or a comma-separated string).
     /// Case-insensitive rules do not apply to phone numbers: they are compared as written, using
     /// Ordinal comparison, with leading and trailing whitespace removed.
     /// </summary>

@@ -152,9 +152,12 @@ public static class ServiceCollectionExtensions
 
         // ---- SMS OTP Services ----
         var smsOptions = configuration.GetSection(SmsOptions.SectionName).Get<SmsOptions>() ?? new SmsOptions();
-        smsOptions.BypassCode = configuration["Sms:BypassCode"] ?? Environment.GetEnvironmentVariable("SMS_BYPASS_CODE");
+        // The database-projected configuration is the only source; the retired flat-named
+        // environment variables (SMS_BYPASS_CODE, SMS_OTP_HMAC_KEY, SMS_BYPASS_PHONES) are
+        // reported by LegacyConfigurationGuard instead of being read here.
+        smsOptions.BypassCode = configuration["Sms:BypassCode"];
         smsOptions.BypassPhones = ResolveBypassPhones(configuration);
-        smsOptions.OtpHmacKey = configuration["Sms:OtpHmacKey"] ?? Environment.GetEnvironmentVariable("SMS_OTP_HMAC_KEY");
+        smsOptions.OtpHmacKey = configuration["Sms:OtpHmacKey"];
         if (environment.IsDevelopment() && string.IsNullOrWhiteSpace(smsOptions.OtpHmacKey))
             smsOptions.OtpHmacKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
         if (environment.IsDevelopment() && smsOptions.Profiles.Count == 0)
@@ -725,8 +728,9 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Resolves the SMS bypass allow-list. Consul KV holds a JSON array and an environment variable
-    /// holds a comma-separated string; both are supported.
+    /// Resolves the SMS bypass allow-list. The configuration section holds either a JSON array
+    /// (as the database snapshot and Consul KV provide) or a comma-separated string; both forms
+    /// are supported.
     /// An empty list is returned when it is not configured, and then <c>SmsValidator</c> admits no
     /// number at all, even with a BypassCode configured.
     /// </summary>
@@ -736,7 +740,7 @@ public static class ServiceCollectionExtensions
 
         var rawValues = section.GetChildren().Any()
             ? section.Get<string[]>() ?? []
-            : (section.Value ?? Environment.GetEnvironmentVariable("SMS_BYPASS_PHONES") ?? string.Empty)
+            : (section.Value ?? string.Empty)
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         return rawValues
