@@ -232,15 +232,21 @@ scrape_configs:
         secrets: ["<the scraper application's secret>"]
 ```
 
-OTLP export is enabled only for an absolute `https` endpoint; traces are exported over gRPC without
-an authentication header, and metrics are never pushed through OTLP. The management API rejects an
-`http` endpoint and one with user info, a query, or a fragment. Changes take effect after a restart.
+OTLP export is enabled for any absolute `http` or `https` endpoint without user info, query, or
+fragment — the scheme is a deployment decision, exactly like the Loki endpoint. Traces are
+exported over gRPC without an authentication header, and metrics are never pushed through OTLP.
+The management API rejects an endpoint that is not an absolute `http`/`https` URL or one that
+carries user info, a query, or a fragment; both schemes are accepted equally. Changes take effect
+after a restart.
 
-**Upgrading.** A plain-HTTP `OpenTelemetry:OtlpEndpoint` stored by an older release does not stop
-the service: OTLP stays off and the start writes one warning that does not contain the address.
-Set an `https` endpoint and restart. Until it is corrected, saving any other setting is also
-refused, because every update validates the complete candidate. Existing Prometheus jobs must add
-the credential headers above; anonymous scrapes now get `401`.
+**Upgrading.** A stored endpoint OTLP cannot use structurally does not stop the service: OTLP
+stays off and the start writes one warning that does not contain the address. Correct the value
+on the settings page and restart; until then, saving other settings still works (the recovery
+boundary keeps an untouched unusable endpoint), while explicitly touching
+`OpenTelemetry:OtlpEndpoint` applies the full rules. A plain-`http` endpoint stored by an older
+release has been a first-class usable endpoint since the ServiceMantle 0.3.2 upgrade — no action
+is needed. Existing Prometheus jobs must add the credential headers above; anonymous scrapes now
+get `401`.
 
 **Rolling back.** Roll back the binary: nothing is persisted by this change and no setting key was
 added, so the older release serves the anonymous `/metrics` endpoint again. A Prometheus job can
@@ -359,6 +365,11 @@ See [Consul integration](./ConsulIntegration.md).
 | `Bootstrap:FilePath` | launcher | Optional bootstrap file override |
 | `BootstrapApps:FilePath` | appsettings | Optional application pre-seed file |
 | `Logging:LogLevel` | appsettings | Log category levels; the Loki address and credential come from the database settings |
+
+This minimal external surface — the bootstrap file, the listening port, and per-instance
+overrides only — is the recorded boundary of
+[ADR 0009](../adr/0009-minimal-external-configuration.md): a deployment still supplying managed
+keys externally gets one startup warning per key or variable name instead of a refused start.
 
 The launcher's `APP_TITLE` environment variable no longer titles the running console: the managed
 `APP_TITLE` setting above owns the title once a settings snapshot exists. The variable still

@@ -14,7 +14,7 @@ SignaCore is a .NET 10 identity and authentication service. It centralizes accou
 - PostgreSQL and SQLite through EF Core provider-specific migrations
 - Database-backed global configuration with web-based first-run setup
 - Optional Consul service discovery
-- OpenTelemetry, Prometheus, sanitized structured logging through the ServiceMantle Serilog pipeline, and optional authenticated Loki export (HTTPS by default, with explicit opt-ins for plain HTTP and no authentication)
+- OpenTelemetry, Prometheus, sanitized structured logging through the ServiceMantle Serilog pipeline, and optional Loki export over `http` or `https` (the scheme is a deployment decision), with an explicit no-authentication opt-in
 
 ## Repository layout
 
@@ -34,7 +34,7 @@ SignaCore is a .NET 10 identity and authentication service. It centralizes accou
 
 Requirements: .NET SDK 10, Node.js 22.12+, 24+, or 26+ with npm for the admin UI, and Docker for the container smoke test.
 
-SignaCore pins all eight ServiceMantle packages to the official `0.3.2` release: the core package, `Web`,
+SignaCore pins all eight ServiceMantle packages to the official `0.3.3` release: the core package, `Web`,
 `Discovery`, `Logging`, `Diagnostics`, `Persistence.Relational`, and the PostgreSQL/SQLite
 providers. Upgrade or roll back the complete binaries together; do not mix the retired adapter
 assemblies with capability-named assemblies. This package migration adds no database migration:
@@ -104,12 +104,17 @@ file at `/app/config/signacore.bootstrap.json`: the database provider, server ve
 string, plus the inline external root key. The whole file is a mode-`0600` secret on persistent
 storage and must be backed up with the database.
 
-An optional [private-network HTTP testing policy](docs/oidc/HttpTesting.md) is available
-through the shared `security.hosted_login_http_test_origins` JSON setting (missing/`[]` disables it).
-A nonempty list requires the actual `Testing` Host environment and restart. Exact allowlisted HTTP callback/logout registration and current-policy runtime revalidation are
-supported, together with the isolated HTTP identity/CSRF Cookie carrier at exact allowed request
-origins. Both stages are implemented; official dual-end published-image/browser release acceptance
-remains pending. HTTPS defaults remain in force.
+Plain-HTTP deployments are a deployment decision
+([ADR 0008](docs/adr/0008-transport-security-is-a-deployment-decision.md)): `http` and `https`
+redirect URIs, public base URLs, and issuers are accepted equally in every environment, and the
+former private-network HTTP testing allowlist (`security.hosted_login_http_test_origins`) and its
+`Testing` environment gate are retired. See [plain-HTTP deployments](docs/oidc/HttpTesting.md);
+terminate TLS in front of the service for public deployments.
+
+The external configuration stays minimal — the bootstrap file, the first-install facts, and the
+listening port; per-instance environment variables only override managed values, and a deployment
+still supplying managed keys externally gets warnings instead of startup failures
+([ADR 0009](docs/adr/0009-minimal-external-configuration.md)).
 
 Important defaults, all stored in the database and editable after installation:
 
@@ -119,7 +124,7 @@ Important defaults, all stored in the database and editable after installation:
 | `Jwt:Issuer` | the normalized public base URL |
 | `Jwt:Audience` | `SignaCore.Services` |
 | `Consul:Discovery:Enabled` | `false` |
-| `APP_TITLE` (launcher) | `SignaCore` |
+| `app.title` | `SignaCore` (the launcher `APP_TITLE` labels only the bootstrap and setup pages) |
 
 See [configuration](docs/development/Configuration.md) for the full catalog.
 

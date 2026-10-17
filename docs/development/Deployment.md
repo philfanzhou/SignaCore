@@ -259,7 +259,8 @@ A pending-setup instance is live but not ready, so it never receives authenticat
   [Consul integration](./ConsulIntegration.md).
 - Scrape `/metrics` with a dedicated registered application's `X-Admin-AppId` / `X-Admin-AppSecret`
   headers (see [Configuration](./Configuration.md#metrics-and-traces)) and connect logs/traces to
-  the chosen observability backend; an OTLP collector must be reached over HTTPS.
+  the chosen observability backend; the OTLP endpoint accepts `http` and `https` alike, so
+  protect the collector link at the infrastructure level when needed.
 - Remove legacy application-setting environment variables from the launcher; startup logs any that
   remain.
 - Run the verification steps after deployment.
