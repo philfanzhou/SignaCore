@@ -46,7 +46,7 @@ export const adminSettingsSections: AdminSettingsSection[] = [
     key: "settings-identity",
     label: "域名与令牌",
     description: "配置公开地址、JWT、刷新令牌及密码哈希策略。",
-    prefixes: ["endpoints", "jwt", "refresh_token", "password_hasher", "security"],
+    prefixes: ["endpoints", "jwt", "refresh_token", "password_hasher"],
   },
   {
     key: "settings-admin",
