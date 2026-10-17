@@ -1,36 +1,36 @@
-> 正文一律用中文填写。标题使用英文 conventional commit 格式（`feat:` / `fix:` / `docs:` …）。
+> Always write the body in English. Use the English conventional commit format for the title (`feat:` / `fix:` / `docs:` ...).
 
-## 概述
+## Overview
 
-说明要解决的问题和本次改动。
+Explain the problem being solved and what this change does.
 
 Closes #
 
-## 范围
+## Scope
 
-引用所链接 issue 的“范围”，并逐项交代：
+Quote the "Scope" section of the linked issue and account for every item:
 
-- **范围内，已完成：**
+- **In scope, completed:**
 
-## 行为保证与兼容性
+## Behavior guarantees and compatibility
 
-- **保证与不保证的内容：** 是否与 issue 一致；不适用写“无”。
-- **HTTP API、JSON、claims、JWT/JWKS 与认证：**
-- **PostgreSQL/SQLite schema、migration 与数据：**
-- **配置、管理端、容器与部署：**
-- **英文使用者文档：**
+- **What is and is not guaranteed:** whether it matches the issue; write "None" if not applicable.
+- **HTTP API, JSON, claims, JWT/JWKS, and authentication:**
+- **PostgreSQL/SQLite schema, migrations, and data:**
+- **Configuration, admin console, containers, and deployment:**
+- **English user-facing documentation:**
 
-没有影响的项目写“无”。
+Write "None" for items with no impact.
 
-## 验证
+## Verification
 
-列出实际执行的命令、结果和跳过原因：
+List the commands actually run, their results, and any skips with reasons:
 
-- [ ] .NET Release 构建通过
-- [ ] 单元测试通过
-- [ ] 适用的 HTTP/认证/数据库集成测试通过
-- [ ] 适用的 PostgreSQL 与 SQLite migration/contract 验证通过
-- [ ] 管理端测试与生产构建通过
-- [ ] 涉及容器或部署时，镜像和 smoke test 通过
-- [ ] 行为、配置或用法变化时，英文文档已同步
-- [ ] 不包含密钥、连接字符串、凭据、token 或私有数据
+- [ ] .NET Release build passes
+- [ ] Unit tests pass
+- [ ] Applicable HTTP/auth/database integration tests pass
+- [ ] Applicable PostgreSQL and SQLite migration/contract checks pass
+- [ ] Admin console tests and production build pass
+- [ ] When containers or deployment are involved, image and smoke tests pass
+- [ ] When behavior, configuration, or usage changes, English documentation is updated in step
+- [ ] No secrets, connection strings, credentials, tokens, or private data included
