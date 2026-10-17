@@ -355,7 +355,7 @@ See [Consul integration](./ConsulIntegration.md).
 
 | Key | Owner | Notes |
 | --- | --- | --- |
-| `Endpoints:Http` | appsettings / launcher | Container HTTP port; a deployment concern |
+| `Endpoints:Http` | launcher | Listening HTTP port; defaults to `5002`, override with `Endpoints__Http` |
 | `Bootstrap:FilePath` | launcher | Optional bootstrap file override |
 | `BootstrapApps:FilePath` | appsettings | Optional application pre-seed file |
 | `Logging:LogLevel` | appsettings | Log category levels; the Loki address and credential come from the database settings |
