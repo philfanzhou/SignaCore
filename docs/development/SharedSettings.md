@@ -44,8 +44,8 @@ aggregate; nothing that reads or publishes a runtime snapshot is composed before
 
 Every legacy database-backed key maps to exactly one normalized key: `:` becomes `.`, and
 PascalCase segments become snake_case, for example `Endpoints:PublicBaseUrl` →
-`endpoints.public_base_url`, `Consul:Discovery:PreferIPAddress` →
-`consul.discovery.prefer_ip_address`. The full pinned table lives in `SharedSettingKeys.cs` and is
+`endpoints.public_base_url`, `Consul:Discovery:HealthScheme` →
+`consul.discovery.health_scheme`. The full pinned table lives in `SharedSettingKeys.cs` and is
 asserted entry by entry against fixed expected values in
 `SharedSettingDefinitionMappingTests`, together with the authoritative definition table in
 `ServiceSettingDefinitions` (the legacy catalog it replaced was removed by ServiceMantle task

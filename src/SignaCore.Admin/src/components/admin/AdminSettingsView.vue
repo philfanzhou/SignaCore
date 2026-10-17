@@ -120,7 +120,7 @@ const settingLabels: Record<string, string> = {
   "consul.discovery.deregister": "停止时注销",
   "consul.discovery.service_name": "服务名称",
   "consul.discovery.health_check_path": "健康检查路径",
-  "consul.discovery.prefer_ip_address": "优先使用 IP 地址",
+  "consul.discovery.health_scheme": "健康检查协议（http/https）",
   "consul.discovery.ip_address": "注册 IP 地址",
   "consul.discovery.port": "注册端口",
 };

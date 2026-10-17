@@ -642,7 +642,10 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
             definitions.Select(item => item.GetProperty("key").GetString()).ToList(),
             definitions.Select(item => item.GetProperty("key").GetString())
                 .OrderBy(key => key, StringComparer.Ordinal).ToList());
+        // The retired prefer-IP switch left the catalog; the managed health scheme joined it (#594).
         Assert.Contains(definitions, item =>
+            item.GetProperty("key").GetString() == "consul.discovery.health_scheme");
+        Assert.DoesNotContain(definitions, item =>
             item.GetProperty("key").GetString() == "consul.discovery.prefer_ip_address");
         Assert.DoesNotContain(definitions, item =>
             (item.GetProperty("key").GetString() ?? string.Empty).Contains(':'));

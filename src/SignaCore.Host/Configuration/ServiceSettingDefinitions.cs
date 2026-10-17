@@ -81,14 +81,22 @@ internal sealed record ProductSettingDefinition(
 /// updates. Number keys keep the legacy integer semantics through
 /// <see cref="IntegerSettingConstraint"/> and the legacy ranges through
 /// <see cref="NumberRangeSettingConstraint"/>; the JSON keys with a fixed root kind use
-/// <see cref="JsonRootKindSettingConstraint"/>, and the SMS bypass allow-list additionally
-/// validates each entry through <see cref="SmsBypassPhonesSettingConstraint"/>. Cross-key rules stay in
+/// <see cref="JsonRootKindSettingConstraint"/>, the SMS bypass allow-list additionally validates
+/// each entry through <see cref="SmsBypassPhonesSettingConstraint"/>, and the Consul health scheme
+/// is pinned to its two literals through <see cref="HealthSchemeSettingConstraint"/>. Cross-key rules stay in
 /// <see cref="SignaCoreSettingCompositeValidator"/>.
 /// </para>
 /// </remarks>
 internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvider
 {
     internal const string IntegerErrorCode = "signacore.setting.integer";
+
+    /// <summary>
+    /// The closed code for a <c>consul.discovery.health_scheme</c> value that is not one of the
+    /// two documented scheme literals; like every settings error code it names only the key and
+    /// the rule, never the submitted value.
+    /// </summary>
+    internal const string HealthSchemeInvalidErrorCode = "signacore.setting.health_scheme_invalid";
 
     /// <summary>
     /// The closed code for an SMS bypass allow-list candidate whose entries are not all valid
@@ -173,7 +181,11 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
         // The persisted default is the deployed readiness probe path the shared health endpoints
         // own; the literal is the contract, pinned by SharedSettingDefinitionMappingTests.
         new("consul.discovery.health_check_path", ServiceSettingValueType.String, IsSensitive: false, LegacyDefault: "/health/ready"),
-        new("consul.discovery.prefer_ip_address", ServiceSettingValueType.Boolean, IsSensitive: false, LegacyDefault: "false"),
+        // The advertised health URL scheme's database default; per-instance deployments override
+        // it through ServiceDiscovery:HealthScheme. The literal allow-list is pinned by
+        // SharedSettingDefinitionMappingTests. (The former prefer-ip auto-detection switch is
+        // retired — see RetiredSettingKeys.)
+        new("consul.discovery.health_scheme", ServiceSettingValueType.String, IsSensitive: false, LegacyDefault: "http"),
         new("consul.discovery.ip_address", ServiceSettingValueType.String, IsSensitive: false, LegacyDefault: ""),
         new("consul.discovery.port", ServiceSettingValueType.Number, IsSensitive: false, LegacyDefault: "0")
     ];
@@ -269,6 +281,10 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
             {
                 yield return new SmsBypassPhonesSettingConstraint();
             }
+        }
+        else if (definition.Key == HealthSchemeSettingConstraint.SettingKey)
+        {
+            yield return new HealthSchemeSettingConstraint();
         }
     }
 }

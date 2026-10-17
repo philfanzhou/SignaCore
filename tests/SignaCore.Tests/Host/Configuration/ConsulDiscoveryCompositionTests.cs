@@ -30,6 +30,7 @@ public sealed class ConsulDiscoveryCompositionTests
     [Fact]
     public async Task EnabledRegister_WithExplicitAdvertisement_MapsEveryKey()
     {
+        // The per-instance process values override the database advertisement key by key (#594).
         var projection = await DeriveAsync(
             AdvertisementAddress: "10.1.2.3",
             AdvertisementPort: 9443,
@@ -44,8 +45,8 @@ public sealed class ConsulDiscoveryCompositionTests
                 ("consul.discovery.deregister", "true"),
                 ("consul.discovery.service_name", "SignaCore"),
                 ("consul.discovery.health_check_path", "/health/ready"),
-                // Deprecated auto-detection inputs must not influence the derived view.
-                ("consul.discovery.prefer_ip_address", "true"),
+                // The database advertisement keys are present but must lose to the process values.
+                ("consul.discovery.health_scheme", "http"),
                 ("consul.discovery.ip_address", "192.0.2.77"),
                 ("consul.discovery.port", "8080")
             ]);
@@ -117,13 +118,44 @@ public sealed class ConsulDiscoveryCompositionTests
     }
 
     [Fact]
-    public async Task EnabledRegister_WithoutTheExplicitAdvertisement_IsRefusedWithTheFixedCode()
+    public async Task EnabledRegister_WithOnlyTheDatabaseAdvertisement_DerivesTheCompleteValidView()
     {
-        // Address present but port missing is still an incomplete advertisement statement.
+        // No process overrides at all: the database keys alone must satisfy the advertisement
+        // statement, including the scheme's own database default (#594).
+        var projection = await DeriveAsync(
+            AdvertisementAddress: null,
+            AdvertisementPort: null,
+            AdvertisementScheme: null,
+            Overrides:
+            [
+                ("consul.discovery.enabled", "true"),
+                ("consul.discovery.register", "true"),
+                ("consul.discovery.deregister", "true"),
+                ("consul.discovery.ip_address", "192.0.2.10"),
+                ("consul.discovery.port", "8081"),
+                ("consul.discovery.health_scheme", "https")
+            ]);
+
+        var values = await AssertValidViewAsync(projection.Read);
+        Assert.Equal("true", values[ConsulSettingDefinitions.Enabled]);
+        Assert.Equal("192.0.2.10", values[ConsulSettingDefinitions.Address]);
+        Assert.Equal("8081", values[ConsulSettingDefinitions.Port]);
+        Assert.Equal("https", values[ConsulSettingDefinitions.HealthScheme]);
+        Assert.Equal("192.0.2.10", projection.AdvertisementAddress);
+        Assert.Equal(8081, projection.AdvertisementPort);
+    }
+
+    [Theory]
+    [InlineData("10.1.2.3", null)]   // process address only: the port is missing everywhere
+    [InlineData(null, 9443)]         // process port only: the address is missing everywhere
+    [InlineData(null, null)]         // neither source provides anything
+    public async Task EnabledRegister_WithoutAnAdvertisementFromEitherSource_IsRefusedWithTheFixedCode(
+        string? advertisementAddress, int? advertisementPort)
+    {
         var exception = await Assert.ThrowsAsync<ConsulDiscoveryConfigurationException>(() =>
             DeriveAsync(
-                AdvertisementAddress: "10.1.2.3",
-                AdvertisementPort: null,
+                AdvertisementAddress: advertisementAddress,
+                AdvertisementPort: advertisementPort,
                 AdvertisementScheme: null,
                 Overrides:
                 [
@@ -134,6 +166,124 @@ public sealed class ConsulDiscoveryCompositionTests
 
         Assert.Equal(
             ConsulDiscoveryConfigurationException.AdvertisementRequired, exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task EnabledRegister_WithADatabaseAddressButTheSeededZeroPort_IsRefusedWithTheFixedCode()
+    {
+        // The seeded database port 0 means "not provided": a half-configured database
+        // advertisement must keep the fixed advertisement code, never derive a port 0.
+        var exception = await Assert.ThrowsAsync<ConsulDiscoveryConfigurationException>(() =>
+            DeriveAsync(
+                AdvertisementAddress: null,
+                AdvertisementPort: null,
+                AdvertisementScheme: null,
+                Overrides:
+                [
+                    ("consul.discovery.enabled", "true"),
+                    ("consul.discovery.register", "true"),
+                    ("consul.discovery.deregister", "true"),
+                    ("consul.discovery.ip_address", "192.0.2.10")
+                ]));
+
+        Assert.Equal(
+            ConsulDiscoveryConfigurationException.AdvertisementRequired, exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task LegacyRow_WithoutTheHealthSchemeKey_MaterializesTheHttpDefault()
+    {
+        // An aggregate written before the key existed carries no health-scheme row: the shared
+        // loader materializes the definition default, startup does not fail, and the derived view
+        // advertises plain HTTP (#594).
+        var product = await BuildProductSnapshotAsync(
+            [
+                ("consul.discovery.enabled", "true"),
+                ("consul.discovery.register", "true"),
+                ("consul.discovery.deregister", "true"),
+                ("consul.discovery.ip_address", "192.0.2.10"),
+                ("consul.discovery.port", "8081")
+            ],
+            omitKeys: new HashSet<string> { "consul.discovery.health_scheme" });
+
+        Assert.True(product.Values.TryGetValue(
+            "consul.discovery.health_scheme", out var materialized) && materialized.HasValue);
+        Assert.Equal("http", materialized!.GetString());
+
+        var projection = ConsulDiscoveryProjection.Derive(
+            product,
+            advertisementAddress: null,
+            advertisementPort: null,
+            advertisementScheme: null,
+            await new MasterKeyRootKeySource(new BootstrapMasterKeyProvider(RootSecret))
+                .GetRootKeyAsync());
+        var values = await AssertValidViewAsync(projection.Read);
+        Assert.Equal("http", values[ConsulSettingDefinitions.HealthScheme]);
+    }
+
+    [Fact]
+    public async Task StoredRetiredPreferIpAddressRow_IsDroppedOnRead()
+    {
+        // An older release stored the retired prefer-IP row. The activation-shaped read drops it
+        // before materialization, so the load succeeds and the projection never sees the key.
+        var product = await BuildProductSnapshotAsync(
+            [
+                ("consul.discovery.enabled", "true"),
+                ("consul.discovery.register", "true"),
+                ("consul.discovery.deregister", "true"),
+                ("consul.discovery.ip_address", "192.0.2.10"),
+                ("consul.discovery.port", "8081")
+            ],
+            extraRows: [(RetiredSettingKeys.ConsulDiscoveryPreferIpAddress,
+                ServiceSettingValueType.Boolean, "true")]);
+
+        Assert.DoesNotContain(
+            RetiredSettingKeys.ConsulDiscoveryPreferIpAddress,
+            product.Values.Keys,
+            StringComparer.Ordinal);
+        var projection = ConsulDiscoveryProjection.Derive(
+            product,
+            advertisementAddress: null,
+            advertisementPort: null,
+            advertisementScheme: null,
+            await new MasterKeyRootKeySource(new BootstrapMasterKeyProvider(RootSecret))
+                .GetRootKeyAsync());
+        Assert.Equal("192.0.2.10", projection.AdvertisementAddress);
+        Assert.Equal(8081, projection.AdvertisementPort);
+    }
+
+    [Fact]
+    public async Task UpdateValidation_TheRetiredPreferIpAddressSwitch_IsAnUnknownKey()
+    {
+        // consul.discovery.prefer_ip_address is retired: updating it is the generic unknown-key
+        // rejection, never a typed Boolean rule, and the key never re-enters the catalog.
+        var candidate = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var (legacyKey, value) in ServiceSettingDefinitions.BuildLegacyDefaults())
+        {
+            var definition = ServiceSettingDefinitions.Find(
+                SharedSettingKeys.NormalizedByLegacyKey[legacyKey])!;
+            if ((definition.IsOptional && value.Length == 0) || definition.IsSensitive)
+            {
+                continue;
+            }
+
+            candidate[definition.Key] = value;
+        }
+
+        candidate["endpoints.public_base_url"] = "https://accounts.example.com";
+        candidate["jwt.issuer"] = "https://accounts.example.com";
+        candidate["admin.username"] = "root-admin";
+        candidate[RetiredSettingKeys.ConsulDiscoveryPreferIpAddress] = "true";
+
+        var result = new ServiceSettingDefinitionRegistry(
+                SharedSettingComposition.CreateDefinitionProviders(),
+                [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules: true)])
+            .Validate(candidate);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error =>
+            error.Key == RetiredSettingKeys.ConsulDiscoveryPreferIpAddress &&
+            error.ErrorCode == WellKnownServiceSettingValidationErrorCodes.Unknown);
     }
 
     [Theory]
@@ -415,10 +565,14 @@ public sealed class ConsulDiscoveryCompositionTests
     /// <summary>
     /// Builds a completed-installation-shaped product snapshot through the real shared loader over
     /// the real product catalog, mirroring the bootstrap activation path. Sensitive values are
-    /// protected exactly like the shared update path protects them.
+    /// protected exactly like the shared update path protects them. The activation-shaped read
+    /// path drops retired-key rows and materializes definition defaults, so <paramref name="omitKeys"/>
+    /// proves default materialization and <paramref name="extraRows"/> proves stored-row tolerance.
     /// </summary>
     private static async Task<ServiceSettingSnapshot> BuildProductSnapshotAsync(
-        (string Key, string Value)[] overrides)
+        (string Key, string Value)[] overrides,
+        IReadOnlySet<string>? omitKeys = null,
+        IEnumerable<(string Key, ServiceSettingValueType Type, string Value)>? extraRows = null)
     {
         var values = InstallationTestSupport.BuildCompletedInstallationValues("consul_admin")
             .ToDictionary(pair => pair.Key, pair => pair.Value);
@@ -432,10 +586,10 @@ public sealed class ConsulDiscoveryCompositionTests
         var registry = SharedSettingComposition.CreateRegistry(isDevelopment: false);
         var accessor = new ServiceSettingCurrentSnapshotAccessor();
         var serviceId = ServiceId.Parse(ServiceMantleComposition.ServiceIdentifier);
-        var read = new ServiceSettingSnapshotRead(
-            serviceId,
-            version: 1,
-            values.Select(pair =>
+        var rows = values
+            .Where(pair => omitKeys is null ||
+                !omitKeys.Contains(SharedSettingKeys.NormalizedByLegacyKey[pair.Key]))
+            .Select(pair =>
             {
                 var key = SharedSettingKeys.NormalizedByLegacyKey[pair.Key];
                 registry.TryGetDefinition(key, out var definition);
@@ -446,10 +600,13 @@ public sealed class ConsulDiscoveryCompositionTests
                     definition.IsSensitive
                         ? new SensitiveValueProtector(serviceId, key).Protect(pair.Value, rootKey)
                         : pair.Value);
-            }));
+            })
+            .Concat(extraRows?.Select(row => new PersistedServiceSettingValue(
+                row.Key, version: 1, row.Type, row.Value)) ?? []);
+        var read = new ServiceSettingSnapshotRead(serviceId, version: 1, rows);
         using var loader = new ServiceSettingSnapshotLoader(
             serviceId,
-            new FixedSource(read),
+            new RetiredSettingKeyFilterSource(new FixedSource(read)),
             registry,
             accessor,
             SharedSettingComposition.CreateRootKeySource(masterKeyProvider));
