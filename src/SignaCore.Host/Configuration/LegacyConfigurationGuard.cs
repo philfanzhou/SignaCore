@@ -31,4 +31,29 @@ internal static class LegacyConfigurationGuard
     /// </summary>
     public static bool HasDatabaseSectionOverride(IConfiguration preSnapshotConfiguration) =>
         preSnapshotConfiguration.GetSection(DatabaseOptions.SectionName).GetChildren().Any();
+
+    /// <summary>
+    /// Retired SMS environment variables from before the settings moved into the database. They no
+    /// longer reach <c>SmsOptions</c>; a deployment that still sets them gets no effect and needs a
+    /// warning instead.
+    /// </summary>
+    private static readonly string[] RetiredSmsEnvironmentVariables =
+    [
+        "SMS_BYPASS_CODE",
+        "SMS_OTP_HMAC_KEY",
+        "SMS_BYPASS_PHONES"
+    ];
+
+    /// <summary>
+    /// Retired SMS environment variables that are still set. Their flat single-underscore names
+    /// enter the configuration as flat keys that match no managed legacy key, so they need this
+    /// explicit check. Presence only: the values are never returned or logged.
+    /// </summary>
+    public static IReadOnlyList<string> FindRetiredSmsEnvironmentVariables(
+        IConfiguration preSnapshotConfiguration)
+    {
+        return RetiredSmsEnvironmentVariables
+            .Where(name => preSnapshotConfiguration[name] is not null)
+            .ToList();
+    }
 }

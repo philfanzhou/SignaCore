@@ -232,6 +232,8 @@ catch (Exception exception)
 // the launcher are inert; report them so operators can remove them.
 var legacyOverrides = LegacyConfigurationGuard.FindManagedOverrides(builder.Configuration);
 var hasLegacyDatabaseSection = LegacyConfigurationGuard.HasDatabaseSectionOverride(builder.Configuration);
+var retiredSmsEnvironmentVariables = LegacyConfigurationGuard.FindRetiredSmsEnvironmentVariables(
+    builder.Configuration);
 
 // ---- Activate the configuration snapshot ----
 // Layered last so the database wins over every deployment-provided source.
@@ -515,6 +517,16 @@ if (legacyOverrides.Count > 0)
         "Legacy application-setting overrides are present and ignored; the database is authoritative " +
         "for these keys. Remove them from the launcher: {Keys}",
         string.Join(", ", legacyOverrides));
+}
+
+// One warning per retired variable, names only: the values are never logged.
+foreach (var retiredSmsEnvironmentVariable in retiredSmsEnvironmentVariables)
+{
+    app.Logger.LogWarning(
+        "Environment variable {RetiredSmsEnvironmentVariable} is set but is no longer read; the " +
+        "managed configuration is the only source for this SMS setting. Remove the variable from " +
+        "the launcher.",
+        retiredSmsEnvironmentVariable);
 }
 
 // ---- Discovery conformance diagnostics ----
