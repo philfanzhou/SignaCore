@@ -10,3 +10,4 @@
 | [0006](./0006-hosted-login-localization-and-browser-sms.md) | Accepted | Localize the hosted login page and add browser SMS login with rate limits, auth-method-aware sessions, and per-application reuse checks |
 | [0007](./0007-official-hosted-login-client-package.md) | Accepted | Publish an official hosted-login client package with fixed responsibilities, four extension points, tag-based versioning, and a minor-minus-one compatibility promise |
 | [0008](./0008-transport-security-is-a-deployment-decision.md) | Accepted | Remove all code-level HTTPS transport policies on both the host and the client package: http and https are equal inputs, structural URI rules and cookie-scheme derivation remain |
+| [0009](./0009-minimal-external-configuration.md) | Accepted | Keep the external configuration minimal (bootstrap file, first-install facts, listening port); per-instance variables only override, and external leftovers warn instead of failing startup |
