@@ -1,52 +1,52 @@
 ---
-name: 任务
-about: 一个可独立合并的改动。
+name: Task
+about: One independently mergeable change.
 title: ''
 labels: 'type: task'
 assignees: ''
 ---
 
 <!--
-正文和标题用中文。标题建议使用：[模块] 简明动作。
+Write the body and title in English. Suggested title format: [Module] concise action.
 -->
 
-## 背景与目标
+## Background and goal
 
-描述现象、触发条件和影响。有复现步骤、失败输出、受影响的 grant/endpoint/provider 或部署方式就写上。
+Describe the symptom, trigger conditions, and impact. Include reproduction steps, failure output, and any affected grants/endpoints/providers or deployment modes.
 
-相关代码/文档：`src/...`、`tests/...`、`docs/...`
+Related code/docs: `src/...`, `tests/...`, `docs/...`
 
-## 必须保持的行为与规则
+## Behavior and rules that must be preserved
 
-- 写清 HTTP 路由、JSON/claims、JWT/JWKS、认证授权、密钥、数据库表、migration、配置或部署中必须保持不变的部分。
-- 若修复需要覆盖多条路径，写清各条路径都必须满足的条件，以及应统一修复的位置。
+- State exactly what must not change among HTTP routes, JSON/claims, JWT/JWKS, authentication and authorization, keys, database tables, migrations, configuration, or deployment.
+- If the fix must cover multiple paths, state the condition every path has to satisfy and where the unified fix should land.
 
-## 范围
+## Scope
 
-- 要改什么。
-- **明确排除什么**：尤其是“不改变现有 token 兼容性”“不修改表名”“不重构 X”“不暴露 secret”等限制。
+- What will change.
+- **Explicit exclusions**: especially limits such as "do not change existing token compatibility", "do not rename tables", "do not refactor X", "do not expose secrets".
 
-## 明确不包含与不保证
+## Explicitly not included and not guaranteed
 
-- 保证：
-- 不保证：
-- 调用方责任：
+- Guaranteed:
+- Not guaranteed:
+- Caller responsibilities:
 
-## 验收标准
+## Acceptance criteria
 
-- 可逐条验证的成功结果。
-- 适用的失败、取消、安全、认证、密钥、migration 和并发结果；不适用时写明“不适用”及理由。
-- 涉及 API、token、数据库或配置时，写清兼容性和回滚结果。
+- Success results that can be verified item by item.
+- Applicable failure, cancellation, security, authentication, key, migration, and concurrency results; write "not applicable" with a reason when they do not apply.
+- When APIs, tokens, the database, or configuration are involved, state the compatibility and rollback outcomes.
 
-## 文档与兼容性影响
+## Documentation and compatibility impact
 
-说明是否影响 API、JSON/claims、JWT、数据库/migration、配置、管理端、容器、部署或英文使用者文档；没有影响时写“无”。
+State whether API, JSON/claims, JWT, database/migrations, configuration, the admin console, containers, deployment, or English user-facing documentation are affected; write "None" when there is no impact.
 
-## 依赖
+## Dependencies
 
-- GitHub 原生 Blocked by：#NNN，或“无”
-- GitHub 原生 Blocks：#NNN，或“无”
+- GitHub native Blocked by: #NNN, or "None"
+- GitHub native Blocks: #NNN, or "None"
 
-## 交付约束
+## Delivery constraints
 
-- 公开行为或用法变化时同步英文 README、docs、API 文档和迁移说明。
+- When public behavior or usage changes, update the English README, docs, API documentation, and migration notes in step.
