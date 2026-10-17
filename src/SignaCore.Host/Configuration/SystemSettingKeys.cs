@@ -65,7 +65,7 @@ internal static class SystemSettingKeys
     public const string ConsulDiscoveryDeregister = "Consul:Discovery:Deregister";
     public const string ConsulDiscoveryServiceName = "Consul:Discovery:ServiceName";
     public const string ConsulDiscoveryHealthCheckPath = "Consul:Discovery:HealthCheckPath";
-    public const string ConsulDiscoveryPreferIpAddress = "Consul:Discovery:PreferIPAddress";
+    public const string ConsulDiscoveryHealthScheme = "Consul:Discovery:HealthScheme";
     public const string ConsulDiscoveryIpAddress = "Consul:Discovery:IPAddress";
     public const string ConsulDiscoveryPort = "Consul:Discovery:Port";
 }

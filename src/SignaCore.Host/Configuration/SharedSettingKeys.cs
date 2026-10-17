@@ -72,7 +72,7 @@ internal static class SharedSettingKeys
             [SystemSettingKeys.ConsulDiscoveryDeregister] = "consul.discovery.deregister",
             [SystemSettingKeys.ConsulDiscoveryServiceName] = "consul.discovery.service_name",
             [SystemSettingKeys.ConsulDiscoveryHealthCheckPath] = "consul.discovery.health_check_path",
-            [SystemSettingKeys.ConsulDiscoveryPreferIpAddress] = "consul.discovery.prefer_ip_address",
+            [SystemSettingKeys.ConsulDiscoveryHealthScheme] = "consul.discovery.health_scheme",
             [SystemSettingKeys.ConsulDiscoveryIpAddress] = "consul.discovery.ip_address",
             [SystemSettingKeys.ConsulDiscoveryPort] = "consul.discovery.port"
         };

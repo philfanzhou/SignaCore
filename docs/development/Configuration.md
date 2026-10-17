@@ -325,19 +325,28 @@ shared settings aggregate.
 | `Consul:Discovery:Deregister` | `false` | must be `true` when registering |
 | `Consul:Discovery:ServiceName` | `SignaCore` | |
 | `Consul:Discovery:HealthCheckPath` | `/health/ready` | |
-| `Consul:Discovery:PreferIPAddress` | `false` | ignored (no auto-detection) |
-| `Consul:Discovery:IPAddress` | empty | legacy fallback, ignored when registering |
-| `Consul:Discovery:Port` | `0` | legacy fallback, ignored when registering |
+| `Consul:Discovery:HealthScheme` | `http` | advertised health URL scheme, `http` or `https` |
+| `Consul:Discovery:IPAddress` | empty | advertised address's database default |
+| `Consul:Discovery:Port` | `0` | advertised port's database default; `0` means not provided |
 
-Registration is driven by the shared ServiceMantle Consul lifecycle, and each instance must state
-its own advertised endpoint through the process configuration (the usual double-underscore
-environment-variable form works); the values are required whenever registration is enabled:
+The former `Consul:Discovery:PreferIPAddress` switch is retired: there is no address
+auto-detection for it to select. A stored row of the retired key is ignored on every read, and an
+update naming it is rejected as an unknown key; operators may drop the stored row with
+`{ "key": "consul.discovery.prefer_ip_address", "value": null }` as optional housekeeping.
+
+Registration is driven by the shared ServiceMantle Consul lifecycle. The advertised endpoint
+defaults from the database keys above and can be overridden per instance through the process
+configuration (the usual double-underscore environment-variable form works); when registration is
+enabled, the address and port must come from at least one of the two sources:
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `ServiceDiscovery:Address` | none | This instance's advertised address (IP or DNS name) |
-| `ServiceDiscovery:Port` | none | This instance's advertised port (1-65535) |
-| `ServiceDiscovery:HealthScheme` | `http` | Advertised health URL scheme, `http` or `https` |
+| `ServiceDiscovery:Address` | none | Per-instance override of the advertised address (IP or DNS name) |
+| `ServiceDiscovery:Port` | none | Per-instance override of the advertised port (1-65535) |
+| `ServiceDiscovery:HealthScheme` | none | Per-instance override of the advertised health URL scheme |
+
+A process value wins over the database key key-by-key, so a multi-instance deployment can pin the
+shared defaults in the management console and still give each instance its own address.
 
 See [Consul integration](./ConsulIntegration.md).
 

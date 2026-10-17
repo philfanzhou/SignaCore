@@ -26,7 +26,7 @@ environment variables:
 | `Consul:Discovery:Deregister` | `false` |
 | `Consul:Discovery:ServiceName` | `SignaCore` |
 | `Consul:Discovery:HealthCheckPath` | `/health/ready` |
-| `Consul:Discovery:PreferIPAddress` | `false` |
+| `Consul:Discovery:HealthScheme` | `http` |
 | `Consul:Discovery:IPAddress` | empty |
 | `Consul:Discovery:Port` | `0` |
 
@@ -39,26 +39,33 @@ Registration happens when `Consul:Discovery:Enabled` **and** `Consul:Discovery:R
   always deregisters on readiness loss and shutdown, and a deployment that keeps the legacy
   `false` value is **refused at startup** with the fixed configuration code
   `signacore.consul.deregister_required` instead of silently leaking registrations.
-- `Consul:Discovery:PreferIPAddress`, `Consul:Discovery:IPAddress`, and `Consul:Discovery:Port` no
-  longer take part in registration. There is no address or port auto-detection any more: each
-  instance must state its advertised endpoint explicitly (below). A migration from the old
-  auto-detected/zero-port behavior must supply the explicit values.
+- `Consul:Discovery:PreferIPAddress` is retired: there is no address auto-detection any more, so
+  the switch has nothing left to select. A stored row of the key is ignored on every read and never
+  blocks startup or management; an update naming it is rejected as an unknown key, and the row can
+  be dropped with `value=null` as optional housekeeping.
+- `Consul:Discovery:IPAddress` and `Consul:Discovery:Port` no longer take part in auto-detection:
+  they are now the advertised endpoint's database defaults (below). A migration from the old
+  auto-detected/zero-port behavior must supply a real address and port.
 
 ## Instance advertisement
 
-Every registering instance states its own externally reachable endpoint through the process
-configuration — the same channel `Bootstrap:FilePath` uses, with the usual double-underscore
-environment-variable form (`ServiceDiscovery__Address`):
+The advertised endpoint defaults from the database settings and can be overridden per instance
+through the process configuration — the same channel `Bootstrap:FilePath` uses, with the usual
+double-underscore environment-variable form (`ServiceDiscovery__Address`):
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `ServiceDiscovery:Address` | none | Required when registering: IP literal or DNS name |
-| `ServiceDiscovery:Port` | none | Required when registering: 1-65535 |
-| `ServiceDiscovery:HealthScheme` | `http` | `http` or `https`; the scheme of the advertised health URL |
+| `ServiceDiscovery:Address` | `Consul:Discovery:IPAddress` | Per-instance override: IP literal or DNS name |
+| `ServiceDiscovery:Port` | `Consul:Discovery:Port` | Per-instance override: 1-65535; the database `0` means not provided |
+| `ServiceDiscovery:HealthScheme` | `Consul:Discovery:HealthScheme` | Per-instance override of the advertised health URL scheme (`http` or `https`) |
 
-A registering deployment without both the address and the port is refused at startup with
-`signacore.consul.advertisement_required`. Two instances of the same service advertise their own
-distinct address/port pairs and never overwrite or deregister each other.
+A process value wins over the database key key-by-key, so a single-instance deployment configures
+the whole advertisement on the management console, while a multi-instance deployment pins the
+shared defaults in the database and gives each instance its own address through the environment.
+
+A registering deployment without an address and a port from at least one source is refused at
+startup with `signacore.consul.advertisement_required`. Two instances of the same service advertise
+their own distinct address/port pairs and never overwrite or deregister each other.
 
 ## Agent endpoint and TLS
 
@@ -73,8 +80,10 @@ The agent endpoint is built from `Consul:Host` and `Consul:Port`:
 
 ## Health checks
 
-The registered check is an HTTP probe of the advertised `ServiceDiscovery:Address:Port` +
-`Consul:Discovery:HealthCheckPath`, polled by the agent. Point the path at `/health/ready`, not
+The registered check is an HTTP probe of the advertised address and port (per-instance override
+or database default) + `Consul:Discovery:HealthCheckPath`, using the advertised scheme
+(`Consul:Discovery:HealthScheme` or its per-instance override), polled by the agent. Point the
+path at `/health/ready`, not
 `/health/live`: readiness gates registration itself, so an instance awaiting first-run setup is
 never registered, and an instance that loses readiness is deregistered. This replaces the retired
 Steeltoe TTL heartbeat, which only proved the process was alive.

@@ -40,13 +40,22 @@ internal static class RetiredSettingKeys
     /// </summary>
     internal const string SecurityAllowNonHttpsIssuer = "security.allow_non_https_issuer";
 
+    /// <summary>
+    /// Retired with the managed Consul advertisement: the advertised address now defaults from
+    /// <c>consul.discovery.ip_address</c> / <c>consul.discovery.port</c> (per-instance override
+    /// through <c>ServiceDiscovery:*</c>), and there is no address auto-detection left for the
+    /// legacy prefer-IP switch to select, so the row is a dead key.
+    /// </summary>
+    internal const string ConsulDiscoveryPreferIpAddress = "consul.discovery.prefer_ip_address";
+
     /// <summary>Every retired normalized key, compared case-sensitively like the definition table.</summary>
     internal static readonly IReadOnlySet<string> All =
         new HashSet<string>(StringComparer.Ordinal)
         {
             LokiAllowInsecureHttp,
             HostedLoginHttpTestOrigins,
-            SecurityAllowNonHttpsIssuer
+            SecurityAllowNonHttpsIssuer,
+            ConsulDiscoveryPreferIpAddress
         };
 
     internal static bool IsRetired(string key) => All.Contains(key);

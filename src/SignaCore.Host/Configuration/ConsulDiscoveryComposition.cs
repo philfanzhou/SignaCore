@@ -54,11 +54,16 @@ internal sealed class ConsulDiscoverySnapshotAccessor : IServiceSettingCurrentSn
 /// are untouched — the typed entry injects none of them.
 /// </para>
 /// <para>
-/// The per-instance advertisement comes from the process configuration
-/// (<c>ServiceDiscovery:Address</c>, <c>ServiceDiscovery:Port</c>, <c>ServiceDiscovery:HealthScheme</c>;
-/// the usual double-underscore environment-variable form works). There is deliberately no address
-/// or port auto-detection. Registration changes of every kind take effect after a restart: the
-/// derived snapshot is activated once at composition time and captured once by the lifecycle.
+/// The per-instance advertisement defaults from the database settings
+/// (<c>consul.discovery.ip_address</c>, <c>consul.discovery.port</c>,
+/// <c>consul.discovery.health_scheme</c>) and can be overridden per instance through the process
+/// configuration (<c>ServiceDiscovery:Address</c>, <c>ServiceDiscovery:Port</c>,
+/// <c>ServiceDiscovery:HealthScheme</c>; the usual double-underscore environment-variable form
+/// works) — key by key, the process value wins. An enabled registration without an address and
+/// port from either source is refused with the fixed advertisement code. There is deliberately no
+/// address or port auto-detection. Registration changes of every kind take effect after a
+/// restart: the derived snapshot is activated once at composition time and captured once by the
+/// lifecycle.
 /// </para>
 /// </remarks>
 internal static class ConsulDiscoveryComposition
@@ -145,14 +150,28 @@ internal static class ConsulDiscoveryComposition
     }
 }
 
-/// <summary>The in-memory projection of the eleven Consul product keys onto the shared catalog.</summary>
+/// <summary>
+/// The in-memory projection of the eleven Consul product keys onto the shared catalog, deriving
+/// the per-instance advertisement with the per-instance override precedence.
+/// </summary>
 internal static class ConsulDiscoveryProjection
 {
-    /// <summary>Derives the eight-key read and the instance advertisement from the product snapshot.</summary>
+    /// <summary>
+    /// Derives the eight-key read and the instance advertisement from the product snapshot.
+    /// </summary>
     /// <exception cref="ConsulDiscoveryConfigurationException">
-    /// The enabled combination requires deregistration or the explicit advertisement and it is not
-    /// configured. Semantic validation of the enabled view is owned by the shared loader.
+    /// The enabled combination requires deregistration or an explicit advertisement and neither
+    /// source provides it. Semantic validation of the enabled view is owned by the shared loader.
     /// </exception>
+    /// <remarks>
+    /// The advertisement resolution is per-instance overrides first, database defaults second: the
+    /// process configuration (<c>ServiceDiscovery:Address/Port/HealthScheme</c>) overrides the
+    /// database keys <c>consul.discovery.ip_address</c>, <c>consul.discovery.port</c>, and
+    /// <c>consul.discovery.health_scheme</c> key by key, so a multi-instance deployment can pin the
+    /// shared default in the management console and still give each instance its own address. A
+    /// blank database address and the seeded port <c>0</c> mean "not provided", exactly like an
+    /// absent process value.
+    /// </remarks>
     internal static ConsulDiscoveryProjectionResult Derive(
         ServiceSettingSnapshot product,
         string? advertisementAddress,
@@ -177,6 +196,15 @@ internal static class ConsulDiscoveryProjection
                          deregisterValue.HasValue && deregisterValue.GetBoolean();
         var wantsRegistration = enabled && register;
 
+        // Per-instance overrides first, database defaults second. A blank database address and the
+        // seeded port 0 are "not provided" — a fresh aggregate enabling registration without any
+        // address must fail with the fixed advertisement code, never with a derived port 0.
+        var databaseAddress = OptionalText(product, "consul.discovery.ip_address");
+        var effectiveAddress =
+            advertisementAddress ?? (string.IsNullOrWhiteSpace(databaseAddress) ? null : databaseAddress);
+        var databasePort = Number(product, "consul.discovery.port");
+        var effectivePort = advertisementPort ?? (databasePort > 0 ? (int)databasePort : null);
+
         // The shared owner always deregisters on readiness loss and shutdown. A deployment that
         // enabled registration but kept the legacy deregister=false switch is refused instead of
         // silently ignoring the switch, so no stale-registration mode can survive the switch-over.
@@ -186,14 +214,16 @@ internal static class ConsulDiscoveryProjection
                 ConsulDiscoveryConfigurationException.DeregisterRequired);
         }
 
-        if (wantsRegistration && (advertisementAddress is null || advertisementPort is null))
+        if (wantsRegistration && (effectiveAddress is null || effectivePort is null))
         {
             throw new ConsulDiscoveryConfigurationException(
                 ConsulDiscoveryConfigurationException.AdvertisementRequired);
         }
 
-        // The scheme is part of the process-level advertisement statement, not a product setting.
-        var scheme = advertisementScheme is { Length: > 0 } ? advertisementScheme : "http";
+        // The scheme follows the same precedence: the per-instance process override, then the
+        // database key, then the fixed plain-HTTP default.
+        var scheme = FirstNonEmpty(advertisementScheme, OptionalText(product, "consul.discovery.health_scheme"))
+            ?? "http";
 
         var values = new List<PersistedServiceSettingValue>
         {
@@ -207,9 +237,9 @@ internal static class ConsulDiscoveryProjection
             // its values are never semantically validated and never reach a client: only the
             // service-level fallbacks fill in, never invented values.
             new(ConsulSettingDefinitions.Address, product.Version, ServiceSettingValueType.String,
-                advertisementAddress ?? OptionalText(product, "consul.discovery.ip_address") ?? string.Empty),
+                effectiveAddress ?? string.Empty),
             new(ConsulSettingDefinitions.Port, product.Version, ServiceSettingValueType.Number,
-                (advertisementPort ?? Number(product, "consul.discovery.port"))
+                (effectivePort ?? (int)databasePort)
                     .ToString(System.Globalization.CultureInfo.InvariantCulture)),
             new(ConsulSettingDefinitions.HealthPath, product.Version, ServiceSettingValueType.String,
                 Text(product, "consul.discovery.health_check_path")),
@@ -232,8 +262,8 @@ internal static class ConsulDiscoveryProjection
 
         return new ConsulDiscoveryProjectionResult(
             new ServiceSettingSnapshotRead(product.ServiceId, product.Version, values),
-            AdvertisementAddress: wantsRegistration ? advertisementAddress : null,
-            AdvertisementPort: wantsRegistration ? advertisementPort : null);
+            AdvertisementAddress: wantsRegistration ? effectiveAddress : null,
+            AdvertisementPort: wantsRegistration ? effectivePort : null);
     }
 
     /// <summary>
@@ -275,6 +305,10 @@ internal static class ConsulDiscoveryProjection
         product.Values.TryGetValue(key, out var value) && value.HasValue
             ? value.GetString()
             : null;
+
+    /// <summary>The first non-blank candidate, or null when every candidate is null or blank.</summary>
+    private static string? FirstNonEmpty(params string?[] candidates) =>
+        candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
 
     private static decimal Number(ServiceSettingSnapshot product, string key)
     {

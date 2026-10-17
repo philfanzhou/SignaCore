@@ -66,7 +66,7 @@ public sealed partial class SharedSettingDefinitionMappingTests
         { "Consul:Discovery:Deregister", "consul.discovery.deregister" },
         { "Consul:Discovery:ServiceName", "consul.discovery.service_name" },
         { "Consul:Discovery:HealthCheckPath", "consul.discovery.health_check_path" },
-        { "Consul:Discovery:PreferIPAddress", "consul.discovery.prefer_ip_address" },
+        { "Consul:Discovery:HealthScheme", "consul.discovery.health_scheme" },
         { "Consul:Discovery:IPAddress", "consul.discovery.ip_address" },
         { "Consul:Discovery:Port", "consul.discovery.port" }
     };
@@ -128,7 +128,7 @@ public sealed partial class SharedSettingDefinitionMappingTests
         { "consul.discovery.deregister", "Boolean", false, true, "false" },
         { "consul.discovery.service_name", "String", false, true, "SignaCore" },
         { "consul.discovery.health_check_path", "String", false, true, "/health/ready" },
-        { "consul.discovery.prefer_ip_address", "Boolean", false, true, "false" },
+        { "consul.discovery.health_scheme", "String", false, true, "http" },
         { "consul.discovery.ip_address", "String", false, false, null },
         { "consul.discovery.port", "Number", false, true, "0" }
     };
@@ -305,6 +305,61 @@ public sealed partial class SharedSettingDefinitionMappingTests
         Assert.Equal(ServiceSettingDefinitions.SmsBypassPhoneInvalidErrorCode, constraint.ErrorCode);
         Assert.Equal("signacore.setting.bypass_phone_invalid", constraint.ErrorCode);
         Assert.Equal(100, SmsBypassPhonesSettingConstraint.MaxEntries);
+    }
+
+    /// <summary>
+    /// The advertised health URL scheme is pinned to its two literals (#594): exactly
+    /// <c>http</c> and <c>https</c> pass the registered constraint, anything else is refused with
+    /// the pinned closed code — the same registry path every save entry point uses.
+    /// </summary>
+    [Theory]
+    [InlineData("http", true)]
+    [InlineData("https", true)]
+    [InlineData("HTTPS", false)]
+    [InlineData("ftp", false)]
+    public void ConsulHealthScheme_AcceptsOnlyItsTwoLiterals(string candidate, bool accepted)
+    {
+        var constraint = SharedDefinitions[HealthSchemeSettingConstraint.SettingKey].Constraints
+            .OfType<HealthSchemeSettingConstraint>()
+            .Single();
+        Assert.Equal(ServiceSettingValueType.String, constraint.ValueType);
+        Assert.Equal(ServiceSettingDefinitions.HealthSchemeInvalidErrorCode, constraint.ErrorCode);
+        Assert.Equal("signacore.setting.health_scheme_invalid", constraint.ErrorCode);
+
+        var values = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var (legacyKey, value) in ServiceSettingDefinitions.BuildLegacyDefaults())
+        {
+            var definition = ServiceSettingDefinitions.Find(
+                SharedSettingKeys.NormalizedByLegacyKey[legacyKey])!;
+            if ((definition.IsOptional && value.Length == 0) || definition.IsSensitive)
+            {
+                continue;
+            }
+
+            values[definition.Key] = value;
+        }
+
+        values["endpoints.public_base_url"] = "https://accounts.example.com";
+        values["jwt.issuer"] = "https://accounts.example.com";
+        values["admin.username"] = "root-admin";
+        values[HealthSchemeSettingConstraint.SettingKey] = candidate;
+
+        var result = new ServiceSettingDefinitionRegistry(
+                SharedSettingComposition.CreateDefinitionProviders(),
+                [new SignaCoreSettingCompositeValidator(isDevelopment: false)])
+            .Validate(values);
+
+        var schemeError = result.Errors.SingleOrDefault(error =>
+            error.Key == HealthSchemeSettingConstraint.SettingKey &&
+            error.ErrorCode == ServiceSettingDefinitions.HealthSchemeInvalidErrorCode);
+        if (accepted)
+        {
+            Assert.Null(schemeError);
+        }
+        else
+        {
+            Assert.NotNull(schemeError);
+        }
     }
 
     [Fact]
