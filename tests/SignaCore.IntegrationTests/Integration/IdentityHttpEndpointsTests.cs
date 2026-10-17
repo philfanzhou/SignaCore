@@ -636,15 +636,18 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         var definitions = body.GetProperty("definitions").EnumerateArray().ToList();
 
-        // All 44 product keys, in the pinned order of the shared contract.
-        Assert.Equal(44, definitions.Count);
+        // All 45 product keys, in the pinned order of the shared contract.
+        Assert.Equal(45, definitions.Count);
         Assert.Equal(
             definitions.Select(item => item.GetProperty("key").GetString()).ToList(),
             definitions.Select(item => item.GetProperty("key").GetString())
                 .OrderBy(key => key, StringComparer.Ordinal).ToList());
-        // The retired prefer-IP switch left the catalog; the managed health scheme joined it (#594).
+        // The retired prefer-IP switch left the catalog; the managed health scheme joined it (#594),
+        // and the console title followed as app.title (#595).
         Assert.Contains(definitions, item =>
             item.GetProperty("key").GetString() == "consul.discovery.health_scheme");
+        Assert.Contains(definitions, item =>
+            item.GetProperty("key").GetString() == "app.title");
         Assert.DoesNotContain(definitions, item =>
             item.GetProperty("key").GetString() == "consul.discovery.prefer_ip_address");
         Assert.DoesNotContain(definitions, item =>

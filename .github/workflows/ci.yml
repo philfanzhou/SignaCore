@@ -439,6 +439,49 @@ jobs:
             *) echo "/setup redirected to '$redirect' instead of /admin"; exit 1 ;;
           esac
 
+      - name: Apply the managed console title through the settings API
+        run: |
+          set -euo pipefail
+          fail() { echo "SMOKE FAIL: $*"; exit 1; }
+
+          # The console title is the managed key app.title (#595): on the normal host the database
+          # value overrides the launcher's APP_TITLE, so the smoke writes the expected title through
+          # the same management settings API the console uses and restarts the container — title
+          # changes apply on restart, like every managed setting.
+          login_body="$(curl -fsS --max-time 10 -X POST http://localhost:5002/api/admin/session/bearer/login \
+            -H 'Content-Type: application/json' \
+            -H 'X-ServiceMantle-Request: 1' \
+            -d "$(jq -n --arg username smoke_admin --arg password "$ADMIN_PASSWORD" \
+              '{username:$username,password:$password}')")"
+          token="$(printf '%s' "$login_body" | jq -r '.accessToken // empty')"
+          [ -n "$token" ] || fail "the bearer login returned no token: $login_body"
+          echo "::add-mask::$token"
+
+          version="$(curl -fsS --max-time 10 http://localhost:5002/management/v1/settings \
+            -H "Authorization: Bearer $token" | jq '.version')"
+          [ "$version" -gt 0 ] 2>/dev/null || fail "the settings snapshot returned version '$version'"
+
+          update_status="$(curl -sS --max-time 10 -o /tmp/title-update.json -w '%{http_code}' \
+            -X POST http://localhost:5002/management/v1/settings \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $token" \
+            -d "$(jq -n --argjson version "$version" \
+              '{expectedVersion:$version,changes:[{key:"app.title",value:"SignaCore CI Smoke"}]}')")"
+          [ "$update_status" = '200' ] \
+            || fail "the app.title update returned $update_status: $(cat /tmp/title-update.json)"
+
+          docker restart signacore-smoke-app >/dev/null
+          for i in $(seq 1 120); do
+            if curl -fsS --max-time 3 http://localhost:5002/health/ready 2>/dev/null | grep -q '"status":"ready"'; then
+              echo "SignaCore ready again after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'Timed out waiting for /health/ready after the title update'
+          docker logs --tail 200 signacore-smoke-app
+          exit 1
+
       - name: Smoke assertions
         run: |
           set -euo pipefail

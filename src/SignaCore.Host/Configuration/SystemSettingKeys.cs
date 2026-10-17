@@ -18,6 +18,14 @@ internal static class SystemSettingKeys
     public const string AdminWebAllowedOrigins = "AdminWeb:AllowedOrigins";
 
     /// <summary>
+    /// Title of the administrative console pages, injected into the SPA's index.html. The flat
+    /// pre-change name is kept so the injector keeps reading the key it already read; the
+    /// bootstrap and setup hosts read it from the process configuration because no settings
+    /// snapshot exists yet.
+    /// </summary>
+    public const string AppTitle = "APP_TITLE";
+
+    /// <summary>
     /// Username of the administrator account created by first-run setup. Only the username lives
     /// here; the password exists solely as a hash in <c>password_credentials</c>.
     /// </summary>

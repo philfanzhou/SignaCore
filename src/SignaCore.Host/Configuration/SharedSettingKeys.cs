@@ -27,6 +27,7 @@ internal static class SharedSettingKeys
             // ---- Administrative console ----
             [SystemSettingKeys.AdminWebAllowedOrigins] = "admin_web.allowed_origins",
             [SystemSettingKeys.AdminUsername] = "admin.username",
+            [SystemSettingKeys.AppTitle] = "app.title",
 
             // ---- Callback policy ----
             [SystemSettingKeys.CallbackAllowedDomains] = "callback.allowed_domains",

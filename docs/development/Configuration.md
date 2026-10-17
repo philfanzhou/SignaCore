@@ -106,6 +106,7 @@ new installation, and live in versioned application code.
 | --- | --- | --- |
 | `Admin:Username` | collected by setup | Username of the administrator account created by first-run setup. Only this account may sign in to the console |
 | `AdminWeb:AllowedOrigins` | `[]` | Setup seeds the public base URL. Production admin cookies are always `Secure` |
+| `APP_TITLE` | `SignaCore` | The admin console and document title, rendered into `index.html` and `window.__APP_TITLE__`; applies after a restart |
 
 Public SPA Origins are per-application policy in `app_allowed_origins`, managed through the
 authenticated admin OIDC endpoint. They are not copied from `AdminWeb:AllowedOrigins`, redirect
@@ -355,10 +356,15 @@ See [Consul integration](./ConsulIntegration.md).
 | Key | Owner | Notes |
 | --- | --- | --- |
 | `Endpoints:Http` | appsettings / launcher | Container HTTP port; a deployment concern |
-| `APP_TITLE` | launcher | Admin console and document title |
 | `Bootstrap:FilePath` | launcher | Optional bootstrap file override |
 | `BootstrapApps:FilePath` | appsettings | Optional application pre-seed file |
 | `Logging:LogLevel` | appsettings | Log category levels; the Loki address and credential come from the database settings |
+
+The launcher's `APP_TITLE` environment variable no longer titles the running console: the managed
+`APP_TITLE` setting above owns the title once a settings snapshot exists. The variable still
+labels the bootstrap and setup pages, which run before the snapshot is activated — a deployment
+that wants a custom install-phase title keeps setting it. On a normal host the variable is inert
+(the database wins) and is reported as a legacy override at startup.
 
 Image name, container name, host port, bind mounts, restart policy, timezone, and .NET runtime
 switches are deployment concerns owned by the launcher or orchestrator.

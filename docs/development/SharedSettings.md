@@ -85,7 +85,7 @@ second rule set:
 
 - `SettingCandidateValidation` (entry: `SharedSettingComposition.ValidateCompleteCandidate`) is
   the pre-validation used by first-run setup, the legacy import, and the test installation
-  fixtures. It checks that the complete legacy-keyed candidate carries every one of the 46
+  fixtures. It checks that the complete legacy-keyed candidate carries every one of the 45
   definition-table keys — completeness precedes defaults, so a missing key is never silently filled in by the
   registry — and that every Number value is integer text (`IntegerSettingConstraint.IsIntegerText`,
   the legacy `NumberStyles.Integer` form), then maps through `SharedSettingKeys` onto the shared

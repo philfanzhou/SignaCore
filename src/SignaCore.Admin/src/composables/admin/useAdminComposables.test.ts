@@ -605,14 +605,19 @@ describe('admin security and runtime settings', () => {
       hasDefault: false, requiresRestart: true, hasValue: true, source: 'persisted',
       value: '[]',
     }
+    const appTitle: AdminSettingValue = {
+      key: 'app.title', valueType: 'string', isRequired: true, isSensitive: false,
+      hasDefault: true, requiresRestart: true, hasValue: true, source: 'persisted',
+      value: 'SignaCore',
+    }
     mocks.api.getSettings.mockResolvedValue({
-      snapshot: { version: 2, values: [audience, secret, adminOrigin] },
+      snapshot: { version: 2, values: [audience, secret, adminOrigin, appTitle] },
       runningVersion: 1,
     })
     await state.loadSettings()
-    expect(state.settingGroups.value.map((group) => group.name)).toEqual(['jwt', 'wechat', 'admin_web'])
+    expect(state.settingGroups.value.map((group) => group.name)).toEqual(['jwt', 'wechat', 'admin_web', 'app'])
     expect(state.getSettingsForSection('settings-identity').map((setting) => setting.key)).toEqual(['jwt.audience'])
-    expect(state.getSettingsForSection('settings-admin').map((setting) => setting.key)).toEqual(['admin_web.allowed_origins'])
+    expect(state.getSettingsForSection('settings-admin').map((setting) => setting.key)).toEqual(['admin_web.allowed_origins', 'app.title'])
     expect(state.formatValue(secret)).toBe('已配置（不会回显）')
     // The stored version (2) leads the running one (1): the console reports restart pending.
     expect(state.restartPending.value).toBe(true)

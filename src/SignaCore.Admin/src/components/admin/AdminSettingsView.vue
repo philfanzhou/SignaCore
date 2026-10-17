@@ -87,6 +87,7 @@ const settingLabels: Record<string, string> = {
   "password_hasher.work_factor": "密码哈希工作因子",
   "admin_web.allowed_origins": "管理端允许来源",
   "admin.username": "管理员标识",
+  "app.title": "管理控制台标题",
   "callback.allowed_domains": "回调允许域名",
   "callback.allow_private_addresses": "允许回调到私有地址",
   "callback.require_https": "回调必须使用 HTTPS",
@@ -131,6 +132,8 @@ function settingLabel(setting: AdminSettingValue) {
 
 /** English purpose notes for the keys whose meaning is not obvious from the label alone. */
 const settingHints: Record<string, string> = {
+  "app.title":
+    "The console page title and window.__APP_TITLE__; it takes effect after a restart. The APP_TITLE environment variable only labels the bootstrap and setup pages, which run before the database settings exist.",
   "loki.allow_no_authentication":
     "Explicitly selects no authentication: no Authorization header is sent, and any stored Loki authorization must be deleted in the same save. Requires a restart.",
 };
