@@ -74,6 +74,26 @@ public class LegacyConfigurationGuardTests
         Assert.Equal(["SMS_BYPASS_CODE"], names);
     }
 
+    /// <summary>
+    /// Once <c>app.title</c> is a managed setting, a deployment still setting the flat
+    /// <c>APP_TITLE</c> is inert on the normal host (the database snapshot wins) and must be
+    /// reported so the operator stops expecting an effect (#595).
+    /// </summary>
+    [Fact]
+    public void FindManagedOverrides_WhenAppTitleIsStillSet_ReportsTheLegacyKey()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["APP_TITLE"] = "Launcher Console"
+            })
+            .Build();
+
+        var overrides = LegacyConfigurationGuard.FindManagedOverrides(configuration);
+
+        Assert.Contains("APP_TITLE", overrides);
+    }
+
     private sealed class TemporaryEnvironmentVariable : IDisposable
     {
         private readonly string _name;

@@ -42,12 +42,12 @@ public class LegacyConfigurationInputTests
             [SystemSettingKeys.LegacyAdminBootstrapUsername] = "legacy_admin"
         });
 
-        // Exactly the four required keys came from the deployment; the other 40 keep the definition
-        // table's legacy defaults, so the complete candidate always covers all 44 keys (the retired
+        // Exactly the four required keys came from the deployment; the other 41 keep the definition
+        // table's legacy defaults, so the complete candidate always covers all 45 keys (the retired
         // loki.allow_insecure_http and ADR 0008 transport rows no longer exist).
         Assert.Equal(4, importedCount);
         Assert.Equal(ServiceSettingDefinitions.Table.Count, values.Count);
-        Assert.Equal(44, values.Count);
+        Assert.Equal(45, values.Count);
 
         // Deployment values are trimmed; defaults are untouched.
         Assert.Equal(BaseUrl, values[SystemSettingKeys.PublicBaseUrl]);

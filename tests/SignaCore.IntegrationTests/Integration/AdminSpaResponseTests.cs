@@ -9,6 +9,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using SignaCore.Database;
 using SignaCore.Host;
+using SignaCore.Host.Configuration;
 using SignaCore.Host.Startup;
 using SignaCore.Tests.Integration;
 using Xunit;
@@ -21,6 +22,8 @@ public sealed class AdminSpaResponseTests
 {
     private const string Template = "<html><head><title>__APP_TITLE__</title></head><body>Console</body></html>";
     private const string Title = "SPA Contract Test";
+    /// <summary>The title stored in the installation's settings aggregate (#595).</summary>
+    private const string StoredTitle = "Stored Console Title";
 
     [Theory]
     [InlineData("bootstrap")]
@@ -36,9 +39,12 @@ public sealed class AdminSpaResponseTests
         };
         var bootstrapPath = mode switch
         {
+            // The normal host stores its own title in the settings aggregate: the activated
+            // snapshot is layered last, so the process-level APP_TITLE below loses to it (#595).
             "normal" => await InstallationTestSupport.PrepareCompletedInstallationAsync(
                 files.Directory, database, IdentityServerFixture.RootSecret,
                 IdentityServerFixture.AdminUsername, IdentityServerFixture.AdminPassword,
+                new Dictionary<string, string> { [SystemSettingKeys.AppTitle] = StoredTitle },
                 cancellationToken: TestContext.Current.CancellationToken),
             "setup" => await InstallationTestSupport.PrepareUninstalledBootstrapAsync(
                 files.Directory, database, IdentityServerFixture.RootSecret, TestContext.Current.CancellationToken),
@@ -54,10 +60,13 @@ public sealed class AdminSpaResponseTests
         });
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
+        // Bootstrap and setup run before a settings snapshot exists and keep reading the
+        // process-level APP_TITLE; the normal host renders the stored aggregate title.
+        var expectedTitle = mode == "normal" ? StoredTitle : Title;
         using var index = await client.GetAsync("/index.html", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, index.StatusCode);
         Assert.Equal("text/html; charset=utf-8", index.Content.Headers.ContentType?.ToString());
-        Assert.Equal(AdminSpaTitleInjector.Inject(Template, Title),
+        Assert.Equal(AdminSpaTitleInjector.Inject(Template, expectedTitle),
             await index.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
 
         var route = mode switch { "bootstrap" => "/bootstrap/route", "setup" => "/setup/route", _ => "/admin/accounts" };

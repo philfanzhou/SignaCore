@@ -87,6 +87,16 @@ public sealed class SharedSettingContractTests
             {
                 [SystemSettingKeys.AdminUsername] = ""
             }, isDevelopment: false, expectedValid: false);
+            // The console title has the same non-blank rule as the audience and administrator
+            // keys: a blank submission is refused instead of rendering an untitled page (#595).
+            Add("app-title-blank", new Dictionary<string, string>
+            {
+                [SystemSettingKeys.AppTitle] = " "
+            }, isDevelopment: false, expectedValid: false);
+            Add("app-title-custom", new Dictionary<string, string>
+            {
+                [SystemSettingKeys.AppTitle] = "Order Platform Console"
+            }, isDevelopment: false, expectedValid: true);
             Add("token-hours-below-range", new Dictionary<string, string>
             {
                 [SystemSettingKeys.JwtTokenExpirationHours] = "0"

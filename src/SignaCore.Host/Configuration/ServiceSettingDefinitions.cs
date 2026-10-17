@@ -126,6 +126,10 @@ internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvi
         // ---- Administrative console ----
         new("admin_web.allowed_origins", ServiceSettingValueType.Json, IsSensitive: false, LegacyDefault: "[]"),
         new("admin.username", ServiceSettingValueType.String, IsSensitive: false, LegacyDefault: ""),
+        // The console title rendered into index.html and window.__APP_TITLE__. The bootstrap and
+        // setup hosts still read the process-level APP_TITLE because they run before a settings
+        // snapshot exists; the activated snapshot wins over it on the normal host (#595).
+        new("app.title", ServiceSettingValueType.String, IsSensitive: false, LegacyDefault: "SignaCore"),
 
         // ---- Callback policy ----
         new("callback.allowed_domains", ServiceSettingValueType.Json, IsSensitive: false, LegacyDefault: "[]"),

@@ -27,6 +27,7 @@ public sealed partial class SharedSettingDefinitionMappingTests
         // ---- Administrative console ----
         { "AdminWeb:AllowedOrigins", "admin_web.allowed_origins" },
         { "Admin:Username", "admin.username" },
+        { "APP_TITLE", "app.title" },
         // ---- Callback policy ----
         { "Callback:AllowedDomains", "callback.allowed_domains" },
         { "Callback:AllowPrivateAddresses", "callback.allow_private_addresses" },
@@ -89,6 +90,7 @@ public sealed partial class SharedSettingDefinitionMappingTests
         // ---- Administrative console ----
         { "admin_web.allowed_origins", "Json", false, false, null },
         { "admin.username", "String", false, false, null },
+        { "app.title", "String", false, true, "SignaCore" },
         // ---- Callback policy ----
         { "callback.allowed_domains", "Json", false, false, null },
         { "callback.allow_private_addresses", "Boolean", false, true, "false" },

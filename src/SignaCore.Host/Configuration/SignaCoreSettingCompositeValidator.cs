@@ -56,6 +56,7 @@ internal sealed class SignaCoreSettingCompositeValidator(
         ValidatePublicBaseUrl(legacy, errors);
         RequireNonBlank(legacy, SystemSettingKeys.JwtAudience, errors);
         RequireNonBlank(legacy, SystemSettingKeys.AdminUsername, errors);
+        RequireNonBlank(legacy, SystemSettingKeys.AppTitle, errors);
         ValidateRuntimeOptions(legacy, errors);
         if (validateManagementUpdateRules)
         {

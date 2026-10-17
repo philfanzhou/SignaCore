@@ -51,8 +51,8 @@ export const adminSettingsSections: AdminSettingsSection[] = [
   {
     key: "settings-admin",
     label: "管理端",
-    description: "配置管理端允许的来源和初始管理员标识。",
-    prefixes: ["admin", "admin_web"],
+    description: "配置管理控制台标题、允许的来源和初始管理员标识。",
+    prefixes: ["app", "admin", "admin_web"],
   },
   {
     key: "settings-network",

@@ -220,7 +220,7 @@ The launcher owns only deployment concerns, overridable through the environment:
 | `CONFIG_DIR` | `./config` | Writable persistent bootstrap mount |
 | `DATA_DIR` | `./data` | Mutable data mount |
 | `TZ` | `Asia/Shanghai` | Container timezone |
-| `APP_TITLE` | container name | Admin console and document title |
+| `APP_TITLE` | container name | Title of the bootstrap and setup pages only; once first-run setup completes, the managed `app.title` setting titles the console and this variable is inert (reported as a legacy override) |
 
 ## Health endpoints
 
