@@ -30,14 +30,17 @@ it('renders the reset entry only for password accounts and leaves account editin
   state.selectedUser.value!.hasPassword = false
   expect(await renderToString(createSSRApp(AdminUserDrawer))).not.toContain('Reset password')
 })
-it('renders the captured username, two password fields, policy, error and disabled submission', async () => {
+it('renders the captured username, two password fields, policy bypass, error and disabled submission', async () => {
   state.resetPasswordTarget.value = { userId: 'captured-account', username: 'captured-user' }
   state.resetPasswordSaving.value = true
   state.resetPasswordError.value = 'Request unavailable.'
   const html = await renderToString(createSSRApp(AdminResetPasswordModal))
   expect(html).toContain('captured-user')
   expect(html.match(/type="password"/g)).toHaveLength(2)
-  expect(html).toContain('uppercase and lowercase')
+  expect(html).toContain('Administrator resets bypass password length and complexity requirements.')
+  expect(html).toContain('The password cannot be blank.')
+  expect(html).not.toContain('At least 8 characters')
+  expect(html).not.toMatch(/minlength=|pattern=/)
   expect(html).toContain('role="alert"')
   expect(html).toContain('Request unavailable.')
   expect(html).toMatch(/type="submit"[^>]*disabled/)

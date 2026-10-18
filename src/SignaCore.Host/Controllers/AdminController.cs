@@ -188,7 +188,6 @@ public class AdminController : ControllerBase
     public async Task<IActionResult> ResetUserPassword(
         Guid userId,
         [FromBody] AdminResetPasswordRequest request,
-        [FromServices] IPasswordPolicy passwordPolicy,
         [FromServices] IPasswordHasher passwordHasher,
         [FromServices] IAccountRepository accountRepository,
         [FromServices] IPasswordCredentialRepository passwordCredentialRepository,
@@ -199,9 +198,8 @@ public class AdminController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.NewPassword))
             return BadRequest(new ErrorResponse("New password cannot be empty."));
-        if (!passwordPolicy.Validate(request.NewPassword, out var policyError))
-            return BadRequest(new ErrorResponse(policyError));
 
+        // Administrators choose reset passwords without the creation/self-service password policy.
         var (actorId, actorName) = GetAdminIdentity();
         var strategy = dbContext.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async operationToken =>

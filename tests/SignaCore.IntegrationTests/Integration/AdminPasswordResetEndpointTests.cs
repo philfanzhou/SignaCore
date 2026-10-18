@@ -68,6 +68,33 @@ public sealed class AdminPasswordResetEndpointTests(IdentityServerFixture fixtur
         });
     }
 
+    [Theory]
+    [InlineData("x")]
+    [InlineData("lowercase1")]
+    [InlineData("UPPERCASE1")]
+    [InlineData("LettersOnly")]
+    [InlineData(" weak ")]
+    public async Task CookieAndBearerAdministrators_BypassPasswordLengthAndComplexity(string password)
+    {
+        using var host = fixture.WithTestServices(_ => { });
+        using var scope = host.Services.CreateScope();
+        var issued = await scope.ServiceProvider.GetRequiredService<ManagementBearerSessionService>().IssueAsync(
+            await fixture.GetAdminAccountIdAsync(), Ct);
+        using var bearer = host.CreateClient();
+        bearer.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", issued.Token!);
+        using var cookie = await fixture.CreateAdminHttpClientAsync();
+        foreach (var admin in new[] { cookie, bearer })
+        {
+            var target = await SeedAsync();
+            using var response = await admin.PostAsJsonAsync(Path(target.Id), new { newPassword = password }, Ct);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.True(await LoginSucceedsAsync(target.Username, password));
+            Assert.False(await LoginSucceedsAsync(target.Username, OldPassword));
+            if (password != password.Trim())
+                Assert.False(await LoginSucceedsAsync(target.Username, password.Trim()));
+        }
+    }
+
     [Fact]
     public async Task AnonymousOrdinaryJwtApplicationAndForgedClaims_AreDeniedWithoutWrites()
     {
@@ -113,7 +140,8 @@ public sealed class AdminPasswordResetEndpointTests(IdentityServerFixture fixtur
     [InlineData("{}")]
     [InlineData("{\"newPassword\":null}")]
     [InlineData("{\"newPassword\":\"\"}")]
-    [InlineData("{\"newPassword\":\"weak\"}")]
+    [InlineData("{\"newPassword\":\"   \"}")]
+    [InlineData("{\"newPassword\":\"\\t\\r\\n\"}")]
     public async Task InvalidPasswords_ReturnTheStandardErrorWithoutWrites(string json)
     {
         var target = await SeedAsync();

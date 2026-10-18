@@ -14,7 +14,6 @@ using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
-using SignaCore.Domain.Validators;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Management;
@@ -28,7 +27,7 @@ public sealed class AdminPasswordResetDatabaseContractTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private const string OldPassword = "Reset-Old-123";
-    private const string NewPassword = " Reset-New-456 ";
+    private const string NewPassword = " weak ";
     private static readonly BCryptPasswordHasher Hasher = new(new PasswordHasherOptions { WorkFactor = 4 });
 
     [Theory]
@@ -187,7 +186,7 @@ public sealed class AdminPasswordResetDatabaseContractTests
             } }
         };
         CorrelationPipeline(controller.HttpContext).GetAwaiter().GetResult();
-        return controller.ResetUserPassword(id, new AdminResetPasswordRequest(password), new DefaultPasswordPolicy(),
+        return controller.ResetUserPassword(id, new AdminResetPasswordRequest(password),
             Hasher, accounts ?? new AccountRepository(context), repository ?? new PasswordCredentialRepository(context),
             unitOfWork ?? new EfCoreUnitOfWork(context), writer ?? new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             context, token ?? Ct);
