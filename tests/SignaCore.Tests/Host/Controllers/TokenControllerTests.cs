@@ -1,4 +1,6 @@
+using System.Diagnostics.Metrics;
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -74,10 +76,11 @@ public class TokenControllerTests : IDisposable
         IIdentityValidator[] validators,
         AdminIdentityOptions adminIdentityOptions,
         ICallbackService? callbackService = null,
-        AppRegistrationEntity? app = null)
+        AppRegistrationEntity? app = null,
+        AuthMetrics? authMetrics = null)
     {
         var controller = new TokenController(
-                CreateIssuanceService(validators, adminIdentityOptions, callbackService))
+                CreateIssuanceService(validators, adminIdentityOptions, callbackService, authMetrics))
             .WithHttpContext();
         controller.HttpContext.Items[IdentityHeaders.ValidatedApp] = app ?? new AppRegistrationEntity
         {
@@ -98,7 +101,8 @@ public class TokenControllerTests : IDisposable
     private TokenIssuanceService CreateIssuanceService(
         IIdentityValidator[] validators,
         AdminIdentityOptions adminIdentityOptions,
-        ICallbackService? callbackService = null) =>
+        ICallbackService? callbackService = null,
+        AuthMetrics? authMetrics = null) =>
         new(
             _keyManagerMock.Object,
             _tokenServiceMock.Object,
@@ -107,7 +111,7 @@ public class TokenControllerTests : IDisposable
             _claimsResolver,
             new ValidatorFactory(validators, NullLogger<ValidatorFactory>.Instance),
             callbackService,
-            AuthTestDoubles.AuthMetrics(),
+            authMetrics ?? AuthTestDoubles.AuthMetrics(),
             _auditServiceMock.Object,
             _accountLoginInfoServiceMock.Object,
             _accountRepositoryMock.Object,
@@ -648,6 +652,219 @@ public class TokenControllerTests : IDisposable
             It.IsAny<AccountEntity>(),
             It.IsAny<string?>(),
             It.IsAny<Guid?>()), Times.Never);
+    }
+
+    #endregion
+
+    #region Legacy failure code (#609)
+
+    private const string SmsDisabledMessage = "SMS login is disabled for this application";
+
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
+    private static AppRegistrationEntity CreateSmsApp(SmsLoginMode mode) => new()
+    {
+        Id = Guid.NewGuid(),
+        AppId = "test-app",
+        AppName = "Test App",
+        AppSecretHash = "not-used-by-controller",
+        IsActive = true,
+        SmsLoginMode = mode,
+        SmsProfileKey = "test"
+    };
+
+    /// <summary>
+    /// The real SMS validator with a bypass code configured for the requested phone, so a bypass
+    /// acceptance would show up as a success if the policy check did not come first.
+    /// </summary>
+    private static SmsValidator CreateSmsValidator(Mock<IOtpService> otp, Mock<ISmsAdmissionService> admission) =>
+        new(
+            otp.Object,
+            admission.Object,
+            NullLogger<SmsValidator>.Instance,
+            AuthTestDoubles.AuthMetrics(),
+            new SmsOptions { BypassCode = "123456", BypassPhones = ["+8613800138000"] });
+
+    private static JsonElement Serialize(TokenResponse response) =>
+        JsonSerializer.SerializeToElement(response, WebJson);
+
+    /// <summary>
+    /// Under <c>Disabled</c> the SMS grant answers HTTP 200, success=false, the existing message,
+    /// and <c>code=SMS_LOGIN_DISABLED</c> — also with an empty phone or code, because the policy is
+    /// checked first. No admission lookup, OTP verification, bypass acceptance, token issuance,
+    /// refresh-token write, or login-state change happens; the one login_failure audit row, the
+    /// single save, and the failure metrics are exactly the existing ones.
+    /// </summary>
+    [Theory]
+    [InlineData("13800138000", "123456")]
+    [InlineData(null, null)]
+    [InlineData("13800138000", "")]
+    public async Task GetToken_SmsGrantUnderDisabledPolicy_ReturnsTheStableCode(string? phone, string? code)
+    {
+        var otp = new Mock<IOtpService>();
+        var admission = new Mock<ISmsAdmissionService>();
+        using var meter = new Meter("SignaCore");
+        var meterFactory = new Mock<IMeterFactory>();
+        meterFactory.Setup(factory => factory.Create(It.IsAny<MeterOptions>())).Returns(meter);
+        var failures = new List<(string? GrantType, string? Reason)>();
+        var durations = 0;
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, l) =>
+            {
+                if (ReferenceEquals(instrument.Meter, meter)) l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<int>((instrument, _, tags, _) =>
+        {
+            if (instrument.Name != "auth.login.failure") return;
+            var values = tags.ToArray().ToDictionary(tag => tag.Key, tag => tag.Value as string);
+            failures.Add((values["grant_type"], values["reason"]));
+        });
+        listener.SetMeasurementEventCallback<double>((instrument, _, _, _) =>
+        {
+            if (instrument.Name == "auth.login.duration") durations++;
+        });
+        listener.Start();
+        var controller = CreateController(
+            [CreateSmsValidator(otp, admission)],
+            _adminIdentityOptions,
+            app: CreateSmsApp(SmsLoginMode.Disabled),
+            authMetrics: new AuthMetrics(meterFactory.Object));
+
+        var actionResult = await controller.GetToken(new TokenRequest
+        {
+            GrantType = IdentityConstants.GrantTypeSms,
+            Phone = phone,
+            Code = code
+        }, CancellationToken.None);
+
+        var response = Assert.IsType<TokenResponse>(AuthTestDoubles.ExtractOk(actionResult).Value);
+        Assert.False(response.Success);
+        Assert.Equal(SmsDisabledMessage, response.Message);
+        Assert.Equal(LegacyAuthResponseCodes.SmsLoginDisabled, response.Code);
+        Assert.Equal("SMS_LOGIN_DISABLED", Serialize(response).GetProperty("code").GetString());
+        Assert.True(string.IsNullOrEmpty(response.AccessToken));
+        Assert.True(string.IsNullOrEmpty(response.RefreshToken));
+        Assert.Null(response.UserInfo);
+
+        otp.VerifyNoOtherCalls();
+        admission.VerifyNoOtherCalls();
+        _tokenServiceMock.VerifyNoOtherCalls();
+        _refreshTokenServiceMock.VerifyNoOtherCalls();
+        _accountLoginInfoServiceMock.VerifyNoOtherCalls();
+        _otpRepositoryMock.VerifyNoOtherCalls();
+        _auditServiceMock.Verify(audit => audit.RecordLoginAsync(
+            null, phone ?? "unknown", IdentityConstants.GrantTypeSms, "login_failure",
+            It.IsAny<string?>(), It.IsAny<string?>(), SmsDisabledMessage,
+            "test-app", It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        _auditServiceMock.Verify(audit => audit.RecordLoginAsync(
+            It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        _unitOfWorkMock.Verify(
+            unitOfWork => unitOfWork.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal([(IdentityConstants.GrantTypeSms, SmsDisabledMessage)], failures);
+        Assert.Equal(1, durations);
+    }
+
+    /// <summary>
+    /// The code comes only from the typed reason. A failure with the very same message text and
+    /// OAuth code but no reason — and the LDAP/WeChat policy rejections that share
+    /// <c>unauthorized_client</c> — carry no <c>code</c> property at all.
+    /// </summary>
+    [Theory]
+    [InlineData("sms", "SMS login is disabled for this application")]
+    [InlineData("ldap", "LDAP login is disabled for this application")]
+    [InlineData("wechat_code", "WeChat login is disabled for this application")]
+    [InlineData("refresh_token", "SMS login is disabled for this application")]
+    public async Task GetToken_FailureWithoutTheTypedReason_OmitsTheCode(string grantType, string message)
+    {
+        var validator = new Mock<IIdentityValidator>();
+        validator.SetupGet(v => v.GrantType).Returns(grantType);
+        validator.Setup(v => v.ValidateAsync(It.IsAny<ValidationRequest>()))
+            .ReturnsAsync(ValidationResult.Failure(message, OAuthErrorCodes.UnauthorizedClient));
+        var controller = CreateController([validator.Object]);
+
+        var actionResult = await controller.GetToken(new TokenRequest { GrantType = grantType }, CancellationToken.None);
+
+        var response = Assert.IsType<TokenResponse>(AuthTestDoubles.ExtractOk(actionResult).Value);
+        Assert.False(response.Success);
+        Assert.Equal(message, response.Message);
+        Assert.Null(response.Code);
+        Assert.False(Serialize(response).TryGetProperty("code", out _));
+    }
+
+    /// <summary>
+    /// Under an enabled mode the later SMS failures keep their existing message and carry no code.
+    /// </summary>
+    [Theory]
+    [InlineData(SmsLoginMode.ManualApproval, "13800138000", "", "Phone or code cannot be empty")]
+    [InlineData(SmsLoginMode.AutoProvision, "12345", "654321", "Invalid mainland China mobile number")]
+    [InlineData(SmsLoginMode.ManualApproval, "13800138000", "654321", "SMS account is not authorized for this application")]
+    public async Task GetToken_SmsFailureUnderAnEnabledPolicy_OmitsTheCode(
+        SmsLoginMode mode, string phone, string code, string message)
+    {
+        var controller = CreateController(
+            [CreateSmsValidator(new Mock<IOtpService>(), new Mock<ISmsAdmissionService>())],
+            _adminIdentityOptions,
+            app: CreateSmsApp(mode));
+
+        var actionResult = await controller.GetToken(new TokenRequest
+        {
+            GrantType = IdentityConstants.GrantTypeSms,
+            Phone = phone,
+            Code = code
+        }, CancellationToken.None);
+
+        var response = Assert.IsType<TokenResponse>(AuthTestDoubles.ExtractOk(actionResult).Value);
+        Assert.False(response.Success);
+        Assert.Equal(message, response.Message);
+        Assert.False(Serialize(response).TryGetProperty("code", out _));
+    }
+
+    [Fact]
+    public async Task GetToken_SuccessAndUnsupportedGrant_OmitTheCode()
+    {
+        var account = CreateTestAccount();
+        var controller = CreateController([CreatePasswordValidator(account, "alice").Object]);
+
+        var success = Assert.IsType<TokenResponse>(AuthTestDoubles.ExtractOk(await controller.GetToken(
+            new TokenRequest { GrantType = "password", Username = "alice", Password = "pw" },
+            CancellationToken.None)).Value);
+        var unsupported = Assert.IsType<TokenResponse>(AuthTestDoubles.ExtractOk(await controller.GetToken(
+            new TokenRequest { GrantType = "no_such_grant" },
+            CancellationToken.None)).Value);
+
+        Assert.True(success.Success);
+        Assert.False(Serialize(success).TryGetProperty("code", out _));
+        Assert.False(unsupported.Success);
+        Assert.Equal("unsupported_grant_type", unsupported.Message);
+        Assert.False(Serialize(unsupported).TryGetProperty("code", out _));
+    }
+
+    /// <summary>
+    /// The optional property is written only when set; every existing field keeps its name and
+    /// position, and a null code is omitted rather than written as null.
+    /// </summary>
+    [Fact]
+    public void LegacyResponses_OmitANullCode_AndWriteASetOne()
+    {
+        var withoutCode = JsonSerializer.Serialize(new TokenResponse { Success = false, Message = "x" }, WebJson);
+        var withCode = JsonSerializer.Serialize(
+            new TokenResponse { Success = false, Message = "x", Code = LegacyAuthResponseCodes.SmsLoginDisabled }, WebJson);
+        var smsWithout = JsonSerializer.Serialize(new SmsCodeResponse { Success = false, Message = "x" }, WebJson);
+        var smsWith = JsonSerializer.Serialize(
+            new SmsCodeResponse { Success = false, Message = "x", Code = LegacyAuthResponseCodes.SmsLoginDisabled }, WebJson);
+
+        Assert.Equal(
+            "{\"success\":false,\"message\":\"x\",\"accessToken\":\"\",\"refreshToken\":\"\",\"expiresIn\":0,\"expiresAt\":0,\"userInfo\":null}",
+            withoutCode);
+        Assert.Equal(
+            "{\"success\":false,\"message\":\"x\",\"accessToken\":\"\",\"refreshToken\":\"\",\"expiresIn\":0,\"expiresAt\":0,\"userInfo\":null,\"code\":\"SMS_LOGIN_DISABLED\"}",
+            withCode);
+        Assert.Equal("{\"success\":false,\"message\":\"x\"}", smsWithout);
+        Assert.Equal("{\"success\":false,\"message\":\"x\",\"code\":\"SMS_LOGIN_DISABLED\"}", smsWith);
     }
 
     #endregion

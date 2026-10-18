@@ -89,6 +89,16 @@ public class ValidationResult
     public string ErrorCode { get; private set; } = OAuthErrorCodes.InvalidGrant;
 
     /// <summary>
+    /// A typed, transport-neutral reason for the few failures a caller may need to tell apart
+    /// without parsing <see cref="ErrorMessage"/>. It is <see cref="ValidationFailureReason.None"/>
+    /// for every success and for almost every failure; the Host maps a non-None value to a stable
+    /// wire string on the legacy <c>/api/auth/token</c> response. <see cref="ErrorCode"/> cannot
+    /// serve this purpose: the SMS, LDAP, and WeChat policy rejections all share
+    /// <see cref="OAuthErrorCodes.UnauthorizedClient"/>.
+    /// </summary>
+    public ValidationFailureReason FailureReason { get; private set; }
+
+    /// <summary>
     /// This refresh is a cross-application exchange: the presented token belongs to
     /// <see cref="SourceAppId"/> and is admitted by a trust edge. The issuance path uses this to
     /// issue without rotating — the presented token is another application's session credential, and
@@ -168,6 +178,34 @@ public class ValidationResult
         OtpVerificationChange = change;
         return this;
     }
+
+    /// <summary>
+    /// Attaches a typed failure reason. It is only meaningful on a failure, so calling it on a
+    /// success is a programming error.
+    /// </summary>
+    internal ValidationResult WithFailureReason(ValidationFailureReason reason)
+    {
+        if (IsSuccess)
+            throw new InvalidOperationException("A failure reason can only be attached to a failed validation.");
+        FailureReason = reason;
+        return this;
+    }
+}
+
+/// <summary>
+/// The typed failure reasons a validator may attach to a <see cref="ValidationResult"/>. Only the
+/// listed decisions carry a reason; every other failure stays <see cref="None"/>.
+/// </summary>
+public enum ValidationFailureReason
+{
+    None = 0,
+
+    /// <summary>
+    /// The application's SMS login mode is <c>Disabled</c>, decided by <see cref="SmsValidator"/>
+    /// before any phone, code, or admission check. A refresh grant of an SMS-origin session does not
+    /// set it.
+    /// </summary>
+    SmsLoginDisabled
 }
 
 public enum LoginAttemptChangeKind

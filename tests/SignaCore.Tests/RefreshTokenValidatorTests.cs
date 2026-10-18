@@ -606,7 +606,53 @@ public class RefreshTokenValidatorTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("WeChat login is disabled for this application", result.ErrorMessage);
+        Assert.Equal(ValidationFailureReason.None, result.FailureReason);
         wechatAdmission.VerifyNoOtherCalls();
+    }
+
+    /// <summary>
+    /// A refresh of an SMS-origin session under <c>Disabled</c> keeps its existing failure and does
+    /// not carry the SMS policy reason: the stable code is limited to the SMS grant itself (#609).
+    /// </summary>
+    [Fact]
+    public async Task ValidateAsync_SmsBoundToken_IsRejectedWhenApplicationDisablesSms_WithoutAFailureReason()
+    {
+        var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true };
+        var app = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "app-1",
+            SmsLoginMode = SmsLoginMode.Disabled
+        };
+        var token = new RefreshTokenEntity
+        {
+            AccountId = account.Id,
+            TokenValue = "sms-refresh",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            AppId = app.AppId,
+            SmsUserLoginId = Guid.NewGuid()
+        };
+        var tokenRepository = new Mock<IRefreshTokenRepository>();
+        tokenRepository.Setup(repository => repository.GetByTokenValueAsync(token.TokenValue)).ReturnsAsync(token);
+        var accountRepository = new Mock<IAccountRepository>();
+        accountRepository.Setup(repository => repository.GetByIdAsync(account.Id)).ReturnsAsync(account);
+        var smsAdmission = new Mock<ISmsAdmissionService>();
+
+        var validator = CreateValidator(
+            tokenRepository.Object, accountRepository.Object, smsAdmissionService: smsAdmission.Object);
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken,
+            RefreshToken = token.TokenValue,
+            AppId = app.AppId,
+            App = app
+        });
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("SMS login is disabled for this application", result.ErrorMessage);
+        Assert.Equal(OAuthErrorCodes.UnauthorizedClient, result.ErrorCode);
+        Assert.Equal(ValidationFailureReason.None, result.FailureReason);
+        smsAdmission.VerifyNoOtherCalls();
     }
 
     [Theory]

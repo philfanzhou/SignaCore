@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using SignaCore.Domain.Validators;
 using SignaCore.Host.Http;
 using SignaCore.Host.Models;
 using SignaCore.Host.Security;
@@ -11,8 +12,9 @@ namespace SignaCore.Host.Controllers;
 /// POST /api/auth/token — issues access tokens under the historical JSON contract.
 /// AppId/AppSecret travel in the X-Admin-AppId / X-Admin-AppSecret headers and are enforced.
 /// <para>
-/// This is the contract endpoint existing downstream consumers depend on, and its shape does not
-/// change. The RFC 6749 conformant equivalent lives on <see cref="OAuthTokenController"/>
+/// This is the contract endpoint existing downstream consumers depend on: its existing fields and
+/// behavior do not change, and only optional additive fields (such as the failure <c>code</c>) may be
+/// added. The RFC 6749 conformant equivalent lives on <see cref="OAuthTokenController"/>
 /// (<c>/oauth2/token</c>); both share <see cref="TokenIssuanceService"/>.
 /// </para>
 /// </summary>
@@ -58,8 +60,13 @@ public class TokenController : ControllerBase
         if (!outcome.IsSuccess)
         {
             // A failure is HTTP 200 as well: that is the outward contract, not something to turn
-            // into a 4xx.
-            return Ok(new TokenResponse { Success = false, Message = outcome.ErrorMessage });
+            // into a 4xx. The optional code comes only from the typed reason, never from the text.
+            return Ok(new TokenResponse
+            {
+                Success = false,
+                Message = outcome.ErrorMessage,
+                Code = MapFailureCode(outcome.FailureReason)
+            });
         }
 
         return Ok(new TokenResponse
@@ -80,4 +87,10 @@ public class TokenController : ControllerBase
             }
         });
     }
+
+    private static string? MapFailureCode(ValidationFailureReason reason) => reason switch
+    {
+        ValidationFailureReason.SmsLoginDisabled => LegacyAuthResponseCodes.SmsLoginDisabled,
+        _ => null
+    };
 }

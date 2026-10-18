@@ -63,7 +63,14 @@ public class SmsCodeController : ControllerBase
         var appId = app.AppId;
 
         if (app.SmsLoginMode == SmsLoginMode.Disabled)
-            return Ok(new SmsCodeResponse { Success = false, Message = "SMS login is disabled for this application" });
+        {
+            return Ok(new SmsCodeResponse
+            {
+                Success = false,
+                Message = "SMS login is disabled for this application",
+                Code = LegacyAuthResponseCodes.SmsLoginDisabled
+            });
+        }
         if (string.IsNullOrWhiteSpace(app.SmsProfileKey))
             return Ok(new SmsCodeResponse { Success = false, Message = "SMS provider is not configured for this application" });
         if (!MainlandChinaPhoneNumber.TryNormalize(request.Phone, out var phone))

@@ -16,7 +16,9 @@ Clients exchange password, SMS, WeChat, LDAP, or refresh-token credentials for a
 
 The same issuance pipeline is reachable through two endpoints, which differ only in wire format:
 
-- `POST /api/auth/token` — the frozen JSON contract described by this document.
+- `POST /api/auth/token` — the frozen JSON contract described by this document. Its existing fields
+  and behavior do not change; only optional additive fields, such as the
+  [legacy failure reason](#legacy-failure-reason), may be added.
 - `POST /oauth2/token` — RFC 6749 form-encoded, with standard error codes and grant names.
 
 See [conformance](../../../overview/StandardsConformance.md) for the standards surface and the
@@ -65,6 +67,56 @@ accepts refresh tokens issued to that one. See
 
 Administrators manage edges through
 [app management](../../Admin/AppManagement/02-SPEC.md).
+
+## Legacy failure reason
+
+The legacy JSON endpoints answer failures with HTTP 200, `success=false`, and an English `message`.
+Callers must not parse `message`. For one decision, an application whose SMS login mode is `Disabled`,
+the response also carries an optional stable `code`. This covers `POST /api/auth/token` with
+`grantType=sms` and `POST /api/auth/sms-code`, which has no separate module document.
+
+| Endpoint | Condition, in the existing check order | HTTP | `success` | `message` (unchanged) | `code` |
+| --- | --- | --- | --- | --- | --- |
+| `/api/auth/sms-code` | empty phone, any mode | 200 | false | `Phone number is required` | omitted |
+| `/api/auth/sms-code` | phone present, mode `Disabled` | 200 | false | `SMS login is disabled for this application` | `SMS_LOGIN_DISABLED` |
+| `/api/auth/sms-code` | any later failure, or success | 200 | as before | as before | omitted |
+| `/api/auth/token` `grantType=sms` | mode `Disabled`, checked before the phone and code, so also when they are empty | 200 | false | `SMS login is disabled for this application` | `SMS_LOGIN_DISABLED` |
+| `/api/auth/token` `grantType=sms` | any later failure, or success | 200 | as before | as before | omitted |
+| `/api/auth/token`, other grants, including `refresh_token` of an SMS-origin session under `Disabled` | any | 200 | as before | as before | omitted |
+| `/oauth2/token` with the SMS grant | mode `Disabled` | 400 | n/a | `error=unauthorized_client` as before | no new field |
+
+A disabled failure:
+
+```json
+{
+  "success": false,
+  "message": "SMS login is disabled for this application",
+  "code": "SMS_LOGIN_DISABLED"
+}
+```
+
+(`/api/auth/token` also returns its existing empty token fields and `userInfo: null` before `code`.)
+
+Any other failure has no `code` property at all, never `"code": null`:
+
+```json
+{
+  "success": false,
+  "message": "SMS account is not authorized for this application"
+}
+```
+
+- The application registration's stored SMS mode is the only authority. It is read on every request,
+  so a committed policy change applies to the next request.
+- A disabled failure has no other effect: no OTP is sent or verified, no bypass code is accepted, no
+  admission is looked up or provisioned, and no token, refresh token, or callback is issued.
+  `/api/auth/sms-code` writes no audit row for it; `/api/auth/token` writes its usual single
+  `login_failure` row with the existing reason text and records the usual failure metrics.
+- Callers compare `code` exactly, treat a missing `code` as "some other failure", and ignore unknown
+  JSON properties.
+- Not guaranteed: a code for any other failure, for `grantType=refresh_token`, or for
+  `/api/auth/sms-code` with an empty phone; ending in-flight requests or revoking tokens when the policy
+  changes; any change to `/oauth2/token`.
 
 ## Security requirements
 

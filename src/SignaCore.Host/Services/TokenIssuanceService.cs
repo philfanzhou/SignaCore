@@ -135,6 +135,7 @@ public sealed class TokenIssuanceService
                 auditUsername: request.Username ?? request.Phone ?? "unknown",
                 loginAttemptChange: validationResult.LoginAttemptChange,
                 otpVerificationChange: validationResult.OtpVerificationChange,
+                failureReason: validationResult.FailureReason,
                 cancellationToken: cancellationToken);
         }
 
@@ -348,6 +349,11 @@ public sealed class TokenIssuanceService
     /// message has a fallback. The response message is part of the /api/auth/token contract, and the error
     /// code is part of the /oauth2/token contract. See docs/modules/Auth/GetToken/06-CONVENTIONS.md.
     /// </para>
+    /// <para>
+    /// <paramref name="failureReason"/> only travels into the outcome; it changes nothing about the
+    /// metric, audit, or save sequence. Only the validation-failure branch passes the validator's
+    /// reason; every other failure keeps <see cref="ValidationFailureReason.None"/>.
+    /// </para>
     /// </summary>
     private async Task<TokenIssuanceOutcome> FailAsync(
         TokenIssuanceRequest request,
@@ -360,6 +366,7 @@ public sealed class TokenIssuanceService
         Guid? accountId = null,
         LoginAttemptChange? loginAttemptChange = null,
         OtpVerificationChange? otpVerificationChange = null,
+        ValidationFailureReason failureReason = ValidationFailureReason.None,
         CancellationToken cancellationToken = default)
     {
         stopwatch.Stop();
@@ -407,7 +414,7 @@ public sealed class TokenIssuanceService
             }, cancellationToken);
         }
 
-        return TokenIssuanceOutcome.Failure(errorCode, responseMessage);
+        return TokenIssuanceOutcome.Failure(errorCode, responseMessage, failureReason);
 
         Task StageAuditAsync(CancellationToken stageCancellationToken) => _auditService.RecordLoginAsync(
             accountId, auditUsername, request.GrantType, "login_failure",
@@ -568,6 +575,13 @@ public sealed class TokenIssuanceOutcome
 
     public IReadOnlyList<string> Permissions { get; private init; } = [];
 
+    /// <summary>
+    /// The validator's typed failure reason, <see cref="ValidationFailureReason.None"/> on success and
+    /// on every failure that does not carry one. <c>/api/auth/token</c> maps it to an optional
+    /// <c>code</c> field; <c>/oauth2/token</c> ignores it.
+    /// </summary>
+    public ValidationFailureReason FailureReason { get; private init; }
+
     public static TokenIssuanceOutcome Success(
         string accessToken,
         string refreshToken,
@@ -591,10 +605,14 @@ public sealed class TokenIssuanceOutcome
             Permissions = permissions
         };
 
-    public static TokenIssuanceOutcome Failure(string errorCode, string errorMessage) => new()
-    {
-        IsSuccess = false,
-        ErrorCode = errorCode,
-        ErrorMessage = errorMessage
-    };
+    public static TokenIssuanceOutcome Failure(
+        string errorCode,
+        string errorMessage,
+        ValidationFailureReason failureReason = ValidationFailureReason.None) => new()
+        {
+            IsSuccess = false,
+            ErrorCode = errorCode,
+            ErrorMessage = errorMessage,
+            FailureReason = failureReason
+        };
 }
