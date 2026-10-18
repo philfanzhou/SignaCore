@@ -41,6 +41,8 @@ public class WechatValidatorTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal("WeChat login is disabled for this application", result.ErrorMessage);
+        // Shares unauthorized_client with the SMS policy rejection but carries no SMS reason.
+        Assert.Equal(ValidationFailureReason.None, result.FailureReason);
         api.VerifyNoOtherCalls();
     }
 

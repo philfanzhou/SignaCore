@@ -1,4 +1,18 @@
+using System.Text.Json.Serialization;
+
 namespace SignaCore.Host.Models;
+
+/// <summary>
+/// Stable machine-readable failure codes of the legacy <c>/api/auth/token</c> and
+/// <c>/api/auth/sms-code</c> responses. A code is additive: it is written only for the decisions
+/// listed here and the property is omitted on success and on every other failure. Callers compare
+/// it exactly and never parse <c>message</c>. See docs/modules/Auth/GetToken/02-SPEC.md.
+/// </summary>
+public static class LegacyAuthResponseCodes
+{
+    /// <summary>The application's SMS login mode is <c>Disabled</c>.</summary>
+    public const string SmsLoginDisabled = "SMS_LOGIN_DISABLED";
+}
 
 /// <summary>
 /// HTTP request body for POST /api/auth/token (OAuth2 grant_type mode).
@@ -25,6 +39,13 @@ public sealed class TokenResponse
     public long ExpiresIn { get; set; }
     public long ExpiresAt { get; set; }
     public UserInfo? UserInfo { get; set; }
+
+    /// <summary>
+    /// An optional stable failure code from <see cref="LegacyAuthResponseCodes"/>; omitted, not
+    /// null, when there is none.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Code { get; set; }
 }
 
 public sealed class UserInfo
@@ -54,6 +75,13 @@ public sealed class SmsCodeResponse
 {
     public bool Success { get; set; }
     public string Message { get; set; } = string.Empty;
+
+    /// <summary>
+    /// An optional stable failure code from <see cref="LegacyAuthResponseCodes"/>; omitted, not
+    /// null, when there is none.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Code { get; set; }
 }
 
 /// <summary>

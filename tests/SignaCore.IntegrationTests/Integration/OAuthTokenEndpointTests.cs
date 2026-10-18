@@ -209,7 +209,8 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
 
     /// <summary>
     /// The URN is recognized; because SMS is disabled for this application, policy rejects it instead
-    /// of treating the grant as unknown.
+    /// of treating the grant as unknown. The legacy endpoint's <c>code</c> field (#609) never appears
+    /// here: the RFC 6749 error body is unchanged.
     /// </summary>
     [Fact]
     public async Task Token_WithTheSmsUrnGrant_ReachesThePolicyCheck()
@@ -226,6 +227,10 @@ public class OAuthTokenEndpointTests : IClassFixture<IdentityServerFixture>
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("unauthorized_client", body.GetProperty("error").GetString());
+        Assert.Equal(
+            ["error", "error_description"],
+            body.EnumerateObject().Select(property => property.Name));
+        Assert.Equal("SMS login is disabled for this application", body.GetProperty("error_description").GetString());
     }
 
     [Fact]

@@ -33,7 +33,8 @@ public class SmsValidator : IIdentityValidator
     {
         if (request.App == null || request.App.SmsLoginMode == SmsLoginMode.Disabled)
             return ValidationResult.Failure(
-                "SMS login is disabled for this application", OAuthErrorCodes.UnauthorizedClient);
+                    "SMS login is disabled for this application", OAuthErrorCodes.UnauthorizedClient)
+                .WithFailureReason(ValidationFailureReason.SmsLoginDisabled);
         if (string.IsNullOrWhiteSpace(request.Phone) || string.IsNullOrWhiteSpace(request.Code))
             return ValidationResult.Failure("Phone or code cannot be empty", OAuthErrorCodes.InvalidRequest);
         if (!MainlandChinaPhoneNumber.TryNormalize(request.Phone, out var phone))

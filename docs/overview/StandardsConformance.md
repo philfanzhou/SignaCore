@@ -219,5 +219,8 @@ RP-Initiated Logout conformance.
 
 The `/api/auth/token` contract (JSON body, camelCase fields, HTTP 200 with `success=false`) is published
 and has downstream consumers, documented in
-[Auth/GetToken](../modules/Auth/GetToken/06-CONVENTIONS.md). It is frozen, not deprecated: new
-conformance work is added at `/oauth2/*` rather than changing it.
+[Auth/GetToken](../modules/Auth/GetToken/06-CONVENTIONS.md). It is frozen, not deprecated: its
+existing fields and behavior do not change, and new conformance work is added at `/oauth2/*` rather
+than changing it. Optional additive fields may still be added; the only one so far is the
+[`code` for an application with SMS login disabled](../modules/Auth/GetToken/02-SPEC.md#legacy-failure-reason)
+on `/api/auth/token` and `/api/auth/sms-code`.

@@ -142,6 +142,9 @@ public sealed class LdapValidatorTests
         var result = await fixture.Validator.ValidateAsync(fixture.Request("alice", TestContext.Current.CancellationToken));
 
         Assert.False(result.IsSuccess);
+        // Shares unauthorized_client with the SMS policy rejection but carries no SMS reason.
+        Assert.Equal(OAuthErrorCodes.UnauthorizedClient, result.ErrorCode);
+        Assert.Equal(ValidationFailureReason.None, result.FailureReason);
         fixture.DirectoryClient.Verify(client => client.ResolveDirectory(It.IsAny<string>()), Times.Never);
     }
 
