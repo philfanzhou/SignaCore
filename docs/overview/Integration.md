@@ -20,6 +20,11 @@ collecting credentials itself; the [Hosted Login guide](../integrations/HostedLo
 registration, the Authorization Code flow, sign-out, session lifetime, mobile applications, and
 migration from the Password and SMS grants.
 
+A site that still signs users in through the Password or SMS grants can ask which login methods
+its application currently permits with `GET /api/gateway/auth-capabilities` (see
+[Gateway auth capabilities](../modules/Gateway/AuthCapabilities/02-SPEC.md)) instead of keeping
+its own SMS switch.
+
 ## External providers
 
 | Integration | Purpose |

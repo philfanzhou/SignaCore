@@ -64,9 +64,14 @@ public sealed class GatewayAppAuthenticationHandler : AuthenticationHandler<Auth
         return AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme.Name));
     }
 
+    /// <summary>
+    /// The generic gateway 401. The status and body never say why authentication failed, and
+    /// <c>Cache-Control: no-store</c> keeps intermediaries from retaining the answer.
+    /// </summary>
     protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
     {
         Response.StatusCode = StatusCodes.Status401Unauthorized;
+        Response.Headers.CacheControl = "no-store";
         await Response.WriteAsJsonAsync(
             new ErrorResponse("Invalid or missing gateway credentials."), Context.RequestAborted);
     }

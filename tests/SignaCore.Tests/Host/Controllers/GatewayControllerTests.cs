@@ -424,6 +424,49 @@ public class GatewayControllerTests : IDisposable
         Assert.Single(list);
     }
 
+    [Theory]
+    [InlineData(SmsLoginMode.Disabled, false)]
+    [InlineData(SmsLoginMode.ManualApproval, true)]
+    [InlineData(SmsLoginMode.AutoProvision, true)]
+    public void GetAuthCapabilities_ReflectsTheValidatedApplicationsSmsMode(SmsLoginMode mode, bool smsLoginEnabled)
+    {
+        _controller.HttpContext.Items[IdentityHeaders.ValidatedApp] = new AppRegistrationEntity
+        {
+            Id = Guid.NewGuid(),
+            AppId = "testapp",
+            AppName = "Test App",
+            IsActive = true,
+            CreatedAt = DateTimeOffset.UtcNow,
+            SmsLoginMode = mode,
+            // No provider profile: permitted methods do not depend on SMS delivery being configured.
+            SmsProfileKey = null
+        };
+
+        var result = _controller.GetAuthCapabilities();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<GatewayAuthCapabilitiesResponse>(ok.Value);
+        Assert.True(response.PasswordEnabled);
+        Assert.Equal(smsLoginEnabled, response.SmsLoginEnabled);
+        Assert.Equal("no-store", _controller.Response.Headers.CacheControl.ToString());
+        // The read is answered from the validated registration alone: no repository lookup.
+        _appRepoMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public void GetAuthCapabilities_WithoutAValidatedApplication_FailsClosed()
+    {
+        // Gateway headers alone never select an application for this action; only the
+        // authentication handler's validated registration does.
+        SetGatewayHeaders("testapp", "testsecret");
+        RegisterValidApp();
+
+        Assert.Throws<InvalidOperationException>(() => _controller.GetAuthCapabilities());
+        _appRepoMock.Verify(
+            repository => repository.GetByAppIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     private GatewayValidationService CreateValidationService()
     {
         return new GatewayValidationService(_appRepoMock.Object, NullLogger<GatewayValidationService>.Instance);

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using SignaCore.Database.Entity;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Http;
@@ -82,6 +83,33 @@ public class GatewayController : ControllerBase
         var orderedUsers = await userQueryService.GetUsersByIdsAsync(userIds, cancellationToken);
 
         return Ok(orderedUsers);
+    }
+
+    /// <summary>
+    /// GET /api/gateway/auth-capabilities — the login methods the calling application currently
+    /// permits, so a site can show or hide SMS login from SignaCore's own application policy.
+    /// <para>
+    /// The application is always the one the <c>GatewayApp</c> authentication validated for this
+    /// request; the action takes no selector, so no query string or body can point it at another
+    /// application. It deliberately does not use <see cref="ValidateGatewayRequestAsync"/>, whose
+    /// fallback answers with specific reasons that would reveal whether an AppId exists.
+    /// </para>
+    /// <para>
+    /// The registration was loaded from the database by the authentication handler for this very
+    /// request, so a committed policy change shows up on the next call without any cache to clear.
+    /// The read changes no state, and the answer carries <c>Cache-Control: no-store</c>.
+    /// </para>
+    /// </summary>
+    [HttpGet("auth-capabilities")]
+    public ActionResult<GatewayAuthCapabilitiesResponse> GetAuthCapabilities()
+    {
+        var app = HttpContext.GetValidatedApp()
+            ?? throw new InvalidOperationException("GatewayApp authentication did not provide a validated application.");
+
+        Response.Headers.CacheControl = "no-store";
+        return Ok(new GatewayAuthCapabilitiesResponse(
+            PasswordEnabled: true,
+            SmsLoginEnabled: app.SmsLoginMode is SmsLoginMode.ManualApproval or SmsLoginMode.AutoProvision));
     }
 
     private async Task<IActionResult?> ValidateGatewayRequestAsync(
