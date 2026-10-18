@@ -285,6 +285,7 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     [InlineData("POST", "api/auth/callback/register")]
     [InlineData("GET", "api/gateway/users/search")]
     [InlineData("POST", "api/gateway/users/batch")]
+    [InlineData("GET", "api/gateway/auth-capabilities")]
     [InlineData("POST", "oauth2/token")]
     [InlineData("POST", "oauth2/revoke")]
      [InlineData("GET", "api/profile/wechat")]

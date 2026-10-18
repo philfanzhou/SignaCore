@@ -42,6 +42,47 @@ public class AuthenticationHandlerCancellationTests
             Times.Once);
     }
 
+    /// <summary>
+    /// A request the client already abandoned never authenticates: the cancellation the registration
+    /// read observes propagates as <see cref="OperationCanceledException"/> instead of becoming a
+    /// failed or successful result, and no validated application is published for a gateway action
+    /// such as <c>GET /api/gateway/auth-capabilities</c> to answer from.
+    /// </summary>
+    [Fact]
+    public async Task GatewayAuthentication_WhenTheRequestIsAborted_PropagatesCancellationWithoutValidatingTheApp()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+        var context = new DefaultHttpContext
+        {
+            RequestAborted = cancellation.Token
+        };
+        context.Request.Headers[IdentityHeaders.AppId] = "testapp";
+        context.Request.Headers[IdentityHeaders.AppSecret] = "testsecret";
+        using var body = new MemoryStream();
+        context.Response.Body = body;
+        var (service, repository) = CreateValidationService();
+        repository
+            .Setup(item => item.GetByAppIdAsync("testapp", It.IsAny<CancellationToken>()))
+            .Returns((string _, CancellationToken token) =>
+                Task.FromCanceled<AppRegistrationEntity?>(token));
+        var handler = new GatewayAppAuthenticationHandler(
+            CreateOptionsMonitor(),
+            NullLoggerFactory.Instance,
+            UrlEncoder.Default,
+            service);
+        await InitializeAsync(handler, context, GatewayAppAuthenticationDefaults.Scheme);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => handler.AuthenticateAsync());
+
+        repository.Verify(
+            item => item.GetByAppIdAsync("testapp", cancellation.Token),
+            Times.Once);
+        Assert.Null(context.GetValidatedApp());
+        // Nothing was written: the abort leaves no response body behind.
+        Assert.Equal(0, body.Length);
+    }
+
     [Fact]
     public async Task OAuthBasicAuthentication_PassesRequestAbortedToValidation()
     {
@@ -116,10 +157,12 @@ public class AuthenticationHandlerCancellationTests
 
         Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
         var content = Encoding.UTF8.GetString(body.ToArray());
+        // Both schemes keep intermediaries from retaining the failure.
+        Assert.Equal("no-store", context.Response.Headers.CacheControl.ToString());
         if (scheme == "gateway")
         {
             Assert.Empty(context.Response.Headers.WWWAuthenticate.ToString());
-            Assert.Contains("Invalid or missing gateway credentials.", content, StringComparison.Ordinal);
+            Assert.Equal("{\"message\":\"Invalid or missing gateway credentials.\"}", content);
         }
         else
         {
