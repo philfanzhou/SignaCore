@@ -34,16 +34,19 @@ and policy requirements are registered by
 ### Administrator password reset
 
 `POST /api/admin/users/{userId:guid}/reset-password` accepts `{ "newPassword": "..." }`.
-It needs no old password and uses the existing password policy (at least eight characters,
-including uppercase and lowercase letters and a digit) and hasher. Passwords are used exactly as
-submitted; they are never trimmed, normalized, logged, or returned.
+It needs no old password and bypasses the usual password length and complexity requirements.
+Only a missing, null, empty, or whitespace-only new password is rejected as invalid input.
+The existing password hasher still applies. Passwords are used exactly as submitted; they are never
+trimmed, normalized, logged, or returned. Account creation and self-service password changes keep
+the existing password policy (at least eight characters, including uppercase and lowercase letters
+and a digit).
 
 | Condition | Result |
 | --- | --- |
-| Existing account, exactly one local credential, valid password and administrator | 200, `OperationResponse`, `Password reset.` |
+| Existing account, exactly one local credential, nonblank password and administrator | 200, `OperationResponse`, `Password reset.` |
 | Missing valid management identity / operator without Admin permission | Existing management 401 / 403 contract |
 | Missing account | 404, `ErrorResponse` |
-| Missing, null, empty, or weak new password | 400, `ErrorResponse` |
+| Missing, null, empty, or whitespace-only new password | 400, `ErrorResponse` |
 | No local password credential | 400, `ErrorResponse`; no credential is created |
 | More than one local password credential | 409, `ErrorResponse`; no credential is selected |
 
@@ -61,9 +64,10 @@ verified the old password retain the existing login behavior. For two successful
 database write wins and each commit has its own audit. No new concurrency/version protocol is added.
 
 The account drawer offers **Reset password** only for `hasPassword` accounts. Its dialog displays
-the target username and password/confirmation fields. Confirmation remains in the browser and
-missing or mismatched inputs prevent submission. The request captures its target and rejects
-repeat submission; old completions cannot mutate a later dialog. Success, cancel, dialog close,
+the target username, password/confirmation fields, and a note that administrator resets bypass
+password length and complexity requirements while still requiring a nonblank password. Confirmation
+remains in the browser and missing or mismatched inputs prevent submission. The request captures
+its target and rejects repeat submission; old completions cannot mutate a later dialog. Success, cancel, dialog close,
 drawer close, and account switch clear both fields. Failures show the standard error. Passwords
 never enter browser storage, URLs, logs, or notifications. Administrators must communicate the
 chosen password to the account owner themselves. No temporary password, forced change, recovery,
@@ -120,6 +124,9 @@ The feature owns or reads accounts, user_logins, password_credentials, and ldap_
 
 Public HTTP routes, JSON property names, and database table names remain stable across the SignaCore rename. Only product, namespace, assembly, image, and deployment identifiers changed.
 
-The reset route and UI are additive. There are no dependencies, schema/migration, configuration,
-JWT/JWKS, key, or deployment changes. Rolling back the code removes the entry and endpoint; already
-reset hashes remain readable by the old version. Rollback does not restore original passwords.
+The reset route, request and response shapes, and administrator authorization remain unchanged.
+Administrator resets now accept passwords that the usual password policy would reject. There are
+no dependency, schema/migration, configuration, JWT/JWKS, key, or deployment changes. Rolling back
+restores policy enforcement for future resets; already reset hashes remain readable by the old
+version, including hashes of passwords that do not meet that policy. Rollback does not restore
+original passwords.

@@ -1164,6 +1164,20 @@ describe('administrator password reset', () => {
     mocks.api.resetUserPassword.mockReset()
   })
 
+  it.each(['x', 'lowercase1', 'UPPERCASE1', 'LettersOnly', ' weak '])(
+    'submits a confirmed password that bypasses the normal policy: %j', async (password) => {
+      const state = useAdminUsers()
+      state.openUser(user())
+      state.openResetPassword()
+      state.resetPasswordForm.newPassword = state.resetPasswordForm.confirmation = password
+      mocks.api.resetUserPassword.mockResolvedValue({ success: true, message: 'Password reset.' })
+      await state.resetUserPassword()
+      expect(mocks.api.resetUserPassword).toHaveBeenCalledWith(user().userId, password)
+      expect(state.resetPasswordTarget.value).toBeNull()
+      expect(state.resetPasswordForm).toEqual({ newPassword: '', confirmation: '' })
+    },
+  )
+
   it('rejects missing or mismatched confirmation, sends only the exact new password, and clears on success', async () => {
     const state = useAdminUsers()
     state.openUser(user())

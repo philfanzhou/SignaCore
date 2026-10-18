@@ -20,7 +20,7 @@ const { resetPasswordTarget, resetPasswordForm, resetPasswordSaving, resetPasswo
           autocomplete="new-password" class="console-input" :disabled="resetPasswordSaving" /></label>
         <label>Confirm password<input v-model="resetPasswordForm.confirmation" type="password"
           autocomplete="new-password" class="console-input" :disabled="resetPasswordSaving" /></label>
-        <small>At least 8 characters, including uppercase and lowercase letters and a number.</small>
+        <small>Administrator resets bypass password length and complexity requirements. The password cannot be blank.</small>
         <p>This keeps existing sessions and tokens active and does not unlock the account.</p>
         <p v-if="resetPasswordError" role="alert" class="danger-text">{{ resetPasswordError }}</p>
       </div>
