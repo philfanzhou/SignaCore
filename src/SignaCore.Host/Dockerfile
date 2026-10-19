@@ -5,7 +5,10 @@
 # Default local builds retain the official multi-platform AWS mirror tag. CI supplies a verified
 # official Linux/amd64 digest through NODE_IMAGE; both anonymous registries have quotas.
 ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine
-FROM ${NODE_IMAGE} AS frontend-build
+# Compile static web assets and framework-dependent .NET assemblies on the build host.
+# UseAppHost=false and no RuntimeIdentifier keep the output portable; the final
+# runtime image and its OS packages are selected separately for each target platform.
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS frontend-build
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 ENV npm_config_registry=${NPM_REGISTRY}
 WORKDIR /app
@@ -15,7 +18,7 @@ COPY src/SignaCore.Admin/ ./
 RUN npm run build
 
 # Restore and publish the ASP.NET Core host.
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /workspace
 

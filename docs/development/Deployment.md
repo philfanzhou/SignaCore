@@ -19,6 +19,19 @@ the stable `signacore` value.
 
 ## Build
 
+Newly published release images contain both `linux/amd64` and `linux/arm64` under the same
+tag. Docker selects the matching platform automatically, including ARM64 when Colima
+runs an `aarch64` VM on Apple Silicon. Existing version tags are unchanged; use a
+version published after multi-platform support was added, or a new `edge` image where
+that channel is available. `docker buildx imagetools inspect <image>:<tag>` lists
+the platforms included in a published tag.
+
+The Node and .NET SDK stages run on the build host and produce static web assets and
+framework-dependent assemblies. The runtime base image and OS packages follow the
+target architecture. CI builds both complete images without publishing on pull
+requests, and publishing waits for that check as well as the existing tests.
+
+
 ```bash
 IMAGE_TAG=latest ./build.sh
 ```
