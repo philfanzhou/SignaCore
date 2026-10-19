@@ -204,7 +204,8 @@ if args[:2] == ['image','inspect']:
             args = self.calls()[-1]['args']
             self.assertEqual(args[args.index('--build-arg')+1], 'NODE_IMAGE=' + reference)
         dockerfile = (ROOT / 'src/SignaCore.Host/Dockerfile').read_text()
-        self.assertIn('ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine\nFROM ${NODE_IMAGE}', dockerfile)
+        self.assertIn('ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine', dockerfile.splitlines())
+        self.assertIn('FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS frontend-build', dockerfile.splitlines())
 
     def test_unknown_build_override_rejected_before_docker(self):
         for reference in ['evil/node:24-alpine', 'docker.io/library/node:24-alpine',
