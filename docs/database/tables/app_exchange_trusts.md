@@ -21,8 +21,9 @@ exchanged for a session at another. See
 - The row is directed. `A` accepting tokens from `B` says nothing about `B` accepting tokens from
   `A`; that requires a second row.
 - The edge is ignored at validation time when the source application is inactive.
-- Edges do not compose. `A → B` and `B → C` do not produce `A → C`, because the token minted by the
-  first exchange carries `refresh_tokens.source_app_id` and is not exchangeable again.
+- Derived tokens may continue along directed edges. `A → B` and `B → C` permit A-to-B-to-C,
+  with current account, application and admission checks at each hop; they do not authorize a
+  direct A-to-C request. Removing B-to-C prevents the next exchange of a B-bound token.
 - An empty table means the refresh-token application binding is enforced exactly as it was before
   this table existed, which is the default for every deployment.
 

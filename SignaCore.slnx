@@ -16,6 +16,7 @@
     <Project Path="tests/SignaCore.Client.AspNetCore.EntityFrameworkCore.Tests/SignaCore.Client.AspNetCore.EntityFrameworkCore.Tests.csproj" />
     <Project Path="tests/SignaCore.Client.AspNetCore.Tests/SignaCore.Client.AspNetCore.Tests.csproj" />
     <Project Path="tests/SignaCore.Client.TestApp/SignaCore.Client.TestApp.csproj" />
+    <Project Path="tests/SignaCore.ExchangeAcceptanceHost/SignaCore.ExchangeAcceptanceHost.csproj" />
     <Project Path="tests/SignaCore.IntegrationTests/SignaCore.IntegrationTests.csproj" />
     <Project Path="tests/SignaCore.ReferenceBff.Tests/SignaCore.ReferenceBff.Tests.csproj" />
     <Project Path="tests/SignaCore.Tests/SignaCore.Tests.csproj" />

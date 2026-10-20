@@ -60,9 +60,18 @@ is `AutoProvision`, the exchange provisions the target's admission row with a ne
 administrator-approved row must already exist. When it is `Disabled`, the exchange is rejected. The
 same rule applies to the LDAP and WeChat admission paths.
 
-**Exchange is single-hop.** `refresh_tokens` gains a nullable `source_app_id`. A token issued by
-authentication has it null and may be exchanged; a token issued by an exchange has it set and may
-not. Trust therefore does not compose: two edges `A → B` and `B → C` do not produce `A → C`.
+**Exchange may continue across hops (amended 2026-10-21).** The nullable `source_app_id`
+records the immediate source of a cross-application mint; it no longer prevents another exchange.
+Each request checks the presented token's current `AppId` against the target's explicit directed
+trust and rechecks the account, application and credential admission. `A → B` and `B → C` allow
+A-to-B-to-C, but do not authorize a direct A-to-C request. The target callback and downstream
+authorization still determine business permissions. This change applies to all configured legacy
+exchange trusts, not only one consumer; interactive OIDC token families remain excluded.
+
+No schema, wire format, expiration, ordinary rotation or revocation policy changes. Existing tokens
+can participate without migration. Deploy this provider behavior before consumers that depend on
+continuous exchange. Rolling back removes onward exchange while preserving ordinary login and
+same-application refresh.
 
 **The edge is an authentication-scope decision, not an authorization one.** It says the target
 application may start a session for an account that authenticated elsewhere. It says nothing about
@@ -75,9 +84,9 @@ the downstream application.
   target-application session for the same account. If the target application is more privileged than
   the source, that difference must be enforced by the target's callback and authorization rules, not
   by the absence of an edge. Administrators need to be told this at the point where they add one.
-- Compromise of one application's refresh token store now reaches every application that trusts it,
-  one hop deep. Single-hop containment bounds the blast radius to the edges an administrator can see
-  in one screen, which is the reason it was chosen over composition.
+- Compromise of an application's refresh token store can reach applications reachable along
+  configured directed paths, subject to their admission and authorization. Administrators must
+  review this reachable set when adding or removing trust; there is no longer single-hop containment.
 - `ExchangeGranted` admission rows record access that no OTP, directory bind, or WeChat authorization
   ever established for that application. Reviewing admission by approval source stays meaningful, and
   an operator can find every access that exists only because of an exchange.
@@ -105,7 +114,7 @@ the downstream application.
   deleting an application leaves dangling ids. Auditing an edit means diffing snapshots.
 - **Treating an exchange as equivalent to a login.** Rejected. It would provision admission with the
   approval source used for verified authentication, count towards login metrics and lockout, and
-  compose across hops. The audit trail would stop distinguishing an authentication from a derivation
+  erase the distinction between direct authentication and exchange. The audit trail would stop distinguishing an authentication from a derivation
   of one, which is the distinction this service exists to record.
 - **Requiring pre-existing admission at the target.** Rejected as the default. It is the safest rule
   and needs no new enum value, but it means a user reaches the target application only after

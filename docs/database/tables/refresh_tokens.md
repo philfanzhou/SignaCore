@@ -32,8 +32,8 @@ Rotating, revocable refresh credentials bound to an account and application.
 - Optional bindings preserve the source LDAP, SMS, or WeChat identity during rotation, so a
   revoked application admission also stops the refresh grant.
 - source_app_id is null for a token issued by authentication and set to the originating AppId for a
-  token minted by a cross-application exchange. A token with it set cannot be exchanged again, which
-  is what keeps [exchange trust](./app_exchange_trusts.md) from composing across hops. See
+  token minted by a cross-application exchange. A token with it set may be exchanged again along a
+  currently configured [exchange trust](./app_exchange_trusts.md) from its own app_id to the target. See
   [ADR 0003](../../adr/0003-cross-application-refresh-grant.md).
 - A cross-application exchange mints rather than rotates: the presented token belongs to the source
   application's session and is left untouched, so the two sessions are independent from that point on.

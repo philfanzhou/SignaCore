@@ -4,6 +4,9 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using SignaCore.Database;
+using SignaCore.Database.Entity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;
@@ -11,7 +14,7 @@ namespace SignaCore.Tests.Integration;
 /// <summary>
 /// The end-to-end contract of cross-application exchange: rejected by default, admitted once an
 /// administrator adds a directed trust edge, the source application's session is left untouched, and
-/// an exchanged token cannot be exchanged a second time. See
+/// a derived token can continue only along a fresh directed trust. See
 /// docs/adr/0003-cross-application-refresh-grant.md.
 /// </summary>
 [Collection(SqliteProcessState.CollectionName)]
@@ -66,28 +69,85 @@ public class CrossApplicationExchangeTests : IClassFixture<IdentityServerFixture
     }
 
     [Fact]
-    public async Task ExchangeTrustDoesNotComposeAcrossTwoHops()
+    public async Task DerivedTokensCompleteRepeatedCyclesWithFreshTrustChecks()
     {
-        // The edges first → second and second → third do not add up to first → third.
         var first = await SeedAppAsync("hop-first");
         var second = await SeedAppAsync("hop-second");
         var third = await SeedAppAsync("hop-third");
         await AddExchangeTrustAsync(second.AppId, first.AppId);
         await AddExchangeTrustAsync(third.AppId, second.AppId);
+        await AddExchangeTrustAsync(first.AppId, third.AppId);
+        var original = await SignInAsync(first);
+        var current = original;
+        foreach (var target in new[] { second, third, first, second, third, first })
+        {
+            var exchanged = await RefreshAsync(target, current);
+            Assert.Equal(HttpStatusCode.OK, exchanged.StatusCode);
+            var next = await ReadRefreshTokenAsync(exchanged);
+            Assert.NotEqual(current, next);
+            current = next;
+        }
+        // A path through B does not grant a direct A-to-C exchange.
+        Assert.Equal(HttpStatusCode.BadRequest, (await RefreshAsync(third, current)).StatusCode);
+        using (var admin = await _fixture.CreateAdminHttpClientAsync())
+        {
+            var removed = await admin.DeleteAsync(
+                $"/api/admin/apps/{second.AppId}/exchange-trusts/{first.AppId}",
+                TestContext.Current.CancellationToken);
+            removed.EnsureSuccessStatusCode();
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, (await RefreshAsync(second, current)).StatusCode);
+        // Cross-application minting has left the original source credential usable.
+        Assert.Equal(HttpStatusCode.OK, (await RefreshAsync(first, original)).StatusCode);
+    }
 
-        var firstRefreshToken = await SignInAsync(first);
-        var secondHop = await RefreshAsync(second, firstRefreshToken);
-        Assert.Equal(HttpStatusCode.OK, secondHop.StatusCode);
-        var secondRefreshToken = await ReadRefreshTokenAsync(secondHop);
-
-        var thirdHop = await RefreshAsync(third, secondRefreshToken);
-        Assert.Equal(HttpStatusCode.BadRequest, thirdHop.StatusCode);
-        Assert.Equal("invalid_grant", await ReadErrorAsync(thirdHop));
-
-        // The same token still refreshes normally within its own application: what was rejected is
-        // the second exchange, not the token itself.
-        var ownApplication = await RefreshAsync(second, secondRefreshToken);
-        Assert.Equal(HttpStatusCode.OK, ownApplication.StatusCode);
+    [Fact]
+    public async Task SmsDerivedTokensContinueAndRecheckTargetAdmission()
+    {
+        var sender = new FakeSmsSender();
+        using var smsHost = _fixture.CreateSmsHost(sender);
+        var first = await SeedAppAsync("sms-first");
+        var second = await SeedAppAsync("sms-second");
+        var third = await SeedAppAsync("sms-third");
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var names = new[] { first.AppId, second.AppId, third.AppId };
+            foreach (var app in await db.AppRegistrations.Where(a => names.Contains(a.AppId)).ToListAsync(TestContext.Current.CancellationToken))
+            {
+                app.SmsLoginMode = SmsLoginMode.AutoProvision;
+                app.SmsProfileKey = OAuthLoginSmsCodeTestSupport.ProfileKey;
+            }
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        await AddExchangeTrustAsync(second.AppId, first.AppId);
+        await AddExchangeTrustAsync(third.AppId, second.AppId);
+        await AddExchangeTrustAsync(first.AppId, third.AppId);
+        using var gateway = smsHost.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
+        gateway.DefaultRequestHeaders.Add("X-Admin-AppId", first.AppId);
+        gateway.DefaultRequestHeaders.Add("X-Admin-AppSecret", first.AppSecret);
+        var phone = OAuthLoginSmsCodeTestSupport.NewPhone();
+        using var sent = await gateway.PostAsJsonAsync("/api/auth/sms-code", new { phone }, TestContext.Current.CancellationToken);
+        Assert.True((await sent.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken)).GetProperty("success").GetBoolean());
+        using var signedIn = await gateway.PostAsJsonAsync("/api/auth/token", new { grantType = "sms", phone, code = sender.Calls.Last().Code }, TestContext.Current.CancellationToken);
+        var initial = await signedIn.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        Assert.True(initial.GetProperty("success").GetBoolean());
+        var current = initial.GetProperty("refreshToken").GetString()!;
+        foreach (var target in new[] { second, third, first, second, third, first })
+        {
+            using var next = await RefreshAsync(target, current);
+            Assert.Equal(HttpStatusCode.OK, next.StatusCode);
+            current = await ReadRefreshTokenAsync(next);
+        }
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            (await db.AppRegistrations.SingleAsync(a => a.AppId == second.AppId, TestContext.Current.CancellationToken)).SmsLoginMode = SmsLoginMode.Disabled;
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+        using var denied = await RefreshAsync(second, current);
+        Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
+        Assert.Equal("unauthorized_client", await ReadErrorAsync(denied));
     }
 
     [Fact]

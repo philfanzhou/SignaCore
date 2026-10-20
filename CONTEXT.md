@@ -57,7 +57,8 @@ _Avoid_: session token
 
 **Cross-application refresh grant**:
 A refresh grant in which the presenting application is not the one the refresh token was issued to.
-It is permitted only along an exchange trust, mints rather than rotates, and is single-hop.
+It is permitted only along an exchange trust and mints rather than rotates. A derived token may
+continue to another application when that next directed trust and current admission both allow it.
 _Avoid_: SSO, single sign-on, token exchange
 
 The term "single sign-on" is deliberately rejected: in OAuth it denotes session reuse at an
