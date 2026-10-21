@@ -796,6 +796,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
+      # Without NODE_IMAGE the Dockerfile default is an unpinned anonymous ECR reference, and ECR
+      # rate-limits (429) shared runner IPs for hours. Resolve the verified digest with the Docker
+      # Hub fallback first, the same contract build-test passes to build.sh.
+      - name: Resolve official Node image
+        run: |
+          node_image="$(python3 .github/scripts/resolve_official_image.py node)"
+          printf 'SIGNACORE_NODE_IMAGE=%s\n' "$node_image" >> "$GITHUB_ENV"
+
       # Build both complete runtime images on pull requests before a release needs them.
       # A multi-platform build stays in BuildKit cache; load:true requires a different image store.
       - name: Build both platforms without publishing
@@ -805,6 +813,8 @@ jobs:
           file: src/SignaCore.Host/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: false
+          build-args: |
+            NODE_IMAGE=${{ env.SIGNACORE_NODE_IMAGE }}
           cache-from: type=gha,scope=signacore-release
 
   # Runs for release tags and for default-branch pushes. A default-branch push publishes only the
@@ -842,6 +852,13 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Same resolver and reason as container-platforms: the unpinned anonymous ECR default in the
+      # Dockerfile rate-limits on shared runner IPs, so pin the verified digest before building.
+      - name: Resolve official Node image
+        run: |
+          node_image="$(python3 .github/scripts/resolve_official_image.py node)"
+          printf 'SIGNACORE_NODE_IMAGE=%s\n' "$node_image" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -883,6 +900,8 @@ jobs:
           file: src/SignaCore.Host/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            NODE_IMAGE=${{ env.SIGNACORE_NODE_IMAGE }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=signacore-release
