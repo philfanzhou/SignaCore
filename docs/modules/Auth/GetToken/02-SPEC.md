@@ -55,8 +55,9 @@ accepts refresh tokens issued to that one. See
 - An admitted exchange **mints** a new refresh token bound to the calling application and leaves the
   presented one untouched, so the source application's session survives. Ordinary same-application
   refresh still rotates.
-- The minted token records `refresh_tokens.source_app_id` and cannot itself be exchanged, so two
-  edges `A → B` and `B → C` do not add up to `A → C`.
+- The minted token records `refresh_tokens.source_app_id` and may continue across applications.
+  Each hop checks the presented token's current application and the target's directed trust.
+  `A → B` and `B → C` allow an exchange through B, but not a direct A-to-C request.
 - Application-scoped admission still applies at the calling application. Under `AutoProvision` the
   exchange derives the admission and records it with approval source `ExchangeGranted`, distinct from
   a verified login. Under `ManualApproval` (`BindRequired` for WeChat) an existing admission is

@@ -362,21 +362,18 @@ public class RefreshTokenValidatorTests
         Assert.Equal("source_app_id", result.SourceAppId);
     }
 
-    [Fact]
-    public async Task ValidateAsync_CrossApplicationRefresh_DoesNotComposeAcrossTwoTrusts()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ValidateAsync_DerivedToken_RequiresTheCurrentApplicationTrust(bool trusted)
     {
-        // A → B and B → C must not add up to A → C. A token minted by an exchange carries the
-        // application it came from, and that is what disqualifies it from a second exchange.
-        var (_, token, tokenRepository, accountRepository) =
+        var (account, token, tokenRepository, accountRepository) =
             CreateCrossApplicationFixture("second_hop_refresh_token", "middle_app_id");
         token.SourceAppId = "first_app_id";
         var targetApp = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "third_app_id" };
-
-        var validator = CreateValidator(
-            tokenRepository.Object,
-            accountRepository.Object,
-            exchangeTrustRepository: TrustFrom(targetApp.Id, token.AppId));
-
+        var validator = CreateValidator(tokenRepository.Object, accountRepository.Object,
+            exchangeTrustRepository: trusted ? TrustFrom(targetApp.Id, token.AppId)
+                : new Mock<IAppExchangeTrustRepository>().Object);
         var result = await validator.ValidateAsync(new ValidationRequest
         {
             GrantType = IdentityConstants.GrantTypeRefreshToken,
@@ -384,9 +381,35 @@ public class RefreshTokenValidatorTests
             AppId = targetApp.AppId,
             App = targetApp
         });
+        Assert.Equal(trusted, result.IsSuccess);
+        Assert.Equal(trusted, result.IsCrossApplicationExchange);
+        if (trusted)
+        {
+            Assert.Equal(account.Id, result.Account!.Id);
+            Assert.Equal("middle_app_id", result.SourceAppId);
+        }
+        else Assert.Equal("Refresh token is not valid for this application", result.ErrorMessage);
+    }
 
+    [Theory]
+    [InlineData("revoked")]
+    [InlineData("expired")]
+    [InlineData("disabled-account")]
+    public async Task ValidateAsync_DerivedTokenRetainsCredentialAndAccountChecks(string failure)
+    {
+        var (account, token, tokens, accounts) = CreateCrossApplicationFixture("derived", "middle");
+        token.SourceAppId = "first";
+        if (failure == "revoked") token.IsRevoked = true;
+        if (failure == "expired") token.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        if (failure == "disabled-account") account.IsActive = false;
+        var target = new AppRegistrationEntity { Id = Guid.NewGuid(), AppId = "target" };
+        var validator = CreateValidator(tokens.Object, accounts.Object, exchangeTrustRepository: TrustFrom(target.Id, token.AppId));
+        var result = await validator.ValidateAsync(new ValidationRequest
+        {
+            GrantType = IdentityConstants.GrantTypeRefreshToken, RefreshToken = token.TokenValue,
+            AppId = target.AppId, App = target
+        });
         Assert.False(result.IsSuccess);
-        Assert.Equal("Refresh token is not valid for this application", result.ErrorMessage);
     }
 
     [Fact]

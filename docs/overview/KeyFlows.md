@@ -12,7 +12,7 @@ Client -> /api/auth/token -> application authentication -> grant validator
 
 A valid, unrevoked, unexpired refresh token must match the requesting application. A successful exchange revokes the old token and creates a replacement. Reuse, expiry, revocation, and application mismatch fail without revealing extra account information.
 
-An application mismatch is admitted only when an administrator has recorded a directed exchange trust between the two applications. That path mints a token instead of rotating, so the source application's session is unaffected, and the minted token cannot be exchanged onward. See [ADR 0003](../adr/0003-cross-application-refresh-grant.md).
+An application mismatch is admitted only when an administrator has recorded a directed exchange trust between the two applications. That path mints a token instead of rotating, so the source application's session is unaffected, and the minted token can be exchanged onward only after the next directed trust and current admission checks. See [ADR 0003](../adr/0003-cross-application-refresh-grant.md).
 
 ## Signing-key rotation
 

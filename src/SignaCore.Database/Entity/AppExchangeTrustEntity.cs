@@ -3,8 +3,8 @@ namespace SignaCore.Database.Entity;
 /// <summary>
 /// Administered, directed statement that one application accepts refresh tokens issued to another.
 /// The row means: <see cref="AppRegistrationId"/> accepts refresh tokens issued to
-/// <see cref="SourceAppRegistrationId"/>. It does not imply the reverse, and it does not compose
-/// with a second edge. See docs/adr/0003-cross-application-refresh-grant.md.
+/// <see cref="SourceAppRegistrationId"/>. It does not imply the reverse or a direct edge to another application.
+/// Derived tokens may continue along independently checked directed edges. See docs/adr/0003-cross-application-refresh-grant.md.
 /// </summary>
 public sealed class AppExchangeTrustEntity
 {

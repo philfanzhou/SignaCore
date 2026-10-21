@@ -97,7 +97,7 @@ public class RefreshTokenServiceTests
         _repoMock.Verify(r => r.AddAsync(It.Is<RefreshTokenEntity>(minted =>
             minted.AccountId == account.Id &&
             minted.AppId == "target-app" &&
-            // Marks the token as already exchanged, so it cannot be exchanged a second time.
+            // Records the immediate source application for the exchange.
             minted.SourceAppId == "source-app" &&
             // The cross-application mint is a fresh singleton root of its own family (PS-07).
             minted.FamilyId == minted.Id &&

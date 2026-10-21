@@ -218,14 +218,6 @@ public class RefreshTokenValidator : IIdentityValidator
             return ExchangeDecision.Reject(rejection);
         }
 
-        if (!string.IsNullOrWhiteSpace(refreshToken.SourceAppId))
-        {
-            _logger.LogWarning(
-                "Cross-application refresh rejected: the presented token was itself minted by an exchange, TokenAppId={TokenAppId}, TokenSourceAppId={TokenSourceAppId}, RequestAppId={RequestAppId}, AccountId={AccountId}",
-                refreshToken.AppId, refreshToken.SourceAppId, request.AppId, refreshToken.AccountId);
-            return ExchangeDecision.Reject(rejection);
-        }
-
         if (!await _exchangeTrustRepository.IsTrustedSourceAsync(
                 request.App.Id, refreshToken.AppId, request.CancellationToken))
         {
