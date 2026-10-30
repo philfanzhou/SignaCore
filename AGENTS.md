@@ -5,7 +5,7 @@ SignaCore is a .NET 10 identity and authentication service with a Vue 3 admin co
 ## Maintenance
 
 - This file is the single entry point for the AI collaboration workflow, review policy, and project boundaries.
-- Codex reads this file directly; Claude Code imports it through the root `CLAUDE.md`.
+- Codex reads this file directly; Claude Code v2.1.277+ also reads it directly, without a root `CLAUDE.md` import.
 - `CONTRIBUTING.md` is the engineering entry point for all contributors.
 - `docs/`, `CONTEXT.md`, the ADRs, and `SECURITY.md` are the sources of truth for their domains; before implementing, confirm whether they describe target behavior or current fact.
 
