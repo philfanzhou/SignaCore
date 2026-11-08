@@ -83,8 +83,8 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             return;
         }
 
-        var nonce = NewToken();
-        var codeVerifier = NewToken();
+        var nonce = OpaqueToken.Generate();
+        var codeVerifier = OpaqueToken.Generate();
         var creation = pendingSignInStore.Create(nonce, codeVerifier, returnUrl);
         if (creation is null)
         {
@@ -99,15 +99,10 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         context.Response.Cookies.Append(
             LoginBindingCookieName(current, creation.State),
             creation.BrowserBinding,
-            new CookieOptions
-            {
-                HttpOnly = true,
-                Secure = SignaCoreCookieProfile.SecureCookies(current),
-                SameSite = SameSiteMode.Lax,
-                Path = (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.CallbackPathSegment,
-                Expires = timeProvider.GetUtcNow() + PendingSignInStore.Lifetime,
-                IsEssential = true
-            });
+            SignaCoreCookieProfile.CookieOptions(
+                current,
+                (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.CallbackPathSegment,
+                timeProvider.GetUtcNow() + PendingSignInStore.Lifetime));
 
         SignaCoreClientLog.SignInStarted(logger, cancellationToken);
         var codeChallenge = Convert.ToBase64String(
@@ -123,13 +118,6 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             creation.State,
             nonce,
             codeChallenge));
-
-        static string NewToken()
-        {
-            Span<byte> entropy = stackalloc byte[32];
-            RandomNumberGenerator.Fill(entropy);
-            return Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        }
     }
 
     internal async Task HandleCallbackAsync(HttpContext context)
@@ -324,15 +312,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         context.Response.Cookies.Append(
             current.SessionCookieName,
             key,
-            new CookieOptions
-            {
-                HttpOnly = true,
-                Secure = SignaCoreCookieProfile.SecureCookies(current),
-                SameSite = SameSiteMode.Lax,
-                Path = "/",
-                Expires = expiresAt,
-                IsEssential = true
-            });
+            SignaCoreCookieProfile.CookieOptions(current, "/", expiresAt));
         SignaCoreClientLog.SignInSucceeded(logger, cancellationToken);
         context.Response.Redirect(pending.ReturnUrl);
     }
@@ -379,7 +359,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
 
     internal async Task HandleFailurePageAsync(HttpContext context)
     {
-        var reason = ParseReason(context.Request.Query["reason"].ToString());
+        var reason = SignaCoreSignInReasonCodes.FromWireName(context.Request.Query["reason"].ToString());
         await options.CurrentValue.ResponseWriter.WriteFailurePageAsync(context, reason, context.RequestAborted);
     }
 
@@ -427,18 +407,11 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         HttpContext context,
         SignaCoreHostedLoginOptions current,
         string state) =>
-        context.Response.Cookies.Append(
+        SignaCoreCookieProfile.DeleteCookie(
+            context,
+            current,
             LoginBindingCookieName(current, state),
-            string.Empty,
-            new CookieOptions
-            {
-                HttpOnly = true,
-                Secure = SignaCoreCookieProfile.SecureCookies(current),
-                SameSite = SameSiteMode.Lax,
-                Path = (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.CallbackPathSegment,
-                Expires = DateTimeOffset.UnixEpoch,
-                IsEssential = true
-            });
+            (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.CallbackPathSegment);
 
     /// <summary>
     /// Whether any required protocol option is blank — exactly the validator's missing-vs-illegal
@@ -501,23 +474,6 @@ internal sealed class SignaCoreHostedLoginEndpointService(
 
         return value;
     }
-
-    private static SignaCoreSignInReason? ParseReason(string? value) => value switch
-    {
-        "authority_unreachable" => SignaCoreSignInReason.AuthorityUnreachable,
-        "invalid_return_url" => SignaCoreSignInReason.InvalidReturnUrl,
-        "invalid_response" => SignaCoreSignInReason.InvalidResponse,
-        "access_denied" => SignaCoreSignInReason.AccessDenied,
-        "user_canceled" => SignaCoreSignInReason.UserCanceled,
-        "pre_sign_in_denied" => SignaCoreSignInReason.PreSignInDenied,
-        "state_mismatch" => SignaCoreSignInReason.StateMismatch,
-        "issuer_mismatch" => SignaCoreSignInReason.IssuerMismatch,
-        "token_exchange_failed" => SignaCoreSignInReason.TokenExchangeFailed,
-        "invalid_token" => SignaCoreSignInReason.InvalidToken,
-        "session_store_full" => SignaCoreSignInReason.SessionStoreFull,
-        "requires_reauthentication" => SignaCoreSignInReason.RequiresReauthentication,
-        _ => null
-    };
 }
 
 /// <summary>Builds the authorization request URL with exactly the contract's fields, in a fixed

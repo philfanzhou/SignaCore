@@ -122,7 +122,7 @@ internal sealed class SignaCoreHostedLogoutService(
             // The return state exists only when the browser will actually be sent back; a full
             // store downgrades the logout to upstream-only (SignaCore's own completion page)
             // rather than failing it.
-            var state = NewState();
+            var state = OpaqueToken.Generate();
             var correlationId = logoutReturnStateStore.Create(state);
             var postLogoutRedirectUri = correlationId is null ? null : current.PostLogoutRedirectUri;
 
@@ -150,13 +150,6 @@ internal sealed class SignaCoreHostedLogoutService(
         finally
         {
             gate.Release();
-        }
-
-        static string NewState()
-        {
-            Span<byte> entropy = stackalloc byte[32];
-            RandomNumberGenerator.Fill(entropy);
-            return Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         }
     }
 
@@ -196,15 +189,7 @@ internal sealed class SignaCoreHostedLogoutService(
     }
 
     private static void DeleteSessionCookie(HttpContext context, SignaCoreHostedLoginOptions current) =>
-        context.Response.Cookies.Append(current.SessionCookieName, string.Empty, new CookieOptions
-        {
-            HttpOnly = true,
-            Secure = SignaCoreCookieProfile.SecureCookies(current),
-            SameSite = SameSiteMode.Lax,
-            Path = "/",
-            Expires = DateTimeOffset.UnixEpoch,
-            IsEssential = true
-        });
+        SignaCoreCookieProfile.DeleteCookie(context, current, current.SessionCookieName, "/");
 
     private void SetLogoutReturnCookie(
         HttpContext context,
@@ -213,29 +198,17 @@ internal sealed class SignaCoreHostedLogoutService(
         context.Response.Cookies.Append(
             current.LogoutReturnCookieName(),
             correlationId,
-            new CookieOptions
-            {
-                HttpOnly = true,
-                Secure = SignaCoreCookieProfile.SecureCookies(current),
-                SameSite = SameSiteMode.Lax,
-                Path = (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.LogoutPathSegment,
-                Expires = timeProvider.GetUtcNow() + SignaCoreHostedLoginDefaults.LogoutReturnLifetime,
-                IsEssential = true
-            });
+            SignaCoreCookieProfile.CookieOptions(
+                current,
+                (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.LogoutPathSegment,
+                timeProvider.GetUtcNow() + SignaCoreHostedLoginDefaults.LogoutReturnLifetime));
 
     private static void DeleteLogoutReturnCookie(HttpContext context, SignaCoreHostedLoginOptions current) =>
-        context.Response.Cookies.Append(
+        SignaCoreCookieProfile.DeleteCookie(
+            context,
+            current,
             current.LogoutReturnCookieName(),
-            string.Empty,
-            new CookieOptions
-            {
-                HttpOnly = true,
-                Secure = SignaCoreCookieProfile.SecureCookies(current),
-                SameSite = SameSiteMode.Lax,
-                Path = (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.LogoutPathSegment,
-                Expires = DateTimeOffset.UnixEpoch,
-                IsEssential = true
-            });
+            (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.LogoutPathSegment);
 }
 
 /// <summary>Package-internal helpers shared by the logout surface.</summary>

@@ -26,20 +26,13 @@ public sealed class InMemoryTicketStore(TimeProvider? timeProvider = null) : ITi
             return Task.FromResult<string?>(null);
         }
 
-        var key = NewKey();
+        var key = OpaqueToken.Generate();
         if (!_tickets.TryAdd(key, ticket))
         {
             return Task.FromResult<string?>(null);
         }
 
         return Task.FromResult<string?>(key);
-
-        static string NewKey()
-        {
-            Span<byte> entropy = stackalloc byte[32];
-            RandomNumberGenerator.Fill(entropy);
-            return Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        }
     }
 
     /// <inheritdoc />
@@ -56,7 +49,7 @@ public sealed class InMemoryTicketStore(TimeProvider? timeProvider = null) : ITi
             return Task.FromResult<string?>(null);
         }
 
-        var key = NewKey();
+        var key = OpaqueToken.Generate();
         if (!_tickets.TryAdd(key, ticket))
         {
             return Task.FromResult<string?>(null);
@@ -69,13 +62,6 @@ public sealed class InMemoryTicketStore(TimeProvider? timeProvider = null) : ITi
         }
 
         return Task.FromResult<string?>(key);
-
-        static string NewKey()
-        {
-            Span<byte> entropy = stackalloc byte[32];
-            RandomNumberGenerator.Fill(entropy);
-            return Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        }
     }
 
     /// <inheritdoc />
