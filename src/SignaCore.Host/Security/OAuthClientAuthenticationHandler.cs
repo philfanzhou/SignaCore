@@ -223,37 +223,10 @@ public sealed class OAuthClientAuthenticationHandler : AuthenticationHandler<Aut
             Context.RequestAborted);
     }
 
-    private (string ClientId, string ClientSecret)? ReadBasicCredentials()
-    {
-        var header = Request.Headers.Authorization.ToString();
-        if (string.IsNullOrWhiteSpace(header) ||
-            !AuthenticationHeaderValue.TryParse(header, out var parsed) ||
-            !string.Equals(parsed.Scheme, "Basic", StringComparison.OrdinalIgnoreCase) ||
-            string.IsNullOrWhiteSpace(parsed.Parameter))
-        {
-            return null;
-        }
-
-        string decoded;
-        try
-        {
-            decoded = Encoding.UTF8.GetString(Convert.FromBase64String(parsed.Parameter));
-        }
-        catch (FormatException)
-        {
-            return null;
-        }
-
-        var separator = decoded.IndexOf(':');
-        if (separator <= 0)
-        {
-            return null;
-        }
-
-        return (
-            Uri.UnescapeDataString(decoded[..separator]),
-            Uri.UnescapeDataString(decoded[(separator + 1)..]));
-    }
+    private (string ClientId, string ClientSecret)? ReadBasicCredentials() =>
+        BasicClientHeader.TryRead(Request, out var clientId, out var clientSecret)
+            ? (clientId, clientSecret)
+            : null;
 
     private async Task<(string ClientId, string ClientSecret)?> ReadFormCredentialsAsync(
         CancellationToken cancellationToken)

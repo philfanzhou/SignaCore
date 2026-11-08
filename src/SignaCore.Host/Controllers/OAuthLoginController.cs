@@ -1188,14 +1188,8 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append(text.Description)
             .Append("</p></header>");
         AppendFormStart(builder, notice, NoticeTarget.Password);
-        builder.Append("<input type=\"hidden\" name=\"login_handle\" value=\"")
-            .Append(WebUtility.HtmlEncode(loginHandle))
-            .Append("\"><input type=\"hidden\" name=\"")
-            .Append(LoginAntiforgeryDefaults.TokenFieldName)
-            .Append("\" value=\"")
-            .Append(WebUtility.HtmlEncode(requestToken))
-            .Append("\">")
-            .Append("<p><label for=\"username\">")
+        AppendHiddenFields(builder, loginHandle, requestToken);
+        builder.Append("<p><label for=\"username\">")
             .Append(text.UsernameLabel)
             .Append("</label> ")
             .Append("<input type=\"text\" id=\"username\" name=\"username\" ")
@@ -1239,14 +1233,8 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append(text.SmsHeading)
             .Append("</h2>");
         AppendFormStart(builder, notice, NoticeTarget.Sms);
-        builder.Append("<input type=\"hidden\" name=\"login_handle\" value=\"")
-            .Append(WebUtility.HtmlEncode(loginHandle))
-            .Append("\"><input type=\"hidden\" name=\"")
-            .Append(LoginAntiforgeryDefaults.TokenFieldName)
-            .Append("\" value=\"")
-            .Append(WebUtility.HtmlEncode(requestToken))
-            .Append("\">")
-            .Append("<p><label for=\"phone\">")
+        AppendHiddenFields(builder, loginHandle, requestToken);
+        builder.Append("<p><label for=\"phone\">")
             .Append(text.PhoneLabel)
             .Append("</label> ")
             .Append("<input type=\"tel\" id=\"phone\" name=\"phone\" autocomplete=\"tel\" maxlength=\"")
@@ -1270,6 +1258,21 @@ public sealed partial class OAuthLoginController : ControllerBase
             .Append(text.SmsSignInButton)
             .Append("</button></p>")
             .Append("</form></section>");
+    }
+
+    /// <summary>
+    /// The hidden fields every login form carries: the continuation handle and the antiforgery
+    /// token, both HTML-encoded like any echoed value.
+    /// </summary>
+    private static void AppendHiddenFields(StringBuilder builder, string loginHandle, string requestToken)
+    {
+        builder.Append("<input type=\"hidden\" name=\"login_handle\" value=\"")
+            .Append(WebUtility.HtmlEncode(loginHandle))
+            .Append("\"><input type=\"hidden\" name=\"")
+            .Append(LoginAntiforgeryDefaults.TokenFieldName)
+            .Append("\" value=\"")
+            .Append(WebUtility.HtmlEncode(requestToken))
+            .Append("\">");
     }
 
     private static void AppendFormStart(StringBuilder builder, LoginNotice? notice, NoticeTarget target)

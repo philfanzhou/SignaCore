@@ -383,13 +383,8 @@ public sealed class AuthorizationCodeRedemptionService(
         string? correlationId,
         CancellationToken cancellationToken)
     {
-        var strategy = dbContext.Database.CreateExecutionStrategy();
-        var replayCommitted = await strategy.ExecuteAsync(async operationToken =>
+        var replayCommitted = await dbContext.ExecuteTransactionalAsync(async (transaction, operationToken) =>
         {
-            dbContext.ChangeTracker.Clear();
-            await using var transaction = await dbContext.Database
-                .BeginTransactionAsync(operationToken);
-
             // EV-20 lock order. A missing session row is not an error here: the committed
             // consumption alone proves the replay.
             var lockedSession = await identitySessions.LockAsync(code.IdentitySessionId, operationToken);
@@ -440,13 +435,8 @@ public sealed class AuthorizationCodeRedemptionService(
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        var strategy = dbContext.Database.CreateExecutionStrategy();
-        return await strategy.ExecuteAsync(async operationToken =>
+        return await dbContext.ExecuteTransactionalAsync(async (transaction, operationToken) =>
         {
-            dbContext.ChangeTracker.Clear();
-            await using var transaction = await dbContext.Database
-                .BeginTransactionAsync(operationToken);
-
             // EV-20 lock order: the loser of a concurrent redemption observes the committed
             // consumption under the locks and runs the replay disposal instead.
             var lockedSession = await identitySessions.LockAsync(descriptor.SessionId, operationToken);

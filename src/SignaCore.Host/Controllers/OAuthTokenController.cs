@@ -352,33 +352,14 @@ public sealed class OAuthTokenController : ControllerBase
 
     /// <summary>
     /// Whether the request carries an <c>Authorization: Basic</c> header the client-authentication
-    /// handler would actually use — parseable, base64-decodable, with a separator. The parse
-    /// mirrors <see cref="OAuthClientAuthenticationHandler"/> so the <c>IN-20</c> mix is judged
-    /// by exactly the rule the handler applies. The name deliberately avoids the "auth"
-    /// substring: CodeQL's user-controlled-bypass query flags calls to %-auth-%-named methods
-    /// under a request-controlled guard.
+    /// handler would actually use — parseable, base64-decodable, with a separator. The parse is
+    /// <see cref="BasicClientHeader.TryRead"/>, so the <c>IN-20</c> mix is judged by exactly the
+    /// rule the handler applies. The name deliberately avoids the "auth" substring: CodeQL's
+    /// user-controlled-bypass query flags calls to %-auth-%-named methods under a
+    /// request-controlled guard.
     /// </summary>
-    private bool HasUsableBasicCredentials()
-    {
-        var header = Request.Headers.Authorization.ToString();
-        if (string.IsNullOrWhiteSpace(header)
-            || !AuthenticationHeaderValue.TryParse(header, out var parsed)
-            || !string.Equals(parsed.Scheme, "Basic", StringComparison.OrdinalIgnoreCase)
-            || string.IsNullOrWhiteSpace(parsed.Parameter))
-        {
-            return false;
-        }
-
-        try
-        {
-            var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(parsed.Parameter));
-            return decoded.IndexOf(':') > 0;
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-    }
+    private bool HasUsableBasicCredentials() =>
+        BasicClientHeader.TryRead(Request, out _, out _);
 
     private static string? Value(Microsoft.Extensions.Primitives.StringValues values)
     {

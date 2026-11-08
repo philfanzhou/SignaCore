@@ -12,6 +12,7 @@ using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Audit;
 using SignaCore.Host.Http;
+using SignaCore.Host.Services;
 using SignaCore.Host.Models;
 
 namespace SignaCore.Host.Controllers;
@@ -157,13 +158,8 @@ public class ProfileController : ControllerBase
         }
 
         var newPasswordHash = passwordHasher.HashPassword(request.NewPassword);
-        var strategy = dbContext.Database.CreateExecutionStrategy();
-        var committed = await strategy.ExecuteAsync(async operationToken =>
+        var committed = await dbContext.ExecuteTransactionalAsync(async (transaction, operationToken) =>
         {
-            dbContext.ChangeTracker.Clear();
-            await using var transaction = await dbContext.Database
-                .BeginTransactionAsync(operationToken);
-
             var now = DateTimeOffset.UtcNow;
 
             // One commit boundary owns the hash write, every promised revocation, and the audit

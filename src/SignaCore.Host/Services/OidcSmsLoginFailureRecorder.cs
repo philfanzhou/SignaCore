@@ -83,12 +83,8 @@ public sealed class OidcSmsLoginFailureRecorder(
         var maskedPhone = SensitiveDataMasker.MaskPhone(phoneE164);
         try
         {
-            var strategy = dbContext.Database.CreateExecutionStrategy();
-            await strategy.ExecuteAsync(async operationCancellationToken =>
+            await dbContext.ExecuteTransactionalAsync(async (transaction, operationCancellationToken) =>
             {
-                dbContext.ChangeTracker.Clear();
-                await using var transaction =
-                    await dbContext.Database.BeginTransactionAsync(operationCancellationToken);
                 // Lock in the same continuation -> OTP -> audit order as EV-36. The update
                 // changes no value, but makes consumption and this failure mutually exclusive.
                 var matched = await dbContext.AuthorizationRequests

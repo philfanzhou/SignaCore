@@ -373,13 +373,8 @@ public sealed class InteractiveRefreshRotationService(
         var legacyChildDigest = RefreshTokenDigest.Compute(childToken);
         var publicChildDigest = RefreshTokenDigest.ComputePublic(childToken);
 
-        var strategy = dbContext.Database.CreateExecutionStrategy();
-        return await strategy.ExecuteAsync(async operationToken =>
+        return await dbContext.ExecuteTransactionalAsync(async (transaction, operationToken) =>
         {
-            dbContext.ChangeTracker.Clear();
-            await using var transaction = await dbContext.Database
-                .BeginTransactionAsync(operationToken);
-
             // Persistence.md lock order: the loser of a concurrent rotation observes the
             // committed consumption under these locks and runs the reuse disposal instead.
             // The application policy row is share-locked between the session and the root so the

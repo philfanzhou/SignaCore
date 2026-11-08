@@ -57,13 +57,8 @@ public sealed class OidcLoginFailureRecorder(
         string correlationId,
         CancellationToken cancellationToken = default)
     {
-        var strategy = dbContext.Database.CreateExecutionStrategy();
-        await strategy.ExecuteAsync(async operationCancellationToken =>
+        await dbContext.ExecuteTransactionalAsync(async (transaction, operationCancellationToken) =>
         {
-            dbContext.ChangeTracker.Clear();
-            await using var transaction =
-                await dbContext.Database.BeginTransactionAsync(operationCancellationToken);
-
             var loginAttempt = await LoginAttemptChangeApplier.ApplyAsync(
                 loginAttemptChange,
                 loginAttemptRepository,
