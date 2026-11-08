@@ -5,12 +5,10 @@ import 'element-plus/es/components/message-box/style/css'
 import './styles/tokens.css'
 import './styles/base.css'
 import './styles/auth.css'
-import './styles/layout.css'
 import './styles/components.css'
 import './styles/overlays.css'
 import './styles/toast.css'
 import './styles/utilities.css'
-import './styles/responsive.css'
 import './styles/redesign.css'
 
 createApp(App).mount('#app')

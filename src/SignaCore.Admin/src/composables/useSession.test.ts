@@ -3,7 +3,6 @@ import { currentCredential } from '../services/managementBearer'
 
 const mocks = vi.hoisted(() => ({
   login: vi.fn(), getCurrentSession: vi.fn(), logout: vi.fn(), isAxiosError: vi.fn(),
-  loadAllDomains: vi.fn(), resetAllDomains: vi.fn(),
   message: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }))
 
@@ -12,9 +11,6 @@ vi.mock('../services/httpTransport', () => ({ credentialFreeClient: { post: vi.f
 vi.mock('element-plus', () => ({ ElMessage: mocks.message }))
 vi.mock('../services/apiClient', () => ({
   adminClient: { login: mocks.login, getCurrentSession: mocks.getCurrentSession, logout: mocks.logout },
-}))
-vi.mock('./sessionHooks', () => ({
-  loadAllDomains: mocks.loadAllDomains, resetAllDomains: mocks.resetAllDomains,
 }))
 
 type UseSession = typeof import('./useSession')
@@ -43,7 +39,6 @@ beforeEach(() => {
     !!value && typeof value === 'object' && 'isAxiosError' in value)
   mocks.login.mockResolvedValue(issued())
   mocks.getCurrentSession.mockResolvedValue({ accountId: 'a1', username: 'admin', isAuthenticated: true })
-  mocks.loadAllDomains.mockResolvedValue(undefined)
   mocks.logout.mockResolvedValue(undefined)
   useSession.resetAdminState()
   useSession.loginForm.username = ''
@@ -76,7 +71,6 @@ describe('Bearer-only management session', () => {
     expect(useSession.loginForm.password).toBe('')
     expect(currentCredential()?.token).toBe(token)
     expect(mocks.getCurrentSession).toHaveBeenCalledOnce()
-    expect(mocks.loadAllDomains).toHaveBeenCalledOnce()
     expect(useSession.isAuthenticated.value).toBe(true)
   })
 
