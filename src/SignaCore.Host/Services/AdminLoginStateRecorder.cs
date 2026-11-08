@@ -66,11 +66,8 @@ public sealed class AdminLoginStateRecorder(
             return;
         }
 
-        var strategy = dbContext.Database.CreateExecutionStrategy();
-        await strategy.ExecuteAsync(async operationCancellationToken =>
+        await dbContext.ExecuteTransactionalAsync(async (transaction, operationCancellationToken) =>
         {
-            dbContext.ChangeTracker.Clear();
-            await using var transaction = await dbContext.Database.BeginTransactionAsync(operationCancellationToken);
             await StageAndSaveAsync(operationCancellationToken);
             await transaction.CommitAsync(operationCancellationToken);
         }, cancellationToken);

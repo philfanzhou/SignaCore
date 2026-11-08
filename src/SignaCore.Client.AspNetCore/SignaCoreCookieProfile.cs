@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Http;
+
 namespace SignaCore.Client.AspNetCore;
 
 /// <summary>
@@ -55,4 +57,30 @@ internal static class SignaCoreCookieProfile
                 + suffix
             : options.SessionCookieName + suffix;
     }
+
+    /// <summary>
+    /// The shared attributes of every cookie this package writes: HttpOnly, the profile's Secure
+    /// decision, Lax, and Essential, under the given path and expiry.
+    /// </summary>
+    internal static CookieOptions CookieOptions(
+        SignaCoreHostedLoginOptions options, string path, DateTimeOffset expires) => new()
+    {
+        HttpOnly = true,
+        Secure = SecureCookies(options),
+        SameSite = SameSiteMode.Lax,
+        Path = path,
+        Expires = expires,
+        IsEssential = true
+    };
+
+    /// <summary>
+    /// Expires one cookie at the Unix epoch with the package's shared attributes — the one
+    /// deletion shape every package cookie uses.
+    /// </summary>
+    internal static void DeleteCookie(
+        HttpContext context, SignaCoreHostedLoginOptions options, string name, string path) =>
+        context.Response.Cookies.Append(
+            name,
+            string.Empty,
+            CookieOptions(options, path, DateTimeOffset.UnixEpoch));
 }

@@ -176,7 +176,7 @@ public sealed class AuthorizationCodeStore : IAuthorizationCodeStore
         ArgumentNullException.ThrowIfNull(binding);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var code = GenerateAuthorizationCode();
+        var code = OpaqueToken.Generate();
         var entity = new AuthorizationCodeEntity
         {
             Id = Guid.NewGuid(),
@@ -293,26 +293,11 @@ public sealed class AuthorizationCodeStore : IAuthorizationCodeStore
     }
 
     /// <summary>
-    /// 256 bits of CSPRNG output rendered as exactly 43 unpadded base64url characters — the
-    /// <c>IN-22</c> shape by construction, never by post-hoc filtering.
+    /// The single <c>IN-22</c> code shape gate: exactly the 43 unpadded base64url characters
+    /// <see cref="OpaqueToken.Generate"/> produces (<see cref="IdentityConstants.AuthorizationCodeLength"/>).
     /// </summary>
-    private static string GenerateAuthorizationCode()
-    {
-        Span<byte> entropy = stackalloc byte[32];
-        RandomNumberGenerator.Fill(entropy);
-        return Convert.ToBase64String(entropy)
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
-    }
-
-    private static bool IsAuthorizationCodeShape(string? value)
-    {
-        return value is not null
-            && value.Length == IdentityConstants.AuthorizationCodeLength
-            && value.All(character =>
-                char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
-    }
+    private static bool IsAuthorizationCodeShape(string? value) =>
+        OpaqueToken.IsShape(value, IdentityConstants.AuthorizationCodeLength);
 
     /// <summary>The <c>IN-24</c> verifier shape: 43–128 ASCII <c>[A-Za-z0-9._~-]</c>.</summary>
     private static bool IsVerifierShape(string? value)

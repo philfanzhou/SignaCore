@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using SignaCore.Database;
 using SignaCore.Database.RateLimiting;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
@@ -59,7 +58,7 @@ public class OidcRateLimitPartitionerTests
         var message = Encoding.UTF8.GetBytes("v1\nclient:OrderService");
         var masterKey = provider.GetMasterKey();
         var otherPurposeKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, masterKey, 32, [],
-            Encoding.UTF8.GetBytes(IdentityConstants.ConfigurationProtectionHkdfInfo));
+            Encoding.UTF8.GetBytes("Some-Other-Derivation-Purpose"));
         Assert.NotEqual(digests[0], Convert.ToHexStringLower(HMACSHA256.HashData(masterKey, message)));
         Assert.NotEqual(digests[0], Convert.ToHexStringLower(HMACSHA256.HashData(otherPurposeKey, message)));
         Assert.NotEqual(digests[0], Convert.ToHexStringLower(SHA256.HashData(message)));

@@ -205,22 +205,8 @@ public sealed class SignaCoreDefaultResponseWriter : ISignaCoreHostedLoginRespon
             cancellationToken);
     }
 
-    internal static string ReasonText(SignaCoreSignInReason reason) => reason switch
-    {
-        SignaCoreSignInReason.AuthorityUnreachable => "authority_unreachable",
-        SignaCoreSignInReason.InvalidReturnUrl => "invalid_return_url",
-        SignaCoreSignInReason.InvalidResponse => "invalid_response",
-        SignaCoreSignInReason.AccessDenied => "access_denied",
-        SignaCoreSignInReason.UserCanceled => "user_canceled",
-        SignaCoreSignInReason.PreSignInDenied => "pre_sign_in_denied",
-        SignaCoreSignInReason.StateMismatch => "state_mismatch",
-        SignaCoreSignInReason.IssuerMismatch => "issuer_mismatch",
-        SignaCoreSignInReason.TokenExchangeFailed => "token_exchange_failed",
-        SignaCoreSignInReason.InvalidToken => "invalid_token",
-        SignaCoreSignInReason.SessionStoreFull => "session_store_full",
-        SignaCoreSignInReason.RequiresReauthentication => "requires_reauthentication",
-        _ => "invalid_response"
-    };
+    internal static string ReasonText(SignaCoreSignInReason reason) =>
+        SignaCoreSignInReasonCodes.ToWireName(reason);
 
     private static string Description(SignaCoreSignInReason? reason) => reason switch
     {

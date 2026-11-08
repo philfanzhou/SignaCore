@@ -127,7 +127,7 @@ public sealed class LogoutRequestStore : ILogoutRequestStore
         ArgumentNullException.ThrowIfNull(descriptor);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var logoutHandle = GenerateLogoutHandle();
+        var logoutHandle = OpaqueToken.Generate();
         var request = new LogoutRequestEntity
         {
             Id = Guid.NewGuid(),
@@ -209,24 +209,9 @@ public sealed class LogoutRequestStore : ILogoutRequestStore
     }
 
     /// <summary>
-    /// 256 bits of CSPRNG output rendered as exactly 43 unpadded base64url characters — the
-    /// <c>IN-35</c> shape by construction, never by post-hoc filtering.
+    /// The single <c>IN-35</c> handle shape gate: exactly the 43 unpadded base64url characters
+    /// <see cref="OpaqueToken.Generate"/> produces (<see cref="IdentityConstants.LogoutHandleLength"/>).
     /// </summary>
-    private static string GenerateLogoutHandle()
-    {
-        Span<byte> entropy = stackalloc byte[32];
-        RandomNumberGenerator.Fill(entropy);
-        return Convert.ToBase64String(entropy)
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
-    }
-
-    private static bool IsLogoutHandleShape(string? value)
-    {
-        return value is not null
-            && value.Length == IdentityConstants.LogoutHandleLength
-            && value.All(character =>
-                char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
-    }
+    private static bool IsLogoutHandleShape(string? value) =>
+        OpaqueToken.IsShape(value, IdentityConstants.LogoutHandleLength);
 }

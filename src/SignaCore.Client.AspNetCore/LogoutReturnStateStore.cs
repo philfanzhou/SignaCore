@@ -33,9 +33,7 @@ internal sealed class LogoutReturnStateStore(TimeProvider? timeProvider = null)
             return null;
         }
 
-        Span<byte> entropy = stackalloc byte[32];
-        RandomNumberGenerator.Fill(entropy);
-        var correlationId = Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var correlationId = OpaqueToken.Generate();
         var now = _time.GetUtcNow();
         _pending[correlationId] = new PendingLogoutReturn(state, now + Lifetime);
         return correlationId;

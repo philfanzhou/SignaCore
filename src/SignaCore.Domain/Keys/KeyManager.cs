@@ -241,22 +241,7 @@ public class KeyManager : IKeyManager
         await _initializationTcs.Task.WaitAsync(cancellationToken);
         using var scope = _scopeFactory.CreateScope();
         var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
-        var keyEntities = await keyRepo.GetLogoutHintKeysAsync(cancellationToken);
-
-        var keys = new List<RsaSecurityKey>();
-        foreach (var entity in keyEntities)
-        {
-            try
-            {
-                keys.Add(LoadKeyFromEntity(entity));
-            }
-            catch (CryptographicException ex)
-            {
-                _logger.LogWarning(ex, "Failed to load key {KeyId}, skipping", entity.KeyId);
-            }
-        }
-
-        return keys;
+        return LoadKeys(await keyRepo.GetLogoutHintKeysAsync(cancellationToken));
     }
 
     /// <summary>
@@ -317,8 +302,16 @@ public class KeyManager : IKeyManager
     {
         using var scope = _scopeFactory.CreateScope();
         var keyRepo = scope.ServiceProvider.GetRequiredService<ISecurityKeyRepository>();
-        var keyEntities = await keyRepo.GetValidKeysAsync(cancellationToken);
+        return LoadKeys(await keyRepo.GetValidKeysAsync(cancellationToken));
+    }
 
+    /// <summary>
+    /// Loads each entity through private-key decryption; an entity whose key no longer decrypts
+    /// under this instance's master key is logged as a Warning and skipped (see
+    /// <see cref="LoadValidKeysAsync"/> for why it must not fall back to the public columns).
+    /// </summary>
+    private List<RsaSecurityKey> LoadKeys(IEnumerable<SecurityKeyEntity> keyEntities)
+    {
         var keys = new List<RsaSecurityKey>();
         foreach (var entity in keyEntities)
         {

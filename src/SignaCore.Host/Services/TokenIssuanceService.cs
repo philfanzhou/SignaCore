@@ -200,12 +200,9 @@ public sealed class TokenIssuanceService
         string? newRefreshToken;
         if (requiresRotation)
         {
-            var strategy = _dbContext.Database.CreateExecutionStrategy();
-            newRefreshToken = await strategy.ExecuteAsync(async operationCancellationToken =>
+            newRefreshToken = await _dbContext.ExecuteTransactionalAsync(async (transaction, operationCancellationToken) =>
             {
-                _dbContext.ChangeTracker.Clear();
                 originalLoginState.Restore(account);
-                await using var transaction = await _dbContext.Database.BeginTransactionAsync(operationCancellationToken);
 
                 await StageLoginStateAsync(operationCancellationToken);
                 var replacement = await StageRefreshTokenAsync(operationCancellationToken);
@@ -230,12 +227,9 @@ public sealed class TokenIssuanceService
                     "A successful SMS validation must carry a conditional OTP consumption.");
             }
 
-            var strategy = _dbContext.Database.CreateExecutionStrategy();
-            var commitResult = await strategy.ExecuteAsync(async operationCancellationToken =>
+            var commitResult = await _dbContext.ExecuteTransactionalAsync(async (transaction, operationCancellationToken) =>
             {
-                _dbContext.ChangeTracker.Clear();
                 originalLoginState.Restore(account);
-                await using var transaction = await _dbContext.Database.BeginTransactionAsync(operationCancellationToken);
 
                 if (!await OtpVerificationChangeApplier.ApplyAsync(
                         otpVerificationChange,
@@ -383,11 +377,8 @@ public sealed class TokenIssuanceService
             // RecordFailureAsync contains an atomic SQL update (and a SaveChanges fallback for the
             // first row), so the Host owns a short explicit transaction that also includes the
             // login-history insert. External validation and token work stay outside this boundary.
-            var strategy = _dbContext.Database.CreateExecutionStrategy();
-            await strategy.ExecuteAsync(async operationCancellationToken =>
+            await _dbContext.ExecuteTransactionalAsync(async (transaction, operationCancellationToken) =>
             {
-                _dbContext.ChangeTracker.Clear();
-                await using var transaction = await _dbContext.Database.BeginTransactionAsync(operationCancellationToken);
                 if (otpVerificationChange != null)
                 {
                     await OtpVerificationChangeApplier.ApplyAsync(

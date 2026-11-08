@@ -1,6 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
-
 namespace SignaCore.Database;
 
 /// <summary>
@@ -10,48 +7,24 @@ namespace SignaCore.Database;
 /// </summary>
 public static class RefreshTokenDigest
 {
-    public const string Prefix = "sha256:";
+    public const string Prefix = Sha256Digest.DefaultPrefix;
+
+    /// <summary><c>Prefix.Length + 64</c> lowercase hex characters.</summary>
     public const int EncodedLength = 71;
     public const string PublicPrefix = "sha256-public:";
+
+    /// <summary><c>PublicPrefix.Length + 64</c> lowercase hex characters.</summary>
     public const int PublicEncodedLength = 78;
 
-    public static string Compute(string token)
-        => ComputeWithPrefix(token, Prefix);
+    public static string Compute(string token) => Sha256Digest.Compute(Prefix, token);
 
-    public static string ComputePublic(string token)
-        => ComputeWithPrefix(token, PublicPrefix);
+    public static string ComputePublic(string token) => Sha256Digest.Compute(PublicPrefix, token);
 
-    private static string ComputeWithPrefix(string token, string prefix)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(token);
-        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(token));
-        return prefix + Convert.ToHexString(digest).ToLowerInvariant();
-    }
-
-    public static bool IsDigest(string value)
-    {
-        var prefix = IsPublicDigest(value) ? PublicPrefix : Prefix;
-        if (!value.StartsWith(prefix, StringComparison.Ordinal) ||
-            value.Length != prefix.Length + 64)
-        {
-            return false;
-        }
-
-        foreach (var character in value.AsSpan(prefix.Length))
-        {
-            if (character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f'))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    public static bool IsDigest(string value) =>
+        IsPublicDigest(value) || Sha256Digest.IsDigest(value, Prefix, EncodedLength);
 
     public static bool IsPublicDigest(string value) =>
-        value.StartsWith(PublicPrefix, StringComparison.Ordinal)
-        && value.Length == PublicEncodedLength
-        && value.AsSpan(PublicPrefix.Length).IndexOfAnyExcept("0123456789abcdef") < 0;
+        Sha256Digest.IsDigest(value, PublicPrefix, PublicEncodedLength);
 
     public static string EnsureDigest(string value) => IsDigest(value) ? value : Compute(value);
 }

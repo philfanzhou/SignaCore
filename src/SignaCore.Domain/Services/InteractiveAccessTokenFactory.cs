@@ -102,18 +102,6 @@ public sealed class InteractiveAccessTokenFactory : IInteractiveAccessTokenFacto
         "name", "nickname", "nonce", "auth_time", "amr", "azp", "acr"
     };
 
-    /// <summary>
-    /// The full interactive scope vocabulary the canonical-form check runs against. Membership and
-    /// ordering rules are <see cref="OidcScopeValidator"/>'s — no second scope rule exists here.
-    /// </summary>
-    private static readonly IReadOnlySet<string> InteractiveScopeVocabulary =
-        new HashSet<string>(StringComparer.Ordinal)
-        {
-            OidcScopeValidator.OpenId,
-            OidcScopeValidator.Profile,
-            OidcScopeValidator.OfflineAccess
-        };
-
     private readonly JwtOptions _jwtOptions;
     private readonly ILogger<InteractiveAccessTokenFactory> _logger;
 
@@ -165,7 +153,7 @@ public sealed class InteractiveAccessTokenFactory : IInteractiveAccessTokenFacto
                 "The signing key id must not be empty.", nameof(signingKey));
         }
 
-        if (!IsCanonicalInteractiveScope(descriptor.Scope))
+        if (!OidcScopeValidator.IsCanonicalInteractiveScope(descriptor.Scope))
         {
             throw new ArgumentException(
                 "The scope must be the canonical interactive scope value.", nameof(descriptor));
@@ -247,18 +235,4 @@ public sealed class InteractiveAccessTokenFactory : IInteractiveAccessTokenFacto
 
         return new InteractiveAccessTokenResult.Issued(serialized, tokenId, expiresAt);
     }
-
-    /// <summary>
-    /// The single canonical-form judgement: the shared requested-scope validator over the full
-    /// interactive vocabulary must accept the value and its canonical output must equal the input
-    /// byte for byte — <c>openid</c> present, unique members, only the three supported values, in
-    /// the fixed <c>openid profile offline_access</c> order.
-    /// </summary>
-    private static bool IsCanonicalInteractiveScope(string? scope) =>
-        OidcScopeValidator.TryValidateRequested(
-            scope,
-            InteractiveScopeVocabulary,
-            allowRefreshToken: true,
-            out var canonicalScope)
-        && string.Equals(canonicalScope, scope, StringComparison.Ordinal);
 }

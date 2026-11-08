@@ -159,13 +159,8 @@ public sealed class OidcSmsLoginCompletionService(
         CancellationToken cancellationToken)
     {
         var accepted = request.Accepted;
-        var strategy = dbContext.Database.CreateExecutionStrategy();
-        return await strategy.ExecuteAsync(async operationCancellationToken =>
+        return await dbContext.ExecuteTransactionalAsync(async (transaction, operationCancellationToken) =>
         {
-            dbContext.ChangeTracker.Clear();
-            await using var transaction =
-                await dbContext.Database.BeginTransactionAsync(operationCancellationToken);
-
             // ① Consume first: the single point a concurrent duplicate submission loses on,
             // before any OTP, identity, session, or code write (EV-03 race, SC-26).
             if (!await continuations.TryConsumeAsync(request.LoginHandle, request.Now, operationCancellationToken)

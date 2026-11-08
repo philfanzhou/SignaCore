@@ -55,3 +55,43 @@ public enum SignaCoreSignInReason
     /// <summary>The fixed reason of an expired or absent session; used by the session endpoint.</summary>
     RequiresReauthentication
 }
+
+/// <summary>
+/// The single string↔enum table of the <see cref="SignaCoreSignInReason"/> wire names. The
+/// failure page writes and the failure-page reader parse through these accessors so the two
+/// directions can never drift apart: an unknown wire name parses to <c>null</c>, and an
+/// out-of-range enum value renders as <see cref="SignaCoreSignInReason.InvalidResponse"/>.
+/// </summary>
+internal static class SignaCoreSignInReasonCodes
+{
+    private static readonly IReadOnlyDictionary<SignaCoreSignInReason, string> WireNames =
+        new Dictionary<SignaCoreSignInReason, string>
+        {
+            [SignaCoreSignInReason.AuthorityUnreachable] = "authority_unreachable",
+            [SignaCoreSignInReason.InvalidReturnUrl] = "invalid_return_url",
+            [SignaCoreSignInReason.InvalidResponse] = "invalid_response",
+            [SignaCoreSignInReason.AccessDenied] = "access_denied",
+            [SignaCoreSignInReason.UserCanceled] = "user_canceled",
+            [SignaCoreSignInReason.PreSignInDenied] = "pre_sign_in_denied",
+            [SignaCoreSignInReason.StateMismatch] = "state_mismatch",
+            [SignaCoreSignInReason.IssuerMismatch] = "issuer_mismatch",
+            [SignaCoreSignInReason.TokenExchangeFailed] = "token_exchange_failed",
+            [SignaCoreSignInReason.InvalidToken] = "invalid_token",
+            [SignaCoreSignInReason.SessionStoreFull] = "session_store_full",
+            [SignaCoreSignInReason.RequiresReauthentication] = "requires_reauthentication"
+        };
+
+    private static readonly IReadOnlyDictionary<string, SignaCoreSignInReason> ReasonsByWireName =
+        WireNames.ToDictionary(
+            pair => pair.Value,
+            pair => pair.Key,
+            StringComparer.Ordinal);
+
+    internal static string ToWireName(SignaCoreSignInReason reason) =>
+        WireNames.TryGetValue(reason, out var wireName) ? wireName : "invalid_response";
+
+    internal static SignaCoreSignInReason? FromWireName(string? value) =>
+        value is not null && ReasonsByWireName.TryGetValue(value, out var reason)
+            ? reason
+            : null;
+}

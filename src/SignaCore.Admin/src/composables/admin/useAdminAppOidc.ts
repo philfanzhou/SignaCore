@@ -9,6 +9,7 @@ import {
 } from "../../services/adminApi";
 import { handleApiError } from "../useSession";
 import { notify } from "./useAdminFeedback";
+import { runAdminTask } from "./adminTask";
 
 /**
  * Interactive OIDC client configuration calls the four existing management endpoints.
@@ -121,6 +122,7 @@ export function useAdminAppOidc(selectedApp: Ref<AdminApp | null>) {
 
   async function addRedirectUri(kind: AdminAppRedirectUri["kind"]) {
     if (!selectedApp.value) return;
+    const app = selectedApp.value;
     const draft = kind === "Redirect" ? redirectUriDraft : postLogoutUriDraft;
     // Trim surrounding whitespace only; leave URI normalization to the server.
     const uri = draft.value.trim();
@@ -132,25 +134,22 @@ export function useAdminAppOidc(selectedApp: Ref<AdminApp | null>) {
       );
     }
 
-    oidcSaving.value = true;
-    oidcError.value = "";
-    try {
-      await adminClient.addOidcRedirectUris(selectedApp.value.appId, kind, [
-        uri,
-      ]);
-      draft.value = "";
-      await loadOidc(selectedApp.value.appId);
-      notify(kind === "Redirect" ? "Redirect URI 已注册" : "Post Logout URI 已注册");
-    } catch (error) {
-      oidcError.value = getErrorMessage(error);
-      handleApiError("注册 URI 失败", error);
-    } finally {
-      oidcSaving.value = false;
-    }
+    await runAdminTask(
+      oidcSaving,
+      "注册 URI 失败",
+      async () => {
+        await adminClient.addOidcRedirectUris(app.appId, kind, [uri]);
+        draft.value = "";
+        await loadOidc(app.appId);
+        notify(kind === "Redirect" ? "Redirect URI 已注册" : "Post Logout URI 已注册");
+      },
+      oidcError,
+    );
   }
 
   async function removeRedirectUri(registration: AdminAppRedirectUri) {
     if (!selectedApp.value) return;
+    const app = selectedApp.value;
     try {
       await ElMessageBox.confirm(
         "移除后，使用该地址的授权请求会被拒绝。",
@@ -167,21 +166,16 @@ export function useAdminAppOidc(selectedApp: Ref<AdminApp | null>) {
       return;
     }
 
-    oidcSaving.value = true;
-    oidcError.value = "";
-    try {
-      await adminClient.removeOidcRedirectUri(
-        selectedApp.value.appId,
-        registration.id,
-      );
-      await loadOidc(selectedApp.value.appId);
-      notify("URI 注册已移除");
-    } catch (error) {
-      oidcError.value = getErrorMessage(error);
-      handleApiError("移除 URI 注册失败", error);
-    } finally {
-      oidcSaving.value = false;
-    }
+    await runAdminTask(
+      oidcSaving,
+      "移除 URI 注册失败",
+      async () => {
+        await adminClient.removeOidcRedirectUri(app.appId, registration.id);
+        await loadOidc(app.appId);
+        notify("URI 注册已移除");
+      },
+      oidcError,
+    );
   }
 
   function clearOidc() {

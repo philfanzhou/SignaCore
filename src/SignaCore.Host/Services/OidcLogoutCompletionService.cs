@@ -91,13 +91,8 @@ public sealed class OidcLogoutCompletionService(
             return OidcLogoutCompletionResult.Unavailable;
         }
 
-        var strategy = dbContext.Database.CreateExecutionStrategy();
-        return await strategy.ExecuteAsync(async operationToken =>
+        return await dbContext.ExecuteTransactionalAsync(async (transaction, operationToken) =>
         {
-            dbContext.ChangeTracker.Clear();
-            await using var transaction = await dbContext.Database
-                .BeginTransactionAsync(operationToken);
-
             // EV-28 lock order: the session row (of the stored sid — it may be gone) before the
             // logout-request row, so a concurrent code redemption on the same session can never
             // deadlock against this unit.

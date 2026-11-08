@@ -1,9 +1,10 @@
 import { computed, reactive, ref, watch } from "vue";
 import axios from "axios";
 import { adminClient } from "../../services/apiClient";
-import { getErrorMessage, type AdminApp } from "../../services/adminApi";
+import { type AdminApp } from "../../services/adminApi";
 import { handleApiError } from "../useSession";
 import { notify } from "./useAdminFeedback";
+import { pageCount, runAdminTask } from "./adminTask";
 import { useAdminAppAccess } from "./useAdminAppAccess";
 import { useAdminAppOidc } from "./useAdminAppOidc";
 
@@ -70,7 +71,7 @@ const filteredApps = computed(() =>
   }),
 );
 const appPages = computed(() =>
-  Math.max(1, Math.ceil(filteredApps.value.length / appPageSize)),
+  pageCount(filteredApps.value.length, appPageSize),
 );
 const appPageItems = computed(() =>
   filteredApps.value.slice(
@@ -88,17 +89,15 @@ function resetAppForm() {
 }
 
 async function loadApps() {
-  appsLoading.value = true;
-  appsError.value = "";
-  try {
-    apps.value = await adminClient.getApps();
-    if (appPage.value > appPages.value) appPage.value = 1;
-  } catch (error) {
-    appsError.value = getErrorMessage(error);
-    handleApiError("加载应用目录失败", error);
-  } finally {
-    appsLoading.value = false;
-  }
+  await runAdminTask(
+    appsLoading,
+    "加载应用目录失败",
+    async () => {
+      apps.value = await adminClient.getApps();
+      if (appPage.value > appPages.value) appPage.value = 1;
+    },
+    appsError,
+  );
 }
 
 function syncAppForm(app: AdminApp) {
@@ -170,8 +169,7 @@ async function saveAppConfig() {
 async function createApp() {
   if (!createAppForm.appName.trim() || Number(createAppForm.ttlSeconds) < 0)
     return notify("请输入应用名称和有效的回调 TTL");
-  appSavingNew.value = true;
-  try {
+  await runAdminTask(appSavingNew, "注册应用失败", async () => {
     const created = await adminClient.createApp({
       appName: createAppForm.appName.trim(),
       callbackUrl: createAppForm.callbackUrl.trim() || undefined,
@@ -189,27 +187,19 @@ async function createApp() {
     }
     resetAppForm();
     await loadApps();
-  } catch (error) {
-    handleApiError("注册应用失败", error);
-  } finally {
-    appSavingNew.value = false;
-  }
+  });
 }
 
 async function resetAppSecret() {
   if (!selectedApp.value) return;
-  destructiveBusy.value = true;
-  try {
-    const result = await adminClient.resetAppSecret(selectedApp.value.appId);
+  const app = selectedApp.value;
+  await runAdminTask(destructiveBusy, "重置 Secret 失败", async () => {
+    const result = await adminClient.resetAppSecret(app.appId);
     secretValue.value = result.appSecret;
     secretAcknowledged.value = false;
     appActionModal.value = "secret";
     notify("新 Secret 已生成，旧 Secret 已失效");
-  } catch (error) {
-    handleApiError("重置 Secret 失败", error);
-  } finally {
-    destructiveBusy.value = false;
-  }
+  });
 }
 
 async function deleteApp() {

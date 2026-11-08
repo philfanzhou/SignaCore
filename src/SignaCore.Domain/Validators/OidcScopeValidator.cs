@@ -12,6 +12,29 @@ public static class OidcScopeValidator
     private static readonly string[] CanonicalOrder = [OpenId, Profile, OfflineAccess];
     private static readonly HashSet<string> Supported = new(CanonicalOrder, StringComparer.Ordinal);
 
+    /// <summary>
+    /// The full interactive scope vocabulary: every member a canonical interactive scope may
+    /// contain. Membership and ordering rules stay <see cref="TryValidateRequested"/>'s — no
+    /// second scope rule exists anywhere.
+    /// </summary>
+    public static readonly IReadOnlySet<string> InteractiveVocabulary =
+        new HashSet<string>(CanonicalOrder, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The single canonical-form judgement shared by the interactive token factories and the
+    /// refresh-family store: the requested-scope validator over the full interactive vocabulary
+    /// must accept the value and its canonical output must equal the input byte for byte —
+    /// <c>openid</c> present, unique members, only the three supported values, in the fixed
+    /// <c>openid profile offline_access</c> order.
+    /// </summary>
+    public static bool IsCanonicalInteractiveScope(string? scope) =>
+        TryValidateRequested(
+            scope,
+            InteractiveVocabulary,
+            allowRefreshToken: true,
+            out var canonicalScope)
+        && string.Equals(canonicalScope, scope, StringComparison.Ordinal);
+
     public static string ValidateAndCanonicalize(
         IEnumerable<string> scopes,
         bool allowRefreshToken)

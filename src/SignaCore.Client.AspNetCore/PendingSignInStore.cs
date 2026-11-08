@@ -34,11 +34,8 @@ internal sealed class PendingSignInStore(TimeProvider? timeProvider = null)
             return null;
         }
 
-        Span<byte> entropy = stackalloc byte[32];
-        RandomNumberGenerator.Fill(entropy);
-        var state = Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-        RandomNumberGenerator.Fill(entropy);
-        var browserBinding = Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var state = OpaqueToken.Generate();
+        var browserBinding = OpaqueToken.Generate();
         var now = _time.GetUtcNow();
         _pending[state] = new PendingSignIn(
             nonce, codeVerifier, returnUrl,

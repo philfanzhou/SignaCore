@@ -291,29 +291,10 @@ public sealed class OAuthLogoutController : ControllerBase
 
     /// <summary>
     /// Whether the request carries an <c>Authorization: Basic</c> header the client-authentication
-    /// handler would actually use — the same parse the handler applies, so the <c>IN-20</c> mix
-    /// is judged by exactly that rule.
+    /// handler would actually use — <see cref="BasicClientHeader.TryRead"/>, so the <c>IN-20</c>
+    /// mix is judged by exactly the rule the handler applies.
     /// </summary>
-    private bool HasUsableBasicCredentials()
-    {
-        var header = Request.Headers.Authorization.ToString();
-        if (string.IsNullOrWhiteSpace(header)
-            || !AuthenticationHeaderValue.TryParse(header, out var parsed)
-            || !string.Equals(parsed.Scheme, "Basic", StringComparison.OrdinalIgnoreCase)
-            || string.IsNullOrWhiteSpace(parsed.Parameter))
-        {
-            return false;
-        }
-
-        try
-        {
-            var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(parsed.Parameter));
-            return decoded.IndexOf(':') > 0;
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-    }
+    private bool HasUsableBasicCredentials() =>
+        BasicClientHeader.TryRead(Request, out _, out _);
 
 }

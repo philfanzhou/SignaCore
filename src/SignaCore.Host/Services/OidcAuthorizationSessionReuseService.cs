@@ -63,13 +63,8 @@ public sealed class OidcAuthorizationSessionReuseService(
     {
         ArgumentNullException.ThrowIfNull(accepted);
 
-        var strategy = dbContext.Database.CreateExecutionStrategy();
-        return await strategy.ExecuteAsync(async operationToken =>
+        return await dbContext.ExecuteTransactionalAsync(async (transaction, operationToken) =>
         {
-            dbContext.ChangeTracker.Clear();
-            await using var transaction = await dbContext.Database
-                .BeginTransactionAsync(operationToken);
-
             // EV-06 lock order: the session row first, before any code row exists.
             var session = await identitySessions.LockAsync(sessionId, operationToken);
             if (session is null

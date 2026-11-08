@@ -91,13 +91,8 @@ public sealed class OidcLoginCompletionService(
         var displayName = credentialResult.DisplayName;
         var loginAttemptChange = credentialResult.LoginAttemptChange;
 
-        var strategy = dbContext.Database.CreateExecutionStrategy();
-        return await strategy.ExecuteAsync(async operationCancellationToken =>
+        return await dbContext.ExecuteTransactionalAsync(async (transaction, operationCancellationToken) =>
         {
-            dbContext.ChangeTracker.Clear();
-            await using var transaction =
-                await dbContext.Database.BeginTransactionAsync(operationCancellationToken);
-
             // Consume first: the conditional update is the single point a concurrent duplicate
             // submission loses on, before any session or code row exists (EV-03 race).
             if (!await continuations.TryConsumeAsync(loginHandle, now, operationCancellationToken))

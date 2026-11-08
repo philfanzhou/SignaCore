@@ -9,6 +9,7 @@ import {
 } from "../../services/adminApi";
 import { handleApiError } from "../useSession";
 import { notify } from "./useAdminFeedback";
+import { confirmDangerAction, pageCount, runAdminTask } from "./adminTask";
 
 const users = ref<AdminUser[]>([]);
 const userTotal = ref(0);
@@ -52,7 +53,7 @@ const filteredUsers = computed(() => {
   return users.value;
 });
 const userPages = computed(() =>
-  Math.max(1, Math.ceil(userTotal.value / userPageSize)),
+  pageCount(userTotal.value, userPageSize),
 );
 
 function resetUserForm() {
@@ -67,30 +68,28 @@ function resetUserForm() {
 }
 
 async function loadUsers() {
-  userLoading.value = true;
-  userError.value = "";
-  try {
-    const result = await adminClient.getUsers({
-      username: userFilters.username.trim() || undefined,
-      phone: userFilters.phone.trim() || undefined,
-      page: userPage.value,
-      pageSize: userPageSize,
-    });
-    users.value = result.items;
-    userTotal.value = result.total;
-    if (userPage.value > Math.max(1, Math.ceil(result.total / userPageSize)))
-      userPage.value = 1;
-    if (selectedUser.value)
-      selectedUser.value =
-        result.items.find(
-          (item) => item.userId === selectedUser.value?.userId,
-        ) ?? selectedUser.value;
-  } catch (error) {
-    userError.value = getErrorMessage(error);
-    handleApiError("加载账户目录失败", error);
-  } finally {
-    userLoading.value = false;
-  }
+  await runAdminTask(
+    userLoading,
+    "加载账户目录失败",
+    async () => {
+      const result = await adminClient.getUsers({
+        username: userFilters.username.trim() || undefined,
+        phone: userFilters.phone.trim() || undefined,
+        page: userPage.value,
+        pageSize: userPageSize,
+      });
+      users.value = result.items;
+      userTotal.value = result.total;
+      if (userPage.value > pageCount(result.total, userPageSize))
+        userPage.value = 1;
+      if (selectedUser.value)
+        selectedUser.value =
+          result.items.find(
+            (item) => item.userId === selectedUser.value?.userId,
+          ) ?? selectedUser.value;
+    },
+    userError,
+  );
 }
 
 function searchUsers() {
@@ -113,8 +112,7 @@ async function saveUser() {
     !/^1[3-9]\d{9}$/.test(createUserForm.phone.trim())
   )
     return notify("请输入有效的中国大陆手机号");
-  userSaving.value = true;
-  try {
+  await runAdminTask(userSaving, "创建账户失败", async () => {
     if (userMode.value === "password") {
       await adminClient.createUser({
         username: createUserForm.username.trim(),
@@ -135,11 +133,7 @@ async function saveUser() {
     resetUserForm();
     notify("账户已创建");
     await loadUsers();
-  } catch (error) {
-    handleApiError("创建账户失败", error);
-  } finally {
-    userSaving.value = false;
-  }
+  });
 }
 
 const resetPasswordTarget = ref<{ userId: string; username: string } | null>(null);
@@ -212,37 +206,29 @@ function openUser(user: AdminUser) {
 }
 
 async function loadUserHistory() {
-  if (!selectedUser.value) return;
-  userHistoryLoading.value = true;
-  try {
-    const result = await adminClient.getUserLoginHistory(
-      selectedUser.value.userId,
-      { page: 1, pageSize: 10 },
-    );
+  const target = selectedUser.value;
+  if (!target) return;
+  await runAdminTask(userHistoryLoading, "加载登录历史失败", async () => {
+    const result = await adminClient.getUserLoginHistory(target.userId, {
+      page: 1,
+      pageSize: 10,
+    });
     userHistory.value = result.items;
     userHistoryTotal.value = result.total;
-  } catch (error) {
-    handleApiError("加载登录历史失败", error);
-  } finally {
-    userHistoryLoading.value = false;
-  }
+  });
 }
 
 async function loadUserSessions() {
-  if (!selectedUser.value) return;
-  userSessionsLoading.value = true;
-  try {
-    const result = await adminClient.getUserIdentitySessions(
-      selectedUser.value.userId,
-      { page: 1, pageSize: 20 },
-    );
+  const target = selectedUser.value;
+  if (!target) return;
+  await runAdminTask(userSessionsLoading, "加载身份会话失败", async () => {
+    const result = await adminClient.getUserIdentitySessions(target.userId, {
+      page: 1,
+      pageSize: 20,
+    });
     userSessions.value = result.items;
     userSessionsTotal.value = result.total;
-  } catch (error) {
-    handleApiError("加载身份会话失败", error);
-  } finally {
-    userSessionsLoading.value = false;
-  }
+  });
 }
 
 async function revokeUserSession(session: AdminIdentitySessionItem) {
@@ -298,23 +284,18 @@ async function updateUserMeta(field: "nickname" | "remark") {
 
 async function toggleUser(user: AdminUser) {
   const action = user.isActive ? "禁用" : "启用";
-  try {
-    await ElMessageBox.confirm(
-      `确认${action}账户「${user.username || user.displayName || user.userId}」？`,
-      `${action}账户`,
-      {
-        confirmButtonText: action,
-        cancelButtonText: "取消",
-        type: user.isActive ? "warning" : "info",
-      },
-    );
-    await adminClient.updateUserStatus(user.userId, !user.isActive);
-    notify(`账户已${action}`);
-    await loadUsers();
-  } catch (error) {
-    if (error !== "cancel" && error !== "close")
-      handleApiError(`${action}账户失败`, error);
-  }
+  await confirmDangerAction(
+    `确认${action}账户「${user.username || user.displayName || user.userId}」？`,
+    `${action}账户`,
+    action,
+    `${action}账户失败`,
+    async () => {
+      await adminClient.updateUserStatus(user.userId, !user.isActive);
+      notify(`账户已${action}`);
+      await loadUsers();
+    },
+    user.isActive ? "warning" : "info",
+  );
 }
 
 function closeUserDrawer() {
