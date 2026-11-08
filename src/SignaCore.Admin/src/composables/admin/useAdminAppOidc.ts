@@ -1,5 +1,4 @@
 import { computed, reactive, ref, type Ref } from "vue";
-import { ElMessageBox } from "element-plus";
 import { adminClient } from "../../services/apiClient";
 import {
   getErrorMessage,
@@ -9,7 +8,7 @@ import {
 } from "../../services/adminApi";
 import { handleApiError } from "../useSession";
 import { notify } from "./useAdminFeedback";
-import { runAdminTask } from "./adminTask";
+import { confirmDangerAction, runAdminTask } from "./adminTask";
 
 /**
  * Interactive OIDC client configuration calls the four existing management endpoints.
@@ -66,18 +65,16 @@ function syncPolicyForm(config: AdminAppOidc) {
 
 export function useAdminAppOidc(selectedApp: Ref<AdminApp | null>) {
   async function loadOidc(appId: string) {
-    oidcLoading.value = true;
-    oidcError.value = "";
-    try {
-      const config = await adminClient.getAppOidc(appId);
-      oidcConfig.value = config;
-      syncPolicyForm(config);
-    } catch (error) {
-      handleApiError("加载交互式 OIDC 配置失败", error);
-      oidcError.value = getErrorMessage(error);
-    } finally {
-      oidcLoading.value = false;
-    }
+    await runAdminTask(
+      oidcLoading,
+      "加载交互式 OIDC 配置失败",
+      async () => {
+        const config = await adminClient.getAppOidc(appId);
+        oidcConfig.value = config;
+        syncPolicyForm(config);
+      },
+      oidcError,
+    );
   }
 
   /** Cancel editing by restoring the server values and clearing unsaved drafts. */
@@ -150,31 +147,22 @@ export function useAdminAppOidc(selectedApp: Ref<AdminApp | null>) {
   async function removeRedirectUri(registration: AdminAppRedirectUri) {
     if (!selectedApp.value) return;
     const app = selectedApp.value;
-    try {
-      await ElMessageBox.confirm(
-        "移除后，使用该地址的授权请求会被拒绝。",
-        "移除 URI 注册",
-        {
-          confirmButtonText: "移除",
-          cancelButtonText: "取消",
-          type: "warning",
-        },
-      );
-    } catch (error) {
-      if (error !== "cancel" && error !== "close")
-        handleApiError("移除 URI 注册失败", error);
-      return;
-    }
-
-    await runAdminTask(
-      oidcSaving,
+    await confirmDangerAction(
+      "移除后，使用该地址的授权请求会被拒绝。",
+      "移除 URI 注册",
+      "移除",
       "移除 URI 注册失败",
-      async () => {
-        await adminClient.removeOidcRedirectUri(app.appId, registration.id);
-        await loadOidc(app.appId);
-        notify("URI 注册已移除");
-      },
-      oidcError,
+      () =>
+        runAdminTask(
+          oidcSaving,
+          "移除 URI 注册失败",
+          async () => {
+            await adminClient.removeOidcRedirectUri(app.appId, registration.id);
+            await loadOidc(app.appId);
+            notify("URI 注册已移除");
+          },
+          oidcError,
+        ),
     );
   }
 

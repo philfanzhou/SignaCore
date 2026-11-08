@@ -64,7 +64,6 @@ public static class SignaCoreHostedLoginDefaults
     public const string LogoutReturnCookieSuffix = "-logout-return";
 
     /// <summary>
-    /// <summary>
     /// The suffix appended to <see cref="SessionCookieName"/> (plus the pending sign-in's
     /// <c>state</c> value after a dot) to name the one-time login browser-binding cookies:
     /// HttpOnly, Secure, SameSite=Lax, scoped to the package's callback path, and alive for the
