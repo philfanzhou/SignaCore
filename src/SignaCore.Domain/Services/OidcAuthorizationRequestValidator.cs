@@ -321,13 +321,8 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
     /// 7636 <c>code-challenge</c> ABNF on purpose: accepting <c>.</c> or <c>~</c> would let a client
     /// register a challenge that no verifier could ever satisfy.
     /// </summary>
-    private static bool IsValidCodeChallenge(string? value)
-    {
-        return value is not null
-            && value.Length == CodeChallengeLength
-            && value.All(character =>
-                char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
-    }
+    private static bool IsValidCodeChallenge(string? value) =>
+        OpaqueToken.IsShape(value, CodeChallengeLength);
 
     private static bool IsUnreserved(char character)
     {

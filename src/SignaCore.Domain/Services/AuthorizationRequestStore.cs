@@ -113,7 +113,7 @@ public sealed class AuthorizationRequestStore : IAuthorizationRequestStore
         ArgumentNullException.ThrowIfNull(accepted);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var loginHandle = GenerateLoginHandle();
+        var loginHandle = OpaqueToken.Generate();
         var request = new AuthorizationRequestEntity
         {
             Id = Guid.NewGuid(),
@@ -210,24 +210,9 @@ public sealed class AuthorizationRequestStore : IAuthorizationRequestStore
     }
 
     /// <summary>
-    /// 256 bits of CSPRNG output rendered as exactly 43 unpadded base64url characters — the
-    /// <c>IN-10</c> shape by construction, never by post-hoc filtering.
+    /// The single <c>IN-10</c> handle shape gate: exactly the 43 unpadded base64url characters
+    /// <see cref="OpaqueToken.Generate"/> produces (<see cref="IdentityConstants.LoginHandleLength"/>).
     /// </summary>
-    private static string GenerateLoginHandle()
-    {
-        Span<byte> entropy = stackalloc byte[32];
-        RandomNumberGenerator.Fill(entropy);
-        return Convert.ToBase64String(entropy)
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
-    }
-
-    private static bool IsLoginHandleShape(string? value)
-    {
-        return value is not null
-            && value.Length == IdentityConstants.LoginHandleLength
-            && value.All(character =>
-                char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
-    }
+    private static bool IsLoginHandleShape(string? value) =>
+        OpaqueToken.IsShape(value, IdentityConstants.LoginHandleLength);
 }
