@@ -1,6 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
-
 namespace SignaCore.Database;
 
 /// <summary>
@@ -13,54 +10,20 @@ namespace SignaCore.Database;
 /// </summary>
 public static class AuthorizationCodeDigest
 {
-    public const string Prefix = "sha256:";
+    public const string Prefix = Sha256Digest.DefaultPrefix;
+
+    /// <summary><c>Prefix.Length + 64</c> lowercase hex characters.</summary>
     public const int EncodedLength = 71;
 
-    public static string Compute(string authorizationCode)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(authorizationCode);
-        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(authorizationCode));
-        return Prefix + Convert.ToHexString(digest).ToLowerInvariant();
-    }
+    public static string Compute(string authorizationCode) =>
+        Sha256Digest.Compute(Prefix, authorizationCode);
 
-    public static bool IsDigest(string value)
-    {
-        if (!value.StartsWith(Prefix, StringComparison.Ordinal) ||
-            value.Length != EncodedLength)
-        {
-            return false;
-        }
-
-        foreach (var character in value.AsSpan(Prefix.Length))
-        {
-            if (character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f'))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    public static bool IsDigest(string value) =>
+        Sha256Digest.IsDigest(value, Prefix, EncodedLength);
 
     public static string EnsureDigest(string value) => IsDigest(value) ? value : Compute(value);
 
-    /// <summary>
-    /// Constant-time comparison of two encoded digests. The database index answers the lookup; this
-    /// gate decides whether a fetched row is released to the caller, so the release decision never
-    /// depends on a short-circuiting string comparison.
-    /// </summary>
-    public static bool Matches(string computedDigest, string storedDigest)
-    {
-        ArgumentNullException.ThrowIfNull(computedDigest);
-        ArgumentNullException.ThrowIfNull(storedDigest);
-
-        if (computedDigest.Length != storedDigest.Length)
-        {
-            return false;
-        }
-
-        return CryptographicOperations.FixedTimeEquals(
-            Encoding.ASCII.GetBytes(computedDigest),
-            Encoding.ASCII.GetBytes(storedDigest));
-    }
+    /// <inheritdoc cref="Sha256Digest.Matches"/>
+    public static bool Matches(string computedDigest, string storedDigest) =>
+        Sha256Digest.Matches(computedDigest, storedDigest);
 }
