@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
@@ -9,8 +8,8 @@ namespace SignaCore.Domain.Services;
 
 /// <summary>
 /// The closed revocation-cause set of the interactive refresh family writes (<c>PS-06</c>). The
-/// refresh-token row itself stores only the boolean revocation fact â€?the first fact stays
-/// authoritative and is never rewritten â€?so the reason exists to keep every caller of the family
+/// refresh-token row itself stores only the boolean revocation fact â€” the first fact stays
+/// authoritative and is never rewritten â€” so the reason exists to keep every caller of the family
 /// API on one of the canonical events: code replay (<c>EV-24</c>), logout (<c>EV-06</c>),
 /// administrative session revocation (<c>EV-15</c>), and the rotation-time <c>EV-32</c> causes
 /// (session expiry, missing session authority, application max-age, SMS admission, scope
@@ -28,7 +27,7 @@ public enum RefreshFamilyRevocationReason
     /// <summary><c>EV-32</c>: the rejecting refresh found the session idle/absolute expired (or revoked).</summary>
     SessionExpired,
 
-    /// <summary><c>EV-32</c>: the rejecting refresh found no session row â€?missing authority, never a guessed session.</summary>
+    /// <summary><c>EV-32</c>: the rejecting refresh found no session row â€” missing authority, never a guessed session.</summary>
     SessionMissing,
 
     /// <summary><c>EV-05</c>/<c>EV-32</c>: the application's per-session max-age was exceeded.</summary>
@@ -62,7 +61,7 @@ public enum RefreshFamilyRevocationReason
 /// The validated server-side inputs of one interactive refresh family root (<c>PS-06</c>/<c>EV-21</c>):
 /// the account, the interactive client's AppId, the live identity session, and the byte-for-byte
 /// authorization-code snapshots of the canonical scope and the original authentication time. The
-/// plaintext token is never part of this shape â€?it exists only in the creation result.
+/// plaintext token is never part of this shape â€” it exists only in the creation result.
 /// </summary>
 public sealed record InteractiveRefreshFamilyRootDescriptor(
     Guid AccountId,
@@ -89,7 +88,7 @@ public sealed record InteractiveRefreshFamilyRootCreation(
 /// <summary>
 /// The marker classification of one digest-matched <c>refresh_tokens</c> row (<c>PS-06</c>/
 /// <c>PS-07</c>): the complete interactive marker (session, canonical scope, auth time all
-/// present), the all-null legacy marker, or anything in between â€?a partial marker no writer of
+/// present), the all-null legacy marker, or anything in between â€” a partial marker no writer of
 /// either kind can produce, which the caller must treat as corrupt state.
 /// </summary>
 public enum RefreshMemberMarker
@@ -103,7 +102,7 @@ public enum RefreshMemberMarker
 /// The validated server-side inputs of one interactive family child (<c>EV-29</c>): the presented
 /// member being consumed, the root it belongs to, and the byte-for-byte copies of the root's
 /// account/client/session/scope/auth-time bindings and family deadline. The child id and digest
-/// are the request-local stable values of one rotation attempt â€?stable across an
+/// are the request-local stable values of one rotation attempt â€” stable across an
 /// execution-strategy retry, so a replayed attempt never mints a second child and a commit of
 /// this attempt can always be recognized as its own (<c>PS-22</c>). The plaintext token exists
 /// only in the calling rotation, never in this shape.
@@ -151,7 +150,7 @@ public interface IRefreshTokenFamilyStore
     /// Stages one family child inside the caller's rotation transaction (<c>EV-29</c>): the
     /// request-local stable id and digest of the attempt, <c>parent_id</c> = the presented member
     /// being consumed, <c>family_id</c> = the root, and byte-for-byte copies of the root's
-    /// account/client/session/scope/auth-time bindings and family deadline â€?rotation never
+    /// account/client/session/scope/auth-time bindings and family deadline â€” rotation never
     /// extends the family. The unique <c>parent_id</c> index is the database backstop that gives
     /// a presented member at most one child. Inside a caller-owned transaction the staged row
     /// commits or rolls back with it.
@@ -187,7 +186,8 @@ public interface IRefreshTokenFamilyStore
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// The <c>EV-31</c> reuse disposal: revokes every live â€?unconsumed and unrevoked â€?    /// interactive member of the family that is a descendant of the presented (consumed) member,
+    /// The <c>EV-31</c> reuse disposal: revokes every live â€” unconsumed and unrevoked â€”
+    /// interactive member of the family that is a descendant of the presented (consumed) member,
     /// following the parent chain down through already-consumed or revoked links so a live member
     /// below them is still reached; ancestors and sibling families keep their facts. Returns the
     /// number of members this call revoked.
@@ -200,7 +200,7 @@ public interface IRefreshTokenFamilyStore
 
     /// <summary>
     /// Revokes every unrevoked interactive refresh family bound to one identity session
-    /// (<c>EV-06</c>/<c>EV-15</c>): a conditional update over interactive rows only â€?legacy
+    /// (<c>EV-06</c>/<c>EV-15</c>): a conditional update over interactive rows only â€” legacy
     /// rows have no session and are structurally out of reach. Returns the number of members
     /// this call revoked.
     /// </summary>
@@ -212,7 +212,7 @@ public interface IRefreshTokenFamilyStore
     /// <summary>
     /// Revokes every unrevoked interactive refresh family of one account (<c>EV-08</c>): the
     /// account-disable transaction's family disposal, a conditional update over interactive rows
-    /// only â€?legacy rows are structurally out of reach (<c>PS-07</c>). Returns the number of
+    /// only â€” legacy rows are structurally out of reach (<c>PS-07</c>). Returns the number of
     /// members this call revoked.
     /// </summary>
     Task<int> RevokeByAccountAsync(
@@ -521,9 +521,9 @@ public sealed class RefreshTokenFamilyStore(
 
     /// <summary>
     /// The canonical interactive refresh token shape: 256 bits of CSPRNG output rendered as
-    /// exactly 43 unpadded base64url characters â€?never by post-hoc filtering. Public because
+    /// exactly 43 unpadded base64url characters â€” never by post-hoc filtering. Public because
     /// the rotation slice (<c>EV-29</c>) must generate the child credential once per HTTP
-    /// attempt â€?outside the execution-strategy lambda â€?so a retried attempt reuses the same
+    /// attempt â€” outside the execution-strategy lambda â€” so a retried attempt reuses the same
     /// bytes and can recognize its own committed child.
     /// </summary>
     public static string GenerateRefreshToken() => OpaqueToken.Generate();
