@@ -22,14 +22,15 @@ the stable `signacore` value.
 Newly published release images contain both `linux/amd64` and `linux/arm64` under the same
 tag. Docker selects the matching platform automatically, including ARM64 when Colima
 runs an `aarch64` VM on Apple Silicon. Existing version tags are unchanged; use a
-version published after multi-platform support was added, or a new `edge` image where
-that channel is available. `docker buildx imagetools inspect <image>:<tag>` lists
+version published after multi-platform support was added. `docker buildx imagetools
+inspect <image>:<tag>` lists
 the platforms included in a published tag.
 
 The Node and .NET SDK stages run on the build host and produce static web assets and
 framework-dependent assemblies. The runtime base image and OS packages follow the
 target architecture. CI builds both complete images without publishing on pull
-requests, and publishing waits for that check as well as the existing tests.
+requests or default-branch pushes, and only a version tag publishes; publishing waits for that
+check as well as the existing tests.
 
 
 ```bash
@@ -81,20 +82,19 @@ to required checks, scanning, SBOM, smoke, and real database contracts. Revertin
 change and this documentation restores the single-source CI behavior, including its quota failures.
 It cannot guarantee that either anonymous registry is always available.
 
-The release job's BuildKit builder image still comes from Docker Hub on default-branch pushes and
-release tags. This recovery does not change that publishing path; pull requests never reach it.
+The release job's BuildKit builder image still comes from Docker Hub on release tags. This
+recovery does not change that publishing path; default-branch pushes and pull requests never
+reach it.
 
-## The `edge` image
+## Publishing
 
-Every push to the default branch that passes the full pipeline publishes
-`ghcr.io/philfanzhou/signacore:edge`. The tag moves to the newest such commit, so it names whatever
-the default branch currently is — not a release. Use it for development environments and for
-verifying a change in a real container; never pin a deployment to it, because the digest behind it
-changes without notice.
+Only a version tag publishes. A push to the default branch runs the full test and scan pipeline
+and stops there: no image is pushed, and no moving tag names whatever the default branch currently
+is. Every tag in the registry therefore names a release; a development build is verified by the
+pull-request and default-branch pipelines themselves, not by a published image.
 
-Each push leaves the previously tagged manifest, together with its provenance and SBOM attestations,
-as an untagged version of the package. GHCR does not remove those, so the untagged versions
-accumulate and are pruned by hand when they become inconvenient.
+Earlier workflow versions published a moving `edge` tag; it stays where it last pointed and
+receives no new manifests.
 
 ## Releasing
 

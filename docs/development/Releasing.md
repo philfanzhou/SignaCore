@@ -19,9 +19,9 @@ and no long-lived publishing credential in this repository.
    image, the `SignaCore.Client.AspNetCore` package on NuGet.org, and the GitHub Release whose
    notes quote the image digest and the package version.
 
-A push to `main` runs the same tests and packs the same package, but publishes no NuGet package
-or GitHub Release: the package exists only as a workflow build output with a non-publishable `0.0.0-edge.*` version, and the
-image is published only under the moving `edge` tag.
+A push to `main` runs the same tests and packs the same package, but publishes nothing: the package
+exists only as a workflow build output with a non-publishable `0.0.0-edge.*` version, and no image
+is pushed. Only a release tag publishes.
 
 ## Version rules
 
@@ -60,7 +60,7 @@ for the same tag repairs the gap:
   *already present* — the run then still verifies that the published version restores from the
   feed;
 - an existing GitHub Release is left untouched, so hand-edited notes survive a re-run;
-- the image and `edge`/`latest` semantics are unchanged from the container-only era.
+- the `latest` and semver image tags behave exactly as they did in the container-only era.
 
 A published version is never deleted or replaced. If a release is wrong, publish a new version.
 
