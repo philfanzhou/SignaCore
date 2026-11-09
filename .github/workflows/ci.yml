@@ -817,14 +817,11 @@ jobs:
             NODE_IMAGE=${{ env.SIGNACORE_NODE_IMAGE }}
           cache-from: type=gha,scope=signacore-release
 
-  # Runs for release tags and for default-branch pushes. A default-branch push publishes only the
-  # moving `edge` tag; `latest` and the semver tags stay tag-only, gated below.
+  # Releases publish; everything else only checks. A push that is not a version tag runs CI and
+  # stops there, so a merge to the default branch pushes no image and moves no tag.
   publish-container:
     name: Publish GHCR Image
-    if: >-
-      github.event_name == 'push' &&
-      (startsWith(github.ref, 'refs/tags/') ||
-      github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     needs: [build-test, database-contracts, container-platforms]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -877,19 +874,13 @@ jobs:
           # flavour off leaves that gate as the only source of `latest`.
           flavor: latest=false
           tags: |
-            # Only produced on a default-branch push. The tag moves rather than accumulating, but
-            # each push leaves the previous manifest, with its provenance and SBOM attestations,
-            # behind as an untagged package version, which GHCR does not prune on its own.
-            type=edge,branch=${{ github.event.repository.default_branch }}
-            # The semver rules read the tag name and yield nothing on a branch ref. They strip the
-            # leading `v`, so the image keeps its bare MAJOR.MINOR.PATCH tags.
-            # A pre-release gets only its exact immutable version. Stable releases additionally
-            # move the minor channel and latest; an RC must never replace either production tag.
+            # The semver rules read the tag name and strip the leading `v`, so the image keeps
+            # its bare MAJOR.MINOR.PATCH tags. Nothing else publishes, so no branch-derived
+            # moving tag exists.
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') }}
             # The `latest` gate keys on the tag ref and the prerelease dash rather than the `v`
-            # prefix. Without this gate the rule is unconditional and the first default-branch
-            # push would move `latest` onto a development build.
+            # prefix: `latest` must never name a release candidate.
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') }}
 
       - name: Build and publish image
