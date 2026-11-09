@@ -29,7 +29,7 @@ public sealed class RefreshTokenFamilyStoreTests
         await using var harness = await CreateHarnessAsync();
         var now = DateTimeOffset.UtcNow;
         var authTime = now.AddMinutes(-5);
-        var descriptor = new InteractiveRefreshFamilyRootDescriptor(
+        var descriptor = new RefreshFamilyRootDescriptor(
             harness.AccountId, ClientId, harness.SessionId, CanonicalScope, authTime);
 
         var creation = await harness.Store.CreateRootAsync(descriptor, now, TestContext.Current.CancellationToken);
@@ -69,10 +69,10 @@ public sealed class RefreshTokenFamilyStoreTests
     {
         await using var harness = await CreateHarnessAsync();
         var now = DateTimeOffset.UtcNow;
-        var descriptor = new InteractiveRefreshFamilyRootDescriptor(
+        var descriptor = new RefreshFamilyRootDescriptor(
             harness.AccountId, ClientId, harness.SessionId, CanonicalScope, now);
 
-        var cases = new Func<InteractiveRefreshFamilyRootDescriptor>[]
+        var cases = new Func<RefreshFamilyRootDescriptor>[]
         {
             () => descriptor with { AccountId = Guid.Empty },
             () => descriptor with { IdentitySessionId = Guid.Empty },
@@ -98,7 +98,7 @@ public sealed class RefreshTokenFamilyStoreTests
         await using var harness = await CreateHarnessAsync();
         var now = DateTimeOffset.UtcNow;
         var deadline = now.AddHours(2);
-        var descriptor = new InteractiveRefreshFamilyRootDescriptor(
+        var descriptor = new RefreshFamilyRootDescriptor(
             harness.AccountId, ClientId, harness.SessionId, CanonicalScope, now.AddMinutes(-5))
         { IsPublicFamily = true, AbsoluteDeadline = deadline };
 
@@ -125,7 +125,7 @@ public sealed class RefreshTokenFamilyStoreTests
     {
         await using var harness = await CreateHarnessAsync();
         var now = DateTimeOffset.UtcNow;
-        var baseDescriptor = new InteractiveRefreshFamilyRootDescriptor(
+        var baseDescriptor = new RefreshFamilyRootDescriptor(
             harness.AccountId, ClientId, harness.SessionId, CanonicalScope, now);
         var legacy = await harness.Store.CreateRootAsync(
             baseDescriptor, now, TestContext.Current.CancellationToken);
@@ -149,14 +149,14 @@ public sealed class RefreshTokenFamilyStoreTests
         var now = DateTimeOffset.UtcNow;
         var deadline = now.AddHours(1);
         var root = await harness.Store.CreateRootAsync(
-            new InteractiveRefreshFamilyRootDescriptor(
+            new RefreshFamilyRootDescriptor(
                 harness.AccountId, ClientId, harness.SessionId, CanonicalScope, now)
             { IsPublicFamily = true, AbsoluteDeadline = deadline },
             now, TestContext.Current.CancellationToken);
         var childToken = RefreshTokenFamilyStore.GenerateRefreshToken();
         var childId = Guid.NewGuid();
         await harness.Store.CreateChildAsync(
-            new InteractiveRefreshChildDescriptor(childId, root.RootId, root.RootId,
+            new RefreshFamilyChildDescriptor(childId, root.RootId, root.RootId,
                 harness.AccountId, ClientId, harness.SessionId, CanonicalScope, now,
                 root.ExpiresAt, RefreshTokenDigest.ComputePublic(childToken)),
             now, TestContext.Current.CancellationToken);
@@ -412,14 +412,14 @@ public sealed class RefreshTokenFamilyStoreTests
         var cancellationToken = TestContext.Current.CancellationToken;
         var now = DateTimeOffset.UtcNow;
         var rootCreation = await harness.Store.CreateRootAsync(
-            new InteractiveRefreshFamilyRootDescriptor(
+            new RefreshFamilyRootDescriptor(
                 harness.AccountId, ClientId, harness.SessionId, CanonicalScope, now.AddMinutes(-5)),
             now,
             cancellationToken);
 
         var childId = Guid.NewGuid();
         var childPlaintext = RefreshTokenFamilyStore.GenerateRefreshToken();
-        var descriptor = new InteractiveRefreshChildDescriptor(
+        var descriptor = new RefreshFamilyChildDescriptor(
             childId,
             rootCreation.RootId,
             rootCreation.RootId,
@@ -461,7 +461,7 @@ public sealed class RefreshTokenFamilyStoreTests
     {
         await using var harness = await CreateHarnessAsync();
         var now = DateTimeOffset.UtcNow;
-        var descriptor = new InteractiveRefreshChildDescriptor(
+        var descriptor = new RefreshFamilyChildDescriptor(
             Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
@@ -473,7 +473,7 @@ public sealed class RefreshTokenFamilyStoreTests
             now.AddDays(7),
             RefreshTokenDigest.Compute(RefreshTokenFamilyStore.GenerateRefreshToken()));
 
-        var cases = new Func<InteractiveRefreshChildDescriptor>[]
+        var cases = new Func<RefreshFamilyChildDescriptor>[]
         {
             () => descriptor with { ChildId = Guid.Empty },
             () => descriptor with { ChildId = descriptor.ParentId },

@@ -257,7 +257,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
         var unitOfWork = new EfCoreUnitOfWork(context);
         var store = new RefreshTokenFamilyStore(
             new RefreshTokenRepository(context), unitOfWork, NullLogger<RefreshTokenFamilyStore>.Instance);
-        var descriptor = new InteractiveRefreshChildDescriptor(
+        var descriptor = new RefreshFamilyChildDescriptor(
             Guid.NewGuid(), rootId, rootId, seed.AccountId, ClientId, seed.SessionId,
             CanonicalScope, seed.AuthTime, DateTimeOffset.UtcNow.AddDays(7),
             RefreshTokenDigest.Compute(RefreshTokenFamilyStore.GenerateRefreshToken()));
@@ -417,7 +417,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
             var creation = await new RefreshTokenFamilyStore(
                 new RefreshTokenRepository(context), unitOfWork, NullLogger<RefreshTokenFamilyStore>.Instance)
                 .CreateRootAsync(
-                    new InteractiveRefreshFamilyRootDescriptor(
+                    new RefreshFamilyRootDescriptor(
                         seed.AccountId, ClientId, seed.SessionId, seed.Scope, seed.AuthTime)
                     {
                         IsPublicFamily = dedicatedDigest,

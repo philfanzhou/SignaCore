@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Buffers.Text;
 using System.Security.Cryptography;
-using System.Text;
 
 namespace SignaCore.Database;
 
@@ -17,7 +16,7 @@ public static class ManagementBearerToken
     public const string Prefix = "scm1.";
     public const int SecretBytes = 32;
     public const int Length = 48;
-    public const string DigestPrefix = "sha256:";
+    public const string DigestPrefix = Sha256Digest.DefaultPrefix;
     public const int DigestLength = 71;
 
     public static string Generate()
@@ -74,6 +73,8 @@ public static class ManagementBearerToken
             throw new ArgumentException("The value is not a management bearer credential.", nameof(token));
         }
 
-        return DigestPrefix + Convert.ToHexStringLower(SHA256.HashData(Encoding.ASCII.GetBytes(token)));
+        // IsWellFormed has already proved the value is ASCII, so the shared digest
+        // implementation's UTF-8 encoding hashes exactly the same bytes as this credential.
+        return Sha256Digest.Compute(DigestPrefix, token);
     }
 }

@@ -7,7 +7,7 @@ namespace SignaCore.Client.AspNetCore;
 /// operation/outcome pair — nothing else is ever accepted: no message text, no exception, no
 /// URL, no query string, and by construction no code, state, nonce, verifier, token, or secret.
 /// </summary>
-internal static class SignaCoreClientLog
+internal static class ClientLog
 {
     internal enum Operation
     {

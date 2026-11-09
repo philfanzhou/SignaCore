@@ -163,9 +163,10 @@ public sealed class SignaCoreDefaultResponseWriter : ISignaCoreHostedLoginRespon
         CancellationToken cancellationToken)
     {
         var prefix = context.RequestServices
-            .GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<SignaCoreHostedLoginOptions>>()
+            .GetRequiredService<IOptionsMonitor<SignaCoreHostedLoginOptions>>()
             .CurrentValue.Prefix ?? string.Empty;
-        context.Response.Redirect($"{prefix}/{SignaCoreHostedLoginDefaults.FailurePathSegment}?reason={ReasonText(reason)}");
+        context.Response.Redirect(
+            $"{prefix}/{SignaCoreHostedLoginDefaults.FailurePathSegment}?reason={SignInReasonWireNames.ToWireName(reason)}");
         return Task.CompletedTask;
     }
 
@@ -201,12 +202,9 @@ public sealed class SignaCoreDefaultResponseWriter : ISignaCoreHostedLoginRespon
         context.Response.ContentType = "application/json";
         context.Response.Headers.CacheControl = "no-store";
         return context.Response.WriteAsync(
-            JsonSerializer.Serialize(status, SignaCoreClientJsonContext.Default.SignaCoreSessionStatus),
+            JsonSerializer.Serialize(status, ClientJsonContext.Default.SignaCoreSessionStatus),
             cancellationToken);
     }
-
-    internal static string ReasonText(SignaCoreSignInReason reason) =>
-        SignaCoreSignInReasonCodes.ToWireName(reason);
 
     private static string Description(SignaCoreSignInReason? reason) => reason switch
     {
@@ -238,4 +236,4 @@ public sealed class SignaCoreDefaultResponseWriter : ISignaCoreHostedLoginRespon
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(SignaCoreSessionStatus))]
-internal sealed partial class SignaCoreClientJsonContext : JsonSerializerContext;
+internal sealed partial class ClientJsonContext : JsonSerializerContext;

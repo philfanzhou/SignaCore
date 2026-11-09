@@ -23,7 +23,7 @@ public class IdentitySessionRepository : IIdentitySessionRepository
         return Task.CompletedTask;
     }
 
-    public async Task<bool> PasswordCredentialExistsForAccountAsync(
+    public async Task<bool> HasPasswordCredentialAsync(
         Guid passwordCredentialId,
         Guid accountId,
         CancellationToken cancellationToken = default)
@@ -36,7 +36,7 @@ public class IdentitySessionRepository : IIdentitySessionRepository
                 cancellationToken);
     }
 
-    public async Task<bool> SmsUserLoginExistsForAccountAsync(
+    public async Task<bool> HasSmsUserLoginAsync(
         Guid smsUserLoginId,
         Guid accountId,
         CancellationToken cancellationToken = default)

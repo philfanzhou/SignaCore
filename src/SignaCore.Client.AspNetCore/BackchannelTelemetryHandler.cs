@@ -9,7 +9,7 @@ namespace SignaCore.Client.AspNetCore;
 /// recorded, and no trace context is propagated into the authority call. The ID token, client
 /// secret, and handles of the flow therefore never reach traces or metrics either.
 /// </summary>
-internal sealed class SignaCoreBackchannelTelemetryHandler : DelegatingHandler
+internal sealed class BackchannelTelemetryHandler : DelegatingHandler
 {
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,

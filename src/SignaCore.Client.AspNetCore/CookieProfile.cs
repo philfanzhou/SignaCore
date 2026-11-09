@@ -21,7 +21,7 @@ namespace SignaCore.Client.AspNetCore;
 /// prefix is ever introduced.
 /// </para>
 /// </summary>
-internal static class SignaCoreCookieProfile
+internal static class CookieProfile
 {
     /// <summary>
     /// Whether the plain-HTTP profile is active: the configured RedirectUri is served over
@@ -59,10 +59,10 @@ internal static class SignaCoreCookieProfile
     }
 
     /// <summary>
-    /// The shared attributes of every cookie this package writes: HttpOnly, the profile's Secure
-    /// decision, Lax, and Essential, under the given path and expiry.
+    /// The shared attributes of every carrier cookie this package writes directly: HttpOnly, the
+    /// profile's Secure decision, Lax, and Essential, under the given path and expiry.
     /// </summary>
-    internal static CookieOptions CookieOptions(
+    internal static CookieOptions CreateCookieOptions(
         SignaCoreHostedLoginOptions options, string path, DateTimeOffset expires) => new()
     {
         HttpOnly = true,
@@ -74,13 +74,13 @@ internal static class SignaCoreCookieProfile
     };
 
     /// <summary>
-    /// Expires one cookie at the Unix epoch with the package's shared attributes — the one
-    /// deletion shape every package cookie uses.
+    /// Expires one carrier cookie at the Unix epoch with the package's shared attributes — the
+    /// one deletion shape every package-written cookie uses.
     /// </summary>
     internal static void DeleteCookie(
         HttpContext context, SignaCoreHostedLoginOptions options, string name, string path) =>
         context.Response.Cookies.Append(
             name,
             string.Empty,
-            CookieOptions(options, path, DateTimeOffset.UnixEpoch));
+            CreateCookieOptions(options, path, DateTimeOffset.UnixEpoch));
 }

@@ -13,16 +13,16 @@ namespace SignaCore.Client.AspNetCore;
 /// propagates the caller's cancellation; and no code, state, nonce, verifier, token, secret, or
 /// full query string is ever written to a response or a log entry.
 /// </summary>
-internal sealed class SignaCoreHostedLoginEndpointService(
+internal sealed class HostedLoginEndpointService(
     IOptionsMonitor<SignaCoreHostedLoginOptions> options,
-    SignaCoreDiscoveryClient discoveryClient,
-    SignaCoreTokenClient tokenClient,
-    SignaCoreIdTokenValidator idTokenValidator,
-    SignaCoreAccessTokenValidator accessTokenValidator,
+    DiscoveryClient discoveryClient,
+    TokenClient tokenClient,
+    IdTokenValidator idTokenValidator,
+    AccessTokenValidator accessTokenValidator,
     PendingSignInStore pendingSignInStore,
     ITicketStore ticketStore,
     TimeProvider timeProvider,
-    ILogger<SignaCoreHostedLoginEndpointService> logger)
+    ILogger<HostedLoginEndpointService> logger)
 {
     internal async Task HandleStartAsync(HttpContext context)
     {
@@ -35,7 +35,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         // they fail startup.
         if (current.AllowUnconfiguredStartup && IsUnconfigured(current))
         {
-            SignaCoreClientLog.SignInUnavailable(logger, cancellationToken);
+            ClientLog.SignInUnavailable(logger, cancellationToken);
             await current.ResponseWriter.WriteSignInUnavailableAsync(context, cancellationToken);
             return;
         }
@@ -68,7 +68,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             return;
         }
 
-        SignaCoreAuthorityConfiguration configuration;
+        AuthorityConfiguration configuration;
         try
         {
             configuration = await discoveryClient.GetConfigurationAsync(cancellationToken);
@@ -99,18 +99,18 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         context.Response.Cookies.Append(
             LoginBindingCookieName(current, creation.State),
             creation.BrowserBinding,
-            SignaCoreCookieProfile.CookieOptions(
+            CookieProfile.CreateCookieOptions(
                 current,
                 (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.CallbackPathSegment,
                 timeProvider.GetUtcNow() + PendingSignInStore.Lifetime));
 
-        SignaCoreClientLog.SignInStarted(logger, cancellationToken);
+        ClientLog.SignInStarted(logger, cancellationToken);
         var codeChallenge = Convert.ToBase64String(
                 SHA256.HashData(Encoding.UTF8.GetBytes(codeVerifier)))
             .TrimEnd('=')
             .Replace('+', '-')
             .Replace('/', '_');
-        context.Response.Redirect(QueryStringHelpers.BuildAuthorizationRequestUrl(
+        context.Response.Redirect(AuthorizationRequestUrl.Build(
             configuration.AuthorizationEndpoint,
             current.ClientId!,
             current.RedirectUri!,
@@ -172,7 +172,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
             return;
         }
 
-        SignaCoreAuthorityConfiguration configuration;
+        AuthorityConfiguration configuration;
         try
         {
             configuration = await discoveryClient.GetConfigurationAsync(cancellationToken);
@@ -235,8 +235,8 @@ internal sealed class SignaCoreHostedLoginEndpointService(
                 context,
                 failure switch
                 {
-                    SignaCoreTokenExchangeFailure.Unreachable => SignaCoreSignInReason.AuthorityUnreachable,
-                    SignaCoreTokenExchangeFailure.Rejected => SignaCoreSignInReason.TokenExchangeFailed,
+                    TokenExchangeFailure.Unreachable => SignaCoreSignInReason.AuthorityUnreachable,
+                    TokenExchangeFailure.Rejected => SignaCoreSignInReason.TokenExchangeFailed,
                     _ => SignaCoreSignInReason.InvalidToken
                 },
                 cancellationToken);
@@ -312,8 +312,8 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         context.Response.Cookies.Append(
             current.SessionCookieName,
             key,
-            SignaCoreCookieProfile.CookieOptions(current, "/", expiresAt));
-        SignaCoreClientLog.SignInSucceeded(logger, cancellationToken);
+            CookieProfile.CreateCookieOptions(current, "/", expiresAt));
+        ClientLog.SignInSucceeded(logger, cancellationToken);
         context.Response.Redirect(pending.ReturnUrl);
     }
 
@@ -353,13 +353,13 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         var cancellationToken = context.RequestAborted;
         var current = options.CurrentValue;
         var (status, principal) = await ReadSessionStatusAsync(context, current, cancellationToken);
-        SignaCoreClientLog.SessionStatus(logger, status.Authenticated, cancellationToken);
+        ClientLog.SessionStatus(logger, status.Authenticated, cancellationToken);
         await current.ResponseWriter.WriteSessionStatusAsync(context, status, principal, cancellationToken);
     }
 
     internal async Task HandleFailurePageAsync(HttpContext context)
     {
-        var reason = SignaCoreSignInReasonCodes.FromWireName(context.Request.Query["reason"].ToString());
+        var reason = SignInReasonWireNames.FromWireName(context.Request.Query["reason"].ToString());
         await options.CurrentValue.ResponseWriter.WriteFailurePageAsync(context, reason, context.RequestAborted);
     }
 
@@ -399,7 +399,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
     /// path, not "/", so a browser would refuse the prefixed name outright — and instead derives
     /// a <c>__Secure-</c> name, exactly like the logout-return cookie.</summary>
     private static string LoginBindingCookieName(SignaCoreHostedLoginOptions current, string state) =>
-        SignaCoreCookieProfile.DerivedCookieName(
+        CookieProfile.DerivedCookieName(
             current,
             SignaCoreHostedLoginDefaults.LoginBindingCookieSuffix + "." + state);
 
@@ -407,7 +407,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         HttpContext context,
         SignaCoreHostedLoginOptions current,
         string state) =>
-        SignaCoreCookieProfile.DeleteCookie(
+        CookieProfile.DeleteCookie(
             context,
             current,
             LoginBindingCookieName(current, state),
@@ -428,7 +428,7 @@ internal sealed class SignaCoreHostedLoginEndpointService(
         SignaCoreSignInReason reason,
         CancellationToken cancellationToken)
     {
-        SignaCoreClientLog.SignInRejected(logger, reason, cancellationToken);
+        ClientLog.SignInRejected(logger, reason, cancellationToken);
         await options.CurrentValue.ResponseWriter.WriteSignInFailureAsync(context, reason, cancellationToken);
     }
 
@@ -479,9 +479,9 @@ internal sealed class SignaCoreHostedLoginEndpointService(
 /// <summary>Builds the authorization request URL with exactly the contract's fields, in a fixed
 /// order, and nothing else — no <c>prompt</c>, <c>max_age</c>, <c>acr_values</c>,
 /// <c>response_mode</c>, <c>request</c>, <c>request_uri</c>, or <c>registration</c>.</summary>
-internal static class QueryStringHelpers
+internal static class AuthorizationRequestUrl
 {
-    internal static string BuildAuthorizationRequestUrl(
+    internal static string Build(
         string authorizationEndpoint,
         string clientId,
         string redirectUri,

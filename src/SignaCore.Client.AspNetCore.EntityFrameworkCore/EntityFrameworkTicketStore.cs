@@ -62,7 +62,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             // Serialization has no database state to leak; still one bounded category.
-            SignaCoreTicketStoreLog.Unavailable(logger, "store", cancellationToken);
+            TicketStoreLog.Unavailable(logger, "store", cancellationToken);
             return null;
         }
 
@@ -83,7 +83,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            SignaCoreTicketStoreLog.Unavailable(logger, "store", cancellationToken);
+            TicketStoreLog.Unavailable(logger, "store", cancellationToken);
             return null;
         }
     }
@@ -136,7 +136,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
             {
                 // The record can never become readable again; remove it and fail this session
                 // closed without touching any other row.
-                SignaCoreTicketStoreLog.Corrupt(logger, cancellationToken);
+                TicketStoreLog.Corrupt(logger, cancellationToken);
                 await DeleteAsync(database, digest, cancellationToken);
                 return null;
             }
@@ -145,7 +145,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            SignaCoreTicketStoreLog.Unavailable(logger, "retrieve", cancellationToken);
+            TicketStoreLog.Unavailable(logger, "retrieve", cancellationToken);
             return null;
         }
     }
@@ -176,7 +176,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
         {
             // Revocation is idempotent at the session level; a failed delete is retried by the
             // expiry sweep, which is the durable backstop.
-            SignaCoreTicketStoreLog.Unavailable(logger, "remove", cancellationToken);
+            TicketStoreLog.Unavailable(logger, "remove", cancellationToken);
         }
     }
 
@@ -221,13 +221,13 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 // The row is already gone; the corrupt record is only observable here.
-                SignaCoreTicketStoreLog.Corrupt(logger, cancellationToken);
+                TicketStoreLog.Corrupt(logger, cancellationToken);
                 return null;
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            SignaCoreTicketStoreLog.Unavailable(logger, "take", cancellationToken);
+            TicketStoreLog.Unavailable(logger, "take", cancellationToken);
             return null;
         }
     }
@@ -251,7 +251,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            SignaCoreTicketStoreLog.Unavailable(logger, "sweep", CancellationToken.None);
+            TicketStoreLog.Unavailable(logger, "sweep", CancellationToken.None);
             return 0;
         }
     }
@@ -390,7 +390,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
 /// The bounded operation log of the persistent ticket store: two fixed categories, no message
 /// text, no exception, and by construction no SQL, connection string, key, token, or principal.
 /// </summary>
-internal static class SignaCoreTicketStoreLog
+internal static class TicketStoreLog
 {
     internal static void Unavailable(
         ILogger? logger,

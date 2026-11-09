@@ -16,7 +16,7 @@ namespace SignaCore.Client.AspNetCore;
 /// CSRF protection; the claims-based user binding adds no protection a cross-site request could
 /// otherwise have defeated.
 /// </summary>
-internal static class SignaCoreAntiforgeryBoundary
+internal static class AntiforgeryBoundary
 {
     /// <summary>
     /// Runs <paramref name="operation"/> — one antiforgery issuance or validation — with the

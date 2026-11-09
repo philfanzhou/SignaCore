@@ -7,7 +7,7 @@ namespace SignaCore.Client.AspNetCore;
 /// only the structural rules remain — no environment privilege, no loopback exception, and no
 /// origin allowlist.
 /// </summary>
-internal static class SignaCoreAuthorityUriRules
+internal static class AuthorityUriRules
 {
     /// <summary>
     /// Whether a configured value is an acceptable base address: an absolute <c>http</c> or

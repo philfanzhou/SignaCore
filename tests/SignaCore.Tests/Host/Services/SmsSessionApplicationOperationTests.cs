@@ -809,12 +809,12 @@ public sealed class SmsSessionApplicationOperationTests
         IRefreshTokenFamilyStore inner,
         CancellationTokenSource cancellation) : IRefreshTokenFamilyStore
     {
-        public Task<InteractiveRefreshFamilyRootCreation> CreateRootAsync(
-            InteractiveRefreshFamilyRootDescriptor descriptor, DateTimeOffset now, CancellationToken cancellationToken = default) =>
+        public Task<RefreshFamilyRootCreation> CreateRootAsync(
+            RefreshFamilyRootDescriptor descriptor, DateTimeOffset now, CancellationToken cancellationToken = default) =>
             inner.CreateRootAsync(descriptor, now, cancellationToken);
 
         public Task CreateChildAsync(
-            InteractiveRefreshChildDescriptor descriptor, DateTimeOffset now, CancellationToken cancellationToken = default) =>
+            RefreshFamilyChildDescriptor descriptor, DateTimeOffset now, CancellationToken cancellationToken = default) =>
             inner.CreateChildAsync(descriptor, now, cancellationToken);
 
         public Task<bool> TryConsumeAsync(Guid memberId, DateTimeOffset now, CancellationToken cancellationToken = default) =>

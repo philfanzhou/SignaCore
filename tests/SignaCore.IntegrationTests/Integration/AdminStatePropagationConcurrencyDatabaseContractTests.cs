@@ -769,7 +769,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
             var creation = await new RefreshTokenFamilyStore(
                 new RefreshTokenRepository(context), unitOfWork, NullLogger<RefreshTokenFamilyStore>.Instance)
                 .CreateRootAsync(
-                    new InteractiveRefreshFamilyRootDescriptor(
+                    new RefreshFamilyRootDescriptor(
                         seed.AccountId, ClientId, seed.SessionId, CanonicalScope, seed.AuthTime),
                     DateTimeOffset.UtcNow,
                     TestContext.Current.CancellationToken);

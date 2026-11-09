@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace SignaCore.Client.AspNetCore;
 
 /// <summary>Thrown when a backchannel response body exceeds its configured byte ceiling.</summary>
-internal sealed class SignaCoreResponseLimitException : Exception;
+internal sealed class ResponseLimitException : Exception;
 
 /// <summary>
 /// The shared reader of the package's backchannel JSON responses: the body is read under a byte
@@ -11,11 +11,11 @@ internal sealed class SignaCoreResponseLimitException : Exception;
 /// keeps duplicate members and parsers disagree about which value wins, so a crafted response
 /// with duplicates is refused outright rather than interpreted.
 /// </summary>
-internal static class SignaCoreBoundedJson
+internal static class BoundedJson
 {
     /// <summary>
     /// Parses one JSON document from a stream under a byte ceiling. Throws
-    /// <see cref="SignaCoreResponseLimitException"/> when the body exceeds the ceiling,
+    /// <see cref="ResponseLimitException"/> when the body exceeds the ceiling,
     /// <see cref="JsonException"/> on malformed JSON or (when requested) duplicated top-level
     /// member names. The returned document is owned by the caller.
     /// </summary>
@@ -78,7 +78,7 @@ internal static class SignaCoreBoundedJson
             _read += read;
             if (_read > maxBytes)
             {
-                throw new SignaCoreResponseLimitException();
+                throw new ResponseLimitException();
             }
         }
 

@@ -9,11 +9,11 @@ public static class RefreshTokenDigest
 {
     public const string Prefix = Sha256Digest.DefaultPrefix;
 
-    /// <summary><c>Prefix.Length + 64</c> lowercase hex characters.</summary>
+    /// <summary>The total encoded length: the prefix plus 64 lowercase hex characters.</summary>
     public const int EncodedLength = 71;
     public const string PublicPrefix = "sha256-public:";
 
-    /// <summary><c>PublicPrefix.Length + 64</c> lowercase hex characters.</summary>
+    /// <summary>The total encoded length: the public prefix plus 64 lowercase hex characters.</summary>
     public const int PublicEncodedLength = 78;
 
     public static string Compute(string token) => Sha256Digest.Compute(Prefix, token);
