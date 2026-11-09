@@ -1,10 +1,8 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.Primitives;
 
 namespace SignaCore.Client.AspNetCore;
 
@@ -18,15 +16,15 @@ namespace SignaCore.Client.AspNetCore;
 /// once with at most one preparation, enforced by striped per-key gates that serialize concurrent
 /// logouts of the same browser session.
 /// </summary>
-internal sealed class SignaCoreHostedLogoutService(
+internal sealed class HostedLogoutService(
     IOptionsMonitor<SignaCoreHostedLoginOptions> options,
     IAntiforgery antiforgery,
-    SignaCoreDiscoveryClient discoveryClient,
-    SignaCoreLogoutClient logoutClient,
+    DiscoveryClient discoveryClient,
+    LogoutClient logoutClient,
     ITicketStore ticketStore,
     LogoutReturnStateStore logoutReturnStateStore,
     TimeProvider timeProvider,
-    ILogger<SignaCoreHostedLogoutService> logger)
+    ILogger<HostedLogoutService> logger)
 {
     /// <summary>
     /// A fixed stripe of gates keyed by session-key hash: one session always maps to one gate, so
@@ -44,7 +42,7 @@ internal sealed class SignaCoreHostedLogoutService(
         // The issuance is user-neutral: the pair must validate on every package surface whatever
         // principal the consumer's pipeline presents at that stage.
         var tokens = await antiforgery.GetAndStoreTokensUserNeutralAsync(context);
-        SignaCoreClientLog.CsrfIssued(logger, cancellationToken);
+        ClientLog.CsrfIssued(logger, cancellationToken);
         context.Response.ContentType = "application/json";
         context.Response.Headers.CacheControl = "no-store";
         await context.Response.WriteAsync(
@@ -67,7 +65,7 @@ internal sealed class SignaCoreHostedLogoutService(
         {
             // A missing or wrong token changes nothing: no session is touched and no preparation
             // is attempted. The fixed answer is indistinguishable for both defect shapes.
-            SignaCoreClientLog.Logout(logger, SignaCoreClientLog.Outcome.CsrfRejected, cancellationToken);
+            ClientLog.Logout(logger, ClientLog.Outcome.CsrfRejected, cancellationToken);
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.Response.ContentType = "application/json";
             context.Response.Headers.CacheControl = "no-store";
@@ -104,7 +102,7 @@ internal sealed class SignaCoreHostedLogoutService(
             await ticketStore.RemoveAsync(key, cancellationToken);
             DeleteSessionCookie(context, current);
 
-            SignaCoreAuthorityConfiguration configuration;
+            AuthorityConfiguration configuration;
             try
             {
                 configuration = await discoveryClient.GetConfigurationAsync(cancellationToken);
@@ -143,7 +141,7 @@ internal sealed class SignaCoreHostedLogoutService(
                 SetLogoutReturnCookie(context, current, correlationId);
             }
 
-            SignaCoreClientLog.Logout(logger, SignaCoreClientLog.Outcome.Prepared, cancellationToken);
+            ClientLog.Logout(logger, ClientLog.Outcome.Prepared, cancellationToken);
             await current.ResponseWriter.WriteLogoutPreparedAsync(
                 context, preparation.LogoutUri, cancellationToken);
         }
@@ -165,7 +163,7 @@ internal sealed class SignaCoreHostedLogoutService(
         var completed = !string.IsNullOrEmpty(presentedState)
             && !string.IsNullOrEmpty(correlationId)
             && logoutReturnStateStore.Consume(correlationId, presentedState);
-        SignaCoreClientLog.LogoutReturn(logger, completed, cancellationToken);
+        ClientLog.LogoutReturn(logger, completed, cancellationToken);
 
         // The correlation cookie is finished either way, and no request input is ever echoed.
         DeleteLogoutReturnCookie(context, current);
@@ -184,12 +182,12 @@ internal sealed class SignaCoreHostedLogoutService(
         SignaCoreHostedLoginOptions current,
         CancellationToken cancellationToken)
     {
-        SignaCoreClientLog.Logout(logger, SignaCoreClientLog.Outcome.LocalOnly, cancellationToken);
+        ClientLog.Logout(logger, ClientLog.Outcome.LocalOnly, cancellationToken);
         await current.ResponseWriter.WriteLogoutLocalOnlyAsync(context, cancellationToken);
     }
 
     private static void DeleteSessionCookie(HttpContext context, SignaCoreHostedLoginOptions current) =>
-        SignaCoreCookieProfile.DeleteCookie(context, current, current.SessionCookieName, "/");
+        CookieProfile.DeleteCookie(context, current, current.SessionCookieName, "/");
 
     private void SetLogoutReturnCookie(
         HttpContext context,
@@ -198,13 +196,13 @@ internal sealed class SignaCoreHostedLogoutService(
         context.Response.Cookies.Append(
             current.LogoutReturnCookieName(),
             correlationId,
-            SignaCoreCookieProfile.CookieOptions(
+            CookieProfile.CreateCookieOptions(
                 current,
                 (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.LogoutPathSegment,
                 timeProvider.GetUtcNow() + SignaCoreHostedLoginDefaults.LogoutReturnLifetime));
 
     private static void DeleteLogoutReturnCookie(HttpContext context, SignaCoreHostedLoginOptions current) =>
-        SignaCoreCookieProfile.DeleteCookie(
+        CookieProfile.DeleteCookie(
             context,
             current,
             current.LogoutReturnCookieName(),
@@ -212,7 +210,7 @@ internal sealed class SignaCoreHostedLogoutService(
 }
 
 /// <summary>Package-internal helpers shared by the logout surface.</summary>
-internal static class SignaCoreLogoutCookieExtensions
+internal static class LogoutCookieExtensions
 {
     /// <summary>
     /// The logout-return cookie name derives from the configured session-cookie name, so
@@ -226,6 +224,6 @@ internal static class SignaCoreLogoutCookieExtensions
     /// derivation, and the intranet HTTP profile never rewrites (its cookies are not Secure).
     /// </summary>
     internal static string LogoutReturnCookieName(this SignaCoreHostedLoginOptions options) =>
-        SignaCoreCookieProfile.DerivedCookieName(
+        CookieProfile.DerivedCookieName(
             options, SignaCoreHostedLoginDefaults.LogoutReturnCookieSuffix);
 }

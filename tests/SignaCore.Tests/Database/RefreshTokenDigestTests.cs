@@ -36,7 +36,10 @@ public class RefreshTokenDigestTests
     [InlineData("   ")]
     public void Compute_RejectsMissingTokens(string? value)
     {
-        Assert.ThrowsAny<ArgumentException>(() => RefreshTokenDigest.Compute(value!));
+        // The façade's parameter name is part of the observable contract: the shared helper
+        // captures it from the caller's argument expression.
+        var exception = Assert.ThrowsAny<ArgumentException>(() => RefreshTokenDigest.Compute(value!));
+        Assert.Equal("token", exception.ParamName);
     }
 
     [Theory]

@@ -12,7 +12,7 @@ public static class LoginHandleDigest
 {
     public const string Prefix = Sha256Digest.DefaultPrefix;
 
-    /// <summary><c>Prefix.Length + 64</c> lowercase hex characters.</summary>
+    /// <summary>The total encoded length: the prefix plus 64 lowercase hex characters.</summary>
     public const int EncodedLength = 71;
 
     public static string Compute(string loginHandle) =>

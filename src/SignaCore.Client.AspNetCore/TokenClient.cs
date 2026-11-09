@@ -9,7 +9,7 @@ namespace SignaCore.Client.AspNetCore;
 /// The outcome of one code redemption: either the validated token response, or a closed failure
 /// kind. Neither side of the result carries the code, the client secret, or any token.
 /// </summary>
-internal sealed record SignaCoreTokenExchangeResult
+internal sealed record TokenExchangeResult
 {
     public required string AccessToken { get; init; }
 
@@ -18,9 +18,9 @@ internal sealed record SignaCoreTokenExchangeResult
     /// <summary>The <c>expires_in</c> seconds; always positive on the success side.</summary>
     public required int ExpiresIn { get; init; }
 
-    public SignaCoreTokenExchangeFailure? Failure { get; init; }
+    public TokenExchangeFailure? Failure { get; init; }
 
-    internal static SignaCoreTokenExchangeResult Success(
+    internal static TokenExchangeResult Success(
         string accessToken, string idToken, int expiresIn) => new()
     {
         AccessToken = accessToken,
@@ -28,7 +28,7 @@ internal sealed record SignaCoreTokenExchangeResult
         ExpiresIn = expiresIn
     };
 
-    internal static SignaCoreTokenExchangeResult Failed(SignaCoreTokenExchangeFailure failure) => new()
+    internal static TokenExchangeResult Failed(TokenExchangeFailure failure) => new()
     {
         AccessToken = string.Empty,
         IdToken = string.Empty,
@@ -38,7 +38,7 @@ internal sealed record SignaCoreTokenExchangeResult
 }
 
 /// <summary>The closed failure kinds of the redemption step.</summary>
-internal enum SignaCoreTokenExchangeFailure
+internal enum TokenExchangeFailure
 {
     /// <summary>The transport failed (unreachable endpoint, TLS failure, timeout).</summary>
     Unreachable,
@@ -58,12 +58,12 @@ internal enum SignaCoreTokenExchangeFailure
 /// verifier. The success side of the answer must carry an access token, an ID token,
 /// <c>token_type=Bearer</c>, and a positive <c>expires_in</c>; anything else is a closed failure.
 /// </summary>
-internal sealed class SignaCoreTokenClient(
+internal sealed class TokenClient(
     System.Net.Http.IHttpClientFactory httpClientFactory,
     IOptionsMonitor<SignaCoreHostedLoginOptions> options)
 {
-    internal async Task<SignaCoreTokenExchangeResult> RedeemCodeAsync(
-        SignaCoreAuthorityConfiguration configuration,
+    internal async Task<TokenExchangeResult> RedeemCodeAsync(
+        AuthorityConfiguration configuration,
         string code,
         string codeVerifier,
         CancellationToken cancellationToken)
@@ -101,14 +101,14 @@ internal sealed class SignaCoreTokenClient(
         {
             // An unreachable endpoint, or a timeout (which surfaces without the caller's
             // cancellation): a closed failure, never a retry.
-            return SignaCoreTokenExchangeResult.Failed(SignaCoreTokenExchangeFailure.Unreachable);
+            return TokenExchangeResult.Failed(TokenExchangeFailure.Unreachable);
         }
 
         using (response)
         {
             if (!response.IsSuccessStatusCode)
             {
-                return SignaCoreTokenExchangeResult.Failed(SignaCoreTokenExchangeFailure.Rejected);
+                return TokenExchangeResult.Failed(TokenExchangeFailure.Rejected);
             }
 
             JsonDocument document;
@@ -116,17 +116,17 @@ internal sealed class SignaCoreTokenClient(
             {
                 // The body is read under the configured byte ceiling and must not repeat a
                 // top-level member name; both defect shapes are the same closed failure.
-                document = await SignaCoreBoundedJson.ParseAsync(
+                document = await BoundedJson.ParseAsync(
                     await response.Content.ReadAsStreamAsync(cancellationToken),
                     current.Validation.MaxTokenResponseBytes,
                     current.Validation.RejectDuplicateJsonMembers,
                     cancellationToken);
             }
             catch (Exception exception) when (exception is JsonException
-                or SignaCoreResponseLimitException or HttpRequestException)
+                or ResponseLimitException or HttpRequestException)
             {
-                return SignaCoreTokenExchangeResult.Failed(
-                    SignaCoreTokenExchangeFailure.MalformedResponse);
+                return TokenExchangeResult.Failed(
+                    TokenExchangeFailure.MalformedResponse);
             }
 
             using (document)
@@ -134,13 +134,13 @@ internal sealed class SignaCoreTokenClient(
                 var root = document.RootElement;
                 if (root.ValueKind != JsonValueKind.Object)
                 {
-                    return SignaCoreTokenExchangeResult.Failed(
-                        SignaCoreTokenExchangeFailure.MalformedResponse);
+                    return TokenExchangeResult.Failed(
+                        TokenExchangeFailure.MalformedResponse);
                 }
 
                 if (root.TryGetProperty("error", out _))
                 {
-                    return SignaCoreTokenExchangeResult.Failed(SignaCoreTokenExchangeFailure.Rejected);
+                    return TokenExchangeResult.Failed(TokenExchangeFailure.Rejected);
                 }
 
                 // A present scope echo must be a subset of what the sign-in requested: an
@@ -151,22 +151,22 @@ internal sealed class SignaCoreTokenClient(
                     && (scopeElement.ValueKind != JsonValueKind.String
                         || !IsScopeEchoSubset(scopeElement.GetString(), current.Scope)))
                 {
-                    return SignaCoreTokenExchangeResult.Failed(
-                        SignaCoreTokenExchangeFailure.MalformedResponse);
+                    return TokenExchangeResult.Failed(
+                        TokenExchangeFailure.MalformedResponse);
                 }
 
                 if (!TryReadString(root, "access_token", out var accessToken)
                     || !TryReadString(root, "id_token", out var idToken))
                 {
-                    return SignaCoreTokenExchangeResult.Failed(
-                        SignaCoreTokenExchangeFailure.MalformedResponse);
+                    return TokenExchangeResult.Failed(
+                        TokenExchangeFailure.MalformedResponse);
                 }
 
                 if (!TryReadString(root, "token_type", out var tokenType)
                     || !string.Equals(tokenType, "Bearer", StringComparison.OrdinalIgnoreCase))
                 {
-                    return SignaCoreTokenExchangeResult.Failed(
-                        SignaCoreTokenExchangeFailure.MalformedResponse);
+                    return TokenExchangeResult.Failed(
+                        TokenExchangeFailure.MalformedResponse);
                 }
 
                 if (!root.TryGetProperty("expires_in", out var expiresInElement)
@@ -174,11 +174,11 @@ internal sealed class SignaCoreTokenClient(
                     || !expiresInElement.TryGetInt32(out var expiresIn)
                     || expiresIn <= 0)
                 {
-                    return SignaCoreTokenExchangeResult.Failed(
-                        SignaCoreTokenExchangeFailure.MalformedResponse);
+                    return TokenExchangeResult.Failed(
+                        TokenExchangeFailure.MalformedResponse);
                 }
 
-                return SignaCoreTokenExchangeResult.Success(accessToken, idToken, expiresIn);
+                return TokenExchangeResult.Success(accessToken, idToken, expiresIn);
             }
         }
     }

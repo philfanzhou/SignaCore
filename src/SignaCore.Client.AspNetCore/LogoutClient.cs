@@ -10,19 +10,19 @@ namespace SignaCore.Client.AspNetCore;
 /// closed failure kind. Neither side of the result carries the ID token, the client secret, or the
 /// logout handle.
 /// </summary>
-internal sealed record SignaCoreLogoutPreparationResult
+internal sealed record LogoutPreparationResult
 {
     /// <summary>The absolute, same-origin logout URI the browser is sent to. Empty on failure.</summary>
     public required string LogoutUri { get; init; }
 
-    public SignaCoreLogoutFailure? Failure { get; init; }
+    public LogoutFailure? Failure { get; init; }
 
-    internal static SignaCoreLogoutPreparationResult Success(string logoutUri) => new()
+    internal static LogoutPreparationResult Success(string logoutUri) => new()
     {
         LogoutUri = logoutUri
     };
 
-    internal static SignaCoreLogoutPreparationResult Failed(SignaCoreLogoutFailure failure) => new()
+    internal static LogoutPreparationResult Failed(LogoutFailure failure) => new()
     {
         LogoutUri = string.Empty,
         Failure = failure
@@ -30,7 +30,7 @@ internal sealed record SignaCoreLogoutPreparationResult
 }
 
 /// <summary>The closed failure kinds of the preparation step.</summary>
-internal enum SignaCoreLogoutFailure
+internal enum LogoutFailure
 {
     /// <summary>The transport failed (unreachable endpoint, TLS failure, timeout, cancellation).</summary>
     Unreachable,
@@ -53,14 +53,14 @@ internal enum SignaCoreLogoutFailure
 /// other shape is a closed failure so a hostile or broken authority cannot redirect the browser.
 /// The ID token and secret stay in this server-to-server call.
 /// </summary>
-internal sealed class SignaCoreLogoutClient(
+internal sealed class LogoutClient(
     System.Net.Http.IHttpClientFactory httpClientFactory,
     IOptionsMonitor<SignaCoreHostedLoginOptions> options)
 {
     private const string PreparePath = "/oauth2/logout/requests";
 
-    internal async Task<SignaCoreLogoutPreparationResult> PrepareAsync(
-        SignaCoreAuthorityConfiguration configuration,
+    internal async Task<LogoutPreparationResult> PrepareAsync(
+        AuthorityConfiguration configuration,
         string idToken,
         string? postLogoutRedirectUri,
         string? state,
@@ -109,14 +109,14 @@ internal sealed class SignaCoreLogoutClient(
         {
             // An unreachable endpoint, or a timeout without the caller's cancellation: a closed
             // failure, never a retry.
-            return SignaCoreLogoutPreparationResult.Failed(SignaCoreLogoutFailure.Unreachable);
+            return LogoutPreparationResult.Failed(LogoutFailure.Unreachable);
         }
 
         using (response)
         {
             if (!response.IsSuccessStatusCode)
             {
-                return SignaCoreLogoutPreparationResult.Failed(SignaCoreLogoutFailure.Rejected);
+                return LogoutPreparationResult.Failed(LogoutFailure.Rejected);
             }
 
             JsonDocument document;
@@ -124,17 +124,17 @@ internal sealed class SignaCoreLogoutClient(
             {
                 // The body is read under the configured byte ceiling and must not repeat a
                 // top-level member name; both defect shapes are the same closed failure.
-                document = await SignaCoreBoundedJson.ParseAsync(
+                document = await BoundedJson.ParseAsync(
                     await response.Content.ReadAsStreamAsync(cancellationToken),
                     current.Validation.MaxLogoutResponseBytes,
                     current.Validation.RejectDuplicateJsonMembers,
                     cancellationToken);
             }
             catch (Exception exception) when (exception is JsonException
-                or SignaCoreResponseLimitException or HttpRequestException)
+                or ResponseLimitException or HttpRequestException)
             {
-                return SignaCoreLogoutPreparationResult.Failed(
-                    SignaCoreLogoutFailure.MalformedResponse);
+                return LogoutPreparationResult.Failed(
+                    LogoutFailure.MalformedResponse);
             }
 
             using (document)
@@ -144,17 +144,17 @@ internal sealed class SignaCoreLogoutClient(
                     || uriElement.ValueKind != JsonValueKind.String
                     || string.IsNullOrEmpty(uriElement.GetString()))
                 {
-                    return SignaCoreLogoutPreparationResult.Failed(
-                        SignaCoreLogoutFailure.MalformedResponse);
+                    return LogoutPreparationResult.Failed(
+                        LogoutFailure.MalformedResponse);
                 }
 
                 if (!TryResolveLogoutUri(uriElement.GetString()!, authorityOrigin, out var resolved))
                 {
-                    return SignaCoreLogoutPreparationResult.Failed(
-                        SignaCoreLogoutFailure.MalformedResponse);
+                    return LogoutPreparationResult.Failed(
+                        LogoutFailure.MalformedResponse);
                 }
 
-                return SignaCoreLogoutPreparationResult.Success(resolved);
+                return LogoutPreparationResult.Success(resolved);
             }
         }
     }

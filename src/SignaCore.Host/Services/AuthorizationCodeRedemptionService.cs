@@ -592,7 +592,7 @@ public sealed class AuthorizationCodeRedemptionService(
             // same unit. The store flushes the staged root so the conditional link write can
             // resolve its restrictive reference; both roll back with everything else on any
             // failure before the commit (EV-26).
-            InteractiveRefreshFamilyRootCreation? familyRoot = null;
+            RefreshFamilyRootCreation? familyRoot = null;
             if (codeCarriesOfflineAccess)
             {
                 DateTimeOffset? publicDeadline = null;
@@ -612,7 +612,7 @@ public sealed class AuthorizationCodeRedemptionService(
                 }
 
                 familyRoot = await refreshFamilies.CreateRootAsync(
-                    new InteractiveRefreshFamilyRootDescriptor(
+                    new RefreshFamilyRootDescriptor(
                         lockedAccount.Id,
                         descriptor.ClientId,
                         lockedSession.Id,

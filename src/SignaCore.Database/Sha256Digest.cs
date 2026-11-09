@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -5,7 +6,8 @@ namespace SignaCore.Database;
 
 /// <summary>
 /// The shared implementation behind <see cref="LoginHandleDigest"/>, <see cref="RefreshTokenDigest"/>,
-/// and <see cref="AuthorizationCodeDigest"/>. Every persisted one-way secret digest is the versioned
+/// <see cref="AuthorizationCodeDigest"/>, and the persisted digest of
+/// <see cref="ManagementBearerToken"/>. Every persisted one-way secret digest is the versioned
 /// <c>sha256:</c>-style notation of one lowercased SHA-256 hex hash, so the database holds a single
 /// digest vocabulary and a future algorithm upgrade stays distinguishable per row.
 /// </summary>
@@ -13,9 +15,18 @@ internal static class Sha256Digest
 {
     public const string DefaultPrefix = "sha256:";
 
-    public static string Compute(string prefix, string value)
+    /// <summary>
+    /// The versioned digest of <paramref name="value"/>. <paramref name="valueParamName"/> is
+    /// captured from the caller's argument expression so the validation guard reports the façade's
+    /// public parameter name (<c>authorizationCode</c>, <c>loginHandle</c>, <c>token</c>) rather
+    /// than this helper's <c>value</c>.
+    /// </summary>
+    public static string Compute(
+        string prefix,
+        string value,
+        [CallerArgumentExpression(nameof(value))] string? valueParamName = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, valueParamName);
         var digest = SHA256.HashData(Encoding.UTF8.GetBytes(value));
         return prefix + Convert.ToHexString(digest).ToLowerInvariant();
     }

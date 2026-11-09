@@ -6,17 +6,17 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace SignaCore.Client.AspNetCore;
 
-internal sealed record SignaCoreVerifiedAccessToken(
+internal sealed record VerifiedAccessToken(
     ClaimsPrincipal Principal, string Issuer, string Subject, DateTimeOffset ExpiresUtc);
 
 // Internal callback validation for SignaCore PS-13 tokens, not a public Bearer validator.
-internal sealed class SignaCoreAccessTokenValidator(
+internal sealed class AccessTokenValidator(
     IOptionsMonitor<SignaCoreHostedLoginOptions> options, TimeProvider timeProvider)
 {
     private static readonly JsonWebTokenHandler Handler = new();
 
-    internal async Task<SignaCoreVerifiedAccessToken?> ValidateAsync(
-        SignaCoreAuthorityConfiguration configuration, string accessToken,
+    internal async Task<VerifiedAccessToken?> ValidateAsync(
+        AuthorityConfiguration configuration, string accessToken,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

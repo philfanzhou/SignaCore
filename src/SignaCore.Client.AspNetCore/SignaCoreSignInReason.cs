@@ -62,7 +62,7 @@ public enum SignaCoreSignInReason
 /// directions can never drift apart: an unknown wire name parses to <c>null</c>, and an
 /// out-of-range enum value renders as <see cref="SignaCoreSignInReason.InvalidResponse"/>.
 /// </summary>
-internal static class SignaCoreSignInReasonCodes
+internal static class SignInReasonWireNames
 {
     private static readonly IReadOnlyDictionary<SignaCoreSignInReason, string> WireNames =
         new Dictionary<SignaCoreSignInReason, string>

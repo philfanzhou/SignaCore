@@ -202,7 +202,7 @@ public sealed class IdentitySessionStore : IIdentitySessionStore
         // The restrictive references (PS-23) are proven before the insert, in the same unit of
         // work: a credential that does not exist or belongs to another account is a programming
         // or attack error, never a session. The message names no id (DF-06/DF-13 discipline).
-        if (!await _repository.PasswordCredentialExistsForAccountAsync(
+        if (!await _repository.HasPasswordCredentialAsync(
                 passwordCredentialId, accountId, cancellationToken))
         {
             throw new InvalidOperationException(
@@ -228,7 +228,7 @@ public sealed class IdentitySessionStore : IIdentitySessionStore
         // Same discipline as the Password reference: the SMS login identity is proven to exist,
         // to be an SMS identity, and to belong to the account before the insert. The message
         // names no id (DF-06/DF-13 discipline).
-        if (!await _repository.SmsUserLoginExistsForAccountAsync(
+        if (!await _repository.HasSmsUserLoginAsync(
                 smsUserLoginId, accountId, cancellationToken))
         {
             throw new InvalidOperationException(

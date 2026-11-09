@@ -63,7 +63,7 @@ public enum RefreshFamilyRevocationReason
 /// authorization-code snapshots of the canonical scope and the original authentication time. The
 /// plaintext token is never part of this shape — it exists only in the creation result.
 /// </summary>
-public sealed record InteractiveRefreshFamilyRootDescriptor(
+public sealed record RefreshFamilyRootDescriptor(
     Guid AccountId,
     string AppId,
     Guid IdentitySessionId,
@@ -80,7 +80,7 @@ public sealed record InteractiveRefreshFamilyRootDescriptor(
 /// here and never persisted, logged, or recoverable afterwards (<c>DF-09</c>);
 /// <paramref name="RootId"/> is the public record id, safe for diagnostics (<c>DF-13</c>).
 /// </summary>
-public sealed record InteractiveRefreshFamilyRootCreation(
+public sealed record RefreshFamilyRootCreation(
     Guid RootId,
     string RefreshToken,
     DateTimeOffset ExpiresAt);
@@ -107,7 +107,7 @@ public enum RefreshMemberMarker
 /// this attempt can always be recognized as its own (<c>PS-22</c>). The plaintext token exists
 /// only in the calling rotation, never in this shape.
 /// </summary>
-public sealed record InteractiveRefreshChildDescriptor(
+public sealed record RefreshFamilyChildDescriptor(
     Guid ChildId,
     Guid ParentId,
     Guid RootId,
@@ -141,8 +141,8 @@ public interface IRefreshTokenFamilyStore
     /// transaction the staged row commits or rolls back with it.
     /// </summary>
     /// <exception cref="ArgumentException">An empty id, client, or non-canonical scope. The message never carries an input value.</exception>
-    Task<InteractiveRefreshFamilyRootCreation> CreateRootAsync(
-        InteractiveRefreshFamilyRootDescriptor descriptor,
+    Task<RefreshFamilyRootCreation> CreateRootAsync(
+        RefreshFamilyRootDescriptor descriptor,
         DateTimeOffset now,
         CancellationToken cancellationToken = default);
 
@@ -160,7 +160,7 @@ public interface IRefreshTokenFamilyStore
     /// or a non-digest token value. The message never carries an input value.
     /// </exception>
     Task CreateChildAsync(
-        InteractiveRefreshChildDescriptor descriptor,
+        RefreshFamilyChildDescriptor descriptor,
         DateTimeOffset now,
         CancellationToken cancellationToken = default);
 
@@ -249,8 +249,8 @@ public sealed class RefreshTokenFamilyStore(
     IUnitOfWork unitOfWork,
     ILogger<RefreshTokenFamilyStore> logger) : IRefreshTokenFamilyStore
 {
-    public async Task<InteractiveRefreshFamilyRootCreation> CreateRootAsync(
-        InteractiveRefreshFamilyRootDescriptor descriptor,
+    public async Task<RefreshFamilyRootCreation> CreateRootAsync(
+        RefreshFamilyRootDescriptor descriptor,
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
@@ -313,11 +313,11 @@ public sealed class RefreshTokenFamilyStore(
         // (authorization_codes.refresh_family_id) satisfies its restrictive reference; the
         // commit itself stays with the caller's transaction.
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return new InteractiveRefreshFamilyRootCreation(rootId, refreshToken, expiresAt);
+        return new RefreshFamilyRootCreation(rootId, refreshToken, expiresAt);
     }
 
     public async Task CreateChildAsync(
-        InteractiveRefreshChildDescriptor descriptor,
+        RefreshFamilyChildDescriptor descriptor,
         DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {

@@ -1,3 +1,4 @@
+using System.Buffers.Text;
 using System.Security.Cryptography;
 using System.Text;
 using SignaCore.Database;
@@ -308,12 +309,6 @@ public sealed class AuthorizationCodeStore : IAuthorizationCodeStore
                 char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '~' or '-');
     }
 
-    private static string ComputeS256Challenge(string verifier)
-    {
-        var digest = SHA256.HashData(Encoding.ASCII.GetBytes(verifier));
-        return Convert.ToBase64String(digest)
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
-    }
+    private static string ComputeS256Challenge(string verifier) =>
+        Base64Url.EncodeToString(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
 }

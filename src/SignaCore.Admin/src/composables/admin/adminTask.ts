@@ -3,7 +3,11 @@ import { ElMessageBox } from "element-plus";
 import { getErrorMessage } from "../../services/adminApi";
 import { handleApiError } from "../useSession";
 
-/** 管理端异步任务公共骨架：置 loading、清 error，catch 先记录文案再走统一错误处理，finally 复位 loading。 */
+/**
+ * Shared skeleton for admin async tasks: mark the bound `loading` ref, clear the optional
+ * `error` text, run `task`, record its failure text and hand the error to the shared API
+ * error handler, then reset `loading` in `finally`.
+ */
 export async function runAdminTask(
   loading: Ref<boolean>,
   errorPrefix: string,
@@ -22,7 +26,12 @@ export async function runAdminTask(
   }
 }
 
-/** 危险操作确认：取消/关闭弹窗时静默返回，其余异常按统一 API 错误处理上报。 */
+/**
+ * Danger-action confirmation: ask through `ElMessageBox.confirm` with the supplied copy, run
+ * `action` only after the administrator confirms, and treat the box's `cancel`/`close`
+ * rejections as a silent no-op. Any other failure goes to the shared API error handler with
+ * `errorPrefix`; `type` selects the icon variant and defaults to `warning`.
+ */
 export async function confirmDangerAction(
   message: string,
   title: string,
@@ -44,7 +53,7 @@ export async function confirmDangerAction(
   }
 }
 
-/** 分页总页数：总数不足一页（含 0）时仍保持 1 页。 */
+/** Total page count, clamped to at least 1 so an empty list still renders one page. */
 export function pageCount(total: number, pageSize: number): number {
   return Math.max(1, Math.ceil(total / pageSize));
 }

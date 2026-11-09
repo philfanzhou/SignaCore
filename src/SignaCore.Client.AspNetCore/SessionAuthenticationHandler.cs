@@ -12,7 +12,7 @@ namespace SignaCore.Client.AspNetCore;
 /// package-specific — every package setting lives in
 /// <see cref="SignaCoreHostedLoginOptions"/>.
 /// </summary>
-internal sealed class SignaCoreSessionSchemeOptions : AuthenticationSchemeOptions;
+internal sealed class SessionSchemeOptions : AuthenticationSchemeOptions;
 
 /// <summary>
 /// The session scheme's handler: it resolves a request's principal from the opaque session cookie
@@ -26,14 +26,14 @@ internal sealed class SignaCoreSessionSchemeOptions : AuthenticationSchemeOption
 /// package's start endpoint; forbid is a plain 403, because a denial is the consumer's own
 /// decision.
 /// </summary>
-internal sealed class SignaCoreSessionAuthenticationHandler(
-    IOptionsMonitor<SignaCoreSessionSchemeOptions> schemeOptions,
+internal sealed class SessionAuthenticationHandler(
+    IOptionsMonitor<SessionSchemeOptions> schemeOptions,
     IOptionsMonitor<SignaCoreHostedLoginOptions> loginOptions,
     ITicketStore ticketStore,
     Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery,
     ILoggerFactory loggerFactory,
     UrlEncoder urlEncoder)
-    : AuthenticationHandler<SignaCoreSessionSchemeOptions>(
+    : AuthenticationHandler<SessionSchemeOptions>(
         schemeOptions, loggerFactory, urlEncoder)
 {
     /// <summary>
@@ -70,7 +70,7 @@ internal sealed class SignaCoreSessionAuthenticationHandler(
         // The CSRF boundary: a session-authenticated unsafe method must present a valid
         // antiforgery token (header or form field, as configured). Failing the authentication —
         // not merely hiding it — keeps the request from reaching any authorization policy. The
-        // validation is user-neutral (see SignaCoreAntiforgeryBoundary): the ambient principal at
+        // validation is user-neutral (see AntiforgeryBoundary): the ambient principal at
         // this stage is whatever the consumer's pipeline presented, which must not decide the
         // pair's validity.
         if (!IsSafeMethod(Request.Method))

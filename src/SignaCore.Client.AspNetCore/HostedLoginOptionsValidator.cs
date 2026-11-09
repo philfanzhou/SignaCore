@@ -7,7 +7,7 @@ namespace SignaCore.Client.AspNetCore;
 /// names the option — never the configured value, so a misconfiguration cannot leak a secret or
 /// an internal address through its own diagnostics.
 /// </summary>
-internal sealed class SignaCoreHostedLoginOptionsValidator
+internal sealed class HostedLoginOptionsValidator
     : IValidateOptions<SignaCoreHostedLoginOptions>
 {
     private const string OptionsName = "SignaCoreHostedLoginOptions";
@@ -28,7 +28,7 @@ internal sealed class SignaCoreHostedLoginOptionsValidator
                 failures.Add($"{OptionsName}.Authority is required.");
             }
         }
-        else if (!SignaCoreAuthorityUriRules.IsAcceptableAuthority(options.Authority))
+        else if (!AuthorityUriRules.IsAcceptableAuthority(options.Authority))
         {
             failures.Add(
                 $"{OptionsName}.Authority must be an absolute http or https URI without a path, query, fragment, or user info.");
@@ -51,7 +51,7 @@ internal sealed class SignaCoreHostedLoginOptionsValidator
                 failures.Add($"{OptionsName}.RedirectUri is required.");
             }
         }
-        else if (!SignaCoreAuthorityUriRules.IsAcceptableRedirectUri(options.RedirectUri))
+        else if (!AuthorityUriRules.IsAcceptableRedirectUri(options.RedirectUri))
         {
             failures.Add(
                 $"{OptionsName}.RedirectUri must be an absolute http or https URI with a path and without a query, fragment, or user info.");
@@ -64,7 +64,7 @@ internal sealed class SignaCoreHostedLoginOptionsValidator
             // Transport follows the RedirectUri's scheme (ADR 0008): a plain-http redirect URI
             // means the package's cookies cannot carry the Secure attribute, and a cookie-name
             // prefix would then make the browser refuse every one of them.
-            if (SignaCoreCookieProfile.IsPlainHttp(options))
+            if (CookieProfile.IsPlainHttp(options))
             {
                 failures.Add(
                     $"{OptionsName}.SessionCookieName cannot carry the __Host- or __Secure- cookie prefix while {OptionsName}.RedirectUri is an http URI: those prefixes require the Secure attribute, which a plain-HTTP deployment cannot set, so every cookie of the session would be refused by the browser.");
@@ -104,7 +104,7 @@ internal sealed class SignaCoreHostedLoginOptionsValidator
 
         if (options.PostLogoutRedirectUri is not null)
         {
-            if (!SignaCoreAuthorityUriRules.IsAcceptableRedirectUri(options.PostLogoutRedirectUri))
+            if (!AuthorityUriRules.IsAcceptableRedirectUri(options.PostLogoutRedirectUri))
             {
                 failures.Add(
                     $"{OptionsName}.PostLogoutRedirectUri must be an absolute http or https URI with a path and without a query, fragment, or user info.");
@@ -118,7 +118,7 @@ internal sealed class SignaCoreHostedLoginOptionsValidator
             }
         }
 
-        if (SignaCoreHostedLoginEndpointService.AsLocalPath(options.PostLogoutReturnPath) is null)
+        if (HostedLoginEndpointService.AsLocalPath(options.PostLogoutReturnPath) is null)
         {
             failures.Add(
                 $"{OptionsName}.PostLogoutReturnPath must be a local absolute path that starts with exactly one slash.");

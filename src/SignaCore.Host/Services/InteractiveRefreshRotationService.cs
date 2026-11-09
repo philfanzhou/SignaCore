@@ -597,7 +597,7 @@ public sealed class InteractiveRefreshRotationService(
             // EV-29: the child copies the root's bindings and deadline byte for byte; the unique
             // parent index is the database backstop for the one-child invariant.
             await refreshFamilies.CreateChildAsync(
-                new InteractiveRefreshChildDescriptor(
+                new RefreshFamilyChildDescriptor(
                     childId,
                     lockedMember.Id,
                     lockedRoot.Id,

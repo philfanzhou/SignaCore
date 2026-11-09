@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
 
 namespace SignaCore.Client.AspNetCore;
 

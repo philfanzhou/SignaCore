@@ -53,7 +53,9 @@ internal sealed class BffResponseWriter : ISignaCoreHostedLoginResponseWriter
 
     /// <summary>
     /// The closed reason vocabulary the package defines; the sample re-declares the bounded
-    /// strings because its own <c>/error</c> page renders them.
+    /// strings because its own <c>/error</c> page renders them. Every member of
+    /// <see cref="SignaCoreSignInReason"/> must appear here — the switch is a mirror, not a
+    /// second source of truth.
     /// </summary>
     internal static string ReasonText(SignaCoreSignInReason reason) => reason switch
     {
@@ -61,6 +63,8 @@ internal sealed class BffResponseWriter : ISignaCoreHostedLoginResponseWriter
         SignaCoreSignInReason.InvalidReturnUrl => "invalid_return_url",
         SignaCoreSignInReason.InvalidResponse => "invalid_response",
         SignaCoreSignInReason.AccessDenied => "access_denied",
+        SignaCoreSignInReason.UserCanceled => "user_canceled",
+        SignaCoreSignInReason.PreSignInDenied => "pre_sign_in_denied",
         SignaCoreSignInReason.StateMismatch => "state_mismatch",
         SignaCoreSignInReason.IssuerMismatch => "issuer_mismatch",
         SignaCoreSignInReason.TokenExchangeFailed => "token_exchange_failed",

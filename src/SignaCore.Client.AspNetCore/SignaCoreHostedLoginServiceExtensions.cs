@@ -31,7 +31,7 @@ public static class SignaCoreHostedLoginServiceExtensions
             .Configure(configure)
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<SignaCoreHostedLoginOptions>,
-            SignaCoreHostedLoginOptionsValidator>();
+            HostedLoginOptionsValidator>();
         services.TryAddSingleton(TimeProvider.System);
 
         services.AddSingleton<PendingSignInStore>();
@@ -63,7 +63,7 @@ public static class SignaCoreHostedLoginServiceExtensions
                 static (antiforgery, login) =>
                 {
                     antiforgery.HeaderName = login.Value.AntiforgeryHeaderName;
-                    antiforgery.Cookie.SecurePolicy = SignaCoreCookieProfile.SecureCookies(login.Value)
+                    antiforgery.Cookie.SecurePolicy = CookieProfile.SecureCookies(login.Value)
                         ? Microsoft.AspNetCore.Http.CookieSecurePolicy.Always
                         : Microsoft.AspNetCore.Http.CookieSecurePolicy.None;
                 });
@@ -72,7 +72,7 @@ public static class SignaCoreHostedLoginServiceExtensions
         // follows a redirect, never carries a cookie, writes no request/response log line, and is
         // excluded from HttpClient instrumentation, so those values reach neither logs, nor
         // traces, nor metrics.
-        services.AddTransient<SignaCoreBackchannelTelemetryHandler>();
+        services.AddTransient<BackchannelTelemetryHandler>();
         services.AddHttpClient(SignaCoreHostedLoginDefaults.HttpClientName)
             .ConfigureHttpClient(static client => client.Timeout = TimeSpan.FromSeconds(30))
             .ConfigurePrimaryHttpMessageHandler(static () =>
@@ -81,20 +81,20 @@ public static class SignaCoreHostedLoginServiceExtensions
                     AllowAutoRedirect = false,
                     UseCookies = false
                 })
-            .AddHttpMessageHandler<SignaCoreBackchannelTelemetryHandler>()
+            .AddHttpMessageHandler<BackchannelTelemetryHandler>()
             .RemoveAllLoggers();
 
-        services.AddSingleton<SignaCoreDiscoveryClient>();
-        services.AddSingleton<SignaCoreTokenClient>();
-        services.AddSingleton<SignaCoreIdTokenValidator>();
-        services.AddSingleton<SignaCoreAccessTokenValidator>();
-        services.AddSingleton<SignaCoreLogoutClient>();
+        services.AddSingleton<DiscoveryClient>();
+        services.AddSingleton<TokenClient>();
+        services.AddSingleton<IdTokenValidator>();
+        services.AddSingleton<AccessTokenValidator>();
+        services.AddSingleton<LogoutClient>();
         services.AddSingleton<LogoutReturnStateStore>();
-        services.AddSingleton<SignaCoreHostedLoginEndpointService>();
-        services.AddSingleton<SignaCoreHostedLogoutService>();
+        services.AddSingleton<HostedLoginEndpointService>();
+        services.AddSingleton<HostedLogoutService>();
 
         services.AddAuthentication()
-            .AddScheme<SignaCoreSessionSchemeOptions, SignaCoreSessionAuthenticationHandler>(
+            .AddScheme<SessionSchemeOptions, SessionAuthenticationHandler>(
                 SignaCoreHostedLoginDefaults.SessionAuthenticationScheme,
                 static _ => { })
             .AddPolicyScheme(

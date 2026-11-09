@@ -10,7 +10,7 @@ namespace SignaCore.Client.AspNetCore;
 /// JWKS. The configured Authority's address and the document's <c>issuer</c> must denote the same
 /// origin; every endpoint must be absolute HTTPS (or the allowed loopback form).
 /// </summary>
-internal sealed record SignaCoreAuthorityConfiguration(
+internal sealed record AuthorityConfiguration(
     string Issuer,
     string AuthorizationEndpoint,
     string TokenEndpoint,
@@ -23,23 +23,23 @@ internal sealed record SignaCoreAuthorityConfiguration(
 /// failed refresh is a hard failure — the package never serves a stale authority configuration to
 /// keep a sign-in going.
 /// </summary>
-internal sealed class SignaCoreDiscoveryClient(
+internal sealed class DiscoveryClient(
     System.Net.Http.IHttpClientFactory httpClientFactory,
     IOptionsMonitor<SignaCoreHostedLoginOptions> options,
     TimeProvider timeProvider,
-    ILogger<SignaCoreDiscoveryClient> logger)
+    ILogger<DiscoveryClient> logger)
 {
     internal static readonly TimeSpan RefreshInterval = TimeSpan.FromHours(1);
 
     private sealed record CacheEntry(
-        SignaCoreAuthorityConfiguration Configuration,
+        AuthorityConfiguration Configuration,
         DateTimeOffset ValidUntil);
 
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private CacheEntry? _cached;
 
     /// <summary>Throws when the document is unreachable or does not validate.</summary>
-    internal async Task<SignaCoreAuthorityConfiguration> GetConfigurationAsync(
+    internal async Task<AuthorityConfiguration> GetConfigurationAsync(
         CancellationToken cancellationToken)
     {
         var cached = Volatile.Read(ref _cached);
@@ -68,7 +68,7 @@ internal sealed class SignaCoreDiscoveryClient(
         }
     }
 
-    private async Task<SignaCoreAuthorityConfiguration> FetchAsync(CancellationToken cancellationToken)
+    private async Task<AuthorityConfiguration> FetchAsync(CancellationToken cancellationToken)
     {
         var authority = options.CurrentValue.Authority!.TrimEnd('/');
         using var client = httpClientFactory.CreateClient(SignaCoreHostedLoginDefaults.HttpClientName);
@@ -95,21 +95,21 @@ internal sealed class SignaCoreDiscoveryClient(
             || string.IsNullOrEmpty(tokenEndpoint)
             || string.IsNullOrEmpty(jwksUri))
         {
-            throw new SignaCoreAuthorityDocumentException(
+            throw new AuthorityDocumentException(
                 "The discovery document is missing a required member.");
         }
 
-        if (!SignaCoreAuthorityUriRules.SameOrigin(options.CurrentValue.Authority, issuer))
+        if (!AuthorityUriRules.SameOrigin(options.CurrentValue.Authority, issuer))
         {
-            throw new SignaCoreAuthorityDocumentException(
+            throw new AuthorityDocumentException(
                 "The discovery document issuer does not match the configured authority.");
         }
 
         foreach (var endpoint in new[] { authorizationEndpoint, tokenEndpoint, jwksUri })
         {
-            if (!SignaCoreAuthorityUriRules.IsAcceptableEndpointUri(endpoint))
+            if (!AuthorityUriRules.IsAcceptableEndpointUri(endpoint))
             {
-                throw new SignaCoreAuthorityDocumentException(
+                throw new AuthorityDocumentException(
                     "A discovery endpoint is not an absolute http or https URI.");
             }
 
@@ -117,9 +117,9 @@ internal sealed class SignaCoreDiscoveryClient(
             // port — the path may differ, SignaCore publishes endpoints under the issuer's root):
             // a tampered document must not move authorization, token, or key traffic to a second
             // host the consumer never chose. There is no partial acceptance.
-            if (!SignaCoreAuthorityUriRules.SameOriginTriple(issuer, endpoint))
+            if (!AuthorityUriRules.SameOriginTriple(issuer, endpoint))
             {
-                throw new SignaCoreAuthorityDocumentException(
+                throw new AuthorityDocumentException(
                     "A discovery endpoint is not same-origin with the issuer.");
             }
         }
@@ -131,12 +131,12 @@ internal sealed class SignaCoreDiscoveryClient(
         var signingKeys = jwks.GetSigningKeys();
         if (signingKeys.Count == 0)
         {
-            throw new SignaCoreAuthorityDocumentException("The authority published no signing keys.");
+            throw new AuthorityDocumentException("The authority published no signing keys.");
         }
 
         logger.LogDebug("SignaCore authority configuration refreshed.");
 
-        return new SignaCoreAuthorityConfiguration(
+        return new AuthorityConfiguration(
             issuer,
             authorizationEndpoint,
             tokenEndpoint,
@@ -156,4 +156,4 @@ internal sealed class SignaCoreDiscoveryClient(
 /// The authority's Discovery document or JWKS could not be read or did not validate. The message
 /// carries no document content and no configured value.
 /// </summary>
-internal sealed class SignaCoreAuthorityDocumentException(string message) : Exception(message);
+internal sealed class AuthorityDocumentException(string message) : Exception(message);

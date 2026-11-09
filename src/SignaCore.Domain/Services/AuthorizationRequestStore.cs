@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;

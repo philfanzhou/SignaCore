@@ -35,7 +35,7 @@ Login and logout go through the shared ServiceMantle management session (`/manag
 
 ## State and errors
 
-Composables own session, user, application, token, clock, navigation, and overlay state. Mutations expose loading state, prevent duplicate submission, show actionable errors, and refresh only the affected data. API errors are presented without exposing raw server internals.
+Composables own session, user, application, application-access, OIDC, token, and settings state. Mutations expose loading state, prevent duplicate submission, show actionable errors, and refresh only the affected data. API errors are presented without exposing raw server internals.
 
 ## Accessibility and responsive behavior
 

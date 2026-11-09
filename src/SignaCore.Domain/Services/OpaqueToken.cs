@@ -1,11 +1,12 @@
+using System.Buffers.Text;
 using System.Security.Cryptography;
 
 namespace SignaCore.Domain.Services;
 
 /// <summary>
-/// The shared shape of the opaque one-time credentials this host issues: 256 bits of CSPRNG
-/// output rendered as exactly 43 unpadded base64url characters — the canonical handle, code,
-/// and refresh-token shape by construction, never by post-hoc filtering.
+/// The shared shape of the opaque one-time credentials this host issues and validates: 256 bits
+/// of CSPRNG output rendered as exactly 43 unpadded base64url characters — the canonical handle,
+/// code, and refresh-token shape by construction, never by post-hoc filtering.
 /// </summary>
 internal static class OpaqueToken
 {
@@ -13,10 +14,7 @@ internal static class OpaqueToken
     {
         Span<byte> entropy = stackalloc byte[32];
         RandomNumberGenerator.Fill(entropy);
-        return Convert.ToBase64String(entropy)
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
+        return Base64Url.EncodeToString(entropy);
     }
 
     /// <summary>

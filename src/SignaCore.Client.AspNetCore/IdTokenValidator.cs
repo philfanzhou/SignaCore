@@ -9,7 +9,7 @@ namespace SignaCore.Client.AspNetCore;
 /// The verified outcome of one ID token: the validated principal plus the exact <c>iss</c> and
 /// <c>sub</c> the validation established. Nothing here is ever written to a response.
 /// </summary>
-internal sealed record SignaCoreVerifiedIdentity(
+internal sealed record VerifiedIdentity(
     ClaimsPrincipal Principal,
     string Issuer,
     string Subject,
@@ -22,7 +22,7 @@ internal sealed record SignaCoreVerifiedIdentity(
 /// lifetime; the <c>nonce</c> equal to the pending sign-in's value; and exactly one non-empty
 /// <c>sub</c>. Any other shape fails the sign-in; no identity is inferred or repaired.
 /// </summary>
-internal sealed class SignaCoreIdTokenValidator(
+internal sealed class IdTokenValidator(
     IOptionsMonitor<SignaCoreHostedLoginOptions> options,
     TimeProvider timeProvider)
 {
@@ -36,8 +36,8 @@ internal sealed class SignaCoreIdTokenValidator(
     /// </summary>
     internal static readonly TimeSpan ClockSkew = TimeSpan.FromSeconds(30);
 
-    internal async Task<SignaCoreVerifiedIdentity?> ValidateAsync(
-        SignaCoreAuthorityConfiguration configuration,
+    internal async Task<VerifiedIdentity?> ValidateAsync(
+        AuthorityConfiguration configuration,
         string idToken,
         string expectedNonce,
         CancellationToken cancellationToken)
@@ -105,7 +105,7 @@ internal sealed class SignaCoreIdTokenValidator(
         var nameClaims = principal.FindAll("name").ToList();
         var displayName = nameClaims.Count == 1 ? nameClaims[0].Value : null;
 
-        return new SignaCoreVerifiedIdentity(
+        return new VerifiedIdentity(
             principal,
             token.Issuer,
             subjectClaims[0].Value,

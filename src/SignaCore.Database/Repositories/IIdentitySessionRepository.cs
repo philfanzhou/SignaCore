@@ -16,7 +16,7 @@ public interface IIdentitySessionRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>Read-only ownership check used by creation; never writes.</summary>
-    Task<bool> PasswordCredentialExistsForAccountAsync(
+    Task<bool> HasPasswordCredentialAsync(
         Guid passwordCredentialId,
         Guid accountId,
         CancellationToken cancellationToken = default);
@@ -26,7 +26,7 @@ public interface IIdentitySessionRepository
     /// <c>user_logins</c> row exists, belongs to <paramref name="accountId"/>, and is an SMS
     /// identity.
     /// </summary>
-    Task<bool> SmsUserLoginExistsForAccountAsync(
+    Task<bool> HasSmsUserLoginAsync(
         Guid smsUserLoginId,
         Guid accountId,
         CancellationToken cancellationToken = default);
