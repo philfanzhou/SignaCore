@@ -784,6 +784,10 @@ jobs:
 
   container-platforms:
     name: Build AMD64 and ARM64 images
+    # The multi-platform build exists for the release tag that will publish it: it validates both
+    # target platforms and warms the BuildKit cache publish-container reads. CI-only builds never
+    # publish, and a non-tag push stops before this job.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -804,7 +808,7 @@ jobs:
           node_image="$(python3 .github/scripts/resolve_official_image.py node)"
           printf 'SIGNACORE_NODE_IMAGE=%s\n' "$node_image" >> "$GITHUB_ENV"
 
-      # Build both complete runtime images on pull requests before a release needs them.
+      # Build both complete runtime images for the release that will publish them.
       # A multi-platform build stays in BuildKit cache; load:true requires a different image store.
       - name: Build both platforms without publishing
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0

@@ -28,9 +28,8 @@ the platforms included in a published tag.
 
 The Node and .NET SDK stages run on the build host and produce static web assets and
 framework-dependent assemblies. The runtime base image and OS packages follow the
-target architecture. CI builds both complete images without publishing on pull
-requests or default-branch pushes, and only a version tag publishes; publishing waits for that
-check as well as the existing tests.
+target architecture. CI builds both complete images only for a version tag, and publishing
+waits for that check as well as the existing tests.
 
 
 ```bash
