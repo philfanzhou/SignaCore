@@ -27,13 +27,13 @@ internal static class CookieProfile
     /// Whether the plain-HTTP profile is active: the configured RedirectUri is served over
     /// plain <c>http</c>. A blank RedirectUri (optional sign-in mode) keeps the HTTPS profile.
     /// </summary>
-    internal static bool IsPlainHttp(SignaCoreHostedLoginOptions options) =>
+    internal static bool IsPlainHttp(HostedLoginOptions options) =>
         Uri.TryCreate(options.RedirectUri, UriKind.Absolute, out var redirect)
         && redirect.Scheme == Uri.UriSchemeHttp;
 
     /// <summary>Whether the package's cookies carry the Secure attribute under the active
     /// profile.</summary>
-    internal static bool SecureCookies(SignaCoreHostedLoginOptions options) =>
+    internal static bool SecureCookies(HostedLoginOptions options) =>
         !IsPlainHttp(options);
 
     /// <summary>
@@ -41,7 +41,7 @@ internal static class CookieProfile
     /// (the login-binding suffix including its <c>&lt;state&gt;</c> part, or the logout-return
     /// suffix), honoring the prefix invariant of the active profile.
     /// </summary>
-    internal static string DerivedCookieName(SignaCoreHostedLoginOptions options, string suffix)
+    internal static string DerivedCookieName(HostedLoginOptions options, string suffix)
     {
         // The plain-HTTP profile never rewrites: its cookies are not Secure, so no prefix
         // could be satisfied, and a session name carrying one fails startup in this profile.
@@ -51,19 +51,26 @@ internal static class CookieProfile
         }
 
         return options.SessionCookieName.StartsWith(
-                SignaCoreHostedLoginDefaults.HostCookiePrefix, StringComparison.Ordinal)
-            ? SignaCoreHostedLoginDefaults.SecureCookiePrefix
-                + options.SessionCookieName[SignaCoreHostedLoginDefaults.HostCookiePrefix.Length..]
+                HostedLoginDefaults.HostCookiePrefix, StringComparison.Ordinal)
+            ? HostedLoginDefaults.SecureCookiePrefix
+                + options.SessionCookieName[HostedLoginDefaults.HostCookiePrefix.Length..]
                 + suffix
             : options.SessionCookieName + suffix;
     }
+
+    /// <summary>
+    /// The cookie path of one package endpoint: the configured prefix (empty when unset) followed
+    /// by <c>/</c> and the endpoint's path segment.
+    /// </summary>
+    internal static string EndpointPath(HostedLoginOptions options, string segment) =>
+        (options.Prefix ?? string.Empty) + "/" + segment;
 
     /// <summary>
     /// The shared attributes of every carrier cookie this package writes directly: HttpOnly, the
     /// profile's Secure decision, Lax, and Essential, under the given path and expiry.
     /// </summary>
     internal static CookieOptions CreateCookieOptions(
-        SignaCoreHostedLoginOptions options, string path, DateTimeOffset expires) => new()
+        HostedLoginOptions options, string path, DateTimeOffset expires) => new()
     {
         HttpOnly = true,
         Secure = SecureCookies(options),
@@ -78,7 +85,7 @@ internal static class CookieProfile
     /// one deletion shape every package-written cookie uses.
     /// </summary>
     internal static void DeleteCookie(
-        HttpContext context, SignaCoreHostedLoginOptions options, string name, string path) =>
+        HttpContext context, HostedLoginOptions options, string name, string path) =>
         context.Response.Cookies.Append(
             name,
             string.Empty,

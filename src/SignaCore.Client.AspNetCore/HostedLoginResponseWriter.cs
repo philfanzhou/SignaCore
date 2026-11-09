@@ -12,11 +12,11 @@ namespace SignaCore.Client.AspNetCore;
 /// failure and session-status answers. The package defines the protocol outcomes; this writer
 /// defines their presentation.
 /// </summary>
-public interface ISignaCoreHostedLoginResponseWriter
+public interface IHostedLoginResponseWriter
 {
     /// <summary>
     /// Presents the sign-in surface's optional-login degradation: the host started with
-    /// <see cref="SignaCoreHostedLoginOptions.AllowUnconfiguredStartup"/> and the protocol
+    /// <see cref="HostedLoginOptions.AllowUnconfiguredStartup"/> and the protocol
     /// options left blank, so no sign-in can start. Default: <c>503</c> with the JSON body
     /// <c>{"outcome":"sign_in_unavailable"}</c> and <c>no-store</c>. A challenge redirected here
     /// surfaces the same fixed answer; the mode ends only when the host is configured and
@@ -42,7 +42,7 @@ public interface ISignaCoreHostedLoginResponseWriter
     /// <param name="cancellationToken">Propagates the caller's cancellation.</param>
     Task WriteSignInFailureAsync(
         HttpContext context,
-        SignaCoreSignInReason reason,
+        SignInReason reason,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -51,7 +51,7 @@ public interface ISignaCoreHostedLoginResponseWriter
     /// </summary>
     Task WriteFailurePageAsync(
         HttpContext context,
-        SignaCoreSignInReason? reason,
+        SignInReason? reason,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -60,7 +60,7 @@ public interface ISignaCoreHostedLoginResponseWriter
     /// </summary>
     Task WriteSessionStatusAsync(
         HttpContext context,
-        SignaCoreSessionStatus status,
+        SessionStatus status,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -74,7 +74,7 @@ public interface ISignaCoreHostedLoginResponseWriter
     /// </summary>
     Task WriteSessionStatusAsync(
         HttpContext context,
-        SignaCoreSessionStatus status,
+        SessionStatus status,
         System.Security.Claims.ClaimsPrincipal? principal,
         CancellationToken cancellationToken) =>
         WriteSessionStatusAsync(context, status, cancellationToken);
@@ -147,33 +147,33 @@ public interface ISignaCoreHostedLoginResponseWriter
 /// failure page, and a fixed JSON session body. None of the answers varies with any secret, code,
 /// or query string of the underlying flow.
 /// </summary>
-public sealed class SignaCoreDefaultResponseWriter : ISignaCoreHostedLoginResponseWriter
+public sealed class DefaultHostedLoginResponseWriter : IHostedLoginResponseWriter
 {
-    private SignaCoreDefaultResponseWriter()
+    private DefaultHostedLoginResponseWriter()
     {
     }
 
     /// <summary>The stateless instance every default configuration shares.</summary>
-    public static SignaCoreDefaultResponseWriter Instance { get; } = new();
+    public static DefaultHostedLoginResponseWriter Instance { get; } = new();
 
     /// <inheritdoc />
     public Task WriteSignInFailureAsync(
         HttpContext context,
-        SignaCoreSignInReason reason,
+        SignInReason reason,
         CancellationToken cancellationToken)
     {
         var prefix = context.RequestServices
-            .GetRequiredService<IOptionsMonitor<SignaCoreHostedLoginOptions>>()
+            .GetRequiredService<IOptionsMonitor<HostedLoginOptions>>()
             .CurrentValue.Prefix ?? string.Empty;
         context.Response.Redirect(
-            $"{prefix}/{SignaCoreHostedLoginDefaults.FailurePathSegment}?reason={SignInReasonWireNames.ToWireName(reason)}");
+            $"{prefix}/{HostedLoginDefaults.FailurePathSegment}?reason={SignInReasonWireNames.ToWireName(reason)}");
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task WriteFailurePageAsync(
         HttpContext context,
-        SignaCoreSignInReason? reason,
+        SignInReason? reason,
         CancellationToken cancellationToken)
     {
         context.Response.ContentType = "text/html; charset=utf-8";
@@ -196,44 +196,44 @@ public sealed class SignaCoreDefaultResponseWriter : ISignaCoreHostedLoginRespon
     /// <inheritdoc />
     public Task WriteSessionStatusAsync(
         HttpContext context,
-        SignaCoreSessionStatus status,
+        SessionStatus status,
         CancellationToken cancellationToken)
     {
         context.Response.ContentType = "application/json";
         context.Response.Headers.CacheControl = "no-store";
         return context.Response.WriteAsync(
-            JsonSerializer.Serialize(status, ClientJsonContext.Default.SignaCoreSessionStatus),
+            JsonSerializer.Serialize(status, ClientJsonContext.Default.SessionStatus),
             cancellationToken);
     }
 
-    private static string Description(SignaCoreSignInReason? reason) => reason switch
+    private static string Description(SignInReason? reason) => reason switch
     {
-        SignaCoreSignInReason.AuthorityUnreachable =>
+        SignInReason.AuthorityUnreachable =>
             "The sign-in server is unreachable or its discovery document is invalid.",
-        SignaCoreSignInReason.InvalidReturnUrl =>
+        SignInReason.InvalidReturnUrl =>
             "The return address was not a local path.",
-        SignaCoreSignInReason.InvalidResponse =>
+        SignInReason.InvalidResponse =>
             "The sign-in response was not usable.",
-        SignaCoreSignInReason.AccessDenied =>
+        SignInReason.AccessDenied =>
             "Access was denied.",
-        SignaCoreSignInReason.UserCanceled =>
+        SignInReason.UserCanceled =>
             "The sign-in was cancelled.",
-        SignaCoreSignInReason.PreSignInDenied =>
+        SignInReason.PreSignInDenied =>
             "Access was denied before the session could be created.",
-        SignaCoreSignInReason.StateMismatch =>
+        SignInReason.StateMismatch =>
             "The sign-in response did not match the pending sign-in.",
-        SignaCoreSignInReason.IssuerMismatch =>
+        SignInReason.IssuerMismatch =>
             "The sign-in response did not come from the expected sign-in server.",
-        SignaCoreSignInReason.TokenExchangeFailed =>
+        SignInReason.TokenExchangeFailed =>
             "The sign-in code could not be exchanged.",
-        SignaCoreSignInReason.InvalidToken =>
+        SignInReason.InvalidToken =>
             "The sign-in response failed validation.",
-        SignaCoreSignInReason.SessionStoreFull =>
+        SignInReason.SessionStoreFull =>
             "The service cannot accept more sessions right now.",
         _ => "Unknown reason."
     };
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-[JsonSerializable(typeof(SignaCoreSessionStatus))]
+[JsonSerializable(typeof(SessionStatus))]
 internal sealed partial class ClientJsonContext : JsonSerializerContext;

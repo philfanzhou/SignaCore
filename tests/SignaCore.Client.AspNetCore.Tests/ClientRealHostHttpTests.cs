@@ -29,7 +29,7 @@ public sealed class ClientRealHostHttpTests : IAsyncLifetime
     private const string ConsumerOrigin = "http://192.168.55.10:5020";
     private const string RedirectUri = ConsumerOrigin + "/auth/callback";
     private const string PostLogoutRedirectUri = ConsumerOrigin + "/auth/logout/return";
-    private const string SessionName = SignaCoreHostedLoginDefaults.SessionCookieName;
+    private const string SessionName = HostedLoginDefaults.SessionCookieName;
 
     private string? _bootstrapDirectory;
     private string? _databasePath;
@@ -233,7 +233,7 @@ public sealed class ClientRealHostHttpTests : IAsyncLifetime
         using var logout = new HttpRequestMessage(
             HttpMethod.Post, new Uri(browser.ConsumerBase, "/auth/logout"));
         logout.Headers.TryAddWithoutValidation(
-            SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, token);
+            HostedLoginDefaults.AntiforgeryHeaderName, token);
         using var logoutResponse = await browser.SendOnConsumerAsync(
             logout, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Found, logoutResponse.StatusCode);

@@ -21,7 +21,7 @@ public sealed class ClientLoginBindingTests
 {
     private const string ClientId = "client-pack-app";
     private static string BindingCookieBase =>
-        SignaCoreHostedLoginDefaults.SessionCookieName + SignaCoreHostedLoginDefaults.LoginBindingCookieSuffix;
+        HostedLoginDefaults.SessionCookieName + HostedLoginDefaults.LoginBindingCookieSuffix;
 
     private static async Task<(WebApplicationFactory<ConsumerApp.Program> Consumer, CrossServerBrowser Browser)>
         CreateAsync(

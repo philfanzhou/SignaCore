@@ -35,7 +35,7 @@ public sealed class ClientLogoutHostPrefixCookieTests
             authority.Server.CreateHandler(),
             postLogoutRedirectUri: SignaCoreHostFixture.PostLogoutRedirectUri,
             configureTestServices: services => services
-                .PostConfigure<SignaCoreHostedLoginOptions>(options =>
+                .PostConfigure<HostedLoginOptions>(options =>
                     options.SessionCookieName = sessionCookieName));
         var browser = ConsumerAppTestServer.CreateBrowserOverAuthority(
             consumer, authority.Server.CreateHandler(), new Uri(FakeIdentityProvider.BaseAddress));
@@ -78,7 +78,7 @@ public sealed class ClientLogoutHostPrefixCookieTests
         var token = await FetchCsrfTokenAsync(browser);
         using var logout = new HttpRequestMessage(
             HttpMethod.Post, new Uri(browser.ConsumerBase, "/auth/logout"));
-        logout.Headers.TryAddWithoutValidation(SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, token);
+        logout.Headers.TryAddWithoutValidation(HostedLoginDefaults.AntiforgeryHeaderName, token);
         using var logoutResponse = await browser.SendOnConsumerAsync(
             logout, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Found, logoutResponse.StatusCode);
@@ -89,7 +89,7 @@ public sealed class ClientLogoutHostPrefixCookieTests
         var setCookie = Assert.Single(cookies, cookie => cookie.Contains("logout-return=", StringComparison.Ordinal));
         Assert.StartsWith(DerivedName + "=", setCookie, StringComparison.Ordinal);
         Assert.DoesNotContain(
-            SignaCoreHostedLoginDefaults.HostCookiePrefix,
+            HostedLoginDefaults.HostCookiePrefix,
             setCookie[..setCookie.IndexOf('=')],
             StringComparison.Ordinal);
         Assert.Contains("path=/auth/logout", setCookie, StringComparison.Ordinal);
@@ -118,8 +118,8 @@ public sealed class ClientLogoutHostPrefixCookieTests
 
     [Theory]
     [InlineData("orders-session", "orders-session-logout-return")]
-    [InlineData(SignaCoreHostedLoginDefaults.SessionCookieName,
-        SignaCoreHostedLoginDefaults.SessionCookieName + "-logout-return")]
+    [InlineData(HostedLoginDefaults.SessionCookieName,
+        HostedLoginDefaults.SessionCookieName + "-logout-return")]
     [InlineData("__host-orders.AdminSession", "__host-orders.AdminSession-logout-return")]
     [InlineData("__Host-", "__Secure--logout-return")]
     public async Task EveryOtherSessionName_KeepsTheByteForByteHistoricalDerivation(
@@ -134,7 +134,7 @@ public sealed class ClientLogoutHostPrefixCookieTests
         var token = await FetchCsrfTokenAsync(browser);
         using var logout = new HttpRequestMessage(
             HttpMethod.Post, new Uri(browser.ConsumerBase, "/auth/logout"));
-        logout.Headers.TryAddWithoutValidation(SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, token);
+        logout.Headers.TryAddWithoutValidation(HostedLoginDefaults.AntiforgeryHeaderName, token);
         using var logoutResponse = await browser.SendOnConsumerAsync(
             logout, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Found, logoutResponse.StatusCode);

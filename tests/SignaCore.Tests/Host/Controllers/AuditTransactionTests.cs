@@ -865,7 +865,7 @@ public sealed class AuditTransactionTests
         // identity provider.
         var credentials = new ManagementCredentialAccessor();
         credentials.Set("admin", "wrong-value");
-        var provider = new SignaCoreManagementIdentityProvider(
+        var provider = new ManagementIdentityProvider(
             credentials,
             new ValidatorFactory([validator], NullLogger<ValidatorFactory>.Instance),
             new AdminIdentityOptions { Username = "admin" },
@@ -876,7 +876,7 @@ public sealed class AuditTransactionTests
                 database.Context,
                 NullLogger<AdminLoginStateRecorder>.Instance),
             new HttpContextAccessor { HttpContext = new DefaultHttpContext() },
-            NullLogger<SignaCoreManagementIdentityProvider>.Instance);
+            NullLogger<ManagementIdentityProvider>.Instance);
 
         await Assert.ThrowsAsync<DbUpdateException>(() =>
             provider.GetIdentityAsync(TestContext.Current.CancellationToken).AsTask());

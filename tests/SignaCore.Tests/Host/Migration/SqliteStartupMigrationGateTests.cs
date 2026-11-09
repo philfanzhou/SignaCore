@@ -44,7 +44,7 @@ public sealed class SqliteStartupMigrationGateTests
             var contextOptions = new DbContextOptionsBuilder<IdentityDbContext>();
             contextOptions.UseIdentityDatabase(options);
             await using var db = new IdentityDbContext(contextOptions.Options);
-            using var executor = new DisposableExecutor(new SignaCoreMigrationExecutor(db, options));
+            using var executor = new DisposableExecutor(new MigrationExecutor(db, options));
 
             await StartupMigrationGate.RunAsync(db, options, NullLogger.Instance, executor,
                 TestContext.Current.CancellationToken);
@@ -77,7 +77,7 @@ public sealed class SqliteStartupMigrationGateTests
             var contextOptions = new DbContextOptionsBuilder<IdentityDbContext>();
             contextOptions.UseIdentityDatabase(options);
             await using var db = new IdentityDbContext(contextOptions.Options);
-            using var executor = new DisposableExecutor(new SignaCoreMigrationExecutor(db, options));
+            using var executor = new DisposableExecutor(new MigrationExecutor(db, options));
             await using (var composition = StartupDatabaseComposition.Create(options, executor))
             {
                 Assert.Empty(composition.Services.GetServices<IHostedService>());
@@ -324,7 +324,7 @@ public sealed class SqliteStartupMigrationGateTests
                     db,
                     options,
                     NullLogger.Instance,
-                    new SignaCoreMigrationExecutor(db, options),
+                    new MigrationExecutor(db, options),
                     TestContext.Current.CancellationToken));
 
             Assert.Equal(WellKnownMigrationErrorCodes.InspectionFailed, exception.ErrorCode);
@@ -641,11 +641,11 @@ public sealed class SqliteStartupMigrationGateTests
 
             // Running the phase again on the already-current database must skip the executor and
             // still resolve the installation state and load the snapshot.
-            var bootstrap = SignaCoreBootstrapStore.Load(
+            var bootstrap = BootstrapStore.Load(
                 new ConfigurationBuilder()
                     .AddInMemoryCollection(new Dictionary<string, string?>
                     {
-                        [SignaCoreBootstrapStore.FilePathConfigurationKey] = bootstrapFilePath
+                        [BootstrapStore.FilePathConfigurationKey] = bootstrapFilePath
                     })
                     .Build(),
                 StubEnvironment());

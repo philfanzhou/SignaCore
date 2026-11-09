@@ -46,14 +46,14 @@ app.MapGet("/", () => "consumer home");
 app.MapGet("/dashboard", (HttpContext http) =>
         $"dashboard:{http.User.FindFirst("sub")?.Value}")
     .RequireAuthorization(policy =>
-        policy.AddAuthenticationSchemes(SignaCoreHostedLoginDefaults.AuthenticationScheme)
+        policy.AddAuthenticationSchemes(HostedLoginDefaults.AuthenticationScheme)
             .RequireAuthenticatedUser());
 
 // A state-changing route behind the session scheme: the package's CSRF boundary must gate it.
 app.MapPost("/dashboard", (HttpContext http) =>
         $"dashboard-write:{http.User.FindFirst("sub")?.Value}")
     .RequireAuthorization(policy =>
-        policy.AddAuthenticationSchemes(SignaCoreHostedLoginDefaults.AuthenticationScheme)
+        policy.AddAuthenticationSchemes(HostedLoginDefaults.AuthenticationScheme)
             .RequireAuthenticatedUser());
 
 // The fixed local landing page of a completed prepared logout.

@@ -22,7 +22,7 @@ public sealed class ClientTicketStoreReplaceTests
     private static readonly string ExpiredBody =
         """{"authenticated":false,"requiresReauthentication":true,"displayName":null,"authorization":null}""";
 
-    private static SignaCoreSessionTicket NewTicket(DateTimeOffset? expires = null) => new(
+    private static SessionTicket NewTicket(DateTimeOffset? expires = null) => new(
         new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "replace-subject")], "test")),
         DateTimeOffset.UtcNow,
         expires ?? DateTimeOffset.UtcNow.AddMinutes(15),
@@ -34,9 +34,9 @@ public sealed class ClientTicketStoreReplaceTests
         Assert.True(response.Headers.TryGetValues("Set-Cookie", out var cookies));
         foreach (var cookie in cookies)
         {
-            if (cookie.StartsWith(SignaCoreHostedLoginDefaults.SessionCookieName + "=", StringComparison.Ordinal))
+            if (cookie.StartsWith(HostedLoginDefaults.SessionCookieName + "=", StringComparison.Ordinal))
             {
-                return cookie[(SignaCoreHostedLoginDefaults.SessionCookieName.Length + 1)..]
+                return cookie[(HostedLoginDefaults.SessionCookieName.Length + 1)..]
                     .Split(';', StringSplitOptions.TrimEntries)[0];
             }
         }
@@ -90,7 +90,7 @@ public sealed class ClientTicketStoreReplaceTests
         if (!string.IsNullOrEmpty(cookieValue))
         {
             request.Headers.TryAddWithoutValidation(
-                "Cookie", $"{SignaCoreHostedLoginDefaults.SessionCookieName}={cookieValue}");
+                "Cookie", $"{HostedLoginDefaults.SessionCookieName}={cookieValue}");
         }
 
         using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
@@ -171,13 +171,13 @@ public sealed class ClientTicketStoreReplaceTests
         private readonly InMemoryTicketStore _inner = new();
         public List<string> Calls { get; } = [];
 
-        public Task<string?> StoreAsync(SignaCoreSessionTicket ticket, CancellationToken cancellationToken)
+        public Task<string?> StoreAsync(SessionTicket ticket, CancellationToken cancellationToken)
         {
             Calls.Add("store");
             return _inner.StoreAsync(ticket, cancellationToken);
         }
 
-        public Task<SignaCoreSessionTicket?> RetrieveAsync(string key, CancellationToken cancellationToken) =>
+        public Task<SessionTicket?> RetrieveAsync(string key, CancellationToken cancellationToken) =>
             _inner.RetrieveAsync(key, cancellationToken);
 
         public Task RemoveAsync(string key, CancellationToken cancellationToken)
@@ -244,7 +244,7 @@ public sealed class ClientTicketStoreReplaceTests
         var (consumer, browser) = await CreateAsync(
             authority,
             configure: services => services
-                .PostConfigure<SignaCoreHostedLoginOptions>(options => options.TicketCapacity = 1));
+                .PostConfigure<HostedLoginOptions>(options => options.TicketCapacity = 1));
         await using var _ = consumer;
         using var __ = browser;
 

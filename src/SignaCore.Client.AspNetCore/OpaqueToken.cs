@@ -1,3 +1,4 @@
+using System.Buffers.Text;
 using System.Security.Cryptography;
 
 namespace SignaCore.Client.AspNetCore;
@@ -14,6 +15,6 @@ internal static class OpaqueToken
     {
         Span<byte> entropy = stackalloc byte[32];
         RandomNumberGenerator.Fill(entropy);
-        return Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return Base64Url.EncodeToString(entropy);
     }
 }

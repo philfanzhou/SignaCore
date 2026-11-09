@@ -277,7 +277,7 @@ public sealed class ConsulDiscoveryCompositionTests
 
         var result = new ServiceSettingDefinitionRegistry(
                 SharedSettingComposition.CreateDefinitionProviders(),
-                [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules: true)])
+                [new SettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules: true)])
             .Validate(candidate);
 
         Assert.False(result.IsValid);

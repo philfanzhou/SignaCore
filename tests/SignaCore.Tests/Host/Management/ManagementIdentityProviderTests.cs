@@ -21,7 +21,7 @@ using Xunit;
 
 namespace SignaCore.Tests.Host.Management;
 
-public sealed class SignaCoreManagementIdentityProviderTests : IAsyncDisposable
+public sealed class ManagementIdentityProviderTests : IAsyncDisposable
 {
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
     private IdentityDbContext _context = null!;
@@ -30,7 +30,7 @@ public sealed class SignaCoreManagementIdentityProviderTests : IAsyncDisposable
     private const string AdminName = "session_admin";
     private const string AdminPassword = "SessionAdmin123!";
 
-    public SignaCoreManagementIdentityProviderTests()
+    public ManagementIdentityProviderTests()
     {
     }
 
@@ -47,7 +47,7 @@ public sealed class SignaCoreManagementIdentityProviderTests : IAsyncDisposable
         await _context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
     }
 
-    private async Task<SignaCoreManagementIdentityProvider> CreateProviderAsync(string adminUsername = AdminName)
+    private async Task<ManagementIdentityProvider> CreateProviderAsync(string adminUsername = AdminName)
     {
         await EnsureContextAsync();
 
@@ -72,7 +72,7 @@ public sealed class SignaCoreManagementIdentityProviderTests : IAsyncDisposable
 
         var accessor = new HttpContextAccessor { HttpContext = new DefaultHttpContext() };
 
-        return new SignaCoreManagementIdentityProvider(
+        return new ManagementIdentityProvider(
             _credentials,
             new ValidatorFactory([validator], NullLogger<ValidatorFactory>.Instance),
             new AdminIdentityOptions { Username = adminUsername },
@@ -83,7 +83,7 @@ public sealed class SignaCoreManagementIdentityProviderTests : IAsyncDisposable
                 _context,
                 NullLogger<AdminLoginStateRecorder>.Instance),
             accessor,
-            NullLogger<SignaCoreManagementIdentityProvider>.Instance);
+            NullLogger<ManagementIdentityProvider>.Instance);
     }
 
     [Fact]

@@ -331,7 +331,7 @@ public sealed class SharedSettingContractTests
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, error =>
             error.Key == "jwt.issuer" &&
-            error.ErrorCode == SignaCoreSettingCompositeValidator.IssuerMismatchCode);
+            error.ErrorCode == SettingCompositeValidator.IssuerMismatchCode);
         foreach (var error in result.Errors)
         {
             Assert.DoesNotContain("accounts.example.com", error.ErrorCode, StringComparison.Ordinal);

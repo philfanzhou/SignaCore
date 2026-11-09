@@ -42,7 +42,7 @@ internal static class StartupMigrationGate
         ILogger logger,
         CancellationToken cancellationToken = default)
     {
-        var executor = new SignaCoreMigrationExecutor(database, databaseOptions);
+        var executor = new MigrationExecutor(database, databaseOptions);
         await RunAsync(database, databaseOptions, logger, executor, cancellationToken);
     }
 

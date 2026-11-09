@@ -32,7 +32,7 @@ public sealed class ClientUnconfiguredStartupTests
             redirectUri,
             new HttpClientHandler(),
             configureTestServices: services => services
-                .PostConfigure<SignaCoreHostedLoginOptions>(options =>
+                .PostConfigure<HostedLoginOptions>(options =>
                 {
                     options.AllowUnconfiguredStartup = allowUnconfigured;
                     if (scope is not null)
@@ -78,10 +78,10 @@ public sealed class ClientUnconfiguredStartupTests
     {
         using var factory = CreateUnconfigured(allowUnconfigured: false);
         var diagnostics = StartupDiagnostics(factory);
-        Assert.Contains("SignaCoreHostedLoginOptions.Authority is required.", diagnostics, StringComparison.Ordinal);
-        Assert.Contains("SignaCoreHostedLoginOptions.ClientId is required.", diagnostics, StringComparison.Ordinal);
-        Assert.Contains("SignaCoreHostedLoginOptions.ClientSecret is required.", diagnostics, StringComparison.Ordinal);
-        Assert.Contains("SignaCoreHostedLoginOptions.RedirectUri is required.", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("HostedLoginOptions.Authority is required.", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("HostedLoginOptions.ClientId is required.", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("HostedLoginOptions.ClientSecret is required.", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("HostedLoginOptions.RedirectUri is required.", diagnostics, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public sealed class ClientUnconfiguredStartupTests
             .Deserialize<System.Text.Json.JsonElement>(csrfBody).GetProperty("token").GetString()!;
         using var logout = new HttpRequestMessage(HttpMethod.Post, "/auth/logout");
         logout.Headers.TryAddWithoutValidation(
-            SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, csrfToken);
+            HostedLoginDefaults.AntiforgeryHeaderName, csrfToken);
         using var logoutResponse = await client.SendAsync(logout, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, logoutResponse.StatusCode);
         Assert.Equal(
@@ -145,7 +145,7 @@ public sealed class ClientUnconfiguredStartupTests
             "",
             new HttpClientHandler(),
             configureTestServices: services => services
-                .PostConfigure<SignaCoreHostedLoginOptions>(options =>
+                .PostConfigure<HostedLoginOptions>(options =>
                 {
                     options.AllowUnconfiguredStartup = true;
                     options.ResponseWriter = new DegradedWriter();
@@ -160,19 +160,19 @@ public sealed class ClientUnconfiguredStartupTests
             await start.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
 
-    private sealed class DegradedWriter : ISignaCoreHostedLoginResponseWriter
+    private sealed class DegradedWriter : IHostedLoginResponseWriter
     {
         public Task WriteSignInFailureAsync(
-            HttpContext context, SignaCoreSignInReason reason, CancellationToken cancellationToken) =>
-            SignaCoreDefaultResponseWriter.Instance.WriteSignInFailureAsync(context, reason, cancellationToken);
+            HttpContext context, SignInReason reason, CancellationToken cancellationToken) =>
+            DefaultHostedLoginResponseWriter.Instance.WriteSignInFailureAsync(context, reason, cancellationToken);
 
         public Task WriteFailurePageAsync(
-            HttpContext context, SignaCoreSignInReason? reason, CancellationToken cancellationToken) =>
-            SignaCoreDefaultResponseWriter.Instance.WriteFailurePageAsync(context, reason, cancellationToken);
+            HttpContext context, SignInReason? reason, CancellationToken cancellationToken) =>
+            DefaultHostedLoginResponseWriter.Instance.WriteFailurePageAsync(context, reason, cancellationToken);
 
         public Task WriteSessionStatusAsync(
-            HttpContext context, SignaCoreSessionStatus status, CancellationToken cancellationToken) =>
-            SignaCoreDefaultResponseWriter.Instance.WriteSessionStatusAsync(context, status, cancellationToken);
+            HttpContext context, SessionStatus status, CancellationToken cancellationToken) =>
+            DefaultHostedLoginResponseWriter.Instance.WriteSessionStatusAsync(context, status, cancellationToken);
 
         public Task WriteSignInUnavailableAsync(
             HttpContext context, CancellationToken cancellationToken)
@@ -197,7 +197,7 @@ public sealed class ClientUnconfiguredStartupTests
             redirectUri: redirectUri,
             clientSecret: string.IsNullOrWhiteSpace(clientSecret) ? "configured-secret" : clientSecret);
         var diagnostics = StartupDiagnostics(factory);
-        Assert.Contains("SignaCoreHostedLoginOptions.", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("HostedLoginOptions.", diagnostics, StringComparison.Ordinal);
         Assert.DoesNotContain("is required.", diagnostics, StringComparison.Ordinal);
     }
 
@@ -212,7 +212,7 @@ public sealed class ClientUnconfiguredStartupTests
             scope: "profile");
         var diagnostics = StartupDiagnostics(factory);
         Assert.Contains(
-            "SignaCoreHostedLoginOptions.Scope must include openid.",
+            "HostedLoginOptions.Scope must include openid.",
             diagnostics,
             StringComparison.Ordinal);
     }

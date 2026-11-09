@@ -13,7 +13,7 @@ namespace SignaCore.Client.AspNetCore;
 /// </summary>
 internal sealed class LogoutReturnStateStore(TimeProvider? timeProvider = null)
 {
-    internal static readonly TimeSpan Lifetime = SignaCoreHostedLoginDefaults.LogoutReturnLifetime;
+    internal static readonly TimeSpan Lifetime = HostedLoginDefaults.LogoutReturnLifetime;
     internal const int Capacity = 1_000;
 
     private readonly ConcurrentDictionary<string, PendingLogoutReturn> _pending = new();

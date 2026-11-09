@@ -21,13 +21,13 @@ namespace SignaCore.Host.Management;
 /// <see cref="ManagementIdentityResult"/> set: an invalid password or a non-bootstrap account is
 /// an expected rejection (<c>Unauthenticated</c>), never a provider failure.
 /// </remarks>
-internal sealed class SignaCoreManagementIdentityProvider(
+internal sealed class ManagementIdentityProvider(
     ManagementCredentialAccessor credentials,
     ValidatorFactory validatorFactory,
     AdminIdentityOptions adminIdentity,
     AdminLoginStateRecorder loginStateRecorder,
     IHttpContextAccessor httpContextAccessor,
-    ILogger<SignaCoreManagementIdentityProvider> logger) : IManagementIdentityProvider
+    ILogger<ManagementIdentityProvider> logger) : IManagementIdentityProvider
 {
     public async ValueTask<ManagementIdentityResult> GetIdentityAsync(
         CancellationToken cancellationToken = default)

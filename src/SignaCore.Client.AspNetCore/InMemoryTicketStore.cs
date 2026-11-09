@@ -11,14 +11,14 @@ namespace SignaCore.Client.AspNetCore;
 /// </summary>
 public sealed class InMemoryTicketStore(TimeProvider? timeProvider = null) : ITicketStore
 {
-    private readonly ConcurrentDictionary<string, SignaCoreSessionTicket> _tickets = new();
+    private readonly ConcurrentDictionary<string, SessionTicket> _tickets = new();
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
     /// <summary>The number of tickets currently held, including not-yet-swept expired ones.</summary>
     public int Count => _tickets.Count;
 
     /// <inheritdoc />
-    public Task<string?> StoreAsync(SignaCoreSessionTicket ticket, CancellationToken cancellationToken)
+    public Task<string?> StoreAsync(SessionTicket ticket, CancellationToken cancellationToken)
     {
         if (_tickets.Count >= Capacity)
         {
@@ -40,7 +40,7 @@ public sealed class InMemoryTicketStore(TimeProvider? timeProvider = null) : ITi
     /// old and the new session as live, and a refused replacement changes nothing.</remarks>
     public Task<string?> ReplaceAsync(
         string? oldKey,
-        SignaCoreSessionTicket ticket,
+        SessionTicket ticket,
         CancellationToken cancellationToken)
     {
         if (_tickets.Count >= Capacity)
@@ -64,20 +64,20 @@ public sealed class InMemoryTicketStore(TimeProvider? timeProvider = null) : ITi
     }
 
     /// <inheritdoc />
-    public Task<SignaCoreSessionTicket?> RetrieveAsync(string key, CancellationToken cancellationToken)
+    public Task<SessionTicket?> RetrieveAsync(string key, CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(key) || !_tickets.TryGetValue(key, out var ticket))
         {
-            return Task.FromResult<SignaCoreSessionTicket?>(null);
+            return Task.FromResult<SessionTicket?>(null);
         }
 
         if (IsExpired(ticket))
         {
             _tickets.TryRemove(key, out _);
-            return Task.FromResult<SignaCoreSessionTicket?>(null);
+            return Task.FromResult<SessionTicket?>(null);
         }
 
-        return Task.FromResult<SignaCoreSessionTicket?>(ticket);
+        return Task.FromResult<SessionTicket?>(ticket);
     }
 
     /// <inheritdoc />
@@ -102,9 +102,9 @@ public sealed class InMemoryTicketStore(TimeProvider? timeProvider = null) : ITi
         return removed;
     }
 
-    /// <summary>The store's capacity; enforced by <see cref="SignaCoreHostedLoginOptions.TicketCapacity"/>
+    /// <summary>The store's capacity; enforced by <see cref="HostedLoginOptions.TicketCapacity"/>
     /// through the registration, with a hard-coded fallback bound.</summary>
     internal int Capacity { get; init; } = 10_000;
 
-    private bool IsExpired(SignaCoreSessionTicket ticket) => ticket.ExpiresUtc <= _time.GetUtcNow();
+    private bool IsExpired(SessionTicket ticket) => ticket.ExpiresUtc <= _time.GetUtcNow();
 }

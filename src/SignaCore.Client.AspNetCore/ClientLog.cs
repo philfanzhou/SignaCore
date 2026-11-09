@@ -63,7 +63,7 @@ internal static class ClientLog
 
     internal static void SignInRejected(
         ILogger logger,
-        SignaCoreSignInReason reason,
+        SignInReason reason,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

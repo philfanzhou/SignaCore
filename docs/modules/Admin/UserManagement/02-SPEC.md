@@ -87,7 +87,7 @@ All logs and errors must redact passwords, application secrets, refresh tokens, 
   [ManagementSessionComposition](../../../../src/SignaCore.Host/Management/ManagementSessionComposition.cs)
   via `AddManagementCookieAuthentication` and the management Bearer selector registration; the
   same file owns the Cookie login adapter that invokes
-  [SignaCoreManagementIdentityProvider](../../../../src/SignaCore.Host/Management/SignaCoreManagementIdentityProvider.cs).
+  [ManagementIdentityProvider](../../../../src/SignaCore.Host/Management/ManagementIdentityProvider.cs).
 - [AdminController](../../../../src/SignaCore.Host/Controllers/AdminController.cs) applies the
   policy to `GetUsers`, `CreateUser`, `CreatePhoneUser`, `UpdateUserRemark`, `UpdateUserNickname`,
   `UpdateUserStatus`, and `ResetUserPassword`, and projects the resolved management operator in `GetCurrentSession`.

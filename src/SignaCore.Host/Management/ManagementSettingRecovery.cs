@@ -109,7 +109,7 @@ internal sealed class ManagementSettingRecovery : IServiceSettingUpdateTransacti
         ];
 
         private readonly HashSet<string> touched = new(changedKeys, StringComparer.OrdinalIgnoreCase);
-        private readonly SignaCoreSettingCompositeValidator core = new(isDevelopment);
+        private readonly SettingCompositeValidator core = new(isDevelopment);
         private string? uri, authorization, endpoint;
         private bool allowNoAuthentication;
         private bool preserveLoki, preserveOtlp;
@@ -139,7 +139,7 @@ internal sealed class ManagementSettingRecovery : IServiceSettingUpdateTransacti
                 context.TryGetValue(key, out var value) && value!.HasValue
                     ? value.GetBoolean() == original
                     : !original;
-            errors.AddRange(SignaCoreSettingCompositeValidator.ValidateOptionalSettings(context,
+            errors.AddRange(SettingCompositeValidator.ValidateOptionalSettings(context,
                 preserveLoki && Same(GrafanaLokiSettingDefinitions.Endpoint, uri)
                     && Same(GrafanaLokiSettingDefinitions.Authorization, authorization)
                     && SameBoolean(GrafanaLokiSettingDefinitions.AllowNoAuthentication, allowNoAuthentication),

@@ -16,7 +16,7 @@ namespace SignaCore.Client.AspNetCore.Tests;
 /// zero-skew window each fail the sign-in through the existing closed paths, while SignaCore's
 /// own normal responses (legal scope echo, no duplicates, present-day <c>iat</c>) pass
 /// untouched. Each dimension relaxes independently through
-/// <see cref="SignaCoreValidationOptions"/>, and an illegal configuration value fails startup
+/// <see cref="ProtocolValidationOptions"/>, and an illegal configuration value fails startup
 /// naming only the option.
 /// </summary>
 public sealed class ClientValidationStrictnessTests
@@ -27,7 +27,7 @@ public sealed class ClientValidationStrictnessTests
     private static async Task<(WebApplicationFactory<ConsumerApp.Program> Consumer, CrossServerBrowser Browser)>
         CreateAsync(
             FakeIdentityProvider authority,
-            Action<SignaCoreValidationOptions>? configureValidation = null,
+            Action<ProtocolValidationOptions>? configureValidation = null,
             bool preSignInGate = false)
     {
         var consumer = ConsumerAppTestServer.Create(
@@ -40,14 +40,14 @@ public sealed class ClientValidationStrictnessTests
             {
                 if (configureValidation is not null)
                 {
-                    services.PostConfigure<SignaCoreHostedLoginOptions>(
+                    services.PostConfigure<HostedLoginOptions>(
                         options => configureValidation(options.Validation));
                 }
 
                 if (preSignInGate)
                 {
                     // The gated access-token checks are exercised through the pre-sign-in gate.
-                    services.PostConfigure<SignaCoreHostedLoginOptions>(options =>
+                    services.PostConfigure<HostedLoginOptions>(options =>
                         options.PreSignInAuthorizationDecision = new AllowingDecision());
                 }
             });
@@ -56,11 +56,11 @@ public sealed class ClientValidationStrictnessTests
         return (consumer, browser);
     }
 
-    private sealed class AllowingDecision : ISignaCorePreSignInAuthorizationDecision
+    private sealed class AllowingDecision : IPreSignInAuthorizationDecision
     {
-        public ValueTask<SignaCoreAuthorizationDecisionResult> DecideAsync(
-            SignaCorePreSignInAuthorizationContext context, CancellationToken cancellationToken) =>
-            ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Allowed);
+        public ValueTask<AuthorizationDecisionResult> DecideAsync(
+            PreSignInAuthorizationContext context, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(AuthorizationDecisionResult.Allowed);
     }
 
     /// <summary>Drives one complete sign-in; returns the callback's outcome ("success" or the
@@ -94,7 +94,7 @@ public sealed class ClientValidationStrictnessTests
             .GetProperty("token").GetString()!;
         using var logout = new HttpRequestMessage(
             HttpMethod.Post, new Uri(browser.ConsumerBase, "/auth/logout"));
-        logout.Headers.TryAddWithoutValidation(SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, token);
+        logout.Headers.TryAddWithoutValidation(HostedLoginDefaults.AntiforgeryHeaderName, token);
         using var logoutResponse = await browser.SendOnConsumerAsync(
             logout, TestContext.Current.CancellationToken);
         if (logoutResponse.StatusCode == HttpStatusCode.Found)
@@ -294,8 +294,8 @@ public sealed class ClientValidationStrictnessTests
     [InlineData(31)]
     public void ANegativeOrOversizedClockSkew_FailsStartupNamingOnlyTheOption(double seconds) =>
         Assert.Contains(
-            "SignaCoreHostedLoginOptions.Validation.ClockSkew is invalid",
-            StartupDiagnostics(services => services.PostConfigure<SignaCoreHostedLoginOptions>(
+            "HostedLoginOptions.Validation.ClockSkew is invalid",
+            StartupDiagnostics(services => services.PostConfigure<HostedLoginOptions>(
                 options => options.Validation.ClockSkew = TimeSpan.FromSeconds(seconds))),
             StringComparison.Ordinal);
 
@@ -304,16 +304,16 @@ public sealed class ClientValidationStrictnessTests
     [InlineData(-1)]
     public void NonPositiveResponseCeilings_FailStartupNamingOnlyTheOption(int bytes) =>
         Assert.Contains(
-            "SignaCoreHostedLoginOptions.Validation.MaxTokenResponseBytes must be positive.",
-            StartupDiagnostics(services => services.PostConfigure<SignaCoreHostedLoginOptions>(
+            "HostedLoginOptions.Validation.MaxTokenResponseBytes must be positive.",
+            StartupDiagnostics(services => services.PostConfigure<HostedLoginOptions>(
                 options => options.Validation.MaxTokenResponseBytes = bytes)),
             StringComparison.Ordinal);
 
     [Fact]
     public void ANonPositiveLogoutCeiling_FailsStartupNamingOnlyTheOption() =>
         Assert.Contains(
-            "SignaCoreHostedLoginOptions.Validation.MaxLogoutResponseBytes must be positive.",
-            StartupDiagnostics(services => services.PostConfigure<SignaCoreHostedLoginOptions>(
+            "HostedLoginOptions.Validation.MaxLogoutResponseBytes must be positive.",
+            StartupDiagnostics(services => services.PostConfigure<HostedLoginOptions>(
                 options => options.Validation.MaxLogoutResponseBytes = 0)),
             StringComparison.Ordinal);
 

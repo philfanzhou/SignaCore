@@ -195,7 +195,7 @@ internal static class InstallationTestSupport
 
         var store = new BootstrapFileStore(
             InstallationStores.ServiceId,
-            SignaCoreBootstrapStore.CreateProviderRegistry(),
+            BootstrapStore.CreateProviderRegistry(),
             bootstrapFilePath);
         store.Create(new BootstrapConfiguration(
             InstallationStores.ServiceId,

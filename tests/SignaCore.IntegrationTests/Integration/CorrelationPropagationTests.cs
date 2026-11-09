@@ -146,7 +146,7 @@ public sealed partial class CorrelationPropagationTests : IClassFixture<Identity
             {
                 builder.UseSetting("environment", Environments.Production);
                 builder.UseSetting(
-                    SignaCoreBootstrapStore.FilePathConfigurationKey,
+                    BootstrapStore.FilePathConfigurationKey,
                     Path.Combine(directory, "signacore.bootstrap.json"));
             });
             using var client = factory.CreateClient();

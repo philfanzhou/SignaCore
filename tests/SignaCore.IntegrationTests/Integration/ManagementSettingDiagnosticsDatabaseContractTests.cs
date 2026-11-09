@@ -31,8 +31,8 @@ public sealed class ManagementSettingDiagnosticsDatabaseContractTests
     private const string ValidAuthorization = "Basic dGVzdDpjYW5hcnk=";
     private const string RunningHeader = "X-SignaCore-Running-Configuration-Version";
 
-    private static readonly string Required = SignaCoreSettingCompositeValidator.RequiredCode;
-    private static readonly string RuntimeInvalid = SignaCoreSettingCompositeValidator.RuntimeInvalidCode;
+    private static readonly string Required = SettingCompositeValidator.RequiredCode;
+    private static readonly string RuntimeInvalid = SettingCompositeValidator.RuntimeInvalidCode;
 
     public static TheoryData<bool, string?, string?, string?, (string Key, string Code)[]> LegacyGroups => new()
     {

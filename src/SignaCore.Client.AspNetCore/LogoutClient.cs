@@ -55,7 +55,7 @@ internal enum LogoutFailure
 /// </summary>
 internal sealed class LogoutClient(
     System.Net.Http.IHttpClientFactory httpClientFactory,
-    IOptionsMonitor<SignaCoreHostedLoginOptions> options)
+    IOptionsMonitor<HostedLoginOptions> options)
 {
     private const string PreparePath = "/oauth2/logout/requests";
 
@@ -71,7 +71,7 @@ internal sealed class LogoutClient(
         // the verified same-origin token endpoint, so a re-homed authority is still followed.
         var authorityOrigin = new Uri(configuration.TokenEndpoint).GetComponents(
             UriComponents.Scheme | UriComponents.Host | UriComponents.Port, UriFormat.UriEscaped);
-        using var client = httpClientFactory.CreateClient(SignaCoreHostedLoginDefaults.HttpClientName);
+        using var client = httpClientFactory.CreateClient(HostedLoginDefaults.HttpClientName);
 
         var form = new Dictionary<string, string>
         {

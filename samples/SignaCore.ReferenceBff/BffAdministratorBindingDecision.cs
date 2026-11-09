@@ -16,9 +16,9 @@ namespace SignaCore.ReferenceBff;
 /// <c>/bff/admin</c> endpoint keeps its own stronger decision: it re-confirms the identity
 /// upstream through UserInfo before the same binding match runs.
 /// </summary>
-internal sealed class BffAdministratorBindingDecision(IServiceProvider services) : ISignaCoreAuthorizationDecision
+internal sealed class BffAdministratorBindingDecision(IServiceProvider services) : IAuthorizationDecision
 {
-    public async ValueTask<SignaCoreAuthorizationDecisionResult> DecideAsync(
+    public async ValueTask<AuthorizationDecisionResult> DecideAsync(
         ClaimsPrincipal subject,
         CancellationToken cancellationToken)
     {
@@ -29,7 +29,7 @@ internal sealed class BffAdministratorBindingDecision(IServiceProvider services)
         if (issuer is null || identitySubject is null)
         {
             // A principal without exactly one verified issuer and subject can prove nothing.
-            return SignaCoreAuthorizationDecisionResult.Denied;
+            return AuthorizationDecisionResult.Denied;
         }
 
         await using var scope = services.CreateAsyncScope();
@@ -37,7 +37,7 @@ internal sealed class BffAdministratorBindingDecision(IServiceProvider services)
         if (bindingStore is null)
         {
             // No database configured: no binding can exist, so no subject is an administrator.
-            return SignaCoreAuthorizationDecisionResult.Denied;
+            return AuthorizationDecisionResult.Denied;
         }
 
         try
@@ -45,8 +45,8 @@ internal sealed class BffAdministratorBindingDecision(IServiceProvider services)
             var match = await bindingStore.MatchAdministratorAsync(issuer, identitySubject, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             return match == ManagementRoleBindingMatchStatus.MatchedActiveAdministrator
-                ? SignaCoreAuthorizationDecisionResult.Allowed
-                : SignaCoreAuthorizationDecisionResult.Denied;
+                ? AuthorizationDecisionResult.Allowed
+                : AuthorizationDecisionResult.Denied;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -55,7 +55,7 @@ internal sealed class BffAdministratorBindingDecision(IServiceProvider services)
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             // A database that cannot answer grants nothing.
-            return SignaCoreAuthorizationDecisionResult.Denied;
+            return AuthorizationDecisionResult.Denied;
         }
     }
 

@@ -10,7 +10,7 @@ namespace SignaCore.Client.AspNetCore;
 /// <summary>
 /// The scheme options of the package's session scheme: the standard scheme options, nothing
 /// package-specific — every package setting lives in
-/// <see cref="SignaCoreHostedLoginOptions"/>.
+/// <see cref="HostedLoginOptions"/>.
 /// </summary>
 internal sealed class SessionSchemeOptions : AuthenticationSchemeOptions;
 
@@ -21,14 +21,14 @@ internal sealed class SessionSchemeOptions : AuthenticationSchemeOptions;
 /// <c>NoResult</c>: the distinction is not observable. A request authenticated by the session
 /// cookie with an unsafe method must additionally pass antiforgery validation — the CSRF boundary
 /// of the hosted session; a missing or wrong token fails the whole authentication. Requests a
-/// consumer's <see cref="SignaCoreHostedLoginOptions.SchemeSelector"/> forwards to its own scheme
+/// consumer's <see cref="HostedLoginOptions.SchemeSelector"/> forwards to its own scheme
 /// (typically Bearer) never pass through here and stay unaffected. A challenge redirects to the
 /// package's start endpoint; forbid is a plain 403, because a denial is the consumer's own
 /// decision.
 /// </summary>
 internal sealed class SessionAuthenticationHandler(
     IOptionsMonitor<SessionSchemeOptions> schemeOptions,
-    IOptionsMonitor<SignaCoreHostedLoginOptions> loginOptions,
+    IOptionsMonitor<HostedLoginOptions> loginOptions,
     ITicketStore ticketStore,
     Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery,
     ILoggerFactory loggerFactory,
@@ -120,7 +120,7 @@ internal sealed class SessionAuthenticationHandler(
         }
 
         Response.Redirect(
-            $"{current.Prefix}/{SignaCoreHostedLoginDefaults.StartPathSegment}"
+            $"{current.Prefix}/{HostedLoginDefaults.StartPathSegment}"
             + $"?returnUrl={Uri.EscapeDataString(returnUrl)}");
         return Task.CompletedTask;
     }

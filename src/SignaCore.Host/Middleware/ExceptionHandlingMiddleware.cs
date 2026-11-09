@@ -37,7 +37,7 @@ public class ExceptionHandlingMiddleware(RequestDelegate next, ILogger<Exception
     private sealed record ProblemDetailsPayload(int Status, string Title, string Detail);
 }
 
-internal static class SignaCoreExceptionBoundary
+internal static class ExceptionBoundary
 {
     /// <summary>Marks this request before composing the shared pipeline exactly once.</summary>
     internal static WebApplication UseSignaCoreSharedHttpPipeline(this WebApplication app)

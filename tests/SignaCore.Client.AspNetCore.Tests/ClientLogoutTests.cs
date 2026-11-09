@@ -41,7 +41,7 @@ public sealed class ClientLogoutTests(SignaCoreHostFixture fixture)
         if (token is not null)
         {
             request.Headers.TryAddWithoutValidation(
-                SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, token);
+                HostedLoginDefaults.AntiforgeryHeaderName, token);
         }
 
         return request;
@@ -158,7 +158,7 @@ public sealed class ClientLogoutTests(SignaCoreHostFixture fixture)
         Assert.Contains(
             logoutResponse.Headers.GetValues("Set-Cookie"),
             cookie => cookie.StartsWith(
-                SignaCoreHostedLoginDefaults.SessionCookieName + "-logout-return=",
+                HostedLoginDefaults.SessionCookieName + "-logout-return=",
                 StringComparison.Ordinal)
                 && cookie.Contains("path=/auth/logout", StringComparison.OrdinalIgnoreCase)
                 && cookie.Contains("httponly", StringComparison.OrdinalIgnoreCase)

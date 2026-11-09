@@ -1,3 +1,4 @@
+using System.Buffers.Text;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Authentication;
@@ -18,7 +19,7 @@ namespace SignaCore.Client.AspNetCore.EntityFrameworkCore;
 /// deletes the row.
 /// </summary>
 /// <typeparam name="TDbContext">The consumer's <see cref="DbContext"/>, mapped with
-/// <see cref="SignaCoreTicketStoreModelBuilderExtensions.ConfigureSignaCoreTicketStore"/>.</typeparam>
+/// <see cref="TicketStoreModelBuilderExtensions.ConfigureSignaCoreTicketStore"/>.</typeparam>
 public sealed class EntityFrameworkTicketStore<TDbContext>(
     IServiceScopeFactory scopeFactory,
     IDataProtectionProvider dataProtectionProvider,
@@ -48,7 +49,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
     /// treats exactly like a full store: the sign-in fails closed.
     /// </remarks>
     public async Task<string?> StoreAsync(
-        global::SignaCore.Client.AspNetCore.SignaCoreSessionTicket ticket,
+        global::SignaCore.Client.AspNetCore.SessionTicket ticket,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(ticket);
@@ -71,7 +72,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var database = scope.ServiceProvider.GetRequiredService<TDbContext>();
-            database.Set<SignaCoreSessionTicketEntity>().Add(new SignaCoreSessionTicketEntity
+            database.Set<SessionTicketEntity>().Add(new SessionTicketEntity
             {
                 KeyDigest = Digest(key),
                 Payload = payload,
@@ -96,7 +97,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
     /// <c>ticket_record_corrupt</c> log category — authentication fails closed, and neither SQL
     /// text nor connection details ever reach the log.
     /// </remarks>
-    public async Task<global::SignaCore.Client.AspNetCore.SignaCoreSessionTicket?> RetrieveAsync(
+    public async Task<global::SignaCore.Client.AspNetCore.SessionTicket?> RetrieveAsync(
         string key,
         CancellationToken cancellationToken)
     {
@@ -111,7 +112,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var database = scope.ServiceProvider.GetRequiredService<TDbContext>();
-            var entity = await database.Set<SignaCoreSessionTicketEntity>()
+            var entity = await database.Set<SessionTicketEntity>()
                 .AsNoTracking()
                 .FirstOrDefaultAsync(ticket => ticket.KeyDigest == digest, cancellationToken);
             if (entity is null)
@@ -127,7 +128,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
                 return null;
             }
 
-            global::SignaCore.Client.AspNetCore.SignaCoreSessionTicket? ticket;
+            global::SignaCore.Client.AspNetCore.SessionTicket? ticket;
             try
             {
                 ticket = Deserialize(entity);
@@ -193,7 +194,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
     /// <param name="cancellationToken">Propagates the caller's cancellation.</param>
     /// <returns>The revoked session's ticket, or <see langword="null"/> when the key was unknown,
     /// already revoked, or expired — and also when persistence failed, which fails closed.</returns>
-    public async Task<global::SignaCore.Client.AspNetCore.SignaCoreSessionTicket?> TakeAsync(
+    public async Task<global::SignaCore.Client.AspNetCore.SessionTicket?> TakeAsync(
         string key,
         CancellationToken cancellationToken)
     {
@@ -261,7 +262,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
         var now = _time.GetUtcNow();
         await using var scope = scopeFactory.CreateAsyncScope();
         var database = scope.ServiceProvider.GetRequiredService<TDbContext>();
-        return await database.Set<SignaCoreSessionTicketEntity>()
+        return await database.Set<SessionTicketEntity>()
             .Where(ticket => ticket.ExpiresUtc <= now)
             .ExecuteDeleteAsync(cancellationToken);
     }
@@ -270,7 +271,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
         TDbContext database,
         string digest,
         CancellationToken cancellationToken) =>
-        database.Set<SignaCoreSessionTicketEntity>()
+        database.Set<SessionTicketEntity>()
             .Where(ticket => ticket.KeyDigest == digest)
             .ExecuteDeleteAsync(cancellationToken);
 
@@ -282,7 +283,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
     /// expiry bound are bind parameters — in the same UTC <see cref="DateTime"/> shape the column
     /// conversion stores — never interpolated SQL text.
     /// </summary>
-    private static async Task<SignaCoreSessionTicketEntity?> TakeRowAsync(
+    private static async Task<SessionTicketEntity?> TakeRowAsync(
         TDbContext database,
         string digest,
         CancellationToken cancellationToken)
@@ -290,7 +291,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
         var connection = database.Database.GetDbConnection();
         var command = connection.CreateCommand();
         command.CommandText = $"""
-            DELETE FROM {SignaCoreTicketStoreModelBuilderExtensions.TableName}
+            DELETE FROM {TicketStoreModelBuilderExtensions.TableName}
             WHERE "KeyDigest" = @digest AND "ExpiresUtc" > @now
             RETURNING "KeyDigest", "Payload", "IssuedUtc", "ExpiresUtc"
             """;
@@ -318,7 +319,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
             reader.GetFieldValue<DateTime>(2), DateTimeKind.Utc);
         var expires = DateTime.SpecifyKind(
             reader.GetFieldValue<DateTime>(3), DateTimeKind.Utc);
-        return new SignaCoreSessionTicketEntity
+        return new SessionTicketEntity
         {
             KeyDigest = reader.GetString(0),
             Payload = reader.GetFieldValue<byte[]>(1),
@@ -328,7 +329,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
     }
 
     private byte[] Serialize(
-        global::SignaCore.Client.AspNetCore.SignaCoreSessionTicket ticket)
+        global::SignaCore.Client.AspNetCore.SessionTicket ticket)
     {
         var properties = new AuthenticationProperties
         {
@@ -347,8 +348,8 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
         return _protector.Protect(serialized);
     }
 
-    private global::SignaCore.Client.AspNetCore.SignaCoreSessionTicket Deserialize(
-        SignaCoreSessionTicketEntity entity)
+    private global::SignaCore.Client.AspNetCore.SessionTicket Deserialize(
+        SessionTicketEntity entity)
     {
         var ticket = Serializer.Deserialize(_protector.Unprotect(entity.Payload))
             ?? throw new InvalidOperationException("The ticket payload did not deserialize.");
@@ -362,7 +363,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
         var idToken = ticket.Properties.Items.TryGetValue(IdTokenItemKey, out var id)
             ? id
             : string.Empty;
-        return new global::SignaCore.Client.AspNetCore.SignaCoreSessionTicket(
+        return new global::SignaCore.Client.AspNetCore.SessionTicket(
             ticket.Principal, issuedUtc, expiresUtc, accessToken ?? string.Empty,
             idToken ?? string.Empty);
     }
@@ -382,7 +383,7 @@ public sealed class EntityFrameworkTicketStore<TDbContext>(
     {
         Span<byte> entropy = stackalloc byte[32];
         RandomNumberGenerator.Fill(entropy);
-        return Convert.ToBase64String(entropy).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return Base64Url.EncodeToString(entropy);
     }
 }
 

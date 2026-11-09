@@ -315,14 +315,14 @@ public sealed class SqliteMigrationObservationTests
         Assert.False(File.Exists(file));
     }
 
-    private static (SignaCoreMigrationExecutor Executor, IdentityDbContext Database) CreateExecutor(
+    private static (MigrationExecutor Executor, IdentityDbContext Database) CreateExecutor(
         string databasePath)
     {
         var options = TestDatabaseOptions(databasePath);
         var optionsBuilder = new DbContextOptionsBuilder<IdentityDbContext>();
         optionsBuilder.UseIdentityDatabase(options);
         var db = new IdentityDbContext(optionsBuilder.Options);
-        return (new SignaCoreMigrationExecutor(db, options), db);
+        return (new MigrationExecutor(db, options), db);
     }
 
     private static async Task MigrateToAsync(IdentityDbContext db, string migrationId)

@@ -35,7 +35,7 @@ public sealed class ClientLoginBindingPrefixCookieTests
             SignaCoreHostFixture.RedirectUri,
             authority.Server.CreateHandler(),
             configureTestServices: services => services
-                .PostConfigure<SignaCoreHostedLoginOptions>(options =>
+                .PostConfigure<HostedLoginOptions>(options =>
                     options.SessionCookieName = sessionCookieName));
 
     private static async Task<(HttpResponseMessage StartResponse, CrossServerBrowser Browser)>
@@ -74,7 +74,7 @@ public sealed class ClientLoginBindingPrefixCookieTests
         Assert.StartsWith(expectedNamePrefix, binding, StringComparison.Ordinal);
         var name = binding[..binding.IndexOf('=')];
         Assert.DoesNotContain(
-            SignaCoreHostedLoginDefaults.HostCookiePrefix, name, StringComparison.Ordinal);
+            HostedLoginDefaults.HostCookiePrefix, name, StringComparison.Ordinal);
         Assert.Contains("path=/auth/callback", binding, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("httponly", binding, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("samesite=lax", binding, StringComparison.OrdinalIgnoreCase);
@@ -104,8 +104,8 @@ public sealed class ClientLoginBindingPrefixCookieTests
 
     [Theory]
     [InlineData("orders-session", "orders-session-login-binding.")]
-    [InlineData(SignaCoreHostedLoginDefaults.SessionCookieName,
-        SignaCoreHostedLoginDefaults.SessionCookieName + "-login-binding.")]
+    [InlineData(HostedLoginDefaults.SessionCookieName,
+        HostedLoginDefaults.SessionCookieName + "-login-binding.")]
     [InlineData("__Secure-orders.AdminSession", "__Secure-orders.AdminSession-login-binding.")]
     [InlineData("__host-orders.AdminSession", "__host-orders.AdminSession-login-binding.")]
     public async Task EveryOtherSessionName_KeepsTheByteForByteHistoricalDerivation(

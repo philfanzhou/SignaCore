@@ -5,12 +5,12 @@ namespace SignaCore.Client.AspNetCore;
 /// default session cookie, the route segments under the consumer's prefix, and the protocol
 /// constants the package enforces.
 /// </summary>
-public static class SignaCoreHostedLoginDefaults
+public static class HostedLoginDefaults
 {
     /// <summary>
     /// The authentication scheme a consumer's routes authenticate against. It forwards each
     /// request either to the package's session scheme or, when the consumer sets
-    /// <see cref="SignaCoreHostedLoginOptions.SchemeSelector"/>, to a scheme of its own
+    /// <see cref="HostedLoginOptions.SchemeSelector"/>, to a scheme of its own
     /// (typically its Bearer handler).
     /// </summary>
     public const string AuthenticationScheme = "SignaCoreHostedLogin";
@@ -52,7 +52,7 @@ public static class SignaCoreHostedLoginDefaults
     /// <summary>
     /// The default request-header name the antiforgery validation accepts for session-authenticated
     /// unsafe methods and the package's logout endpoint. Configure through
-    /// <see cref="SignaCoreHostedLoginOptions.AntiforgeryHeaderName"/>.
+    /// <see cref="HostedLoginOptions.AntiforgeryHeaderName"/>.
     /// </summary>
     public const string AntiforgeryHeaderName = "X-SignaCore-CSRF";
 

@@ -9,13 +9,13 @@ namespace SignaCore.Client.AspNetCore.EntityFrameworkCore;
 /// (PostgreSQL, SQLite, or any other EF Core relational provider) exactly as it does for its own
 /// tables.
 /// </summary>
-public static class SignaCoreTicketStoreModelBuilderExtensions
+public static class TicketStoreModelBuilderExtensions
 {
     /// <summary>The single table name the store occupies in the consumer's database.</summary>
     public const string TableName = "signacore_client_session_tickets";
 
     /// <summary>
-    /// Maps <see cref="SignaCoreSessionTicketEntity"/> for a provider-neutral relational schema:
+    /// Maps <see cref="SessionTicketEntity"/> for a provider-neutral relational schema:
     /// one digest-keyed row per live session, an index on the plain expiry column for the sweep,
     /// and fixed column lengths so PostgreSQL and SQLite see the same shape. The timestamp
     /// columns convert to plain UTC <see cref="DateTime"/> values: SQLite stores
@@ -28,7 +28,7 @@ public static class SignaCoreTicketStoreModelBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
 
-        modelBuilder.Entity<SignaCoreSessionTicketEntity>(entity =>
+        modelBuilder.Entity<SessionTicketEntity>(entity =>
         {
             entity.ToTable(TableName);
             entity.HasKey(ticket => ticket.KeyDigest);

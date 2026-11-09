@@ -38,18 +38,18 @@ app.MapSignaCoreHostedLogin("/auth");
 
 app.MapGet("/orders", () => "orders")
     .RequireAuthorization(policy =>
-        policy.AddAuthenticationSchemes(SignaCoreHostedLoginDefaults.AuthenticationScheme)
+        policy.AddAuthenticationSchemes(HostedLoginDefaults.AuthenticationScheme)
             .RequireAuthenticatedUser());
 
 app.Run();
 
 /// <summary>A minimal neutral authorization decision, the way a consumer plugs its own in.</summary>
-internal sealed class OrderServiceAllowAll : ISignaCoreAuthorizationDecision
+internal sealed class OrderServiceAllowAll : IAuthorizationDecision
 {
     internal static readonly OrderServiceAllowAll Instance = new();
 
-    public ValueTask<SignaCoreAuthorizationDecisionResult> DecideAsync(
+    public ValueTask<AuthorizationDecisionResult> DecideAsync(
         ClaimsPrincipal subject,
         CancellationToken cancellationToken) =>
-        ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Allowed);
+        ValueTask.FromResult(AuthorizationDecisionResult.Allowed);
 }

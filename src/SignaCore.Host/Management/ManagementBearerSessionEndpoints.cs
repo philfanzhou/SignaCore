@@ -15,7 +15,7 @@ namespace SignaCore.Host.Management;
 /// <remarks>
 /// <para>
 /// The login reuses the shared management login chain unchanged — the scoped credential accessor,
-/// <see cref="SignaCoreManagementIdentityProvider"/>, the same password validator, bootstrap
+/// <see cref="ManagementIdentityProvider"/>, the same password validator, bootstrap
 /// administrator restriction, and login attempt/audit recording — and calls
 /// <see cref="ManagementBearerSessionService.IssueAsync"/> only after an authenticated result. It is
 /// anonymous and reads no existing principal, so an accompanying <c>Authorization</c> header or

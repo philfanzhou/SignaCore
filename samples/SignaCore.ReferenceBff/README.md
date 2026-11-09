@@ -360,7 +360,7 @@ Authentication and authorization are deliberately separate decisions in this sam
   Authority is never treated as the verified issuer, and a token without exactly one usable
   subject fails the sign-in. A ticket that cannot prove that identity is rejected with a
   re-login. The package reports the binding decision for its `/bff/session` endpoint through the
-  sample's `ISignaCoreAuthorizationDecision` implementation; `/bff/admin` keeps its own stronger
+  sample's `IAuthorizationDecision` implementation; `/bff/admin` keeps its own stronger
   per-request decision below.
 - Every management request re-confirms the identity live: one Discovery-resolved UserInfo call
   carrying the stored access token, whose successful JSON object must contain exactly one string

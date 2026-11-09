@@ -64,11 +64,11 @@ void ConfigureKestrel(WebApplicationBuilder target)
 // A malformed one is, because ignoring a bootstrap someone did write is indistinguishable from
 // silently pointing the service at the wrong database. The path is resolved once so the banner,
 // the pre-composition store, and the DI-registered store all agree.
-var bootstrapFilePath = SignaCoreBootstrapStore.ResolveFilePath(builder.Configuration);
+var bootstrapFilePath = BootstrapStore.ResolveFilePath(builder.Configuration);
 BootstrapConfiguration? bootstrap;
 try
 {
-    bootstrap = SignaCoreBootstrapStore.TryLoad(builder.Configuration, builder.Environment);
+    bootstrap = BootstrapStore.TryLoad(builder.Configuration, builder.Environment);
 }
 catch (Exception exception)
 {
@@ -92,7 +92,7 @@ if (bootstrap is null)
     {
         // Another process published a bootstrap file between the load above and the reissue. This
         // process continues as the configured instance it now is.
-        bootstrap = SignaCoreBootstrapStore.TryLoad(builder.Configuration, builder.Environment);
+        bootstrap = BootstrapStore.TryLoad(builder.Configuration, builder.Environment);
         if (bootstrap is null)
         {
             Console.Error.WriteLine("SignaCore failed to start.");
@@ -118,12 +118,12 @@ if (bootstrap is null)
         // instance over the same resolved path. The mode host has no current master key, so the
         // key-replacement refusal step of the validator is inert here.
         builder.Services.AddSingleton<IBootstrapCandidateValidator>(
-            _ => new SignaCoreBootstrapCandidateValidator(
-                SignaCoreBootstrapStore.CreateProviderRegistry(),
+            _ => new BootstrapCandidateValidator(
+                BootstrapStore.CreateProviderRegistry(),
                 currentMasterKey: null));
         builder.Services.AddSingleton<BootstrapConfigurationManager>(provider =>
             new BootstrapConfigurationManager(
-                SignaCoreBootstrapStore.Create(builder.Configuration),
+                BootstrapStore.Create(builder.Configuration),
                 provider.GetRequiredService<InstanceId>(),
                 provider.GetRequiredService<IBootstrapCandidateValidator>()!));
 
@@ -277,7 +277,7 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
     // the (not yet existing) configuration snapshot is composed, which is precisely why setup
     // cannot start a half-configured identity service. The capability set matches the shared
     // entry's startable baseline; a missing capability fails the host start.
-    var setupDatabaseOptions = SignaCoreBootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database);
+    var setupDatabaseOptions = BootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database);
     var setupMantle = builder.Services.AddSignaCoreServiceMantle(bootstrapFilePath);
     setupMantle.AddSensitiveHeaders();
     setupMantle.AddSecurityResponseHeaders();
@@ -420,12 +420,12 @@ await builder.Services.AddConsulDiscoveryLifecycleAsync(
 // default validator, which does not enforce the master-key rules of a running host. The manager
 // owns a store instance over the same resolved path, exactly like the mode host's registration.
 builder.Services.AddSingleton<IBootstrapCandidateValidator>(
-    _ => new SignaCoreBootstrapCandidateValidator(
-        SignaCoreBootstrapStore.CreateProviderRegistry(),
+    _ => new BootstrapCandidateValidator(
+        BootstrapStore.CreateProviderRegistry(),
         currentMasterKey: bootstrapResult.Bootstrap.MasterKey));
 builder.Services.AddSingleton<BootstrapConfigurationManager>(provider =>
     new BootstrapConfigurationManager(
-        SignaCoreBootstrapStore.Create(builder.Configuration),
+        BootstrapStore.Create(builder.Configuration),
         provider.GetRequiredService<InstanceId>(),
         provider.GetRequiredService<IBootstrapCandidateValidator>()!));
 
@@ -443,12 +443,12 @@ var otlpEndpoint = mantle.AddSignaCoreTelemetry(bootstrapResult.SharedSnapshot!)
 var (jwtOptions, dbProvider) = builder.Services.AddIdentityInfrastructure(
     builder.Configuration,
     builder.Environment,
-    SignaCoreBootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database),
+    BootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database),
     bootstrapResult.MasterKeyProvider);
 
 // ---- Shared ServiceMantle management session (fixed cookie scheme, phase gate, session entries) ----
 mantle.AddSignaCoreManagementSession(
-    SignaCoreBootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database));
+    BootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database));
 
 // The shared setup entry is mapped on this host too: with the installation Completed it answers
 // the status read with "completed" and refuses every completion with the fixed 409 without
@@ -477,7 +477,7 @@ builder.Services.AddSingleton(bootstrapResult.CurrentSnapshotAccessor);
 
 // ---- Shared ServiceMantle setting stack (the runtime snapshot authority since #548) ----
 builder.Services.AddSignaCoreSharedSettings(
-    SignaCoreBootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database),
+    BootstrapStore.ToDatabaseOptions(bootstrapResult.Bootstrap.Database),
     builder.Environment.IsDevelopment());
 
 // The authenticated bootstrap editor needs the root secret verbatim so a database change can keep
@@ -492,8 +492,8 @@ var app = builder.Build();
 app.Services.GetRequiredService<ServiceMantle.Diagnostics.ServiceMetrics>()
     .SetPhase(ServiceMantle.Installation.ServiceStartupPhase.Completed);
 
-SignaCoreLogging.WriteLokiWarning(app.Logger, lokiSettings!);
-SignaCoreTelemetry.WriteOtlpWarning(app.Logger, otlpEndpoint);
+LoggingComposition.WriteLokiWarning(app.Logger, lokiSettings!);
+TelemetryComposition.WriteOtlpWarning(app.Logger, otlpEndpoint);
 app.Logger.LogInformation("Service endpoints configured: HTTP={HttpPort}", httpPort);
 app.Logger.LogInformation(
     "Database: {Provider} at {Endpoint}",

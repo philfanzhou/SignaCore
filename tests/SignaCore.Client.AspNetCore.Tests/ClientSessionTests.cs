@@ -22,12 +22,12 @@ public sealed class ClientSessionTests
     private static readonly string FixedRequiresReauthenticationBody =
         """{"authenticated":false,"requiresReauthentication":true,"displayName":null,"authorization":null}""";
 
-    private sealed class DenyAllDecision : ISignaCoreAuthorizationDecision
+    private sealed class DenyAllDecision : IAuthorizationDecision
     {
-        public ValueTask<SignaCoreAuthorizationDecisionResult> DecideAsync(
+        public ValueTask<AuthorizationDecisionResult> DecideAsync(
             ClaimsPrincipal subject,
             CancellationToken cancellationToken) =>
-            ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Denied);
+            ValueTask.FromResult(AuthorizationDecisionResult.Denied);
     }
 
     private static async Task<(WebApplicationFactory<ConsumerApp.Program> Consumer, CrossServerBrowser Browser)>
@@ -118,7 +118,7 @@ public sealed class ClientSessionTests
         var (consumer, firstBrowser) = await CreateAsync(
             authority,
             configure: services => services
-                .PostConfigure<SignaCoreHostedLoginOptions>(options => options.TicketCapacity = 1));
+                .PostConfigure<HostedLoginOptions>(options => options.TicketCapacity = 1));
         await using var _ = consumer;
         using var __ = firstBrowser;
 
@@ -172,7 +172,7 @@ public sealed class ClientSessionTests
         var (consumer, browser) = await CreateAsync(
             authority,
             configure: services => services
-                .PostConfigure<SignaCoreHostedLoginOptions>(
+                .PostConfigure<HostedLoginOptions>(
                     options => options.AuthorizationDecision = new DenyAllDecision()));
         await using var _ = consumer;
         using var __ = browser;
@@ -203,7 +203,7 @@ public sealed class ClientSessionTests
         var (consumer, browser) = await CreateAsync(
             authority,
             configure: services => services
-                .PostConfigure<SignaCoreHostedLoginOptions>(options =>
+                .PostConfigure<HostedLoginOptions>(options =>
                     options.SchemeSelector = context =>
                         context.Request.Path.StartsWithSegments("/api") ? "TestBearer" : null));
         await using var _ = consumer;

@@ -144,7 +144,7 @@ public sealed class ServiceMantleLoggingTests : IAsyncLifetime
     [Fact]
     public void HostAssemblyAndProject_CarryNoLocalLoggingInfrastructure()
     {
-        var hostAssembly = typeof(SignaCoreLogging).Assembly;
+        var hostAssembly = typeof(LoggingComposition).Assembly;
         Assert.Empty(LocalLoggingInfrastructure(hostAssembly));
         Assert.DoesNotContain(
             hostAssembly.GetReferencedAssemblies(),

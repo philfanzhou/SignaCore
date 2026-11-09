@@ -59,11 +59,11 @@ internal static class InstallationStartup
 
         var masterKeyProvider = new BootstrapMasterKeyProvider(bootstrap.MasterKey);
         var currentSnapshotAccessor = new ServiceSettingCurrentSnapshotAccessor();
-        var databaseOptions = SignaCoreBootstrapStore.ToDatabaseOptions(bootstrap.Database);
+        var databaseOptions = BootstrapStore.ToDatabaseOptions(bootstrap.Database);
 
         await using var db = CreateDbContext(databaseOptions);
 
-        var executor = migrationExecutor ?? new SignaCoreMigrationExecutor(db, databaseOptions);
+        var executor = migrationExecutor ?? new MigrationExecutor(db, databaseOptions);
         await using var startup = StartupDatabaseComposition.Create(databaseOptions, executor);
         await startup.PrepareAsync(cancellationToken);
         await using (await StartupDatabase.AcquireInitializationLockAsync(databaseOptions, cancellationToken))
@@ -467,7 +467,7 @@ internal static class InstallationStartup
         BootstrapConfiguration bootstrap;
         try
         {
-            bootstrap = SignaCoreBootstrapStore.Load(configuration, environment);
+            bootstrap = BootstrapStore.Load(configuration, environment);
         }
         catch (SignaCore.Host.Bootstrap.BootstrapException exception)
         {
@@ -475,7 +475,7 @@ internal static class InstallationStartup
             return 1;
         }
 
-        var databaseOptions = SignaCoreBootstrapStore.ToDatabaseOptions(bootstrap.Database);
+        var databaseOptions = BootstrapStore.ToDatabaseOptions(bootstrap.Database);
         await using var db = CreateDbContext(databaseOptions);
 
         await using var initializationLock =

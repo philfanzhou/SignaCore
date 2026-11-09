@@ -26,7 +26,7 @@ public sealed class ClientHttpCookieProfileTests
     private const string ConsumerOrigin = "http://192.168.55.10:5020";
     private const string RedirectUri = ConsumerOrigin + "/auth/callback";
     private const string PostLogoutRedirectUri = ConsumerOrigin + "/auth/logout/return";
-    private const string SessionName = SignaCoreHostedLoginDefaults.SessionCookieName;
+    private const string SessionName = HostedLoginDefaults.SessionCookieName;
     private const string BindingPrefix = SessionName + "-login-binding.";
     private const string LogoutReturnName = SessionName + "-logout-return";
 
@@ -67,11 +67,11 @@ public sealed class ClientHttpCookieProfileTests
         Assert.Contains("samesite=lax", binding, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("path=/auth/callback", binding, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(
-            SignaCoreHostedLoginDefaults.HostCookiePrefix,
+            HostedLoginDefaults.HostCookiePrefix,
             binding[..binding.IndexOf('=')],
             StringComparison.Ordinal);
         Assert.DoesNotContain(
-            SignaCoreHostedLoginDefaults.SecureCookiePrefix,
+            HostedLoginDefaults.SecureCookiePrefix,
             binding[..binding.IndexOf('=')],
             StringComparison.Ordinal);
 
@@ -157,7 +157,7 @@ public sealed class ClientHttpCookieProfileTests
         var token = await FetchCsrfTokenAsync(browser);
         using var logout = new HttpRequestMessage(
             HttpMethod.Post, new Uri(browser.ConsumerBase, "/auth/logout"));
-        logout.Headers.TryAddWithoutValidation(SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, token);
+        logout.Headers.TryAddWithoutValidation(HostedLoginDefaults.AntiforgeryHeaderName, token);
         using var logoutResponse = await browser.SendOnConsumerAsync(
             logout, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Found, logoutResponse.StatusCode);
@@ -214,6 +214,6 @@ public sealed class ClientHttpCookieProfileTests
             text += Environment.NewLine + inner.Message;
         }
 
-        Assert.Contains("SignaCoreHostedLoginOptions.Authority", text, StringComparison.Ordinal);
+        Assert.Contains("HostedLoginOptions.Authority", text, StringComparison.Ordinal);
     }
 }

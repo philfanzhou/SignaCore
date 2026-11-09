@@ -26,7 +26,7 @@ namespace SignaCore.Host;
 /// (<c>UseServiceMantlePipeline</c>); the normal host additionally composes the
 /// shared management session capabilities. The installation state, the business database, and
 /// authentication remain owned by SignaCore. Logging is the ServiceMantle Serilog pipeline
-/// composed by <see cref="Logging.SignaCoreLogging"/>; the ServiceMantle request log scope adds the
+/// composed by <see cref="Logging.LoggingComposition"/>; the ServiceMantle request log scope adds the
 /// ServiceName, ServiceVersion, and InstanceId fields.
 /// </remarks>
 internal static class ServiceMantleComposition
@@ -146,7 +146,7 @@ internal static class ServiceMantleComposition
         // Setup and default updates enforce optional telemetry rules. Management recovery builds
         // a per-call registry from its transaction baseline; startup and query loads are tolerant.
         services.AddSingleton<IServiceSettingCompositeValidator>(_ =>
-            new SignaCoreSettingCompositeValidator(isDevelopment, validateManagementUpdateRules: true));
+            new SettingCompositeValidator(isDevelopment, validateManagementUpdateRules: true));
         services.AddSingleton<IServiceSettingRootKeySource, MasterKeyRootKeySource>();
         services.TryAddSingleton(_ => SharedSettingComposition.CreateRegistry(
             isDevelopment, validateManagementUpdateRules: true));

@@ -1,5 +1,4 @@
 import { computed, reactive, ref } from "vue";
-import { ElMessageBox } from "element-plus";
 import { adminClient } from "../../services/apiClient";
 import {
   getErrorMessage,
@@ -232,34 +231,27 @@ async function loadUserSessions() {
 }
 
 async function revokeUserSession(session: AdminIdentitySessionItem) {
-  if (!selectedUser.value) return;
-  try {
-    await ElMessageBox.confirm(
-      `确认撤销该身份会话？该会话绑定的浏览器登录将立即失效。`,
-      "撤销身份会话",
-      {
-        confirmButtonText: "撤销",
-        cancelButtonText: "取消",
-        type: "warning",
-      },
-    );
-  } catch {
-    return;
-  }
-
-  userSessionRevokingId.value = session.id;
-  try {
-    const result = await adminClient.revokeIdentitySession(
-      selectedUser.value.userId,
-      session.id,
-    );
-    notify(result.message || "身份会话已撤销");
-    await loadUserSessions();
-  } catch (error) {
-    handleApiError("撤销身份会话失败", error);
-  } finally {
-    userSessionRevokingId.value = "";
-  }
+  const target = selectedUser.value;
+  if (!target) return;
+  await confirmDangerAction(
+    "确认撤销该身份会话？该会话绑定的浏览器登录将立即失效。",
+    "撤销身份会话",
+    "撤销",
+    "撤销身份会话失败",
+    async () => {
+      userSessionRevokingId.value = session.id;
+      try {
+        const result = await adminClient.revokeIdentitySession(
+          target.userId,
+          session.id,
+        );
+        notify(result.message || "身份会话已撤销");
+        await loadUserSessions();
+      } finally {
+        userSessionRevokingId.value = "";
+      }
+    },
+  );
 }
 
 async function updateUserMeta(field: "nickname" | "remark") {

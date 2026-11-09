@@ -39,7 +39,7 @@ public sealed class ClientRealHostSignInTests(SignaCoreHostFixture fixture)
             SignaCoreHostFixture.RedirectUri,
             authorityHandler,
             loggerProvider: capture,
-            configureTestServices: services => services.PostConfigure<SignaCoreHostedLoginOptions>(options =>
+            configureTestServices: services => services.PostConfigure<HostedLoginOptions>(options =>
                 options.PreSignInAuthorizationDecision = useGate ? new RealHostDecision() : null));
         using var browser = ConsumerAppTestServer.CreateBrowser(fixture.Host, consumer);
 
@@ -91,7 +91,7 @@ public sealed class ClientRealHostSignInTests(SignaCoreHostFixture fixture)
         var setCookie = Assert.Single(
             callbackResponse.Headers.GetValues("Set-Cookie"),
             value => value.StartsWith(
-                SignaCoreHostedLoginDefaults.SessionCookieName + "=",
+                HostedLoginDefaults.SessionCookieName + "=",
                 StringComparison.Ordinal));
         Assert.Contains("httponly", setCookie, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("secure", setCookie, StringComparison.OrdinalIgnoreCase);
@@ -222,15 +222,15 @@ public sealed class ClientRealHostSignInTests(SignaCoreHostFixture fixture)
             query => Assert.False(query.Contains("secret", StringComparison.OrdinalIgnoreCase)));
     }
 
-    private sealed class RealHostDecision : ISignaCorePreSignInAuthorizationDecision
+    private sealed class RealHostDecision : IPreSignInAuthorizationDecision
     {
-        public ValueTask<SignaCoreAuthorizationDecisionResult> DecideAsync(
-            SignaCorePreSignInAuthorizationContext context, CancellationToken cancellationToken)
+        public ValueTask<AuthorizationDecisionResult> DecideAsync(
+            PreSignInAuthorizationContext context, CancellationToken cancellationToken)
         {
             Assert.Equal(SignaCoreHostFixture.Authority, context.Issuer);
             Assert.Equal(context.Subject, context.AccessTokenPrincipal.FindFirst("sub")?.Value);
             Assert.Equal(context.Subject, context.IdTokenPrincipal.FindFirst("sub")?.Value);
-            return ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Allowed);
+            return ValueTask.FromResult(AuthorizationDecisionResult.Allowed);
         }
     }
 

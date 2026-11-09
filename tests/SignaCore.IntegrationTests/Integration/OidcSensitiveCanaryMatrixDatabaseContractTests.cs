@@ -269,7 +269,7 @@ public sealed partial class OidcSensitiveCanaryMatrixDatabaseContractTests
         var services = host.Factory.Services;
         Assert.Empty(LoggingPipelineViolations(services));
         Assert.True(services.GetRequiredService<SensitiveHeaderRegistry>().IsSensitive("X-Admin-AppSecret"));
-        Assert.Contains(services.GetServices<SignaCoreTelemetry.MeterSelection>(), selection => selection.MeterNames.Contains("SignaCore"));
+        Assert.Contains(services.GetServices<TelemetryComposition.MeterSelection>(), selection => selection.MeterNames.Contains("SignaCore"));
         var endpoint = Assert.Single(services.GetServices<EndpointDataSource>().SelectMany(source => source.Endpoints)
             .OfType<RouteEndpoint>(), endpoint => endpoint.RoutePattern.RawText == "/metrics");
         Assert.Contains(endpoint.Metadata, item => item.GetType().FullName == "ServiceMantle.Diagnostics.Export.Prometheus.PrometheusEndpointMetadata");

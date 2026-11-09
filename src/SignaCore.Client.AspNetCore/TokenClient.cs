@@ -60,7 +60,7 @@ internal enum TokenExchangeFailure
 /// </summary>
 internal sealed class TokenClient(
     System.Net.Http.IHttpClientFactory httpClientFactory,
-    IOptionsMonitor<SignaCoreHostedLoginOptions> options)
+    IOptionsMonitor<HostedLoginOptions> options)
 {
     internal async Task<TokenExchangeResult> RedeemCodeAsync(
         AuthorityConfiguration configuration,
@@ -69,7 +69,7 @@ internal sealed class TokenClient(
         CancellationToken cancellationToken)
     {
         var current = options.CurrentValue;
-        using var client = httpClientFactory.CreateClient(SignaCoreHostedLoginDefaults.HttpClientName);
+        using var client = httpClientFactory.CreateClient(HostedLoginDefaults.HttpClientName);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, configuration.TokenEndpoint)
         {

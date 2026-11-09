@@ -153,7 +153,7 @@ public class SettingCandidateValidationTests
 
         Assert.Contains(errors, error =>
             error.Key == "jwt.issuer" &&
-            error.ErrorCode == SignaCoreSettingCompositeValidator.IssuerMismatchCode);
+            error.ErrorCode == SettingCompositeValidator.IssuerMismatchCode);
     }
 
     [Theory]
@@ -235,7 +235,7 @@ public class SettingCandidateValidationTests
 
         // The binder message is not surfaced: the closed runtime code carries no values.
         Assert.Contains(errors, error =>
-            error.ErrorCode == SignaCoreSettingCompositeValidator.RuntimeInvalidCode);
+            error.ErrorCode == SettingCompositeValidator.RuntimeInvalidCode);
     }
 
     [Fact]
@@ -247,7 +247,7 @@ public class SettingCandidateValidationTests
         var errors = SharedSettingComposition.ValidateCompleteCandidate(values);
 
         Assert.Contains(errors, error =>
-            error.ErrorCode == SignaCoreSettingCompositeValidator.RuntimeInvalidCode);
+            error.ErrorCode == SettingCompositeValidator.RuntimeInvalidCode);
     }
 
     [Fact]
@@ -260,7 +260,7 @@ public class SettingCandidateValidationTests
 
         Assert.Contains(errors, error =>
             error.Key == "reverse_proxy.known_proxies" &&
-            error.ErrorCode == SignaCoreSettingCompositeValidator.RuntimeInvalidCode);
+            error.ErrorCode == SettingCompositeValidator.RuntimeInvalidCode);
     }
 
     private static Dictionary<string, string> CompleteSnapshot()

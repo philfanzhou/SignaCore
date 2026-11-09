@@ -84,7 +84,7 @@ internal sealed record ProductSettingDefinition(
 /// <see cref="JsonRootKindSettingConstraint"/>, the SMS bypass allow-list additionally validates
 /// each entry through <see cref="SmsBypassPhonesSettingConstraint"/>, and the Consul health scheme
 /// is pinned to its two literals through <see cref="HealthSchemeSettingConstraint"/>. Cross-key rules stay in
-/// <see cref="SignaCoreSettingCompositeValidator"/>.
+/// <see cref="SettingCompositeValidator"/>.
 /// </para>
 /// </remarks>
 internal sealed class ServiceSettingDefinitions : IServiceSettingDefinitionProvider

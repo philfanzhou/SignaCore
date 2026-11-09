@@ -273,10 +273,10 @@ public sealed partial class EntityFrameworkTicketStoreTests
     public void TheModelBuilder_RegistersTheExpectedProviderNeutralShape()
     {
         using var context = TicketStoreDatabase.CreateSchemaOnlyContext();
-        var entityType = context.Model.FindEntityType(typeof(SignaCoreSessionTicketEntity));
+        var entityType = context.Model.FindEntityType(typeof(SessionTicketEntity));
         Assert.NotNull(entityType);
         Assert.Equal(
-            SignaCoreTicketStoreModelBuilderExtensions.TableName,
+            TicketStoreModelBuilderExtensions.TableName,
             entityType!.GetTableName());
         Assert.Equal("KeyDigest", entityType.FindPrimaryKey()!.Properties.Single().Name);
         Assert.Contains(
@@ -285,7 +285,7 @@ public sealed partial class EntityFrameworkTicketStoreTests
         // The digest column is bounded so both providers see the same shape.
         Assert.Equal(
             64,
-            entityType.FindProperty(nameof(SignaCoreSessionTicketEntity.KeyDigest))!
+            entityType.FindProperty(nameof(SessionTicketEntity.KeyDigest))!
                 .GetMaxLength());
     }
 
@@ -298,7 +298,7 @@ public sealed partial class EntityFrameworkTicketStoreTests
         return key;
     }
 
-    private static SignaCoreSessionTicket NewTicket(string subject) =>
+    private static SessionTicket NewTicket(string subject) =>
         new(
             new ClaimsPrincipal(new ClaimsIdentity(
                 new[]
@@ -316,14 +316,14 @@ public sealed partial class EntityFrameworkTicketStoreTests
     private static async Task<int> CountRowsAsync(TicketStoreDatabase database)
     {
         await using var context = database.CreateContext();
-        return await context.Set<SignaCoreSessionTicketEntity>()
+        return await context.Set<SessionTicketEntity>()
             .CountAsync(TestContext.Current.CancellationToken);
     }
 
     private static async Task CorruptPayloadAsync(TicketStoreDatabase database, string key)
     {
         await using var context = database.CreateContext();
-        var entity = await context.Set<SignaCoreSessionTicketEntity>()
+        var entity = await context.Set<SessionTicketEntity>()
             .SingleAsync(
                 ticket => ticket.KeyDigest == Convert.ToBase64String(
                     System.Security.Cryptography.SHA256.HashData(

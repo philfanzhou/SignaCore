@@ -10,7 +10,7 @@ namespace SignaCore.ReferenceBff;
 /// outcomes; this writer defines their presentation, exactly as its response-format extension
 /// point intends.
 /// </summary>
-internal sealed class BffResponseWriter : ISignaCoreHostedLoginResponseWriter
+internal sealed class BffResponseWriter : IHostedLoginResponseWriter
 {
     private BffResponseWriter()
     {
@@ -22,7 +22,7 @@ internal sealed class BffResponseWriter : ISignaCoreHostedLoginResponseWriter
     /// <inheritdoc />
     public Task WriteSignInFailureAsync(
         HttpContext context,
-        SignaCoreSignInReason reason,
+        SignInReason reason,
         CancellationToken cancellationToken)
     {
         context.Response.Redirect("/error?reason=" + ReasonText(reason));
@@ -32,7 +32,7 @@ internal sealed class BffResponseWriter : ISignaCoreHostedLoginResponseWriter
     /// <inheritdoc />
     public Task WriteFailurePageAsync(
         HttpContext context,
-        SignaCoreSignInReason? reason,
+        SignInReason? reason,
         CancellationToken cancellationToken)
     {
         // The sample routes every failure presentation through its own bounded /error page; the
@@ -45,32 +45,32 @@ internal sealed class BffResponseWriter : ISignaCoreHostedLoginResponseWriter
     /// <inheritdoc />
     public Task WriteSessionStatusAsync(
         HttpContext context,
-        SignaCoreSessionStatus status,
+        SessionStatus status,
         CancellationToken cancellationToken) =>
         // The package's fixed JSON session body already carries the status fields and no token;
         // the sample keeps it verbatim.
-        SignaCoreDefaultResponseWriter.Instance.WriteSessionStatusAsync(context, status, cancellationToken);
+        DefaultHostedLoginResponseWriter.Instance.WriteSessionStatusAsync(context, status, cancellationToken);
 
     /// <summary>
     /// The closed reason vocabulary the package defines; the sample re-declares the bounded
     /// strings because its own <c>/error</c> page renders them. Every member of
-    /// <see cref="SignaCoreSignInReason"/> must appear here — the switch is a mirror, not a
+    /// <see cref="SignInReason"/> must appear here — the switch is a mirror, not a
     /// second source of truth.
     /// </summary>
-    internal static string ReasonText(SignaCoreSignInReason reason) => reason switch
+    internal static string ReasonText(SignInReason reason) => reason switch
     {
-        SignaCoreSignInReason.AuthorityUnreachable => "authority_unreachable",
-        SignaCoreSignInReason.InvalidReturnUrl => "invalid_return_url",
-        SignaCoreSignInReason.InvalidResponse => "invalid_response",
-        SignaCoreSignInReason.AccessDenied => "access_denied",
-        SignaCoreSignInReason.UserCanceled => "user_canceled",
-        SignaCoreSignInReason.PreSignInDenied => "pre_sign_in_denied",
-        SignaCoreSignInReason.StateMismatch => "state_mismatch",
-        SignaCoreSignInReason.IssuerMismatch => "issuer_mismatch",
-        SignaCoreSignInReason.TokenExchangeFailed => "token_exchange_failed",
-        SignaCoreSignInReason.InvalidToken => "invalid_token",
-        SignaCoreSignInReason.SessionStoreFull => "session_store_full",
-        SignaCoreSignInReason.RequiresReauthentication => "requires_reauthentication",
+        SignInReason.AuthorityUnreachable => "authority_unreachable",
+        SignInReason.InvalidReturnUrl => "invalid_return_url",
+        SignInReason.InvalidResponse => "invalid_response",
+        SignInReason.AccessDenied => "access_denied",
+        SignInReason.UserCanceled => "user_canceled",
+        SignInReason.PreSignInDenied => "pre_sign_in_denied",
+        SignInReason.StateMismatch => "state_mismatch",
+        SignInReason.IssuerMismatch => "issuer_mismatch",
+        SignInReason.TokenExchangeFailed => "token_exchange_failed",
+        SignInReason.InvalidToken => "invalid_token",
+        SignInReason.SessionStoreFull => "session_store_full",
+        SignInReason.RequiresReauthentication => "requires_reauthentication",
         _ => "invalid_response"
     };
 }

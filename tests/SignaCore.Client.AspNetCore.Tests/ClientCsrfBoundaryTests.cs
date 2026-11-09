@@ -116,7 +116,7 @@ public sealed class ClientCsrfBoundaryTests
         using var write = new HttpRequestMessage(
             HttpMethod.Post, new Uri(browser.ConsumerBase, "/dashboard"));
         write.Headers.TryAddWithoutValidation(
-            SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, "a-token-that-was-never-issued");
+            HostedLoginDefaults.AntiforgeryHeaderName, "a-token-that-was-never-issued");
         using var response = await browser.SendOnConsumerAsync(
             write, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -134,7 +134,7 @@ public sealed class ClientCsrfBoundaryTests
         using var write = new HttpRequestMessage(
             HttpMethod.Post, new Uri(browser.ConsumerBase, "/dashboard"));
         write.Headers.TryAddWithoutValidation(
-            SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, token);
+            HostedLoginDefaults.AntiforgeryHeaderName, token);
         using var response = await browser.SendOnConsumerAsync(
             write, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -152,7 +152,7 @@ public sealed class ClientCsrfBoundaryTests
             "client-pack-test-secret",
             SignaCoreHostFixture.RedirectUri,
             authority.Server.CreateHandler(),
-            configureTestServices: services => services.PostConfigure<SignaCoreHostedLoginOptions>(
+            configureTestServices: services => services.PostConfigure<HostedLoginOptions>(
                 options => options.SchemeSelector = context =>
                     context.Request.Path.StartsWithSegments("/api") ? "TestBearer" : null));
         using var browser = ConsumerAppTestServer.CreateBrowserOverAuthority(
@@ -189,8 +189,8 @@ public sealed class ClientCsrfBoundaryTests
             configureTestServices: services => services.PostConfigure<AuthenticationOptions>(
                 options =>
                 {
-                    options.DefaultScheme = SignaCoreHostedLoginDefaults.AuthenticationScheme;
-                    options.DefaultChallengeScheme = SignaCoreHostedLoginDefaults.AuthenticationScheme;
+                    options.DefaultScheme = HostedLoginDefaults.AuthenticationScheme;
+                    options.DefaultChallengeScheme = HostedLoginDefaults.AuthenticationScheme;
                 }));
         var browser = ConsumerAppTestServer.CreateBrowserOverAuthority(
             consumer, authority.Server.CreateHandler(), new Uri(FakeIdentityProvider.BaseAddress));
@@ -213,14 +213,14 @@ public sealed class ClientCsrfBoundaryTests
         using var write = new HttpRequestMessage(
             HttpMethod.Post, new Uri(browser.ConsumerBase, "/dashboard"));
         write.Headers.TryAddWithoutValidation(
-            SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, token);
+            HostedLoginDefaults.AntiforgeryHeaderName, token);
         using var response = await browser.SendOnConsumerAsync(write, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         using var logout = new HttpRequestMessage(
             HttpMethod.Post, new Uri(browser.ConsumerBase, "/auth/logout"));
         logout.Headers.TryAddWithoutValidation(
-            SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, token);
+            HostedLoginDefaults.AntiforgeryHeaderName, token);
         using var logoutResponse = await browser.SendOnConsumerAsync(
             logout, TestContext.Current.CancellationToken);
         Assert.NotEqual(HttpStatusCode.BadRequest, logoutResponse.StatusCode);
@@ -245,7 +245,7 @@ public sealed class ClientCsrfBoundaryTests
             if (wrong is not null)
             {
                 logout.Headers.TryAddWithoutValidation(
-                    SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, wrong);
+                    HostedLoginDefaults.AntiforgeryHeaderName, wrong);
             }
 
             using var response = await browser.SendOnConsumerAsync(
@@ -289,7 +289,7 @@ public sealed class ClientCsrfBoundaryTests
         using var logout = new HttpRequestMessage(
             HttpMethod.Post, new Uri(browser.ConsumerBase, "/auth/logout"));
         logout.Headers.TryAddWithoutValidation(
-            SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, foreignToken);
+            HostedLoginDefaults.AntiforgeryHeaderName, foreignToken);
         using var response = await browser.SendOnConsumerAsync(
             logout, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);

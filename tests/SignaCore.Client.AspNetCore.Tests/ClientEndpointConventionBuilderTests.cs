@@ -14,7 +14,7 @@ using Xunit;
 namespace SignaCore.Client.AspNetCore.Tests;
 
 /// <summary>
-/// <see cref="SignaCoreHostedLoginEndpointExtensions.MapSignaCoreHostedLogin"/> returns a
+/// <see cref="HostedLoginEndpointExtensions.MapSignaCoreHostedLogin"/> returns a
 /// convention builder whose conventions reach all seven endpoints of the mapping at group
 /// granularity: custom metadata is visible on every endpoint, <c>RequireRateLimiting</c> on the
 /// group throttles the surface (429), ignoring the return value maps exactly as before, and the
@@ -30,7 +30,7 @@ public sealed class ClientEndpointConventionBuilderTests
     }
 
     private static (WebApplication App, Capture Captured) CreateApp(
-        Action<SignaCoreHostedLoginOptions>? configure = null,
+        Action<HostedLoginOptions>? configure = null,
         Action<IEndpointConventionBuilder>? useGroup = null,
         Action<IServiceCollection>? configureServices = null,
         bool useRateLimiter = false)

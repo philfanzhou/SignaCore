@@ -31,7 +31,7 @@ public static class ReferenceBffServiceMantle
 /// lifetime (and, for a first installation, the shared initialization save contract). Runtime
 /// wiring of the context itself is a later slice; tests provide the context explicitly.
 /// </remarks>
-public static class ReferenceBffServiceMantleServiceCollectionExtensions
+public static class ServiceMantleStoreExtensions
 {
     /// <summary>
     /// Registers <see cref="IServiceInstallationStore"/> and <see cref="IManagementAuditWriter"/> as

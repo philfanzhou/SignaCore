@@ -490,7 +490,7 @@ public sealed partial class ReferenceBffTokenSessionTests(SignaCoreHostFixture f
         return (response, body);
     }
 
-    private static SignaCoreSessionTicket CreateTicket(DateTimeOffset expiresUtc) =>
+    private static SessionTicket CreateTicket(DateTimeOffset expiresUtc) =>
         new(
             new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "token-session-test")], "SignaCoreHostedLogin")),
             DateTimeOffset.UtcNow,

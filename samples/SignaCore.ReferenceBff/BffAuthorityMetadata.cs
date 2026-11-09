@@ -15,7 +15,7 @@ namespace SignaCore.ReferenceBff;
 /// </summary>
 internal sealed class BffAuthorityMetadataReader(
     System.Net.Http.IHttpClientFactory httpClientFactory,
-    IOptionsMonitor<SignaCoreHostedLoginOptions> loginOptions)
+    IOptionsMonitor<HostedLoginOptions> loginOptions)
 {
     private const string DiscoveryDocumentPath = "/.well-known/openid-configuration";
 

@@ -12,7 +12,7 @@ namespace SignaCore.Tests.Host.Bootstrap;
 /// error code, a missing target is prepared explicitly once, and only an internal failure reports
 /// the shared 503 classification.
 /// </summary>
-public sealed class SignaCoreBootstrapCandidateValidatorTests : IAsyncLifetime
+public sealed class BootstrapCandidateValidatorTests : IAsyncLifetime
 {
     private string _directory = string.Empty;
 
@@ -48,8 +48,8 @@ public sealed class SignaCoreBootstrapCandidateValidatorTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
-    private static SignaCoreBootstrapCandidateValidator CreateValidator(string? currentMasterKey = null) =>
-        new(SignaCoreBootstrapStore.CreateProviderRegistry(), currentMasterKey);
+    private static BootstrapCandidateValidator CreateValidator(string? currentMasterKey = null) =>
+        new(BootstrapStore.CreateProviderRegistry(), currentMasterKey);
 
     private static BootstrapConfiguration Candidate(
         string provider = "SQLite",
@@ -79,7 +79,7 @@ public sealed class SignaCoreBootstrapCandidateValidatorTests : IAsyncLifetime
         // requires what its own reload path requires, so the net stays independent of the shared
         // providers' drift: a PostgreSQL target without a host parses and names a database yet
         // could never be loaded here after the restart.
-        var local = SignaCoreBootstrapCandidateValidator.ValidateLocalShape(new DatabaseOptions
+        var local = BootstrapCandidateValidator.ValidateLocalShape(new DatabaseOptions
         {
             Provider = "PostgreSQL",
             ServerVersion = "15",
@@ -90,7 +90,7 @@ public sealed class SignaCoreBootstrapCandidateValidatorTests : IAsyncLifetime
         Assert.False(local!.IsValid);
         Assert.Equal("signacore.bootstrap.database_invalid", local.ErrorCode);
 
-        Assert.Null(SignaCoreBootstrapCandidateValidator.ValidateLocalShape(new DatabaseOptions
+        Assert.Null(BootstrapCandidateValidator.ValidateLocalShape(new DatabaseOptions
         {
             Provider = "PostgreSQL",
             ServerVersion = "15",
@@ -144,8 +144,8 @@ public sealed class SignaCoreBootstrapCandidateValidatorTests : IAsyncLifetime
             InstallationId: null,
             Endpoint: "redacted",
             FailureReason: "probe");
-        var validator = new SignaCoreBootstrapCandidateValidator(
-            SignaCoreBootstrapStore.CreateProviderRegistry(),
+        var validator = new BootstrapCandidateValidator(
+            BootstrapStore.CreateProviderRegistry(),
             currentMasterKey: null,
             inspection: (_, _, _) => Task.FromResult(inspection));
 
@@ -194,7 +194,7 @@ public sealed class SignaCoreBootstrapCandidateValidatorTests : IAsyncLifetime
         // first: a shape this process could not reload is refused under the local code, and the
         // missing target is never prepared for it. Without the early check the same candidate
         // would keep the shared database.target_not_found after a failed preparation attempt.
-        var validator = new SignaCoreBootstrapCandidateValidator(
+        var validator = new BootstrapCandidateValidator(
             new BootstrapDatabaseProviderRegistry([new TargetNotFoundProvider("SQLite")]),
             currentMasterKey: null);
         var result = await validator.ValidateAsync(
@@ -214,7 +214,7 @@ public sealed class SignaCoreBootstrapCandidateValidatorTests : IAsyncLifetime
         // The same ordering proof on the key rule: with the shared checks reporting a missing
         // target, a running host that would swap its key is refused under the SignaCore code and
         // the preparation never creates the target.
-        var validator = new SignaCoreBootstrapCandidateValidator(
+        var validator = new BootstrapCandidateValidator(
             new BootstrapDatabaseProviderRegistry([new TargetNotFoundProvider("SQLite")]),
             currentMasterKey: "the-running-key");
         var result = await validator.ValidateAsync(
@@ -271,8 +271,8 @@ public sealed class SignaCoreBootstrapCandidateValidatorTests : IAsyncLifetime
     [Fact]
     public async Task InternalInspectionFailure_IsTheSharedValidationFailedCode()
     {
-        var validator = new SignaCoreBootstrapCandidateValidator(
-            SignaCoreBootstrapStore.CreateProviderRegistry(),
+        var validator = new BootstrapCandidateValidator(
+            BootstrapStore.CreateProviderRegistry(),
             currentMasterKey: null,
             inspection: (_, _, _) => throw new IOException("simulated internal failure"));
 

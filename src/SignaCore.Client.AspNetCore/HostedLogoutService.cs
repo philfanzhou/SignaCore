@@ -17,7 +17,7 @@ namespace SignaCore.Client.AspNetCore;
 /// logouts of the same browser session.
 /// </summary>
 internal sealed class HostedLogoutService(
-    IOptionsMonitor<SignaCoreHostedLoginOptions> options,
+    IOptionsMonitor<HostedLoginOptions> options,
     IAntiforgery antiforgery,
     DiscoveryClient discoveryClient,
     LogoutClient logoutClient,
@@ -179,34 +179,34 @@ internal sealed class HostedLogoutService(
 
     private async Task WriteLocalOnlyAsync(
         HttpContext context,
-        SignaCoreHostedLoginOptions current,
+        HostedLoginOptions current,
         CancellationToken cancellationToken)
     {
         ClientLog.Logout(logger, ClientLog.Outcome.LocalOnly, cancellationToken);
         await current.ResponseWriter.WriteLogoutLocalOnlyAsync(context, cancellationToken);
     }
 
-    private static void DeleteSessionCookie(HttpContext context, SignaCoreHostedLoginOptions current) =>
+    private static void DeleteSessionCookie(HttpContext context, HostedLoginOptions current) =>
         CookieProfile.DeleteCookie(context, current, current.SessionCookieName, "/");
 
     private void SetLogoutReturnCookie(
         HttpContext context,
-        SignaCoreHostedLoginOptions current,
+        HostedLoginOptions current,
         string correlationId) =>
         context.Response.Cookies.Append(
             current.LogoutReturnCookieName(),
             correlationId,
             CookieProfile.CreateCookieOptions(
                 current,
-                (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.LogoutPathSegment,
-                timeProvider.GetUtcNow() + SignaCoreHostedLoginDefaults.LogoutReturnLifetime));
+                CookieProfile.EndpointPath(current, HostedLoginDefaults.LogoutPathSegment),
+                timeProvider.GetUtcNow() + HostedLoginDefaults.LogoutReturnLifetime));
 
-    private static void DeleteLogoutReturnCookie(HttpContext context, SignaCoreHostedLoginOptions current) =>
+    private static void DeleteLogoutReturnCookie(HttpContext context, HostedLoginOptions current) =>
         CookieProfile.DeleteCookie(
             context,
             current,
             current.LogoutReturnCookieName(),
-            (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.LogoutPathSegment);
+            CookieProfile.EndpointPath(current, HostedLoginDefaults.LogoutPathSegment));
 }
 
 /// <summary>Package-internal helpers shared by the logout surface.</summary>
@@ -223,7 +223,7 @@ internal static class LogoutCookieExtensions
     /// other session name keeps the byte-for-byte historical <c>&lt;name&gt;-logout-return</c>
     /// derivation, and the intranet HTTP profile never rewrites (its cookies are not Secure).
     /// </summary>
-    internal static string LogoutReturnCookieName(this SignaCoreHostedLoginOptions options) =>
+    internal static string LogoutReturnCookieName(this HostedLoginOptions options) =>
         CookieProfile.DerivedCookieName(
-            options, SignaCoreHostedLoginDefaults.LogoutReturnCookieSuffix);
+            options, HostedLoginDefaults.LogoutReturnCookieSuffix);
 }
