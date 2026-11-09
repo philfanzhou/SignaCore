@@ -103,7 +103,7 @@ public sealed class ServerDatabaseContractTests
                     ({credentialId}, {accountId}, {"LegacyUser"}, {"hash"}, {DateTimeOffset.UtcNow});
                 """, cancellationToken: TestContext.Current.CancellationToken);
 
-            await new SignaCore.Host.Migration.SignaCoreMigrationExecutor(
+            await new SignaCore.Host.Migration.MigrationExecutor(
                 context,
                 databaseOptions).ExecuteAsync(TestContext.Current.CancellationToken);
 

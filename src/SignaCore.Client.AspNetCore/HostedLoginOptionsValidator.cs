@@ -3,16 +3,16 @@ using Microsoft.Extensions.Options;
 namespace SignaCore.Client.AspNetCore;
 
 /// <summary>
-/// The startup validation of <see cref="SignaCoreHostedLoginOptions"/>. Every failure message
+/// The startup validation of <see cref="HostedLoginOptions"/>. Every failure message
 /// names the option — never the configured value, so a misconfiguration cannot leak a secret or
 /// an internal address through its own diagnostics.
 /// </summary>
 internal sealed class HostedLoginOptionsValidator
-    : IValidateOptions<SignaCoreHostedLoginOptions>
+    : IValidateOptions<HostedLoginOptions>
 {
-    private const string OptionsName = "SignaCoreHostedLoginOptions";
+    private const string OptionsName = "HostedLoginOptions";
 
-    public ValidateOptionsResult Validate(string? name, SignaCoreHostedLoginOptions options)
+    public ValidateOptionsResult Validate(string? name, HostedLoginOptions options)
     {
         if (!string.IsNullOrEmpty(name) && name != Options.DefaultName)
         {
@@ -57,9 +57,9 @@ internal sealed class HostedLoginOptionsValidator
                 $"{OptionsName}.RedirectUri must be an absolute http or https URI with a path and without a query, fragment, or user info.");
         }
         else if (options.SessionCookieName.StartsWith(
-                     SignaCoreHostedLoginDefaults.HostCookiePrefix, StringComparison.OrdinalIgnoreCase)
+                     HostedLoginDefaults.HostCookiePrefix, StringComparison.OrdinalIgnoreCase)
                  || options.SessionCookieName.StartsWith(
-                     SignaCoreHostedLoginDefaults.SecureCookiePrefix, StringComparison.OrdinalIgnoreCase))
+                     HostedLoginDefaults.SecureCookiePrefix, StringComparison.OrdinalIgnoreCase))
         {
             // Transport follows the RedirectUri's scheme (ADR 0008): a plain-http redirect URI
             // means the package's cookies cannot carry the Secure attribute, and a cookie-name
@@ -111,7 +111,7 @@ internal sealed class HostedLoginOptionsValidator
             }
             else if (options.Prefix is { } prefix
                 && new Uri(options.PostLogoutRedirectUri).AbsolutePath.TrimEnd('/')
-                    != prefix + "/" + SignaCoreHostedLoginDefaults.LogoutReturnPathSegment)
+                    != prefix + "/" + HostedLoginDefaults.LogoutReturnPathSegment)
             {
                 failures.Add(
                     $"{OptionsName}.PostLogoutRedirectUri does not match the hosted-login logout-return path; the redirect URI's path must be exactly <prefix>/logout/return.");

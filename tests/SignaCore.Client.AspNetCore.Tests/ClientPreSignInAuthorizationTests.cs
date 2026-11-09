@@ -38,13 +38,13 @@ public sealed class ClientPreSignInAuthorizationTests
             Assert.Null(context.IdTokenPrincipal.FindFirst("role"));
             Assert.Equal(context.Subject, context.IdTokenPrincipal.FindFirst("sub")?.Value);
             ((ClaimsIdentity)context.IdTokenPrincipal.Identity!).AddClaim(new Claim("role", "injected"));
-            return ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Allowed);
+            return ValueTask.FromResult(AuthorizationDecisionResult.Allowed);
         };
         using var response = await harness.CallbackAsync(await harness.BeginAsync());
         Assert.Equal("/dashboard", response.Headers.Location?.ToString());
         // The success writes the session cookie and finishes the one-time binding cookie.
         var cookie = Assert.Single(response.Headers.GetValues("Set-Cookie").Where(value =>
-            value.StartsWith(SignaCoreHostedLoginDefaults.SessionCookieName + "=", StringComparison.Ordinal)));
+            value.StartsWith(HostedLoginDefaults.SessionCookieName + "=", StringComparison.Ordinal)));
         foreach (var attribute in new[] { "httponly", "secure", "samesite=lax", "path=/" })
             Assert.Contains(attribute, cookie, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, harness.Decision.Calls);
@@ -68,10 +68,10 @@ public sealed class ClientPreSignInAuthorizationTests
         var original = harness.Store.LastTicket;
         harness.Decision.Run = (_, _) => failure switch
         {
-            "denied" => ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Denied),
-            "unknown" => ValueTask.FromResult((SignaCoreAuthorizationDecisionResult)99),
+            "denied" => ValueTask.FromResult(AuthorizationDecisionResult.Denied),
+            "unknown" => ValueTask.FromResult((AuthorizationDecisionResult)99),
             "sync" => throw new InvalidOperationException("private-decision-detail"),
-            "async" => new ValueTask<SignaCoreAuthorizationDecisionResult>(Task.FromException<SignaCoreAuthorizationDecisionResult>(new InvalidOperationException("private-decision-detail"))),
+            "async" => new ValueTask<AuthorizationDecisionResult>(Task.FromException<AuthorizationDecisionResult>(new InvalidOperationException("private-decision-detail"))),
             _ => throw new OperationCanceledException("private-decision-detail")
         };
         using var response = await harness.CallbackAsync(await harness.BeginAsync());
@@ -89,7 +89,7 @@ public sealed class ClientPreSignInAuthorizationTests
     {
         await using var harness = await Harness.CreateAsync();
         var entered = Signal();
-        var late = new TaskCompletionSource<SignaCoreAuthorizationDecisionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var late = new TaskCompletionSource<AuthorizationDecisionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         CancellationToken decisionToken = default;
         harness.Decision.Run = (_, token) => { decisionToken = token; entered.SetResult(); return new(late.Task); };
         var callback = harness.CallbackAsync(await harness.BeginAsync());
@@ -100,7 +100,7 @@ public sealed class ClientPreSignInAuthorizationTests
         AssertFailure(response, "pre_sign_in_denied");
         Assert.True(decisionToken.IsCancellationRequested);
         if (lateFault) late.SetException(new InvalidOperationException("private-late-detail"));
-        else late.SetResult(SignaCoreAuthorizationDecisionResult.Allowed);
+        else late.SetResult(AuthorizationDecisionResult.Allowed);
         Assert.Equal(0, harness.Store.Writes);
         using var replay = await harness.CallbackAsync(response.RequestMessage!.RequestUri!.ToString());
         AssertFailure(replay, "state_mismatch");
@@ -134,11 +134,11 @@ public sealed class ClientPreSignInAuthorizationTests
         await using var harness = await Harness.CreateAsync();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         var entered = Signal();
-        var late = new TaskCompletionSource<SignaCoreAuthorizationDecisionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var late = new TaskCompletionSource<AuthorizationDecisionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         harness.Decision.Run = (_, _) =>
         {
             entered.SetResult();
-            if (afterAllowed) { cancellation.Cancel(); return ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Allowed); }
+            if (afterAllowed) { cancellation.Cancel(); return ValueTask.FromResult(AuthorizationDecisionResult.Allowed); }
             return new(late.Task);
         };
         // The request-specific token is the cancellation behavior under test.
@@ -148,7 +148,7 @@ public sealed class ClientPreSignInAuthorizationTests
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         if (!afterAllowed) await cancellation.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => callback);
-        late.TrySetResult(SignaCoreAuthorizationDecisionResult.Allowed);
+        late.TrySetResult(AuthorizationDecisionResult.Allowed);
         Assert.Equal(0, harness.Store.Writes);
         Assert.Equal(string.Empty, harness.Browser.Cookies.GetCookieHeader(harness.Browser.ConsumerBase));
     }
@@ -160,13 +160,13 @@ public sealed class ClientPreSignInAuthorizationTests
         // ID token's not-before needs the historical thirty-second skew bound to stay valid;
         // the ticket-expiry assertions below are independent of skew.
         await using var harness = await Harness.CreateAsync(extraConfigure: services => services
-            .PostConfigure<SignaCoreHostedLoginOptions>(
+            .PostConfigure<HostedLoginOptions>(
                 options => options.Validation.ClockSkew = TimeSpan.FromSeconds(30)));
         harness.Authority.AccessLifetime = TimeSpan.FromSeconds(5);
         harness.Decision.Run = (_, _) =>
         {
             harness.Clock.Advance(TimeSpan.FromSeconds(6));
-            return ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Allowed);
+            return ValueTask.FromResult(AuthorizationDecisionResult.Allowed);
         };
         using var expired = await harness.CallbackAsync(await harness.BeginAsync());
         AssertFailure(expired, "invalid_token");
@@ -177,7 +177,7 @@ public sealed class ClientPreSignInAuthorizationTests
         harness.Decision.Run = (_, _) =>
         {
             harness.Clock.Advance(TimeSpan.FromSeconds(5));
-            return ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Allowed);
+            return ValueTask.FromResult(AuthorizationDecisionResult.Allowed);
         };
         using var allowed = await harness.CallbackAsync(await harness.BeginAsync());
         Assert.Equal("/dashboard", allowed.Headers.Location?.ToString());
@@ -190,14 +190,14 @@ public sealed class ClientPreSignInAuthorizationTests
     {
         await using var harness = await Harness.CreateAsync();
         var entered = Signal();
-        var gate = new TaskCompletionSource<SignaCoreAuthorizationDecisionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate = new TaskCompletionSource<AuthorizationDecisionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         harness.Decision.Run = (_, _) => { entered.SetResult(); return new(gate.Task); };
         var url = await harness.BeginAsync();
         var first = harness.CallbackAsync(url);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         using var second = await harness.CallbackAsync(url);
         AssertFailure(second, "state_mismatch");
-        gate.SetResult(SignaCoreAuthorizationDecisionResult.Allowed);
+        gate.SetResult(AuthorizationDecisionResult.Allowed);
         using var winner = await first;
         Assert.Equal("/dashboard", winner.Headers.Location?.ToString());
         Assert.Single(harness.Authority.RedeemedCodes);
@@ -219,11 +219,11 @@ public sealed class ClientPreSignInAuthorizationTests
                 ((ClaimsIdentity)context.AccessTokenPrincipal.Identity!).AddClaim(new Claim("request-only", "first"));
                 entered.SetResult();
                 await release.Task;
-                return SignaCoreAuthorizationDecisionResult.Denied;
+                return AuthorizationDecisionResult.Denied;
             }
             Assert.NotSame(firstPrincipal, context.AccessTokenPrincipal);
             Assert.Null(context.AccessTokenPrincipal.FindFirst("request-only"));
-            return SignaCoreAuthorizationDecisionResult.Allowed;
+            return AuthorizationDecisionResult.Allowed;
         };
         var firstUrl = await harness.BeginAsync();
         var secondUrl = await harness.BeginAsync();
@@ -248,7 +248,7 @@ public sealed class ClientPreSignInAuthorizationTests
         // historical thirty seconds; the test configures that bound explicitly because the
         // default profile is the strict zero.
         await using var harness = await Harness.CreateAsync(extraConfigure: services => services
-            .PostConfigure<SignaCoreHostedLoginOptions>(
+            .PostConfigure<HostedLoginOptions>(
                 options => options.Validation.ClockSkew = TimeSpan.FromSeconds(30)));
         harness.Authority.RotateSigningKey();
         harness.Authority.AccessTimeOffset = TimeSpan.FromSeconds(offsetSeconds);
@@ -257,7 +257,7 @@ public sealed class ClientPreSignInAuthorizationTests
         {
             Assert.Equal(expectedTime.ToString(System.Globalization.CultureInfo.InvariantCulture), context.AccessTokenPrincipal.FindFirst("nbf")?.Value);
             Assert.Equal(expectedTime.ToString(System.Globalization.CultureInfo.InvariantCulture), context.AccessTokenPrincipal.FindFirst("iat")?.Value);
-            return ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Allowed);
+            return ValueTask.FromResult(AuthorizationDecisionResult.Allowed);
         };
         using var response = await harness.CallbackAsync(await harness.BeginAsync());
         Assert.Equal("/dashboard", response.Headers.Location?.ToString());
@@ -269,7 +269,7 @@ public sealed class ClientPreSignInAuthorizationTests
     public async Task ClockSkewBeyondTheConfiguredBound_IsRejectedBeforeDecision()
     {
         await using var harness = await Harness.CreateAsync(extraConfigure: services => services
-            .PostConfigure<SignaCoreHostedLoginOptions>(
+            .PostConfigure<HostedLoginOptions>(
                 options => options.Validation.ClockSkew = TimeSpan.FromSeconds(30)));
         harness.Authority.RotateSigningKey();
         harness.Authority.AccessTimeOffset = TimeSpan.FromSeconds(31);
@@ -303,21 +303,21 @@ public sealed class ClientPreSignInAuthorizationTests
         {
             var cookie = Assert.Single(cookies);
             Assert.StartsWith(
-                SignaCoreHostedLoginDefaults.SessionCookieName
-                    + SignaCoreHostedLoginDefaults.LoginBindingCookieSuffix + ".",
+                HostedLoginDefaults.SessionCookieName
+                    + HostedLoginDefaults.LoginBindingCookieSuffix + ".",
                 cookie,
                 StringComparison.Ordinal);
             Assert.Contains("expires=Thu, 01 Jan 1970", cookie, StringComparison.Ordinal);
         }
     }
 
-    private sealed class Decision : ISignaCorePreSignInAuthorizationDecision
+    private sealed class Decision : IPreSignInAuthorizationDecision
     {
         private int _calls;
         public int Calls => _calls;
-        public Func<SignaCorePreSignInAuthorizationContext, CancellationToken, ValueTask<SignaCoreAuthorizationDecisionResult>> Run { get; set; }
-            = (_, _) => ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Allowed);
-        public ValueTask<SignaCoreAuthorizationDecisionResult> DecideAsync(SignaCorePreSignInAuthorizationContext context, CancellationToken token)
+        public Func<PreSignInAuthorizationContext, CancellationToken, ValueTask<AuthorizationDecisionResult>> Run { get; set; }
+            = (_, _) => ValueTask.FromResult(AuthorizationDecisionResult.Allowed);
+        public ValueTask<AuthorizationDecisionResult> DecideAsync(PreSignInAuthorizationContext context, CancellationToken token)
         { Interlocked.Increment(ref _calls); return Run(context, token); }
     }
 
@@ -325,10 +325,10 @@ public sealed class ClientPreSignInAuthorizationTests
     {
         private readonly InMemoryTicketStore _inner = new(clock);
         public int Writes { get; private set; }
-        public SignaCoreSessionTicket? LastTicket { get; private set; }
-        public Task<string?> StoreAsync(SignaCoreSessionTicket ticket, CancellationToken token)
+        public SessionTicket? LastTicket { get; private set; }
+        public Task<string?> StoreAsync(SessionTicket ticket, CancellationToken token)
         { Writes++; LastTicket = ticket; return _inner.StoreAsync(ticket, token); }
-        public Task<SignaCoreSessionTicket?> RetrieveAsync(string key, CancellationToken token) => _inner.RetrieveAsync(key, token);
+        public Task<SessionTicket?> RetrieveAsync(string key, CancellationToken token) => _inner.RetrieveAsync(key, token);
         public Task RemoveAsync(string key, CancellationToken token) => _inner.RemoveAsync(key, token);
         public int RemoveExpired(CancellationToken token) => _inner.RemoveExpired(token);
     }
@@ -381,7 +381,7 @@ public sealed class ClientPreSignInAuthorizationTests
                 loggerProvider: capture, configureTestServices: services =>
                 {
                     services.AddSingleton<ITicketStore>(store);
-                    services.PostConfigure<SignaCoreHostedLoginOptions>(options => options.PreSignInAuthorizationDecision = decision);
+                    services.PostConfigure<HostedLoginOptions>(options => options.PreSignInAuthorizationDecision = decision);
                     extraConfigure?.Invoke(services);
                 });
             return new Harness { Authority = authority, Consumer = consumer,

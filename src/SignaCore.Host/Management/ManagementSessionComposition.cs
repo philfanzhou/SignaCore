@@ -74,7 +74,7 @@ internal static class ManagementSessionComposition
 
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddScoped<ManagementCredentialAccessor>();
-        builder.Services.AddScoped<IManagementIdentityProvider, SignaCoreManagementIdentityProvider>();
+        builder.Services.AddScoped<IManagementIdentityProvider, ManagementIdentityProvider>();
         builder.Services.AddSingleton<ManagementOperatorReader>();
         builder.Services.AddScoped<IServiceHealthSnapshotSource, InstallationHealthSnapshotSource>();
 

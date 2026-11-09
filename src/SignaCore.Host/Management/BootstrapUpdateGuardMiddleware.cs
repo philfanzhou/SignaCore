@@ -226,7 +226,7 @@ internal sealed class BootstrapUpdateGuardMiddleware(
     {
         try
         {
-            return SignaCoreBootstrapStore.Create(configuration).Load();
+            return BootstrapStore.Create(configuration).Load();
         }
         catch (ServiceMantle.Bootstrap.BootstrapException)
         {

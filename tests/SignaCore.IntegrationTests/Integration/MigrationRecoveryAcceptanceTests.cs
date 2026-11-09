@@ -230,7 +230,7 @@ public sealed class MigrationRecoveryAcceptanceTests
             CancellationToken cancellationToken = default)
         {
             var context = CreateContext(database);
-            return new SignaCoreMigrationExecutor(context, database).InspectAsync(cancellationToken);
+            return new MigrationExecutor(context, database).InspectAsync(cancellationToken);
         }
 
         public async ValueTask ExecuteAsync(CancellationToken cancellationToken = default) =>

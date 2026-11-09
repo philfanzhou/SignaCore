@@ -11,7 +11,7 @@ using Xunit;
 namespace SignaCore.Client.AspNetCore.Tests;
 
 /// <summary>
-/// The logout presentation extension points: three new <see cref="ISignaCoreHostedLoginResponseWriter"/>
+/// The logout presentation extension points: three new <see cref="IHostedLoginResponseWriter"/>
 /// methods (prepared logout, local-only, return-failed) each default to the byte-for-byte
 /// historical presentation, a custom writer can reshape each envelope independently, and the
 /// protocol outcomes underneath — revoke-first, single preparation, one-time correlation
@@ -25,21 +25,21 @@ public sealed class ClientLogoutResponseWriterTests
     /// <summary>A writer that reshapes all three logout presentations like an SPA integration
     /// would: a 200 JSON logout URL instead of the redirect, an empty 200 for local-only, and a
     /// reason-routed redirect for a failed return.</summary>
-    private sealed class SpaStyleWriter : ISignaCoreHostedLoginResponseWriter
+    private sealed class SpaStyleWriter : IHostedLoginResponseWriter
     {
         public List<string> SeenLogoutUris { get; } = [];
 
         public Task WriteSignInFailureAsync(
-            HttpContext context, SignaCoreSignInReason reason, CancellationToken cancellationToken) =>
-            SignaCoreDefaultResponseWriter.Instance.WriteSignInFailureAsync(context, reason, cancellationToken);
+            HttpContext context, SignInReason reason, CancellationToken cancellationToken) =>
+            DefaultHostedLoginResponseWriter.Instance.WriteSignInFailureAsync(context, reason, cancellationToken);
 
         public Task WriteFailurePageAsync(
-            HttpContext context, SignaCoreSignInReason? reason, CancellationToken cancellationToken) =>
-            SignaCoreDefaultResponseWriter.Instance.WriteFailurePageAsync(context, reason, cancellationToken);
+            HttpContext context, SignInReason? reason, CancellationToken cancellationToken) =>
+            DefaultHostedLoginResponseWriter.Instance.WriteFailurePageAsync(context, reason, cancellationToken);
 
         public Task WriteSessionStatusAsync(
-            HttpContext context, SignaCoreSessionStatus status, CancellationToken cancellationToken) =>
-            SignaCoreDefaultResponseWriter.Instance.WriteSessionStatusAsync(context, status, cancellationToken);
+            HttpContext context, SessionStatus status, CancellationToken cancellationToken) =>
+            DefaultHostedLoginResponseWriter.Instance.WriteSessionStatusAsync(context, status, cancellationToken);
 
         public async Task WriteLogoutPreparedAsync(
             HttpContext context, string logoutUri, CancellationToken cancellationToken)
@@ -69,7 +69,7 @@ public sealed class ClientLogoutResponseWriterTests
     private static async Task<(WebApplicationFactory<ConsumerApp.Program> Consumer, CrossServerBrowser Browser)>
         SignInAsync(
             FakeIdentityProvider authority,
-            ISignaCoreHostedLoginResponseWriter? writer = null)
+            IHostedLoginResponseWriter? writer = null)
     {
         var consumer = ConsumerAppTestServer.Create(
             FakeIdentityProvider.BaseAddress,
@@ -82,7 +82,7 @@ public sealed class ClientLogoutResponseWriterTests
             {
                 if (writer is not null)
                 {
-                    services.PostConfigure<SignaCoreHostedLoginOptions>(
+                    services.PostConfigure<HostedLoginOptions>(
                         options => options.ResponseWriter = writer);
                 }
             });
@@ -118,7 +118,7 @@ public sealed class ClientLogoutResponseWriterTests
             .GetProperty("token").GetString()!;
         using var logout = new HttpRequestMessage(
             HttpMethod.Post, new Uri(browser.ConsumerBase, "/auth/logout"));
-        logout.Headers.TryAddWithoutValidation(SignaCoreHostedLoginDefaults.AntiforgeryHeaderName, token);
+        logout.Headers.TryAddWithoutValidation(HostedLoginDefaults.AntiforgeryHeaderName, token);
         var response = await browser.SendOnConsumerAsync(logout, TestContext.Current.CancellationToken);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         return (response, body);

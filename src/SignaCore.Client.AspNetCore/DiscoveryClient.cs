@@ -25,7 +25,7 @@ internal sealed record AuthorityConfiguration(
 /// </summary>
 internal sealed class DiscoveryClient(
     System.Net.Http.IHttpClientFactory httpClientFactory,
-    IOptionsMonitor<SignaCoreHostedLoginOptions> options,
+    IOptionsMonitor<HostedLoginOptions> options,
     TimeProvider timeProvider,
     ILogger<DiscoveryClient> logger)
 {
@@ -71,7 +71,7 @@ internal sealed class DiscoveryClient(
     private async Task<AuthorityConfiguration> FetchAsync(CancellationToken cancellationToken)
     {
         var authority = options.CurrentValue.Authority!.TrimEnd('/');
-        using var client = httpClientFactory.CreateClient(SignaCoreHostedLoginDefaults.HttpClientName);
+        using var client = httpClientFactory.CreateClient(HostedLoginDefaults.HttpClientName);
 
         using var discoveryResponse = await client.GetAsync(
             authority + "/.well-known/openid-configuration", cancellationToken);

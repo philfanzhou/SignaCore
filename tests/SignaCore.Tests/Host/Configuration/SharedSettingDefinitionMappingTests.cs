@@ -348,7 +348,7 @@ public sealed partial class SharedSettingDefinitionMappingTests
 
         var result = new ServiceSettingDefinitionRegistry(
                 SharedSettingComposition.CreateDefinitionProviders(),
-                [new SignaCoreSettingCompositeValidator(isDevelopment: false)])
+                [new SettingCompositeValidator(isDevelopment: false)])
             .Validate(values);
 
         var schemeError = result.Errors.SingleOrDefault(error =>

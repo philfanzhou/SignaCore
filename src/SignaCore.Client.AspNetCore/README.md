@@ -71,7 +71,7 @@ app.MapSignaCoreHostedLogin("/auth");
 // The consumer's own routes authenticate against the package's session scheme.
 app.MapGet("/orders", () => "Signed-in content")
     .RequireAuthorization(policy =>
-        policy.AddAuthenticationSchemes(SignaCoreHostedLoginDefaults.AuthenticationScheme)
+        policy.AddAuthenticationSchemes(HostedLoginDefaults.AuthenticationScheme)
             .RequireAuthenticatedUser());
 
 app.Run();
@@ -158,7 +158,7 @@ enforce it at their own configuration layer before the options reach the package
 
 ### Validation strictness
 
-The `options.Validation` group (a `SignaCoreValidationOptions`) controls five dimensions of the
+The `options.Validation` group (a `ProtocolValidationOptions`) controls five dimensions of the
 token and backchannel response checks. **The defaults are the strict profile** — a
 zero-configuration consumer gets the tightest behavior the package supports:
 
@@ -182,14 +182,14 @@ present-day `iat`) pass the strict defaults unchanged.
 
    ```csharp
    options.AuthorizationDecision = new OrderServiceAuthorizationDecision();
-   // ... implements ISignaCoreAuthorizationDecision.DecideAsync(ClaimsPrincipal, CancellationToken)
+   // ... implements IAuthorizationDecision.DecideAsync(ClaimsPrincipal, CancellationToken)
    //     returning Allowed or Denied; the result is reported by the session endpoint.
    ```
 
 2. **Route prefix** — where the package's endpoints are mounted: `app.MapSignaCoreHostedLogin("/auth")`.
 
 3. **Response format** — replace the default failure page and session-status body by implementing
-   `ISignaCoreHostedLoginResponseWriter` and assigning `options.ResponseWriter`. The writer also
+   `IHostedLoginResponseWriter` and assigning `options.ResponseWriter`. The writer also
    owns the three logout presentations — a completed prepared logout
    (`WriteLogoutPreparedAsync`, default: `302` to the package-verified logout URI), the fixed
    local-only outcome (`WriteLogoutLocalOnlyAsync`, default: `200 {"outcome":"local_only"}`),
@@ -257,7 +257,7 @@ options.PreSignInAuthorizationDecision = new OrderServicePreSignInDecision();
 options.PreSignInAuthorizationTimeout = TimeSpan.FromSeconds(10); // default; positive, at most 30
 ```
 
-Implement `ISignaCorePreSignInAuthorizationDecision.DecideAsync(context, cancellationToken)` and
+Implement `IPreSignInAuthorizationDecision.DecideAsync(context, cancellationToken)` and
 return `Allowed` or `Denied`. The context supplies request-local copies of `AccessTokenPrincipal`
 and `IdTokenPrincipal`, plus the verified shared `Issuer` and `Subject`; no raw tokens or handshake
 values are exposed. Authorize using access-token claims and your own rules, never ID-token profile

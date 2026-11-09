@@ -157,12 +157,13 @@ public class AdminController : ControllerBase
         };
         await passwordCredentialRepository.AddAsync(credential, cancellationToken);
 
-        await AuditAdminAsync(auditWriter,
-                              "account_created",
-                              "Account",
-                              account.Id.ToString(),
-                              $"Admin created user: {credential.Username}",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "account_created",
+            "Account",
+            account.Id.ToString(),
+            $"Admin created user: {credential.Username}",
+            cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
@@ -211,13 +212,14 @@ public class AdminController : ControllerBase
                 credentials[0].Id, passwordHasher.HashPassword(request.NewPassword), operationToken);
             if (affected != 1)
                 throw new DbUpdateConcurrencyException("Password credential changed during reset.");
-            await AuditAdminAsync(auditWriter,
-                                  "admin_password_reset",
-                                  "Account",
-                                  userId.ToString(),
-                                  "Admin reset local password",
-                                  operationToken,
-                                  correlationId: HttpContext.GetCorrelationId());
+            await AuditAdminAsync(
+                auditWriter,
+                "admin_password_reset",
+                "Account",
+                userId.ToString(),
+                "Admin reset local password",
+                operationToken,
+                correlationId: HttpContext.GetCorrelationId());
             await unitOfWork.SaveChangesAsync(operationToken);
             await transaction.CommitAsync(operationToken);
             return Ok(new OperationResponse(true, "Password reset."));
@@ -262,12 +264,13 @@ public class AdminController : ControllerBase
         };
         await userLoginRepository.AddAsync(userLogin, cancellationToken);
 
-        await AuditAdminAsync(auditWriter,
-                              "account_created",
-                              "Account",
-                              account.Id.ToString(),
-                              "Admin created phone user",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "account_created",
+            "Account",
+            account.Id.ToString(),
+            "Admin created phone user",
+            cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
@@ -382,12 +385,16 @@ public class AdminController : ControllerBase
                     account.Id, RefreshFamilyRevocationReason.AccountDisabled, operationToken);
             }
 
-            await AuditAdminAsync(auditWriter,
-                                  request.IsActive ? "account_enabled" : "account_disabled",
-                                  "Account",
-                                  account.Id.ToString(),
-                                  request.IsActive ? $"Admin enabled user: {userId}" : $"Admin disabled user: {userId}; revoked sessions: {revokedSessions}; " + $"revoked family members: {revokedFamilyMembers}",
-                                  operationToken);
+            await AuditAdminAsync(
+                auditWriter,
+                request.IsActive ? "account_enabled" : "account_disabled",
+                "Account",
+                account.Id.ToString(),
+                request.IsActive
+                    ? $"Admin enabled user: {userId}"
+                    : $"Admin disabled user: {userId}; revoked sessions: {revokedSessions}; " +
+                      $"revoked family members: {revokedFamilyMembers}",
+                operationToken);
             await unitOfWork.SaveChangesAsync(operationToken);
             await transaction.CommitAsync(operationToken);
             return (Found: true, Message: request.IsActive ? "User enabled." : "User disabled.");
@@ -516,12 +523,13 @@ public class AdminController : ControllerBase
 
         // The generated secret and its hash stay out of the record; the shared model keeps only
         // the closed description naming the application.
-        await AuditAdminAsync(auditWriter,
-                              "app_created",
-                              "AppRegistration",
-                              app.AppId,
-                              $"Admin created app: {app.AppName}",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "app_created",
+            "AppRegistration",
+            app.AppId,
+            $"Admin created app: {app.AppName}",
+            cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new AdminCreateAppResponse(
@@ -611,12 +619,14 @@ public class AdminController : ControllerBase
                     app.AppId, RefreshFamilyRevocationReason.ApplicationDisabled, operationToken);
             }
 
-            await AuditAdminAsync(auditWriter,
-                                  "app_callback_updated",
-                                  "AppRegistration",
-                                  app.AppId,
-                                  $"Admin updated callback configuration for app: {app.AppName}; " + $"active={request.IsActive}; revoked family members: {revokedFamilyMembers}",
-                                  operationToken);
+            await AuditAdminAsync(
+                auditWriter,
+                "app_callback_updated",
+                "AppRegistration",
+                app.AppId,
+                $"Admin updated callback configuration for app: {app.AppName}; " +
+                $"active={request.IsActive}; revoked family members: {revokedFamilyMembers}",
+                operationToken);
             await unitOfWork.SaveChangesAsync(operationToken);
             await transaction.CommitAsync(operationToken);
             return true;
@@ -647,12 +657,13 @@ public class AdminController : ControllerBase
 
         await appRegistrationRepository.DeleteAsync(app, cancellationToken);
 
-        await AuditAdminAsync(auditWriter,
-                              "app_deleted",
-                              "AppRegistration",
-                              appId,
-                              $"Admin deleted app: {app.AppName}",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "app_deleted",
+            "AppRegistration",
+            appId,
+            $"Admin deleted app: {app.AppName}",
+            cancellationToken);
 
         try
         {
@@ -710,12 +721,13 @@ public class AdminController : ControllerBase
         app.SmsLoginMode = mode;
         app.SmsProfileKey = profileKey;
 
-        await AuditAdminAsync(auditWriter,
-                              "app_sms_policy_updated",
-                              "AppRegistration",
-                              appId,
-                              $"SMS login mode changed from {beforeMode} to {mode}; profile={profileKey ?? "none"}",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "app_sms_policy_updated",
+            "AppRegistration",
+            appId,
+            $"SMS login mode changed from {beforeMode} to {mode}; profile={profileKey ?? "none"}",
+            cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return Ok(new OperationResponse(true, "SMS login policy updated."));
     }
@@ -760,19 +772,20 @@ public class AdminController : ControllerBase
         var app = await appRegistrationRepository.GetByAppIdAsync(appId, cancellationToken);
         if (app == null) return NotFound(new ErrorResponse("App not found."));
 
-        var (actorId, actorName) = GetAdminIdentity();
+        var actorId = GetAdminIdentity().ActorId;
         var admission = await admissionService.ProvisionAsync(
             app,
             phone,
             SmsAccessApprovalSource.Admin,
             actorId,
             cancellationToken,
-            async result => await AuditAdminAsync(auditWriter,
-                                                  "app_sms_user_approved",
-                                                  "AppRegistration",
-                                                  appId,
-                                                  "Administrator approved an SMS identity for the application",
-                                                  cancellationToken));
+            async result => await AuditAdminAsync(
+                auditWriter,
+                "app_sms_user_approved",
+                "AppRegistration",
+                appId,
+                "Administrator approved an SMS identity for the application",
+                cancellationToken));
         return Ok(new AdminSmsUserResponse(
             admission.Login.Id.ToString(), admission.Account.Id.ToString(), admission.Login.ProviderUserId,
             admission.Access.ApprovalSource.ToString(), admission.Access.IsActive,
@@ -800,12 +813,13 @@ public class AdminController : ControllerBase
             access.Id,
             item => item.IsActive = false,
             token => token.AppId == app.AppId && token.SmsUserLoginId == loginId && !token.IsRevoked,
-            async operationCancellationToken => await AuditAdminAsync(auditWriter,
-                                                                      "app_sms_user_revoked",
-                                                                      "AppRegistration",
-                                                                      appId,
-                                                                      "Administrator revoked an SMS identity for the application",
-                                                                      operationCancellationToken),
+            async operationCancellationToken => await AuditAdminAsync(
+                auditWriter,
+                "app_sms_user_revoked",
+                "AppRegistration",
+                appId,
+                "Administrator revoked an SMS identity for the application",
+                operationCancellationToken),
             cancellationToken);
         if (!revoked) return NotFound(new ErrorResponse("SMS application access not found."));
         return Ok(new OperationResponse(true, "SMS application access revoked."));
@@ -832,12 +846,13 @@ public class AdminController : ControllerBase
         var beforeMode = app.WechatLoginMode;
         app.WechatLoginMode = mode;
 
-        await AuditAdminAsync(auditWriter,
-                              "app_wechat_policy_updated",
-                              "AppRegistration",
-                              appId,
-                              $"WeChat login mode changed from {beforeMode} to {mode}",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "app_wechat_policy_updated",
+            "AppRegistration",
+            appId,
+            $"WeChat login mode changed from {beforeMode} to {mode}",
+            cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return Ok(new OperationResponse(true, "WeChat login policy updated."));
     }
@@ -869,12 +884,13 @@ public class AdminController : ControllerBase
         app.AudienceMode = mode;
         var audience = JwtTokenService.ResolveAudience(app, jwtOptions);
 
-        await AuditAdminAsync(auditWriter,
-                              "app_audience_mode_updated",
-                              "AppRegistration",
-                              appId,
-                              $"Access-token audience mode changed from {beforeMode} to {mode}; aud={audience}",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "app_audience_mode_updated",
+            "AppRegistration",
+            appId,
+            $"Access-token audience mode changed from {beforeMode} to {mode}; aud={audience}",
+            cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return Ok(new OperationResponse(true, $"Access tokens for this application now carry aud={audience}."));
     }
@@ -958,12 +974,13 @@ public class AdminController : ControllerBase
                     CanonicalOrigin = origin
                 }),
                 operationToken);
-            await AuditAdminAsync(auditWriter,
-                                  "app_oidc_allowed_origins_replaced",
-                                  "AppRegistration",
-                                  app.AppId,
-                                  $"Public Origin registrations replaced; count: {origins.Count}",
-                                  operationToken);
+            await AuditAdminAsync(
+                auditWriter,
+                "app_oidc_allowed_origins_replaced",
+                "AppRegistration",
+                app.AppId,
+                $"Public Origin registrations replaced; count: {origins.Count}",
+                operationToken);
             await unitOfWork.SaveChangesAsync(operationToken);
             await transaction.CommitAsync(operationToken);
             return Ok(Describe(app));
@@ -1066,12 +1083,14 @@ public class AdminController : ControllerBase
                     app.AppId, RefreshFamilyRevocationReason.RefreshCapabilityDisabled, operationToken);
             }
 
-            await AuditAdminAsync(auditWriter,
-                                  "app_oidc_policy_updated",
-                                  "AppRegistration",
-                                  app.AppId,
-                                  $"Interactive OIDC policy updated; client={app.ClientType}; " + $"revoked family members: {revokedFamilyMembers}",
-                                  operationToken);
+            await AuditAdminAsync(
+                auditWriter,
+                "app_oidc_policy_updated",
+                "AppRegistration",
+                app.AppId,
+                $"Interactive OIDC policy updated; client={app.ClientType}; " +
+                $"revoked family members: {revokedFamilyMembers}",
+                operationToken);
             await unitOfWork.SaveChangesAsync(operationToken);
             await transaction.CommitAsync(operationToken);
             return Ok(Describe(app, issuedAppSecret));
@@ -1198,12 +1217,13 @@ public class AdminController : ControllerBase
         await appRegistrationRepository.AddRedirectUrisAsync(change.AddedRegistrations, cancellationToken);
         await appRegistrationRepository.RemoveRedirectUrisAsync(change.RemovedRegistrations, cancellationToken);
 
-        await AuditAdminAsync(auditWriter,
-                              auditAction,
-                              "AppRegistration",
-                              app.AppId,
-                              successMessage,
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            auditAction,
+            "AppRegistration",
+            app.AppId,
+            successMessage,
+            cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(Describe(app));
@@ -1316,14 +1336,15 @@ public class AdminController : ControllerBase
         if (sourceApp.Id == app.Id)
             return BadRequest(new ErrorResponse("An application cannot trust itself."));
 
-        var (actorId, actorName) = GetAdminIdentity();
+        var actorId = GetAdminIdentity().ActorId;
         var trust = await exchangeTrustRepository.AddAsync(app, sourceApp, actorId, cancellationToken);
-        await AuditAdminAsync(auditWriter,
-                              "app_exchange_trust_added",
-                              "AppRegistration",
-                              appId,
-                              $"Application now accepts refresh tokens issued to {sourceApp.AppId}",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "app_exchange_trust_added",
+            "AppRegistration",
+            appId,
+            $"Application now accepts refresh tokens issued to {sourceApp.AppId}",
+            cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return Ok(new AdminExchangeTrustResponse(
             trust.SourceAppId, trust.SourceAppName, trust.SourceIsActive,
@@ -1356,12 +1377,13 @@ public class AdminController : ControllerBase
         if (!await exchangeTrustRepository.RemoveAsync(app.Id, sourceApp.Id, cancellationToken))
             return NotFound(new ErrorResponse("Exchange trust not found."));
 
-        await AuditAdminAsync(auditWriter,
-                              "app_exchange_trust_removed",
-                              "AppRegistration",
-                              appId,
-                              $"Application no longer accepts refresh tokens issued to {sourceApp.AppId}",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "app_exchange_trust_removed",
+            "AppRegistration",
+            appId,
+            $"Application no longer accepts refresh tokens issued to {sourceApp.AppId}",
+            cancellationToken);
         try
         {
             await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1431,12 +1453,13 @@ public class AdminController : ControllerBase
         if (access == null) return NotFound(new ErrorResponse("WeChat application access not found."));
 
         access.IsActive = true;
-        await AuditAdminAsync(auditWriter,
-                              "app_wechat_user_restored",
-                              "AppRegistration",
-                              appId,
-                              "Administrator restored a WeChat identity for the application",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "app_wechat_user_restored",
+            "AppRegistration",
+            appId,
+            "Administrator restored a WeChat identity for the application",
+            cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         return Ok(new OperationResponse(true, "WeChat application access restored."));
     }
@@ -1462,12 +1485,13 @@ public class AdminController : ControllerBase
             access.Id,
             item => item.IsActive = false,
             token => token.AppId == app.AppId && token.WechatUserLoginId == loginId && !token.IsRevoked,
-            async operationCancellationToken => await AuditAdminAsync(auditWriter,
-                                                                      "app_wechat_user_revoked",
-                                                                      "AppRegistration",
-                                                                      appId,
-                                                                      "Administrator revoked a WeChat identity for the application",
-                                                                      operationCancellationToken),
+            async operationCancellationToken => await AuditAdminAsync(
+                auditWriter,
+                "app_wechat_user_revoked",
+                "AppRegistration",
+                appId,
+                "Administrator revoked a WeChat identity for the application",
+                operationCancellationToken),
             cancellationToken);
         if (!revoked) return NotFound(new ErrorResponse("WeChat application access not found."));
         return Ok(new OperationResponse(true, "WeChat application access revoked."));
@@ -1498,12 +1522,13 @@ public class AdminController : ControllerBase
         var before = app.LdapLoginMode;
         app.LdapLoginMode = mode;
 
-        await AuditAdminAsync(auditWriter,
-                              "app_ldap_policy_updated",
-                              "AppRegistration",
-                              appId,
-                              $"LDAP login mode changed from {before} to {mode}",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "app_ldap_policy_updated",
+            "AppRegistration",
+            appId,
+            $"LDAP login mode changed from {before} to {mode}",
+            cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new OperationResponse(true, "LDAP login policy updated."));
@@ -1611,19 +1636,20 @@ public class AdminController : ControllerBase
             return BadRequest(new ErrorResponse("LDAP user is disabled."));
         }
 
-        var (actorId, actorName) = GetAdminIdentity();
+        var actorId = GetAdminIdentity().ActorId;
         var result = await ldapAccountService.ProvisionAsync(
             identity,
             app,
             LdapAccessApprovalSource.Admin,
             actorId,
             cancellationToken,
-            async provisioned => await AuditAdminAsync(auditWriter,
-                                                       "app_ldap_user_approved",
-                                                       "AppRegistration",
-                                                       appId,
-                                                       $"Administrator approved LDAP identity {identity.ObjectGuid} for the application",
-                                                       cancellationToken));
+            async provisioned => await AuditAdminAsync(
+                auditWriter,
+                "app_ldap_user_approved",
+                "AppRegistration",
+                appId,
+                $"Administrator approved LDAP identity {identity.ObjectGuid} for the application",
+                cancellationToken));
 
         return Ok(new AdminLdapUserResponse(
             result.Credential.Id.ToString(),
@@ -1666,12 +1692,13 @@ public class AdminController : ControllerBase
             access.Id,
             item => item.IsActive = false,
             token => token.AppId == app.AppId && token.LdapCredentialId == credentialId && !token.IsRevoked,
-            async operationCancellationToken => await AuditAdminAsync(auditWriter,
-                                                                      "app_ldap_user_revoked",
-                                                                      "AppRegistration",
-                                                                      appId,
-                                                                      $"Administrator revoked LDAP credential {credentialId} from the application",
-                                                                      operationCancellationToken),
+            async operationCancellationToken => await AuditAdminAsync(
+                auditWriter,
+                "app_ldap_user_revoked",
+                "AppRegistration",
+                appId,
+                $"Administrator revoked LDAP credential {credentialId} from the application",
+                operationCancellationToken),
             cancellationToken);
         if (!revoked)
         {
@@ -1706,12 +1733,13 @@ public class AdminController : ControllerBase
         var newAppSecret = NewAppSecret();
         app.AppSecretHash = BCrypt.Net.BCrypt.HashPassword(newAppSecret);
 
-        await AuditAdminAsync(auditWriter,
-                              "app_secret_reset",
-                              "AppRegistration",
-                              appId,
-                              $"Admin reset the application secret for {app.AppName}",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "app_secret_reset",
+            "AppRegistration",
+            appId,
+            $"Admin reset the application secret for {app.AppName}",
+            cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new AdminCreateAppResponse(
@@ -1745,12 +1773,13 @@ public class AdminController : ControllerBase
 
         refreshToken.IsRevoked = true;
 
-        await AuditAdminAsync(auditWriter,
-                              "refresh_token_revoked",
-                              "RefreshToken",
-                              refreshToken.AccountId.ToString(),
-                              "Admin revoked refresh token",
-                              cancellationToken);
+        await AuditAdminAsync(
+            auditWriter,
+            "refresh_token_revoked",
+            "RefreshToken",
+            refreshToken.AccountId.ToString(),
+            "Admin revoked refresh token",
+            cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Ok(new OperationResponse(true, "Refresh token revoked."));
@@ -1841,13 +1870,14 @@ public class AdminController : ControllerBase
                 await refreshTokenRepository.RevokeBySessionAsync(sessionId, operationToken);
             }
 
-            await AuditAdminAsync(auditWriter,
-                                  "identity_session_revoked",
-                                  "IdentitySession",
-                                  sessionId.ToString("D"),
-                                  alreadyRevoked ? $"account:{userId};already_revoked" : $"account:{userId}",
-                                  operationToken,
-                                  correlationId: HttpContext.GetCorrelationId());
+            await AuditAdminAsync(
+                auditWriter,
+                "identity_session_revoked",
+                "IdentitySession",
+                sessionId.ToString("D"),
+                alreadyRevoked ? $"account:{userId};already_revoked" : $"account:{userId}",
+                operationToken,
+                correlationId: HttpContext.GetCorrelationId());
             await unitOfWork.SaveChangesAsync(operationToken);
             await transaction.CommitAsync(operationToken);
             return (Found: true, AlreadyRevoked: alreadyRevoked);
@@ -1906,7 +1936,8 @@ public class AdminController : ControllerBase
 
     /// <summary>
     /// The one audit shape of every administrative action: the interactive-admin operator of the
-    /// current session, the forwarded client IP, and the correlation id when one exists.
+    /// current session and the forwarded client IP. Only the call sites that historically recorded
+    /// a correlation id pass <paramref name="correlationId"/>; every other record keeps it empty.
     /// </summary>
     private ValueTask AuditAdminAsync(
         IManagementAuditWriter auditWriter,

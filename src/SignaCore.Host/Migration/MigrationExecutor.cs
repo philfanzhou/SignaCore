@@ -18,7 +18,7 @@ namespace SignaCore.Host.Migration;
 /// The borrowed <see cref="IdentityDbContext"/> is never disposed by this adapter; the backfill
 /// steps clear the change tracker so no consumer entity survives the execution.
 /// </summary>
-internal sealed class SignaCoreMigrationExecutor : IDatabaseMigrationExecutor
+internal sealed class MigrationExecutor : IDatabaseMigrationExecutor
 {
     private const string ExpandMigrationId =
         "20260730134106_AddNormalizedIdentityValues";
@@ -33,7 +33,7 @@ internal sealed class SignaCoreMigrationExecutor : IDatabaseMigrationExecutor
     private readonly IdentityDbContext _database;
     private readonly DatabaseOptions _databaseOptions;
 
-    public SignaCoreMigrationExecutor(IdentityDbContext database, DatabaseOptions databaseOptions)
+    public MigrationExecutor(IdentityDbContext database, DatabaseOptions databaseOptions)
     {
         _database = database ?? throw new ArgumentNullException(nameof(database));
         _databaseOptions = databaseOptions ?? throw new ArgumentNullException(nameof(databaseOptions));

@@ -91,11 +91,11 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         Assert.NotNull(services.GetService(ServiceMantleType("ServiceMantle.Diagnostics.Export.Prometheus.PrometheusRegistration")));
         var metrics = Assert.Single(
             services.GetServices<EndpointDataSource>().SelectMany(source => source.Endpoints).OfType<RouteEndpoint>(),
-            endpoint => endpoint.RoutePattern.RawText == SignaCoreTelemetry.MetricsPath);
+            endpoint => endpoint.RoutePattern.RawText == TelemetryComposition.MetricsPath);
         Assert.Contains(metrics.Metadata, item => item.GetType().FullName ==
             "ServiceMantle.Diagnostics.Export.Prometheus.PrometheusEndpointMetadata");
 
-        var hostAssembly = typeof(SignaCoreTelemetry).Assembly;
+        var hostAssembly = typeof(TelemetryComposition).Assembly;
         Assert.Empty(LocalTelemetryReferences(hostAssembly));
         var project = File.ReadAllText(Path.Combine(RepositoryRoot(), "src", "SignaCore.Host", "SignaCore.Host.csproj"));
         Assert.Empty(DirectOpenTelemetryPackages(project));
@@ -161,8 +161,8 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         var factory = await StartNormalHostAsync(configureServices: services =>
         {
             var product = services.Single(descriptor =>
-                descriptor.ImplementationInstance is SignaCoreTelemetry.MeterSelection selection &&
-                selection.MeterNames.Contains(SignaCoreTelemetry.ProductSignalName));
+                descriptor.ImplementationInstance is TelemetryComposition.MeterSelection selection &&
+                selection.MeterNames.Contains(TelemetryComposition.ProductSignalName));
             services.Remove(product);
         });
         await SeedApplicationsAsync();
@@ -528,7 +528,7 @@ public sealed class ServiceMantleTelemetryTests : IAsyncLifetime
         string? appSecret,
         HttpMethod? method = null)
     {
-        var request = new HttpRequestMessage(method ?? HttpMethod.Get, SignaCoreTelemetry.MetricsPath);
+        var request = new HttpRequestMessage(method ?? HttpMethod.Get, TelemetryComposition.MetricsPath);
         if (appId is not null)
         {
             request.Headers.Add("X-Admin-AppId", appId);

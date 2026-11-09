@@ -30,7 +30,7 @@ namespace SignaCore.Host.Bootstrap;
 /// target behind.
 /// </para>
 /// </remarks>
-internal sealed class SignaCoreBootstrapCandidateValidator : IBootstrapCandidateValidator
+internal sealed class BootstrapCandidateValidator : IBootstrapCandidateValidator
 {
     private const string TargetNotFoundErrorCode = "database.target_not_found";
     private const string DatabaseInvalidErrorCode = "signacore.bootstrap.database_invalid";
@@ -54,7 +54,7 @@ internal sealed class SignaCoreBootstrapCandidateValidator : IBootstrapCandidate
     /// The master key this process loaded at startup, or null in Bootstrap Configuration Mode,
     /// where no key exists yet. A non-null key refuses a candidate that would silently replace it.
     /// </param>
-    public SignaCoreBootstrapCandidateValidator(
+    public BootstrapCandidateValidator(
         BootstrapDatabaseProviderRegistry providerRegistry,
         string? currentMasterKey = null)
         : this(providerRegistry, currentMasterKey, BootstrapTargetInspector.InspectAsync)
@@ -65,7 +65,7 @@ internal sealed class SignaCoreBootstrapCandidateValidator : IBootstrapCandidate
     /// Initializes the validator with a target-inspection seam, so the local classification steps
     /// can be exercised deterministically without a reachable target.
     /// </summary>
-    internal SignaCoreBootstrapCandidateValidator(
+    internal BootstrapCandidateValidator(
         BootstrapDatabaseProviderRegistry providerRegistry,
         string? currentMasterKey,
         Func<DatabaseOptions, string?, CancellationToken, Task<BootstrapTargetInspection>> inspection)
@@ -96,7 +96,7 @@ internal sealed class SignaCoreBootstrapCandidateValidator : IBootstrapCandidate
         {
             if (string.Equals(shared.ErrorCode, TargetNotFoundErrorCode, StringComparison.Ordinal))
             {
-                var earlyShape = ValidateLocalShape(SignaCoreBootstrapStore.ToDatabaseOptions(candidate.Database));
+                var earlyShape = ValidateLocalShape(BootstrapStore.ToDatabaseOptions(candidate.Database));
                 if (earlyShape is not null)
                 {
                     return earlyShape;
@@ -121,7 +121,7 @@ internal sealed class SignaCoreBootstrapCandidateValidator : IBootstrapCandidate
 
         // 2. The local shape this process must be able to reload after the restart the write
         //    triggers; a file TryLoad would reject would turn into a restart loop.
-        var options = SignaCoreBootstrapStore.ToDatabaseOptions(candidate.Database);
+        var options = BootstrapStore.ToDatabaseOptions(candidate.Database);
         var localShape = ValidateLocalShape(options);
         if (localShape is not null)
         {

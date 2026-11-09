@@ -70,7 +70,7 @@ public sealed class AdminBootstrapEndpointsTests : IAsyncLifetime
     private WebApplicationFactory<Program> StartHost() =>
         new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
-                builder.UseSetting(SignaCoreBootstrapStore.FilePathConfigurationKey, _bootstrapPath));
+                builder.UseSetting(BootstrapStore.FilePathConfigurationKey, _bootstrapPath));
 
     private static async Task<HttpClient> CreateAdminClientAsync(WebApplicationFactory<Program> factory)
     {

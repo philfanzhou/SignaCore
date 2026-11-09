@@ -53,7 +53,7 @@ internal sealed record BffIdentityCheckResult(
 internal sealed class BffIdentityCheckService(
     IHttpClientFactory httpClientFactory,
     ITicketStore ticketStore,
-    IOptionsMonitor<SignaCoreHostedLoginOptions> loginOptions,
+    IOptionsMonitor<HostedLoginOptions> loginOptions,
     BffAuthorityMetadataReader metadataReader)
 {
     /// <summary>The named client that carries the Bearer header on the server-to-server leg.</summary>

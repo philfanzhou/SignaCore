@@ -680,7 +680,7 @@ public sealed class ReferenceBffAdminAuthorizationTests
     private static async Task ReplaceTicketAsync(
         WebApplicationFactory<BffProgram> bff,
         CrossServerBrowser browser,
-        Func<SignaCoreSessionTicket, SignaCoreSessionTicket> transform)
+        Func<SessionTicket, SessionTicket> transform)
     {
         var store = TicketStore(bff);
         var cookieValue = browser.Cookies.GetCookies(browser.BffBase)[SessionCookieName]?.Value;

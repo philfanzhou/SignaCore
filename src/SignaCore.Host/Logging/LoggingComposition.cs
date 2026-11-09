@@ -15,7 +15,7 @@ namespace SignaCore.Host.Logging;
 /// the <c>Logging:LogLevel</c> section of the host configuration; the pipeline minimum stays at
 /// Information. Service identity fields come from the ServiceMantle request log scope.
 /// </remarks>
-internal static class SignaCoreLogging
+internal static class LoggingComposition
 {
     /// <summary>
     /// The Console-only pipeline of the Bootstrap Configuration Mode and Setup hosts, which have no

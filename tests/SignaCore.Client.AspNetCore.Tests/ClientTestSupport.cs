@@ -314,7 +314,7 @@ public static class ConsumerAppTestServer
             builder.ConfigureTestServices(services =>
             {
                 // Route the package's Discovery/JWKS/token backchannel to the in-memory server.
-                services.AddHttpClient(SignaCoreHostedLoginDefaults.HttpClientName)
+                services.AddHttpClient(HostedLoginDefaults.HttpClientName)
                     .ConfigurePrimaryHttpMessageHandler(() => backchannelHandler);
 
                 // A test-controlled clock replaces the system one for the ticket store's expiry

@@ -9,7 +9,7 @@ namespace SignaCore.Client.AspNetCore;
 /// the consumer's own risk call — an upstream clock drift belongs in <see cref="ClockSkew"/>,
 /// never in disabling a time check.
 /// </summary>
-public sealed class SignaCoreValidationOptions
+public sealed class ProtocolValidationOptions
 {
     /// <summary>
     /// The clock skew allowed by the ID-token lifetime validation and the gated access-token
@@ -20,7 +20,7 @@ public sealed class SignaCoreValidationOptions
     /// <summary>
     /// When a token response carries a <c>scope</c> member, its space-separated values must be
     /// a subset of the scopes the sign-in requested (the configured
-    /// <see cref="SignaCoreHostedLoginOptions.Scope"/>); a superset — an authority silently
+    /// <see cref="HostedLoginOptions.Scope"/>); a superset — an authority silently
     /// granting more than was asked for — fails the sign-in. A response without the member is
     /// accepted (the member is optional in the token contract). Default on.
     /// </summary>

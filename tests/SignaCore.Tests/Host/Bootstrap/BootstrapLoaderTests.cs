@@ -50,7 +50,7 @@ public sealed class BootstrapLoaderTests : IDisposable
             }
             """);
 
-        var bootstrap = SignaCoreBootstrapStore.Load(Configuration(path), Environment(Environments.Production));
+        var bootstrap = BootstrapStore.Load(Configuration(path), Environment(Environments.Production));
 
         Assert.Equal("PostgreSQL", bootstrap.Database.Provider, StringComparer.Ordinal);
         Assert.Equal(ConnectionString, bootstrap.Database.ConnectionString);
@@ -75,7 +75,7 @@ public sealed class BootstrapLoaderTests : IDisposable
             }
             """);
 
-        var bootstrap = SignaCoreBootstrapStore.Load(Configuration(path), Environment(Environments.Production));
+        var bootstrap = BootstrapStore.Load(Configuration(path), Environment(Environments.Production));
 
         Assert.Equal("PostgreSQL", bootstrap.Database.Provider, StringComparer.Ordinal);
         Assert.Equal("signacore", bootstrap.ServiceId.Value, StringComparer.Ordinal);
@@ -84,7 +84,7 @@ public sealed class BootstrapLoaderTests : IDisposable
     [Fact]
     public void TryLoad_WithMissingFileInProduction_ReturnsNull()
     {
-        var bootstrap = SignaCoreBootstrapStore.TryLoad(
+        var bootstrap = BootstrapStore.TryLoad(
             Configuration(Path.Combine(_directory, "signacore.bootstrap.json")),
             Environment(Environments.Production));
 
@@ -97,7 +97,7 @@ public sealed class BootstrapLoaderTests : IDisposable
         var expected = Path.Combine(_directory, "signacore.bootstrap.json");
 
         var exception = Assert.Throws<SignaCore.Host.Bootstrap.BootstrapException>(() =>
-            SignaCoreBootstrapStore.Load(Configuration(expected), Environment(Environments.Production)));
+            BootstrapStore.Load(Configuration(expected), Environment(Environments.Production)));
 
         Assert.Contains(expected, exception.Message, StringComparison.Ordinal);
     }
@@ -116,7 +116,7 @@ public sealed class BootstrapLoaderTests : IDisposable
             """);
 
         var exception = Assert.Throws<SignaCore.Host.Bootstrap.BootstrapException>(() =>
-            SignaCoreBootstrapStore.Load(Configuration(path), Environment(Environments.Production)));
+            BootstrapStore.Load(Configuration(path), Environment(Environments.Production)));
 
         Assert.DoesNotContain("super-secret-password", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(RootSecret, exception.Message, StringComparison.Ordinal);
@@ -129,7 +129,7 @@ public sealed class BootstrapLoaderTests : IDisposable
             """{ "Database": { "Provider": "PostgreSQL", "ServerVersion": "15", "ConnectionString": "Host=db;Database=x;Username=u" } }""");
 
         var exception = Assert.Throws<SignaCore.Host.Bootstrap.BootstrapException>(() =>
-            SignaCoreBootstrapStore.Load(Configuration(path), Environment(Environments.Production)));
+            BootstrapStore.Load(Configuration(path), Environment(Environments.Production)));
 
         Assert.Contains("MasterKey", exception.Message, StringComparison.Ordinal);
     }
@@ -142,7 +142,7 @@ public sealed class BootstrapLoaderTests : IDisposable
         var path = WriteBootstrap(json);
 
         var exception = Assert.Throws<SignaCore.Host.Bootstrap.BootstrapException>(() =>
-            SignaCoreBootstrapStore.Load(Configuration(path), Environment(Environments.Production)));
+            BootstrapStore.Load(Configuration(path), Environment(Environments.Production)));
 
         Assert.DoesNotContain("PoolSecret", exception.Message, StringComparison.Ordinal);
     }
@@ -165,7 +165,7 @@ public sealed class BootstrapLoaderTests : IDisposable
         var path = WriteBootstrap(json);
 
         var exception = Assert.Throws<SignaCore.Host.Bootstrap.BootstrapException>(() =>
-            SignaCoreBootstrapStore.Load(Configuration(path), Environment(Environments.Production)));
+            BootstrapStore.Load(Configuration(path), Environment(Environments.Production)));
 
         Assert.Contains(expectedFragment, exception.Message, StringComparison.Ordinal);
     }
@@ -180,14 +180,14 @@ public sealed class BootstrapLoaderTests : IDisposable
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                [SignaCoreBootstrapStore.FilePathConfigurationKey] =
+                [BootstrapStore.FilePathConfigurationKey] =
                     Path.Combine(_directory, "signacore.bootstrap.json"),
                 ["Database:Provider"] = "SQLite",
                 ["Database:ConnectionString"] = "Data Source=dev.db"
             })
             .Build();
 
-        var bootstrap = SignaCoreBootstrapStore.Load(configuration, Environment(Environments.Development));
+        var bootstrap = BootstrapStore.Load(configuration, Environment(Environments.Development));
 
         Assert.Equal("SQLite", bootstrap.Database.Provider, StringComparer.Ordinal);
         Assert.False(string.IsNullOrWhiteSpace(bootstrap.MasterKey));
@@ -218,7 +218,7 @@ public sealed class BootstrapLoaderTests : IDisposable
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                [SignaCoreBootstrapStore.FilePathConfigurationKey] = bootstrapPath
+                [BootstrapStore.FilePathConfigurationKey] = bootstrapPath
             })
             .Build();
 

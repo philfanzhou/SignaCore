@@ -130,7 +130,7 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
                 // The tests run in Development, where the legacy admin cookie remains usable over
                 // plain HTTP. The bootstrap file exists, so the Development fallback never engages.
                 builder.UseEnvironment("Development");
-                builder.UseSetting(SignaCoreBootstrapStore.FilePathConfigurationKey, _bootstrapPath);
+                builder.UseSetting(BootstrapStore.FilePathConfigurationKey, _bootstrapPath);
                 if (testServices is not null)
                 {
                     builder.ConfigureTestServices(testServices);
@@ -692,7 +692,7 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
     /// </summary>
     private sealed class CountingValidator : IBootstrapCandidateValidator
     {
-        private readonly SignaCoreBootstrapCandidateValidator inner;
+        private readonly BootstrapCandidateValidator inner;
         private readonly TaskCompletionSource? releaseGate;
         private readonly IHttpContextAccessor? accessor;
         private readonly bool cancelAfterValidation;
@@ -704,8 +704,8 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
             bool cancelAfterValidation,
             IHttpContextAccessor? accessor)
         {
-            inner = new SignaCoreBootstrapCandidateValidator(
-                SignaCoreBootstrapStore.CreateProviderRegistry(),
+            inner = new BootstrapCandidateValidator(
+                BootstrapStore.CreateProviderRegistry(),
                 currentMasterKey);
             this.releaseGate = releaseGate;
             this.cancelAfterValidation = cancelAfterValidation;

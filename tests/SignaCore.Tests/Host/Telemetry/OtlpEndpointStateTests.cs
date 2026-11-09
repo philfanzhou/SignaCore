@@ -38,11 +38,11 @@ public sealed class OtlpEndpointStateTests
     }
 
     [Theory]
-    [InlineData("https://user:pass@collector.example.com", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
-    [InlineData("https://collector.example.com/?x=1", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
-    [InlineData("https://collector.example.com/#x", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
-    [InlineData("ftp://collector.example.com:4317", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
-    [InlineData("collector.example.com:4317", SignaCoreSettingCompositeValidator.RuntimeInvalidCode)]
+    [InlineData("https://user:pass@collector.example.com", SettingCompositeValidator.RuntimeInvalidCode)]
+    [InlineData("https://collector.example.com/?x=1", SettingCompositeValidator.RuntimeInvalidCode)]
+    [InlineData("https://collector.example.com/#x", SettingCompositeValidator.RuntimeInvalidCode)]
+    [InlineData("ftp://collector.example.com:4317", SettingCompositeValidator.RuntimeInvalidCode)]
+    [InlineData("collector.example.com:4317", SettingCompositeValidator.RuntimeInvalidCode)]
     public void UpdateValidation_RejectsUnusableEndpointsWithClosedCodes(string endpoint, string code)
     {
         var error = Assert.Single(Validate(endpoint, validateManagementUpdateRules: true));
@@ -109,7 +109,7 @@ public sealed class OtlpEndpointStateTests
         bool validateManagementUpdateRules) =>
         new ServiceSettingDefinitionRegistry(
                 SharedSettingComposition.CreateDefinitionProviders(),
-                [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules)])
+                [new SettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules)])
             .Validate(Candidate(endpoint))
             .Errors;
 

@@ -31,7 +31,7 @@ internal static class SharedSettingComposition
     internal static ServiceSettingDefinitionRegistry CreateRegistry(
         bool isDevelopment, bool validateManagementUpdateRules = false) => new(
         CreateDefinitionProviders(),
-        [new SignaCoreSettingCompositeValidator(isDevelopment, validateManagementUpdateRules)]);
+        [new SettingCompositeValidator(isDevelopment, validateManagementUpdateRules)]);
 
     // Capability registrations contribute generic strict validators. The product registry selects
     // its error-code adapter explicitly so startup/legacy/bootstrap remain tolerant, while updates

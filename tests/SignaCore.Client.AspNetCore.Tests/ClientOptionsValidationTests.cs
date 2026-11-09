@@ -80,14 +80,14 @@ public sealed class ClientOptionsValidationTests
     [Fact]
     public void AnHttpAuthorityWithAPath_FailsStartup() =>
         Assert.Contains(
-            "SignaCoreHostedLoginOptions.Authority",
+            "HostedLoginOptions.Authority",
             StartupDiagnostics("http://signacore.example/identity", environment: "Production"),
             StringComparison.Ordinal);
 
     [Fact]
     public void AnAuthorityWithPath_FailsStartup() =>
         Assert.Contains(
-            "SignaCoreHostedLoginOptions.Authority",
+            "HostedLoginOptions.Authority",
             StartupDiagnostics("https://signacore.example/identity", environment: "Production"),
             StringComparison.Ordinal);
 
@@ -96,7 +96,7 @@ public sealed class ClientOptionsValidationTests
     {
         var diagnostics = StartupDiagnostics(
             "https://signacore.example", clientSecret: null, environment: "Production");
-        Assert.Contains("SignaCoreHostedLoginOptions.ClientSecret", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("HostedLoginOptions.ClientSecret", diagnostics, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -105,7 +105,7 @@ public sealed class ClientOptionsValidationTests
         var diagnostics = StartupDiagnostics(
             "https://signacore.example",
             "https://bff.localhost/auth/callback?tenant=a", environment: "Production");
-        Assert.Contains("SignaCoreHostedLoginOptions.RedirectUri", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("HostedLoginOptions.RedirectUri", diagnostics, StringComparison.Ordinal);
         Assert.DoesNotContain("tenant", diagnostics, StringComparison.Ordinal);
     }
 
@@ -114,31 +114,31 @@ public sealed class ClientOptionsValidationTests
     [InlineData(0)]
     [InlineData(31)]
     public void InvalidPreSignInTimeout_FailsStartupWithoutEchoingTheValue(int seconds) =>
-        Assert.Contains("SignaCoreHostedLoginOptions.PreSignInAuthorizationTimeout is invalid.",
+        Assert.Contains("HostedLoginOptions.PreSignInAuthorizationTimeout is invalid.",
             StartupDiagnostics("https://signacore.example",
-                configureTestServices: services => services.PostConfigure<SignaCoreHostedLoginOptions>(
+                configureTestServices: services => services.PostConfigure<HostedLoginOptions>(
                     options => options.PreSignInAuthorizationTimeout = TimeSpan.FromSeconds(seconds)),
                 environment: "Production"), StringComparison.Ordinal);
 
     [Fact]
     public void AZeroTicketCapacity_FailsStartup() =>
         Assert.Contains(
-            "SignaCoreHostedLoginOptions.TicketCapacity",
+            "HostedLoginOptions.TicketCapacity",
             StartupDiagnostics(
                 "https://signacore.example",
                 configureTestServices: services => services
-                    .PostConfigure<SignaCoreHostedLoginOptions>(options => options.TicketCapacity = 0),
+                    .PostConfigure<HostedLoginOptions>(options => options.TicketCapacity = 0),
                 environment: "Production"),
             StringComparison.Ordinal);
 
     [Fact]
     public void AScopeWithoutOpenid_FailsStartup() =>
         Assert.Contains(
-            "SignaCoreHostedLoginOptions.Scope",
+            "HostedLoginOptions.Scope",
             StartupDiagnostics(
                 "https://signacore.example",
                 configureTestServices: services => services
-                    .PostConfigure<SignaCoreHostedLoginOptions>(options => options.Scope = "profile"),
+                    .PostConfigure<HostedLoginOptions>(options => options.Scope = "profile"),
                 environment: "Production"),
             StringComparison.Ordinal);
 

@@ -20,7 +20,7 @@ namespace SignaCore.Host.Bootstrap;
 /// fatal, and failure messages identify paths and rules but never the connection string or the
 /// master key.
 /// </remarks>
-internal static class SignaCoreBootstrapStore
+internal static class BootstrapStore
 {
     /// <summary>Optional host-level override of the bootstrap file location.</summary>
     public const string FilePathConfigurationKey = "Bootstrap:FilePath";

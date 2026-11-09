@@ -34,7 +34,7 @@ namespace SignaCore.Host.Configuration;
 /// host then switches off with a warning instead of failing.
 /// </para>
 /// </remarks>
-internal sealed class SignaCoreSettingCompositeValidator(
+internal sealed class SettingCompositeValidator(
     bool isDevelopment,
     bool validateManagementUpdateRules = false)
     : IServiceSettingCompositeValidator

@@ -7,7 +7,7 @@ namespace SignaCore.Client.AspNetCore;
 /// registration, redirect URI) are validated at startup: a missing or illegal value is a startup
 /// failure whose diagnostics name the option, never the value.
 /// </summary>
-public sealed class SignaCoreHostedLoginOptions
+public sealed class HostedLoginOptions
 {
     /// <summary>
     /// The SignaCore base address, for example <c>https://signacore.example</c>. Must be an
@@ -31,7 +31,7 @@ public sealed class SignaCoreHostedLoginOptions
     /// The exact, pre-registered callback URI, for example
     /// <c>https://orders.example/bff/callback</c>. Must be an absolute <c>http</c> or
     /// <c>https</c> URI whose path is byte-for-byte the callback path of the mapped prefix
-    /// (<see cref="M:SignaCore.Client.AspNetCore.SignaCoreHostedLoginEndpointExtensions.MapSignaCoreHostedLogin(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder,string)"/>).
+    /// (<see cref="M:SignaCore.Client.AspNetCore.HostedLoginEndpointExtensions.MapSignaCoreHostedLogin(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder,string)"/>).
     /// </summary>
     public string? RedirectUri { get; set; }
 
@@ -42,11 +42,11 @@ public sealed class SignaCoreHostedLoginOptions
     public string Scope { get; set; } = "openid profile";
 
     /// <summary>The name of the opaque session cookie. The default is
-    /// <see cref="SignaCoreHostedLoginDefaults.SessionCookieName"/>. The name must not carry the
+    /// <see cref="HostedLoginDefaults.SessionCookieName"/>. The name must not carry the
     /// <c>__Host-</c> or <c>__Secure-</c> cookie prefix while <see cref="RedirectUri"/> is served
     /// over plain <c>http</c>: those prefixes demand the Secure attribute, which an HTTP
     /// deployment cannot set, so the combination fails startup.</summary>
-    public string SessionCookieName { get; set; } = SignaCoreHostedLoginDefaults.SessionCookieName;
+    public string SessionCookieName { get; set; } = HostedLoginDefaults.SessionCookieName;
 
     /// <summary>
     /// The maximum number of concurrent server-side session tickets the default in-memory store
@@ -62,15 +62,15 @@ public sealed class SignaCoreHostedLoginOptions
     /// issuer plus <c>sub</c> against its own bindings). The result is reported by the session
     /// endpoint; the package itself enforces no business rule. Default: allow every subject.
     /// </summary>
-    public ISignaCoreAuthorizationDecision AuthorizationDecision { get; set; } =
-        SignaCoreAllowAllAuthorizationDecision.Instance;
+    public IAuthorizationDecision AuthorizationDecision { get; set; } =
+        AllowAllAuthorizationDecision.Instance;
 
     /// <summary>
     /// Optional authorization before callback sign-in. Default null preserves the ID-token-only
     /// path. When configured, strictly validates and correlates the SignaCore access token too.
     /// Only timely Allowed writes a new session; failures leave existing sessions unchanged.
     /// </summary>
-    public ISignaCorePreSignInAuthorizationDecision? PreSignInAuthorizationDecision { get; set; }
+    public IPreSignInAuthorizationDecision? PreSignInAuthorizationDecision { get; set; }
 
     /// <summary>
     /// Maximum asynchronous decision wait. Default ten seconds; must be positive and at most
@@ -84,13 +84,13 @@ public sealed class SignaCoreHostedLoginOptions
     /// protocol outcomes; this writer defines their presentation. Default: a fixed English failure
     /// page and a fixed JSON session body.
     /// </summary>
-    public ISignaCoreHostedLoginResponseWriter ResponseWriter { get; set; } =
-        SignaCoreDefaultResponseWriter.Instance;
+    public IHostedLoginResponseWriter ResponseWriter { get; set; } =
+        DefaultHostedLoginResponseWriter.Instance;
 
     /// <summary>
     /// Extension point — session and Bearer scheme selection. Returns, per request, the
     /// authentication scheme that serves it: the package's session scheme
-    /// (<see cref="SignaCoreHostedLoginDefaults.SessionAuthenticationScheme"/>) or a host-owned
+    /// (<see cref="HostedLoginDefaults.SessionAuthenticationScheme"/>) or a host-owned
     /// scheme such as its Bearer handler. Return <see langword="null"/> to keep the session
     /// scheme. Default: every request authenticates against the package's session.
     /// </summary>
@@ -119,11 +119,11 @@ public sealed class SignaCoreHostedLoginOptions
     /// unsafe method (anything but GET, HEAD, OPTIONS, and TRACE) must present the token from
     /// <c>GET &lt;prefix&gt;/csrf</c> in this header; a missing or wrong token fails the request.
     /// Requests forwarded by <see cref="SchemeSelector"/> to a host scheme are unaffected. The
-    /// default is <see cref="SignaCoreHostedLoginDefaults.AntiforgeryHeaderName"/>; the value is
+    /// default is <see cref="HostedLoginDefaults.AntiforgeryHeaderName"/>; the value is
     /// applied to the shared antiforgery configuration, and an application that post-configures
     /// <c>AntiforgeryOptions</c> after <c>AddSignaCoreHostedLogin</c> can still override it.
     /// </summary>
-    public string AntiforgeryHeaderName { get; set; } = SignaCoreHostedLoginDefaults.AntiforgeryHeaderName;
+    public string AntiforgeryHeaderName { get; set; } = HostedLoginDefaults.AntiforgeryHeaderName;
 
     /// <summary>
     /// The consumer's post-logout redirect URI, exactly as registered in SignaCore with the
@@ -163,7 +163,7 @@ public sealed class SignaCoreHostedLoginOptions
     /// duplicate JSON members rejected, bounded response bodies, future <c>iat</c> rejected);
     /// every dimension can be relaxed independently through this group.
     /// </summary>
-    public SignaCoreValidationOptions Validation { get; set; } = new();
+    public ProtocolValidationOptions Validation { get; set; } = new();
 
     /// <summary>
     /// Whether the session-status endpoint requires an authenticated user (endpoint

@@ -11,7 +11,7 @@ internal sealed record VerifiedAccessToken(
 
 // Internal callback validation for SignaCore PS-13 tokens, not a public Bearer validator.
 internal sealed class AccessTokenValidator(
-    IOptionsMonitor<SignaCoreHostedLoginOptions> options, TimeProvider timeProvider)
+    IOptionsMonitor<HostedLoginOptions> options, TimeProvider timeProvider)
 {
     private static readonly JsonWebTokenHandler Handler = new();
 

@@ -19,7 +19,7 @@ issue #556); see [System settings retirement](../database/system-settings-retire
 | Capability | Registration |
 | --- | --- |
 | Runtime definitions (45 unique keys) | `ServiceSettingDefinitions` plus shared `GrafanaLokiSettingDefinitions` and `OtlpSettingDefinitions`; product `Table` retains legacy/UI metadata for every key |
-| Cross-key rules | `SignaCoreSettingCompositeValidator : IServiceSettingCompositeValidator` |
+| Cross-key rules | `SettingCompositeValidator : IServiceSettingCompositeValidator` |
 | Integer Number semantics | `IntegerSettingConstraint : IServiceSettingValueConstraint` |
 | Store (single aggregate per service) | `EfCoreServiceSettingStore<IdentityDbContext>` over `IDbContextFactory<IdentityDbContext>` |
 | Transactional updates + audits | `EfCoreServiceSettingUpdateTransaction<IdentityDbContext>` + `ServiceSettingUpdateService` (scoped) |
@@ -68,7 +68,7 @@ Everything else lives exactly once, in the shared stack: value types, the "must 
 requirement for keys with real defaults, `requiresRestart` (all keys), the integer semantics of
 every Number key, the three numeric ranges, the fixed JSON root kinds, and every cross-key rule
 (base URL normalization, HTTPS policy, issuer equality, non-blank keys, SMS/LDAP/WeChat binder
-validation, reverse-proxy IP parsing) in `SignaCoreSettingCompositeValidator`. The Loki group rules
+validation, reverse-proxy IP parsing) in `SettingCompositeValidator`. The Loki group rules
 — the shared ServiceMantle combination evaluation over `loki.uri` (an absolute `http` or `https`
 URL without user info, query, or fragment; the scheme is a deployment decision), `loki.authorization`
 (set for the authenticated modes; absent when the explicit `loki.allow_no_authentication` opt-in is

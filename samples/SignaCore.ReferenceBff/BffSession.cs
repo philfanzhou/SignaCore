@@ -26,7 +26,7 @@ internal static class BffSession
     internal static async Task RevokeAsync(HttpContext http, CancellationToken cancellationToken)
     {
         var current = http.RequestServices
-            .GetRequiredService<IOptionsMonitor<SignaCoreHostedLoginOptions>>()
+            .GetRequiredService<IOptionsMonitor<HostedLoginOptions>>()
             .CurrentValue;
         if (http.Request.Cookies.TryGetValue(current.SessionCookieName, out var key)
             && !string.IsNullOrEmpty(key))

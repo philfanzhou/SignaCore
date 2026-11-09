@@ -7,7 +7,7 @@ namespace SignaCore.Client.AspNetCore.EntityFrameworkCore;
 /// <see cref="ExpiresUtc"/> column stays outside the payload so expiry sweeps can query it
 /// without decrypting anything.
 /// </summary>
-public sealed class SignaCoreSessionTicketEntity
+public sealed class SessionTicketEntity
 {
     /// <summary>
     /// The base64 SHA-256 digest of the opaque session key. A digest is stored instead of the key

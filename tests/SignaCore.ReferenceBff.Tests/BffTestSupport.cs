@@ -353,7 +353,7 @@ public static class BffTestServer
                 // primary handler itself — a later registration wins over the package's own —
                 // because bridging through another HttpClient would hand it an already-started
                 // request, which HttpClient refuses.
-                services.AddHttpClient(SignaCoreHostedLoginDefaults.HttpClientName)
+                services.AddHttpClient(HostedLoginDefaults.HttpClientName)
                     .ConfigurePrimaryHttpMessageHandler(() => backchannel);
 
                 // Route the BFF's own authority reads (the named "signacore" client: Discovery
@@ -566,7 +566,7 @@ public static class BffTickets
     public static string? SessionKey(CrossServerBrowser browser) =>
         browser.Cookies.GetCookies(browser.BffBase)[SessionCookieName]?.Value;
 
-    public static async Task<SignaCoreSessionTicket?> RetrieveAsync(
+    public static async Task<SessionTicket?> RetrieveAsync(
         WebApplicationFactory<BffSample.Program> bff,
         string? key,
         CancellationToken cancellationToken = default) =>

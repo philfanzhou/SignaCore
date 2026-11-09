@@ -24,25 +24,25 @@ public sealed class ClientSessionPrincipalAndAuthorizationTests
     private const string ClientId = "client-pack-app";
 
     /// <summary>Records what the new overload received; renders a fixed body.</summary>
-    private sealed class RecordingWriter : ISignaCoreHostedLoginResponseWriter
+    private sealed class RecordingWriter : IHostedLoginResponseWriter
     {
-        public List<(SignaCoreSessionStatus Status, ClaimsPrincipal? Principal)> Received { get; } = [];
+        public List<(SessionStatus Status, ClaimsPrincipal? Principal)> Received { get; } = [];
 
         public Task WriteSignInFailureAsync(
-            HttpContext context, SignaCoreSignInReason reason, CancellationToken cancellationToken) =>
-            SignaCoreDefaultResponseWriter.Instance.WriteSignInFailureAsync(context, reason, cancellationToken);
+            HttpContext context, SignInReason reason, CancellationToken cancellationToken) =>
+            DefaultHostedLoginResponseWriter.Instance.WriteSignInFailureAsync(context, reason, cancellationToken);
 
         public Task WriteFailurePageAsync(
-            HttpContext context, SignaCoreSignInReason? reason, CancellationToken cancellationToken) =>
-            SignaCoreDefaultResponseWriter.Instance.WriteFailurePageAsync(context, reason, cancellationToken);
+            HttpContext context, SignInReason? reason, CancellationToken cancellationToken) =>
+            DefaultHostedLoginResponseWriter.Instance.WriteFailurePageAsync(context, reason, cancellationToken);
 
         public Task WriteSessionStatusAsync(
-            HttpContext context, SignaCoreSessionStatus status, CancellationToken cancellationToken) =>
+            HttpContext context, SessionStatus status, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("The three-argument overload must not be called directly.");
 
         public async Task WriteSessionStatusAsync(
             HttpContext context,
-            SignaCoreSessionStatus status,
+            SessionStatus status,
             ClaimsPrincipal? principal,
             CancellationToken cancellationToken)
         {
@@ -56,23 +56,23 @@ public sealed class ClientSessionPrincipalAndAuthorizationTests
 
     /// <summary>Only implements the historical three-argument signature, exactly like a writer
     /// written before the principal overload existed.</summary>
-    private sealed class LegacyWriter : ISignaCoreHostedLoginResponseWriter
+    private sealed class LegacyWriter : IHostedLoginResponseWriter
     {
         public int Calls { get; private set; }
 
         public Task WriteSignInFailureAsync(
-            HttpContext context, SignaCoreSignInReason reason, CancellationToken cancellationToken) =>
-            SignaCoreDefaultResponseWriter.Instance.WriteSignInFailureAsync(context, reason, cancellationToken);
+            HttpContext context, SignInReason reason, CancellationToken cancellationToken) =>
+            DefaultHostedLoginResponseWriter.Instance.WriteSignInFailureAsync(context, reason, cancellationToken);
 
         public Task WriteFailurePageAsync(
-            HttpContext context, SignaCoreSignInReason? reason, CancellationToken cancellationToken) =>
-            SignaCoreDefaultResponseWriter.Instance.WriteFailurePageAsync(context, reason, cancellationToken);
+            HttpContext context, SignInReason? reason, CancellationToken cancellationToken) =>
+            DefaultHostedLoginResponseWriter.Instance.WriteFailurePageAsync(context, reason, cancellationToken);
 
         public Task WriteSessionStatusAsync(
-            HttpContext context, SignaCoreSessionStatus status, CancellationToken cancellationToken)
+            HttpContext context, SessionStatus status, CancellationToken cancellationToken)
         {
             Calls++;
-            return SignaCoreDefaultResponseWriter.Instance.WriteSessionStatusAsync(context, status, cancellationToken);
+            return DefaultHostedLoginResponseWriter.Instance.WriteSessionStatusAsync(context, status, cancellationToken);
         }
     }
 
@@ -82,7 +82,7 @@ public sealed class ClientSessionPrincipalAndAuthorizationTests
     {
         private readonly InMemoryTicketStore _inner = new(clock);
 
-        public Task<string?> StoreAsync(SignaCoreSessionTicket ticket, CancellationToken cancellationToken)
+        public Task<string?> StoreAsync(SessionTicket ticket, CancellationToken cancellationToken)
         {
             var enriched = ticket with
             {
@@ -95,7 +95,7 @@ public sealed class ClientSessionPrincipalAndAuthorizationTests
             return _inner.StoreAsync(enriched, cancellationToken);
         }
 
-        public Task<SignaCoreSessionTicket?> RetrieveAsync(string key, CancellationToken cancellationToken) =>
+        public Task<SessionTicket?> RetrieveAsync(string key, CancellationToken cancellationToken) =>
             _inner.RetrieveAsync(key, cancellationToken);
 
         public Task RemoveAsync(string key, CancellationToken cancellationToken) =>
@@ -171,7 +171,7 @@ public sealed class ClientSessionPrincipalAndAuthorizationTests
             configure: services =>
             {
                 services.AddSingleton<ITicketStore>(new RoleInjectingStore(clock));
-                services.PostConfigure<SignaCoreHostedLoginOptions>(
+                services.PostConfigure<HostedLoginOptions>(
                     options => options.ResponseWriter = writer);
             },
             timeProvider: clock);
@@ -209,7 +209,7 @@ public sealed class ClientSessionPrincipalAndAuthorizationTests
         await using var authority = await FakeIdentityProvider.StartAsync();
         var (consumer, browser) = await SignInAsync(
             authority,
-            configure: services => services.PostConfigure<SignaCoreHostedLoginOptions>(
+            configure: services => services.PostConfigure<HostedLoginOptions>(
                 options => options.ResponseWriter = writer));
         await using var _ = consumer;
         using var __ = browser;
@@ -242,7 +242,7 @@ public sealed class ClientSessionPrincipalAndAuthorizationTests
         await using var authority = await FakeIdentityProvider.StartAsync();
         var (consumer, browser) = await SignInAsync(
             authority,
-            configure: services => services.PostConfigure<SignaCoreHostedLoginOptions>(
+            configure: services => services.PostConfigure<HostedLoginOptions>(
                 options => options.SessionEndpointRequireAuthorization = true));
         await using var _ = consumer;
         using var __ = browser;
@@ -284,13 +284,13 @@ public sealed class ClientSessionPrincipalAndAuthorizationTests
             authority,
             configure: services =>
             {
-                services.PostConfigure<SignaCoreHostedLoginOptions>(
+                services.PostConfigure<HostedLoginOptions>(
                     options => options.SessionEndpointRequireAuthorization = true);
                 // A host that makes the package's scheme its default authenticates the endpoint
                 // through the session handler and presents its challenge: one redirect to the
                 // sign-in start.
                 services.PostConfigure<AuthenticationOptions>(
-                    options => options.DefaultScheme = SignaCoreHostedLoginDefaults.AuthenticationScheme);
+                    options => options.DefaultScheme = HostedLoginDefaults.AuthenticationScheme);
             });
         await using var _ = consumer;
         using var __ = browser;

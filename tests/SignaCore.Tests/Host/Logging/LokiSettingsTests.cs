@@ -103,7 +103,7 @@ public sealed class LokiSettingsTests
 
         var result = new ServiceSettingDefinitionRegistry(
                 SharedSettingComposition.CreateDefinitionProviders(),
-                [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules: true)])
+                [new SettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules: true)])
             .Validate(candidate);
 
         Assert.False(result.IsValid);
@@ -120,7 +120,7 @@ public sealed class LokiSettingsTests
 
         var error = Assert.Single(errors);
         Assert.Equal("loki.authorization", error.Key);
-        Assert.Equal(SignaCoreSettingCompositeValidator.RuntimeInvalidCode, error.ErrorCode);
+        Assert.Equal(SettingCompositeValidator.RuntimeInvalidCode, error.ErrorCode);
     }
 
     [Fact]
@@ -176,14 +176,14 @@ public sealed class LokiSettingsTests
 
     public static TheoryData<string?, string?, string?, string?> RejectedCandidates => new()
     {
-        { "https://user:pass@loki.example.com", Authorization, "loki.uri", SignaCoreSettingCompositeValidator.RuntimeInvalidCode },
-        { "http://user:pass@loki.example.com:3100", Authorization, "loki.uri", SignaCoreSettingCompositeValidator.RuntimeInvalidCode },
-        { "https://loki.example.com/?tenant=a", Authorization, "loki.uri", SignaCoreSettingCompositeValidator.RuntimeInvalidCode },
-        { "https://loki.example.com/#fragment", Authorization, "loki.uri", SignaCoreSettingCompositeValidator.RuntimeInvalidCode },
-        { "loki.example.com", Authorization, "loki.uri", SignaCoreSettingCompositeValidator.RuntimeInvalidCode },
-        { Endpoint, null, "loki.authorization", SignaCoreSettingCompositeValidator.RequiredCode },
-        { null, Authorization, "loki.uri", SignaCoreSettingCompositeValidator.RequiredCode },
-        { Endpoint, "Basic a\u0007b", "loki.authorization", SignaCoreSettingCompositeValidator.RuntimeInvalidCode },
+        { "https://user:pass@loki.example.com", Authorization, "loki.uri", SettingCompositeValidator.RuntimeInvalidCode },
+        { "http://user:pass@loki.example.com:3100", Authorization, "loki.uri", SettingCompositeValidator.RuntimeInvalidCode },
+        { "https://loki.example.com/?tenant=a", Authorization, "loki.uri", SettingCompositeValidator.RuntimeInvalidCode },
+        { "https://loki.example.com/#fragment", Authorization, "loki.uri", SettingCompositeValidator.RuntimeInvalidCode },
+        { "loki.example.com", Authorization, "loki.uri", SettingCompositeValidator.RuntimeInvalidCode },
+        { Endpoint, null, "loki.authorization", SettingCompositeValidator.RequiredCode },
+        { null, Authorization, "loki.uri", SettingCompositeValidator.RequiredCode },
+        { Endpoint, "Basic a\u0007b", "loki.authorization", SettingCompositeValidator.RuntimeInvalidCode },
     };
 
     [Theory]
@@ -246,7 +246,7 @@ public sealed class LokiSettingsTests
 
         return new ServiceSettingDefinitionRegistry(
                 SharedSettingComposition.CreateDefinitionProviders(),
-                [new SignaCoreSettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules)])
+                [new SettingCompositeValidator(isDevelopment: false, validateManagementUpdateRules)])
             .Validate(candidate)
             .Errors;
     }

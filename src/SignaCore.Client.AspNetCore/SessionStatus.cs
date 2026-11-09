@@ -6,23 +6,23 @@ namespace SignaCore.Client.AspNetCore;
 /// reached the access token's expiry), the verified display name, and the consumer's authorization
 /// decision. It never carries a token of any kind.
 /// </summary>
-public sealed record SignaCoreSessionStatus(
+public sealed record SessionStatus(
     bool Authenticated,
     bool RequiresReauthentication,
     string? DisplayName,
-    SignaCoreAuthorizationDecisionResult? Authorization)
+    AuthorizationDecisionResult? Authorization)
 {
     /// <summary>The fixed status of an expired or absent session.</summary>
-    public static SignaCoreSessionStatus Expired { get; } = new(
+    public static SessionStatus Expired { get; } = new(
         Authenticated: false,
         RequiresReauthentication: true,
         DisplayName: null,
         Authorization: null);
 
     /// <summary>Creates the status of a verified, unexpired session.</summary>
-    public static SignaCoreSessionStatus AuthenticatedSession(
+    public static SessionStatus AuthenticatedSession(
         string? displayName,
-        SignaCoreAuthorizationDecisionResult authorization) => new(
+        AuthorizationDecisionResult authorization) => new(
         Authenticated: true,
         RequiresReauthentication: false,
         DisplayName: displayName,

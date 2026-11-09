@@ -10,13 +10,13 @@ namespace SignaCore.Client.AspNetCore.EntityFrameworkCore;
 /// the default in-process store <c>AddSignaCoreHostedLogin</c> installs — so the call order
 /// against the package's own registration does not matter.
 /// </summary>
-public static class SignaCoreTicketStoreServiceCollectionExtensions
+public static class TicketStoreServiceCollectionExtensions
 {
     /// <summary>
     /// Registers the persistent ticket store backed by the consumer's
     /// <typeparamref name="TDbContext"/>. The context must map
-    /// <see cref="SignaCoreSessionTicketEntity"/> through
-    /// <see cref="SignaCoreTicketStoreModelBuilderExtensions.ConfigureSignaCoreTicketStore"/>, and
+    /// <see cref="SessionTicketEntity"/> through
+    /// <see cref="TicketStoreModelBuilderExtensions.ConfigureSignaCoreTicketStore"/>, and
     /// the consumer generates and applies the migration for its provider: this package never
     /// creates or executes migrations.
     /// </summary>

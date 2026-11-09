@@ -23,14 +23,14 @@ internal sealed record VerifiedIdentity(
 /// <c>sub</c>. Any other shape fails the sign-in; no identity is inferred or repaired.
 /// </summary>
 internal sealed class IdTokenValidator(
-    IOptionsMonitor<SignaCoreHostedLoginOptions> options,
+    IOptionsMonitor<HostedLoginOptions> options,
     TimeProvider timeProvider)
 {
     private static readonly JsonWebTokenHandler Handler = new();
 
     /// <summary>
     /// The historical accepted clock skew of the lifetime validation — thirty seconds. The live
-    /// validation reads <see cref="SignaCoreValidationOptions.ClockSkew"/> instead, whose default
+    /// validation reads <see cref="ProtocolValidationOptions.ClockSkew"/> instead, whose default
     /// is the strict zero; this constant remains only as the documented upper bound the options
     /// validator enforces.
     /// </summary>

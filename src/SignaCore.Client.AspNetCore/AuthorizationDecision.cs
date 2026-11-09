@@ -3,7 +3,7 @@ using System.Security.Claims;
 namespace SignaCore.Client.AspNetCore;
 
 /// <summary>The outcome of the consumer's authorization decision.</summary>
-public enum SignaCoreAuthorizationDecisionResult
+public enum AuthorizationDecisionResult
 {
     /// <summary>The subject is allowed.</summary>
     Allowed,
@@ -18,12 +18,12 @@ public enum SignaCoreAuthorizationDecisionResult
 /// consumer decides what that subject may do. The package calls it for the session-status answer
 /// and never enforces a business rule of its own.
 /// </summary>
-public interface ISignaCoreAuthorizationDecision
+public interface IAuthorizationDecision
 {
     /// <summary>Decides whether the verified subject is allowed.</summary>
     /// <param name="subject">The principal verified from the ID token.</param>
     /// <param name="cancellationToken">Propagates the caller's cancellation.</param>
-    ValueTask<SignaCoreAuthorizationDecisionResult> DecideAsync(
+    ValueTask<AuthorizationDecisionResult> DecideAsync(
         ClaimsPrincipal subject,
         CancellationToken cancellationToken);
 }
@@ -32,18 +32,18 @@ public interface ISignaCoreAuthorizationDecision
 /// The default decision: every verified subject is allowed. The package carries no business rule;
 /// a consumer that needs a boundary replaces this through the options.
 /// </summary>
-public sealed class SignaCoreAllowAllAuthorizationDecision : ISignaCoreAuthorizationDecision
+public sealed class AllowAllAuthorizationDecision : IAuthorizationDecision
 {
-    private SignaCoreAllowAllAuthorizationDecision()
+    private AllowAllAuthorizationDecision()
     {
     }
 
     /// <summary>The stateless instance every default configuration shares.</summary>
-    public static SignaCoreAllowAllAuthorizationDecision Instance { get; } = new();
+    public static AllowAllAuthorizationDecision Instance { get; } = new();
 
     /// <inheritdoc />
-    public ValueTask<SignaCoreAuthorizationDecisionResult> DecideAsync(
+    public ValueTask<AuthorizationDecisionResult> DecideAsync(
         ClaimsPrincipal subject,
         CancellationToken cancellationToken) =>
-        ValueTask.FromResult(SignaCoreAuthorizationDecisionResult.Allowed);
+        ValueTask.FromResult(AuthorizationDecisionResult.Allowed);
 }

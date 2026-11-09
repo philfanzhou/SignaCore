@@ -17,7 +17,7 @@ using SignaCore.Client.AspNetCore.EntityFrameworkCore;
 
 public class OrderServiceDbContext : DbContext
 {
-    public DbSet<SignaCoreSessionTicketEntity> SessionTickets => Set<SignaCoreSessionTicketEntity>();
+    public DbSet<SessionTicketEntity> SessionTickets => Set<SessionTicketEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder) =>
         modelBuilder.ConfigureSignaCoreTicketStore();

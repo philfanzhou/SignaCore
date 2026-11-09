@@ -14,7 +14,7 @@ namespace SignaCore.Client.AspNetCore;
 /// from HttpClient instrumentation — and the package's two authentication schemes: the session
 /// scheme and the forwarding scheme consumers authorize against.
 /// </summary>
-public static class SignaCoreHostedLoginServiceExtensions
+public static class HostedLoginServiceExtensions
 {
     /// <summary>
     /// Registers the SignaCore hosted-login integration. Call
@@ -25,12 +25,12 @@ public static class SignaCoreHostedLoginServiceExtensions
     /// <param name="configure">The protocol configuration.</param>
     public static IServiceCollection AddSignaCoreHostedLogin(
         this IServiceCollection services,
-        Action<SignaCoreHostedLoginOptions> configure)
+        Action<HostedLoginOptions> configure)
     {
-        services.AddOptions<SignaCoreHostedLoginOptions>()
+        services.AddOptions<HostedLoginOptions>()
             .Configure(configure)
             .ValidateOnStart();
-        services.AddSingleton<IValidateOptions<SignaCoreHostedLoginOptions>,
+        services.AddSingleton<IValidateOptions<HostedLoginOptions>,
             HostedLoginOptionsValidator>();
         services.TryAddSingleton(TimeProvider.System);
 
@@ -38,7 +38,7 @@ public static class SignaCoreHostedLoginServiceExtensions
         services.TryAddSingleton<ITicketStore>(static services =>
             new InMemoryTicketStore(services.GetRequiredService<TimeProvider>())
             {
-                Capacity = services.GetRequiredService<IOptions<SignaCoreHostedLoginOptions>>()
+                Capacity = services.GetRequiredService<IOptions<HostedLoginOptions>>()
                     .Value.TicketCapacity
             });
         services.AddHostedService<TicketStoreCleanupService>();
@@ -59,7 +59,7 @@ public static class SignaCoreHostedLoginServiceExtensions
             options.Cookie.IsEssential = true;
         });
         services.AddOptions<Microsoft.AspNetCore.Antiforgery.AntiforgeryOptions>()
-            .PostConfigure<IOptions<SignaCoreHostedLoginOptions>>(
+            .PostConfigure<IOptions<HostedLoginOptions>>(
                 static (antiforgery, login) =>
                 {
                     antiforgery.HeaderName = login.Value.AntiforgeryHeaderName;
@@ -73,7 +73,7 @@ public static class SignaCoreHostedLoginServiceExtensions
         // excluded from HttpClient instrumentation, so those values reach neither logs, nor
         // traces, nor metrics.
         services.AddTransient<BackchannelTelemetryHandler>();
-        services.AddHttpClient(SignaCoreHostedLoginDefaults.HttpClientName)
+        services.AddHttpClient(HostedLoginDefaults.HttpClientName)
             .ConfigureHttpClient(static client => client.Timeout = TimeSpan.FromSeconds(30))
             .ConfigurePrimaryHttpMessageHandler(static () =>
                 new System.Net.Http.SocketsHttpHandler
@@ -95,10 +95,10 @@ public static class SignaCoreHostedLoginServiceExtensions
 
         services.AddAuthentication()
             .AddScheme<SessionSchemeOptions, SessionAuthenticationHandler>(
-                SignaCoreHostedLoginDefaults.SessionAuthenticationScheme,
+                HostedLoginDefaults.SessionAuthenticationScheme,
                 static _ => { })
             .AddPolicyScheme(
-                SignaCoreHostedLoginDefaults.AuthenticationScheme,
+                HostedLoginDefaults.AuthenticationScheme,
                 "SignaCore hosted login",
                 static policy =>
                 {
@@ -107,9 +107,9 @@ public static class SignaCoreHostedLoginServiceExtensions
                     // session scheme is the default.
                     policy.ForwardDefaultSelector = static context =>
                         context.RequestServices
-                            .GetRequiredService<IOptionsMonitor<SignaCoreHostedLoginOptions>>()
+                            .GetRequiredService<IOptionsMonitor<HostedLoginOptions>>()
                             .CurrentValue.SchemeSelector?.Invoke(context)
-                        ?? SignaCoreHostedLoginDefaults.SessionAuthenticationScheme;
+                        ?? HostedLoginDefaults.SessionAuthenticationScheme;
                 });
 
         return services;

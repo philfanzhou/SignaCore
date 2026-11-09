@@ -76,7 +76,7 @@ public sealed class ServiceMantleMigrationGateTests
         await PrepareScenarioAsync(container, database, scenario);
 
         await using var context = CreateContext(database);
-        var executor = new SignaCoreMigrationExecutor(context, database);
+        var executor = new MigrationExecutor(context, database);
         var observed = await executor.InspectAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(scenario switch

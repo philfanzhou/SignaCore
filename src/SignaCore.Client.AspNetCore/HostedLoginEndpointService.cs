@@ -1,3 +1,4 @@
+using System.Buffers.Text;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -14,7 +15,7 @@ namespace SignaCore.Client.AspNetCore;
 /// full query string is ever written to a response or a log entry.
 /// </summary>
 internal sealed class HostedLoginEndpointService(
-    IOptionsMonitor<SignaCoreHostedLoginOptions> options,
+    IOptionsMonitor<HostedLoginOptions> options,
     DiscoveryClient discoveryClient,
     TokenClient tokenClient,
     IdTokenValidator idTokenValidator,
@@ -64,7 +65,7 @@ internal sealed class HostedLoginEndpointService(
 
         if (returnUrl is null)
         {
-            await RejectAsync(context, SignaCoreSignInReason.InvalidReturnUrl, cancellationToken);
+            await RejectAsync(context, SignInReason.InvalidReturnUrl, cancellationToken);
             return;
         }
 
@@ -79,7 +80,7 @@ internal sealed class HostedLoginEndpointService(
         }
         catch (Exception)
         {
-            await RejectAsync(context, SignaCoreSignInReason.AuthorityUnreachable, cancellationToken);
+            await RejectAsync(context, SignInReason.AuthorityUnreachable, cancellationToken);
             return;
         }
 
@@ -88,7 +89,7 @@ internal sealed class HostedLoginEndpointService(
         var creation = pendingSignInStore.Create(nonce, codeVerifier, returnUrl);
         if (creation is null)
         {
-            await RejectAsync(context, SignaCoreSignInReason.SessionStoreFull, cancellationToken);
+            await RejectAsync(context, SignInReason.SessionStoreFull, cancellationToken);
             return;
         }
 
@@ -101,15 +102,12 @@ internal sealed class HostedLoginEndpointService(
             creation.BrowserBinding,
             CookieProfile.CreateCookieOptions(
                 current,
-                (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.CallbackPathSegment,
+                CookieProfile.EndpointPath(current, HostedLoginDefaults.CallbackPathSegment),
                 timeProvider.GetUtcNow() + PendingSignInStore.Lifetime));
 
         ClientLog.SignInStarted(logger, cancellationToken);
-        var codeChallenge = Convert.ToBase64String(
-                SHA256.HashData(Encoding.UTF8.GetBytes(codeVerifier)))
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
+        var codeChallenge = Base64Url.EncodeToString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(codeVerifier)));
         context.Response.Redirect(AuthorizationRequestUrl.Build(
             configuration.AuthorizationEndpoint,
             current.ClientId!,
@@ -132,7 +130,7 @@ internal sealed class HostedLoginEndpointService(
         {
             if (query[member].Count > 1)
             {
-                await RejectAsync(context, SignaCoreSignInReason.InvalidResponse, cancellationToken);
+                await RejectAsync(context, SignInReason.InvalidResponse, cancellationToken);
                 return;
             }
         }
@@ -143,7 +141,7 @@ internal sealed class HostedLoginEndpointService(
         var error = query["error"].ToString();
         if (string.IsNullOrEmpty(state))
         {
-            await RejectAsync(context, SignaCoreSignInReason.InvalidResponse, cancellationToken);
+            await RejectAsync(context, SignInReason.InvalidResponse, cancellationToken);
             return;
         }
 
@@ -160,15 +158,15 @@ internal sealed class HostedLoginEndpointService(
             await RejectAsync(
                 context,
                 error == "access_denied"
-                    ? SignaCoreSignInReason.UserCanceled
-                    : SignaCoreSignInReason.InvalidResponse,
+                    ? SignInReason.UserCanceled
+                    : SignInReason.InvalidResponse,
                 cancellationToken);
             return;
         }
 
         if (string.IsNullOrEmpty(code))
         {
-            await RejectAsync(context, SignaCoreSignInReason.InvalidResponse, cancellationToken);
+            await RejectAsync(context, SignInReason.InvalidResponse, cancellationToken);
             return;
         }
 
@@ -183,7 +181,7 @@ internal sealed class HostedLoginEndpointService(
         }
         catch (Exception)
         {
-            await RejectAsync(context, SignaCoreSignInReason.AuthorityUnreachable, cancellationToken);
+            await RejectAsync(context, SignInReason.AuthorityUnreachable, cancellationToken);
             return;
         }
 
@@ -192,7 +190,7 @@ internal sealed class HostedLoginEndpointService(
         if (string.IsNullOrEmpty(iss))
         {
             pendingSignInStore.Consume(state);
-            await RejectAsync(context, SignaCoreSignInReason.InvalidResponse, cancellationToken);
+            await RejectAsync(context, SignInReason.InvalidResponse, cancellationToken);
             return;
         }
 
@@ -201,7 +199,7 @@ internal sealed class HostedLoginEndpointService(
             // The state is consumed by any callback that presents it, so this attempt cannot be
             // retried with a corrected iss against the same pending sign-in.
             pendingSignInStore.Consume(state);
-            await RejectAsync(context, SignaCoreSignInReason.IssuerMismatch, cancellationToken);
+            await RejectAsync(context, SignInReason.IssuerMismatch, cancellationToken);
             return;
         }
 
@@ -209,7 +207,7 @@ internal sealed class HostedLoginEndpointService(
         var pending = pendingSignInStore.Consume(state);
         if (pending is null)
         {
-            await RejectAsync(context, SignaCoreSignInReason.StateMismatch, cancellationToken);
+            await RejectAsync(context, SignInReason.StateMismatch, cancellationToken);
             return;
         }
 
@@ -223,7 +221,7 @@ internal sealed class HostedLoginEndpointService(
                 SHA256.HashData(Encoding.UTF8.GetBytes(browserBinding)),
                 pending.BrowserBindingHash))
         {
-            await RejectAsync(context, SignaCoreSignInReason.StateMismatch, cancellationToken);
+            await RejectAsync(context, SignInReason.StateMismatch, cancellationToken);
             return;
         }
 
@@ -235,9 +233,9 @@ internal sealed class HostedLoginEndpointService(
                 context,
                 failure switch
                 {
-                    TokenExchangeFailure.Unreachable => SignaCoreSignInReason.AuthorityUnreachable,
-                    TokenExchangeFailure.Rejected => SignaCoreSignInReason.TokenExchangeFailed,
-                    _ => SignaCoreSignInReason.InvalidToken
+                    TokenExchangeFailure.Unreachable => SignInReason.AuthorityUnreachable,
+                    TokenExchangeFailure.Rejected => SignInReason.TokenExchangeFailed,
+                    _ => SignInReason.InvalidToken
                 },
                 cancellationToken);
             return;
@@ -248,7 +246,7 @@ internal sealed class HostedLoginEndpointService(
             configuration, exchange.IdToken, pending.Nonce, cancellationToken);
         if (identity is null)
         {
-            await RejectAsync(context, SignaCoreSignInReason.InvalidToken, cancellationToken);
+            await RejectAsync(context, SignInReason.InvalidToken, cancellationToken);
             return;
         }
 
@@ -263,24 +261,24 @@ internal sealed class HostedLoginEndpointService(
                 || !string.Equals(access.Issuer, identity.Issuer, StringComparison.Ordinal)
                 || !string.Equals(access.Subject, identity.Subject, StringComparison.Ordinal))
             {
-                await RejectAsync(context, SignaCoreSignInReason.InvalidToken, cancellationToken);
+                await RejectAsync(context, SignInReason.InvalidToken, cancellationToken);
                 return;
             }
 
-            var authorizationContext = new SignaCorePreSignInAuthorizationContext(
+            var authorizationContext = new PreSignInAuthorizationContext(
                 access.Principal, identity.Principal, access.Issuer, access.Subject);
             if (!await AuthorizeSignInAsync(decision, authorizationContext,
                 current.PreSignInAuthorizationTimeout, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await RejectAsync(context, SignaCoreSignInReason.PreSignInDenied, cancellationToken);
+                await RejectAsync(context, SignInReason.PreSignInDenied, cancellationToken);
                 return;
             }
 
             cancellationToken.ThrowIfCancellationRequested();
             if (access.ExpiresUtc <= timeProvider.GetUtcNow())
             {
-                await RejectAsync(context, SignaCoreSignInReason.InvalidToken, cancellationToken);
+                await RejectAsync(context, SignInReason.InvalidToken, cancellationToken);
                 return;
             }
 
@@ -292,7 +290,7 @@ internal sealed class HostedLoginEndpointService(
         cancellationToken.ThrowIfCancellationRequested();
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             identity.Principal.Claims, "SignaCoreHostedLogin", nameType: "name", roleType: "role"));
-        var ticket = new SignaCoreSessionTicket(
+        var ticket = new SessionTicket(
             principal, now, expiresAt, exchange.AccessToken, exchange.IdToken);
         // A fresh sign-in replaces the session this browser held before, atomically: the store
         // takes the new ticket and revokes the old key in one call, so a re-login ends the
@@ -305,7 +303,7 @@ internal sealed class HostedLoginEndpointService(
             cancellationToken);
         if (key is null)
         {
-            await RejectAsync(context, SignaCoreSignInReason.SessionStoreFull, cancellationToken);
+            await RejectAsync(context, SignInReason.SessionStoreFull, cancellationToken);
             return;
         }
 
@@ -318,13 +316,13 @@ internal sealed class HostedLoginEndpointService(
     }
 
     private async Task<bool> AuthorizeSignInAsync(
-        ISignaCorePreSignInAuthorizationDecision decision,
-        SignaCorePreSignInAuthorizationContext context, TimeSpan timeout,
+        IPreSignInAuthorizationDecision decision,
+        PreSignInAuthorizationContext context, TimeSpan timeout,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        Task<SignaCoreAuthorizationDecisionResult>? task = null;
+        Task<AuthorizationDecisionResult>? task = null;
         try
         {
             var started = timeProvider.GetTimestamp();
@@ -333,7 +331,7 @@ internal sealed class HostedLoginEndpointService(
             if (remaining <= TimeSpan.Zero) throw new TimeoutException();
             var result = await task.WaitAsync(remaining, timeProvider, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            return result == SignaCoreAuthorizationDecisionResult.Allowed;
+            return result == AuthorizationDecisionResult.Allowed;
         }
         catch (Exception)
         {
@@ -363,16 +361,16 @@ internal sealed class HostedLoginEndpointService(
         await options.CurrentValue.ResponseWriter.WriteFailurePageAsync(context, reason, context.RequestAborted);
     }
 
-    private async Task<(SignaCoreSessionStatus Status, System.Security.Claims.ClaimsPrincipal? Principal)>
+    private async Task<(SessionStatus Status, System.Security.Claims.ClaimsPrincipal? Principal)>
         ReadSessionStatusAsync(
             HttpContext context,
-            SignaCoreHostedLoginOptions current,
+            HostedLoginOptions current,
             CancellationToken cancellationToken)
     {
         if (!context.Request.Cookies.TryGetValue(current.SessionCookieName, out var key)
             || string.IsNullOrEmpty(key))
         {
-            return (SignaCoreSessionStatus.Expired, null);
+            return (SessionStatus.Expired, null);
         }
 
         var ticket = await ticketStore.RetrieveAsync(key, cancellationToken);
@@ -380,7 +378,7 @@ internal sealed class HostedLoginEndpointService(
         {
             // The fixed answer of an expired or unknown session: re-authentication is the only
             // way forward, and the package never refreshes silently.
-            return (SignaCoreSessionStatus.Expired, null);
+            return (SessionStatus.Expired, null);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -388,7 +386,7 @@ internal sealed class HostedLoginEndpointService(
         var displayName = ticket.Principal.FindFirst("name")?.Value;
         // The principal reaches the writer exactly as the ticket holds it — including claims a
         // custom store added at storage time. Anonymous and expired sessions carry null.
-        return (SignaCoreSessionStatus.AuthenticatedSession(displayName, decision), ticket.Principal);
+        return (SessionStatus.AuthenticatedSession(displayName, decision), ticket.Principal);
     }
 
     /// <summary>The name of the binding cookie of one pending sign-in: the session cookie's
@@ -398,26 +396,26 @@ internal sealed class HostedLoginEndpointService(
     /// name cannot keep its prefix on this cookie — the binding cookie is scoped to the callback
     /// path, not "/", so a browser would refuse the prefixed name outright — and instead derives
     /// a <c>__Secure-</c> name, exactly like the logout-return cookie.</summary>
-    private static string LoginBindingCookieName(SignaCoreHostedLoginOptions current, string state) =>
+    private static string LoginBindingCookieName(HostedLoginOptions current, string state) =>
         CookieProfile.DerivedCookieName(
             current,
-            SignaCoreHostedLoginDefaults.LoginBindingCookieSuffix + "." + state);
+            HostedLoginDefaults.LoginBindingCookieSuffix + "." + state);
 
     private static void DeleteLoginBindingCookie(
         HttpContext context,
-        SignaCoreHostedLoginOptions current,
+        HostedLoginOptions current,
         string state) =>
         CookieProfile.DeleteCookie(
             context,
             current,
             LoginBindingCookieName(current, state),
-            (current.Prefix ?? string.Empty) + "/" + SignaCoreHostedLoginDefaults.CallbackPathSegment);
+            CookieProfile.EndpointPath(current, HostedLoginDefaults.CallbackPathSegment));
 
     /// <summary>
     /// Whether any required protocol option is blank — exactly the validator's missing-vs-illegal
     /// split: a blank member degrades in optional mode, a configured illegal one fails startup.
     /// </summary>
-    private static bool IsUnconfigured(SignaCoreHostedLoginOptions current) =>
+    private static bool IsUnconfigured(HostedLoginOptions current) =>
         string.IsNullOrWhiteSpace(current.Authority)
         || string.IsNullOrWhiteSpace(current.ClientId)
         || string.IsNullOrWhiteSpace(current.ClientSecret)
@@ -425,7 +423,7 @@ internal sealed class HostedLoginEndpointService(
 
     private async Task RejectAsync(
         HttpContext context,
-        SignaCoreSignInReason reason,
+        SignInReason reason,
         CancellationToken cancellationToken)
     {
         ClientLog.SignInRejected(logger, reason, cancellationToken);
@@ -490,12 +488,12 @@ internal static class AuthorizationRequestUrl
         string nonce,
         string codeChallenge) =>
         authorizationEndpoint
-        + "?response_type=" + Uri.EscapeDataString(SignaCoreHostedLoginDefaults.ResponseType)
+        + "?response_type=" + Uri.EscapeDataString(HostedLoginDefaults.ResponseType)
         + "&client_id=" + Uri.EscapeDataString(clientId)
         + "&redirect_uri=" + Uri.EscapeDataString(redirectUri)
         + "&scope=" + Uri.EscapeDataString(scope)
         + "&state=" + Uri.EscapeDataString(state)
         + "&nonce=" + Uri.EscapeDataString(nonce)
         + "&code_challenge=" + Uri.EscapeDataString(codeChallenge)
-        + "&code_challenge_method=" + Uri.EscapeDataString(SignaCoreHostedLoginDefaults.CodeChallengeMethod);
+        + "&code_challenge_method=" + Uri.EscapeDataString(HostedLoginDefaults.CodeChallengeMethod);
 }

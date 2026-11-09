@@ -168,7 +168,7 @@ public sealed class TicketStoreDatabase : IAsyncDisposable
     public async Task<string> DumpAllRowsAsTextAsync()
     {
         await using var context = CreateContext();
-        var rows = await context.Set<SignaCoreSessionTicketEntity>()
+        var rows = await context.Set<SessionTicketEntity>()
             .AsNoTracking()
             .ToListAsync(TestContext.Current.CancellationToken);
         return string.Join(
@@ -238,7 +238,7 @@ public sealed class TicketStoreDatabase : IAsyncDisposable
 public sealed class SessionTicketTestContext(DbContextOptions<SessionTicketTestContext> options)
     : DbContext(options)
 {
-    public DbSet<SignaCoreSessionTicketEntity> SessionTickets => Set<SignaCoreSessionTicketEntity>();
+    public DbSet<SessionTicketEntity> SessionTickets => Set<SessionTicketEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder) =>
         modelBuilder.ConfigureSignaCoreTicketStore();

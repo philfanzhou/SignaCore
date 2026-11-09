@@ -5,7 +5,7 @@ namespace SignaCore.Client.AspNetCore;
 /// the fixed failure page carrying one of these values; no other failure detail — and never a
 /// code, state, token, or query string — reaches the browser.
 /// </summary>
-public enum SignaCoreSignInReason
+public enum SignInReason
 {
     /// <summary>The Authority's Discovery document could not be read or did not validate.</summary>
     AuthorityUnreachable,
@@ -57,40 +57,40 @@ public enum SignaCoreSignInReason
 }
 
 /// <summary>
-/// The single string↔enum table of the <see cref="SignaCoreSignInReason"/> wire names. The
+/// The single string↔enum table of the <see cref="SignInReason"/> wire names. The
 /// failure page writes and the failure-page reader parse through these accessors so the two
 /// directions can never drift apart: an unknown wire name parses to <c>null</c>, and an
-/// out-of-range enum value renders as <see cref="SignaCoreSignInReason.InvalidResponse"/>.
+/// out-of-range enum value renders as <see cref="SignInReason.InvalidResponse"/>.
 /// </summary>
 internal static class SignInReasonWireNames
 {
-    private static readonly IReadOnlyDictionary<SignaCoreSignInReason, string> WireNames =
-        new Dictionary<SignaCoreSignInReason, string>
+    private static readonly IReadOnlyDictionary<SignInReason, string> WireNames =
+        new Dictionary<SignInReason, string>
         {
-            [SignaCoreSignInReason.AuthorityUnreachable] = "authority_unreachable",
-            [SignaCoreSignInReason.InvalidReturnUrl] = "invalid_return_url",
-            [SignaCoreSignInReason.InvalidResponse] = "invalid_response",
-            [SignaCoreSignInReason.AccessDenied] = "access_denied",
-            [SignaCoreSignInReason.UserCanceled] = "user_canceled",
-            [SignaCoreSignInReason.PreSignInDenied] = "pre_sign_in_denied",
-            [SignaCoreSignInReason.StateMismatch] = "state_mismatch",
-            [SignaCoreSignInReason.IssuerMismatch] = "issuer_mismatch",
-            [SignaCoreSignInReason.TokenExchangeFailed] = "token_exchange_failed",
-            [SignaCoreSignInReason.InvalidToken] = "invalid_token",
-            [SignaCoreSignInReason.SessionStoreFull] = "session_store_full",
-            [SignaCoreSignInReason.RequiresReauthentication] = "requires_reauthentication"
+            [SignInReason.AuthorityUnreachable] = "authority_unreachable",
+            [SignInReason.InvalidReturnUrl] = "invalid_return_url",
+            [SignInReason.InvalidResponse] = "invalid_response",
+            [SignInReason.AccessDenied] = "access_denied",
+            [SignInReason.UserCanceled] = "user_canceled",
+            [SignInReason.PreSignInDenied] = "pre_sign_in_denied",
+            [SignInReason.StateMismatch] = "state_mismatch",
+            [SignInReason.IssuerMismatch] = "issuer_mismatch",
+            [SignInReason.TokenExchangeFailed] = "token_exchange_failed",
+            [SignInReason.InvalidToken] = "invalid_token",
+            [SignInReason.SessionStoreFull] = "session_store_full",
+            [SignInReason.RequiresReauthentication] = "requires_reauthentication"
         };
 
-    private static readonly IReadOnlyDictionary<string, SignaCoreSignInReason> ReasonsByWireName =
+    private static readonly IReadOnlyDictionary<string, SignInReason> ReasonsByWireName =
         WireNames.ToDictionary(
             pair => pair.Value,
             pair => pair.Key,
             StringComparer.Ordinal);
 
-    internal static string ToWireName(SignaCoreSignInReason reason) =>
+    internal static string ToWireName(SignInReason reason) =>
         WireNames.TryGetValue(reason, out var wireName) ? wireName : "invalid_response";
 
-    internal static SignaCoreSignInReason? FromWireName(string? value) =>
+    internal static SignInReason? FromWireName(string? value) =>
         value is not null && ReasonsByWireName.TryGetValue(value, out var reason)
             ? reason
             : null;

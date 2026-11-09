@@ -44,7 +44,7 @@ public sealed class ServiceSettingsDatabaseContractTests
 
     private static ServiceSettingDefinitionRegistry CreateRegistry() => new(
         SharedSettingComposition.CreateDefinitionProviders(),
-        [new SignaCoreSettingCompositeValidator(isDevelopment: false)]);
+        [new SettingCompositeValidator(isDevelopment: false)]);
 
     /// <summary>
     /// The smallest valid seed: the two setup-collected keys are required without defaults, the
@@ -629,7 +629,7 @@ public sealed class ServiceSettingsDatabaseContractTests
             await using (var context = new IdentityDbContext(options))
             {
                 await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(
-                    async () => await new SignaCore.Host.Migration.SignaCoreMigrationExecutor(context, databaseOptions)
+                    async () => await new SignaCore.Host.Migration.MigrationExecutor(context, databaseOptions)
                         .ExecuteAsync(TestContext.Current.CancellationToken));
 
                 var legacyRows = await context.Database.SqlQuery<long>($"""
@@ -699,7 +699,7 @@ public sealed class ServiceSettingsDatabaseContractTests
 
             await using (var context = new IdentityDbContext(options))
             {
-                await new SignaCore.Host.Migration.SignaCoreMigrationExecutor(context, databaseOptions)
+                await new SignaCore.Host.Migration.MigrationExecutor(context, databaseOptions)
                     .ExecuteAsync(TestContext.Current.CancellationToken);
 
                 var retiredTable = await context.Database.SqlQuery<long>($"""

@@ -109,8 +109,8 @@ builder.Services
 // default so its own routes challenge into the package's start endpoint.
 builder.Services.AddAuthentication(options =>
 {
-    options.DefaultScheme = SignaCoreHostedLoginDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = SignaCoreHostedLoginDefaults.AuthenticationScheme;
+    options.DefaultScheme = HostedLoginDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = HostedLoginDefaults.AuthenticationScheme;
 });
 
 // The administrator-binding decision the package reports through its session endpoint. It is a
@@ -145,20 +145,20 @@ builder.Services.AddSignaCoreHostedLogin(options =>
             UriComponents.Scheme | UriComponents.Host | UriComponents.Port,
             UriFormat.UriEscaped);
         options.PostLogoutRedirectUri = origin + BffRoutePrefix + "/"
-            + SignaCoreHostedLoginDefaults.LogoutReturnPathSegment;
+            + HostedLoginDefaults.LogoutReturnPathSegment;
     }
 });
 
 // The package reports the administrator decision through its session endpoint; this registration
 // runs after AddSignaCoreHostedLogin and replaces the default allow-all decision.
-builder.Services.AddOptions<SignaCoreHostedLoginOptions>()
+builder.Services.AddOptions<HostedLoginOptions>()
     .Configure<BffAdministratorBindingDecision>(
         static (options, decision) => options.AuthorizationDecision = decision);
 
 // The sample's presentation of the package's bounded outcomes: sign-in failures redirect to the
 // sample's own /error page with the closed reason, and the session status keeps the package's
 // fixed JSON body.
-builder.Services.AddOptions<SignaCoreHostedLoginOptions>()
+builder.Services.AddOptions<HostedLoginOptions>()
     .PostConfigure(static options => options.ResponseWriter = BffResponseWriter.Instance);
 
 builder.Services.AddAuthorization();
@@ -238,7 +238,7 @@ routes.MapGet("/", (HttpContext http, IAntiforgery antiforgery) =>
 });
 
 routes.MapGet("/bff/login", () => Results.Redirect(
-    BffRoutePrefix + "/" + SignaCoreHostedLoginDefaults.StartPathSegment + "?returnUrl=%2F",
+    BffRoutePrefix + "/" + HostedLoginDefaults.StartPathSegment + "?returnUrl=%2F",
     permanent: false, preserveMethod: false));
 
 routes.MapGet("/bff/diagnostics", async (

@@ -47,7 +47,7 @@ public sealed class ClientReturnUrlValidatorTests
             loggerProvider: capture,
             configureTestServices: validator is null
                 ? null
-                : services => services.PostConfigure<SignaCoreHostedLoginOptions>(
+                : services => services.PostConfigure<HostedLoginOptions>(
                     options => options.ReturnUrlValidator = validator.Validate));
         var browser = ConsumerAppTestServer.CreateBrowserOverAuthority(
             consumer, authority.Server.CreateHandler(), new Uri(FakeIdentityProvider.BaseAddress));
@@ -323,7 +323,7 @@ public sealed class ClientReturnUrlValidatorTests
             SignaCoreHostFixture.RedirectUri,
             authority.Server.CreateHandler(),
             loggerProvider: capture,
-            configureTestServices: services => services.PostConfigure<SignaCoreHostedLoginOptions>(
+            configureTestServices: services => services.PostConfigure<HostedLoginOptions>(
                 options => options.ReturnUrlValidator = value =>
                 {
                     entered.Set();

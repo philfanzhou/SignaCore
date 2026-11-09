@@ -24,7 +24,7 @@ namespace SignaCore.Host.Telemetry;
 /// routing, and rate-limiting series keep being exported.
 /// </para>
 /// </remarks>
-internal static class SignaCoreTelemetry
+internal static class TelemetryComposition
 {
     /// <summary>The product meter and activity source name.</summary>
     internal const string ProductSignalName = "SignaCore";

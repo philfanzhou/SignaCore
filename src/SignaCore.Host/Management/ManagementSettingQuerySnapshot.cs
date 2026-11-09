@@ -39,10 +39,10 @@ internal sealed class ManagementSettingQuerySnapshot : IDisposable
         if (!refresh.Succeeded || refresh.Snapshot is null)
             return ManagementSettingDiagnostics.Unavailable;
 
-        var legacy = SignaCoreSettingCompositeValidator.BuildLegacySnapshot(refresh.Snapshot.Values);
+        var legacy = SettingCompositeValidator.BuildLegacySnapshot(refresh.Snapshot.Values);
         return ManagementSettingDiagnostics.Success(
             refresh.Snapshot.Version,
-            SignaCoreSettingCompositeValidator.ValidateOptionalSettings(legacy).ToList());
+            SettingCompositeValidator.ValidateOptionalSettings(legacy).ToList());
     }
 
     public void Dispose() => loader.Dispose();

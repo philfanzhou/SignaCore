@@ -596,7 +596,7 @@ public sealed class ManagementBearerSessionEndpointTests : IClassFixture<Identit
 
     private static void CountProvider(IServiceCollection services, ProviderCounter counter) =>
         services.Replace(ServiceDescriptor.Scoped<IManagementIdentityProvider>(serviceProvider =>
-            new CountingProvider(ActivatorUtilities.CreateInstance<SignaCoreManagementIdentityProvider>(serviceProvider), counter)));
+            new CountingProvider(ActivatorUtilities.CreateInstance<ManagementIdentityProvider>(serviceProvider), counter)));
 
     private static void RecordTags(ReadOnlySpan<KeyValuePair<string, object?>> tags, ConcurrentQueue<string> values)
     {

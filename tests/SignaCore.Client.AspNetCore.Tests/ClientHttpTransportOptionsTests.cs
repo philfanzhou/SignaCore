@@ -28,7 +28,7 @@ public sealed class ClientHttpTransportOptionsTests
         string authority,
         string redirectUri = HttpRedirectUri,
         string? clientSecret = "test-secret",
-        Action<SignaCoreHostedLoginOptions>? configureOptions = null,
+        Action<HostedLoginOptions>? configureOptions = null,
         string? environment = null)
     {
         using var factory = ConsumerAppTestServer.Create(
@@ -103,7 +103,7 @@ public sealed class ClientHttpTransportOptionsTests
         string authority, string mustNotAppear)
     {
         var diagnostics = StartupDiagnostics(authority, environment: "Production");
-        Assert.Contains("SignaCoreHostedLoginOptions.Authority", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("HostedLoginOptions.Authority", diagnostics, StringComparison.Ordinal);
         Assert.DoesNotContain(mustNotAppear, diagnostics, StringComparison.Ordinal);
     }
 
@@ -119,7 +119,7 @@ public sealed class ClientHttpTransportOptionsTests
             HostOrigin,
             redirectUri: redirectUri,
             environment: "Production");
-        Assert.Contains("SignaCoreHostedLoginOptions.RedirectUri", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("HostedLoginOptions.RedirectUri", diagnostics, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public sealed class ClientHttpTransportOptionsTests
                 options.PostLogoutRedirectUri = ConsumerOrigin + "/elsewhere/return",
             environment: "Production");
         Assert.Contains(
-            "SignaCoreHostedLoginOptions.PostLogoutRedirectUri", diagnostics, StringComparison.Ordinal);
+            "HostedLoginOptions.PostLogoutRedirectUri", diagnostics, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -145,9 +145,9 @@ public sealed class ClientHttpTransportOptionsTests
             configureOptions: options => options.SessionCookieName = sessionCookieName,
             environment: "Production");
         Assert.Contains(
-            "SignaCoreHostedLoginOptions.SessionCookieName", diagnostics, StringComparison.Ordinal);
+            "HostedLoginOptions.SessionCookieName", diagnostics, StringComparison.Ordinal);
         Assert.Contains(
-            "SignaCoreHostedLoginOptions.RedirectUri is an http URI",
+            "HostedLoginOptions.RedirectUri is an http URI",
             diagnostics,
             StringComparison.Ordinal);
     }
@@ -163,7 +163,7 @@ public sealed class ClientHttpTransportOptionsTests
             "test-secret",
             "https://orders.example/auth/callback",
             Handler,
-            configureTestServices: services => services.PostConfigure<SignaCoreHostedLoginOptions>(
+            configureTestServices: services => services.PostConfigure<HostedLoginOptions>(
                 options => options.SessionCookieName = sessionCookieName),
             environment: "Production");
         using var client = factory.CreateClient();
