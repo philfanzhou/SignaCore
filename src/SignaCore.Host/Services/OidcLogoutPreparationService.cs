@@ -1,7 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 using ServiceMantle.Audit;
 using SignaCore.Database;
 using SignaCore.Host.Audit;
@@ -128,7 +125,8 @@ public sealed class OidcLogoutPreparationService(
         cancellationToken.ThrowIfCancellationRequested();
         var keys = await keyManager.GetLogoutHintValidationKeysAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        if (!TryValidateIdTokenHint(idTokenHint, app.AppId, keys, now, out var subject, out var sessionId))
+        if (!OidcLogoutHintValidator.TryValidate(
+                idTokenHint, app.AppId, jwtOptions.Issuer, keys, now, out var subject, out var sessionId))
         {
             return Fail("id_token_hint_validation");
         }
@@ -190,84 +188,6 @@ public sealed class OidcLogoutPreparationService(
         await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         return creation;
-    }
-
-    /// <summary>
-    /// The full <c>IN-31</c> judgement: RS256 signature over the logout-hint key set, exact
-    /// issuer, the authenticated client's audience, exactly one parseable <c>sub</c> and
-    /// <c>sid</c>, and an <c>iat</c> no older than the freshness bound. <c>exp</c> is ignored
-    /// here and nowhere else.
-    /// </summary>
-    private bool TryValidateIdTokenHint(
-        string idTokenHint,
-        string clientId,
-        IReadOnlyList<RsaSecurityKey> keys,
-        DateTimeOffset now,
-        out Guid subject,
-        out Guid sessionId)
-    {
-        subject = Guid.Empty;
-        sessionId = Guid.Empty;
-        if (keys.Count == 0)
-        {
-            return false;
-        }
-
-        var handler = new JwtSecurityTokenHandler { MapInboundClaims = false };
-        if (!handler.CanReadToken(idTokenHint))
-        {
-            return false;
-        }
-
-        ClaimsPrincipal principal;
-        try
-        {
-            principal = handler.ValidateToken(
-                idTokenHint,
-                new TokenValidationParameters
-                {
-                    ValidIssuer = jwtOptions.Issuer,
-                    ValidAudience = clientId,
-                    IssuerSigningKeys = keys.Cast<SecurityKey>().ToList(),
-                    ValidAlgorithms = ["RS256"],
-                    ValidateLifetime = false
-                },
-                out var validated);
-            _ = validated;
-        }
-        catch (Exception exception) when (exception
-            is SecurityTokenValidationException or SecurityTokenMalformedException or ArgumentException)
-        {
-            return false;
-        }
-
-        // Exactly one sub and one sid, both parseable ids; any other shape is a failure.
-        var subjectClaims = principal.FindAll("sub").ToList();
-        var sessionClaims = principal.FindAll(JwtRegisteredClaimNames.Sid).ToList();
-        if (subjectClaims.Count != 1
-            || sessionClaims.Count != 1
-            || !Guid.TryParse(subjectClaims[0].Value, out subject)
-            || subject == Guid.Empty
-            || !Guid.TryParse(sessionClaims[0].Value, out sessionId)
-            || sessionId == Guid.Empty)
-        {
-            subject = Guid.Empty;
-            sessionId = Guid.Empty;
-            return false;
-        }
-
-        // IN-31 freshness: iat exists, is not in the future beyond clock skew, and is at most the
-        // bound old. exp is deliberately not checked here.
-        var issuedAtClaims = principal.FindAll(JwtRegisteredClaimNames.Iat).ToList();
-        if (issuedAtClaims.Count != 1
-            || !long.TryParse(issuedAtClaims[0].Value, out var issuedAtSeconds))
-        {
-            return false;
-        }
-
-        var issuedAt = DateTimeOffset.FromUnixTimeSeconds(issuedAtSeconds);
-        return issuedAt <= now.AddMinutes(5)
-            && issuedAt >= now.AddHours(-IdentityConstants.LogoutHintMaximumAgeHours);
     }
 
     private OidcLogoutPreparationSuccess? Fail(string reason)

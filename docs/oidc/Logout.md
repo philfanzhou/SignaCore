@@ -12,8 +12,25 @@ current-profile cookies; failed or replayed completion performs no successful cl
 
 SignaCore uses an authenticated preparation request followed by an opaque browser handle. This
 preserves the first-party BFF's server-only ID-token boundary while still correlating logout with
-the exact identity session. It is deliberately not the standard RP-Initiated Logout wire shape, so
-Discovery does not publish `end_session_endpoint` (`AC-10`).
+the exact identity session. Since [ADR 0010](../adr/0010-standards-conformant-oidc-and-generic-client-integration.md)
+stage 1, the standard RP-Initiated Logout route `GET /oauth2/session/end` is additionally
+published as `end_session_endpoint` for generic OIDC clients; the prepared flow's own wire shape
+is unchanged and remains the package contract.
+
+## Standard RP-Initiated Logout: `GET /oauth2/session/end`
+
+The browser arrives with a required `id_token_hint` (the same `IN-31` judgement: RS256 over the
+logout-hint key set, exact issuer, `sub` and `sid`, an `iat` no older than 24 hours, `exp`
+ignored), an optional exactly-registered `post_logout_redirect_uri` (`IN-32`), and an optional
+bounded `state` (`IN-33`). The application is resolved from the hint's single `aud` claim and
+must be active. The flow stages the same one-time logout request the prepared flow uses and
+immediately completes it with the browser's identity cookie, so the `EV-06`/`EV-07` semantics,
+the `EV-28` lock order, the audit rows, and the cookie cleanup are identical to the prepared
+completion. Unknown or duplicated query fields, an unusable hint, an unknown or inactive
+application, or an unregistered redirect URI answer the single local 400 page and change nothing.
+A committed success answers with the verified redirect (state appended byte-for-byte) or the
+local signed-out page. The endpoint joins the logout rate-limit policy and its source-network
+partition.
 
 ## Step 1: authenticated preparation
 

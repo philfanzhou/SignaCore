@@ -67,6 +67,13 @@ public class AuthMetrics
         public const string LogoutComplete = "logout-complete";
 
         /// <summary>
+        /// The standard RP-Initiated Logout <c>GET /oauth2/session/end</c> (ADR 0010). Its
+        /// outcomes are the closed <c>success</c> (a committed completion with the redirect or the
+        /// local signed-out page) and <c>invalid_request</c> (every shared local rejection).
+        /// </summary>
+        public const string SessionEnd = "session-end";
+
+        /// <summary>
         /// The browser SMS send route <c>POST /oauth2/login/sms-code</c>. Its outcomes are the closed
         /// <c>sent</c>, <c>invalid_phone</c>, <c>local_rejected</c>, <c>rate_limited</c>,
         /// <c>persistence_failed</c>, and suppressed-send reason values; it never carries a client

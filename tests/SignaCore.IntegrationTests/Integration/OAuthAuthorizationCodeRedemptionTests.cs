@@ -868,7 +868,9 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
             ["client_secret_basic", "client_secret_post"],
             parsed.RootElement.GetProperty("revocation_endpoint_auth_methods_supported").EnumerateArray()
                 .Select(item => item.GetString()));
-        Assert.False(parsed.RootElement.TryGetProperty("end_session_endpoint", out _));
+        // ADR 0010 stage 1: the standard end_session_endpoint is published as its own route.
+        Assert.True(parsed.RootElement.TryGetProperty("end_session_endpoint", out var endSession));
+        Assert.EndsWith("/oauth2/session/end", endSession.GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1,6 +1,6 @@
 # Interactive OIDC for Confidential BFF Clients
 
-- Status: Accepted
+- Status: Accepted, amended by [ADR 0010](./0010-standards-conformant-oidc-and-generic-client-integration.md)
 - Date: 2026-08-31
 - Decision owners: SignaCore maintainers
 

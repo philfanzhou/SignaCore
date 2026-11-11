@@ -37,7 +37,7 @@ public sealed class OAuthLogoutCancellationTests
         context.Features.Set(feature.Object);
         if (boundary == "entry") caller.Cancel();
         // No dependencies may be reached: a missing observation would fail instead of canceling.
-        var controller = new OAuthLogoutController(null!, null!, null!, null!, null!)
+        var controller = new OAuthLogoutController(null!, null!, null!, null!, null!, null!)
         {
             ControllerContext = new ControllerContext { HttpContext = context }
         };

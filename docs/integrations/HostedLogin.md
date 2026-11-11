@@ -97,7 +97,9 @@ from it instead of hard-coding paths. Check that its `issuer` equals the SignaCo
 service is configured with. The document provides `authorization_endpoint`, `token_endpoint`,
 `userinfo_endpoint`, `revocation_endpoint`, and `jwks_uri`, and advertises
 `response_types_supported: ["code"]`, `code_challenge_methods_supported: ["S256"]`, and the
-supported scopes. It deliberately has no `end_session_endpoint`; sign-out uses
+supported scopes. Since [ADR 0010](../adr/0010-standards-conformant-oidc-and-generic-client-integration.md)
+stage 1 it also publishes `end_session_endpoint` (`GET /oauth2/session/end`) for generic OIDC
+clients; the client package itself keeps using
 [prepared logout](#7-sign-out-with-prepared-logout).
 
 ## 4. Send the browser to the authorization endpoint

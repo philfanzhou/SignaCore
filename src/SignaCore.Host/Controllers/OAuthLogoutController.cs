@@ -15,8 +15,9 @@ namespace SignaCore.Host.Controllers;
 /// <summary>
 /// The prepared logout of the interactive flow: <c>POST /oauth2/logout/requests</c> is the
 /// authenticated BFF preparation (<c>IN-30</c>–<c>IN-34</c>) and <c>GET /oauth2/logout</c> is
-/// the browser completion (<c>IN-35</c>/<c>IN-36</c>). The wire shape is deliberately not
-/// RP-Initiated Logout, so Discovery publishes no <c>end_session_endpoint</c> (<c>AC-10</c>).
+/// the browser completion (<c>IN-35</c>/<c>IN-36</c>). ADR 0010 additionally publishes the
+/// standard <c>end_session_endpoint</c> at <c>GET /oauth2/session/end</c>, which stages and
+/// completes the same one-time request in a single browser visit.
 /// </summary>
 /// <remarks>
 /// Preparation rejects with one local JSON 400 and never redirects to
@@ -54,6 +55,7 @@ public sealed class OAuthLogoutController : ControllerBase
 
     private readonly OidcLogoutPreparationService _preparation;
     private readonly OidcLogoutCompletionService _completion;
+    private readonly OidcStandardLogoutService _standardLogout;
     private readonly IIdentitySessionCookieReader _identityCookies;
     private readonly ILogger<OAuthLogoutController> _logger;
     private readonly AuthMetrics _authMetrics;
@@ -61,12 +63,14 @@ public sealed class OAuthLogoutController : ControllerBase
     public OAuthLogoutController(
         OidcLogoutPreparationService preparation,
         OidcLogoutCompletionService completion,
+        OidcStandardLogoutService standardLogout,
         IIdentitySessionCookieReader identityCookies,
         ILogger<OAuthLogoutController> logger,
         AuthMetrics authMetrics)
     {
         _preparation = preparation;
         _completion = completion;
+        _standardLogout = standardLogout;
         _identityCookies = identityCookies;
         _logger = logger;
         _authMetrics = authMetrics;
@@ -236,12 +240,93 @@ public sealed class OAuthLogoutController : ControllerBase
     }
 
     /// <summary>
+    /// The standard RP-Initiated Logout of ADR 0010 stage 1: <c>GET /oauth2/session/end</c> with
+    /// a required <c>id_token_hint</c>, an optional exactly-registered
+    /// <c>post_logout_redirect_uri</c>, and an optional bounded <c>state</c>. The flow validates
+    /// the hint against the application named by its <c>aud</c> claim, then stages and immediately
+    /// completes the same one-time request the prepared flow uses, so the <c>EV-06</c>/<c>EV-07</c>
+    /// session semantics and the audit trail are identical. Every rejection is the single local
+    /// 400 page; a committed success deletes the browser cookies and answers with the verified
+    /// redirect (state appended byte-for-byte) or the local signed-out page. The endpoint shares
+    /// the logout rate-limit policy and its source-network partition.
+    /// </summary>
+    [HttpGet("session/end")]
+    public async Task<IActionResult> StandardEnd(CancellationToken cancellationToken)
+    {
+        ApplyBrowserSecurityHeaders();
+        cancellationToken.ThrowIfCancellationRequested();
+        var profile = IdentityCookieProfile.Resolve(HttpContext);
+        if (profile is null) return LocalBadRequest();
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var query = Request.Query;
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (name, values) in query)
+        {
+            if (!OidcStandardLogoutService.AdmittedQueryFields.Contains(name)
+                || values.Count != 1
+                || !fields.TryAdd(name, values[0] ?? string.Empty))
+            {
+                return FinishSessionEnd("invalid_request", LocalBadRequest(), stopwatch);
+            }
+        }
+
+        var cookieSessionId = await _identityCookies.TryReadSessionIdAsync(HttpContext);
+        var result = await _standardLogout.EndAsync(
+            fields,
+            cookieSessionId,
+            HttpContext.GetClientIp(),
+            HttpContext.GetCorrelationId(),
+            cancellationToken);
+        if (result is null || !result.IsSuccess)
+        {
+            return FinishSessionEnd("invalid_request", LocalBadRequest(), stopwatch);
+        }
+
+        _authMetrics.RecordOidcEndpointOutcome(AuthMetrics.OidcMetricEndpoints.SessionEnd, "success");
+        _authMetrics.RecordOidcEndpointDuration(
+            AuthMetrics.OidcMetricEndpoints.SessionEnd,
+            stopwatch.Elapsed.TotalMilliseconds);
+
+        // The same committed-completion cookie cleanup as the handle flow (PS-18 attributes,
+        // explicit scheme); the management cookie is never touched.
+        await HttpContext.SignOutAsync(IdentitySessionDefaults.AuthenticationScheme);
+        Response.Cookies.Delete(profile.CsrfCookie, profile.CsrfOptions());
+
+        if (result.VerifiedPostLogoutUri is null)
+        {
+            return Content(LocalCompletionPage, HtmlContentType);
+        }
+
+        var redirectUri = AppendState(result.VerifiedPostLogoutUri, result.State);
+        _logger.LogInformation(
+            "Standard logout redirect issued for a committed request. CorrelationId={CorrelationId}",
+            LogValueSanitizer.Sanitize(HttpContext.GetCorrelationId()));
+        return Redirect(redirectUri);
+    }
+
+    /// <summary>
+    /// Records one <c>session-end</c> endpoint-class outcome and latency around the branch
+    /// result; the outcome vocabulary matches the completion endpoint's.
+    /// </summary>
+    private IActionResult FinishSessionEnd(
+        string outcome,
+        IActionResult result,
+        System.Diagnostics.Stopwatch stopwatch)
+    {
+        _authMetrics.RecordOidcEndpointOutcome(AuthMetrics.OidcMetricEndpoints.SessionEnd, outcome);
+        _authMetrics.RecordOidcEndpointDuration(
+            AuthMetrics.OidcMetricEndpoints.SessionEnd,
+            stopwatch.Elapsed.TotalMilliseconds);
+        return result;
+    }
+
+    /// <summary>
     /// Appends the stored state byte-for-byte using safe URI construction: the IN-33 alphabet is
     /// exactly the unreserved set, so escaping leaves valid bytes unchanged and never injects a
     /// second parameter, fragment, or host into the registered URI.
     /// </summary>
-    private static string AppendState(string verifiedUri, string? state)
-    {
+    private static string AppendState(string verifiedUri, string? state)    {
         if (state is null)
         {
             return verifiedUri;

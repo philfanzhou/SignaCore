@@ -74,7 +74,8 @@ public class DiscoveryDocumentTests
     /// <c>userinfo_endpoint</c> is advertised since the scope-controlled UserInfo read exists
     /// (<c>AC-08</c>), and <c>offline_access</c> since the interactive refresh family rotates
     /// atomically end to end (<c>AC-12</c>); advertising either earlier would promise a request
-    /// no client can complete.
+    /// no client can complete. <c>end_session_endpoint</c> is advertised since ADR 0010 stage 1
+    /// delivered the standard RP-Initiated Logout route.
     /// </summary>
     [Fact]
     public void Create_AdvertisesOnlyTheScopesTheRuntimeCompletesToday()
@@ -83,6 +84,7 @@ public class DiscoveryDocumentTests
 
         Assert.Equal(["openid", "profile", "offline_access"], document.ScopesSupported);
         Assert.Equal("https://id.example.com/oauth2/userinfo", document.UserInfoEndpoint);
+        Assert.Equal("https://id.example.com/oauth2/session/end", document.EndSessionEndpoint);
     }
 
     [Fact]
@@ -96,6 +98,7 @@ public class DiscoveryDocumentTests
         Assert.Equal("https://id.example.com/.well-known/jwks", metadata["jwks_uri"]);
         Assert.Equal("https://id.example.com/oauth2/authorize", metadata["authorization_endpoint"]);
         Assert.Equal("https://id.example.com/oauth2/revoke", metadata["revocation_endpoint"]);
+        Assert.Equal("https://id.example.com/oauth2/session/end", metadata["end_session_endpoint"]);
         Assert.Contains("grant_types_supported", metadata.Keys);
         Assert.Contains("code_challenge_methods_supported", metadata.Keys);
         Assert.Contains("scopes_supported", metadata.Keys);
