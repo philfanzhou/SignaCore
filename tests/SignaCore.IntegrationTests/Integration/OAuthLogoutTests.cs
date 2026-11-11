@@ -583,13 +583,22 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     // ---- AC-10 and the sensitive-value canary ----
 
     [Fact]
-    public async Task Discovery_DoesNotAdvertiseEndSessionEndpoint()
+    public async Task Discovery_AdvertisesTheSeparateStandardEndSessionEndpoint()
     {
+        // ADR 0010 stage 1: the standard RP-Initiated Logout is published as its own route; the
+        // prepared completion keeps its single-logout_handle shape and never accepts the standard
+        // request form.
         using var host = CreateLogoutHost();
         using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         var document = await http.GetFromJsonAsync<JsonElement>(
             "/.well-known/openid-configuration", TestContext.Current.CancellationToken);
-        Assert.False(document.TryGetProperty("end_session_endpoint", out _));
+        Assert.True(document.TryGetProperty("end_session_endpoint", out var endpoint));
+        Assert.EndsWith("/oauth2/session/end", endpoint.GetString(), StringComparison.Ordinal);
+
+        using var handleRoute = await http.GetAsync(
+            "/oauth2/logout?id_token_hint=probe&post_logout_redirect_uri=https://probe.test&state=probe-state-0123456789abcdef0123",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, handleRoute.StatusCode);
     }
 
     [Fact]

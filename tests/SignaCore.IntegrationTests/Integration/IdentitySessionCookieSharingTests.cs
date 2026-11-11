@@ -232,8 +232,8 @@ public sealed class IdentitySessionCookieSharingTests : IAsyncLifetime
         using var client = instance.CreateClient();
 
         // The login route exists but a GET without a login_handle shares the single local 400 of
-        // EV-03; the interactive core is advertised by capability (AC-07), never by login state,
-        // and the not-yet-delivered logout route stays unadvertised (AC-10).
+        // EV-03; the interactive core is advertised by capability (AC-07), never by login state.
+        // ADR 0010 stage 1 publishes the standard end_session_endpoint as its own route.
         using var login = await client.GetAsync("/oauth2/login", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, login.StatusCode);
         Assert.Null(login.Headers.Location);
@@ -244,7 +244,8 @@ public sealed class IdentitySessionCookieSharingTests : IAsyncLifetime
         using var document = JsonDocument.Parse(
             await discovery.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         Assert.True(document.RootElement.TryGetProperty("authorization_endpoint", out _));
-        Assert.False(document.RootElement.TryGetProperty("end_session_endpoint", out _));
+        Assert.True(document.RootElement.TryGetProperty("end_session_endpoint", out var endSession));
+        Assert.EndsWith("/oauth2/session/end", endSession.GetString(), StringComparison.Ordinal);
     }
 
     private static async Task<AuthenticateResult> AuthenticateManagementAsync(
