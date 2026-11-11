@@ -31,8 +31,8 @@ namespace SignaCore.Tests.Integration;
 /// browser completion with its single-use five-minute handle, the <c>EV-06</c>/<c>EV-07</c>
 /// external-shape equivalence, the corruption and boundary cases, the <c>SC-05</c>/<c>SC-06</c>
 /// serial orders against code redemption, the response-header set, the untouched management
-/// cookie, and the canary scan. The standard RP-Initiated shape stays unadvertised
-/// (<c>AC-10</c>).
+/// cookie, and the canary scan. The standard RP-Initiated Logout route of ADR 0010 is covered
+/// in <see cref="OAuthLogoutTests.StandardEnd.cs"/>.
 /// </summary>
 [Collection(SqliteProcessState.CollectionName)]
 [UsesProcessWideSqlitePoolClearing]

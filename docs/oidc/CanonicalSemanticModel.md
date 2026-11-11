@@ -436,9 +436,12 @@ request line, nor SignaCore access logs receive an ID token. Logout-handle query
 redacted because their disclosure can disrupt a pending logout.
 
 This prepared transport is intentionally not wire-compatible with a standard client navigating
-directly to an RP-Initiated Logout `end_session_endpoint`: such a client would put
-`id_token_hint` in the browser request. The first phase therefore keeps `end_session_endpoint`
-absent from Discovery instead of claiming interoperability it does not provide.
+directly to an RP-Initiated Logout `end_session_endpoint`: such a client puts `id_token_hint` in
+the browser request. [ADR 0010](../adr/0010-standards-conformant-oidc-and-generic-client-integration.md)
+stage 1 therefore publishes `end_session_endpoint` as a *separate* route — `GET /oauth2/session/end`
+— that accepts the browser-carried hint under the same `IN-31` judgement, stages the identical
+one-time request, and completes it with the browser's cookie, while the prepared transport keeps
+its server-only ID-token boundary unchanged for package consumers.
 
 ## Sensitive value × trust boundary and data flow
 
@@ -489,7 +492,7 @@ an incomplete flow.
 | `AC-07` | #54 ID-token issuance and end-to-end core tests, after #96 live-session enforcement; its #95 prerequisite is already required by `AC-03` | Complete confidential-BFF code flow with the database session checks required by redemption | Atomically add `authorization_endpoint`, `response_types_supported: [code]`, `authorization_code`, `S256`, then-supported scopes, and actual client-auth methods; retain the already truthful RS256 algorithm metadata |
 | `AC-08` | #55 UserInfo implementation and tests, after #96 live-session enforcement | `/oauth2/userinfo` is usable with all current-state checks | Add `userinfo_endpoint` only now |
 | `AC-09` | #67 identity-session persistence/lifecycle and #69 state propagation, of which the #95 storage slice is already required by `AC-03` | Cross-instance session authority and disablement behavior are enforceable | No new metadata; prerequisites must be complete before dependent capability is considered production-ready |
-| `AC-10` | #68 logout preparation, browser completion, and tests | Token-safe prepared logout is usable by the first-party BFF contract | No standard `end_session_endpoint`; it stays absent because the browser handle endpoint does not accept the standard request shape |
+| `AC-10` | #68 logout preparation, browser completion, and tests; [ADR 0010](../adr/0010-standards-conformant-oidc-and-generic-client-integration.md) stage 1 adds the separate standard `end_session_endpoint` | Token-safe prepared logout is usable by the first-party BFF contract, and the standard RP-Initiated Logout route `GET /oauth2/session/end` serves generic clients | `end_session_endpoint` points at the separate standard route; the browser handle endpoint keeps its single-`logout_handle` shape |
 | `AC-11` | #97 family persistence | Interactive family shape exists but reuse handling is not active | Do not advertise `offline_access` |
 | `AC-12` | #98 atomic rotation/reuse handling plus required session lifecycle | Interactive offline access is end-to-end usable | Add `offline_access` to `scopes_supported` only now; existing advertised `refresh_token` grant remains truthful throughout |
 | `AC-13` | #71 operational protections and later attack-matrix tasks | Rate limits, audit, metrics, and sensitive canaries meet production gate | Metadata unchanged; release activation waits for required protections |

@@ -18,8 +18,9 @@ authorization-code client using S256 and a form `client_id`. The revoke endpoint
 The metadata does not enable Public revoke or other Public grants. Exact registered Public Origin
 CORS for Code-token, refresh-token, and UserInfo responses is a separate host policy, not inferred
 from this metadata.
-It does not publish a standard
-`end_session_endpoint`.
+Since [ADR 0010](../adr/0010-standards-conformant-oidc-and-generic-client-integration.md) stage 1,
+it publishes the standard `end_session_endpoint` (`GET /oauth2/session/end`) alongside the
+prepared logout; see [Logout](./Logout.md).
 
 ## Activation graph
 
@@ -44,7 +45,7 @@ snapshot of the same graph.
 | `AC-07` | #54 ← #53, #96 | Confidential-BFF code flow includes ID token and live persistent-session checks | Atomically add `authorization_endpoint`, `code`, `authorization_code`, `S256`, supported interactive scopes, and actual auth methods | [AC-07](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#131](https://github.com/philfanzhou/SignaCore/issues/131) |
 | `AC-08` | #55 ← #54 | #55 makes UserInfo usable with current-state checks | Add `userinfo_endpoint` only now | [AC-08](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#132](https://github.com/philfanzhou/SignaCore/issues/132) |
 | `AC-09` | #67 ← #52, #64, #65, #66; #69 ← #53, #55, #94, #96 | Session lifecycle and state propagation become enforceable | None | [AC-09](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#132](https://github.com/philfanzhou/SignaCore/issues/132) |
-| `AC-10` | #68 ← #49, #96 | #68 provides authenticated preparation and one-time browser completion | Never add standard `end_session_endpoint` for this nonstandard wire shape | [AC-10](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#132](https://github.com/philfanzhou/SignaCore/issues/132) |
+| `AC-10` | #68 ← #49, #96; [ADR 0010](../adr/0010-standards-conformant-oidc-and-generic-client-integration.md) stage 1 | #68 provides authenticated preparation and one-time browser completion; ADR 0010 adds the separate standard route | Publish `end_session_endpoint` for the separate `GET /oauth2/session/end`; the handle endpoint keeps its nonstandard wire shape | [AC-10](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#132](https://github.com/philfanzhou/SignaCore/issues/132) |
 | `AC-11` | #97 ← #53, #95, #133 | #97 adds exact interactive family persistence | Do not add `offline_access` | [AC-11](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#133](https://github.com/philfanzhou/SignaCore/issues/133) |
 | `AC-12` | #98 ← #96, #97, #133 | #98 closes atomic rotation, reuse handling, and session enforcement | Add `offline_access` only now; the already truthful `refresh_token` grant remains | [AC-12](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#133](https://github.com/philfanzhou/SignaCore/issues/133) |
 | `AC-13` | #71 ← #53, #55, #94, #96, [ServiceMantle#83](https://github.com/philfanzhou/ServiceMantle/issues/83), [ServiceMantle#84](https://github.com/philfanzhou/ServiceMantle/issues/84), [ServiceMantle#86](https://github.com/philfanzhou/ServiceMantle/issues/86), [ServiceMantle#88](https://github.com/philfanzhou/ServiceMantle/issues/88), [ServiceMantle#142](https://github.com/philfanzhou/ServiceMantle/issues/142) | Product-specific limits, audit, metrics, and sensitive canaries pass | None; production release remains disabled until the gate passes | [AC-13](./CanonicalSemanticModel.md#implementation-task--capability-activation), [#129](https://github.com/philfanzhou/SignaCore/issues/129), [#134](https://github.com/philfanzhou/SignaCore/issues/134) |

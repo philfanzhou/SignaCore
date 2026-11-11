@@ -27,6 +27,7 @@ public sealed record DiscoveryDocument(
     string TokenEndpoint,
     string RevocationEndpoint,
     string UserInfoEndpoint,
+    string EndSessionEndpoint,
     IReadOnlyList<string> GrantTypesSupported,
     IReadOnlyList<string> ResponseTypesSupported,
     IReadOnlyList<string> CodeChallengeMethodsSupported,
@@ -57,6 +58,10 @@ public sealed record DiscoveryDocument(
             RevocationEndpoint: $"{origin}/oauth2/revoke",
             // AC-08: published only now that the scope-controlled UserInfo read exists.
             UserInfoEndpoint: $"{origin}/oauth2/userinfo",
+            // ADR 0010 stage 1: the standard RP-Initiated Logout route for generic OIDC clients.
+            // The prepared logout's one-time-handle completion at /oauth2/logout remains the
+            // package contract and is unchanged.
+            EndSessionEndpoint: $"{origin}/oauth2/session/end",
             // The direct credential grants are the honest set, taken from the registered validators
             // rather than a literal, so a new grant cannot ship without appearing here. Extension
             // grants are advertised under the absolute URIs RFC 6749 §4.5 requires, which is what
@@ -106,6 +111,7 @@ public sealed record DiscoveryDocument(
         ["token_endpoint"] = TokenEndpoint,
         ["revocation_endpoint"] = RevocationEndpoint,
         ["userinfo_endpoint"] = UserInfoEndpoint,
+        ["end_session_endpoint"] = EndSessionEndpoint,
         ["grant_types_supported"] = GrantTypesSupported,
         ["response_types_supported"] = ResponseTypesSupported,
         ["code_challenge_methods_supported"] = CodeChallengeMethodsSupported,

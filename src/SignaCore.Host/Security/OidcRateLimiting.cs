@@ -69,6 +69,9 @@ public static class OidcRateLimitPolicies
         "/oauth2/userinfo",
         "/oauth2/logout",
         "/oauth2/logout/requests",
+        // ADR 0010 stage 1: the standard end_session_endpoint, a browser route in the logout
+        // endpoint class and its source-network partition.
+        "/oauth2/session/end",
         "/oauth2/revoke",
         SmsCodePath
     };

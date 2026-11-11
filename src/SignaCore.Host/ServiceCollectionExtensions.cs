@@ -252,6 +252,7 @@ public static class ServiceCollectionExtensions
         });
         services.AddScoped<OidcLogoutPreparationService>();
         services.AddScoped<OidcLogoutCompletionService>();
+        services.AddScoped<OidcStandardLogoutService>();
 
         // ---- User Query Service ----
         services.AddScoped<IUserQueryService, UserQueryService>();

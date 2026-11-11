@@ -1,6 +1,6 @@
 # Standards-Conformant OIDC and a Generic-Client Integration Path
 
-- Status: Proposed
+- Status: Accepted (stage 1 delivered; stages 2–5 pending)
 - Date: 2026-11-11
 - Decision owners: SignaCore maintainers
 - Extends: [ADR 0005](./0005-interactive-oidc-confidential-bff.md), [ADR 0007](./0007-official-hosted-login-client-package.md)
@@ -68,7 +68,12 @@ package**, while keeping the existing package and legacy contract working throug
    `post_logout_redirect_uri` and `state`, exact-registration matching) on that endpoint. The
    existing one-time-handle completion and the prepared-logout backchannel remain unchanged
    for package consumers. Acceptance: a consumer configured only with a generic handler can
-   end its session through the standard endpoint.
+   end its session through the standard endpoint. — **Delivered**: the endpoint is
+   `GET /oauth2/session/end`; it resolves the application from the hint's single `aud` claim,
+   applies the shared `IN-31` hint judgement, stages the identical one-time request, and
+   immediately completes it with the browser's identity cookie, so the `EV-06`/`EV-07`
+   session semantics, the `EV-28` lock order, and the audit rows are byte-for-byte the
+   prepared flow's (see [Logout](../oidc/Logout.md)).
 2. **Define standard-parameter semantics on the authorization endpoint.** Stop hard-rejecting
    the parameter set generic clients send: accept `prompt=login` (force re-authentication),
    answer `prompt=none` from the live identity session when one exists (the session-reuse
