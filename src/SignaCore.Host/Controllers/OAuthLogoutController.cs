@@ -293,12 +293,17 @@ public sealed class OAuthLogoutController : ControllerBase
         await HttpContext.SignOutAsync(IdentitySessionDefaults.AuthenticationScheme);
         Response.Cookies.Delete(profile.CsrfCookie, profile.CsrfOptions());
 
+        // ADR 0010 stage 4: the standard flow's state is a protected blob that exceeds the stored
+        // column's bound, so the service stages the request without one and the completion result
+        // carries no state; the controller echoes the already-validated request value instead,
+        // byte-for-byte, exactly like the stored path does.
+        fields.TryGetValue("state", out var requestState);
         if (result.VerifiedPostLogoutUri is null)
         {
             return Content(LocalCompletionPage, HtmlContentType);
         }
 
-        var redirectUri = AppendState(result.VerifiedPostLogoutUri, result.State);
+        var redirectUri = AppendState(result.VerifiedPostLogoutUri, requestState);
         _logger.LogInformation(
             "Standard logout redirect issued for a committed request. CorrelationId={CorrelationId}",
             LogValueSanitizer.Sanitize(HttpContext.GetCorrelationId()));

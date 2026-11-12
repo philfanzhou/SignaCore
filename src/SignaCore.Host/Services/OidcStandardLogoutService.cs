@@ -46,6 +46,15 @@ public sealed class OidcStandardLogoutService(
     };
 
     /// <summary>
+    /// The state-only bound of the standard request (ADR 0010 stage 4): a generic framework
+    /// client's sign-out state is a data-protection-protected blob of several hundred unreserved
+    /// characters. The value is echoed from the validated request rather than persisted, because
+    /// the standard flow stages and completes in one request, so the stored bound stays
+    /// <see cref="IdentityConstants.MaxLogoutStateLength"/>.
+    /// </summary>
+    public const int MaxStandardLogoutStateLength = 2048;
+
+    /// <summary>
     /// Runs the whole standard decision: shape checks, application resolution by the hint's
     /// single <c>aud</c>, the shared <c>IN-31</c> hint validation, the <c>IN-32</c> exact
     /// registration match, staging, and the immediate completion. A <c>null</c> return is the
@@ -97,7 +106,7 @@ public sealed class OidcStandardLogoutService(
         }
 
         if (fields.TryGetValue("state", out var state)
-            && (state.Length is < IdentityConstants.MinLogoutStateLength or > IdentityConstants.MaxLogoutStateLength
+            && (state.Length is < IdentityConstants.MinLogoutStateLength or > MaxStandardLogoutStateLength
                 || !state.All(character =>
                     char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '~' or '-')))
         {
@@ -157,7 +166,11 @@ public sealed class OidcStandardLogoutService(
         }
 
         var creation = await scope.ServiceProvider.GetRequiredService<ILogoutRequestStore>().StageCreateAsync(
-            new LogoutRequestDescriptor(app.Id, subject, sessionId, verifiedPostLogoutUri, state), now, cancellationToken);
+            // The state is deliberately not persisted: the standard flow stages and completes in
+            // one request, so the caller echoes the already-validated request value byte-for-byte
+            // from its own copy; the stored column keeps its tighter bound.
+            new LogoutRequestDescriptor(app.Id, subject, sessionId, verifiedPostLogoutUri, State: null),
+            now, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         await ManagementActionAudit.RecordAsync(
             scope.ServiceProvider.GetRequiredService<IManagementAuditWriter>(),

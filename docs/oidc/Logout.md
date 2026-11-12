@@ -22,15 +22,17 @@ is unchanged and remains the package contract.
 The browser arrives with a required `id_token_hint` (the same `IN-31` judgement: RS256 over the
 logout-hint key set, exact issuer, `sub` and `sid`, an `iat` no older than 24 hours, `exp`
 ignored), an optional exactly-registered `post_logout_redirect_uri` (`IN-32`), and an optional
-bounded `state` (`IN-33`). The application is resolved from the hint's single `aud` claim and
-must be active. The flow stages the same one-time logout request the prepared flow uses and
-immediately completes it with the browser's identity cookie, so the `EV-06`/`EV-07` semantics,
-the `EV-28` lock order, the audit rows, and the cookie cleanup are identical to the prepared
-completion. Unknown or duplicated query fields, an unusable hint, an unknown or inactive
-application, or an unregistered redirect URI answer the single local 400 page and change nothing.
-A committed success answers with the verified redirect (state appended byte-for-byte) or the
-local signed-out page. The endpoint joins the logout rate-limit policy and its source-network
-partition.
+bounded `state` — 22–2048 unreserved characters on this route (ADR 0010 stage 4: a generic
+framework client's sign-out state is a protected blob; the value is echoed from the validated
+request rather than persisted, because this flow stages and completes in one request). The
+application is resolved from the hint's single `aud` claim and must be active. The flow stages
+the same one-time logout request the prepared flow uses and immediately completes it with the
+browser's identity cookie, so the `EV-06`/`EV-07` semantics, the `EV-28` lock order, the audit
+rows, and the cookie cleanup are identical to the prepared completion. Unknown or duplicated
+query fields, an unusable hint, an unknown or inactive application, or an unregistered redirect
+URI answer the single local 400 page and change nothing. A committed success answers with the
+verified redirect (state appended byte-for-byte) or the local signed-out page. The endpoint
+joins the logout rate-limit policy and its source-network partition.
 
 ## Step 1: authenticated preparation
 
