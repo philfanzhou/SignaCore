@@ -511,7 +511,7 @@ public sealed class OAuthAuthorizationSessionReuseTests : IClassFixture<Identity
     [Fact]
     public async Task PromptNone_WithoutACookie_RedirectsWithLoginRequiredAndWritesNoContinuation()
     {
-        await SeedReuseUserAsync();
+        await SeedSuccessApplicationAsync(_fixture.Services);
         using var client = _fixture.CreateNonRedirectingHttpClient(handleCookies: false);
         var continuationCount = await CountRowsAsync(db => db.AuthorizationRequests.CountAsync());
 
@@ -601,7 +601,7 @@ public sealed class OAuthAuthorizationSessionReuseTests : IClassFixture<Identity
     [Fact]
     public async Task AcrValues_AreAcceptedAndDoNotChangeTheOutcome()
     {
-        await SeedReuseUserAsync();
+        await SeedSuccessApplicationAsync(_fixture.Services);
         using var client = _fixture.CreateNonRedirectingHttpClient(handleCookies: false);
 
         using var response = await client.GetAsync(
