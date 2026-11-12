@@ -164,9 +164,14 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
                     {
                         var backchannel = new HttpClient(identityHandler);
                         options.Backchannel = backchannel;
+                        // The same metadata address convention the built-in post-configure uses:
+                        // the explicit MetadataAddress when present, otherwise the authority plus
+                        // the well-known discovery path.
+                        var metadataAddress = options.MetadataAddress
+                            ?? options.Authority!.TrimEnd('/') + "/.well-known/openid-configuration";
                         options.ConfigurationManager =
                             new Microsoft.IdentityModel.Protocols.ConfigurationManager<Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfiguration>(
-                                options.Authority,
+                                metadataAddress,
                                 new Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfigurationRetriever(),
                                 new Microsoft.IdentityModel.Protocols.HttpDocumentRetriever(backchannel)
                                 {
