@@ -319,10 +319,22 @@ public class OidcAuthorizationRequestValidatorTests
     [Fact]
     public async Task OverlongState_IsARedirectedInvalidRequest()
     {
-        var result = await ValidateAsync(Valid().With("state", new string('a', 129)));
+        var result = await ValidateAsync(Valid().With("state", new string('a', 2049)));
 
         var redirect = AssertRedirect(result, OAuthErrorCodes.InvalidRequest);
         Assert.Null(redirect.State);
+    }
+
+    /// <summary>
+    /// ADR 0010 stage 4: a generic framework client's protected state blob is several hundred
+    /// unreserved characters; the delivered bound admits it while staying bounded.
+    /// </summary>
+    [Fact]
+    public async Task ProtectedStateBlobLength_IsAccepted()
+    {
+        var result = await ValidateAsync(Valid().With("state", new string('a', 1200)));
+
+        Assert.True(result is OidcAuthorizationValidationResult.Accepted);
     }
 
     [Theory]
