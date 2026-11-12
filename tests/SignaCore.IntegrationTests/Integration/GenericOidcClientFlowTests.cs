@@ -1,9 +1,12 @@
 using System.Net;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Host;
@@ -54,9 +57,16 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
     [Fact]
     public async Task TheGenericHandler_CompletesSignInAndStandardSignOut_AgainstTheRealHost()
     {
-        var accountId = await SeedUserAndApplicationAsync();
         using var identity = _fixture.WithTestServices(_ => { });
-        using var consumer = CreateConsumerFactory(identity.Server.CreateHandler());
+        await CompleteSignInAndSignOutAsync(identity);
+    }
+
+    internal static async Task CompleteSignInAndSignOutAsync(
+        WebApplicationFactory<Program> identity,
+        int? nonceLength = null)
+    {
+        var accountId = await SeedUserAndApplicationAsync(identity.Services);
+        using var consumer = CreateConsumerFactory(identity.Server.CreateHandler(), nonceLength);
         using var browser = new CrossOriginBrowser(identity.Server.CreateHandler(), consumer.Server.CreateHandler());
 
         // ---- Sign-in: challenge 鈫?authorize 鈫?hosted login 鈫?callback 鈫?local session ----
@@ -68,6 +78,13 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
         Assert.Contains("response_type=code", authorizeUrl, StringComparison.Ordinal);
         Assert.Contains("code_challenge_method=S256", authorizeUrl, StringComparison.Ordinal);
         Assert.Contains("scope=openid", authorizeUrl, StringComparison.Ordinal);
+        var authorizationQuery = QueryHelpers.ParseQuery(new Uri(authorizeUrl).Query);
+        var state = authorizationQuery["state"].ToString();
+        Assert.InRange(state.Length, 129, 2048);
+        if (nonceLength is int expectedNonceLength)
+        {
+            Assert.Equal(expectedNonceLength, authorizationQuery["nonce"].ToString().Length);
+        }
 
         using var authorize = await browser.GetIdentityAsync(authorizeUrl);
         Assert.Equal(HttpStatusCode.Found, authorize.StatusCode);
@@ -99,6 +116,8 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
         var callbackUrl = ToIdentityBrowserUrl(loginResponse.Headers.Location!);
         Assert.StartsWith(RedirectUri, callbackUrl, StringComparison.Ordinal);
         Assert.Contains("code=", callbackUrl, StringComparison.Ordinal);
+        Assert.True(state == QueryHelpers.ParseQuery(new Uri(callbackUrl).Query)["state"].ToString(),
+            "The callback must echo the protected state byte-for-byte.");
 
         using var callback = await browser.GetConsumerAsync(
             new Uri(callbackUrl).PathAndQuery);
@@ -133,7 +152,7 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
         Assert.Equal(PostLogoutUri, signedOut.Headers.Location!.ToString());
 
         // EV-06: the standard logout revoked the SignaCore identity session of this account.
-        var session = await QuerySessionAsync(accountId);
+        var session = await QuerySessionAsync(identity.Services, accountId);
         Assert.NotNull(session);
         Assert.NotNull(session!.RevokedAt);
         Assert.Equal("logout", session.RevocationReason);
@@ -145,8 +164,8 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
 
     // ---- The consumer host ----
 
-    private WebApplicationFactory<GenericOidc.Program> CreateConsumerFactory(
-        HttpMessageHandler identityHandler) =>
+    private static WebApplicationFactory<GenericOidc.Program> CreateConsumerFactory(
+        HttpMessageHandler identityHandler, int? nonceLength) =>
         new WebApplicationFactory<GenericOidc.Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("GenericOidc:Authority", Authority);
@@ -163,9 +182,18 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
                 // the injection replaces that manager with one over the in-memory handler — the
                 // standard pattern for testing this handler against an in-memory authority.
                 services
-                    .AddOptions<Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectOptions>("oidc")
+                    .AddOptions<OpenIdConnectOptions>("oidc")
                     .PostConfigure(options =>
                     {
+                        if (nonceLength is int length)
+                        {
+                            options.ProtocolValidator = new ExtendedNonceProtocolValidator(length)
+                            {
+                                RequireStateValidation = options.ProtocolValidator.RequireStateValidation,
+                                NonceLifetime = options.ProtocolValidator.NonceLifetime
+                            };
+                        }
+
                         var backchannel = new HttpClient(identityHandler);
                         options.Backchannel = backchannel;
                         // The same metadata address convention the built-in post-configure uses:
@@ -187,9 +215,9 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
 
     // ---- Seeding ----
 
-    private async Task<Guid> SeedUserAndApplicationAsync()
+    private static async Task<Guid> SeedUserAndApplicationAsync(IServiceProvider services)
     {
-        using var scope = _fixture.Services.CreateScope();
+        using var scope = services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
         var credential = await dbContext.PasswordCredentials.AsNoTracking()
             .FirstOrDefaultAsync(item => item.Username == Username, TestContext.Current.CancellationToken);
@@ -267,15 +295,21 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
         return accountId;
     }
 
-    private async Task<IdentitySessionEntity?> QuerySessionAsync(Guid accountId)
+    private static async Task<IdentitySessionEntity?> QuerySessionAsync(IServiceProvider services, Guid accountId)
     {
-        using var scope = _fixture.Services.CreateScope();
+        using var scope = services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
         return await dbContext.IdentitySessions.AsNoTracking()
             .Where(row => row.AccountId == accountId)
             .OrderByDescending(row => row.AuthTime)
             .ThenByDescending(row => row.Id)
             .FirstOrDefaultAsync(TestContext.Current.CancellationToken);
+    }
+
+    private sealed class ExtendedNonceProtocolValidator(int nonceLength) : OpenIdConnectProtocolValidator
+    {
+        // Keep the framework's nonce timestamp, entropy, cookie binding, and token validation.
+        public override string GenerateNonce() => base.GenerateNonce().PadRight(nonceLength, 'A');
     }
 
     /// <summary>

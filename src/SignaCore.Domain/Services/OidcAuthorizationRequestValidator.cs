@@ -85,15 +85,6 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
     private const int MaxAcrValuesLength = 512;
 
     private const int MinOpaqueValueLength = 22;
-    private const int MaxOpaqueValueLength = 128;
-
-    /// <summary>
-    /// The state-only upper bound (ADR 0010 stage 4): a generic framework client sends a
-    /// data-protection-protected state blob of several hundred unreserved characters, so the
-    /// state admits up to 2048 — still bounded, still the unreserved alphabet only — while every
-    /// other opaque value keeps the tighter bound.
-    /// </summary>
-    private const int MaxStateLength = 2048;
 
     private const int CodeChallengeLength = 43;
 
@@ -175,11 +166,10 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
 
         // ---- Stage 4: everything else may now answer through the verified URI ----
         // Capture the echoable state first: a state that is duplicated or malformed is not echoed
-        // into any redirect, so no unvalidated request byte can reach the destination URL. The
-        // state uses its own bound (ADR 0010 stage 4): a generic framework client's protected
-        // state blob is several hundred unreserved characters long.
-        var echoableState = parameters.Count(State) == 1 && IsValidState(parameters.Single(State))
-            ? parameters.Single(State)
+        // into any redirect, so no unvalidated request byte can reach the destination URL.
+        var state = parameters.Count(State) == 1 ? parameters.Single(State) : null;
+        var echoableState = IsValidOpaqueValue(state, IdentityConstants.MaxOidcAuthorizationStateLength)
+            ? state
             : null;
 
         OidcAuthorizationValidationResult Redirect(string error, string description) =>
@@ -317,7 +307,7 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
         }
 
         var nonce = parameters.Single(Nonce);
-        if (!IsValidOpaqueValue(nonce))
+        if (!IsValidOpaqueValue(nonce, IdentityConstants.MaxOidcAuthorizationNonceLength))
         {
             return Redirect(
                 OAuthErrorCodes.InvalidRequest,
@@ -386,24 +376,12 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
             && value.All(character => character > 0x20 && character < 0x7f);
     }
 
-    /// <summary><c>IN-06</c> and the other opaque values: 22–128 ASCII unreserved characters.</summary>
-    private static bool IsValidOpaqueValue(string? value)
+    /// <summary><c>IN-05</c> and <c>IN-06</c>: bounded ASCII unreserved correlation values.</summary>
+    private static bool IsValidOpaqueValue(string? value, int maxLength)
     {
         return value is not null
             && value.Length >= MinOpaqueValueLength
-            && value.Length <= MaxOpaqueValueLength
-            && value.All(IsUnreserved);
-    }
-
-    /// <summary>
-    /// <c>IN-05</c> with the ADR 0010 stage-4 state bound: the same unreserved alphabet and
-    /// minimum, but the maximum accommodates a protected state blob.
-    /// </summary>
-    private static bool IsValidState(string? value)
-    {
-        return value is not null
-            && value.Length >= MinOpaqueValueLength
-            && value.Length <= MaxStateLength
+            && value.Length <= maxLength
             && value.All(IsUnreserved);
     }
 

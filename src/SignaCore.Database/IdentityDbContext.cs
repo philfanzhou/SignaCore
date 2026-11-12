@@ -391,11 +391,11 @@ public class IdentityDbContext : DbContext, IServiceDbContext
                 .IsRequired();
             entity.Property(e => e.State)
                 .HasColumnName("state")
-                .HasMaxLength(IdentityConstants.MaxOidcOpaqueValueLength)
+                .HasMaxLength(IdentityConstants.MaxOidcAuthorizationStateLength)
                 .IsRequired();
             entity.Property(e => e.Nonce)
                 .HasColumnName("nonce")
-                .HasMaxLength(IdentityConstants.MaxOidcOpaqueValueLength)
+                .HasMaxLength(IdentityConstants.MaxOidcAuthorizationNonceLength)
                 .IsRequired();
             entity.Property(e => e.CodeChallenge)
                 .HasColumnName("code_challenge")
@@ -511,7 +511,7 @@ public class IdentityDbContext : DbContext, IServiceDbContext
                 .IsRequired();
             entity.Property(e => e.Nonce)
                 .HasColumnName("nonce")
-                .HasMaxLength(IdentityConstants.MaxOidcOpaqueValueLength)
+                .HasMaxLength(IdentityConstants.MaxOidcAuthorizationNonceLength)
                 .IsRequired();
             entity.Property(e => e.CodeChallenge)
                 .HasColumnName("code_challenge")

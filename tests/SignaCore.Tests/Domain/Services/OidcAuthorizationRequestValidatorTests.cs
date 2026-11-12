@@ -325,16 +325,18 @@ public class OidcAuthorizationRequestValidatorTests
         Assert.Null(redirect.State);
     }
 
-    /// <summary>
-    /// ADR 0010 stage 4: a generic framework client's protected state blob is several hundred
-    /// unreserved characters; the delivered bound admits it while staying bounded.
-    /// </summary>
-    [Fact]
-    public async Task ProtectedStateBlobLength_IsAccepted()
+    [Theory]
+    [InlineData(460, 130)]
+    [InlineData(2048, 1024)]
+    public async Task LongStateAndNonce_AreAcceptedWithoutChangingTheirValues(int stateLength, int nonceLength)
     {
-        var result = await ValidateAsync(Valid().With("state", new string('a', 1200)));
+        var state = ValidState.PadRight(stateLength, 'A');
+        var nonce = ValidNonce.PadRight(nonceLength, 'Z');
+        var result = await ValidateAsync(Valid().With("state", state).With("nonce", nonce));
 
-        Assert.True(result is OidcAuthorizationValidationResult.Accepted);
+        var accepted = Assert.IsType<OidcAuthorizationValidationResult.Accepted>(result);
+        Assert.Equal(state, accepted.State);
+        Assert.Equal(nonce, accepted.Nonce);
     }
 
     [Theory]
@@ -346,6 +348,16 @@ public class OidcAuthorizationRequestValidatorTests
         var builder = nonce is null ? Valid().Without("nonce") : Valid().With("nonce", nonce);
 
         AssertRedirect(await ValidateAsync(builder), OAuthErrorCodes.InvalidRequest);
+    }
+
+    [Fact]
+    public async Task OverlongNonce_IsARedirectedInvalidRequestWithVerifiedState()
+    {
+        var result = await ValidateAsync(Valid().With("nonce", new string('n', 1025)));
+
+        var redirect = AssertRedirect(result, OAuthErrorCodes.InvalidRequest);
+        Assert.Equal(OidcAuthorizationErrorDescriptions.MalformedNonce, redirect.ErrorDescription);
+        Assert.Equal(ValidState, redirect.State);
     }
 
     /// <summary>

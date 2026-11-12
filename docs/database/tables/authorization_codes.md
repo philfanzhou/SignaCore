@@ -16,7 +16,7 @@ redeemed at most once by the token endpoint on any instance, using only the shar
 - redirect_uri (snapshot of the exact registered canonical redirect URI value, compared ordinally
   at redemption — `EV-12`/`IN-23`)
 - scope (canonical space-delimited scope snapshot)
-- nonce (byte-for-byte snapshot)
+- nonce (byte-for-byte snapshot up to 1024 ASCII characters)
 - code_challenge (S256 challenge snapshot; the PKCE verifier is never stored)
 - auth_time (copied from the referenced session at creation)
 - created_at / expires_at (creation plus the fixed 60-second code lifetime)
