@@ -337,14 +337,14 @@ non-Secure carriers over plain `http`, selected from the trusted effective reque
 The dual-end official published-image browser acceptance for plain HTTP is still pending, now
 sequenced behind the upcoming 0.2.0 release.
 
-The official
-[`SignaCore.Client.AspNetCore`](https://www.nuget.org/packages/SignaCore.Client.AspNetCore) package
-follows the same decision: its Authority, redirect URIs, post-logout redirect URIs, and Discovery
-endpoints accept `http` and `https` equally in every environment name with no allowlist to
-configure, and its cookies follow the configured redirect URI's scheme — the historical Secure
-profile byte for byte over `https`, the neutral profile without name prefixes over plain `http`.
-See the package README's
-[HTTP deployments](https://github.com/philfanzhou/SignaCore/blob/main/src/SignaCore.Client.AspNetCore/README.md#http-deployments)
-section for the structural rules, the cookie profile, and the caller responsibilities, or
-[Migrating from 0.1.15](https://github.com/philfanzhou/SignaCore/blob/main/src/SignaCore.Client.AspNetCore/README.md#migrating-from-0115)
-when upgrading from the retired intranet HTTP opt-in.
+**Recommended for new integrations: the generic OIDC path (ADR 0010).** A service built on the
+framework's own `Microsoft.AspNetCore.Authentication.OpenIdConnect` handler completes the whole
+lifecycle — sign-in over the authorization endpoint with the delivered `prompt`/`max_age`
+parameters, token redemption, and sign-out over the published `end_session_endpoint` — without any
+SignaCore-specific package. See
+[samples/SignaCore.GenericOidc](https://github.com/philfanzhou/SignaCore/tree/main/samples/SignaCore.GenericOidc)
+for the reference application; the integration assembly proves the path against the real host on
+every CI run. The client package
+[`SignaCore.Client.AspNetCore`](https://www.nuget.org/packages/SignaCore.Client.AspNetCore)
+remains published and supported for its existing consumers but is feature-frozen and deprecated
+for new integrations (stage 5 of the ADR).

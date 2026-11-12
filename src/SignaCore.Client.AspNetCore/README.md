@@ -1,5 +1,21 @@
 # SignaCore.Client.AspNetCore
 
+> **Deprecation notice (ADR 0010, stage 5).** SignaCore now publishes the standard OIDC surfaces —
+> Discovery with `end_session_endpoint`, the authorization endpoint with the delivered
+> `prompt`/`max_age` interaction parameters, and the token endpoint — and a consumer built on the
+> framework's own `Microsoft.AspNetCore.Authentication.OpenIdConnect` handler completes the whole
+> lifecycle against it, verified continuously in CI by
+> [samples/SignaCore.GenericOidc](https://github.com/philfanzhou/SignaCore/tree/main/samples/SignaCore.GenericOidc).
+> **New integrations should use the generic handler, not this package.**
+>
+> This package is feature-frozen: it receives security fixes only, while the existing consumers
+> that still depend on it (the first-party administrator consoles) migrate. It remains published
+> and supported for those consumers until the last one migrates, and is then retired. Consumers
+> that value its strict validation profile (zero clock skew, bounded responses, duplicate-member
+> rejection) or its server-side-ticket session posture should read
+> [ADR 0010](https://github.com/philfanzhou/SignaCore/blob/main/docs/adr/0010-standards-conformant-oidc-and-generic-client-integration.md)
+> before choosing.
+
 The official SignaCore hosted-login client for ASP.NET Core. A few lines of registration let an
 application sign users in through SignaCore's hosted login page — Confidential Authorization Code
 flow with PKCE S256 — and keep a server-side session: every token stays on the server, and the

@@ -1,6 +1,6 @@
 # Standards-Conformant OIDC and a Generic-Client Integration Path
 
-- Status: Accepted (stages 1, 2, and 4 delivered; stages 3 and 5 pending)
+- Status: Accepted (stages 1, 2, and 4 delivered; stage 5 in progress; stage 3 optional, deferred)
 - Date: 2026-11-11
 - Decision owners: SignaCore maintainers
 - Extends: [ADR 0005](./0005-interactive-oidc-confidential-bff.md), [ADR 0007](./0007-official-hosted-login-client-package.md)
@@ -105,7 +105,12 @@ package**, while keeping the existing package and legacy contract working throug
    integrations in favor of the generic path, keep maintaining it for the five existing
    consoles until each migrates, and offer the strict validation profile either as a small
    optional add-on or as contributions upstream. The five consoles' adaptation layers keep
-   working unchanged for as long as they stay on the package.
+   working unchanged for as long as they stay on the package. — **In progress**: with stage 4
+   delivered and green across releases, the package README carries the deprecation notice, the
+   NuGet.org listing is flagged deprecated (an account-side owner action recorded outside this
+   repository), and features are frozen. Retirement completes when the remaining consumers —
+   the Doctheca, Lexarbor, Quaestura, and Ruoyu.Study administrator consoles (Ruoyu.Admin is
+   already retired) — migrate to the generic handler.
 
 The resource-server guidance (plain framework JWT handler, as Emenda integrates) and the
 legacy first-party `/api/auth/*` contract are unaffected by this decision.
