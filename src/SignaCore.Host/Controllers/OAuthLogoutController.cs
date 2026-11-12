@@ -263,9 +263,15 @@ public sealed class OAuthLogoutController : ControllerBase
         var fields = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (name, values) in query)
         {
-            if (!OidcStandardLogoutService.AdmittedQueryFields.Contains(name)
-                || values.Count != 1
-                || !fields.TryAdd(name, values[0] ?? string.Empty))
+            // The same unknown-field policy the authorize endpoint applies: a name this contract
+            // does not read is ignored (a generic framework client appends telemetry parameters),
+            // while each admitted name must appear exactly once.
+            if (!OidcStandardLogoutService.AdmittedQueryFields.Contains(name))
+            {
+                continue;
+            }
+
+            if (values.Count != 1 || !fields.TryAdd(name, values[0] ?? string.Empty))
             {
                 return FinishSessionEnd("invalid_request", LocalBadRequest(), stopwatch);
             }
@@ -293,12 +299,17 @@ public sealed class OAuthLogoutController : ControllerBase
         await HttpContext.SignOutAsync(IdentitySessionDefaults.AuthenticationScheme);
         Response.Cookies.Delete(profile.CsrfCookie, profile.CsrfOptions());
 
+        // ADR 0010 stage 4: the standard flow's state is a protected blob that exceeds the stored
+        // column's bound, so the service stages the request without one and the completion result
+        // carries no state; the controller echoes the already-validated request value instead,
+        // byte-for-byte, exactly like the stored path does.
+        fields.TryGetValue("state", out var requestState);
         if (result.VerifiedPostLogoutUri is null)
         {
             return Content(LocalCompletionPage, HtmlContentType);
         }
 
-        var redirectUri = AppendState(result.VerifiedPostLogoutUri, result.State);
+        var redirectUri = AppendState(result.VerifiedPostLogoutUri, requestState);
         _logger.LogInformation(
             "Standard logout redirect issued for a committed request. CorrelationId={CorrelationId}",
             LogValueSanitizer.Sanitize(HttpContext.GetCorrelationId()));

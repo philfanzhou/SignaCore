@@ -77,13 +77,16 @@ public sealed partial class OAuthLogoutTests
                 .SingleAsync(row => row.Id == familyRootId, TestContext.Current.CancellationToken));
         Assert.True(family.IsRevoked);
 
-        // The staged request is consumed exactly once and carries the standard-flow marker.
+        // The staged request is consumed exactly once. The state is deliberately not persisted on
+        // the standard route (ADR 0010 stage 4: the caller echoes the validated request value, so
+        // the stored column keeps the prepared flow's tighter bound) and the flow marker travels
+        // in the staged audit description.
         var row = await QueryAsync(async dbContext =>
             await dbContext.LogoutRequests.AsNoTracking()
                 .SingleAsync(r => r.IdentitySessionId == sessionId, TestContext.Current.CancellationToken));
         Assert.NotNull(row.ConsumedAt);
         Assert.Equal(RegisteredPostLogoutUri, row.PostLogoutRedirectUri);
-        Assert.Equal(State, row.State);
+        Assert.Null(row.State);
 
         // The response and location never carry the hint.
         Assert.DoesNotContain(idToken, await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken), StringComparison.Ordinal);

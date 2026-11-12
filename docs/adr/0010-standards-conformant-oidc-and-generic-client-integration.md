@@ -1,6 +1,6 @@
 # Standards-Conformant OIDC and a Generic-Client Integration Path
 
-- Status: Accepted (stages 1–2 delivered; stages 3–5 pending)
+- Status: Accepted (stages 1, 2, and 4 delivered; stages 3 and 5 pending)
 - Date: 2026-11-11
 - Decision owners: SignaCore maintainers
 - Extends: [ADR 0005](./0005-interactive-oidc-confidential-bff.md), [ADR 0007](./0007-official-hosted-login-client-package.md)
@@ -93,7 +93,13 @@ package**, while keeping the existing package and legacy contract working throug
 4. **Prove the generic path continuously.** Add an official sample and a CI job that talks to
    the real host using only `Microsoft.AspNetCore.Authentication.OpenIdConnect` — no
    `SignaCore.Client.AspNetCore`. This simultaneously converts the paper compatibility
-   promise into an enforced matrix and keeps future regressions visible.
+   promise into an enforced matrix and keeps future regressions visible. — **Delivered**:
+   [samples/SignaCore.GenericOidc](../../samples/SignaCore.GenericOidc/README.md) is the
+   sample, and `GenericOidcClientFlowTests` (in the integration assembly, so it runs in the
+   ordinary CI build and test job) drives it against the real host through the whole lifecycle:
+   Discovery, the code + PKCE S256 authorization request, the hosted login form, the token
+   redemption, the local cookie session, and the stage-1 standard RP-Initiated Logout with the
+   SignaCore identity session revoked end to end.
 5. **Deprecate the package along a published window.** Once stage 4 has run green across
    releases: freeze package features (security fixes only), mark it deprecated for *new*
    integrations in favor of the generic path, keep maintaining it for the five existing

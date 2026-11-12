@@ -270,7 +270,7 @@ spot.
 | `IN-02` | `client_id` | Required 1–100 UTF-16 code units before and after NFC + invariant-uppercase lookup normalization | Public identifier | Unknown, inactive, malformed, or non-interactive: local 400, no redirect |
 | `IN-03` | `redirect_uri` | Required 1–500 ASCII characters; no request normalization; `PS-20` structural rules plus exact ordinal match to a current registered canonical string on an active application | Sensitive configuration | Missing/unmatched/untrusted: local 400, no redirect |
 | `IN-04` | `scope` | Required 1–200 ASCII characters; U+0020-delimited unique members from `openid`, `profile`, `offline_access`; must include `openid`; stored in fixed normal order | Public policy | Safe redirect `invalid_scope`; never silently narrowed |
-| `IN-05` | `state` | Required 22–128 ASCII `[A-Za-z0-9._~-]`; opaque; no normalization; echoed byte-for-byte | Correlation-sensitive | Safe redirect `invalid_request` |
+| `IN-05` | `state` | Required 22–2048 ASCII `[A-Za-z0-9._~-]` (ADR 0010 stage 4: the bound admits a generic framework client's data-protection-protected state blob); opaque; no normalization; echoed byte-for-byte | Correlation-sensitive | Safe redirect `invalid_request` |
 | `IN-06` | `nonce` | Required 22–128 ASCII `[A-Za-z0-9._~-]`; opaque; no normalization; exact copy into the first ID token only | Correlation-sensitive | Safe redirect `invalid_request` |
 | `IN-07` | `code_challenge` | Required exactly 43 ASCII `[A-Za-z0-9_-]`, no padding; exact stored comparison | Credential-derived secret | Safe redirect `invalid_request`; `.` and `~` are rejected |
 | `IN-08` | `code_challenge_method` | Required ASCII; exactly `S256` | Public | Safe redirect `invalid_request` |

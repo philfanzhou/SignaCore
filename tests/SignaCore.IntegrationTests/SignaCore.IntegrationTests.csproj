@@ -31,6 +31,9 @@
       <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
       <ExcludeAssets>buildTransitive</ExcludeAssets>
     </ProjectReference>
+    <!-- ADR 0010 stage 4: the generic-path flow test hosts the sample that uses only the
+         framework OpenID Connect handler, so this assembly needs the handler package too. -->
+    <ProjectReference Include="..\..\samples\SignaCore.GenericOidc\SignaCore.GenericOidc.csproj" />
   </ItemGroup>
 
 </Project>
