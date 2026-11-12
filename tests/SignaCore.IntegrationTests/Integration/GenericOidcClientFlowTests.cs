@@ -154,10 +154,25 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
             builder.ConfigureTestServices(services =>
             {
                 // Route the handler's Discovery/JWKS/token backchannel to the in-memory identity
-                // host instead of the network.
+                // host instead of the network. The built-in OpenIdConnect post-configure runs
+                // first and has already built a ConfigurationManager around a real HttpClient, so
+                // the injection replaces that manager with one over the in-memory handler — the
+                // standard pattern for testing this handler against an in-memory authority.
                 services
                     .AddOptions<Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectOptions>("oidc")
-                    .PostConfigure(options => options.Backchannel = new HttpClient(identityHandler));
+                    .PostConfigure(options =>
+                    {
+                        var backchannel = new HttpClient(identityHandler);
+                        options.Backchannel = backchannel;
+                        options.ConfigurationManager =
+                            new Microsoft.IdentityModel.Protocols.ConfigurationManager<Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfiguration>(
+                                options.Authority,
+                                new Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfigurationRetriever(),
+                                new Microsoft.IdentityModel.Protocols.HttpDocumentRetriever(backchannel)
+                                {
+                                    RequireHttps = false
+                                });
+                    });
             });
         });
 

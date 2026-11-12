@@ -16,12 +16,15 @@
 using Microsoft.AspNetCore.Authentication;
 
 namespace SignaCore.GenericOidc;
-
 public sealed class Program
 {
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+
+        var authority = Required(builder.Configuration, "GenericOidc:Authority");
+        var redirectUri = Required(builder.Configuration, "GenericOidc:RedirectUri");
+        var postLogoutRedirectUri = Required(builder.Configuration, "GenericOidc:PostLogoutRedirectUri");
 
         builder.Services.AddAuthentication(options =>
         {
@@ -32,9 +35,9 @@ public sealed class Program
             .AddCookie("Cookies")
             .AddOpenIdConnect("oidc", options =>
             {
-                options.Authority = builder.Configuration["GenericOidc:Authority"];
-                options.ClientId = builder.Configuration["GenericOidc:ClientId"];
-                options.ClientSecret = builder.Configuration["GenericOidc:ClientSecret"];
+                options.Authority = authority;
+                options.ClientId = Required(builder.Configuration, "GenericOidc:ClientId");
+                options.ClientSecret = Required(builder.Configuration, "GenericOidc:ClientSecret");
                 options.ResponseType = "code";
                 // The framework default: PKCE S256, exactly what SignaCore requires.
                 options.UsePkce = true;
@@ -45,7 +48,7 @@ public sealed class Program
                 options.MapInboundClaims = false;
                 options.CallbackPath = "/signin-oidc";
                 options.SignedOutCallbackPath = "/signout-callback-oidc";
-                options.SignedOutRedirectUri = builder.Configuration["GenericOidc:PostLogoutRedirectUri"];
+                options.SignedOutRedirectUri = postLogoutRedirectUri;
                 // Plain-HTTP authorities are a deployment decision (SignaCore ADR 0008); the
                 // framework requires this explicit opt-in because its default assumes a public
                 // HTTPS authority.
@@ -87,4 +90,8 @@ public sealed class Program
 
         app.Run();
     }
+
+    private static string Required(IConfiguration configuration, string key) =>
+        configuration[key]
+        ?? throw new InvalidOperationException($"The required setting '{key}' is missing; the generic-path sample refuses to start half-configured.");
 }
