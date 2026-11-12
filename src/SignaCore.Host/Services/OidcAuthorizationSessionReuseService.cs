@@ -47,11 +47,12 @@ public sealed class OidcAuthorizationSessionReuseService(
     /// snapshot. Returns the committed plaintext code, or <c>null</c> when the session row is
     /// missing, revoked, idle- or absolutely expired (inclusive boundaries, <c>EV-04</c>), the
     /// account is gone or deactivated (<c>EV-08</c>), or this application's session max-age is
-    /// reached (<c>EV-05</c>, never a global revocation), or, for an <c>Sms</c> session, this
-    /// application's current <c>PS-04</c> SMS admission predicate is false (<c>EV-38</c>: no
-    /// activity write, no admission write, no provisioning) — each with the whole unit rolled back.
-    /// The application's current capability, scope and redirect registration are checked again
-    /// under the issuance transaction.
+    /// reached (<c>EV-05</c>, never a global revocation), or the request's own
+    /// <c>max_age</c> bound (ADR 0010 stage 2) is reached — <c>0</c> refuses every reuse — or,
+    /// for an <c>Sms</c> session, this application's current <c>PS-04</c> SMS admission
+    /// predicate is false (<c>EV-38</c>: no activity write, no admission write, no provisioning)
+    /// — each with the whole unit rolled back. The application's current capability, scope and
+    /// redirect registration are checked again under the issuance transaction.
     /// </summary>
     public async Task<string?> TryIssueAsync(
         OidcAuthorizationValidationResult.Accepted accepted,
@@ -59,7 +60,8 @@ public sealed class OidcAuthorizationSessionReuseService(
         DateTimeOffset now,
         string? clientIp,
         string? correlationId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int? maxAgeSeconds = null)
     {
         ArgumentNullException.ThrowIfNull(accepted);
 
@@ -69,6 +71,16 @@ public sealed class OidcAuthorizationSessionReuseService(
             var session = await identitySessions.LockAsync(sessionId, operationToken);
             if (session is null
                 || IdentitySessionStore.Classify(session, now) != IdentitySessionState.Active)
+            {
+                await transaction.RollbackAsync(operationToken);
+                return null;
+            }
+
+            // ADR 0010 stage 2: the request's own max_age bound is judged under the same lock as
+            // every other session decision, so a concurrent touch cannot smuggle a stale session
+            // past it. The inclusive boundary matches EV-05's; max_age=0 refuses every reuse.
+            if (maxAgeSeconds is int requestMaxAge
+                && now >= session.AuthTime.AddSeconds(requestMaxAge))
             {
                 await transaction.RollbackAsync(operationToken);
                 return null;
@@ -91,8 +103,8 @@ public sealed class OidcAuthorizationSessionReuseService(
             var application = await dbContext.AppRegistrations.AsNoTracking()
                 .SingleAsync(app => app.Id == accepted.ApplicationId, operationToken);
             if (application is null
-                || (application.IdentitySessionMaxAgeSeconds is int maxAgeSeconds
-                    && now >= session.AuthTime.AddSeconds(maxAgeSeconds)))
+                || (application.IdentitySessionMaxAgeSeconds is int applicationMaxAgeSeconds
+                    && now >= session.AuthTime.AddSeconds(applicationMaxAgeSeconds)))
             {
                 await transaction.RollbackAsync(operationToken);
                 return null;

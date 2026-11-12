@@ -23,12 +23,28 @@ sensitivity, and errors. This table is an index, not a second field definition:
 | `nonce` | `IN-06` |
 | `code_challenge` | `IN-07` |
 | `code_challenge_method` | `IN-08` |
+| `prompt`, `max_age`, `acr_values`, `response_mode` | `IN-09` (ADR 0010 stage 2 subset) |
 | Rejected and unknown parameters | `IN-09` |
 
 The S256 challenge rule is intentionally narrower than the generic RFC 7636 `code-challenge` ABNF.
 This phase accepts only the exact 43-character unpadded base64url output of
 `BASE64URL(SHA256(ASCII(code_verifier)))`, so `.` and `~` cannot create a code that no verifier could
 redeem. The verifier itself retains the RFC 7636 unreserved alphabet at token redemption (`IN-24`).
+
+## Standard interaction parameters (ADR 0010 stage 2)
+
+The delivered subset of the OIDC Core interaction parameters:
+
+| Parameter | Delivered semantics |
+| --- | --- |
+| `prompt=none` | The request must be answered without any user interaction. A usable live identity session yields the code silently through the reuse transaction; anything else — no cookie, an unusable session, or a `max_age` bound the session no longer satisfies — answers with the standard `login_required` error redirect (verified `state` included) and never renders the login form. |
+| `prompt=login` | Re-authentication is forced: the session-reuse path is skipped entirely and the browser always lands on the hosted login form. |
+| `max_age` | 0–2592000 seconds of ASCII digits. The reuse transaction enforces it against the session's `auth_time` under the session-row lock: a session older than the bound (inclusive, `0` refuses every reuse) falls back to the login form, or to `login_required` under `prompt=none`. |
+| `acr_values` | Accepted when 1–512 printable ASCII characters and ignored: SignaCore publishes no authentication context classes, so there is nothing the hint could select. |
+| `response_mode=query` | Accepted explicitly (the RFC 6749 default for the code response type, so it changes nothing); any other value is `unsupported_response_mode`. |
+
+Any `prompt` value other than exactly `none` or `login` (including space-delimited lists) is a
+redirected `invalid_request`, as is a malformed `max_age` or `acr_values`.
 
 ## Validation and redirect trust
 

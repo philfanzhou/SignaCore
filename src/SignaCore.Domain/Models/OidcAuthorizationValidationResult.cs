@@ -40,6 +40,23 @@ public static class OidcAuthorizationErrorDescriptions
     public const string UnsupportedCodeChallengeMethod = "The code_challenge_method must be S256.";
     public const string InvalidScope = "The requested scope is not permitted for this client.";
     public const string AccessDenied = "The user cancelled the authorization request.";
+    public const string UnsupportedPromptValue = "The prompt parameter supports only none or login.";
+    public const string MalformedMaxAge = "The max_age parameter must be a non-negative number of seconds.";
+    public const string MalformedAcrValues = "The acr_values parameter is malformed.";
+    public const string UnsupportedResponseMode = "This authorization server supports only the query response mode.";
+    public const string LoginRequired = "The end-user could not be authenticated without interaction, and the prompt parameter forbids it.";
+}
+
+/// <summary>
+/// The delivered subset of the OIDC Core <c>prompt</c> parameter (ADR 0010 stage 2):
+/// <see cref="Unspecified"/> is the absent parameter, <see cref="None"/> demands a silent
+/// answer with no user interaction, and <see cref="Login"/> demands re-authentication.
+/// </summary>
+public enum OidcAuthorizationPrompt
+{
+    Unspecified = 0,
+    None = 1,
+    Login = 2
 }
 
 /// <summary>
@@ -81,6 +98,16 @@ public abstract record OidcAuthorizationValidationResult
     /// Every protocol field validated. The caller still rechecks current policy and session state
     /// in its issuance transaction before returning a code or success redirect.
     /// </summary>
+    /// <param name="Prompt">
+    /// The delivered <c>prompt</c> value (ADR 0010 stage 2): <see cref="OidcAuthorizationPrompt.None"/>
+    /// must be answered without any user interaction, <see cref="OidcAuthorizationPrompt.Login"/>
+    /// must re-authenticate even when a live session cookie exists.
+    /// </param>
+    /// <param name="MaxAgeSeconds">
+    /// The delivered <c>max_age</c> bound in seconds (<c>0</c> demands immediate re-authentication),
+    /// or <c>null</c> when the request supplied none. The reuse transaction enforces it against the
+    /// session's authentication time.
+    /// </param>
     public sealed record Accepted(
         string ClientId,
         Guid ApplicationId,
@@ -88,5 +115,7 @@ public abstract record OidcAuthorizationValidationResult
         string CanonicalScope,
         string State,
         string Nonce,
-        string CodeChallenge) : OidcAuthorizationValidationResult;
+        string CodeChallenge,
+        OidcAuthorizationPrompt Prompt = OidcAuthorizationPrompt.Unspecified,
+        int? MaxAgeSeconds = null) : OidcAuthorizationValidationResult;
 }

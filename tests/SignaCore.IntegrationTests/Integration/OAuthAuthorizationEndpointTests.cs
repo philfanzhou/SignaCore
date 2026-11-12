@@ -202,10 +202,12 @@ public class OAuthAuthorizationEndpointTests : IClassFixture<IdentityServerFixtu
     }
 
     [Theory]
-    [InlineData("prompt", "login", OAuthErrorCodes.InvalidRequest)]
-    [InlineData("max_age", "0", OAuthErrorCodes.InvalidRequest)]
-    [InlineData("acr_values", "urn:example", OAuthErrorCodes.InvalidRequest)]
-    [InlineData("response_mode", "form_post", OAuthErrorCodes.InvalidRequest)]
+    [InlineData("prompt", "consent", OAuthErrorCodes.InvalidRequest)]
+    [InlineData("prompt", "none login", OAuthErrorCodes.InvalidRequest)]
+    [InlineData("max_age", "-1", OAuthErrorCodes.InvalidRequest)]
+    [InlineData("max_age", "abc", OAuthErrorCodes.InvalidRequest)]
+    [InlineData("response_mode", "form_post", OAuthErrorCodes.UnsupportedResponseMode)]
+    [InlineData("response_mode", "fragment", OAuthErrorCodes.UnsupportedResponseMode)]
     [InlineData("request", "eyJhbGciOiJub25lIn0", OAuthErrorCodes.RequestNotSupported)]
     [InlineData("request_uri", "https://attacker.test/req", OAuthErrorCodes.RequestUriNotSupported)]
     [InlineData("registration", "{}", OAuthErrorCodes.RegistrationNotSupported)]
