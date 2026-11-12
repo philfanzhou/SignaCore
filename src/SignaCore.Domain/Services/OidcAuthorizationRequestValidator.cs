@@ -73,6 +73,16 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
 
     private const string ResponseTypeCode = "code";
     private const string CodeChallengeMethodS256 = "S256";
+    private const string ResponseModeQuery = "query";
+
+    /// <summary>
+    /// The <c>max_age</c> upper bound of 30 days: large enough for any sane session policy, small
+    /// enough that the seconds arithmetic cannot overflow and the parameter stays a hint, not a
+    /// persistence mechanism.
+    /// </summary>
+    private const int MaxAgeUpperBoundSeconds = 30 * 24 * 60 * 60;
+
+    private const int MaxAcrValuesLength = 512;
 
     private const int MinOpaqueValueLength = 22;
     private const int MaxOpaqueValueLength = 128;
@@ -187,14 +197,71 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
                 OidcAuthorizationErrorDescriptions.UnsupportedResponseType);
         }
 
-        if (parameters.Contains(Prompt)
-            || parameters.Contains(MaxAge)
-            || parameters.Contains(AcrValues)
-            || parameters.Contains(ResponseMode))
+        // ---- ADR 0010 stage 2: the delivered subset of the standard prompt/max_age/acr_values
+        // semantics. Anything outside the subset stays a bounded redirect rejection, so the
+        // previously closed parameter surface only grows by exactly the delivered behavior.
+        var prompt = OidcAuthorizationPrompt.Unspecified;
+        if (parameters.Contains(Prompt))
         {
-            return Redirect(
-                OAuthErrorCodes.InvalidRequest,
-                OidcAuthorizationErrorDescriptions.UnsupportedParameter);
+            var promptValue = parameters.Single(Prompt);
+            prompt = promptValue switch
+            {
+                "none" => OidcAuthorizationPrompt.None,
+                "login" => OidcAuthorizationPrompt.Login,
+                _ => OidcAuthorizationPrompt.Unspecified
+            };
+            if (prompt == OidcAuthorizationPrompt.Unspecified)
+            {
+                return Redirect(
+                    OAuthErrorCodes.InvalidRequest,
+                    OidcAuthorizationErrorDescriptions.UnsupportedPromptValue);
+            }
+        }
+
+        int? maxAgeSeconds = null;
+        if (parameters.Contains(MaxAge))
+        {
+            var maxAgeValue = parameters.Single(MaxAge);
+            if (maxAgeValue is null
+                || maxAgeValue.Length is < 1 or > 7
+                || !maxAgeValue.All(char.IsAsciiDigit)
+                || !int.TryParse(maxAgeValue, out var parsed)
+                || parsed > MaxAgeUpperBoundSeconds)
+            {
+                return Redirect(
+                    OAuthErrorCodes.InvalidRequest,
+                    OidcAuthorizationErrorDescriptions.MalformedMaxAge);
+            }
+
+            maxAgeSeconds = parsed;
+        }
+
+        if (parameters.Contains(AcrValues))
+        {
+            var acrValues = parameters.Single(AcrValues);
+            if (acrValues is null
+                || acrValues.Length is < 1 or > MaxAcrValuesLength
+                || !acrValues.All(character => character == ' ' || (character > 0x20 && character < 0x7f)))
+            {
+                return Redirect(
+                    OAuthErrorCodes.InvalidRequest,
+                    OidcAuthorizationErrorDescriptions.MalformedAcrValues);
+            }
+
+            // Delivered semantics: the value is accepted and ignored. SignaCore publishes no
+            // authentication context classes, so there is nothing an acr_values hint could select.
+        }
+
+        if (parameters.Contains(ResponseMode))
+        {
+            // query is the RFC 6749 default for the code response type, so accepting it explicitly
+            // changes nothing; every other encoding stays unsupported.
+            if (!string.Equals(parameters.Single(ResponseMode), ResponseModeQuery, StringComparison.Ordinal))
+            {
+                return Redirect(
+                    OAuthErrorCodes.UnsupportedResponseMode,
+                    OidcAuthorizationErrorDescriptions.UnsupportedResponseMode);
+            }
         }
 
         if (parameters.Contains(Request))
@@ -271,7 +338,9 @@ public sealed class OidcAuthorizationRequestValidator : IOidcAuthorizationReques
             canonicalScope,
             echoableState,
             nonce!,
-            codeChallenge!);
+            codeChallenge!,
+            prompt,
+            maxAgeSeconds);
     }
 
     private static OidcAuthorizationValidationResult Local(string reason)

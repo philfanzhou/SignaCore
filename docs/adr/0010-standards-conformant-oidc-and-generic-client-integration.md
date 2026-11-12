@@ -1,6 +1,6 @@
 # Standards-Conformant OIDC and a Generic-Client Integration Path
 
-- Status: Accepted (stage 1 delivered; stages 2–5 pending)
+- Status: Accepted (stages 1–2 delivered; stages 3–5 pending)
 - Date: 2026-11-11
 - Decision owners: SignaCore maintainers
 - Extends: [ADR 0005](./0005-interactive-oidc-confidential-bff.md), [ADR 0007](./0007-official-hosted-login-client-package.md)
@@ -79,7 +79,14 @@ package**, while keeping the existing package and legacy contract working throug
    answer `prompt=none` from the live identity session when one exists (the session-reuse
    service already backs this) and with `login_required` otherwise, and accept or
    safely ignore `max_age`/`acr_values` per a written table. The rejection of `response_mode`
-   values other than `query` and of `request`/`request_uri` may remain, documented.
+   values other than `query` and of `request`/`request_uri` may remain, documented. —
+   **Delivered**: `prompt` accepts exactly `none` or `login`; `max_age` (0–2592000 seconds) is
+   enforced against the session's `auth_time` under the session-row lock in the reuse
+   transaction (`0` refuses every reuse); `acr_values` is accepted within a printable-ASCII
+   bound and ignored; `response_mode=query` is accepted explicitly and every other value is
+   `unsupported_response_mode`; `prompt=none` without a usable session answers the standard
+   `login_required` error redirect and never renders the login form (see
+   [AuthorizationEndpoint](../oidc/AuthorizationEndpoint.md)).
 3. **Optional session-management alignment.** Evaluate back-channel logout (and, only if it
    earns its keep, the session-management iframe) so generic clients learn when the SignaCore
    identity session ends, instead of discovering it at token expiry.

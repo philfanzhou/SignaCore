@@ -6,6 +6,7 @@ using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
+using SignaCore.Domain.Validators;
 using ServiceMantle.Audit;
 using SignaCore.Host.Audit;
 using SignaCore.Host.Http;
@@ -144,6 +145,17 @@ public sealed class OAuthAuthorizationController : ControllerBase
             case OidcAuthorizationValidationResult.Accepted accepted:
                 _metrics.RecordOidcAuthorizeOutcome(AcceptedOutcome, accepted.ClientId);
                 var now = DateTimeOffset.UtcNow;
+
+                // ADR 0010 stage 2: prompt=login demands re-authentication, so the reuse path is
+                // skipped entirely and the browser always lands on the login form.
+                if (accepted.Prompt == OidcAuthorizationPrompt.Login)
+                {
+                    _logger.LogInformation(
+                        "Authorization request forced re-authentication (prompt=login). CorrelationId={CorrelationId}",
+                        LogValueSanitizer.Sanitize(HttpContext.GetCorrelationId()));
+                    return await ContinueToLoginAsync(accepted, now, cancellationToken);
+                }
+
                 // The identity cookie may name a still-live server-side session: when the reuse
                 // transaction commits, the browser leaves with a code and no login continuation;
                 // when it rolls back, the unchanged continuation path runs afterwards, so every
@@ -158,7 +170,8 @@ public sealed class OAuthAuthorizationController : ControllerBase
                         now,
                         HttpContext.GetClientIp(),
                         HttpContext.GetCorrelationId(),
-                        cancellationToken);
+                        cancellationToken,
+                        accepted.MaxAgeSeconds);
                     if (reusedCode is not null)
                     {
                         _logger.LogInformation(
@@ -178,33 +191,76 @@ public sealed class OAuthAuthorizationController : ControllerBase
                             LogValueSanitizer.Sanitize(HttpContext.GetCorrelationId()));
                 }
 
-                // The login continuation must stay a same-origin relative path. PathBase is
-                // request-controlled state, so the destination is validated as a local URL before
-                // anything is written: a prefix that cannot form a local URL answers the fixed
-                // local error with no Location, no continuation, and no audit row, and the original
-                // prefix value is never echoed or logged.
-                var loginPath = $"{Request.PathBase}/oauth2/login";
-                if (!Url.IsLocalUrl(loginPath))
+                // ADR 0010 stage 2: prompt=none must never show the login form. A missing cookie
+                // or an unusable session is answered with the standard login_required error
+                // redirect, carrying the verified state, instead of the continuation.
+                if (accepted.Prompt == OidcAuthorizationPrompt.None)
                 {
-                    return LocalError();
+                    return await RedirectInteractionRequiredAsync(
+                        accepted,
+                        OAuthErrorCodes.LoginRequired,
+                        OidcAuthorizationErrorDescriptions.LoginRequired,
+                        cancellationToken);
                 }
 
-                // The accepted audit row is only staged here; the continuation store's single
-                // SaveChanges commits the continuation row and the audit row as one unit, so a
-                // failure between them cannot leave half of the outcome behind.
-                await StageAuditAsync(accepted.ApplicationId, AcceptedOutcome, cancellationToken);
-                var creation = await _authorizationRequestStore.CreateAsync(
-                    accepted, now, cancellationToken);
-                // A same-origin relative location only: no scheme or host is taken from the
-                // request, the handle is the sole query field the login page receives, and the
-                // final executor re-asserts locality by refusing any non-local destination.
-                return LocalRedirect(
-                    $"{loginPath}?login_handle={Uri.EscapeDataString(creation.LoginHandle)}");
+                return await ContinueToLoginAsync(accepted, now, cancellationToken);
 
             default:
                 throw new InvalidOperationException(
                     $"Unhandled authorization validation result '{result.GetType().Name}'.");
         }
+    }
+
+    /// <summary>
+    /// The login continuation must stay a same-origin relative path. PathBase is
+    /// request-controlled state, so the destination is validated as a local URL before
+    /// anything is written: a prefix that cannot form a local URL answers the fixed
+    /// local error with no Location, no continuation, and no audit row, and the original
+    /// prefix value is never echoed or logged.
+    /// </summary>
+    private async Task<IActionResult> ContinueToLoginAsync(
+        OidcAuthorizationValidationResult.Accepted accepted,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var loginPath = $"{Request.PathBase}/oauth2/login";
+        if (!Url.IsLocalUrl(loginPath))
+        {
+            return LocalError();
+        }
+
+        // The accepted audit row is only staged here; the continuation store's single
+        // SaveChanges commits the continuation row and the audit row as one unit, so a
+        // failure between them cannot leave half of the outcome behind.
+        await StageAuditAsync(accepted.ApplicationId, AcceptedOutcome, cancellationToken);
+        var creation = await _authorizationRequestStore.CreateAsync(
+            accepted, now, cancellationToken);
+        // A same-origin relative location only: no scheme or host is taken from the
+        // request, the handle is the sole query field the login page receives, and the
+        // final executor re-asserts locality by refusing any non-local destination.
+        return LocalRedirect(
+            $"{loginPath}?login_handle={Uri.EscapeDataString(creation.LoginHandle)}");
+    }
+
+    /// <summary>
+    /// ADR 0010 stage 2: the silent-answer rejection of <c>prompt=none</c>. The error, its fixed
+    /// description, and the verified state travel to the registered URI exactly like a validation
+    /// rejection, and one audit row records the bounded outcome.
+    /// </summary>
+    private async Task<IActionResult> RedirectInteractionRequiredAsync(
+        OidcAuthorizationValidationResult.Accepted accepted,
+        string error,
+        string errorDescription,
+        CancellationToken cancellationToken)
+    {
+        _metrics.RecordOidcAuthorizeOutcome(error, accepted.ClientId);
+        await RecordAuditAsync(accepted.ApplicationId, error, cancellationToken);
+        return Redirect(OidcAuthorizationRedirect.BuildError(
+            accepted.RegisteredRedirectUri,
+            error,
+            errorDescription,
+            accepted.State,
+            _jwtOptions.Issuer));
     }
 
     private IActionResult LocalError()

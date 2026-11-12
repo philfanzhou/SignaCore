@@ -373,16 +373,63 @@ public class OidcAuthorizationRequestValidatorTests
     }
 
     [Theory]
-    [InlineData("prompt", "login")]
-    [InlineData("max_age", "0")]
-    [InlineData("acr_values", "urn:example")]
-    [InlineData("response_mode", "form_post")]
-    public async Task RejectedField_IsARedirectedInvalidRequest(string name, string value)
+    [InlineData("prompt", "consent")]
+    [InlineData("prompt", "select_account")]
+    [InlineData("prompt", "none login")]
+    [InlineData("max_age", "-1")]
+    [InlineData("max_age", "abc")]
+    [InlineData("max_age", "9999999")]
+    [InlineData("acr_values", "malformed\u00e9")]
+    public async Task UnsupportedStandardFieldValue_IsARedirectedInvalidRequest(string name, string value)
     {
         var result = await ValidateAsync(Valid().With(name, value));
 
-        var redirect = AssertRedirect(result, OAuthErrorCodes.InvalidRequest);
-        Assert.Equal(OidcAuthorizationErrorDescriptions.UnsupportedParameter, redirect.ErrorDescription);
+        Assert.True(result is OidcAuthorizationValidationResult.RedirectRejection, $"expected rejection for {name}={value}");
+        var redirect = (OidcAuthorizationValidationResult.RedirectRejection)result;
+        Assert.Equal(OAuthErrorCodes.InvalidRequest, redirect.Error);
+    }
+
+    [Fact]
+    public async Task ResponseModeOtherThanQuery_UsesItsOwnError()
+    {
+        var result = await ValidateAsync(Valid().With("response_mode", "fragment"));
+
+        var redirect = (OidcAuthorizationValidationResult.RedirectRejection)result;
+        Assert.Equal(OAuthErrorCodes.UnsupportedResponseMode, redirect.Error);
+    }
+
+    [Theory]
+    [InlineData("prompt", "none")]
+    [InlineData("prompt", "login")]
+    [InlineData("max_age", "0")]
+    [InlineData("max_age", "3600")]
+    [InlineData("acr_values", "urn:example:basic phr")]
+    [InlineData("response_mode", "query")]
+    public async Task DeliveredStandardField_IsAccepted(string name, string value)
+    {
+        var result = await ValidateAsync(Valid().With(name, value));
+
+        Assert.True(result is OidcAuthorizationValidationResult.Accepted, $"expected acceptance for {name}={value}");
+    }
+
+    [Fact]
+    public async Task MaxAge_IsCarriedOnTheAcceptedResult()
+    {
+        var result = await ValidateAsync(Valid().With("max_age", "300"));
+
+        var accepted = (OidcAuthorizationValidationResult.Accepted)result;
+        Assert.Equal(300, accepted.MaxAgeSeconds);
+        Assert.Equal(OidcAuthorizationPrompt.Unspecified, accepted.Prompt);
+    }
+
+    [Fact]
+    public async Task Prompt_IsCarriedOnTheAcceptedResult()
+    {
+        var result = await ValidateAsync(Valid().With("prompt", "none"));
+
+        var accepted = (OidcAuthorizationValidationResult.Accepted)result;
+        Assert.Equal(OidcAuthorizationPrompt.None, accepted.Prompt);
+        Assert.Null(accepted.MaxAgeSeconds);
     }
 
     [Theory]

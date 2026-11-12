@@ -489,6 +489,128 @@ public sealed class OAuthAuthorizationSessionReuseTests : IClassFixture<Identity
         return accountId;
     }
 
+    // ---- ADR 0010 stage 2: the prompt and max_age semantics ----
+
+    [Fact]
+    public async Task PromptNone_WithAUsableCookie_ReturnsTheCodeSilently()
+    {
+        var accountId = await SeedReuseUserAsync();
+        using var client = _fixture.CreateNonRedirectingHttpClient(handleCookies: false);
+        var cookieValue = await CompleteSuccessLoginAndGetIdentityCookieValueAsync(
+            _fixture.Services, client, ReuseUser, ReusePassword);
+        var session = await GetLatestSessionAsync(accountId);
+
+        using var response = await client.SendAsync(
+            AuthorizeRequest(BuildSuccessAuthorizeUrl() + "&prompt=none", cookieValue),
+            TestContext.Current.CancellationToken);
+
+        AssertRedirectWithCode(response, out _);
+        Assert.True(await CodeExistsForSessionAsync(session!.Id));
+    }
+
+    [Fact]
+    public async Task PromptNone_WithoutACookie_RedirectsWithLoginRequiredAndWritesNoContinuation()
+    {
+        await SeedReuseUserAsync();
+        using var client = _fixture.CreateNonRedirectingHttpClient(handleCookies: false);
+        var continuationCount = await CountRowsAsync(db => db.AuthorizationRequests.CountAsync());
+
+        using var response = await client.GetAsync(
+            BuildSuccessAuthorizeUrl() + "&prompt=none",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        var location = response.Headers.Location!.ToString();
+        Assert.StartsWith(SuccessRegisteredUri.Split('?')[0], location, StringComparison.Ordinal);
+        Assert.Contains("error=login_required", location, StringComparison.Ordinal);
+        Assert.Contains("state=" + Uri.EscapeDataString(SuccessState), location, StringComparison.Ordinal);
+        Assert.DoesNotContain("code=", location, StringComparison.Ordinal);
+        Assert.DoesNotContain("login_handle=", location, StringComparison.Ordinal);
+        Assert.Equal(continuationCount, await CountRowsAsync(db => db.AuthorizationRequests.CountAsync()));
+    }
+
+    [Fact]
+    public async Task PromptNone_WithAMaxAgeOfZero_RedirectsWithLoginRequired()
+    {
+        var accountId = await SeedReuseUserAsync();
+        using var client = _fixture.CreateNonRedirectingHttpClient(handleCookies: false);
+        var cookieValue = await CompleteSuccessLoginAndGetIdentityCookieValueAsync(
+            _fixture.Services, client, ReuseUser, ReusePassword);
+        var session = await GetLatestSessionAsync(accountId);
+
+        using var response = await client.SendAsync(
+            AuthorizeRequest(BuildSuccessAuthorizeUrl() + "&prompt=none&max_age=0", cookieValue),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        var location = response.Headers.Location!.ToString();
+        Assert.StartsWith(SuccessRegisteredUri.Split('?')[0], location, StringComparison.Ordinal);
+        Assert.Contains("error=login_required", location, StringComparison.Ordinal);
+        Assert.DoesNotContain("code=", location, StringComparison.Ordinal);
+        Assert.False(await CodeExistsForSessionAsync(session!.Id)
+            && (await CountRowsAsync(db => db.AuthorizationCodes.CountAsync(
+                row => row.IdentitySessionId == session.Id))) > 1);
+    }
+
+    [Fact]
+    public async Task PromptLogin_WithAUsableCookie_StillGoesToTheLoginForm()
+    {
+        await SeedReuseUserAsync();
+        using var client = _fixture.CreateNonRedirectingHttpClient(handleCookies: false);
+        var cookieValue = await CompleteSuccessLoginAndGetIdentityCookieValueAsync(
+            _fixture.Services, client, ReuseUser, ReusePassword);
+
+        using var response = await client.SendAsync(
+            AuthorizeRequest(BuildSuccessAuthorizeUrl() + "&prompt=login", cookieValue),
+            TestContext.Current.CancellationToken);
+
+        await AssertLoginFallbackAsync(response);
+    }
+
+    [Fact]
+    public async Task MaxAgeZero_WithAUsableCookie_GoesToTheLoginForm()
+    {
+        await SeedReuseUserAsync();
+        using var client = _fixture.CreateNonRedirectingHttpClient(handleCookies: false);
+        var cookieValue = await CompleteSuccessLoginAndGetIdentityCookieValueAsync(
+            _fixture.Services, client, ReuseUser, ReusePassword);
+
+        using var response = await client.SendAsync(
+            AuthorizeRequest(BuildSuccessAuthorizeUrl() + "&max_age=0", cookieValue),
+            TestContext.Current.CancellationToken);
+
+        await AssertLoginFallbackAsync(response);
+    }
+
+    [Fact]
+    public async Task MaxAgeBound_WithAUsableCookie_ReusesTheSession()
+    {
+        var accountId = await SeedReuseUserAsync();
+        using var client = _fixture.CreateNonRedirectingHttpClient(handleCookies: false);
+        var cookieValue = await CompleteSuccessLoginAndGetIdentityCookieValueAsync(
+            _fixture.Services, client, ReuseUser, ReusePassword);
+
+        using var response = await client.SendAsync(
+            AuthorizeRequest(BuildSuccessAuthorizeUrl() + "&max_age=86400", cookieValue),
+            TestContext.Current.CancellationToken);
+
+        AssertRedirectWithCode(response, out _);
+        Assert.NotNull(await GetLatestSessionAsync(accountId));
+    }
+
+    [Fact]
+    public async Task AcrValues_AreAcceptedAndDoNotChangeTheOutcome()
+    {
+        await SeedReuseUserAsync();
+        using var client = _fixture.CreateNonRedirectingHttpClient(handleCookies: false);
+
+        using var response = await client.GetAsync(
+            BuildSuccessAuthorizeUrl() + "&acr_values=urn%3Aexample%3Abasic%20phr",
+            TestContext.Current.CancellationToken);
+
+        await AssertLoginFallbackAsync(response);
+    }
+
     // ---- Helpers ----
 
     private static HttpRequestMessage AuthorizeRequest(

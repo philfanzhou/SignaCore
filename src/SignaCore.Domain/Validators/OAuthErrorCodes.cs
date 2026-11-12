@@ -54,4 +54,16 @@ public static class OAuthErrorCodes
 
     /// <summary>The authorization server does not support the OIDC Core <c>registration</c> parameter.</summary>
     public const string RegistrationNotSupported = "registration_not_supported";
+
+    /// <summary>
+    /// The end-user could not be authenticated silently (OIDC Core §3.1.2.6). The authorization
+    /// endpoint answers with it when <c>prompt=none</c> met no usable live identity session.
+    /// </summary>
+    public const string LoginRequired = "login_required";
+
+    /// <summary>
+    /// The authorization server does not support the requested response mode (OAuth 2.0
+    /// Multiple Response Type Encoding Practices §4).
+    /// </summary>
+    public const string UnsupportedResponseMode = "unsupported_response_mode";
 }
