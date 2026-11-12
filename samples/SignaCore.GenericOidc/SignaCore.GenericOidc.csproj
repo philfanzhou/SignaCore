@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SignaCore.GenericOidc</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ADR 0010 stage 4: the generic-path sample deliberately references nothing but the
+         framework's own OpenID Connect handler — no SignaCore package of any kind. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
+  </ItemGroup>
+
+</Project>
