@@ -263,9 +263,15 @@ public sealed class OAuthLogoutController : ControllerBase
         var fields = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (name, values) in query)
         {
-            if (!OidcStandardLogoutService.AdmittedQueryFields.Contains(name)
-                || values.Count != 1
-                || !fields.TryAdd(name, values[0] ?? string.Empty))
+            // The same unknown-field policy the authorize endpoint applies: a name this contract
+            // does not read is ignored (a generic framework client appends telemetry parameters),
+            // while each admitted name must appear exactly once.
+            if (!OidcStandardLogoutService.AdmittedQueryFields.Contains(name))
+            {
+                continue;
+            }
+
+            if (values.Count != 1 || !fields.TryAdd(name, values[0] ?? string.Empty))
             {
                 return FinishSessionEnd("invalid_request", LocalBadRequest(), stopwatch);
             }
