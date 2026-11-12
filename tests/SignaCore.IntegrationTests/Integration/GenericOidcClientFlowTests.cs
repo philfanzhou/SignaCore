@@ -127,7 +127,10 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
 
         using var signedOut = await browser.GetConsumerAsync(
             new Uri(signedOutLocation).PathAndQuery);
-        Assert.Equal(HttpStatusCode.OK, signedOut.StatusCode);
+        // The handler's signed-out callback redirects to the configured SignedOutRedirectUri —
+        // here the registered post-logout URI itself — after validating the returned state.
+        Assert.Equal(HttpStatusCode.Found, signedOut.StatusCode);
+        Assert.Equal(PostLogoutUri, signedOut.Headers.Location!.ToString());
 
         // EV-06: the standard logout revoked the SignaCore identity session of this account.
         var session = await QuerySessionAsync(accountId);
