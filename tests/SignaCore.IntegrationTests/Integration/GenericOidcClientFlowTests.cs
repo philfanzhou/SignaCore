@@ -91,6 +91,7 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
             {
                 ["login_handle"] = handle,
                 ["__RequestVerificationToken"] = token,
+                ["action"] = "login",
                 ["username"] = Username,
                 ["password"] = Password
             });
