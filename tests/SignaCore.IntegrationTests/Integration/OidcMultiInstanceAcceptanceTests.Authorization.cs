@@ -62,6 +62,7 @@ public sealed partial class OidcMultiInstanceAcceptanceTests
             ("state", null, "invalid_request"), ("state", "short", "invalid_request"),
             ("state", new string('a', 2049), "invalid_request"),
             ("nonce", null, "invalid_request"), ("nonce", "invalid+nonce", "invalid_request"),
+            ("nonce", new string('n', 1025), "invalid_request"),
             ("scope", null, "invalid_scope"), ("scope", "profile", "invalid_scope"),
             ("scope", "openid openid", "invalid_scope"), ("scope", "openid unknown", "invalid_scope"),
             ("code_challenge", null, "invalid_request"), ("code_challenge", new string('.', 43), "invalid_request"),

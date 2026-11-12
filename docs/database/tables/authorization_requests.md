@@ -12,7 +12,7 @@ through its digest, on any instance, using only the shared database.
 - app_registration_id
 - redirect_uri (snapshot of the exact registered canonical redirect URI value, not a foreign key)
 - scope (canonical space-delimited scope snapshot)
-- state / nonce (byte-for-byte snapshots)
+- state / nonce (byte-for-byte snapshots up to 2048 and 1024 ASCII characters, respectively)
 - code_challenge (S256 challenge snapshot; the PKCE verifier is never stored)
 - created_at / expires_at / consumed_at (nullable)
 - sms_code_send_count (non-null integer, database default 0, check constraint `>= 0`; the browser

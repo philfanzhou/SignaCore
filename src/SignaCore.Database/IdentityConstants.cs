@@ -59,7 +59,8 @@ public static class IdentityConstants
     public const int MaxOidcCanonicalOriginLength = 500;
     public const int MaxOidcAllowedOrigins = 10;
     public const int MaxOidcAllowedScopesLength = 32;
-    public const int MaxOidcOpaqueValueLength = 128;
+    public const int MaxOidcAuthorizationStateLength = 2048;
+    public const int MaxOidcAuthorizationNonceLength = 1024;
     public const int MaxOidcCodeChallengeLength = 43;
     public const int LoginHandleLength = 43;
     public const int LoginHandleLifetimeMinutes = 10;

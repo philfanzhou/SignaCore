@@ -201,6 +201,7 @@ public sealed class ServerDatabaseContractTests
         // The migration under test, pinned: later migrations in the chain legitimately change
         // refresh_tokens (the family columns), which is not this migration's contract.
         const string continuationMigration = "20260916073310_AddAuthorizationRequests";
+        const string preCorrelationMigration = "20260929055429_AddBrowserSmsLoginStorage";
         var container = new PostgreSqlBuilder(PostgreSqlImage)
             .WithDatabase("identity")
             .WithUsername("postgres")
@@ -224,6 +225,9 @@ public sealed class ServerDatabaseContractTests
             var createdAt = DateTimeOffset.UtcNow;
             var expiresAt = createdAt.AddHours(1);
             var tokenDigest = RefreshTokenDigest.Compute("continuation-upgrade-token");
+            var legacyRequestId = Guid.NewGuid();
+            const string legacyState = "legacy-continuation-state";
+            const string legacyNonce = "legacy-continuation-nonce";
 
             // ---- Additive upgrade from the immediately preceding migration, symmetric Down ----
             await using (var context = new IdentityDbContext(options))
@@ -287,7 +291,12 @@ public sealed class ServerDatabaseContractTests
 
                 // The remaining sections exercise the current PS-03 shape, which the current EF
                 // model writes and reads, so the schema moves on to the latest migration.
+                await migrator.MigrateAsync(preCorrelationMigration, cancellationToken);
+                await BrowserSmsStorageTestSupport.InsertLegacyAuthorizationRequestAsync(
+                    context, legacyRequestId, LoginHandleDigest.Compute("legacy-correlation-handle"),
+                    appId, createdAt, state: legacyState, nonce: legacyNonce);
                 await migrator.MigrateAsync(cancellationToken: cancellationToken);
+                Assert.False(context.Database.HasPendingModelChanges());
             }
 
             // ---- Exact current schema shape ----
@@ -303,8 +312,8 @@ public sealed class ServerDatabaseContractTests
                         ["app_registration_id"] = ("NO", null),
                         ["redirect_uri"] = ("NO", 501),
                         ["scope"] = ("NO", 32),
-                        ["state"] = ("NO", 128),
-                        ["nonce"] = ("NO", 128),
+                        ["state"] = ("NO", 2048),
+                        ["nonce"] = ("NO", 1024),
                         ["code_challenge"] = ("NO", 43),
                         ["created_at"] = ("NO", null),
                         ["expires_at"] = ("NO", null),
@@ -312,6 +321,11 @@ public sealed class ServerDatabaseContractTests
                         ["sms_code_send_count"] = ("NO", null)
                     },
                     columnDetails);
+                var codeColumns = await GetPostgreSqlColumnDetailsAsync(context, "authorization_codes");
+                Assert.Equal(("NO", (int?)1024), codeColumns["nonce"]);
+                var legacy = await context.AuthorizationRequests.AsNoTracking()
+                    .SingleAsync(row => row.Id == legacyRequestId, TestContext.Current.CancellationToken);
+                Assert.Equal((legacyState, legacyNonce), (legacy.State, legacy.Nonce));
 
                 var indexDefinitions = await GetPostgreSqlIndexDefinitionsAsync(
                     context, "authorization_requests");
@@ -348,6 +362,8 @@ public sealed class ServerDatabaseContractTests
             }
 
             // ---- Two independent connections consume concurrently: exactly one commits ----
+            var state = "ServerCanaryState_".PadRight(2048, 's');
+            var nonce = "ServerCanaryNonce_".PadRight(1024, 'n');
             string handle;
             await using (var creationContext = new IdentityDbContext(options))
             {
@@ -360,8 +376,8 @@ public sealed class ServerDatabaseContractTests
                         appId,
                         "https://client.example.com/callback?tenant=one",
                         "openid profile",
-                        "ServerCanaryState_0123456789abcdef",
-                        "ServerCanaryNonce_0123456789abcdef",
+                        state,
+                        nonce,
                         "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
                     DateTimeOffset.UtcNow,
                     TestContext.Current.CancellationToken);
@@ -381,6 +397,7 @@ public sealed class ServerDatabaseContractTests
                     .ToListAsync(TestContext.Current.CancellationToken);
                 var row = Assert.Single(rows);
                 Assert.NotNull(row.ConsumedAt);
+                Assert.Equal((state, nonce), (row.State, row.Nonce));
 
                 var store = new AuthorizationRequestStore(
                     new AuthorizationRequestRepository(assertionContext),
@@ -394,6 +411,29 @@ public sealed class ServerDatabaseContractTests
                 assertionContext.AppRegistrations.Remove(application);
                 await Assert.ThrowsAsync<DbUpdateException>(() =>
                     assertionContext.SaveChangesAsync(TestContext.Current.CancellationToken));
+            }
+
+            await using (var context = new IdentityDbContext(options))
+            {
+                var cancellationToken = TestContext.Current.CancellationToken;
+                var migrator = context.GetService<IMigrator>();
+                var failure = await Assert.ThrowsAsync<Npgsql.PostgresException>(
+                    () => migrator.MigrateAsync(preCorrelationMigration, cancellationToken));
+                Assert.Contains("OIDC authorization downgrade blocked", failure.MessageText, StringComparison.Ordinal);
+                var longRequest = await context.AuthorizationRequests.AsNoTracking()
+                    .SingleAsync(row => row.Id != legacyRequestId, cancellationToken);
+                Assert.Equal((state, nonce), (longRequest.State, longRequest.Nonce));
+
+                await context.AuthorizationRequests.Where(row => row.Id == longRequest.Id)
+                    .ExecuteDeleteAsync(cancellationToken);
+                await migrator.MigrateAsync(preCorrelationMigration, cancellationToken);
+                var requestColumns = await GetPostgreSqlColumnDetailsAsync(context, "authorization_requests");
+                var codeColumns = await GetPostgreSqlColumnDetailsAsync(context, "authorization_codes");
+                Assert.Equal(("NO", (int?)128), requestColumns["state"]);
+                Assert.Equal(("NO", (int?)128), requestColumns["nonce"]);
+                Assert.Equal(("NO", (int?)128), codeColumns["nonce"]);
+                var legacy = await context.AuthorizationRequests.AsNoTracking().SingleAsync(cancellationToken);
+                Assert.Equal((legacyState, legacyNonce), (legacy.State, legacy.Nonce));
             }
         }
     }
