@@ -39,6 +39,9 @@ public sealed class Program
                 options.ClientId = Required(builder.Configuration, "GenericOidc:ClientId");
                 options.ClientSecret = Required(builder.Configuration, "GenericOidc:ClientSecret");
                 options.ResponseType = "code";
+                // The framework default response_mode is form_post; the code flow's standard
+                // default — and the only mode SignaCore delivers — is query.
+                options.ResponseMode = Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectResponseMode.Query;
                 // The framework default: PKCE S256, exactly what SignaCore requires.
                 options.UsePkce = true;
                 options.Scope.Clear();
