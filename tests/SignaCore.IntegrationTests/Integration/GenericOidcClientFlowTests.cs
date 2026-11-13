@@ -29,6 +29,7 @@ namespace SignaCore.Tests.Integration;
 [UsesProcessWideSqlitePoolClearing]
 public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFixture>
 {
+    private const string AdministratorRequired = "The validated ID token must identify an administrator.";
     private const string Username = "generic_oidc_flow_user";
     private const string Password = "GenericOidcFlow-123!";
     private const string ClientId = "generic-oidc-flow-app";
@@ -61,12 +62,27 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
         await CompleteSignInAndSignOutAsync(identity);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TheGenericHandler_GatesCookieSignInOnTheVerifiedIdTokenRole(bool isAdministrator)
+    {
+        using var identity = _fixture.WithTestServices(_ => { });
+        var credentials = isAdministrator
+            ? (IdentityServerFixture.AdminUsername, IdentityServerFixture.AdminPassword)
+            : (Username, Password);
+        await CompleteSignInAndSignOutAsync(identity, administratorGate: (credentials.Item1, credentials.Item2, isAdministrator));
+    }
+
     internal static async Task CompleteSignInAndSignOutAsync(
         WebApplicationFactory<Program> identity,
-        int? nonceLength = null)
+        int? nonceLength = null,
+        (string Username, string Password, bool Allowed)? administratorGate = null)
     {
-        var accountId = await SeedUserAndApplicationAsync(identity.Services);
-        using var consumer = CreateConsumerFactory(identity.Server.CreateHandler(), nonceLength);
+        var username = administratorGate?.Username ?? Username;
+        var password = administratorGate?.Password ?? Password;
+        var accountId = await SeedUserAndApplicationAsync(identity.Services, username, password);
+        using var consumer = CreateConsumerFactory(identity.Server.CreateHandler(), nonceLength, administratorGate.HasValue);
         using var browser = new CrossOriginBrowser(identity.Server.CreateHandler(), consumer.Server.CreateHandler());
 
         // ---- Sign-in: challenge 鈫?authorize 鈫?hosted login 鈫?callback 鈫?local session ----
@@ -109,8 +125,8 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
                 ["login_handle"] = handle,
                 ["__RequestVerificationToken"] = token,
                 ["action"] = "login",
-                ["username"] = Username,
-                ["password"] = Password
+                ["username"] = username,
+                ["password"] = password
             });
         Assert.Equal(HttpStatusCode.Found, loginResponse.StatusCode);
         var callbackUrl = ToIdentityBrowserUrl(loginResponse.Headers.Location!);
@@ -124,9 +140,16 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
         Assert.Equal(HttpStatusCode.Found, callback.StatusCode);
 
         using var me = await browser.GetConsumerAsync("/me");
+        if (administratorGate is { Allowed: false })
+        {
+            Assert.Equal("/administrator-required", callback.Headers.Location?.OriginalString);
+            Assert.Equal(HttpStatusCode.Redirect, me.StatusCode);
+            return;
+        }
+
         Assert.Equal(HttpStatusCode.OK, me.StatusCode);
         var meBody = await me.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
-        Assert.Contains(Username, meBody, StringComparison.Ordinal);
+        Assert.Contains(username, meBody, StringComparison.Ordinal);
 
         // ---- Sign-out: local cookie first, then the standard end_session_endpoint ----
         using var signout = await browser.PostConsumerAsync("/signout");
@@ -165,7 +188,7 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
     // ---- The consumer host ----
 
     private static WebApplicationFactory<GenericOidc.Program> CreateConsumerFactory(
-        HttpMessageHandler identityHandler, int? nonceLength) =>
+        HttpMessageHandler identityHandler, int? nonceLength, bool requireAdministrator) =>
         new WebApplicationFactory<GenericOidc.Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("GenericOidc:Authority", Authority);
@@ -185,6 +208,30 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
                     .AddOptions<OpenIdConnectOptions>("oidc")
                     .PostConfigure(options =>
                     {
+                        if (requireAdministrator)
+                        {
+                            options.TokenValidationParameters.RoleClaimType = "role";
+                            options.Events.OnTokenValidated = context =>
+                            {
+                                if (context.Principal?.IsInRole("admin") != true)
+                                {
+                                    context.Fail(AdministratorRequired);
+                                }
+
+                                return Task.CompletedTask;
+                            };
+                            options.Events.OnRemoteFailure = context =>
+                            {
+                                if (context.Failure?.Message == AdministratorRequired)
+                                {
+                                    context.HandleResponse();
+                                    context.Response.Redirect("/administrator-required");
+                                }
+
+                                return Task.CompletedTask;
+                            };
+                        }
+
                         if (nonceLength is int length)
                         {
                             options.ProtocolValidator = new ExtendedNonceProtocolValidator(length)
@@ -215,12 +262,12 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
 
     // ---- Seeding ----
 
-    private static async Task<Guid> SeedUserAndApplicationAsync(IServiceProvider services)
+    private static async Task<Guid> SeedUserAndApplicationAsync(IServiceProvider services, string username, string password)
     {
         using var scope = services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
         var credential = await dbContext.PasswordCredentials.AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Username == Username, TestContext.Current.CancellationToken);
+            .FirstOrDefaultAsync(item => item.Username == username, TestContext.Current.CancellationToken);
         Guid accountId;
         if (credential is null)
         {
@@ -235,8 +282,8 @@ public sealed class GenericOidcClientFlowTests : IClassFixture<IdentityServerFix
             {
                 Id = Guid.NewGuid(),
                 AccountId = accountId,
-                Username = Username,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword(Password),
+                Username = username,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
                 CreatedAt = DateTimeOffset.UtcNow
             });
         }

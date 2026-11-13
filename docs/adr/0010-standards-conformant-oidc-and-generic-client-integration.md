@@ -100,6 +100,10 @@ package**, while keeping the existing package and legacy contract working throug
    Discovery, the code + PKCE S256 authorization request, the hosted login form, the token
    redemption, the local cookie session, and the stage-1 standard RP-Initiated Logout with the
    SignaCore identity session revoked end to end.
+   Administrator sign-in is covered through the framework's verified ID-token principal before
+   its session cookie is written. A Confidential client granted `profile` can map `role` to
+   `admin` for the password-authenticated bootstrap administrator. See the
+   [ID token contract](../oidc/Tokens.md#id-token) for issuance and refresh behavior.
 5. **Deprecate the package along a published window.** Once stage 4 has run green across
    releases: freeze package features (security fixes only), mark it deprecated for *new*
    integrations in favor of the generic path, keep maintaining it for the five existing

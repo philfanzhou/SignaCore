@@ -574,6 +574,7 @@ public sealed class SmsSessionApplicationOperationTests
                 unitOfWork,
                 new AppRegistrationRepository(Context),
                 Context,
+                new AdminIdentityOptions(),
                 new SmsAdmissionService(Context),
                 NullLogger<InteractiveRefreshRotationService>.Instance);
         }

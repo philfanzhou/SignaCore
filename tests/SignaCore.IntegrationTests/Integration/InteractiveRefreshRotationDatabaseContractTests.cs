@@ -13,6 +13,7 @@ using SignaCore.Database;
 using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services;
 using SignaCore.Domain;
+using SignaCore.Host;
 using SignaCore.Host.Services;
 using SignaCore.Tests.Integration;
 using System.Data.Common;
@@ -348,6 +349,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
                 unitOfWork,
                 new AppRegistrationRepository(context),
                 context,
+                new AdminIdentityOptions(),
                 new SmsAdmissionService(context),
                 NullLogger<InteractiveRefreshRotationService>.Instance);
         }

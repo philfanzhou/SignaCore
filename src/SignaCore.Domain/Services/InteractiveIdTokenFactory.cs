@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.IdentityModel.Tokens;
 using SignaCore.Database;
+using SignaCore.Database.Entity;
 using SignaCore.Domain.Validators;
 
 namespace SignaCore.Domain.Services;
@@ -13,9 +14,8 @@ namespace SignaCore.Domain.Services;
 /// facts, the canonical granted scope, the exact authorization-request nonce snapshot, and the two
 /// profile sources. <paramref name="Nonce"/> is <c>null</c> only on the refresh variant
 /// (<c>PS-15</c>): a refreshed ID token omits the nonce claim entirely while keeping every other
-/// closed-set member. Callback enrichment, bootstrap roles, and every access-token binding claim
-/// are deliberately not representable here: an ID token is an authentication statement, never a
-/// downstream authorization (<c>PS-12</c>).
+/// session authentication fact. The caller resolves the bootstrap administrator from the current
+/// account. Callback enrichment and access-token binding claims are outside this contract.
 /// </summary>
 public sealed record InteractiveIdTokenDescriptor(
     Guid AccountId,
@@ -26,7 +26,9 @@ public sealed record InteractiveIdTokenDescriptor(
     string? Nonce,
     DateTimeOffset AuthTime,
     string? PasswordUsername,
-    string? Nickname);
+    string? Nickname,
+    OidcClientType ClientType = OidcClientType.Confidential,
+    bool IsBootstrapAdministrator = false);
 
 /// <summary>
 /// The unique two-way outcome of <see cref="IInteractiveIdTokenFactory.Create"/>: either the issued
@@ -61,7 +63,7 @@ public abstract record InteractiveIdTokenResult
 /// OIDC Core §2): a pure, stateless, synchronous function over its validated inputs with no I/O
 /// and no persisted token row (<c>PS-09</c>). The header is exactly <c>alg: RS256</c>, the current
 /// <c>kid</c>, and <c>typ: JWT</c> — never the access token's <c>at+jwt</c> — and the claim set is
-/// the closed <c>PS-12</c> set with no enrichment path at all. Only the constructor of the
+/// the closed <c>PS-12</c> set. Only the constructor of the
 /// interactive access token (<see cref="IInteractiveAccessTokenFactory"/>) shares its signing
 /// authority; the two claim and type policies are fully separate.
 /// </summary>
@@ -73,10 +75,10 @@ public interface IInteractiveIdTokenFactory
     /// <c>sub</c>, single-string <c>aud</c> = client id, <c>exp</c>/<c>iat</c> at the fixed
     /// 5-minute lifetime, the session's original <c>auth_time</c>, <c>sid</c>, <c>amr</c> as a JSON
     /// array, and the exact <c>nonce</c> snapshot of the initial exchange; <c>name</c> and
-    /// <c>nickname</c> appear only when <c>profile</c> was granted. A <c>null</c> nonce selects the
-    /// refresh variant (<c>PS-15</c>), which omits the <c>nonce</c> claim and keeps the same closed
-    /// set otherwise. The only failure is the serialized-length bound; precondition violations are
-    /// programming errors and throw.
+    /// <c>nickname</c> appear only when <c>profile</c> was granted. With that scope, a confidential
+    /// client also receives <c>role: admin</c> for the password-authenticated bootstrap administrator.
+    /// A <c>null</c> nonce selects the refresh variant (<c>PS-15</c>), which omits <c>nonce</c> and
+    /// applies the same claim policy. The only failure is the serialized-length bound.
     /// </summary>
     /// <exception cref="ArgumentException">
     /// An empty id, client, auth method, key id, or empty nonce, an unsupported auth method, or a
@@ -171,7 +173,7 @@ public sealed class InteractiveIdTokenFactory : IInteractiveIdTokenFactory
             issuedAtSeconds + IdentityConstants.InteractiveIdTokenLifetimeSeconds);
 
         // The closed PS-12 claim set, and nothing else: no jti, no nbf, no scope, no client_id
-        // claim, no auth_method, and no enrichment of any kind. JwtPayload adds iss/aud/exp/iat
+        // claim, no auth_method, and no callback enrichment. JwtPayload adds iss/aud/exp/iat
         // from its own parameters; auth_time and amr are added as native JSON values below.
         var payloadClaims = new List<Claim>
         {
@@ -200,6 +202,13 @@ public sealed class InteractiveIdTokenFactory : IInteractiveIdTokenFactory
             if (!string.IsNullOrEmpty(descriptor.Nickname))
             {
                 payloadClaims.Add(new Claim(IdentityConstants.ClaimNickname, descriptor.Nickname));
+            }
+
+            if (descriptor.IsBootstrapAdministrator
+                && descriptor.ClientType == OidcClientType.Confidential
+                && descriptor.AuthMethod == IdentityConstants.AuthMethodPassword)
+            {
+                payloadClaims.Add(new Claim(IdentityConstants.ClaimRole, IdentityConstants.BootstrapAdministratorRole));
             }
         }
 

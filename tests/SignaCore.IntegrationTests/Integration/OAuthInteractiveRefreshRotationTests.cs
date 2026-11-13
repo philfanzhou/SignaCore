@@ -244,6 +244,28 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
     }
 
     [Fact]
+    public async Task Rotate_ReevaluatesTheBootstrapAdministratorRole()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var seeded = await SeedRedeemedFamilyAsync(IdentityServerFixture.AdminUsername);
+        using var http = _fixture.CreateHttpClient();
+        http.DefaultRequestHeaders.Authorization = BasicHeader(AppId, AppSecret);
+        using var first = await http.PostAsync("/oauth2/token", RefreshForm(seeded.RefreshToken), ct);
+        var tokens = await AssertPs15SuccessAsync(first, seeded);
+        var handler = new JwtSecurityTokenHandler();
+        Assert.Equal("admin", Assert.IsType<string>(handler.ReadJwtToken(tokens.IdToken).Payload["role"]));
+        Assert.False(handler.ReadJwtToken(tokens.AccessToken).Payload.ContainsKey("role"));
+
+        using var otherAdministrator = _fixture.WithTestServices(services =>
+            services.AddSingleton(new AdminIdentityOptions { Username = Username }));
+        using var otherClient = otherAdministrator.CreateClient();
+        otherClient.DefaultRequestHeaders.Authorization = BasicHeader(AppId, AppSecret);
+        using var second = await otherClient.PostAsync("/oauth2/token", RefreshForm(tokens.RefreshToken), ct);
+        var rotated = await AssertPs15SuccessAsync(second, seeded with { RefreshToken = tokens.RefreshToken });
+        Assert.False(handler.ReadJwtToken(rotated.IdToken).Payload.ContainsKey("role"));
+    }
+
+    [Fact]
     public async Task Rotate_ReturnsThePs15ResponseAndGrowsTheFamily()
     {
         var seeded = await SeedRedeemedFamilyAsync();
@@ -681,7 +703,7 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
     /// <c>offline_access</c>, redeemed for the first token set, whose <c>refresh_token</c> names
     /// the committed family root.
     /// </summary>
-    private async Task<SeededFamily> SeedRedeemedFamilyAsync()
+    private async Task<SeededFamily> SeedRedeemedFamilyAsync(string username = Username)
     {
         var applicationId = await SeedAppAsync();
         using var scope = _fixture.Services.CreateScope();
@@ -689,7 +711,7 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
 
         var credential = await dbContext.PasswordCredentials
             .AsNoTracking()
-            .FirstOrDefaultAsync(row => row.Username == Username, TestContext.Current.CancellationToken);
+            .FirstOrDefaultAsync(row => row.Username == username, TestContext.Current.CancellationToken);
         Guid accountId;
         Guid credentialId;
         if (credential is not null)
@@ -710,7 +732,7 @@ public sealed class OAuthInteractiveRefreshRotationTests : IClassFixture<Identit
             {
                 Id = credentialId,
                 AccountId = accountId,
-                Username = Username,
+                Username = username,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword("rotation-user-secret"),
                 CreatedAt = DateTimeOffset.UtcNow
             });

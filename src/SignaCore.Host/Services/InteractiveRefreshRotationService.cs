@@ -145,6 +145,7 @@ public sealed class InteractiveRefreshRotationService(
     IUnitOfWork unitOfWork,
     IAppRegistrationRepository applications,
     IdentityDbContext dbContext,
+    AdminIdentityOptions adminIdentityOptions,
     ISmsAdmissionService smsAdmissions,
     ILogger<InteractiveRefreshRotationService> logger)
 {
@@ -546,7 +547,10 @@ public sealed class InteractiveRefreshRotationService(
                 return ServerError();
             }
 
-            // PS-15: the refreshed ID token omits the nonce and carries the original auth facts.
+            // PS-15: the refreshed ID token omits the nonce and resolves administrator status
+            // from the current account under the same claim policy as the initial exchange.
+            var isBootstrapAdministrator = await BootstrapAdministrator.IsAccountAsync(
+                lockedAccount.Id, adminIdentityOptions, accounts, operationToken);
             if (idTokenFactory.Create(
                     new InteractiveIdTokenDescriptor(
                         lockedAccount.Id,
@@ -557,7 +561,9 @@ public sealed class InteractiveRefreshRotationService(
                         Nonce: null,
                         lockedMember.AuthTime!.Value,
                         passwordUsername,
-                        lockedAccount.Nickname),
+                        lockedAccount.Nickname,
+                        currentApplication.ClientType,
+                        isBootstrapAdministrator),
                     signingKey,
                     now)
                 is not InteractiveIdTokenResult.Issued issuedIdToken)

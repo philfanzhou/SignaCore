@@ -473,13 +473,8 @@ public sealed class TokenIssuanceService
         }
         else if (request.GrantType == IdentityConstants.GrantTypeRefreshToken)
         {
-            var bootstrapAccount =
-                await _accountRepository.GetByPasswordCredentialUsernameAsync(
-                    bootstrapUsername.Trim(), cancellationToken);
-
-            isBootstrapAdmin =
-                bootstrapAccount != null
-                && bootstrapAccount.Id == authenticatedAccount.Id;
+            isBootstrapAdmin = await BootstrapAdministrator.IsAccountAsync(
+                authenticatedAccount.Id, _adminIdentityOptions, _accountRepository, cancellationToken);
         }
 
         if (!isBootstrapAdmin)
@@ -491,13 +486,13 @@ public sealed class TokenIssuanceService
                 claim.Type == IdentityConstants.ClaimRole
                 && string.Equals(
                     claim.Value,
-                    "admin",
+                    IdentityConstants.BootstrapAdministratorRole,
                     StringComparison.OrdinalIgnoreCase)))
         {
             return;
         }
 
-        claims.Add(new Claim(IdentityConstants.ClaimRole, "admin"));
+        claims.Add(new Claim(IdentityConstants.ClaimRole, IdentityConstants.BootstrapAdministratorRole));
         _logger.LogInformation(
             "Injected bootstrap admin role for account {AccountId}",
             authenticatedAccount.Id);
