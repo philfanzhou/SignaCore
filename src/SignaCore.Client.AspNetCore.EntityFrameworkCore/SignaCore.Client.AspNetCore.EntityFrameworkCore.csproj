@@ -20,6 +20,7 @@
          authentication ticket serializer live there) plus EF Core relational; the concrete
          provider (Npgsql, Microsoft.EntityFrameworkCore.Sqlite, ...) is the consumer's choice,
          which is why this package stays provider-neutral. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
   </ItemGroup>
