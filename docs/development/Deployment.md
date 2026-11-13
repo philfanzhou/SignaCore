@@ -112,8 +112,9 @@ git push origin v0.1.8-rc.1
 ```
 
 The tag must use `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-rc.NUMBER`; CI rejects anything
-else. The GitHub Release is titled after the tag, and the package and image versions are the tag
-without the `v` prefix.
+else. The GitHub Release is titled after the tag, and the image version is the tag without the
+`v` prefix (the client package is packed with the same version but no longer published
+automatically; see [Releasing](Releasing.md)).
 Pushing it runs the full
 pipeline — build, unit tests, integration and HTTP contract tests, the image vulnerability scan, the
 containerised first-run and smoke assertions, and the database contract matrix — and only if all of
