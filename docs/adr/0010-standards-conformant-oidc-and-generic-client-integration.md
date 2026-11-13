@@ -112,9 +112,12 @@ package**, while keeping the existing package and legacy contract working throug
    working unchanged for as long as they stay on the package. — **In progress**: with stage 4
    delivered and green across releases, the package README carries the deprecation notice, the
    NuGet.org listing is flagged deprecated (an account-side owner action recorded outside this
-   repository), and features are frozen. Retirement completes when the remaining consumers —
-   the Doctheca, Lexarbor, Quaestura, and Ruoyu.Study administrator consoles (Ruoyu.Admin is
-   already retired) — migrate to the generic handler.
+   repository), features are frozen, and the release pipeline no longer publishes the package
+   automatically — the `publish-nuget` CI job is suspended while CI keeps packing the package
+   and running its consumption smoke, so a security-fix release can still ship through that job.
+   Retirement completes when the remaining consumers — the Doctheca, Lexarbor, Quaestura, and
+   Ruoyu.Study administrator consoles (Ruoyu.Admin is already retired) — migrate to the generic
+   handler.
 
 The resource-server guidance (plain framework JWT handler, as Emenda integrates) and the
 legacy first-party `/api/auth/*` contract are unaffected by this decision.

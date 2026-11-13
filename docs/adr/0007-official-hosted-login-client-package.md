@@ -111,8 +111,12 @@ the package:
 ### Versioning and release
 
 - The package version equals the repository tag that produced it, and the package is published in
-  the same release as the container image from that tag.
-- `rc` tags publish prerelease packages only; stable tags publish stable packages.
+  the same release as the container image from that tag. (Automatic publishing is suspended during
+  the deprecation window opened by
+  [ADR 0010](./0010-standards-conformant-oidc-and-generic-client-integration.md) stage 5; the tag
+  still names the packed version.)
+- `rc` tags publish prerelease packages only; stable tags publish stable packages (subject to the
+  same suspension).
 
 ### Compatibility promise
 
