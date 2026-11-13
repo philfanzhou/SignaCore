@@ -36,7 +36,7 @@ COPY --from=frontend-build /app/dist src/SignaCore.Host/wwwroot
 RUN dotnet publish "src/SignaCore.Host/SignaCore.Host.csproj" -c $BUILD_CONFIGURATION -o /app/publish --no-restore /p:UseAppHost=false
 
 # Run with the non-root user provided by the official ASP.NET image.
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:11.0 AS final
 # Targeted upgrades of Ubuntu source packages the floating aspnet tag still ships vulnerable:
 # openssl/libssl3t64 clear CVE-2026-84782, and apt/libapt-pkg6.0t64 (2.8.4ubuntu0.1) clear
 # CVE-2026-109518 (apt hard-link reuse during package download). Only these packages are
