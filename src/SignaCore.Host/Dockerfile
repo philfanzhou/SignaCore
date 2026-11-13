@@ -18,7 +18,7 @@ COPY src/SignaCore.Admin/ ./
 RUN npm run build
 
 # Restore and publish the ASP.NET Core host.
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:11.0 AS backend-build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /workspace
 
