@@ -20,6 +20,7 @@ using SignaCore.Host;
 using SignaCore.Tests.TestSupport;
 using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using Xunit;
 
@@ -45,6 +46,28 @@ public sealed class AuthorizationCodeRedemptionServiceTests
     // RFC 7636 appendix B.
     private const string Verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
     private const string Challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
+    [Fact]
+    public async Task RedeemAsync_CallbackRoleCannotMakeAnOrdinaryAccountAnAdministratorInTheIdToken()
+    {
+        const string callbackUrl = "https://claims.example.test";
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var callback = new Mock<ICallbackService>();
+        callback.Setup(service => service.FetchExternalClaimsAsync(callbackUrl, It.IsAny<string>(), cancellationToken))
+            .ReturnsAsync([new Claim("role", "admin")]);
+        await using var database = await CreateDatabaseAsync(
+            callbackService: callback.Object, administratorUsername: "other-account");
+        var seed = await SeedAsync(database.Context);
+        seed.Application.CallbackUrl = callbackUrl;
+
+        var outcome = await database.Service.RedeemAsync(
+            seed.Application, CreateForm(seed.Code), null, null, cancellationToken);
+
+        Assert.True(outcome.IsSuccess);
+        var handler = new JwtSecurityTokenHandler();
+        Assert.Equal("admin", handler.ReadJwtToken(outcome.AccessToken).Payload["role"]);
+        Assert.False(handler.ReadJwtToken(outcome.IdToken).Payload.ContainsKey("role"));
+    }
 
     [Fact]
     public async Task RemovedRedirectRegistration_RejectsUnconsumedCodeWithoutWrites()
@@ -131,15 +154,16 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         Assert.Equal(Nonce, idToken.Claims.Single(c => c.Type == JwtRegisteredClaimNames.Nonce).Value);
         Assert.Equal("pwd", idToken.Claims.Single(c => c.Type == JwtRegisteredClaimNames.Amr).Value);
         Assert.Equal(Username, idToken.Claims.Single(c => c.Type == IdentityConstants.ClaimName).Value);
+        Assert.Equal("admin", Assert.IsType<string>(idToken.Payload["role"]));
         Assert.Equal(
             seed.AuthTime.ToUnixTimeSeconds(),
             long.Parse(idToken.Claims.Single(c => c.Type == JwtRegisteredClaimNames.AuthTime).Value, CultureInfo.InvariantCulture));
         Assert.Equal(
             ((DateTimeOffset)idToken.IssuedAt).ToUnixTimeSeconds() + IdentityConstants.InteractiveIdTokenLifetimeSeconds,
             ((DateTimeOffset)idToken.ValidTo).ToUnixTimeSeconds());
-        // The closed PS-12 set: no access-token binding claims and no enrichment of any kind.
+        // PS-12 excludes access-token binding claims.
         Assert.DoesNotContain(idToken.Claims, claim => claim.Type is "scope" or IdentityConstants.ClaimClientId
-            or IdentityConstants.ClaimAuthMethod or IdentityConstants.ClaimRole or JwtRegisteredClaimNames.Jti);
+            or IdentityConstants.ClaimAuthMethod or JwtRegisteredClaimNames.Jti);
         Assert.Null(idToken.Payload.Nbf);
 
         // A standard validator accepts the ID token through the same key material JWKS publishes.
@@ -572,7 +596,9 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         IInteractiveIdTokenFactory idTokenFactory,
         IAuthorizationCodeStore? codeStore,
         StaticKeyManager keys,
-        ILogger<AuthorizationCodeRedemptionService> logger)
+        ILogger<AuthorizationCodeRedemptionService> logger,
+        ICallbackService? callbackService = null,
+        string administratorUsername = Username)
     {
         var unitOfWork = new EfCoreUnitOfWork(context);
         var accountRepository = new AccountRepository(context);
@@ -588,14 +614,14 @@ public sealed class AuthorizationCodeRedemptionServiceTests
                 new RefreshTokenRepository(context),
                 unitOfWork,
                 NullLogger<RefreshTokenFamilyStore>.Instance),
-            callbackService: null,
+            callbackService,
             keys,
             new EfCoreManagementAuditWriter<IdentityDbContext>(context),
             CreateMetrics(),
             unitOfWork,
             new AppRegistrationRepository(context),
             context,
-            new AdminIdentityOptions { Username = Username },
+            new AdminIdentityOptions { Username = administratorUsername },
             new SmsAdmissionService(context),
             logger);
     }
@@ -603,7 +629,9 @@ public sealed class AuthorizationCodeRedemptionServiceTests
     private static async Task<RedemptionDatabase> CreateDatabaseAsync(
         IInteractiveAccessTokenFactory? tokenFactory = null,
         IInteractiveIdTokenFactory? idTokenFactory = null,
-        Func<IdentityDbContext, IAuthorizationCodeStore>? codeStoreOverride = null)
+        Func<IdentityDbContext, IAuthorizationCodeStore>? codeStoreOverride = null,
+        ICallbackService? callbackService = null,
+        string administratorUsername = Username)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync(TestContext.Current.CancellationToken);
@@ -618,7 +646,9 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             idTokenFactory ?? NullIdTokenFactory(),
             codeStoreOverride?.Invoke(context),
             keys,
-            NullLogger<AuthorizationCodeRedemptionService>.Instance);
+            NullLogger<AuthorizationCodeRedemptionService>.Instance,
+            callbackService,
+            administratorUsername);
         return new RedemptionDatabase(connection, context, service, keys);
     }
 

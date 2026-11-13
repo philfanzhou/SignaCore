@@ -47,6 +47,7 @@ public static class IdentityConstants
     public const string ClaimSubject = "sub";
     public const string ClaimName = "name";
     public const string ClaimRole = "role";
+    public const string BootstrapAdministratorRole = "admin";
     public const string ClaimNickname = "nickname";
 
     public const int MaxUsernameLength = 100;

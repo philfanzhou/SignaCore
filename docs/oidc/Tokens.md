@@ -26,14 +26,16 @@ never substitute for the other.
 | `nonce` | Exact authorization-request snapshot, present on the first ID token only |
 | `name` | Only when `profile` was granted; its source follows the session auth method (`PS-12`): the Password username for a Password session; for an `Sms` session the username of the account's Password credential only when exactly one exists at issuance, otherwise omitted |
 | `nickname` | Current non-null account nickname only when `profile` was granted |
+| `role` | The string `admin` for the configured bootstrap administrator after password authentication, when a Confidential client was granted `profile` |
 
-`azp`, `acr`, role, permission, `auth_method`, `client_id`, callback claims, and access-token binding
+`azp`, `acr`, permission, `auth_method`, `client_id`, callback claims, and access-token binding
 claims are absent. No ID-token or access-token claim ever carries a phone number, including for an
 `Sms` session (`DF-16`). The `["sms"]` mapping shipped (#453) before SMS login (#445) created the
 first `Sms` session, so a consumer that asserted `amr == ["pwd"]` must accept `["sms"]` for every
-application that enables browser SMS login (`AC-17`). Callback output cannot replace a core claim or
-inject a second copy. The ID token contains an authentication statement, not downstream
-authorization; consumers must never treat its profile fields as roles or permissions.
+application that enables browser SMS login (`AC-17`). SignaCore resolves the administrator by the
+current configured username's password credential and account ID at code exchange and on refresh.
+The relying party can use the verified role for its local sign-in policy. Resource services use
+access tokens for authorization.
 
 The BFF validates the RS256 signature through the `kid` selected JWKS key, exact issuer, its own
 audience, lifetime, and exact one-time nonce. It also validates the authorization response `iss`
@@ -84,7 +86,7 @@ fails issuance before commit.
 | Lifetime | 5 minutes | 15 minutes |
 | `nonce` | Exact initial request nonce | Never |
 | `scope`, `sid` | `sid` only | Both canonical scope and `sid` |
-| Role/permission/callback claims | Never | Existing enrichment allowed |
+| Role/permission/callback claims | Conditional bootstrap administrator role | Existing enrichment allowed |
 | Live-state revocation | Not revocable; valid to `exp` | Not revocable downstream; valid to `exp` |
 
 Both use the existing database-backed signing authority in `PS-10`, but separate constructors and

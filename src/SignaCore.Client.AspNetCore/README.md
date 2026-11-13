@@ -113,8 +113,8 @@ combination of yours. Every other package endpoint keeps its historical accessib
 The session-status writer has a four-argument overload —
 `WriteSessionStatusAsync(context, status, principal, cancellationToken)` — that additionally
 receives the verified session principal, including any claims your custom `ITicketStore` added
-at storage time (for example roles re-verified from the access token; the SignaCore ID token is
-a closed set without roles). The principal is `null` for anonymous or expired sessions, is
+at storage time (for example application roles re-verified from the access token).
+The principal is `null` for anonymous or expired sessions, is
 presentation input only, and the default implementation forwards to the three-argument
 overload, so existing writers keep working.
 

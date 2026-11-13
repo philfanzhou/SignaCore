@@ -216,6 +216,7 @@ public sealed class SmsAdmissionRevocationConcurrencyDatabaseContractTests
             unitOfWork,
             new AppRegistrationRepository(context),
             context,
+            new AdminIdentityOptions(),
             new SmsAdmissionService(context),
             NullLogger<InteractiveRefreshRotationService>.Instance);
         var dispatch = await service.RotateAsync(

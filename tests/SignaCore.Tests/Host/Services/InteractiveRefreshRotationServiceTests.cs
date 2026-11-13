@@ -727,6 +727,7 @@ public sealed class InteractiveRefreshRotationServiceTests
                 unitOfWork,
                 applicationsOverride ?? new AppRegistrationRepository(Context),
                 Context,
+                new AdminIdentityOptions(),
                 new SmsAdmissionService(Context),
                 NullLogger<InteractiveRefreshRotationService>.Instance);
         }

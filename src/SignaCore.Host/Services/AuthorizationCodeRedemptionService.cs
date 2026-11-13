@@ -341,8 +341,6 @@ public sealed class AuthorizationCodeRedemptionService(
             }
         }
 
-        await InjectBootstrapAdminRoleAsync(account, enrichment, cancellationToken);
-
         await keyManager.RefreshKeysAsync(cancellationToken);
         var signingKey = keyManager.GetCurrentKey();
 
@@ -546,7 +544,25 @@ public sealed class AuthorizationCodeRedemptionService(
 
             // Both signatures are part of the unit: an oversized or failing construction of either
             // token rolls the consumption back with everything else (EV-26).
-            if (tokenFactory.Create(descriptor, signingKey, now)
+            var isBootstrapAdministrator = await BootstrapAdministrator.IsAccountAsync(
+                lockedAccount.Id, adminIdentityOptions, accounts, operationToken);
+            var accessDescriptor = descriptor;
+            if (isBootstrapAdministrator && !accessDescriptor.EnrichmentClaims.Any(claim =>
+                    claim.Type == IdentityConstants.ClaimRole
+                    && string.Equals(claim.Value, IdentityConstants.BootstrapAdministratorRole, StringComparison.OrdinalIgnoreCase)))
+            {
+                accessDescriptor = accessDescriptor with
+                {
+                    EnrichmentClaims =
+                    [
+                        .. accessDescriptor.EnrichmentClaims,
+                        new Claim(IdentityConstants.ClaimRole, IdentityConstants.BootstrapAdministratorRole)
+                    ]
+                };
+                logger.LogInformation("Injected bootstrap admin role for account {AccountId}", lockedAccount.Id);
+            }
+
+            if (tokenFactory.Create(accessDescriptor, signingKey, now)
                 is not InteractiveAccessTokenResult.Issued issued)
             {
                 await transaction.RollbackAsync(operationToken);
@@ -568,7 +584,9 @@ public sealed class AuthorizationCodeRedemptionService(
                 lockedCode.Nonce,
                 lockedCode.AuthTime,
                 passwordUsername,
-                lockedAccount.Nickname);
+                lockedAccount.Nickname,
+                currentApplication.ClientType,
+                isBootstrapAdministrator);
             if (idTokenFactory.Create(idDescriptor, signingKey, now)
                 is not InteractiveIdTokenResult.Issued issuedIdToken)
             {
@@ -754,42 +772,6 @@ public sealed class AuthorizationCodeRedemptionService(
 
     private static string[] SplitCanonicalScope(string scopeSnapshot) =>
         scopeSnapshot.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-    /// <summary>
-    /// Same rule as the refresh branch of <see cref="TokenIssuanceService"/>: the bootstrap
-    /// administrator is resolved from the configured username's password credential, never from
-    /// client-controlled input, and the role is appended after the callback claims.
-    /// </summary>
-    private async Task InjectBootstrapAdminRoleAsync(
-        AccountEntity account,
-        List<Claim> claims,
-        CancellationToken cancellationToken)
-    {
-        var bootstrapUsername = adminIdentityOptions.Username;
-        if (string.IsNullOrWhiteSpace(bootstrapUsername))
-        {
-            return;
-        }
-
-        var bootstrapAccount = await accounts.GetByPasswordCredentialUsernameAsync(
-            bootstrapUsername.Trim(), cancellationToken);
-        if (bootstrapAccount is null || bootstrapAccount.Id != account.Id)
-        {
-            return;
-        }
-
-        if (claims.Any(claim =>
-                claim.Type == IdentityConstants.ClaimRole
-                && string.Equals(claim.Value, "admin", StringComparison.OrdinalIgnoreCase)))
-        {
-            return;
-        }
-
-        claims.Add(new Claim(IdentityConstants.ClaimRole, "admin"));
-        logger.LogInformation(
-            "Injected bootstrap admin role for account {AccountId}",
-            account.Id);
-    }
 
     private AuthorizationCodeRedemptionOutcome InvalidGrant() =>
         AuthorizationCodeRedemptionOutcome.Failure(

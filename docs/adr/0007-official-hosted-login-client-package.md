@@ -76,9 +76,9 @@ Out of scope in the first phase:
   self-contained access token stays valid to its own `exp`
   ([EV-03..05](../oidc/CanonicalSemanticModel.md#event--artifact--result),
   [caller responsibilities](../oidc/CanonicalSemanticModel.md#guarantees-and-caller-responsibilities)).
-- Business authorization. The ID token carries no roles or permissions
-  ([PS-12](../oidc/CanonicalSemanticModel.md#artifact--persistence-relationship)); every
-  authorization decision stays with the consumer, expressed through the extension points below.
+- Business authorization. The consumer owns authorization decisions through the extension points
+  below. [PS-12](../oidc/CanonicalSemanticModel.md#artifact--persistence-relationship) defines the
+  ID token's bootstrap administrator claim.
 - Frontend concerns (views, assets, or SPA code).
 - Refresh-token handling (`offline_access`), matching the first-phase Reference BFF shape with
   refresh disabled. Durable, revocable server-side tickets are the second phase tracked by

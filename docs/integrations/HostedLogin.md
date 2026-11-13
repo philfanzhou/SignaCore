@@ -161,8 +161,9 @@ by its `kid`, `typ: JWT`, `iss` equal to the Discovery issuer, `aud` equal to th
 account id), `auth_time`, `sid`, and `amr` (`["pwd"]` for a password sign-in, `["sms"]` for an
 [SMS sign-in](#sms-sign-in-optional)), plus `name` (the SignaCore username) and `nickname` when
 `profile` was granted. After an SMS sign-in, `name` appears only when the account has exactly one
-SignaCore username. Key the local user by `iss` plus `sub`; the ID token carries no roles or
-permissions, so authorization stays the service's own decision.
+SignaCore username. Key the local user by `iss` plus `sub`. For a Confidential client granted
+`profile`, a verified ID token carries `role: "admin"` when the configured bootstrap administrator
+signed in with a password. The client owns its local sign-in policy and downstream authorization.
 
 The official client package optionally gates new callback sessions with
 `PreSignInAuthorizationDecision` (default null). When configured, it strictly validates the

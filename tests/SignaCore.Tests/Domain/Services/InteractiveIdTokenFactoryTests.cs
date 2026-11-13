@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.IdentityModel.Tokens;
 using SignaCore.Database;
+using SignaCore.Database.Entity;
 using SignaCore.Domain.Services;
 using Xunit;
 
@@ -78,6 +79,35 @@ public sealed class InteractiveIdTokenFactoryTests
         Assert.Equal(
             ((DateTimeOffset)token.IssuedAt).ToUnixTimeSeconds() + IdentityConstants.InteractiveIdTokenLifetimeSeconds,
             ((DateTimeOffset)token.ValidTo).ToUnixTimeSeconds());
+    }
+
+    [Theory]
+    [InlineData("openid profile", OidcClientType.Confidential, IdentityConstants.AuthMethodPassword, true, true)]
+    [InlineData("openid profile offline_access", OidcClientType.Confidential, IdentityConstants.AuthMethodPassword, false, true)]
+    [InlineData("openid", OidcClientType.Confidential, IdentityConstants.AuthMethodPassword, true, false)]
+    [InlineData("openid profile", OidcClientType.Public, IdentityConstants.AuthMethodPassword, true, false)]
+    [InlineData("openid profile", OidcClientType.Confidential, IdentityConstants.AuthMethodSms, true, false)]
+    public void Create_ReleasesTheAdministratorRoleOnlyForEligibleTokens(
+        string scope, OidcClientType clientType, string authMethod, bool initial, bool expectRole)
+    {
+        var issued = Create(Descriptor(scope, nonce: initial ? Nonce : null) with
+        {
+            ClientType = clientType,
+            AuthMethod = authMethod,
+            IsBootstrapAdministrator = true
+        });
+        var payload = new JwtSecurityTokenHandler().ReadJwtToken(issued.IdToken).Payload;
+
+        if (expectRole)
+        {
+            Assert.Equal("admin", Assert.IsType<string>(payload["role"]));
+        }
+        else
+        {
+            Assert.False(payload.ContainsKey("role"));
+        }
+
+        Assert.Equal(initial, payload.ContainsKey("nonce"));
     }
 
     /// <summary>

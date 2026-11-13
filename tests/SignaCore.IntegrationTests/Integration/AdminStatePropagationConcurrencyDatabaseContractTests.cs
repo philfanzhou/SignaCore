@@ -675,6 +675,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
                 unitOfWork,
                 new AppRegistrationRepository(context),
                 context,
+                new AdminIdentityOptions(),
                 new SmsAdmissionService(context),
                 NullLogger<InteractiveRefreshRotationService>.Instance);
         }
