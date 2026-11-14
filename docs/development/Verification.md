@@ -31,13 +31,11 @@ Server database contract tests use environment-supplied connection strings. CI r
 The `Database Contract Matrix` job runs for pull requests targeting `main` and pushes to `main`,
 after `Build & Test`. `Protect main` requires this exact check name. The job has a **25-minute hard
 timeout** and enables PostgreSQL contracts with `RUN_SIGNACORE_DATABASE_CONTRACTS=true`. Its existing
-filter includes `DatabaseContractTests` plus the installation-adoption and migration-gate exceptions;
-the reference BFF contracts run in a separate step of the same job.
+filter includes `DatabaseContractTests` plus the installation-adoption and migration-gate tests.
 
-After the test steps, the Python standard-library
-[result validator](../../.github/scripts/verify_oidc_matrix.py) requires exactly one readable report
-for each of `signacore-database-contracts.trx` and
-`signacore-reference-bff-database-contracts.trx` under `reports/`. It checks result/definition
+After the test step, the Python standard-library
+[result validator](../../.github/scripts/verify_oidc_matrix.py) requires exactly one readable
+`signacore-database-contracts.trx` report under `reports/`. It checks result/definition
 correspondence, unique result IDs, successful run summaries and consistent execution counters.
 Every reported test must pass. Missing, duplicate, malformed or incomplete reports fail the job.
 
@@ -46,7 +44,7 @@ The integration report must also contain exactly the checked-in
 
 | Test class | Expected passed cases |
 | --- | ---: |
-| `OidcAttackRateLimitDatabaseContractTests` | 30 |
+| `OidcAttackRateLimitDatabaseContractTests` | 33 |
 | `OidcSensitiveCanaryMatrixDatabaseContractTests` | 13 |
 | `OidcNamedRevocationDatabaseContractTests` | 5 |
 

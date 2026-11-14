@@ -72,9 +72,9 @@ Linux/amd64 platform. Only the successful `repository:tag@digest` reference is e
 `SIGNACORE_NODE_IMAGE` passes that fixed official reference through `build.sh` into the Dockerfile's
 `NODE_IMAGE` build argument. Unlisted overrides are rejected. An ordinary `IMAGE_TAG=latest
 ./build.sh` invocation requires no resolver or override and retains its default platform behavior.
-Each CI job independently exports `SIGNACORE_POSTGRES_IMAGE`; container smoke and all integration
-and Reference BFF Testcontainers consume that same warmed reference. Local tests fall back to the
-plain official Docker Hub tag when the variable is absent.
+Each CI job independently exports `SIGNACORE_POSTGRES_IMAGE`. The container smoke tests and
+integration Testcontainers use that pre-pulled reference. Local tests fall back to the plain
+official Docker Hub tag when the variable is absent.
 
 This recovery adds no runtime business configuration, credentials, database migration, or change
 to required checks, scanning, SBOM, smoke, and real database contracts. Reverting the recovery
@@ -113,8 +113,7 @@ git push origin v0.1.8-rc.1
 
 The tag must use `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-rc.NUMBER`; CI rejects anything
 else. The GitHub Release is titled after the tag, and the image version is the tag without the
-`v` prefix (the client package is packed with the same version but no longer published
-automatically; see [Releasing](Releasing.md)).
+`v` prefix. See [Releasing](Releasing.md) for the release checks.
 Pushing it runs the full
 pipeline — build, unit tests, integration and HTTP contract tests, the image vulnerability scan, the
 containerised first-run and smoke assertions, and the database contract matrix — and only if all of

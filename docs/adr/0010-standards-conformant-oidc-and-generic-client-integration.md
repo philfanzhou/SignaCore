@@ -1,11 +1,12 @@
 # Standards-Conformant OIDC and a Generic-Client Integration Path
 
-- Status: Accepted (stages 1, 2, and 4 delivered; stage 5 in progress; stage 3 optional, deferred)
+- Status: Accepted (stages 1, 2, and 4 delivered, stage 5 retires the package, optional stage 3 deferred)
 - Date: 2026-11-11
 - Decision owners: SignaCore maintainers
-- Extends: [ADR 0005](./0005-interactive-oidc-confidential-bff.md), [ADR 0007](./0007-official-hosted-login-client-package.md)
+- Extends: [ADR 0005](./0005-interactive-oidc-confidential-bff.md)
+- Supersedes: [ADR 0007](./0007-official-hosted-login-client-package.md)
 
-## Context
+## Context at adoption
 
 SignaCore has three distinct integration roles, only one of which uses the official client
 package:
@@ -58,10 +59,10 @@ The coupling cost of the package has been observed directly:
   contract tests cover the promised matrix") is enforced only as *current package × current
   host*; no job restores an old published package against a new host.
 
-## Decision (proposed)
+## Decision
 
-Make SignaCore integrable by **generic, standards-based OIDC clients with no SignaCore-specific
-package**, while keeping the existing package and legacy contract working throughout. Staged:
+Support **generic, standards-based OIDC clients** and retire the SignaCore-specific client
+package after delivering and testing the standard flow. The rollout proceeded in stages:
 
 1. **Standard logout alongside the prepared logout.** Publish `end_session_endpoint` in
    Discovery and accept OIDC RP-Initiated Logout requests (`id_token_hint`, optional
@@ -104,20 +105,11 @@ package**, while keeping the existing package and legacy contract working throug
    its session cookie is written. A Confidential client granted `profile` can map `role` to
    `admin` for the password-authenticated bootstrap administrator. See the
    [ID token contract](../oidc/Tokens.md#id-token) for issuance and refresh behavior.
-5. **Deprecate the package along a published window.** Once stage 4 has run green across
-   releases: freeze package features (security fixes only), mark it deprecated for *new*
-   integrations in favor of the generic path, keep maintaining it for the five existing
-   consoles until each migrates, and offer the strict validation profile either as a small
-   optional add-on or as contributions upstream. The five consoles' adaptation layers keep
-   working unchanged for as long as they stay on the package. — **In progress**: with stage 4
-   delivered and green across releases, the package README carries the deprecation notice, the
-   NuGet.org listing is flagged deprecated (an account-side owner action recorded outside this
-   repository), features are frozen, and the release pipeline no longer publishes the package
-   automatically — the `publish-nuget` CI job is suspended while CI keeps packing the package
-   and running its consumption smoke, so a security-fix release can still ship through that job.
-   Retirement completes when the remaining consumers — the Doctheca, Lexarbor, Quaestura, and
-   Ruoyu.Study administrator consoles (Ruoyu.Admin is already retired) — migrate to the generic
-   handler.
+5. **Retire the package.** Automatic publishing was suspended during deprecation. Retirement
+   removes the client source, the sample that depended on it, and the NuGet build and publish steps.
+   Unlisting published versions on NuGet.org requires a package owner. Consumers that pin an exact
+   version can still restore it while following the
+   [Hosted Login migration guide](../integrations/HostedLogin.md#migrating-from-the-retired-aspnet-core-client-package).
 
 The resource-server guidance (plain framework JWT handler, as Emenda integrates) and the
 legacy first-party `/api/auth/*` contract are unaffected by this decision.
@@ -136,9 +128,9 @@ legacy first-party `/api/auth/*` contract are unaffected by this decision.
   parameter semantics with their threat model re-derived (every newly accepted parameter is a
   new external-input surface), and conformance testing. Dual logout paths must stay
   consistent by contract tests on both.
-- The existing consoles, the NuGet-published package history, and the legacy API are not
-  broken by any stage; risk is bounded by the ordering (server conformance first, consumer
-  migration last, one console at a time).
+- Existing clients can migrate one application at a time. For a rollback, redeploy the previous
+  client with its pinned package version and keep its callback registrations until migration is
+  verified. The server's prepared-logout endpoints remain available for Confidential clients.
 
 ## Alternatives considered
 
@@ -154,5 +146,4 @@ legacy first-party `/api/auth/*` contract are unaffected by this decision.
 OpenID Connect Core 1.0, OpenID Connect Discovery 1.0, OpenID Connect RP-Initiated Logout 1.0,
 OpenID Connect Back-Channel Logout 1.0 (optional stage), [RFC 6749](https://www.rfc-editor.org/rfc/rfc6749),
 [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636), [RFC 9207](https://www.rfc-editor.org/rfc/rfc9207).
-The prepared-logout transport remains a documented SignaCore extension for package consumers
-and is not withdrawn by this decision.
+The prepared-logout transport remains a documented SignaCore extension for Confidential clients.

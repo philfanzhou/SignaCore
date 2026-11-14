@@ -52,10 +52,10 @@ the code on both ends:
 4. **Outbound callbacks**: `Callback:RequireHttps` now defaults to `false`. The SSRF gates —
    `Callback:AllowedDomains` and `Callback:AllowPrivateAddresses` — are unchanged and carry the
    real protection.
-5. **The official client package** (`SignaCore.Client.AspNetCore`) follows the same principle for
-   Authority/RedirectUri validation and its own cookie derivation; its `IntranetHttpOrigins`
-   opt-in is retired (see the package README). This ADR covers both ends; the package-side tasks
-   are tracked in [#566](https://github.com/philfanzhou/SignaCore/issues/566).
+5. **The former client package** (`SignaCore.Client.AspNetCore`) followed the same principle for
+   Authority/RedirectUri validation and its cookie derivation. The package-side changes are
+   tracked in [#566](https://github.com/philfanzhou/SignaCore/issues/566). See
+   [ADR 0010](./0010-standards-conformant-oidc-and-generic-client-integration.md) for its retirement.
 
 Retired shared keys keep their stored rows ignored by every read (a leftover row never blocks
 startup, management queries, or updates); dropping the rows after an upgrade is optional
@@ -63,9 +63,9 @@ housekeeping documented in the upgrade notes.
 
 ## Consequences
 
-- A plain-HTTP deployment — an intranet, a container network, or a developer machine — works
-  end-to-end (registration, authorize, hosted login, callback, token, JWKS, logout, and the client
-  package) with zero extra configuration in any environment name.
+- A plain-HTTP deployment works for the SignaCore server in any environment. Framework clients
+  can have their own settings for HTTP metadata, as shown in the
+  [ASP.NET Core sample](../../samples/SignaCore.GenericOidc/README.md).
 - The guarantees SignaCore itself provides are unchanged where they do not depend on transport:
   PKCE S256, state/nonce, single-use authorization codes, exact redirect matching, issuer/audience
   validation, JWKS key rotation, refresh-token rotation, and CSRF boundaries.

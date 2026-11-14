@@ -246,7 +246,7 @@ if args[:2] == ['image','inspect']:
         self.assertIn('run: bash build.sh', workflow)
         for marker in ['name: Build & Test', 'name: Database Contract Matrix',
                        'Scan image for high and critical vulnerabilities', 'Generate image SBOM',
-                       'Reference BFF database contracts', 'verify_oidc_matrix.py reports',
+                       'verify_oidc_matrix.py reports',
                        'Setup Mode assertions', 'Token issuance end-to-end', 'consumed refresh token replay was accepted']:
             self.assertIn(marker, workflow)
         for file in (ROOT / 'tests').rglob('*.cs'):
