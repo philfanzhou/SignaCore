@@ -1,9 +1,13 @@
 # Official Hosted-Login Client Package
 
-- Status: Accepted
+- Status: Superseded by [ADR 0010](./0010-standards-conformant-oidc-and-generic-client-integration.md)
 - Date: 2026-10-01
 - Decision owners: SignaCore maintainers
 - Extends: [ADR 0005](./0005-interactive-oidc-confidential-bff.md)
+
+This record describes the original package contract. See the
+[Hosted Login migration guide](../integrations/HostedLogin.md#migrating-from-the-retired-aspnet-core-client-package)
+for the standard OIDC integration.
 
 ## Context
 
@@ -19,7 +23,7 @@ That boundary keeps the server internals closed, but it leaves every consumer to
 confidential-client protocol duties on its own: authorization-request construction with PKCE S256,
 callback hardening, strict ID-token validation, one-time state, a server-side session,
 re-authentication after session expiry, prepared logout, and sensitive-value redaction in logs and
-telemetry. The [Reference BFF sample](../../samples/SignaCore.ReferenceBff/README.md) and several
+telemetry. The [former Reference BFF sample](https://github.com/philfanzhou/SignaCore/blob/504b8b419c5bb1a9a28526f44f76a841674bd7a6/samples/SignaCore.ReferenceBff/README.md) and several
 downstream services each carry such an implementation, each stabilized through multiple review
 rounds; a protocol or security fix must currently be repeated in every consumer
 ([#479](https://github.com/philfanzhou/SignaCore/issues/479)).
@@ -101,7 +105,7 @@ the package:
    return promptly, and avoid sign-in or external side effects. Non-cooperative synchronous work
    cannot be sandboxed, late completion cannot sign in, and existing sessions/roles and upstream
    tokens are not revoked. This adds no public Bearer validator; details and migration are in the
-   [package README](../../src/SignaCore.Client.AspNetCore/README.md#optional-authorization-before-sign-in).
+   [archived package README](https://github.com/philfanzhou/SignaCore/blob/504b8b419c5bb1a9a28526f44f76a841674bd7a6/src/SignaCore.Client.AspNetCore/README.md#optional-authorization-before-sign-in).
 2. Route prefix — where the package's endpoints are mounted (for example `/bff`).
 3. Response format — bodies and status codes of the consumer-facing routes; the package defines
    protocol outcomes, not presentation.
