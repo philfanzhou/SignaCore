@@ -25,13 +25,11 @@ Docker is required for the complete database contract matrix and image smoke che
 
 ## Project boundaries
 
-Downstream systems integrate with SignaCore over HTTP (Discovery, JWKS, and the documented API
-and OAuth surfaces) or by referencing the officially released client package
-`SignaCore.Client.AspNetCore`; see
-[ADR 0007](docs/adr/0007-official-hosted-login-client-package.md). Server-side assemblies (`SignaCore`
+Downstream systems integrate with SignaCore over HTTP using Discovery, JWKS, and the documented API
+and OAuth endpoints. For hosted login, use a standard OIDC client as shown in the
+[ASP.NET Core sample](samples/SignaCore.GenericOidc/README.md). Server-side assemblies (`SignaCore`
 host, `SignaCore.Domain`, `SignaCore.Database`, and the migration projects) are never published for
-downstream reference, and contributions to the client package must not add consumer business
-models, branding, or authorization rules.
+downstream reference.
 
 ## Database changes
 

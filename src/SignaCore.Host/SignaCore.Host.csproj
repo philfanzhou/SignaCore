@@ -3,8 +3,6 @@
   <ItemGroup>
     <InternalsVisibleTo Include="SignaCore.Tests" />
     <InternalsVisibleTo Include="SignaCore.IntegrationTests" />
-    <InternalsVisibleTo Include="SignaCore.ReferenceBff.Tests" />
-    <InternalsVisibleTo Include="SignaCore.Client.AspNetCore.Tests" />
   </ItemGroup>
 
   <ItemGroup>

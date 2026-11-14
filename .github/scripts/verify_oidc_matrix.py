@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require complete, passing database reports and the exact OIDC case inventory."""
+"""Require a complete, passing database report and the exact OIDC case inventory."""
 
 from __future__ import annotations
 
@@ -12,10 +12,7 @@ import xml.etree.ElementTree as ET
 
 
 NS = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
-REPORTS = (
-    "signacore-database-contracts.trx",
-    "signacore-reference-bff-database-contracts.trx",
-)
+REPORT = "signacore-database-contracts.trx"
 CLASSES = (
     "SignaCore.Tests.Integration.OidcAttackRateLimitDatabaseContractTests",
     "SignaCore.Tests.Integration.OidcSensitiveCanaryMatrixDatabaseContractTests",
@@ -81,17 +78,15 @@ def verify(directory: Path) -> int:
     ):
         raise InvalidReport
 
-    reports = []
-    for filename in REPORTS:
-        paths = list(directory.rglob(filename))
-        if len(paths) != 1:
-            print(f"OIDC matrix: reports={len(paths)} expected=1 status=invalid")
-            return 1
-        reports.append(read_report(paths[0]))
+    paths = list(directory.rglob(REPORT))
+    if len(paths) != 1:
+        print(f"OIDC matrix: reports={len(paths)} expected=1 status=invalid")
+        return 1
+    report = read_report(paths[0])
 
     valid = True
     for class_name in CLASSES:
-        rows = reports[0].get(class_name, [])
+        rows = report.get(class_name, [])
         actual = Counter(name for name, _ in rows)
         wanted = Counter(expected[class_name])
         missing = sum((wanted - actual).values())

@@ -14,8 +14,7 @@ SignaCore uses an authenticated preparation request followed by an opaque browse
 preserves the first-party BFF's server-only ID-token boundary while still correlating logout with
 the exact identity session. Since [ADR 0010](../adr/0010-standards-conformant-oidc-and-generic-client-integration.md)
 stage 1, the standard RP-Initiated Logout route `GET /oauth2/session/end` is additionally
-published as `end_session_endpoint` for generic OIDC clients; the prepared flow's own wire shape
-is unchanged and remains the package contract.
+published as `end_session_endpoint` for standard OIDC clients.
 
 ## Standard RP-Initiated Logout: `GET /oauth2/session/end`
 

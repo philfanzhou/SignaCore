@@ -441,7 +441,7 @@ the browser request. [ADR 0010](../adr/0010-standards-conformant-oidc-and-generi
 stage 1 therefore publishes `end_session_endpoint` as a *separate* route — `GET /oauth2/session/end`
 — that accepts the browser-carried hint under the same `IN-31` judgement, stages the identical
 one-time request, and completes it with the browser's cookie, while the prepared transport keeps
-its server-only ID-token boundary unchanged for package consumers.
+its server-only ID-token boundary.
 
 ## Sensitive value × trust boundary and data flow
 

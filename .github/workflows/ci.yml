@@ -144,85 +144,6 @@ jobs:
             --results-directory reports \
             --no-restore
 
-      # The reference BFF keeps its own test project: its failures must not mix with the
-      # SignaCore slices' signals, and its assemblies stay out of the unit coverage gate's
-      # denominator. Like the integration step, it carries no coverage minimum.
-      - name: Reference BFF tests
-        run: |
-          dotnet restore tests/SignaCore.ReferenceBff.Tests/SignaCore.ReferenceBff.Tests.csproj
-          dotnet test tests/SignaCore.ReferenceBff.Tests/SignaCore.ReferenceBff.Tests.csproj \
-            --configuration Release \
-            --coverage \
-            --coverage-output signacore-reference-bff.cobertura.xml \
-            --coverage-output-format cobertura \
-            --coverage-settings tests/coverage.settings.xml \
-            --report-xunit-trx \
-            --report-xunit-trx-filename signacore-reference-bff.trx \
-            --results-directory reports \
-            --no-restore
-
-      # The official client package keeps its own test project for the same reason as the
-      # reference BFF: its real-host contract tests (ADR 0007's compatibility matrix) and its
-      # fake-authority negative cases must stay a separate signal from the server slices.
-      - name: Client package tests
-        run: |
-          dotnet restore tests/SignaCore.Client.AspNetCore.Tests/SignaCore.Client.AspNetCore.Tests.csproj
-          dotnet test tests/SignaCore.Client.AspNetCore.Tests/SignaCore.Client.AspNetCore.Tests.csproj \
-            --configuration Release \
-            --coverage \
-            --coverage-output signacore-client-pack.cobertura.xml \
-            --coverage-output-format cobertura \
-            --coverage-settings tests/coverage.settings.xml \
-            --report-xunit-trx \
-            --report-xunit-trx-filename signacore-client-pack.trx \
-            --results-directory reports \
-            --no-restore
-
-      # Pack the client package after its tests have passed. A tag packs the tag's exact version
-      # (without the `v` prefix); a branch push or pull request packs a non-publishable edge build
-      # that exists only for the consumption smoke. Nothing is published from this job, on any ref.
-      - name: Resolve client package version
-        id: package_version
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            version="${GITHUB_REF_NAME#v}"
-            if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
-              echo "Tag ${GITHUB_REF_NAME} is not a canonical release tag (vMAJOR.MINOR.PATCH[-rc.NUMBER], no build metadata)." >&2
-              exit 1
-            fi
-          else
-            version="0.0.0-edge.$(date -u +%Y%m%d%H%M%S).${GITHUB_RUN_NUMBER}"
-          fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "Client package version: ${version}"
-
-      - name: Pack client package
-        run: |
-          dotnet pack src/SignaCore.Client.AspNetCore/SignaCore.Client.AspNetCore.csproj \
-            --configuration Release \
-            -p:Version="${{ steps.package_version.outputs.version }}" \
-            -o artifacts/packages
-
-      # The only check that speaks for a consumer rather than for the build that produced the
-      # package: a project that references nothing but the nupkg restores, builds, and boots
-      # against the pack output through a cache that has never held this package before.
-      - name: Smoke-build a package-only consumer
-        run: |
-          eng/tests/published-package-consumption.sh \
-            --version "${{ steps.package_version.outputs.version }}" \
-            --source "$(pwd)/artifacts/packages" \
-            --consumer eng/tests/consumers/signacore-client-aspnetcore \
-            --attempts 1
-
-      - name: Upload client package artifact
-        if: github.event_name == 'push'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: nuget-package-${{ steps.package_version.outputs.version }}
-          path: artifacts/packages/*.nupkg
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Pre-pull PostgreSQL image
         run: |
           postgres_image="$(python3 .github/scripts/resolve_official_image.py postgres)"
@@ -740,36 +661,6 @@ jobs:
             --hangdump-timeout 5m \
             --no-restore
 
-      # The reference BFF keeps its own test assembly, so the filter above never reaches its gated
-      # classes: its PostgreSQL storage contracts run here, in their own step, under the same
-      # RUN_SIGNACORE_DATABASE_CONTRACTS gate. Like the BFF step of build-test, this project does
-      # not carry the hangdump extension, so no hangdump options are passed.
-      - name: Reference BFF database contracts
-        run: |
-          dotnet restore tests/SignaCore.ReferenceBff.Tests/SignaCore.ReferenceBff.Tests.csproj
-          dotnet test tests/SignaCore.ReferenceBff.Tests/SignaCore.ReferenceBff.Tests.csproj \
-            --configuration Release \
-            --filter 'FullyQualifiedName~ReferenceBffDatabaseContractTests' \
-            --report-xunit-trx \
-            --report-xunit-trx-filename signacore-reference-bff-database-contracts.trx \
-            --output Detailed \
-            --results-directory reports \
-            --no-restore
-
-      # The persistent client ticket store keeps its own test assembly for the same reason: its
-      # SQLite matrix runs everywhere, and its PostgreSQL cases join through the same
-      # RUN_SIGNACORE_DATABASE_CONTRACTS gate as the rest of this job.
-      - name: Client package EF ticket store contracts
-        run: |
-          dotnet restore tests/SignaCore.Client.AspNetCore.EntityFrameworkCore.Tests/SignaCore.Client.AspNetCore.EntityFrameworkCore.Tests.csproj
-          dotnet test tests/SignaCore.Client.AspNetCore.EntityFrameworkCore.Tests/SignaCore.Client.AspNetCore.EntityFrameworkCore.Tests.csproj \
-            --configuration Release \
-            --report-xunit-trx \
-            --report-xunit-trx-filename signacore-client-ef-store.trx \
-            --output Detailed \
-            --results-directory reports \
-            --no-restore
-
       - name: Verify OIDC matrix results
         if: ${{ !cancelled() }}
         run: python3 .github/scripts/verify_oidc_matrix.py reports
@@ -922,120 +813,8 @@ jobs:
             done <<< "${META_TAGS}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # SUSPENDED during the client package's deprecation window (ADR 0010 stage 5): the NuGet.org
-  # listing is deprecated and its features are frozen, so release tags no longer publish the
-  # package and this job never runs. CI still packs the package and runs its consumption smoke in
-  # build-test, and the nupkg artifact stays available for a manual push. To ship a security-fix
-  # package release, restore the original condition —
-  # github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') — on `main` and cut a new
-  # release tag: a re-run of an existing run would keep the workflow file that run was created
-  # from, so the job would stay skipped. The steps below then work unchanged: the job runs only
-  # after publish-container
-  # because a NuGet push is irreversible while the image can be re-pushed, it downloads the exact
-  # nupkg artifact that passed the tests and the consumption smoke (nothing is rebuilt here), it
-  # skips a version already present on the feed, and it is the only job in the workflow that
-  # holds a publishing credential, acquired through NuGet Trusted Publishing (a GitHub OIDC token
-  # exchanged for a short-lived API key; no long-lived secret exists in this repository).
-  publish-nuget:
-    name: Publish NuGet Package
-    if: ${{ false }} # Suspended; see the comment above.
-    needs: [build-test, publish-container]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: nuget.org
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      NUGET_SOURCE: https://api.nuget.org/v3/index.json
-    steps:
-      # The job holds a publishing credential; the checkout token is kept out of the workspace so
-      # the two never sit together in .git/config.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
-        with:
-          global-json-file: global.json
-
-      - name: Resolve package version
-        id: package_version
-        # The artifact uploaded by build-test carries the tag without its `v` prefix.
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      # The exact bytes that passed the tests and the smoke are what get pushed. Rebuilding here
-      # would publish an artifact no gate has seen.
-      - name: Download verified package artifact
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: nuget-package-${{ steps.package_version.outputs.version }}
-          path: artifacts/packages
-
-      # A re-run of the same tag must not fail on the version it already published: an existing
-      # exact version on the feed is skipped as already present. The artifact name carries the
-      # version, so a mismatched artifact fails the download step before anything is pushed.
-      - name: Check whether the version is already published
-        id: published
-        run: |
-          set -euo pipefail
-          version="${{ steps.package_version.outputs.version }}"
-          index="$(curl -fsS --max-time 30 \
-            "https://api.nuget.org/v3-flatcontainer/signacore.client.aspnetcore/index.json" \
-            || echo '{}')"
-          if printf '%s' "$index" | grep -q "\"${version}\""; then
-            echo "already=true" >> "$GITHUB_OUTPUT"
-            echo "Version ${version} is already on NuGet.org; the push will be skipped."
-          else
-            echo "already=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Acquire a short-lived NuGet.org credential
-        if: steps.published.outputs.already != 'true'
-        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
-        id: login
-        with:
-          user: ${{ vars.NUGET_USER }}
-
-      - name: Push the package to NuGet.org
-        if: steps.published.outputs.already != 'true'
-        env:
-          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
-        run: |
-          set -euo pipefail
-          # No --skip-duplicate: the pre-check above owns idempotence, so an unexpected 409 must
-          # fail loudly instead of silently claiming success for bytes that were never verified.
-          # The pinned SDK reads NUGET_API_KEY from the environment, keeping the credential
-          # out of process arguments as well as logs.
-          dotnet nuget push artifacts/packages/*.nupkg \
-            --source "$NUGET_SOURCE"
-
-      # Publishing succeeded is not the same as a consumer being able to use the result: this
-      # restores the published version from NuGet.org through a cache that has never held a
-      # SignaCore package, builds the package-only consumer against it, and boots it. The retry
-      # budget is finite (see the script); exhausting it fails this job rather than hanging.
-      - name: Verify the published package restores from NuGet.org
-        run: |
-          eng/tests/published-package-consumption.sh \
-            --version "${{ steps.package_version.outputs.version }}" \
-            --source "$NUGET_SOURCE" \
-            --consumer eng/tests/consumers/signacore-client-aspnetcore \
-            --attempts 30 \
-            --delay-seconds 30
-
-      - name: Record published package
-        run: |
-          {
-            echo "### Published NuGet package"
-            echo
-            echo "- SignaCore.Client.AspNetCore \`${{ steps.package_version.outputs.version }}\`"
-            echo "- Skipped as already present: ${{ steps.published.outputs.already == 'true' }}"
-          } >> "$GITHUB_STEP_SUMMARY"
-
   # Runs last so a release only ever exists for a tag whose tests passed and whose image is
-  # actually pullable, and so the notes can quote the digest that was really published. The NuGet
-  # package is not part of the release: publish-nuget is suspended for the package's deprecation
-  # window (ADR 0010 stage 5).
+  # actually pullable, and so the notes can quote the digest that was really published.
   publish-release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/')
@@ -1064,13 +843,13 @@ jobs:
             exit 0
           fi
 
-          # The package version and the image's semver tags are the tag without its `v` prefix;
+          # The image's semver tag is the Git tag without its `v` prefix;
           # the release title is the tag itself.
           version="${GITHUB_REF_NAME#v}"
 
           if [[ "${version}" == *-* ]]; then
             release_flags=(--prerelease)
-            channel_note="Pre-release image and package; the stable minor channel and latest tag were not changed."
+            channel_note="Pre-release image; the stable minor channel and latest tag were not changed."
           else
             minor="${version%.*}"
             release_flags=(--latest)

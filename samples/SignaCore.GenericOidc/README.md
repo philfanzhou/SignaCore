@@ -1,23 +1,17 @@
-# SignaCore.GenericOidc — the generic-path sample
+# SignaCore.GenericOidc
 
-This sample integrates with SignaCore using **only the framework's own OpenID Connect handler**
-(`Microsoft.AspNetCore.Authentication.OpenIdConnect`). It references no SignaCore package of any
-kind — that is the entire point. Since [ADR 0010](../../docs/adr/0010-standards-conformant-oidc-and-generic-client-integration.md),
-SignaCore publishes the standard OIDC surfaces this handler consumes:
+This confidential client uses `Microsoft.AspNetCore.Authentication.OpenIdConnect` for hosted
+sign-in and sign-out. It uses the following OIDC endpoints:
 
 - **Discovery** — `/.well-known/openid-configuration`, including the `end_session_endpoint`
   published by stage 1;
 - **Authorization endpoint** — code + PKCE S256, with the standard interaction parameters
   (`prompt`, `max_age`, `acr_values`, `response_mode=query`) delivered by stage 2;
-- **Token endpoint** — `client_secret_basic` authentication and a standard code redemption;
+- **Token endpoint** — confidential client authentication and authorization code redemption;
 - **RP-Initiated Logout** — `GET /oauth2/session/end`, driven by the handler's own sign-out
   redirect with `id_token_hint` and the registered post-logout URI.
 
-The client package `SignaCore.Client.AspNetCore` remains available and remains the right choice
-when a consumer wants SignaCore's server-side ticket store, its strict response-validation
-profile, and its prepared-logout transport. This sample exists to prove the other path: a
-consumer that holds no SignaCore dependency can sign in and sign out against a conforming
-SignaCore. The integration test
+The integration test
 `tests/SignaCore.IntegrationTests/Integration/GenericOidcClientFlowTests.cs` drives this exact
 application against the real host on every CI run.
 

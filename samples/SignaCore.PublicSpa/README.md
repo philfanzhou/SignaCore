@@ -10,9 +10,9 @@ The sample has no npm dependencies and needs only Node.js 22.12 or later (the sa
 
 > **Prefer a BFF for high-privilege applications.** A browser that holds bearer tokens exposes them
 > to every script running in the page. Administration consoles and other high-privilege clients
-> should use a confidential backend-for-frontend such as the
-> [Reference BFF](../SignaCore.ReferenceBff/README.md). Use this Public client pattern only when
-> tokens in the browser are an acceptable risk.
+> should use a confidential backend-for-frontend. The [ASP.NET Core OIDC sample](../SignaCore.GenericOidc/README.md)
+> shows how to integrate a confidential client. Use this Public client pattern only when tokens
+> in the browser are an acceptable risk.
 
 | File | Purpose |
 | --- | --- |

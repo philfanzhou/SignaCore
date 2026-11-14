@@ -48,20 +48,17 @@ class MatrixGateTests(unittest.TestCase):
         self.directory = Path(self.temporary.name)
         self.cases = json.loads(gate.MANIFEST.read_text())
         self.integration = report(self.cases)
-        self.bff = report({"OtherClass": ["OtherClass.Case"]})
 
-    def check(self, succeeds=False, raw=None, omit=None, duplicate=False, script=None):
-        for index, root in enumerate((self.integration, self.bff)):
-            if index == omit:
-                continue
-            path = self.directory / gate.REPORTS[index]
-            ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
-            if index == 0 and raw is not None:
-                path.write_text(raw)
+    def check(self, succeeds=False, raw=None, omit=False, duplicate=False, script=None):
+        path = self.directory / gate.REPORT
+        if not omit:
+            ET.ElementTree(self.integration).write(path, encoding="utf-8", xml_declaration=True)
+        if raw is not None:
+            path.write_text(raw)
         if duplicate:
             nested = self.directory / "nested"
             nested.mkdir()
-            (nested / gate.REPORTS[0]).write_bytes((self.directory / gate.REPORTS[0]).read_bytes())
+            (nested / gate.REPORT).write_bytes(path.read_bytes())
         result = subprocess.run(
             [sys.executable, str(script or Path(gate.__file__)), str(self.directory)],
             capture_output=True, text=True, check=False,
@@ -74,12 +71,8 @@ class MatrixGateTests(unittest.TestCase):
         self.assertEqual([len(self.cases[c]) for c in gate.CLASSES], [33, 13, 5])
         self.check(succeeds=True)
 
-    def test_missing_reports_fail(self):
-        for index in range(2):
-            with self.subTest(report=index):
-                for path in self.directory.glob("*.trx"):
-                    path.unlink()
-                self.check(omit=index)
+    def test_missing_report_fails(self):
+        self.check(omit=True)
 
     def test_missing_each_class_fails(self):
         for class_name in gate.CLASSES:
@@ -87,15 +80,12 @@ class MatrixGateTests(unittest.TestCase):
                 self.integration = report({c: n for c, n in self.cases.items() if c != class_name})
                 self.check()
 
-    def test_non_passing_results_fail_in_both_reports(self):
-        for index in range(2):
-            for outcome in ("NotExecuted", "Skipped", "Failed", "Aborted", "Timeout", "", CANARY):
-                with self.subTest(report=index, outcome=outcome):
-                    self.integration = report(self.cases)
-                    self.bff = report({"OtherClass": ["OtherClass.Case"]})
-                    root = (self.integration, self.bff)[index]
-                    root.find("t:Results/t:UnitTestResult", gate.NS).set("outcome", outcome)
-                    self.check()
+    def test_non_passing_results_fail(self):
+        for outcome in ("NotExecuted", "Skipped", "Failed", "Aborted", "Timeout", "", CANARY):
+            with self.subTest(outcome=outcome):
+                self.integration = report(self.cases)
+                self.integration.find("t:Results/t:UnitTestResult", gate.NS).set("outcome", outcome)
+                self.check()
 
     def test_malformed_or_wrong_schema_fails(self):
         for raw in ("", "<" + CANARY, "<TestRun/>", '<TestRun xmlns="urn:wrong"/>'):
