@@ -1,5 +1,3 @@
-using ServiceMantle.Configuration;
-using SignaCore.Database;
 using SignaCore.Host.Configuration;
 using Xunit;
 

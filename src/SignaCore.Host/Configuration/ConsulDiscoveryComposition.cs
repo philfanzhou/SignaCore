@@ -1,8 +1,5 @@
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using ServiceMantle.Configuration;
 using ServiceMantle.Discovery.Configuration;
-using ServiceMantle.Discovery.Registration;
 using ServiceMantle;
 using SignaCore.Domain.Keys;
 using System.Net;

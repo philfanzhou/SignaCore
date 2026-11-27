@@ -1,6 +1,5 @@
 using System.Diagnostics.Metrics;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using SignaCore.Database;
 
 namespace SignaCore.Host.Metrics;
@@ -27,28 +26,27 @@ public sealed class OidcRetentionGauges
         var meter = meterFactory.Create("SignaCore");
         meter.CreateObservableGauge(
             "oidc.retention.continuation",
-            () => ObserveCount("oidc.retention.continuation", db => db.AuthorizationRequests.CountAsync()),
+            () => ObserveCount(db => db.AuthorizationRequests.CountAsync()),
             "count",
             "Retained login continuations");
         meter.CreateObservableGauge(
             "oidc.retention.identity_session",
-            () => ObserveCount("oidc.retention.identity_session", db => db.IdentitySessions.CountAsync()),
+            () => ObserveCount(db => db.IdentitySessions.CountAsync()),
             "count",
             "Retained identity sessions");
         meter.CreateObservableGauge(
             "oidc.retention.authorization_code",
-            () => ObserveCount("oidc.retention.authorization_code", db => db.AuthorizationCodes.CountAsync()),
+            () => ObserveCount(db => db.AuthorizationCodes.CountAsync()),
             "count",
             "Retained authorization codes");
         meter.CreateObservableGauge(
             "oidc.retention.logout_request",
-            () => ObserveCount("oidc.retention.logout_request", db => db.LogoutRequests.CountAsync()),
+            () => ObserveCount(db => db.LogoutRequests.CountAsync()),
             "count",
             "Retained logout requests");
         meter.CreateObservableGauge(
             "oidc.retention.interactive_family",
             () => ObserveCount(
-                "oidc.retention.interactive_family",
                 db => db.RefreshTokens.CountAsync(token => token.IdentitySessionId != null)),
             "count",
             "Retained interactive refresh family members");
@@ -58,7 +56,6 @@ public sealed class OidcRetentionGauges
     public string Provider => _provider;
 
     private IEnumerable<Measurement<long>> ObserveCount(
-        string name,
         Func<IdentityDbContext, Task<int>> count)
     {
         try

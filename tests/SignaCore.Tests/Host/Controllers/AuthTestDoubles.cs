@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
 using ServiceMantle.Audit;
@@ -97,7 +96,7 @@ internal static class AuthTestDoubles
     }
 
     public static GatewayValidationService GatewayValidator(Mock<IAppRegistrationRepository> appRegRepoMock) =>
-        new(appRegRepoMock.Object, NullLogger<GatewayValidationService>.Instance);
+        new(appRegRepoMock.Object);
 
     /// <summary>
     /// The administrator identity configuration, with the username defaulting to admin; individual
@@ -114,7 +113,7 @@ internal static class AuthTestDoubles
     public static AdminController CreateAdminController(Guid? operatorId = null, string? operatorName = "admin")
     {
         var services = new ServiceCollection();
-        services.AddSingleton<ManagementOperatorReader>();
+        services.AddSingleton<OperatorReader>();
         services.AddSingleton<IManagementClaimsParser, ManagementClaimsParser>();
         services.AddSingleton<IManagementCurrentOperatorResolver, ManagementCurrentOperatorResolver>();
         var controller = new AdminController(

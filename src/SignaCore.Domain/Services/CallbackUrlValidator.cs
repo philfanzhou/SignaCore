@@ -35,60 +35,6 @@ public class CallbackUrlValidator
         _resolveHostAddressesAsync = resolveHostAddressesAsync;
     }
 
-    public ValidationResult Validate(string callbackUrl)
-    {
-        if (!Uri.TryCreate(callbackUrl, UriKind.Absolute, out var uri))
-        {
-            return ValidationResult.Invalid("Callback URL is not a valid absolute URL");
-        }
-
-        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
-        {
-            return ValidationResult.Invalid("Callback URL must use HTTP or HTTPS scheme");
-        }
-
-        if (_requireHttps && uri.Scheme != Uri.UriSchemeHttps)
-        {
-            return ValidationResult.Invalid("Callback URL must use HTTPS");
-        }
-
-        if (!string.IsNullOrEmpty(uri.UserInfo))
-        {
-            return ValidationResult.Invalid("Callback URL must not contain user information");
-        }
-
-        var host = uri.Host;
-
-        if (_allowedDomains.Count > 0 && !_allowedDomains.Contains(host))
-        {
-            return ValidationResult.Invalid($"Callback domain '{host}' is not in the allowed domains list");
-        }
-
-        if (!_allowPrivateAddresses && IPAddress.TryParse(host, out var parsedIp))
-        {
-            if (IsNonPublicAddress(parsedIp))
-            {
-                return ValidationResult.Invalid("Callback URL must not point to a private/internal IP address");
-            }
-        }
-
-        if (!_allowPrivateAddresses && !IPAddress.TryParse(host, out _))
-        {
-            var addresses = ResolveHostAddresses(host);
-            if (addresses is null or { Length: 0 })
-            {
-                return ValidationResult.Invalid("Callback URL host could not be resolved");
-            }
-
-            if (addresses.Any(IsNonPublicAddress))
-            {
-                return ValidationResult.Invalid("Callback URL must not resolve to a private/internal IP address");
-            }
-        }
-
-        return ValidationResult.Valid();
-    }
-
     /// <summary>
     /// Validates the callback URL asynchronously so DNS resolution does not block the request thread.
     /// </summary>
@@ -151,18 +97,6 @@ public class CallbackUrlValidator
     internal delegate Task<IPAddress[]?> CallbackHostResolver(
         string host,
         CancellationToken cancellationToken);
-
-    private static IPAddress[]? ResolveHostAddresses(string host)
-    {
-        try
-        {
-            return Dns.GetHostAddresses(host);
-        }
-        catch (System.Net.Sockets.SocketException)
-        {
-            return null;
-        }
-    }
 
     private static async Task<IPAddress[]?> ResolveHostAddressesAsync(
         string host,

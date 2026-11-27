@@ -1,7 +1,6 @@
 using ServiceMantle.Audit;
 using ServiceMantle.Bootstrap;
 using SignaCore.Database.Repositories;
-using SignaCore.Domain.Services;
 using SignaCore.Host.Audit;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Http;
@@ -166,7 +165,7 @@ internal sealed class BootstrapUpdateGuardMiddleware(
     {
         try
         {
-            var operatorReader = context.RequestServices.GetRequiredService<ManagementOperatorReader>();
+            var operatorReader = context.RequestServices.GetRequiredService<OperatorReader>();
             var (actorId, actorName) = operatorReader.Read(context.User);
             // Provider and redacted endpoint only. Recording the connection string here would put
             // the database password into the audit trail.

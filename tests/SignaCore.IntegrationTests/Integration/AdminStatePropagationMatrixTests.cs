@@ -12,7 +12,6 @@ using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
-using SignaCore.Host;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;
@@ -399,7 +398,7 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
             sessionId = session.Id;
         });
 
-        var code = await CreateCodeAsync(accountId, sessionId, appId);
+        var code = await CreateCodeAsync(sessionId, appId);
         using var http = _fixture.CreateHttpClient();
         http.DefaultRequestHeaders.Authorization = BasicHeader(appId, appSecret);
         using var response = await http.PostAsync("/oauth2/token", new FormUrlEncodedContent(new Dictionary<string, string>
@@ -498,9 +497,9 @@ public sealed class AdminStatePropagationMatrixTests : IClassFixture<IdentitySer
     }
 
     private async Task<string> CreateCodeAsync(SeededFamily seeded) =>
-        await CreateCodeAsync(seeded.AccountId, seeded.SessionId, DisableFirstAppId);
+        await CreateCodeAsync(seeded.SessionId, DisableFirstAppId);
 
-    private async Task<string> CreateCodeAsync(Guid accountId, Guid sessionId, string appId)
+    private async Task<string> CreateCodeAsync(Guid sessionId, string appId)
     {
         var applicationRowId = await QueryAsync(async context => await context.AppRegistrations
             .AsNoTracking()

@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
@@ -126,7 +125,7 @@ public sealed class AdminSpaResponseTests
                 context.Response.Body = originalBody;
             }
         });
-        AdminSpaBranch.Map(app, 0);
+        AdminSpa.MapNormalHostSpaFallback(app, 0);
         await app.StartAsync(TestContext.Current.CancellationToken);
         using var client = app.GetTestClient();
         var response = client.GetAsync("/index.html", cancellation.Token);

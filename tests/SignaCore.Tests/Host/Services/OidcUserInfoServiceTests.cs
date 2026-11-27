@@ -10,11 +10,9 @@ using Microsoft.IdentityModel.Tokens;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
-using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Services.Sms;
-using SignaCore.Host;
 using SignaCore.Host.Services;
 using Xunit;
 
@@ -350,7 +348,7 @@ public sealed class OidcUserInfoServiceTests
     private sealed class UserInfoHarness(
         SqliteConnection connection,
         IdentityDbContext context,
-        OidcUserInfoService service,
+        OidcUserInfo service,
         StaticKeyManager keys,
         Guid accountId,
         Guid sessionId,
@@ -361,7 +359,7 @@ public sealed class OidcUserInfoServiceTests
 
         public IdentityDbContext Context { get; } = context;
 
-        public OidcUserInfoService Service { get; } = service;
+        public OidcUserInfo Service { get; } = service;
 
         public StaticKeyManager Keys { get; } = keys;
 
@@ -520,14 +518,14 @@ public sealed class OidcUserInfoServiceTests
             .CreateAsync(accountId, credentialId, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken);
 
         var keys = new StaticKeyManager();
-        var service = new OidcUserInfoService(
+        var service = new OidcUserInfo(
             keys,
             new AccountRepository(context),
             new PasswordCredentialRepository(context),
             context,
             new JwtOptions { Issuer = Issuer },
             new SmsAdmissionService(context),
-            NullLogger<OidcUserInfoService>.Instance);
+            NullLogger<OidcUserInfo>.Instance);
         return new UserInfoHarness(
             connection, context, service, keys, accountId, session.Id, applicationId, scope);
     }

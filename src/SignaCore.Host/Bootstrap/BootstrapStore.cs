@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Hosting;
-using ServiceMantle;
 using ServiceMantle.Bootstrap;
 using ServiceMantle.Database.PostgreSql;
 using ServiceMantle.Database.Sqlite;

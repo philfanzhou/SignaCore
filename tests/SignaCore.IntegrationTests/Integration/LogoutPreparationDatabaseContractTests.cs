@@ -8,13 +8,11 @@ using Moq;
 using Npgsql;
 using ServiceMantle.Audit;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
-using SignaCore.Domain;
 using SignaCore.Host.Services;
 using SignaCore.Tests.Integration;
 using System.Collections.Concurrent;
@@ -174,7 +172,7 @@ public sealed class LogoutPreparationDatabaseContractTests
         public FaultPlan Fault { get; } = new();
         public CaptureLog Log { get; } = new();
         private readonly Keys keys;
-        private readonly OidcLogoutPreparationService service;
+        private readonly OidcLogoutPreparation service;
         private AppRegistrationEntity app = null!;
         private string hint = "";
 
@@ -212,7 +210,7 @@ public sealed class LogoutPreparationDatabaseContractTests
             services.AddScoped<IUnitOfWork>(provider => new ObservedSave(provider.GetRequiredService<IdentityDbContext>(), Fault));
             Services = services.BuildServiceProvider();
             keys = new Keys(Fault);
-            service = new OidcLogoutPreparationService(new ScopeFactory(Services.GetRequiredService<IServiceScopeFactory>(), Fault),
+            service = new OidcLogoutPreparation(new ScopeFactory(Services.GetRequiredService<IServiceScopeFactory>(), Fault),
                 keys, new JwtOptions { Issuer = Issuer }, Log);
         }
 
@@ -390,7 +388,7 @@ public sealed class LogoutPreparationDatabaseContractTests
         public void Dispose() => rsa.Dispose();
     }
 
-    private sealed class CaptureLog : ILogger<OidcLogoutPreparationService>
+    private sealed class CaptureLog : ILogger<OidcLogoutPreparation>
     {
         public ConcurrentQueue<string> Entries { get; } = new();
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;

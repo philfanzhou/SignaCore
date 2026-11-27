@@ -8,10 +8,8 @@ using ServiceMantle.Web.Management;
 using SignaCore.Database;
 using SignaCore.Host.Security;
 using SignaCore.Host.Startup;
-using SignaCore.Host;
 using System.Net.Http.Json;
 using System.Net;
-using System.Text.Json;
 using Xunit;
 using static SignaCore.Tests.Integration.OAuthLoginTestSupport;
 
@@ -222,14 +220,6 @@ public sealed class OAuthLoginAntiforgerySessionTests : IAsyncLifetime
                 TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
-    }
-
-    private static string ExtractToken(string body)
-    {
-        var match = System.Text.RegularExpressions.Regex.Match(
-            body, "name=\"__RequestVerificationToken\" value=\"([^\"]*)\"");
-        Assert.True(match.Success);
-        return match.Groups[1].Value;
     }
 
     private static async Task<string> LoginManagementAsync(WebApplicationFactory<Program> factory)

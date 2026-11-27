@@ -5,12 +5,10 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Moq;
 using ServiceMantle.Audit;
 using ServiceMantle.Management;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
@@ -22,13 +20,9 @@ using SignaCore.Domain;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Management;
 using SignaCore.Host.Models;
-using SignaCore.Host.Services;
-using SignaCore.Host;
-using System.Data.Common;
 using System.Linq.Expressions;
 using System.Net;
 using System.Security.Claims;
-using System.Text.Json;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Controllers;
@@ -103,7 +97,7 @@ public class AdminControllerTests : IDisposable
     private static IServiceProvider BuildRequestServices()
     {
         var services = new ServiceCollection();
-        services.AddSingleton<ManagementOperatorReader>();
+        services.AddSingleton<OperatorReader>();
         services.AddSingleton<IManagementClaimsParser, ManagementClaimsParser>();
         services.AddSingleton<IManagementCurrentOperatorResolver, ManagementCurrentOperatorResolver>();
         return services.BuildServiceProvider();
@@ -1497,21 +1491,6 @@ public class AdminControllerTests : IDisposable
     private void VerifyNoAudit() =>
         _auditWriterMock.Verify(writer => writer.RecordAsync(
             It.IsAny<ManagementAuditEvent>(), It.IsAny<CancellationToken>()), Times.Never);
-
-    /// <summary>
-    /// Serializes a snapshot exactly the way <c>AuditService</c> does, so the assertions run against
-    /// the text that would be persisted.
-    /// </summary>
-    private static string Serialize(object? snapshot) =>
-        snapshot == null
-            ? string.Empty
-            : System.Text.Json.JsonSerializer.Serialize(
-                snapshot,
-                new System.Text.Json.JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
-                    WriteIndented = false
-                });
 
     private static void AssertNoSecret(string json, string appSecret, string? appSecretHash)
     {

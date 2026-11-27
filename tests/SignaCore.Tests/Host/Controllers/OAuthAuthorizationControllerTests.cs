@@ -11,16 +11,12 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using ServiceMantle.Audit;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
-using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Security;
-using SignaCore.Host.Services;
-using SignaCore.Host;
 using SignaCore.Tests.TestSupport;
 using Xunit;
 

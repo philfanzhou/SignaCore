@@ -231,12 +231,12 @@ public sealed class ManagementBearerSessionEndpointTests : IClassFixture<Identit
     {
         var missing = Path.Combine(PhysicalTempPath.Root(), $"missing-{Guid.NewGuid():N}", "bearer.db");
         using var host = CreateHost(services => services.Replace(ServiceDescriptor.Singleton(serviceProvider =>
-            new ManagementBearerSessionService(
+            new BearerSessionService(
                 new DatabaseOptions { Provider = "SQLite", ConnectionString = $"Data Source={missing};Pooling=false" },
                 serviceProvider.GetRequiredService<AdminIdentityOptions>(),
                 serviceProvider.GetRequiredService<IManagementBearerSessionRepository>(),
                 serviceProvider.GetRequiredService<TimeProvider>(),
-                serviceProvider.GetRequiredService<ILogger<ManagementBearerSessionService>>()))));
+                serviceProvider.GetRequiredService<ILogger<BearerSessionService>>()))));
 
         var response = await SendAsync(host, LoginRequest(IdentityServerFixture.AdminUsername, IdentityServerFixture.AdminPassword));
 
@@ -337,12 +337,12 @@ public sealed class ManagementBearerSessionEndpointTests : IClassFixture<Identit
     public async Task Logout_RevocationStorageFailure_Is503()
     {
         using var host = CreateHost(services => services.Replace(ServiceDescriptor.Singleton(serviceProvider =>
-            new ManagementBearerSessionService(
+            new BearerSessionService(
                 serviceProvider.GetRequiredService<DatabaseOptions>(),
                 serviceProvider.GetRequiredService<AdminIdentityOptions>(),
                 serviceProvider.GetRequiredService<IManagementBearerSessionRepository>(),
                 serviceProvider.GetRequiredService<TimeProvider>(),
-                serviceProvider.GetRequiredService<ILogger<ManagementBearerSessionService>>(),
+                serviceProvider.GetRequiredService<ILogger<BearerSessionService>>(),
                 builder => builder.AddInterceptors(new FailingRevocation())))));
         var token = await LoginBearerAsync(host);
 
@@ -479,8 +479,8 @@ public sealed class ManagementBearerSessionEndpointTests : IClassFixture<Identit
         {
             "text-plain" => new StringContent(json, Encoding.UTF8, "text/plain"),
             "latin1-charset" => new StringContent(json, Encoding.Latin1, "application/json"),
-            "declared-oversize" => new StringContent(new string(' ', ManagementBearerSessionEndpoints.MaximumBodyLength) + json, Encoding.UTF8, "application/json"),
-            "chunked-oversize" => new StreamContent(new MemoryStream(Encoding.UTF8.GetBytes(new string(' ', ManagementBearerSessionEndpoints.MaximumBodyLength) + json))),
+            "declared-oversize" => new StringContent(new string(' ', BearerSessionEndpoints.MaximumBodyLength) + json, Encoding.UTF8, "application/json"),
+            "chunked-oversize" => new StreamContent(new MemoryStream(Encoding.UTF8.GetBytes(new string(' ', BearerSessionEndpoints.MaximumBodyLength) + json))),
             "bad-json" => new StringContent("{\"username\":", Encoding.UTF8, "application/json"),
             "array-root" => new StringContent("[]", Encoding.UTF8, "application/json"),
             "number-username" => new StringContent("""{"username":1,"password":"secret"}""", Encoding.UTF8, "application/json"),
@@ -596,7 +596,7 @@ public sealed class ManagementBearerSessionEndpointTests : IClassFixture<Identit
 
     private static void CountProvider(IServiceCollection services, ProviderCounter counter) =>
         services.Replace(ServiceDescriptor.Scoped<IManagementIdentityProvider>(serviceProvider =>
-            new CountingProvider(ActivatorUtilities.CreateInstance<ManagementIdentityProvider>(serviceProvider), counter)));
+            new CountingProvider(ActivatorUtilities.CreateInstance<IdentityProvider>(serviceProvider), counter)));
 
     private static void RecordTags(ReadOnlySpan<KeyValuePair<string, object?>> tags, ConcurrentQueue<string> values)
     {

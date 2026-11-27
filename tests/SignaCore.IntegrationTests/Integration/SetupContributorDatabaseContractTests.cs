@@ -4,15 +4,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging;
 using Npgsql;
-using ServiceMantle.Audit;
 using ServiceMantle.Configuration;
 using ServiceMantle.Installation;
 using ServiceMantle.Persistence.Relational.Mapping;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using ServiceMantle.Web.ManagementApi.Setup;
 using SignaCore.Database.Entity;
-using SignaCore.Database.Repositories;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
@@ -21,7 +18,6 @@ using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
 using SignaCore.Tests.Integration;
 using System.Data.Common;
-using System.Security.Cryptography;
 using System.Text.Json;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -320,7 +316,7 @@ public sealed class SetupContributorDatabaseContractTests
             "after-commit" => new CancelAfterCommitInterceptor(cancellation),
             _ => null
         };
-        await using var database = await SetupDatabase.CreateAsync("SQLite", interceptor: interceptor);
+        await using var database = await SetupDatabase.CreateAsync("SQLite");
 
         RecordingHasher hasher;
         if (checkpoint is "during-validate" or "rejection-with-cancellation")
@@ -1006,8 +1002,7 @@ public sealed class SetupContributorDatabaseContractTests
 
         public static async Task<SetupDatabase> CreateAsync(
             string provider,
-            int? seedVersion = null,
-            IInterceptor? interceptor = null)
+            int? seedVersion = null)
         {
             if (provider == "SQLite")
             {
@@ -1024,8 +1019,7 @@ public sealed class SetupContributorDatabaseContractTests
                                 providerOptions => providerOptions.MigrationsAssembly(
                                     "SignaCore.Database.Migrations.Sqlite")),
                         new DatabaseOptions { Provider = "SQLite", ConnectionString = "Data Source=:memory:" },
-                        seedVersion,
-                        interceptor);
+                        seedVersion);
                 }
                 catch
                 {
@@ -1054,8 +1048,7 @@ public sealed class SetupContributorDatabaseContractTests
                     container,
                     () => CreatePostgreSqlOptionsBuilder(options),
                     options,
-                    seedVersion,
-                    interceptor);
+                    seedVersion);
             }
             catch
             {
@@ -1076,8 +1069,7 @@ public sealed class SetupContributorDatabaseContractTests
                 new NoopOwner(),
                 () => CreatePostgreSqlOptionsBuilder(options),
                 options,
-                seedVersion: null,
-                interceptor: null);
+                seedVersion: null);
         }
 
         private static DbContextOptionsBuilder<IdentityDbContext> CreatePostgreSqlOptionsBuilder(
@@ -1092,8 +1084,7 @@ public sealed class SetupContributorDatabaseContractTests
             IAsyncDisposable owner,
             Func<DbContextOptionsBuilder<IdentityDbContext>> optionsBuilderFactory,
             DatabaseOptions options,
-            int? seedVersion,
-            IInterceptor? interceptor)
+            int? seedVersion)
         {
             await WaitUntilConnectableAsync(optionsBuilderFactory().Options);
 

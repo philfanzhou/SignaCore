@@ -109,7 +109,7 @@ public class UserQueryServiceTests : IDisposable
         SeedAccount(remark: "VIP customer");
         SeedAccount(remark: "regular");
 
-        var (users, total) = await _service.SearchUsersAsync("VIP", null, 1, 20);
+        var (_, total) = await _service.SearchUsersAsync("VIP", null, 1, 20);
 
         Assert.Equal(1, total);
     }

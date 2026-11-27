@@ -8,11 +8,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ServiceMantle.Audit;
 using ServiceMantle.Management;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
-using SignaCore.Domain.Services;
 using SignaCore.Domain;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Management;
@@ -20,7 +18,6 @@ using SignaCore.Host.Models;
 using SignaCore.Tests.Integration;
 using System.Data.Common;
 using System.Net;
-using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Xunit;
@@ -328,7 +325,7 @@ public sealed class AdminAppCancellationDatabaseContractTests
     private static AdminController CreateController()
     {
         var services = new ServiceCollection();
-        services.AddSingleton<ManagementOperatorReader>();
+        services.AddSingleton<OperatorReader>();
         services.AddSingleton<IManagementClaimsParser, ManagementClaimsParser>();
         services.AddSingleton<IManagementCurrentOperatorResolver, ManagementCurrentOperatorResolver>();
         var controller = new AdminController(

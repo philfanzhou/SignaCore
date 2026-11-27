@@ -226,18 +226,18 @@ public static class ServiceCollectionExtensions
         services.AddScoped<OidcLoginFailureRecorder>();
 
         // ---- Scope-controlled OIDC UserInfo read (AC-08), standalone validation pipeline ----
-        services.AddScoped<OidcUserInfoService>();
+        services.AddScoped<OidcUserInfo>();
 
         // ---- Browser OIDC login success commit path (canonical EV-01) ----
-        services.AddScoped<OidcLoginCompletionService>();
+        services.AddScoped<OidcLoginCompletion>();
 
         // ---- Browser SMS send route unit (canonical EV-35) ----
-        services.AddScoped<OidcSmsCodeSendService>();
+        services.AddScoped<OidcSmsCodeSend>();
 
         // ---- Browser SMS login success and failure commit paths (canonical EV-36/EV-37) ----
-        services.AddScoped<OidcSmsLoginCompletionService>();
+        services.AddScoped<OidcSmsLoginCompletion>();
         services.AddScoped<OidcSmsLoginFailureRecorder>();
-        services.AddScoped<OidcAuthorizationSessionReuseService>();
+        services.AddScoped<OidcAuthorizationSessionReuse>();
         services.AddScoped<LogoutPreparationScope>();
         services.AddScoped<IdentityDbContext>(provider =>
         {
@@ -250,9 +250,9 @@ public static class ServiceCollectionExtensions
             }
             return new IdentityDbContext(options);
         });
-        services.AddScoped<OidcLogoutPreparationService>();
-        services.AddScoped<OidcLogoutCompletionService>();
-        services.AddScoped<OidcStandardLogoutService>();
+        services.AddScoped<OidcLogoutPreparation>();
+        services.AddScoped<OidcLogoutCompletion>();
+        services.AddScoped<OidcStandardLogout>();
 
         // ---- User Query Service ----
         services.AddScoped<IUserQueryService, UserQueryService>();
@@ -435,13 +435,13 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ValidatorFactory>();
 
         // ---- Token issuance pipeline shared by /api/auth/token and /oauth2/token ----
-        services.AddScoped<TokenIssuanceService>();
+        services.AddScoped<TokenIssuance>();
 
         // ---- Internal authorization_code redemption (AC-06), outside the validator factory ----
-        services.AddScoped<AuthorizationCodeRedemptionService>();
+        services.AddScoped<AuthorizationCodeRedemption>();
 
         // ---- Interactive refresh family rotation (EV-29–EV-32), dispatched by digest marker ----
-        services.AddScoped<InteractiveRefreshRotationService>();
+        services.AddScoped<InteractiveRefreshRotation>();
 
         // ---- Background Cleanup Service ----
         services.AddHostedService<CleanupWorker>();
@@ -459,9 +459,9 @@ public static class ServiceCollectionExtensions
         // operation uses its own non-retrying context, never the request-scoped one.
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IManagementBearerSessionRepository, ManagementBearerSessionRepository>();
-        services.AddSingleton<ManagementBearerSessionService>();
+        services.AddSingleton<BearerSessionService>();
         services.AddSingleton<IManagementBearerSessionCleanup>(
-            serviceProvider => serviceProvider.GetRequiredService<ManagementBearerSessionService>());
+            serviceProvider => serviceProvider.GetRequiredService<BearerSessionService>());
 
         services.AddCors(options =>
         {
@@ -653,7 +653,7 @@ public static class ServiceCollectionExtensions
                 // management cookie, or the management bearer when the request carries an
                 // Authorization header, plus the shared requirement that the principal resolves to
                 // one legitimate operator holding the Admin permission.
-                policy.AddAuthenticationSchemes(ManagementBearerAuthenticationDefaults.SelectorScheme);
+                policy.AddAuthenticationSchemes(BearerAuthenticationDefaults.SelectorScheme);
                 policy.RequireAuthenticatedUser();
                 policy.AddRequirements(new ManagementPermissionRequirement(ManagementPermission.Admin));
             })
@@ -667,15 +667,15 @@ public static class ServiceCollectionExtensions
                 policy.RequireAuthenticatedUser();
                 policy.AddRequirements(new IdentitySessionRequirement());
             })
-            .AddPolicy(ManagementBearerAuthenticationDefaults.Policy, policy =>
+            .AddPolicy(BearerAuthenticationDefaults.Policy, policy =>
             {
-                policy.AddAuthenticationSchemes(ManagementBearerAuthenticationDefaults.AuthenticationScheme);
+                policy.AddAuthenticationSchemes(BearerAuthenticationDefaults.AuthenticationScheme);
                 policy.RequireAuthenticatedUser();
                 policy.AddRequirements(new ManagementPermissionRequirement(ManagementPermission.Admin));
             })
             .AddPolicy(GatewayAppAuthenticationDefaults.OpsPolicy, policy =>
             {
-                policy.AddAuthenticationSchemes(ManagementBearerAuthenticationDefaults.SelectorScheme);
+                policy.AddAuthenticationSchemes(BearerAuthenticationDefaults.SelectorScheme);
                 policy.RequireAuthenticatedUser();
                 policy.AddRequirements(new ManagementPermissionRequirement(ManagementPermission.Admin));
             })

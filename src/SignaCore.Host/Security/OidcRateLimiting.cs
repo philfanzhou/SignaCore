@@ -1,7 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Caching.Memory;
-using SignaCore.Database;
 using SignaCore.Database.Repositories;
 
 namespace SignaCore.Host.Security;

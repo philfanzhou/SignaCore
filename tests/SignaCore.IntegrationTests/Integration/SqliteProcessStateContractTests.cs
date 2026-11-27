@@ -1,6 +1,5 @@
 using System.Reflection;
 using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
 using SignaCore.IntegrationTests.Integration;
 using Xunit;
 

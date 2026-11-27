@@ -17,7 +17,6 @@ using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
-using SignaCore.Host;
 using SignaCore.Host.Security;
 using Xunit;
 
@@ -508,7 +507,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
     {
         using var host = CreateLogoutHost();
         var (accountId, sessionId, cookieValue) = await LoginAndCaptureSessionAsync(host);
-        var code = await SeedCodeAsync(accountId, sessionId);
+        var code = await SeedCodeAsync(sessionId);
         using var http = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         http.DefaultRequestHeaders.Add(
             "Cookie", $"{IdentitySessionDefaults.CookieName}={cookieValue}");
@@ -548,7 +547,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         using var host = CreateLogoutHost();
         var (accountId, sessionId, cookieValue) = await LoginAndCaptureSessionAsync(host);
         var familyRootId = await SeedInteractiveFamilyAsync(accountId, sessionId);
-        var code = await SeedCodeAsync(accountId, sessionId);
+        var code = await SeedCodeAsync(sessionId);
 
         using var redeem = host.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false });
         redeem.DefaultRequestHeaders.Authorization = BasicHeader();
@@ -884,7 +883,7 @@ public sealed partial class OAuthLogoutTests : IClassFixture<IdentityServerFixtu
         return rootId;
     }
 
-    private async Task<string> SeedCodeAsync(Guid accountId, Guid sessionId)
+    private async Task<string> SeedCodeAsync(Guid sessionId)
     {
         var applicationRowId = await SeedLogoutAppAsync();
         using var scope = _fixture.Services.CreateScope();

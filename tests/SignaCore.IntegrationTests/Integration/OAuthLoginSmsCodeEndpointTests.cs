@@ -1,6 +1,4 @@
 using System.Net;
-using System.Text;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -260,7 +258,7 @@ public sealed class OAuthLoginSmsCodeEndpointTests : IClassFixture<IdentityServe
 
         var cases = new SendCase[]
         {
-            new("sent", "sent", Admitted, ProviderCalls: 1, OtpStatus.Sent, AuditEvent: OidcSmsCodeSendService.SentEventType),
+            new("sent", "sent", Admitted, ProviderCalls: 1, OtpStatus.Sent, AuditEvent: OidcSmsCodeSend.SentEventType),
             new("not_registered", "not_registered", () => Task.CompletedTask, 0, null, AccountResolved: false),
             new("not_admitted", "not_admitted", () => SeedIdentityAsync(host.Services, e164), 0, null),
             new("admission_inactive", "admission_inactive",
@@ -364,7 +362,7 @@ public sealed class OAuthLoginSmsCodeEndpointTests : IClassFixture<IdentityServe
                 Assert.Equal(historiesBefore + 1, histories.Count);
                 var row = histories[^1];
                 Assert.Equal("oidc_sms_login", row.AuthMethod);
-                Assert.Equal(testCase.AuditEvent ?? OidcSmsCodeSendService.SuppressedEventType, row.EventType);
+                Assert.Equal(testCase.AuditEvent ?? OidcSmsCodeSend.SuppressedEventType, row.EventType);
                 Assert.Equal(testCase.Outcome == "sent" ? null : testCase.Outcome, row.FailureReason);
                 Assert.Equal(e164[..3] + "****" + e164[^4..], row.Username);
                 Assert.Equal(testCase.AccountResolved, row.AccountId is not null);
@@ -697,7 +695,7 @@ public sealed class OAuthLoginSmsCodeEndpointTests : IClassFixture<IdentityServe
         public Task RecordLoginAsync(Guid? accountId, string username, string authMethod, string eventType,
             string? clientIp, string? userAgent, string? failureReason = null, string? appId = null,
             string? correlationId = null, CancellationToken cancellationToken = default) =>
-            authMethod == OidcSmsCodeSendService.AuthMethod
+            authMethod == OidcSmsCodeSend.AuthMethod
                 ? throw new InvalidOperationException("Simulated audit persistence failure.")
                 : _inner.RecordLoginAsync(accountId, username, authMethod, eventType, clientIp, userAgent,
                     failureReason, appId, correlationId, cancellationToken);

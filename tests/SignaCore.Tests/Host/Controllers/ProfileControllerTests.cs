@@ -1,13 +1,10 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
-using SignaCore.Domain;
-using SignaCore.Domain.Services;
 using SignaCore.Domain.Services.WeChat;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Models;

@@ -3,7 +3,7 @@ using SignaCore.Host.Models;
 
 namespace SignaCore.Host.Bootstrap;
 
-internal enum BootstrapOutcome
+internal enum Outcome
 {
     Succeeded,
 
@@ -14,10 +14,10 @@ internal enum BootstrapOutcome
     TargetUnreachable
 }
 
-internal sealed record BootstrapOperationResult(
-    BootstrapOutcome Outcome,
+internal sealed record OperationResult(
+    Outcome Outcome,
     string Message,
-    BootstrapTargetInspection? Inspection = null);
+    TargetInspection? Inspection = null);
 
 /// <summary>
 /// The retained target probe of the former bootstrap editor: it classifies a candidate database
@@ -39,39 +39,39 @@ internal sealed class BootstrapConfigurationService(BootstrapFileStore store)
     /// Classifies a candidate database without writing anything, so the operator sees what they are
     /// about to point at before they commit to it.
     /// </summary>
-    public async Task<BootstrapOperationResult> TestAsync(
+    public async Task<OperationResult> TestAsync(
         BootstrapDatabaseRequest request,
         string? candidateMasterKey,
         CancellationToken cancellationToken = default)
     {
-        if (!BootstrapDatabaseRequestBinder.TryBind(request, out var database, out var error))
+        if (!DatabaseRequestBinder.TryBind(request, out var database, out var error))
         {
-            return new BootstrapOperationResult(BootstrapOutcome.InvalidRequest, error);
+            return new OperationResult(Outcome.InvalidRequest, error);
         }
 
-        var inspection = await BootstrapTargetInspector.InspectAsync(
+        var inspection = await TargetInspector.InspectAsync(
             database,
             candidateMasterKey,
             cancellationToken);
 
-        return new BootstrapOperationResult(
-            inspection.CanConnect ? BootstrapOutcome.Succeeded : BootstrapOutcome.TargetUnreachable,
+        return new OperationResult(
+            inspection.CanConnect ? Outcome.Succeeded : Outcome.TargetUnreachable,
             DescribeTarget(inspection),
             inspection);
     }
 
-    private static string DescribeTarget(BootstrapTargetInspection inspection) => inspection.Kind switch
+    private static string DescribeTarget(TargetInspection inspection) => inspection.Kind switch
     {
-        BootstrapTargetKind.Unreachable =>
+        TargetKind.Unreachable =>
             $"The database at {inspection.Endpoint} could not be opened: " +
             $"{inspection.FailureReason ?? "the server did not accept the connection."}",
-        BootstrapTargetKind.Empty =>
+        TargetKind.Empty =>
             $"{inspection.Endpoint} is empty. SignaCore will create its schema and then run first-run setup.",
-        BootstrapTargetKind.PendingInstallation =>
+        TargetKind.PendingInstallation =>
             $"{inspection.Endpoint} holds a SignaCore installation that has not completed first-run setup.",
-        BootstrapTargetKind.CompletedInstallation =>
+        TargetKind.CompletedInstallation =>
             $"{inspection.Endpoint} holds a completed SignaCore installation.",
-        BootstrapTargetKind.LegacyData =>
+        TargetKind.LegacyData =>
             $"{inspection.Endpoint} holds SignaCore data from before database-backed configuration. " +
             "Startup will run the protected legacy import.",
         _ => inspection.Endpoint

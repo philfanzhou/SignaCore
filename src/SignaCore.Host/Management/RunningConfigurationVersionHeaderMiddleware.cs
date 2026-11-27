@@ -17,7 +17,7 @@ namespace SignaCore.Host.Management;
 /// </remarks>
 internal sealed class RunningConfigurationVersionHeaderMiddleware(
     RequestDelegate next,
-    InstallationRuntimeState runtimeState)
+    RuntimeState runtimeState)
 {
     internal const string HeaderName = "X-SignaCore-Running-Configuration-Version";
 

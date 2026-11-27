@@ -21,14 +21,14 @@ namespace SignaCore.Host.Controllers;
 /// </para>
 /// <para>
 /// The <c>authorization_code</c> grant is redeemed here too (<c>AC-06</c>), through
-/// <see cref="AuthorizationCodeRedemptionService"/> instead of the validator factory: the grant
-/// deliberately stays unregistered with <see cref="TokenIssuanceService"/>, because this branch is
+/// <see cref="AuthorizationCodeRedemption"/> instead of the validator factory: the grant
+/// deliberately stays unregistered with <see cref="TokenIssuance"/>, because this branch is
 /// not a validator-shaped credential grant. Discovery advertises <c>authorization_code</c>
 /// explicitly as a delivered capability (<c>AC-07</c>), never through validator registration.
 /// </para>
 /// <para>
 /// The <c>refresh_token</c> grant is dispatched by digest classification
-/// (<see cref="InteractiveRefreshRotationService"/>): a complete interactive marker enters the
+/// (<see cref="InteractiveRefreshRotation"/>): a complete interactive marker enters the
 /// atomic family rotation (<c>EV-29</c>–<c>EV-32</c>); every valid-shape legacy presentation
 /// keeps its current validator path byte for byte (<c>EV-33</c>).
 /// </para>
@@ -43,17 +43,17 @@ namespace SignaCore.Host.Controllers;
 [ApiController]
 public sealed class OAuthTokenController : ControllerBase
 {
-    private readonly TokenIssuanceService _tokenIssuanceService;
+    private readonly TokenIssuance _tokenIssuanceService;
     private readonly IRefreshTokenService _refreshTokenService;
-    private readonly AuthorizationCodeRedemptionService _authorizationCodeRedemption;
-    private readonly InteractiveRefreshRotationService _interactiveRefreshRotation;
+    private readonly AuthorizationCodeRedemption _authorizationCodeRedemption;
+    private readonly InteractiveRefreshRotation _interactiveRefreshRotation;
     private readonly AuthMetrics _authMetrics;
 
     public OAuthTokenController(
-        TokenIssuanceService tokenIssuanceService,
+        TokenIssuance tokenIssuanceService,
         IRefreshTokenService refreshTokenService,
-        AuthorizationCodeRedemptionService authorizationCodeRedemption,
-        InteractiveRefreshRotationService interactiveRefreshRotation,
+        AuthorizationCodeRedemption authorizationCodeRedemption,
+        InteractiveRefreshRotation interactiveRefreshRotation,
         AuthMetrics authMetrics)
     {
         _tokenIssuanceService = tokenIssuanceService;
@@ -79,7 +79,7 @@ public sealed class OAuthTokenController : ControllerBase
         if (form["grant_type"].Count == 1
             && string.Equals(
                 form["grant_type"].ToString(),
-                AuthorizationCodeRedemptionService.GrantType,
+                AuthorizationCodeRedemption.GrantType,
                 StringComparison.Ordinal))
         {
             return await RedeemCodeGrantAsync(app, form, stopwatch, cancellationToken);
@@ -91,7 +91,7 @@ public sealed class OAuthTokenController : ControllerBase
         if (form["grant_type"].Count == 1
             && string.Equals(
                 form["grant_type"].ToString(),
-                InteractiveRefreshRotationService.GrantType,
+                InteractiveRefreshRotation.GrantType,
                 StringComparison.Ordinal))
         {
             var dispatch = await _interactiveRefreshRotation.RotateAsync(
@@ -248,7 +248,7 @@ public sealed class OAuthTokenController : ControllerBase
     /// <c>grant_type</c>. The <c>IN-20</c> credential mix is
     /// rejected here — a Basic header the authentication handler would accept alongside any
     /// <c>client_id</c>/<c>client_secret</c> form field — before the code is looked up; every
-    /// other decision belongs to <see cref="AuthorizationCodeRedemptionService"/>. Both the
+    /// other decision belongs to <see cref="AuthorizationCodeRedemption"/>. Both the
     /// success and the error bodies of this branch carry <c>Pragma: no-cache</c> in addition to
     /// <c>Cache-Control: no-store</c>.
     /// </summary>

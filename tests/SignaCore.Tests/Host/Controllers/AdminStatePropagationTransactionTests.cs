@@ -1,19 +1,15 @@
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using ServiceMantle.Audit;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
 using SignaCore.Domain.Services;
 using SignaCore.Domain;
-using SignaCore.Host.Controllers;
 using SignaCore.Host.Models;
 using SignaCore.Tests.TestSupport;
 using System.Diagnostics;
@@ -184,24 +180,9 @@ public sealed class AdminStatePropagationTransactionTests
                 AppId,
                 new AdminUpdateOidcPolicyRequest("Confidential", true, ["openid"], false, null),
                 apps, unitOfWork, audit,
-                ProductionEnvironment(),
                 context, families,
                 cancellationToken)
         };
-    }
-
-    private static IWebHostEnvironment ProductionEnvironment()
-    {
-        var environment = new Mock<IWebHostEnvironment>();
-        environment.SetupGet(item => item.EnvironmentName).Returns("Production");
-        environment.SetupGet(item => item.ApplicationName).Returns("SignaCore.Tests");
-        environment.SetupGet(item => item.ContentRootPath).Returns(AppContext.BaseDirectory);
-        environment.SetupGet(item => item.ContentRootFileProvider)
-            .Returns(new Microsoft.Extensions.FileProviders.NullFileProvider());
-        environment.SetupGet(item => item.WebRootPath).Returns(AppContext.BaseDirectory);
-        environment.SetupGet(item => item.WebRootFileProvider)
-            .Returns(new Microsoft.Extensions.FileProviders.NullFileProvider());
-        return environment.Object;
     }
 
     private sealed record Seed(

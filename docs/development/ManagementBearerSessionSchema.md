@@ -27,7 +27,7 @@ this schema delivery. Existing Cookie, OIDC, and business JWT behavior is unchan
 ## Lifecycle service
 
 [Task #383](https://github.com/philfanzhou/SignaCore/issues/383) adds an internal
-`ManagementBearerSessionService` that issues, validates, revokes, and cleans up these rows.
+`BearerSessionService` that issues, validates, revokes, and cleans up these rows.
 Each operation uses its own non-retrying `IdentityDbContext`; `CleanupWorker` deletes rows
 expired for at least 24 hours in batches of at most 1000. Its contract suite is
 `ManagementBearerSessionDatabaseContractTests`.

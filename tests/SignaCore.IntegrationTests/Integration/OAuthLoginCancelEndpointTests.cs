@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -9,8 +8,6 @@ using Microsoft.Extensions.Logging;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Models;
-using SignaCore.Domain.Validators;
-using SignaCore.Host;
 using SignaCore.Host.Security;
 using Xunit;
 using static SignaCore.Tests.Integration.OAuthLoginTestSupport;

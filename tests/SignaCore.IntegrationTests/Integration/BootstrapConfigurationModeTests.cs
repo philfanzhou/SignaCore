@@ -8,9 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ServiceMantle.Bootstrap;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
-using ServiceMantle.Web.Health;
 using ServiceMantle.Web.Logging;
-using SignaCore.Database.Entity;
 using SignaCore.Database;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Tests.Integration;
@@ -38,7 +36,6 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
     private string _directory = string.Empty;
     private string _webRoot = string.Empty;
     private string _bootstrapPath = string.Empty;
-    private string _credentialRecordPath = string.Empty;
     private WebApplicationFactory<Program>? _factory;
 
     public ValueTask InitializeAsync()
@@ -49,7 +46,6 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
         File.WriteAllText(Path.Combine(_webRoot, "index.html"), SpaTemplate);
         File.WriteAllText(Path.Combine(_webRoot, "app.css"), "body{}");
         _bootstrapPath = Path.Combine(_directory, "signacore.bootstrap.json");
-        _credentialRecordPath = Path.Combine(_directory, "signacore.bootstrap-credential.json");
         return ValueTask.CompletedTask;
     }
 
@@ -112,7 +108,7 @@ public sealed class BootstrapConfigurationModeTests : IAsyncLifetime
     /// </summary>
     private async Task<string> ReissueCredentialAsync()
     {
-        var store = BootstrapCredentialProvisioner.CreateStore(_bootstrapPath);
+        var store = CredentialProvisioner.CreateStore(_bootstrapPath);
         var provision = await store.ReissueAsync(
             BootstrapCredentialLifetime.Default,
             TestContext.Current.CancellationToken);

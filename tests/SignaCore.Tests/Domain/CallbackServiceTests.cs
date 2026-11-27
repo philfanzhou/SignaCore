@@ -1,6 +1,4 @@
-using System.Linq;
 using System.Net;
-using System.Security.Claims;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SignaCore.Database;

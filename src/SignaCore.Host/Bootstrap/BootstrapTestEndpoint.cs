@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Http;
 using ServiceMantle.Bootstrap;
 using ServiceMantle.Installation;
 using ServiceMantle.Web.ManagementApi.Entries;
@@ -96,12 +95,12 @@ internal static class BootstrapTestEndpoint
                 string.IsNullOrWhiteSpace(request.MasterKey) ? null : request.MasterKey.Trim(),
                 context.RequestAborted);
 
-            if (result.Outcome == BootstrapOutcome.InvalidRequest)
+            if (result.Outcome == Outcome.InvalidRequest)
             {
                 return ManagementApiResults.InvalidRequest();
             }
 
-            return Results.Json(BootstrapResponseMapper.Describe(result));
+            return Results.Json(ResponseMapper.Describe(result));
         })
         .WithServiceMantlePhaseAdmission(ServiceStartupPhase.BootstrapConfiguration)
         .RequireRateLimiting(RateLimitingDefaults.SetupPolicyName);

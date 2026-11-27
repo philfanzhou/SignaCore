@@ -1,11 +1,9 @@
 using System.Net;
 using System.Net.Http.Headers;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SignaCore.Database;
-using SignaCore.Host;
 using SignaCore.Host.Management;
 using SignaCore.Host.Startup;
 using Testcontainers.PostgreSql;
@@ -51,8 +49,8 @@ public sealed class ManagementBearerAuthenticationDatabaseContractTests
             });
 
             var adminId = await AdminAccountIdAsync(a);
-            var issued = await a.Services.GetRequiredService<ManagementBearerSessionService>().IssueAsync(adminId, Ct);
-            Assert.Equal(ManagementBearerIssueStatus.Issued, issued.Status);
+            var issued = await a.Services.GetRequiredService<BearerSessionService>().IssueAsync(adminId, Ct);
+            Assert.Equal(BearerIssueStatus.Issued, issued.Status);
 
             using (var before = await clientB.SendAsync(Me(issued.Token!), Ct))
             {
@@ -61,8 +59,8 @@ public sealed class ManagementBearerAuthenticationDatabaseContractTests
             }
 
             Assert.Equal(
-                ManagementBearerRevocationResult.Revoked,
-                await a.Services.GetRequiredService<ManagementBearerSessionService>().RevokeAsync(issued.Token, Ct));
+                BearerRevocationResult.Revoked,
+                await a.Services.GetRequiredService<BearerSessionService>().RevokeAsync(issued.Token, Ct));
 
             using var after = await clientB.SendAsync(Me(issued.Token!), Ct);
             Assert.Equal(HttpStatusCode.Unauthorized, after.StatusCode);

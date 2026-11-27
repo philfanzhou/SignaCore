@@ -138,11 +138,11 @@ public sealed class IdentitySessionCookieTests(SqliteKeyStoreFixture fixture)
         // cookie keeps sign-in and sign-out. The identity scheme only contributes a
         // non-interactive scheme that identity paths must name explicitly.
         Assert.Equal(
-            ManagementBearerAuthenticationDefaults.SelectorScheme, authentication.DefaultAuthenticateScheme);
+            BearerAuthenticationDefaults.SelectorScheme, authentication.DefaultAuthenticateScheme);
         Assert.Equal(
-            ManagementBearerAuthenticationDefaults.SelectorScheme, authentication.DefaultChallengeScheme);
+            BearerAuthenticationDefaults.SelectorScheme, authentication.DefaultChallengeScheme);
         Assert.Equal(
-            ManagementBearerAuthenticationDefaults.SelectorScheme, authentication.DefaultForbidScheme);
+            BearerAuthenticationDefaults.SelectorScheme, authentication.DefaultForbidScheme);
         Assert.Equal(
             ManagementSessionDefaults.AuthenticationScheme, authentication.DefaultSignInScheme);
         Assert.Equal(
@@ -164,7 +164,7 @@ public sealed class IdentitySessionCookieTests(SqliteKeyStoreFixture fixture)
 
                 Assert.NotEqual(
                     IdentitySessionDefaults.AuthenticationScheme,
-                    ManagementBearerAuthenticationDefaults.SelectScheme(context));
+                    BearerAuthenticationDefaults.SelectScheme(context));
             }
         }
     }

@@ -1,22 +1,15 @@
-using Microsoft.Extensions.Logging;
-using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
-using SignaCore.Domain.Validators;
 
 namespace SignaCore.Domain.Services;
 
 public class GatewayValidationService
 {
     private readonly IAppRegistrationRepository _appRegistrationRepository;
-    private readonly ILogger<GatewayValidationService> _logger;
 
-    public GatewayValidationService(
-        IAppRegistrationRepository appRegistrationRepository,
-        ILogger<GatewayValidationService> logger)
+    public GatewayValidationService(IAppRegistrationRepository appRegistrationRepository)
     {
         _appRegistrationRepository = appRegistrationRepository;
-        _logger = logger;
     }
 
     public async Task<GatewayAuthResult> ValidateAsync(

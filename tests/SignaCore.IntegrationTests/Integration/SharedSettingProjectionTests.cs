@@ -1,9 +1,6 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using ServiceMantle.Audit;
 using ServiceMantle.Configuration;
-using SignaCore.Domain.Keys;
-using SignaCore.Host.Configuration;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;

@@ -1,7 +1,6 @@
 using ServiceMantle.Configuration;
 using ServiceMantle.Logging.Pipeline;
 using ServiceMantle.Logging.Remote;
-using ServiceMantle.Logging;
 
 namespace SignaCore.Host.Logging;
 

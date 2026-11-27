@@ -14,7 +14,7 @@ public sealed class ManagementOperatorReaderTests
 {
     private static readonly Guid OperatorId = Guid.NewGuid();
 
-    private static ManagementOperatorReader CreateReader() => new(new ManagementCurrentOperatorResolver(
+    private static OperatorReader CreateReader() => new(new ManagementCurrentOperatorResolver(
         new ManagementClaimsParser()));
 
     private static ClaimsPrincipal ManagementPrincipal(

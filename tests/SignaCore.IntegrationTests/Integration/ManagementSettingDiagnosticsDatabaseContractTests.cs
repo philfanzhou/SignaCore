@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using ServiceMantle.Logging.Remote;
 using SignaCore.Database;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Installation;
@@ -29,7 +28,6 @@ public sealed class ManagementSettingDiagnosticsDatabaseContractTests
     private const string Diagnostics = Root + "/diagnostics";
     private const string LegacyOtlp = "ftp://collector.example.com:4317";
     private const string ValidAuthorization = "Basic dGVzdDpjYW5hcnk=";
-    private const string RunningHeader = "X-SignaCore-Running-Configuration-Version";
 
     private static readonly string Required = SettingCompositeValidator.RequiredCode;
     private static readonly string RuntimeInvalid = SettingCompositeValidator.RuntimeInvalidCode;
@@ -79,7 +77,7 @@ public sealed class ManagementSettingDiagnosticsDatabaseContractTests
             (await anonymous.GetAsync(Diagnostics, TestContext.Current.CancellationToken)).StatusCode);
         using var admin = await LoginAsync(factory);
         var stored = await fixture.StoredAsync();
-        var runtimeVersion = factory.Services.GetRequiredService<InstallationRuntimeState>()
+        var runtimeVersion = factory.Services.GetRequiredService<RuntimeState>()
             .ConfigurationVersion;
 
         using var response = await admin.GetAsync(Diagnostics, TestContext.Current.CancellationToken);
@@ -202,7 +200,7 @@ public sealed class ManagementSettingDiagnosticsDatabaseContractTests
         await using var fixture = await Fixture.CreateAsync(false,
             "http://loki.example.com", ValidAuthorization, LegacyOtlp);
         await using var factory = fixture.Host();
-        var snapshot = factory.Services.GetRequiredService<ManagementSettingQuerySnapshot>();
+        var snapshot = factory.Services.GetRequiredService<SettingQuerySnapshot>();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
             TestContext.Current.CancellationToken);
         await cancellation.CancelAsync();

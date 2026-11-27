@@ -9,7 +9,7 @@ namespace SignaCore.Host.Services;
 
 /// <summary>
 /// The closed <c>login_histories.failure_reason</c> values of a failed browser SMS login besides the
-/// send-eligibility values (<see cref="OidcSmsCodeSendService.ReasonFor(SmsSendEligibility)"/>).
+/// send-eligibility values (<see cref="OidcSmsCodeSend.ReasonFor(SmsSendEligibility)"/>).
 /// </summary>
 public static class OidcSmsLoginFailureReasons
 {
@@ -109,7 +109,7 @@ public sealed class OidcSmsLoginFailureRecorder(
                 await auditService.RecordLoginAsync(
                     accountId,
                     maskedPhone,
-                    OidcSmsCodeSendService.AuthMethod,
+                    OidcSmsCodeSend.AuthMethod,
                     LoginFailureEventType,
                     clientIp,
                     userAgent,

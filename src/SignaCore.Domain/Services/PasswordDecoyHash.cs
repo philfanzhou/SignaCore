@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using SignaCore.Database;
 
 namespace SignaCore.Domain.Services;
 

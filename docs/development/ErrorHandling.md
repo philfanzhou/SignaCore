@@ -74,7 +74,7 @@ writer into `service_audit_logs`; the caller owns the save or explicit transacti
 operation-specific transaction boundaries. Use those contracts and the implementation/test sources
 below rather than assuming audit persistence is best-effort:
 
-- [TokenIssuanceService](../../src/SignaCore.Host/Services/TokenIssuanceService.cs) commits staged
+- [TokenIssuance](../../src/SignaCore.Host/Services/TokenIssuance.cs) commits staged
   login state and login history together, using an explicit transaction for conditional refresh
   rotation, OTP verification changes, and failed-attempt updates.
   [AuditTransactionTests](../../tests/SignaCore.Tests/Host/Controllers/AuditTransactionTests.cs)

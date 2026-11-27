@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Bootstrap;
 using SignaCore.Database;
-using SignaCore.Database.Entity;
 using SignaCore.Host.Bootstrap;
 using Xunit;
 
@@ -48,7 +47,7 @@ public sealed class BootstrapCandidateValidatorTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
-    private static BootstrapCandidateValidator CreateValidator(string? currentMasterKey = null) =>
+    private static CandidateValidator CreateValidator(string? currentMasterKey = null) =>
         new(BootstrapStore.CreateProviderRegistry(), currentMasterKey);
 
     private static BootstrapConfiguration Candidate(
@@ -79,7 +78,7 @@ public sealed class BootstrapCandidateValidatorTests : IAsyncLifetime
         // requires what its own reload path requires, so the net stays independent of the shared
         // providers' drift: a PostgreSQL target without a host parses and names a database yet
         // could never be loaded here after the restart.
-        var local = BootstrapCandidateValidator.ValidateLocalShape(new DatabaseOptions
+        var local = CandidateValidator.ValidateLocalShape(new DatabaseOptions
         {
             Provider = "PostgreSQL",
             ServerVersion = "15",
@@ -90,7 +89,7 @@ public sealed class BootstrapCandidateValidatorTests : IAsyncLifetime
         Assert.False(local!.IsValid);
         Assert.Equal("signacore.bootstrap.database_invalid", local.ErrorCode);
 
-        Assert.Null(BootstrapCandidateValidator.ValidateLocalShape(new DatabaseOptions
+        Assert.Null(CandidateValidator.ValidateLocalShape(new DatabaseOptions
         {
             Provider = "PostgreSQL",
             ServerVersion = "15",
@@ -138,13 +137,13 @@ public sealed class BootstrapCandidateValidatorTests : IAsyncLifetime
     [Fact]
     public async Task UnreachableTarget_ReportsTheLocalUnreachableCode()
     {
-        var inspection = new BootstrapTargetInspection(
-            BootstrapTargetKind.Unreachable,
+        var inspection = new TargetInspection(
+            TargetKind.Unreachable,
             MasterKeyCompatibility.NoProtectedData,
             InstallationId: null,
             Endpoint: "redacted",
             FailureReason: "probe");
-        var validator = new BootstrapCandidateValidator(
+        var validator = new CandidateValidator(
             BootstrapStore.CreateProviderRegistry(),
             currentMasterKey: null,
             inspection: (_, _, _) => Task.FromResult(inspection));
@@ -194,7 +193,7 @@ public sealed class BootstrapCandidateValidatorTests : IAsyncLifetime
         // first: a shape this process could not reload is refused under the local code, and the
         // missing target is never prepared for it. Without the early check the same candidate
         // would keep the shared database.target_not_found after a failed preparation attempt.
-        var validator = new BootstrapCandidateValidator(
+        var validator = new CandidateValidator(
             new BootstrapDatabaseProviderRegistry([new TargetNotFoundProvider("SQLite")]),
             currentMasterKey: null);
         var result = await validator.ValidateAsync(
@@ -214,7 +213,7 @@ public sealed class BootstrapCandidateValidatorTests : IAsyncLifetime
         // The same ordering proof on the key rule: with the shared checks reporting a missing
         // target, a running host that would swap its key is refused under the SignaCore code and
         // the preparation never creates the target.
-        var validator = new BootstrapCandidateValidator(
+        var validator = new CandidateValidator(
             new BootstrapDatabaseProviderRegistry([new TargetNotFoundProvider("SQLite")]),
             currentMasterKey: "the-running-key");
         var result = await validator.ValidateAsync(
@@ -271,7 +270,7 @@ public sealed class BootstrapCandidateValidatorTests : IAsyncLifetime
     [Fact]
     public async Task InternalInspectionFailure_IsTheSharedValidationFailedCode()
     {
-        var validator = new BootstrapCandidateValidator(
+        var validator = new CandidateValidator(
             BootstrapStore.CreateProviderRegistry(),
             currentMasterKey: null,
             inspection: (_, _, _) => throw new IOException("simulated internal failure"));

@@ -1,6 +1,5 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
@@ -14,7 +13,7 @@ using Xunit;
 namespace SignaCore.Tests.Host.Services;
 
 /// <summary>
-/// The <c>EV-01</c> success transaction as a unit: <see cref="OidcLoginCompletionService"/>
+/// The <c>EV-01</c> success transaction as a unit: <see cref="OidcLoginCompletion"/>
 /// commits the continuation consumption, the session, the code, the counter clear, the login
 /// info, and the success audit as one unit; the consumed-continuation and deactivated-account
 /// races answer with the single <c>null</c> and roll the whole unit back; cancellation observed
@@ -291,12 +290,12 @@ public sealed class OidcLoginCompletionServiceTests
     private sealed class CompletionDatabase(
         SqliteConnection connection,
         IdentityDbContext context,
-        OidcLoginCompletionService service,
+        OidcLoginCompletion service,
         IAuthorizationRequestStore continuations) : IAsyncDisposable
     {
         public SqliteConnection Connection { get; } = connection;
         public IdentityDbContext Context { get; } = context;
-        public OidcLoginCompletionService Service { get; } = service;
+        public OidcLoginCompletion Service { get; } = service;
         public IAuthorizationRequestStore Continuations { get; } = continuations;
 
         public async ValueTask DisposeAsync()
@@ -318,7 +317,7 @@ public sealed class OidcLoginCompletionServiceTests
         var accountRepository = new AccountRepository(context);
         var continuations = new AuthorizationRequestStore(
             new AuthorizationRequestRepository(context), unitOfWork);
-        var service = new OidcLoginCompletionService(
+        var service = new OidcLoginCompletion(
             continuations,
             accountRepository,
             new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),

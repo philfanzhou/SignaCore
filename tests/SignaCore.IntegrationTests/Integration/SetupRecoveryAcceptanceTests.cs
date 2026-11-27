@@ -9,7 +9,6 @@ using SignaCore.Database;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Installation;
 using SignaCore.Host.Startup;
-using SignaCore.Host;
 using System.Net.Http.Json;
 using System.Net;
 using System.Text.Json;

@@ -12,7 +12,6 @@ using SignaCore.Database.Entity;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Services.Sms;
-using SignaCore.Host;
 using SignaCore.Host.Security;
 using Xunit;
 

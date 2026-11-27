@@ -13,46 +13,46 @@ namespace SignaCore.Tests.Host.Configuration;
 public class CallbackUrlValidatorRegistrationTests
 {
     [Fact]
-    public void AddIdentityInfrastructure_ByDefault_AcceptsPlainHttpCallbacks()
+    public async Task AddIdentityInfrastructure_ByDefault_AcceptsPlainHttpCallbacks()
     {
         // RequireHttps defaults to false (ADR 0008): the transport is a deployment decision, and
         // the SSRF gate (private-address refusal) carries the protection.
         var validator = ResolveValidator(allowPrivateAddresses: null);
 
-        var result = validator.Validate("http://93.184.216.34/callback");
+        var result = await validator.ValidateAsync("http://93.184.216.34/callback", TestContext.Current.CancellationToken);
 
         Assert.True(result.IsValid);
     }
 
     [Fact]
-    public void AddIdentityInfrastructure_WithAllowPrivateAddressesFalse_RejectsPrivateCallbackAddresses()
+    public async Task AddIdentityInfrastructure_WithAllowPrivateAddressesFalse_RejectsPrivateCallbackAddresses()
     {
         var validator = ResolveValidator(allowPrivateAddresses: false);
 
-        var result = validator.Validate("https://10.0.0.1/callback");
+        var result = await validator.ValidateAsync("https://10.0.0.1/callback", TestContext.Current.CancellationToken);
 
         Assert.False(result.IsValid);
         Assert.Contains("private/internal IP", result.ErrorMessage);
     }
 
     [Fact]
-    public void AddIdentityInfrastructure_InDevelopmentByDefault_AllowsPrivateHttpCallbacks()
+    public async Task AddIdentityInfrastructure_InDevelopmentByDefault_AllowsPrivateHttpCallbacks()
     {
         var validator = ResolveValidator(
             allowPrivateAddresses: null,
             environmentName: Environments.Development);
 
-        Assert.True(validator.Validate("http://10.0.0.1/callback").IsValid);
+        Assert.True((await validator.ValidateAsync("http://10.0.0.1/callback", TestContext.Current.CancellationToken)).IsValid);
     }
 
     [Fact]
-    public void AddIdentityInfrastructure_WithExplicitProductionOverrides_AllowsPrivateHttpCallbacks()
+    public async Task AddIdentityInfrastructure_WithExplicitProductionOverrides_AllowsPrivateHttpCallbacks()
     {
         var validator = ResolveValidator(
             allowPrivateAddresses: true,
             requireHttps: false);
 
-        Assert.True(validator.Validate("http://10.0.0.1/callback").IsValid);
+        Assert.True((await validator.ValidateAsync("http://10.0.0.1/callback", TestContext.Current.CancellationToken)).IsValid);
     }
 
     private static CallbackUrlValidator ResolveValidator(

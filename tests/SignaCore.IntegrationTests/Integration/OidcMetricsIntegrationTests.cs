@@ -8,7 +8,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using SignaCore.Database;
 using SignaCore.Domain;
-using SignaCore.Host;
 using SignaCore.Host.Metrics;
 using Xunit;
 
@@ -151,7 +150,7 @@ public sealed class OidcMetricsIntegrationTests : IClassFixture<IdentityServerFi
         var gauges = host.Services.GetRequiredService<OidcRetentionGauges>();
         using var collector = new MetricsCollector();
 
-        var before = collector.SnapshotGauge("oidc.retention.identity_session", gauges);
+        var before = collector.SnapshotGauge("oidc.retention.identity_session");
 
         var accountId = Guid.NewGuid();
         var credentialId = Guid.NewGuid();
@@ -180,7 +179,7 @@ public sealed class OidcMetricsIntegrationTests : IClassFixture<IdentityServerFi
             Assert.NotEqual(default, session.Id);
         });
 
-        var after = collector.SnapshotGauge("oidc.retention.identity_session", gauges);
+        var after = collector.SnapshotGauge("oidc.retention.identity_session");
         Assert.Equal(before + 1, after);
 
         // The closed provider label is part of every gauge sample.
@@ -305,7 +304,7 @@ public sealed class OidcMetricsIntegrationTests : IClassFixture<IdentityServerFi
 
         private readonly Dictionary<string, long> _retentions = new(StringComparer.Ordinal);
 
-        public long SnapshotGauge(string name, OidcRetentionGauges gauges)
+        public long SnapshotGauge(string name)
         {
             lock (_gate)
             {

@@ -12,7 +12,6 @@ using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
-using SignaCore.Host;
 using SignaCore.Host.Startup;
 using Testcontainers.PostgreSql;
 using Xunit;

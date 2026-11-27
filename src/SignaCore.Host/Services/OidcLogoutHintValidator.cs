@@ -1,8 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using Microsoft.IdentityModel.Tokens;
 using SignaCore.Database;
-using SignaCore.Domain;
-using SignaCore.Domain.Keys;
 
 namespace SignaCore.Host.Services;
 

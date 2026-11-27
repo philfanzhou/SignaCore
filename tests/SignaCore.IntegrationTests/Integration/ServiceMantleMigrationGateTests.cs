@@ -8,8 +8,6 @@ using Npgsql;
 using ServiceMantle;
 using ServiceMantle.Bootstrap;
 using SignaCore.Database;
-using SignaCore.Database.Entity;
-using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Migration;
 using SignaCore.Host.Startup;
 using ServiceMantle.Migration;
@@ -28,7 +26,6 @@ namespace SignaCore.IntegrationTests.Integration;
 /// </summary>
 public sealed class ServiceMantleMigrationGateTests
 {
-    private const string ServiceIdValue = "signacore";
     private const string PostgreSqlPreServiceInstallations =
         "20260831103620_PersistInteractiveOidcClientConfiguration";
 
@@ -73,7 +70,7 @@ public sealed class ServiceMantleMigrationGateTests
     {
         await using var container = await StartContainerAsync();
         var database = ContainerDatabaseOptions(container);
-        await PrepareScenarioAsync(container, database, scenario);
+        await PrepareScenarioAsync(database, scenario);
 
         await using var context = CreateContext(database);
         var executor = new MigrationExecutor(context, database);
@@ -348,7 +345,6 @@ public sealed class ServiceMantleMigrationGateTests
     }
 
     private static async Task PrepareScenarioAsync(
-        PostgreSqlContainer container,
         DatabaseOptions database,
         ObservationScenario scenario)
     {

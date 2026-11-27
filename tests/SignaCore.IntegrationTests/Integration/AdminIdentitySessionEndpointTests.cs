@@ -1,4 +1,3 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -11,11 +10,8 @@ using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
-using SignaCore.Host;
 using SignaCore.Host.Security;
 using Xunit;
-
-using SignaCore.Tests.Integration;
 
 namespace SignaCore.Tests.Integration;
 
@@ -169,7 +165,7 @@ public sealed class AdminIdentitySessionEndpointTests : IClassFixture<IdentitySe
     {
         using var host = CreateHost();
         var (accountId, sessionId, cookieValue) = await LoginAndCaptureSessionAsync(host);
-        var code = await SeedCodeAsync(accountId, sessionId);
+        var code = await SeedCodeAsync(sessionId);
         using var admin = await _fixture.CreateAdminHttpClientAsync();
 
         var revoked = await ReadRevokeResponseAsync(admin, accountId, sessionId);
@@ -348,7 +344,7 @@ public sealed class AdminIdentitySessionEndpointTests : IClassFixture<IdentitySe
         return rootId;
     }
 
-    private async Task<string> SeedCodeAsync(Guid accountId, Guid sessionId)
+    private async Task<string> SeedCodeAsync(Guid sessionId)
     {
         var applicationRowId = await SeedAppAsync();
         using var scope = _fixture.Services.CreateScope();

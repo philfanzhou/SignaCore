@@ -31,24 +31,11 @@ internal static class StartupMigrationGate
     internal static readonly TimeSpan SharedLockWaitBudget = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Runs the shared migration orchestration with SignaCore's real executor. Caller cancellation
+    /// Runs the shared migration orchestration with the caller's executor. The installation startup
+    /// reuses one core composition across target preparation and migration. Caller cancellation
     /// propagates as <see cref="OperationCanceledException"/> on the original token; every other
     /// failure is delivered as a <see cref="StartupMigrationException"/> with a fixed code and
     /// message.
-    /// </summary>
-    public static async Task RunAsync(
-        IdentityDbContext database,
-        DatabaseOptions databaseOptions,
-        ILogger logger,
-        CancellationToken cancellationToken = default)
-    {
-        var executor = new MigrationExecutor(database, databaseOptions);
-        await RunAsync(database, databaseOptions, logger, executor, cancellationToken);
-    }
-
-    /// <summary>
-    /// Direct-call seam with an injectable executor. The installation startup reuses one core
-    /// composition across target preparation and migration.
     /// </summary>
     internal static async Task RunAsync(
         IdentityDbContext database,

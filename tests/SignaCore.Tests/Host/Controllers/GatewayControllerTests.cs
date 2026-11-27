@@ -32,8 +32,6 @@ public class GatewayControllerTests : IDisposable
         _userQueryService = new UserQueryService(_dbContext);
 
         _appRepoMock = new Mock<IAppRegistrationRepository>();
-        var validationService = new GatewayValidationService(_appRepoMock.Object, NullLogger<GatewayValidationService>.Instance);
-
         _controller = new GatewayController(NullLogger<GatewayController>.Instance);
         var httpContext = new DefaultHttpContext();
         httpContext.Connection.RemoteIpAddress = IPAddress.Parse("127.0.0.1");
@@ -158,7 +156,7 @@ public class GatewayControllerTests : IDisposable
         SetGatewayHeaders("testapp", "testsecret");
         RegisterValidApp();
         var acc1 = SeedAccount(nickname: "Alice");
-        var acc2 = SeedAccount(nickname: "Bob");
+        SeedAccount(nickname: "Bob");
         SeedPasswordCredential(acc1.Id, "alice123");
 
         var result = await _controller.SearchUsers(null, null, null, null, _userQueryService, CreateValidationService());
@@ -469,6 +467,6 @@ public class GatewayControllerTests : IDisposable
 
     private GatewayValidationService CreateValidationService()
     {
-        return new GatewayValidationService(_appRepoMock.Object, NullLogger<GatewayValidationService>.Instance);
+        return new GatewayValidationService(_appRepoMock.Object);
     }
 }

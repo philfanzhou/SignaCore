@@ -2,7 +2,6 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
@@ -88,7 +87,7 @@ public sealed class OidcSmsCodeSendServiceTests : IAsyncLifetime
         _admissions.VerifyNoOtherCalls();
         _otp.VerifyNoOtherCalls();
         var row = Assert.Single(await HistoriesAsync());
-        AssertAudit(row, OidcSmsCodeSendService.SuppressedEventType, "continuation_budget", accountId: null);
+        AssertAudit(row, OidcSmsCodeSend.SuppressedEventType, "continuation_budget", accountId: null);
         Assert.Equal(IdentityConstants.MaxSmsCodeSendsPerContinuation, await CountAsync());
     }
 
@@ -109,7 +108,7 @@ public sealed class OidcSmsCodeSendServiceTests : IAsyncLifetime
         Assert.Equal(reason, outcome);
         Assert.Equal(["count:1", "eligibility"], _calls);
         _otp.VerifyNoOtherCalls();
-        AssertAudit(Assert.Single(await HistoriesAsync()), OidcSmsCodeSendService.SuppressedEventType, reason, accountId);
+        AssertAudit(Assert.Single(await HistoriesAsync()), OidcSmsCodeSend.SuppressedEventType, reason, accountId);
     }
 
     [Theory]
@@ -129,7 +128,7 @@ public sealed class OidcSmsCodeSendServiceTests : IAsyncLifetime
 
         Assert.Equal(reason, outcome);
         Assert.Equal(["count:1", "eligibility", "otp"], _calls);
-        AssertAudit(Assert.Single(await HistoriesAsync()), OidcSmsCodeSendService.SuppressedEventType, reason, accountId);
+        AssertAudit(Assert.Single(await HistoriesAsync()), OidcSmsCodeSend.SuppressedEventType, reason, accountId);
         // Whatever the OTP service left tracked never rides along with the suppressed audit row.
         Assert.Empty(await _context.Otps.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken));
     }
@@ -143,7 +142,7 @@ public sealed class OidcSmsCodeSendServiceTests : IAsyncLifetime
         var outcome = await CreateService().SendAsync(Request(), TestContext.Current.CancellationToken);
 
         Assert.Equal(OidcSmsCodeSendOutcomes.Sent, outcome);
-        AssertAudit(Assert.Single(await HistoriesAsync()), OidcSmsCodeSendService.SentEventType, failureReason: null, accountId: null);
+        AssertAudit(Assert.Single(await HistoriesAsync()), OidcSmsCodeSend.SentEventType, failureReason: null, accountId: null);
         // The staged delivery state commits in the same unit as the audit row.
         Assert.Single(await _context.Otps.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken));
     }
@@ -234,7 +233,7 @@ public sealed class OidcSmsCodeSendServiceTests : IAsyncLifetime
         Assert.Empty(await HistoriesAsync());
     }
 
-    private OidcSmsCodeSendService CreateService(IAuditService? audit = null)
+    private OidcSmsCodeSend CreateService(IAuditService? audit = null)
     {
         var recordingStore = new Mock<IAuthorizationRequestStore>(MockBehavior.Strict);
         recordingStore.Setup(store => store.TryTakeSmsCodeSendSlotAsync(
@@ -245,14 +244,14 @@ public sealed class OidcSmsCodeSendServiceTests : IAsyncLifetime
                 _calls.Add("count:" + (taken ? 1 : 0));
                 return taken;
             });
-        return new OidcSmsCodeSendService(
+        return new OidcSmsCodeSend(
             recordingStore.Object,
             _admissions.Object,
             _otp.Object,
             audit ?? new AuditService(new LoginHistoryRepository(_context)),
             new EfCoreUnitOfWork(_context),
             _context,
-            NullLogger<OidcSmsCodeSendService>.Instance);
+            NullLogger<OidcSmsCodeSend>.Instance);
     }
 
     private OidcSmsCodeSendRequest Request() => new(
@@ -313,7 +312,7 @@ public sealed class OidcSmsCodeSendServiceTests : IAsyncLifetime
 
     private static void AssertAudit(LoginHistoryEntity row, string eventType, string? failureReason, Guid? accountId)
     {
-        Assert.Equal(OidcSmsCodeSendService.AuthMethod, row.AuthMethod);
+        Assert.Equal(OidcSmsCodeSend.AuthMethod, row.AuthMethod);
         Assert.Equal(eventType, row.EventType);
         Assert.Equal(failureReason, row.FailureReason);
         Assert.Equal(accountId, row.AccountId);

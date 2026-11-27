@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Http;
 using ServiceMantle.Bootstrap;
 using ServiceMantle.Web.Management;
 using ServiceMantle.Web.ManagementApi.Entries;
@@ -100,12 +99,12 @@ internal static class AdminBootstrapEndpoints
 
             var service = context.RequestServices.GetRequiredService<BootstrapConfigurationService>();
             var result = await service.TestAsync(request.Database, candidateKey, context.RequestAborted);
-            if (result.Outcome == BootstrapOutcome.InvalidRequest)
+            if (result.Outcome == Outcome.InvalidRequest)
             {
                 return ManagementApiResults.InvalidRequest();
             }
 
-            return Results.Json(BootstrapResponseMapper.Describe(result));
+            return Results.Json(ResponseMapper.Describe(result));
         })
         .RequireAuthorization(
             ManagementAuthorizationDefaults.AdminPolicyName,

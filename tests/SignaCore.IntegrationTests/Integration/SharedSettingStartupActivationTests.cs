@@ -1,14 +1,10 @@
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using ServiceMantle.Audit;
 using ServiceMantle.Configuration;
 using SignaCore.Database;
-using SignaCore.Database.Entity;
-using SignaCore.Domain.Keys;
 using SignaCore.Host.Configuration;
-using SignaCore.Host.Installation;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;

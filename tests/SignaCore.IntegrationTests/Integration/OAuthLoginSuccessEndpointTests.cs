@@ -15,7 +15,6 @@ using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Security;
 using SignaCore.Host.Services;
-using SignaCore.Host;
 using System.Data.Common;
 using System.Net;
 using Xunit;

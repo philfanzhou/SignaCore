@@ -11,7 +11,6 @@ using SignaCore.Database.Entity;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
-using SignaCore.Host;
 using SignaCore.Host.Security;
 using Xunit;
 

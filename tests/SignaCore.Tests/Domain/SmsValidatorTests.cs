@@ -16,7 +16,7 @@ public class SmsValidatorTests
     [Fact]
     public async Task ManualApproval_RejectsBeforeOtp_WhenUserIsNotAdminApproved()
     {
-        var (validator, otp, admission) = Create(SmsLoginMode.ManualApproval, null);
+        var (validator, otp, admission) = Create(null);
         var result = await validator.ValidateAsync(Request(SmsLoginMode.ManualApproval));
         Assert.False(result.IsSuccess);
         Assert.Equal("SMS account is not authorized for this application", result.ErrorMessage);
@@ -35,7 +35,7 @@ public class SmsValidatorTests
         var login = new UserLoginEntity { Id = Guid.NewGuid(), AccountId = account.Id, ProviderUserId = "+8613800138000" };
         var access = new AppSmsAccessEntity { IsActive = true, ApprovalSource = SmsAccessApprovalSource.AutoProvision };
         var provisioned = new SmsAdmission(account, login, access);
-        var (validator, otp, admission) = Create(SmsLoginMode.AutoProvision, null);
+        var (validator, otp, admission) = Create(null);
         var otpChange = Change(OtpVerificationChangeKind.Consume);
         otp.Setup(service => service.VerifyAsync(
                 AppId,
@@ -58,7 +58,7 @@ public class SmsValidatorTests
     [Fact]
     public async Task DisabledMode_DoesNotVerifyOtp()
     {
-        var (validator, otp, _) = Create(SmsLoginMode.Disabled, null);
+        var (validator, otp, _) = Create(null);
         var result = await validator.ValidateAsync(Request(SmsLoginMode.Disabled));
         Assert.False(result.IsSuccess);
         Assert.Equal("SMS login is disabled for this application", result.ErrorMessage);
@@ -79,7 +79,7 @@ public class SmsValidatorTests
     public async Task DisabledPolicy_SetsTheSmsLoginDisabledReason_BeforeAnyOtherCheck(
         bool withApp, string? phone, string? code)
     {
-        var (validator, otp, admission) = Create(SmsLoginMode.Disabled, null);
+        var (validator, otp, admission) = Create(null);
         var request = Request(SmsLoginMode.Disabled);
         request.Phone = phone;
         request.Code = code;
@@ -110,7 +110,6 @@ public class SmsValidatorTests
         var login = new UserLoginEntity { Id = Guid.NewGuid(), AccountId = account.Id };
         var access = new AppSmsAccessEntity { IsActive = true, ApprovalSource = SmsAccessApprovalSource.Admin };
         var (validator, otp, _) = Create(
-            SmsLoginMode.ManualApproval,
             scenario == "not-authorized" ? null : new SmsAdmission(account, login, access));
         var verified = scenario != "wrong-code";
         otp.Setup(service => service.VerifyAsync(
@@ -141,7 +140,7 @@ public class SmsValidatorTests
         var account = new AccountEntity { Id = Guid.NewGuid(), IsActive = true };
         var login = new UserLoginEntity { Id = Guid.NewGuid(), AccountId = account.Id };
         var access = new AppSmsAccessEntity { IsActive = true, ApprovalSource = SmsAccessApprovalSource.Admin };
-        var (validator, otp, _) = Create(mode, new SmsAdmission(account, login, access));
+        var (validator, otp, _) = Create(new SmsAdmission(account, login, access));
         otp.Setup(service => service.VerifyAsync(
                 AppId, "+8613800138000", "123456", TestContext.Current.CancellationToken))
             .ReturnsAsync(new OtpVerificationResult(true, Change(OtpVerificationChangeKind.Consume)));
@@ -169,7 +168,7 @@ public class SmsValidatorTests
         var login = new UserLoginEntity { Id = Guid.NewGuid(), AccountId = account.Id, ProviderUserId = "+8613800138000" };
         var access = new AppSmsAccessEntity { IsActive = true, ApprovalSource = SmsAccessApprovalSource.Admin };
         var admissionValue = new SmsAdmission(account, login, access);
-        var (validator, otp, admission) = Create(SmsLoginMode.ManualApproval, admissionValue);
+        var (validator, otp, admission) = Create(admissionValue);
         var otpChange = Change(OtpVerificationChangeKind.Consume);
         otp.Setup(service => service.VerifyAsync(
                 AppId,
@@ -195,7 +194,6 @@ public class SmsValidatorTests
         var login = new UserLoginEntity { Id = Guid.NewGuid(), AccountId = account.Id };
         var access = new AppSmsAccessEntity { IsActive = true, ApprovalSource = SmsAccessApprovalSource.Admin };
         var (validator, otp, _) = Create(
-            SmsLoginMode.ManualApproval,
             new SmsAdmission(account, login, access));
         var otpChange = Change(OtpVerificationChangeKind.RecordFailure);
         otp.Setup(service => service.VerifyAsync(
@@ -218,7 +216,6 @@ public class SmsValidatorTests
         var login = new UserLoginEntity { Id = Guid.NewGuid(), AccountId = account.Id };
         var access = new AppSmsAccessEntity { IsActive = true, ApprovalSource = SmsAccessApprovalSource.Admin };
         var (validator, otp, _) = Create(
-            SmsLoginMode.ManualApproval,
             new SmsAdmission(account, login, access),
             new SmsOptions { BypassCode = "123456", BypassPhones = ["+8613800138000"] });
 
@@ -236,7 +233,6 @@ public class SmsValidatorTests
         var login = new UserLoginEntity { Id = Guid.NewGuid(), AccountId = account.Id };
         var access = new AppSmsAccessEntity { IsActive = true, ApprovalSource = SmsAccessApprovalSource.Admin };
         var (validator, otp, _) = Create(
-            SmsLoginMode.ManualApproval,
             new SmsAdmission(account, login, access));
         var otpChange = Change(OtpVerificationChangeKind.Consume);
         otp.Setup(service => service.VerifyAsync(
@@ -254,7 +250,6 @@ public class SmsValidatorTests
     }
 
     private static (SmsValidator Validator, Mock<IOtpService> Otp, Mock<ISmsAdmissionService> Admission) Create(
-        SmsLoginMode mode,
         SmsAdmission? admissionValue,
         SmsOptions? options = null)
     {

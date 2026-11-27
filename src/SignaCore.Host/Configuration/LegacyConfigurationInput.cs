@@ -29,8 +29,7 @@ internal static class LegacyConfigurationInput
     /// message carries key names only.
     /// </exception>
     public static (Dictionary<string, string> Values, int ImportedKeyCount) ReadCompleteInput(
-        IConfiguration configuration,
-        ILogger logger)
+        IConfiguration configuration)
     {
         var values = ServiceSettingDefinitions.BuildLegacyDefaults();
         var imported = new List<string>();
@@ -91,7 +90,7 @@ internal static class LegacyConfigurationInput
         {
             if (definition.ValueType == ServiceSettingValueType.Json)
             {
-                var exported = ConfigurationJsonExporter.Export(configuration.GetSection(key));
+                var exported = JsonExporter.Export(configuration.GetSection(key));
                 if (exported is not null)
                 {
                     return exported;

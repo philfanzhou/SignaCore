@@ -2,12 +2,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
@@ -44,7 +42,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task RotateAsync_CommitsTheConsumptionTheChildAndThePs15Outcome()
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var seed = await SeedAsync(harness.Context);
         var root = await InsertInteractiveMemberAsync(harness, seed, consumedAt: null);
 
         var dispatch = await harness.Service.RotateAsync(
@@ -125,7 +123,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task PublicRotation_RequiresTheCurrentBoundedPolicyAndFamilyScope(string change)
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var seed = await SeedAsync(harness.Context);
         seed.Application.ClientType = OidcClientType.Public;
         seed.Application.AppSecretHash = string.Empty;
         seed.Application.AllowRefreshToken = change != "opt-out";
@@ -166,7 +164,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task RotateAsync_OnReplay_RevokesLiveDescendantsAndCommitsOneIdOnlyAudit()
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var seed = await SeedAsync(harness.Context);
         var now = DateTimeOffset.UtcNow;
 
         // root (consumed) -> child (consumed) -> grandchild (live): presenting the root must
@@ -217,7 +215,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task RotateAsync_WhenSessionRevoked_RevokesTheFamilyAndRejectsWithoutAReuseAudit()
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var seed = await SeedAsync(harness.Context);
         var root = await InsertInteractiveMemberAsync(harness, seed, consumedAt: null);
         await ExecuteAsync(harness.Context, context => context.IdentitySessions
             .Where(row => row.Id == seed.SessionId)
@@ -240,7 +238,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task RotateAsync_WhenSessionIdleExpired_RevokesTheFamilyAndRejects()
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var seed = await SeedAsync(harness.Context);
         var root = await InsertInteractiveMemberAsync(harness, seed, consumedAt: null);
         await ExecuteAsync(harness.Context, context => context.IdentitySessions
             .Where(row => row.Id == seed.SessionId)
@@ -260,7 +258,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task RotateAsync_WhenApplicationMaxAgeIsExceeded_RevokesTheFamilyAndRejects()
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope, maxAgeSeconds: 5);
+        var seed = await SeedAsync(harness.Context, maxAgeSeconds: 5);
         await ExecuteAsync(harness.Context, context => context.IdentitySessions
             .Where(row => row.Id == seed.SessionId)
             .ExecuteUpdateAsync(setters => setters
@@ -280,7 +278,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task RotateAsync_WhenScopeWasRemoved_RevokesTheFamilyAndRejects()
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope, allowedScopes: "openid profile");
+        var seed = await SeedAsync(harness.Context, allowedScopes: "openid profile");
 
         var root = await InsertInteractiveMemberAsync(harness, seed, consumedAt: null);
         var dispatch = await harness.Service.RotateAsync(
@@ -299,7 +297,7 @@ public sealed class InteractiveRefreshRotationServiceTests
         bool allowRefreshToken, bool applicationActive)
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope, allowRefreshToken: true);
+        var seed = await SeedAsync(harness.Context, allowRefreshToken: true);
         if (!allowRefreshToken)
         {
             await ExecuteAsync(harness.Context, context => context.AppRegistrations
@@ -328,7 +326,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task RotateAsync_WhenAccountDisabled_RejectsWithoutWrites()
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var seed = await SeedAsync(harness.Context);
         var root = await InsertInteractiveMemberAsync(harness, seed, consumedAt: null);
         await ExecuteAsync(harness.Context, context => context.Accounts
             .Where(row => row.Id == seed.AccountId)
@@ -347,7 +345,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task RotateAsync_WhenMemberExpiredOrRevoked_RejectsWithoutReuseOrWrites()
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var seed = await SeedAsync(harness.Context);
 
         // Expired: the family deadline has passed; expiry never manufactures reuse (EV-32).
         var expired = await InsertInteractiveMemberAsync(
@@ -373,7 +371,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task RotateAsync_ForAnotherClient_RejectsWithoutSideEffects()
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var seed = await SeedAsync(harness.Context);
         var root = await InsertInteractiveMemberAsync(harness, seed, consumedAt: null);
         var other = new AppRegistrationEntity
         {
@@ -444,7 +442,7 @@ public sealed class InteractiveRefreshRotationServiceTests
         // CK_refresh_tokens_family_marker keeps a partial marker out of the database; this is
         // the defense-in-depth branch, driven through a corrupt row shape from a fake lookup.
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var seed = await SeedAsync(harness.Context);
         var corrupt = new RefreshTokenEntity
         {
             Id = Guid.NewGuid(),
@@ -485,7 +483,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task RotateAsync_WithAScopeField_RejectsWithInvalidRequest(string scopeField)
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var seed = await SeedAsync(harness.Context);
         var root = await InsertInteractiveMemberAsync(harness, seed, consumedAt: null);
         var fields = new Dictionary<string, StringValues>
         {
@@ -509,7 +507,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task RotateAsync_WithMixedClientCredentials_AnswersInvalidClient()
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var seed = await SeedAsync(harness.Context);
         var root = await InsertInteractiveMemberAsync(harness, seed, consumedAt: null);
 
         var dispatch = await harness.Service.RotateAsync(
@@ -628,7 +626,7 @@ public sealed class InteractiveRefreshRotationServiceTests
     public async Task RotateAsync_CancelledAtTheApplicationPolicyLock_LeavesNoHalfCommit()
     {
         await using var harness = await CreateHarnessAsync();
-        var seed = await SeedAsync(harness.Context, scope: CanonicalScope);
+        var seed = await SeedAsync(harness.Context);
         var root = await InsertInteractiveMemberAsync(harness, seed, consumedAt: null);
         using var caller = new CancellationTokenSource();
         var applications = new Mock<IAppRegistrationRepository>(MockBehavior.Strict);
@@ -697,21 +695,21 @@ public sealed class InteractiveRefreshRotationServiceTests
     private sealed class RotationHarness(
         SqliteConnection connection,
         IdentityDbContext context,
-        InteractiveRefreshRotationService service) : IAsyncDisposable
+        InteractiveRefreshRotation service) : IAsyncDisposable
     {
         public SqliteConnection Connection { get; } = connection;
 
         public IdentityDbContext Context { get; } = context;
 
-        public InteractiveRefreshRotationService Service { get; } = service;
+        public InteractiveRefreshRotation Service { get; } = service;
 
-        public InteractiveRefreshRotationService BuildService(
+        public InteractiveRefreshRotation BuildService(
             IRefreshTokenRepository? repositoryOverride = null,
             IAppRegistrationRepository? applicationsOverride = null)
         {
             var unitOfWork = new EfCoreUnitOfWork(Context);
             var refreshTokens = repositoryOverride ?? new RefreshTokenRepository(Context);
-            return new InteractiveRefreshRotationService(
+            return new InteractiveRefreshRotation(
                 refreshTokens,
                 new RefreshTokenFamilyStore(refreshTokens, unitOfWork, NullLogger<RefreshTokenFamilyStore>.Instance),
                 new IdentitySessionStore(new IdentitySessionRepository(Context), unitOfWork),
@@ -729,7 +727,7 @@ public sealed class InteractiveRefreshRotationServiceTests
                 Context,
                 new AdminIdentityOptions(),
                 new SmsAdmissionService(Context),
-                NullLogger<InteractiveRefreshRotationService>.Instance);
+                NullLogger<InteractiveRefreshRotation>.Instance);
         }
 
         public async ValueTask DisposeAsync()
@@ -761,7 +759,6 @@ public sealed class InteractiveRefreshRotationServiceTests
 
     private static async Task<Seed> SeedAsync(
         IdentityDbContext context,
-        string scope = "openid profile",
         string allowedScopes = "openid profile offline_access",
         bool allowRefreshToken = true,
         int? maxAgeSeconds = null)

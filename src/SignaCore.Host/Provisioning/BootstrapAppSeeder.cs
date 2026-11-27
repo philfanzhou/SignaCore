@@ -35,7 +35,6 @@ internal static class BootstrapAppSeeder
         IManagementAuditWriter auditWriter,
         IPasswordHasher passwordHasher,
         ILogger logger,
-        bool isDevelopment,
         CancellationToken cancellationToken = default)
     {
         var filePath = configuration["BootstrapApps:FilePath"] ?? DefaultBootstrapAppsFilePath;
@@ -94,7 +93,6 @@ internal static class BootstrapAppSeeder
                     auditWriter,
                     passwordHasher,
                     logger,
-                    isDevelopment,
                     cancellationToken);
                 switch (result)
                 {
@@ -138,7 +136,6 @@ internal static class BootstrapAppSeeder
         IManagementAuditWriter auditWriter,
         IPasswordHasher passwordHasher,
         ILogger logger,
-        bool isDevelopment,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(entry.AppId) || string.IsNullOrWhiteSpace(entry.AppSecret))

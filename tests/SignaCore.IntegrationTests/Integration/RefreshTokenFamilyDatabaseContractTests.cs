@@ -912,9 +912,6 @@ public sealed class RefreshTokenFamilyDatabaseContractTests
             """, TestContext.Current.CancellationToken);
     }
 
-    private static long Micros(DateTimeOffset value) =>
-        RefreshTokenFamilyTestSupport.ToSqliteMicroseconds(value);
-
     private static async Task<string> DumpSqlAsync(IdentityDbContext context, string sql)
     {
         await context.Database.OpenConnectionAsync(TestContext.Current.CancellationToken);

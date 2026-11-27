@@ -27,14 +27,14 @@ namespace SignaCore.Host.Controllers;
 public class AdminController : ControllerBase
 {
     private readonly ILogger<AdminController> _logger;
-    private readonly ManagementOperatorReader _operatorReader;
+    private readonly OperatorReader _operatorReader;
 
     // The operator reader is an internal type, so it comes from the request scope rather than from
     // a declared constructor parameter — MVC activates controllers through a public constructor.
     public AdminController(ILogger<AdminController> logger, IServiceProvider services)
     {
         _logger = logger;
-        _operatorReader = services.GetRequiredService<ManagementOperatorReader>();
+        _operatorReader = services.GetRequiredService<OperatorReader>();
     }
 
     /// <summary>
@@ -1012,7 +1012,6 @@ public class AdminController : ControllerBase
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
         [FromServices] IUnitOfWork unitOfWork,
         [FromServices] IManagementAuditWriter auditWriter,
-        [FromServices] IWebHostEnvironment environment,
         [FromServices] IdentityDbContext dbContext,
         [FromServices] IRefreshTokenFamilyStore refreshTokenFamilyStore,
         CancellationToken cancellationToken)
@@ -1114,7 +1113,6 @@ public class AdminController : ControllerBase
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
         [FromServices] IUnitOfWork unitOfWork,
         [FromServices] IManagementAuditWriter auditWriter,
-        [FromServices] IWebHostEnvironment environment,
         CancellationToken cancellationToken)
     {
         var app = await appRegistrationRepository.GetByAppIdWithOidcConfigurationAsync(
@@ -1138,7 +1136,6 @@ public class AdminController : ControllerBase
             appRegistrationRepository,
             unitOfWork,
             auditWriter,
-            environment,
             cancellationToken);
     }
 
@@ -1158,7 +1155,6 @@ public class AdminController : ControllerBase
         [FromServices] IAppRegistrationRepository appRegistrationRepository,
         [FromServices] IUnitOfWork unitOfWork,
         [FromServices] IManagementAuditWriter auditWriter,
-        [FromServices] IWebHostEnvironment environment,
         CancellationToken cancellationToken)
     {
         var app = await appRegistrationRepository.GetByAppIdWithOidcConfigurationAsync(
@@ -1182,7 +1178,6 @@ public class AdminController : ControllerBase
             appRegistrationRepository,
             unitOfWork,
             auditWriter,
-            environment,
             cancellationToken);
     }
 
@@ -1201,7 +1196,6 @@ public class AdminController : ControllerBase
         IAppRegistrationRepository appRegistrationRepository,
         IUnitOfWork unitOfWork,
         IManagementAuditWriter auditWriter,
-        IWebHostEnvironment environment,
         CancellationToken cancellationToken)
     {
         OidcClientConfigurationChange change;

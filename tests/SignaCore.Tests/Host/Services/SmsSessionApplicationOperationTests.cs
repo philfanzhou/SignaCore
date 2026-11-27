@@ -7,7 +7,6 @@ using Microsoft.Extensions.Primitives;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
@@ -408,7 +407,7 @@ public sealed class SmsSessionApplicationOperationTests
     private static IFormCollection RedemptionForm(string code) =>
         new FormCollection(new Dictionary<string, StringValues>
         {
-            ["grant_type"] = AuthorizationCodeRedemptionService.GrantType,
+            ["grant_type"] = AuthorizationCodeRedemption.GrantType,
             ["code"] = code,
             ["redirect_uri"] = RedirectUri,
             ["code_verifier"] = Verifier
@@ -518,10 +517,10 @@ public sealed class SmsSessionApplicationOperationTests
         public IAuthorizationCodeStore Codes() =>
             new AuthorizationCodeStore(new AuthorizationCodeRepository(Context), new EfCoreUnitOfWork(Context));
 
-        public OidcAuthorizationSessionReuseService Reuse()
+        public OidcAuthorizationSessionReuse Reuse()
         {
             var unitOfWork = new EfCoreUnitOfWork(Context);
-            return new OidcAuthorizationSessionReuseService(
+            return new OidcAuthorizationSessionReuse(
                 Sessions(),
                 Codes(),
                 new AccountRepository(Context),
@@ -531,10 +530,10 @@ public sealed class SmsSessionApplicationOperationTests
                 new SmsAdmissionService(Context));
         }
 
-        public AuthorizationCodeRedemptionService Redemption()
+        public AuthorizationCodeRedemption Redemption()
         {
             var unitOfWork = new EfCoreUnitOfWork(Context);
-            return new AuthorizationCodeRedemptionService(
+            return new AuthorizationCodeRedemption(
                 Codes(),
                 Sessions(),
                 new AccountRepository(Context),
@@ -551,16 +550,16 @@ public sealed class SmsSessionApplicationOperationTests
                 Context,
                 new AdminIdentityOptions(),
                 new SmsAdmissionService(Context),
-                NullLogger<AuthorizationCodeRedemptionService>.Instance);
+                NullLogger<AuthorizationCodeRedemption>.Instance);
         }
 
-        public InteractiveRefreshRotationService Refresh(
+        public InteractiveRefreshRotation Refresh(
             Func<IRefreshTokenFamilyStore, IRefreshTokenFamilyStore>? wrapFamilies = null)
         {
             var unitOfWork = new EfCoreUnitOfWork(Context);
             var refreshTokens = new RefreshTokenRepository(Context);
             var families = FamilyStore(refreshTokens, unitOfWork);
-            return new InteractiveRefreshRotationService(
+            return new InteractiveRefreshRotation(
                 refreshTokens,
                 wrapFamilies?.Invoke(families) ?? families,
                 Sessions(),
@@ -576,10 +575,10 @@ public sealed class SmsSessionApplicationOperationTests
                 Context,
                 new AdminIdentityOptions(),
                 new SmsAdmissionService(Context),
-                NullLogger<InteractiveRefreshRotationService>.Instance);
+                NullLogger<InteractiveRefreshRotation>.Instance);
         }
 
-        public OidcUserInfoService UserInfo() =>
+        public OidcUserInfo UserInfo() =>
             new(
                 Keys,
                 new AccountRepository(Context),
@@ -587,7 +586,7 @@ public sealed class SmsSessionApplicationOperationTests
                 Context,
                 new JwtOptions { Issuer = Issuer },
                 new SmsAdmissionService(Context),
-                NullLogger<OidcUserInfoService>.Instance);
+                NullLogger<OidcUserInfo>.Instance);
 
         public OidcAuthorizationValidationResult.Accepted Accepted(Guid applicationRowId, string clientId) =>
             new(clientId, applicationRowId, RedirectUri, "openid profile", "sms-operation-state", Nonce, Challenge);

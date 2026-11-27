@@ -1,15 +1,13 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.AspNetCore.Routing;
 using SignaCore.Host;
 using Xunit;
 
 namespace SignaCore.Tests.Host;
 
 /// <summary>
-/// The SPA branch is a terminal branch: a request it takes never reaches MapControllers().
-/// These tests hold the line on what the SPA must not take — one regression there silently 404s a
-/// whole API.
+/// The console fallback must never take a service route: one regression there silently answers an
+/// API request with the console HTML.
 /// </summary>
 public class AdminSpaRoutingTests
 {
@@ -20,22 +18,21 @@ public class AdminSpaRoutingTests
     [InlineData("/admin")]
     [InlineData("/admin/apps")]
     [InlineData("/assets/index.js")]
-    public void ShouldServeSpa_ServesConsoleRoutes(string path)
+    public void ShouldServeSpaFallback_ServesConsoleRoutes(string path)
     {
-        Assert.True(AdminSpaRouting.ShouldServeSpa(Context(path), HttpPort));
+        Assert.True(AdminSpaRouting.ShouldServeSpaFallback(Context(path), HttpPort));
     }
 
     /// <summary>
-    /// Regression: /oauth2 was once missing from the exclusion list, so in production the SPA branch
-    /// swallowed the entire OAuth endpoint, while TestServer's LocalPort of 0 kept the tests from
-    /// seeing any of it.
+    /// Regression: /oauth2 was once missing from the exclusion list, so the SPA took the entire
+    /// OAuth endpoint in production, while TestServer's LocalPort of 0 kept the tests from seeing
+    /// any of it.
     /// </summary>
     [Theory]
     [InlineData("/api/auth/token")]
     [InlineData("/api/profile/wechat")]
     [InlineData("/oauth2/token")]
     [InlineData("/oauth2/revoke")]
-    [InlineData("/api/auth/token")]
     [InlineData("/.well-known/openid-configuration")]
     [InlineData("/.well-known/jwks")]
     [InlineData("/.well-known/jwks.json")]
@@ -43,38 +40,24 @@ public class AdminSpaRoutingTests
     [InlineData("/health/live")]
     [InlineData("/health/ready")]
     [InlineData("/metrics")]
-    public void ShouldServeSpa_NeverSwallowsServiceRoutes(string path)
+    public void ShouldServeSpaFallback_NeverTakesServiceRoutes(string path)
     {
-        Assert.False(AdminSpaRouting.ShouldServeSpa(Context(path), HttpPort));
-    }
-
-    /// <summary>
-    /// The main line of defence is that routing has already selected an endpoint, not the prefix
-    /// list: a newly added route is excluded automatically, without anyone having to remember to
-    /// come back and edit that list.
-    /// </summary>
-    [Fact]
-    public void ShouldServeSpa_ExcludesAnyPathThatRoutingAlreadyMatched()
-    {
-        var context = Context("/some/future/endpoint");
-        context.SetEndpoint(new Endpoint(_ => Task.CompletedTask, null, "future"));
-
-        Assert.False(AdminSpaRouting.ShouldServeSpa(context, HttpPort));
+        Assert.False(AdminSpaRouting.ShouldServeSpaFallback(Context(path), HttpPort));
     }
 
     [Fact]
-    public void ShouldServeSpa_IgnoresRequestsOnAnotherPort()
+    public void ShouldServeSpaFallback_IgnoresRequestsOnAnotherPort()
     {
-        Assert.False(AdminSpaRouting.ShouldServeSpa(Context("/admin", port: 9443), HttpPort));
+        Assert.False(AdminSpaRouting.ShouldServeSpaFallback(Context("/admin", port: 9443), HttpPort));
     }
 
     /// <summary>
     /// Prefixes are compared on segment boundaries: /apifoo is not something under /api.
     /// </summary>
     [Fact]
-    public void ShouldServeSpa_MatchesPrefixesOnSegmentBoundaries()
+    public void ShouldServeSpaFallback_MatchesPrefixesOnSegmentBoundaries()
     {
-        Assert.True(AdminSpaRouting.ShouldServeSpa(Context("/apifoo"), HttpPort));
+        Assert.True(AdminSpaRouting.ShouldServeSpaFallback(Context("/apifoo"), HttpPort));
     }
 
     private static DefaultHttpContext Context(string path, int? port = null)

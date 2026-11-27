@@ -15,7 +15,6 @@ using Microsoft.Extensions.Logging;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain;
-using SignaCore.Host;
 using SignaCore.Host.Http;
 using SignaCore.Host.Management;
 using SignaCore.Host.Security;
@@ -166,7 +165,7 @@ public sealed class GatewayAuthCapabilitiesTests : IClassFixture<IdentityServerF
         string managementBearer;
         using (var scope = host.Services.CreateScope())
         {
-            var issued = await scope.ServiceProvider.GetRequiredService<ManagementBearerSessionService>()
+            var issued = await scope.ServiceProvider.GetRequiredService<BearerSessionService>()
                 .IssueAsync(await _fixture.GetAdminAccountIdAsync(), Ct);
             managementBearer = issued.Token!;
         }

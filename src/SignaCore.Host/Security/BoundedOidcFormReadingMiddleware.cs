@@ -2,7 +2,6 @@ using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Primitives;
-using SignaCore.Host.Http;
 
 namespace SignaCore.Host.Security;
 

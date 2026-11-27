@@ -14,8 +14,6 @@ using Microsoft.IdentityModel.Tokens;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Services;
-using SignaCore.Host;
-using SignaCore.Host.Security;
 using SignaCore.Host.Services;
 using Xunit;
 
@@ -1029,7 +1027,7 @@ public sealed class OAuthAuthorizationCodeRedemptionTests : IClassFixture<Identi
     {
         var fields = new List<KeyValuePair<string, string>>
         {
-            new("grant_type", AuthorizationCodeRedemptionService.GrantType),
+            new("grant_type", AuthorizationCodeRedemption.GrantType),
             new("code", code),
             new("redirect_uri", redirectUri ?? RedirectUri),
             new("code_verifier", verifier ?? Verifier)

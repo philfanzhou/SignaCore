@@ -36,10 +36,10 @@ namespace SignaCore.Host.Controllers;
 /// against the stored snapshot, then — for a passing credential check — committing the
 /// continuation consumption, the new identity session, the new authorization code, the
 /// failure-counter clear, the login-info update, and the success audit as one transaction
-/// (<see cref="OidcLoginCompletionService"/>) before the fresh <c>PS-18</c> identity cookie and the
+/// (<see cref="OidcLoginCompletion"/>) before the fresh <c>PS-18</c> identity cookie and the
 /// <c>PS-17</c> success redirect are written. The SMS login follows the same shape with its own
 /// generic failure (<c>EV-37</c>, <see cref="OidcSmsLoginFailureRecorder"/>) and success
-/// transaction (<c>EV-36</c>, <see cref="OidcSmsLoginCompletionService"/>). The cancel exit consumes the continuation and
+/// transaction (<c>EV-36</c>, <see cref="OidcSmsLoginCompletion"/>). The cancel exit consumes the continuation and
 /// returns the <c>access_denied</c> safe redirect. A missing, malformed, unknown, expired, or
 /// consumed handle shares the single local 400 of <c>EV-03</c>/<c>SC-18</c>: no redirect, no
 /// credential check, no failure count, no replay audit.
@@ -176,10 +176,10 @@ public sealed partial class OAuthLoginController : ControllerBase
     private readonly ValidatorFactory _validatorFactory;
     private readonly IOidcAuthorizationRequestValidator _revalidator;
     private readonly OidcLoginFailureRecorder _failureRecorder;
-    private readonly OidcLoginCompletionService _loginCompletion;
-    private readonly OidcSmsCodeSendService _smsCodeSend;
+    private readonly OidcLoginCompletion _loginCompletion;
+    private readonly OidcSmsCodeSend _smsCodeSend;
     private readonly OidcSmsLoginFailureRecorder _smsFailureRecorder;
-    private readonly OidcSmsLoginCompletionService _smsLoginCompletion;
+    private readonly OidcSmsLoginCompletion _smsLoginCompletion;
     private readonly ISmsAdmissionService _smsAdmissions;
     private readonly IOtpService _otpService;
     private readonly IdentityDbContext _dbContext;
@@ -193,10 +193,10 @@ public sealed partial class OAuthLoginController : ControllerBase
         ValidatorFactory validatorFactory,
         IOidcAuthorizationRequestValidator revalidator,
         OidcLoginFailureRecorder failureRecorder,
-        OidcLoginCompletionService loginCompletion,
-        OidcSmsCodeSendService smsCodeSend,
+        OidcLoginCompletion loginCompletion,
+        OidcSmsCodeSend smsCodeSend,
         OidcSmsLoginFailureRecorder smsFailureRecorder,
-        OidcSmsLoginCompletionService smsLoginCompletion,
+        OidcSmsLoginCompletion smsLoginCompletion,
         ISmsAdmissionService smsAdmissions,
         IOtpService otpService,
         IdentityDbContext dbContext,
@@ -668,7 +668,7 @@ public sealed partial class OAuthLoginController : ControllerBase
         {
             return await FailSmsLoginAsync(
                 failure, otpFailure: null, eligibility.AccountId,
-                OidcSmsCodeSendService.ReasonFor(eligibility.Decision), cancellationToken);
+                OidcSmsCodeSend.ReasonFor(eligibility.Decision), cancellationToken);
         }
 
         // ⑨ The read-only OTP verification. A failure carries the conditional failed-attempt

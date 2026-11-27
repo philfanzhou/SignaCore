@@ -17,7 +17,7 @@ namespace SignaCore.Host.Startup;
 internal sealed record BootstrapPhaseResult(
     BootstrapConfiguration Bootstrap,
     InstallationPhase Phase,
-    InstallationRuntimeState RuntimeState,
+    RuntimeState RuntimeState,
     IMasterKeyProvider MasterKeyProvider,
     ServiceSettingSnapshot? SharedSnapshot,
     IReadOnlyDictionary<string, string?>? ConfigurationEntries,

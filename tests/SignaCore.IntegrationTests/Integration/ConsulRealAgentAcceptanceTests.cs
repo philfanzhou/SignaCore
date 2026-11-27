@@ -11,7 +11,6 @@ using ServiceMantle.Health;
 using SignaCore.Database;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Startup;
-using SignaCore.Host;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http.Json;

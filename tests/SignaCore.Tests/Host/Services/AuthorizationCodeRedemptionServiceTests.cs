@@ -7,7 +7,6 @@ using Microsoft.Extensions.Primitives;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
@@ -555,7 +554,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
     private static IFormCollection CreateForm(string code, string? verifier = null) =>
         new FormCollection(new Dictionary<string, StringValues>
         {
-            ["grant_type"] = AuthorizationCodeRedemptionService.GrantType,
+            ["grant_type"] = AuthorizationCodeRedemption.GrantType,
             ["code"] = code,
             ["redirect_uri"] = RedirectUri,
             ["code_verifier"] = verifier ?? Verifier
@@ -564,17 +563,17 @@ public sealed class AuthorizationCodeRedemptionServiceTests
     private sealed class RedemptionDatabase(
         SqliteConnection connection,
         IdentityDbContext context,
-        AuthorizationCodeRedemptionService service,
+        AuthorizationCodeRedemption service,
         StaticKeyManager keys) : IAsyncDisposable
     {
         public SqliteConnection Connection { get; } = connection;
         public IdentityDbContext Context { get; } = context;
-        public AuthorizationCodeRedemptionService Service { get; } = service;
+        public AuthorizationCodeRedemption Service { get; } = service;
         public StaticKeyManager Keys { get; } = keys;
         public RsaSecurityKey Key => Keys.GetCurrentKey();
 
-        public AuthorizationCodeRedemptionService CreateService(
-            ILogger<AuthorizationCodeRedemptionService> logger) =>
+        public AuthorizationCodeRedemption CreateService(
+            ILogger<AuthorizationCodeRedemption> logger) =>
             BuildService(
                 Context,
                 NullTokenFactory(),
@@ -590,19 +589,19 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         }
     }
 
-    private static AuthorizationCodeRedemptionService BuildService(
+    private static AuthorizationCodeRedemption BuildService(
         IdentityDbContext context,
         IInteractiveAccessTokenFactory tokenFactory,
         IInteractiveIdTokenFactory idTokenFactory,
         IAuthorizationCodeStore? codeStore,
         StaticKeyManager keys,
-        ILogger<AuthorizationCodeRedemptionService> logger,
+        ILogger<AuthorizationCodeRedemption> logger,
         ICallbackService? callbackService = null,
         string administratorUsername = Username)
     {
         var unitOfWork = new EfCoreUnitOfWork(context);
         var accountRepository = new AccountRepository(context);
-        return new AuthorizationCodeRedemptionService(
+        return new AuthorizationCodeRedemption(
             codeStore ?? new AuthorizationCodeStore(
                 new AuthorizationCodeRepository(context), unitOfWork),
             new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),
@@ -646,7 +645,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
             idTokenFactory ?? NullIdTokenFactory(),
             codeStoreOverride?.Invoke(context),
             keys,
-            NullLogger<AuthorizationCodeRedemptionService>.Instance,
+            NullLogger<AuthorizationCodeRedemption>.Instance,
             callbackService,
             administratorUsername);
         return new RedemptionDatabase(connection, context, service, keys);
@@ -847,7 +846,7 @@ public sealed class AuthorizationCodeRedemptionServiceTests
         public Task InitializationCompleted => Task.CompletedTask;
     }
 
-    private sealed class RecordingLogger(List<string> messages) : ILogger<AuthorizationCodeRedemptionService>
+    private sealed class RecordingLogger(List<string> messages) : ILogger<AuthorizationCodeRedemption>
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 

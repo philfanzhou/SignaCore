@@ -9,10 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
-using SignaCore.Host;
-using SignaCore.Host.Security;
 using Xunit;
-using static SignaCore.Tests.Integration.OAuthLoginTestSupport;
 
 namespace SignaCore.Tests.Integration;
 
