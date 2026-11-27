@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
-using ServiceMantle.Web.Health;
 using SignaCore.Domain.Keys;
 using SignaCore.Host.HealthChecks;
 using Xunit;

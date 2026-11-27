@@ -1,6 +1,5 @@
 using ServiceMantle.Bootstrap;
 using SignaCore.Host.Bootstrap;
-using SignaCore.Host.Startup;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Bootstrap;
@@ -43,8 +42,8 @@ public sealed class BootstrapCredentialProvisionerTests : IAsyncLifetime
     [Fact]
     public async Task TwoConsecutiveStarts_PrintDifferentCredentialsAndInvalidateThePreviousOne()
     {
-        var first = await BootstrapCredentialProvisioner.ProvisionAsync(_bootstrapPath);
-        Assert.Equal(BootstrapCredentialStartupOutcome.Provisioned, first.Outcome);
+        var first = await CredentialProvisioner.ProvisionAsync(_bootstrapPath);
+        Assert.Equal(CredentialStartupOutcome.Provisioned, first.Outcome);
         Assert.NotNull(first.Store);
 
         var lines = _captured.ToString().Split('\n', '\r');
@@ -55,8 +54,8 @@ public sealed class BootstrapCredentialProvisionerTests : IAsyncLifetime
         Assert.Single(lines, line => line == "one-time bootstrap credential:");
 
         _captured.GetStringBuilder().Clear();
-        var second = await BootstrapCredentialProvisioner.ProvisionAsync(_bootstrapPath);
-        Assert.Equal(BootstrapCredentialStartupOutcome.Provisioned, second.Outcome);
+        var second = await CredentialProvisioner.ProvisionAsync(_bootstrapPath);
+        Assert.Equal(CredentialStartupOutcome.Provisioned, second.Outcome);
 
         var secondLines = _captured.ToString().Split('\n', '\r');
         var secondAnchor = Array.IndexOf(secondLines, "one-time bootstrap credential:");
@@ -79,12 +78,12 @@ public sealed class BootstrapCredentialProvisionerTests : IAsyncLifetime
         await File.WriteAllTextAsync(_recordPath, "not a credential record", TestContext.Current.CancellationToken);
         var before = await File.ReadAllTextAsync(_recordPath, TestContext.Current.CancellationToken);
 
-        var outcome = await BootstrapCredentialProvisioner.ProvisionAsync(
-            BootstrapCredentialProvisioner.CreateStore(_bootstrapPath),
+        var outcome = await CredentialProvisioner.ProvisionAsync(
+            CredentialProvisioner.CreateStore(_bootstrapPath),
             _recordPath,
             _bootstrapPath);
 
-        Assert.Equal(BootstrapCredentialStartupOutcome.Failed, outcome);
+        Assert.Equal(CredentialStartupOutcome.Failed, outcome);
         var output = _captured.ToString();
         Assert.DoesNotContain("one-time bootstrap credential:", output, StringComparison.Ordinal);
         Assert.Contains(_recordPath, output, StringComparison.Ordinal);
@@ -94,14 +93,14 @@ public sealed class BootstrapCredentialProvisionerTests : IAsyncLifetime
     [Fact]
     public async Task AlreadyExistsRejection_FailsWithoutAPlaintext()
     {
-        var outcome = await BootstrapCredentialProvisioner.ProvisionAsync(
+        var outcome = await CredentialProvisioner.ProvisionAsync(
             new FixedOutcomeReissuer(
                 BootstrapCredentialProvisionResult.Rejected(
                     WellKnownBootstrapCredentialErrorCodes.AlreadyExists)),
             _recordPath,
             _bootstrapPath);
 
-        Assert.Equal(BootstrapCredentialStartupOutcome.Failed, outcome);
+        Assert.Equal(CredentialStartupOutcome.Failed, outcome);
         Assert.DoesNotContain("one-time bootstrap credential:", _captured.ToString(), StringComparison.Ordinal);
         Assert.Contains(_recordPath, _captured.ToString(), StringComparison.Ordinal);
         Assert.False(File.Exists(_recordPath));
@@ -110,21 +109,21 @@ public sealed class BootstrapCredentialProvisionerTests : IAsyncLifetime
     [Fact]
     public async Task BootstrapConfiguredRejection_ContinuesAsAConfiguredInstance()
     {
-        var outcome = await BootstrapCredentialProvisioner.ProvisionAsync(
+        var outcome = await CredentialProvisioner.ProvisionAsync(
             new FixedOutcomeReissuer(
                 BootstrapCredentialProvisionResult.Rejected(
                     WellKnownBootstrapCredentialErrorCodes.BootstrapConfigured)),
             _recordPath,
             _bootstrapPath);
 
-        Assert.Equal(BootstrapCredentialStartupOutcome.AlreadyConfigured, outcome);
+        Assert.Equal(CredentialStartupOutcome.AlreadyConfigured, outcome);
         Assert.DoesNotContain("one-time bootstrap credential:", _captured.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
     public void TheRecordSitsBesideTheBootstrapFile()
     {
-        var store = BootstrapCredentialProvisioner.CreateStore(_bootstrapPath);
+        var store = CredentialProvisioner.CreateStore(_bootstrapPath);
         Assert.Equal(_recordPath, store.FilePath);
         Assert.Equal(_bootstrapPath, store.BootstrapFilePath);
     }

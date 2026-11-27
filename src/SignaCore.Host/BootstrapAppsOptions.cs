@@ -4,10 +4,6 @@ namespace SignaCore.Host;
 
 public sealed class BootstrapAppsOptions
 {
-    public const string SectionName = "BootstrapApps";
-
-    public string FilePath { get; set; } = "/app/data/bootstrap-apps.json";
-
     public List<BootstrapAppEntry> Apps { get; set; } = new();
 }
 

@@ -1,4 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using ServiceMantle;
 using ServiceMantle.Bootstrap;

@@ -1,18 +1,13 @@
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
-using SignaCore.Domain.Validators;
 using Xunit;
 
 namespace SignaCore.Tests.Domain.Services;
 
 public class GatewayValidationServiceTests
 {
-    private static ILogger<GatewayValidationService> CreateLogger() => NullLogger<GatewayValidationService>.Instance;
-
     private static Mock<IAppRegistrationRepository> CreateAppRegRepoMock(AppRegistrationEntity? app = null)
     {
         var mock = new Mock<IAppRegistrationRepository>();
@@ -40,7 +35,7 @@ public class GatewayValidationServiceTests
     {
         var app = CreateActiveApp();
         var repoMock = CreateAppRegRepoMock(app);
-        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+        var service = new GatewayValidationService(repoMock.Object);
 
         var result = await service.ValidateAsync("testapp", "testsecret");
 
@@ -54,7 +49,7 @@ public class GatewayValidationServiceTests
     {
         var app = CreateActiveApp();
         var repoMock = CreateAppRegRepoMock(app);
-        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+        var service = new GatewayValidationService(repoMock.Object);
         using var cancellation = new CancellationTokenSource();
 
         await service.ValidateAsync("testapp", "testsecret", cancellation.Token);
@@ -68,7 +63,7 @@ public class GatewayValidationServiceTests
     public async Task ValidateAsync_WithEmptyAppSecret_ReturnsFailure()
     {
         var repoMock = CreateAppRegRepoMock();
-        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+        var service = new GatewayValidationService(repoMock.Object);
 
         var result = await service.ValidateAsync("testapp", "");
 
@@ -80,7 +75,7 @@ public class GatewayValidationServiceTests
     public async Task ValidateAsync_WithNullAppSecret_ReturnsFailure()
     {
         var repoMock = CreateAppRegRepoMock();
-        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+        var service = new GatewayValidationService(repoMock.Object);
 
         var result = await service.ValidateAsync("testapp", null);
 
@@ -92,7 +87,7 @@ public class GatewayValidationServiceTests
     public async Task ValidateAsync_WithNonExistentAppId_ReturnsFailure()
     {
         var repoMock = CreateAppRegRepoMock(null);
-        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+        var service = new GatewayValidationService(repoMock.Object);
 
         var result = await service.ValidateAsync("nonexistent", "secret");
 
@@ -106,7 +101,7 @@ public class GatewayValidationServiceTests
         var app = CreateActiveApp();
         app.IsActive = false;
         var repoMock = CreateAppRegRepoMock(app);
-        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+        var service = new GatewayValidationService(repoMock.Object);
 
         var result = await service.ValidateAsync("testapp", "testsecret");
 
@@ -120,7 +115,7 @@ public class GatewayValidationServiceTests
         var app = CreateActiveApp();
         app.CallbackExpiresAt = DateTimeOffset.UtcNow.AddHours(-1);
         var repoMock = CreateAppRegRepoMock(app);
-        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+        var service = new GatewayValidationService(repoMock.Object);
 
         var result = await service.ValidateAsync("testapp", "testsecret");
 
@@ -135,7 +130,7 @@ public class GatewayValidationServiceTests
         app.CallbackExpiresAt = null;
         app.CallbackUrl = "http://example.com/callback";
         var repoMock = CreateAppRegRepoMock(app);
-        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+        var service = new GatewayValidationService(repoMock.Object);
 
         var result = await service.ValidateAsync("testapp", "testsecret");
 
@@ -147,7 +142,7 @@ public class GatewayValidationServiceTests
     {
         var app = CreateActiveApp();
         var repoMock = CreateAppRegRepoMock(app);
-        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+        var service = new GatewayValidationService(repoMock.Object);
 
         var result = await service.ValidateAsync("testapp", "wrongsecret");
 
@@ -166,7 +161,7 @@ public class GatewayValidationServiceTests
         app.ClientType = OidcClientType.Public;
         app.AppSecretHash = string.Empty;
         var repoMock = CreateAppRegRepoMock(app);
-        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+        var service = new GatewayValidationService(repoMock.Object);
 
         var result = await service.ValidateAsync("testapp", "any-presented-secret");
 
@@ -183,7 +178,7 @@ public class GatewayValidationServiceTests
         var app = CreateActiveApp();
         app.AppSecretHash = string.Empty;
         var repoMock = CreateAppRegRepoMock(app);
-        var service = new GatewayValidationService(repoMock.Object, CreateLogger());
+        var service = new GatewayValidationService(repoMock.Object);
 
         var result = await service.ValidateAsync("testapp", "any-presented-secret");
 

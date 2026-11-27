@@ -7,7 +7,7 @@ SignaCore exposes two token surfaces:
 | Standards | `/oauth2/token`, `/oauth2/revoke` | RFC 6749 / RFC 7009 | What discovery advertises; use this for new integrations |
 | Legacy | `/api/auth/token`, `/api/auth/revoke` | JSON, camelCase, HTTP 200 with `success=false` | Frozen contract for existing consumers |
 
-Both run the same issuance pipeline (`TokenIssuanceService`), so authentication policy, auditing, metrics,
+Both run the same issuance pipeline (`TokenIssuance`), so authentication policy, auditing, metrics,
 and lockout behave identically; only the wire format differs.
 
 **This page describes the current runtime.** SignaCore is now an OpenID Connect provider for a

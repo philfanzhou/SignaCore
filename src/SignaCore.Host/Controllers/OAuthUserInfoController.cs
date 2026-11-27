@@ -12,7 +12,7 @@ namespace SignaCore.Host.Controllers;
 /// The scope-controlled OIDC UserInfo endpoint (<c>AC-08</c>/<c>PS-16</c>): a
 /// projection for one interactive access token. Only <c>GET</c> with a
 /// single <c>Authorization: Bearer</c> header is admitted (<c>IN-28</c>); every validation and
-/// live-state decision belongs to <see cref="OidcUserInfoService"/> (<c>IN-29</c>). The endpoint
+/// live-state decision belongs to <see cref="OidcUserInfo"/> (<c>IN-29</c>). The endpoint
 /// is anonymous at the ASP.NET layer on purpose — the Bearer credential is the only
 /// authentication, and the management API's JWT bearer configuration is deliberately not reused.
 /// <para>
@@ -38,10 +38,10 @@ public sealed class OAuthUserInfoController : ControllerBase
     private const string InsufficientScopeDescription =
         "The access token does not carry the required scope.";
 
-    private readonly OidcUserInfoService _userInfo;
+    private readonly OidcUserInfo _userInfo;
     private readonly AuthMetrics _authMetrics;
 
-    public OAuthUserInfoController(OidcUserInfoService userInfo, AuthMetrics authMetrics)
+    public OAuthUserInfoController(OidcUserInfo userInfo, AuthMetrics authMetrics)
     {
         _userInfo = userInfo;
         _authMetrics = authMetrics;

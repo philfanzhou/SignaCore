@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using SignaCore.Database;
-using SignaCore.Database.Entity;
 using SignaCore.Domain;
 using SignaCore.Host.Http;
 using SignaCore.Host.Security;
@@ -53,17 +52,17 @@ public sealed class OAuthLogoutController : ControllerBase
     private const string PreparationFailureDescription = "The logout request could not be validated.";
     private const string HandleQueryName = "logout_handle";
 
-    private readonly OidcLogoutPreparationService _preparation;
-    private readonly OidcLogoutCompletionService _completion;
-    private readonly OidcStandardLogoutService _standardLogout;
+    private readonly OidcLogoutPreparation _preparation;
+    private readonly OidcLogoutCompletion _completion;
+    private readonly OidcStandardLogout _standardLogout;
     private readonly IIdentitySessionCookieReader _identityCookies;
     private readonly ILogger<OAuthLogoutController> _logger;
     private readonly AuthMetrics _authMetrics;
 
     public OAuthLogoutController(
-        OidcLogoutPreparationService preparation,
-        OidcLogoutCompletionService completion,
-        OidcStandardLogoutService standardLogout,
+        OidcLogoutPreparation preparation,
+        OidcLogoutCompletion completion,
+        OidcStandardLogout standardLogout,
         IIdentitySessionCookieReader identityCookies,
         ILogger<OAuthLogoutController> logger,
         AuthMetrics authMetrics)
@@ -101,7 +100,7 @@ public sealed class OAuthLogoutController : ControllerBase
         foreach (var (name, values) in form)
         {
             // The strict structure: unknown fields and repeated fields are both rejected.
-            if (!OidcLogoutPreparationService.AdmittedFormFields.Contains(name)
+            if (!OidcLogoutPreparation.AdmittedFormFields.Contains(name)
                 || values.Count != 1
                 || !fields.TryAdd(name, values[0] ?? string.Empty))
             {
@@ -266,7 +265,7 @@ public sealed class OAuthLogoutController : ControllerBase
             // The same unknown-field policy the authorize endpoint applies: a name this contract
             // does not read is ignored (a generic framework client appends telemetry parameters),
             // while each admitted name must appear exactly once.
-            if (!OidcStandardLogoutService.AdmittedQueryFields.Contains(name))
+            if (!OidcStandardLogout.AdmittedQueryFields.Contains(name))
             {
                 continue;
             }

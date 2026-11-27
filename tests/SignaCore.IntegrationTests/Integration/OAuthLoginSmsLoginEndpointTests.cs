@@ -937,7 +937,7 @@ public sealed class OAuthLoginSmsLoginEndpointTests : IClassFixture<IdentityServ
         public Task RecordLoginAsync(Guid? accountId, string username, string authMethod, string eventType,
             string? clientIp, string? userAgent, string? failureReason = null, string? appId = null,
             string? correlationId = null, CancellationToken cancellationToken = default) =>
-            authMethod == OidcSmsCodeSendService.AuthMethod
+            authMethod == OidcSmsCodeSend.AuthMethod
                 ? throw new InvalidOperationException("Simulated audit persistence failure.")
                 : _inner.RecordLoginAsync(accountId, username, authMethod, eventType, clientIp, userAgent,
                     failureReason, appId, correlationId, cancellationToken);

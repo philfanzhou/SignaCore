@@ -9,7 +9,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using ServiceMantle.Audit;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
@@ -387,7 +386,7 @@ public sealed class AuditTransactionTests
         using var cancellation = new CancellationTokenSource();
         var interceptor = new CancelAtCommitInterceptor(cancellation, afterCommit);
         await using var database = await SqliteTestDatabase.CreateAsync(interceptor);
-        TokenIssuanceService service;
+        TokenIssuance service;
         TokenIssuanceRequest request;
         if (grant == "sms")
         {
@@ -863,9 +862,9 @@ public sealed class AuditTransactionTests
         // The shared management login adapter runs the same recorder the legacy admin login ran,
         // so the transactional rollback of the failed-login path keeps its proof through the
         // identity provider.
-        var credentials = new ManagementCredentialAccessor();
+        var credentials = new CredentialAccessor();
         credentials.Set("admin", "wrong-value");
-        var provider = new ManagementIdentityProvider(
+        var provider = new IdentityProvider(
             credentials,
             new ValidatorFactory([validator], NullLogger<ValidatorFactory>.Instance),
             new AdminIdentityOptions { Username = "admin" },
@@ -876,7 +875,7 @@ public sealed class AuditTransactionTests
                 database.Context,
                 NullLogger<AdminLoginStateRecorder>.Instance),
             new HttpContextAccessor { HttpContext = new DefaultHttpContext() },
-            NullLogger<ManagementIdentityProvider>.Instance);
+            NullLogger<IdentityProvider>.Instance);
 
         await Assert.ThrowsAsync<DbUpdateException>(() =>
             provider.GetIdentityAsync(TestContext.Current.CancellationToken).AsTask());
@@ -1640,7 +1639,7 @@ public sealed class AuditTransactionTests
             UserAgent: "audit-transaction-test",
             CorrelationId: "correlation-148");
 
-    private static TokenIssuanceService CreateTokenIssuanceService(
+    private static TokenIssuance CreateTokenIssuanceService(
         IdentityDbContext context,
         IIdentityValidator validator,
         ILoginAttemptRepository loginAttemptRepository,
@@ -1649,7 +1648,7 @@ public sealed class AuditTransactionTests
         ITokenService? tokenService = null)
     {
         var accountRepository = new AccountRepository(context);
-        return new TokenIssuanceService(
+        return new TokenIssuance(
             AuthTestDoubles.KeyManager().Object,
             tokenService ?? AuthTestDoubles.TokenService().Object,
             new JwtOptions
@@ -1671,10 +1670,10 @@ public sealed class AuditTransactionTests
             new EfCoreUnitOfWork(context),
             context,
             new AdminIdentityOptions { Username = "bootstrap-admin" },
-            NullLogger<TokenIssuanceService>.Instance);
+            NullLogger<TokenIssuance>.Instance);
     }
 
-    private static TokenIssuanceService CreateSmsTokenIssuanceService(
+    private static TokenIssuance CreateSmsTokenIssuanceService(
         IdentityDbContext context,
         IIdentityValidator validator,
         IAuditService? auditService = null,

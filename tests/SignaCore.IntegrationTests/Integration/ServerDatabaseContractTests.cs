@@ -8,7 +8,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
@@ -1521,7 +1520,7 @@ public sealed class ServerDatabaseContractTests
     {
         await using var context = new IdentityDbContext(options);
         var unitOfWork = new EfCoreUnitOfWork(context);
-        var service = new SignaCore.Host.Services.OidcAuthorizationSessionReuseService(
+        var service = new SignaCore.Host.Services.OidcAuthorizationSessionReuse(
             new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),
             new AuthorizationCodeStore(new AuthorizationCodeRepository(context), unitOfWork),
             new AccountRepository(context),
@@ -1754,7 +1753,7 @@ public sealed class ServerDatabaseContractTests
         meterFactory
             .Setup(factory => factory.Create(It.IsAny<System.Diagnostics.Metrics.MeterOptions>()))
             .Returns(new System.Diagnostics.Metrics.Meter("SignaCore"));
-        var service = new SignaCore.Host.Services.AuthorizationCodeRedemptionService(
+        var service = new SignaCore.Host.Services.AuthorizationCodeRedemption(
             new AuthorizationCodeStore(new AuthorizationCodeRepository(context), unitOfWork),
             new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),
             accountRepository,
@@ -1776,12 +1775,12 @@ public sealed class ServerDatabaseContractTests
             context,
             new AdminIdentityOptions(),
             new SmsAdmissionService(context),
-            NullLogger<SignaCore.Host.Services.AuthorizationCodeRedemptionService>.Instance);
+            NullLogger<SignaCore.Host.Services.AuthorizationCodeRedemption>.Instance);
         return await service.RedeemAsync(
             application,
             new FormCollection(new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
             {
-                ["grant_type"] = SignaCore.Host.Services.AuthorizationCodeRedemptionService.GrantType,
+                ["grant_type"] = SignaCore.Host.Services.AuthorizationCodeRedemption.GrantType,
                 ["code"] = code,
                 ["redirect_uri"] = "https://client.example.com/callback",
                 ["code_verifier"] = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
@@ -1972,7 +1971,7 @@ public sealed class ServerDatabaseContractTests
     /// One "instance" of the completion service on its own connection and unit of work — the same
     /// composition the host registers per request scope.
     /// </summary>
-    private static async Task<SignaCore.Host.Services.OidcLoginCompletion?> CompleteLoginAsync(
+    private static async Task<SignaCore.Host.Services.OidcLoginCompletionResult?> CompleteLoginAsync(
         DbContextOptions<IdentityDbContext> options,
         string handle,
         OidcAuthorizationValidationResult.Accepted accepted,
@@ -1982,7 +1981,7 @@ public sealed class ServerDatabaseContractTests
         await using var context = new IdentityDbContext(options);
         var unitOfWork = new EfCoreUnitOfWork(context);
         var accountRepository = new AccountRepository(context);
-        var service = new SignaCore.Host.Services.OidcLoginCompletionService(
+        var service = new SignaCore.Host.Services.OidcLoginCompletion(
             new AuthorizationRequestStore(new AuthorizationRequestRepository(context), unitOfWork),
             accountRepository,
             new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),

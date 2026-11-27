@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
-using SignaCore.Host;
 using Xunit;
 using static SignaCore.Tests.Integration.OAuthLoginTestSupport;
 

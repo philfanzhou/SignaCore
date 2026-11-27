@@ -17,8 +17,6 @@ using ServiceMantle.Management;
 using ServiceMantle.Web.Management;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
-using SignaCore.Domain;
-using SignaCore.Domain.Services;
 using SignaCore.Host.Management;
 using Xunit;
 
@@ -51,7 +49,7 @@ public sealed class AdminPasswordResetEndpointTests(IdentityServerFixture fixtur
 
         using var host = fixture.WithTestServices(_ => { });
         using var scope = host.Services.CreateScope();
-        var issued = await scope.ServiceProvider.GetRequiredService<ManagementBearerSessionService>().IssueAsync(
+        var issued = await scope.ServiceProvider.GetRequiredService<BearerSessionService>().IssueAsync(
             await fixture.GetAdminAccountIdAsync(), Ct);
         using var bearer = host.CreateClient();
         bearer.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", issued.Token!);
@@ -78,7 +76,7 @@ public sealed class AdminPasswordResetEndpointTests(IdentityServerFixture fixtur
     {
         using var host = fixture.WithTestServices(_ => { });
         using var scope = host.Services.CreateScope();
-        var issued = await scope.ServiceProvider.GetRequiredService<ManagementBearerSessionService>().IssueAsync(
+        var issued = await scope.ServiceProvider.GetRequiredService<BearerSessionService>().IssueAsync(
             await fixture.GetAdminAccountIdAsync(), Ct);
         using var bearer = host.CreateClient();
         bearer.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", issued.Token!);
@@ -186,7 +184,7 @@ public sealed class AdminPasswordResetEndpointTests(IdentityServerFixture fixtur
             }));
         });
         using var scope = host.Services.CreateScope();
-        var issued = await scope.ServiceProvider.GetRequiredService<ManagementBearerSessionService>()
+        var issued = await scope.ServiceProvider.GetRequiredService<BearerSessionService>()
             .IssueAsync(await fixture.GetAdminAccountIdAsync(), Ct);
         using var http = host.CreateClient();
         http.DefaultRequestHeaders.Authorization = new("Bearer", issued.Token!);

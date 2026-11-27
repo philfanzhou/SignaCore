@@ -5,13 +5,11 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.Tokens;
 using ServiceMantle.Audit;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services;
-using SignaCore.Domain;
 using SignaCore.Host.Services;
 using SignaCore.Tests.TestSupport;
 using System.IdentityModel.Tokens.Jwt;
@@ -30,7 +28,6 @@ public sealed class OidcLogoutPreparationServiceTests
 {
     private const string Issuer = "https://logout-unit.test";
     private const string ClientId = "logout-unit-app";
-    private const string Secret = "logout-unit-secret";
 
     private sealed class StaticKeyManager : IKeyManager
     {
@@ -51,7 +48,7 @@ public sealed class OidcLogoutPreparationServiceTests
     private sealed record Harness(
         SqliteConnection Connection,
         IdentityDbContext Context,
-        OidcLogoutPreparationService Service,
+        OidcLogoutPreparation Service,
         StaticKeyManager Keys,
         Guid ApplicationId, ServiceProvider Services) : IAsyncDisposable
     {
@@ -106,8 +103,8 @@ public sealed class OidcLogoutPreparationServiceTests
                 provider.GetRequiredService<IdentityDbContext>()));
         var provider = services.BuildServiceProvider();
         var keys = new StaticKeyManager();
-        var service = new OidcLogoutPreparationService(provider.GetRequiredService<IServiceScopeFactory>(), keys,
-            new JwtOptions { Issuer = Issuer }, NullLogger<OidcLogoutPreparationService>.Instance);
+        var service = new OidcLogoutPreparation(provider.GetRequiredService<IServiceScopeFactory>(), keys,
+            new JwtOptions { Issuer = Issuer }, NullLogger<OidcLogoutPreparation>.Instance);
         return new Harness(connection, context, service, keys, application.Id, provider);
     }
 

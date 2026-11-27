@@ -5,7 +5,6 @@ using ServiceMantle.Bootstrap;
 using ServiceMantle.Health;
 using ServiceMantle.Logging.Remote;
 using ServiceMantle.Installation;
-using ServiceMantle.Web.Health;
 using ServiceMantle;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
@@ -86,9 +85,9 @@ if (bootstrap is null)
 {
     // Every start reissues the one-time credential, invalidating the credential of any previous
     // start, and prints the new plaintext exactly once.
-    var credentialStartup = await BootstrapCredentialProvisioner.ProvisionAsync(bootstrapFilePath);
+    var credentialStartup = await CredentialProvisioner.ProvisionAsync(bootstrapFilePath);
 
-    if (credentialStartup.Outcome == BootstrapCredentialStartupOutcome.AlreadyConfigured)
+    if (credentialStartup.Outcome == CredentialStartupOutcome.AlreadyConfigured)
     {
         // Another process published a bootstrap file between the load above and the reissue. This
         // process continues as the configured instance it now is.
@@ -101,7 +100,7 @@ if (bootstrap is null)
             return 1;
         }
     }
-    else if (credentialStartup.Outcome == BootstrapCredentialStartupOutcome.Failed)
+    else if (credentialStartup.Outcome == CredentialStartupOutcome.Failed)
     {
         // The notice with the record path has already been printed; the record is untouched.
         return 1;
@@ -118,7 +117,7 @@ if (bootstrap is null)
         // instance over the same resolved path. The mode host has no current master key, so the
         // key-replacement refusal step of the validator is inert here.
         builder.Services.AddSingleton<IBootstrapCandidateValidator>(
-            _ => new BootstrapCandidateValidator(
+            _ => new CandidateValidator(
                 BootstrapStore.CreateProviderRegistry(),
                 currentMasterKey: null));
         builder.Services.AddSingleton<BootstrapConfigurationManager>(provider =>
@@ -144,7 +143,7 @@ if (bootstrap is null)
         builder.Services.AddSingleton(credentialStartup.Store!);
         builder.Services.AddSingleton<IBootstrapCredentialStore>(credentialStartup.Store!);
         builder.Services.AddSingleton<IBootstrapCredentialVerifier>(credentialStartup.Store!);
-        builder.Services.AddSingleton<IServiceHealthSnapshotSource, BootstrapModeSnapshotSource>();
+        builder.Services.AddSingleton<IServiceHealthSnapshotSource, ModeSnapshotSource>();
         builder.Services.AddSingleton<BootstrapConfigurationService>();
 
         var bootstrapApp = builder.Build();
@@ -197,7 +196,7 @@ if (bootstrap is null)
         // The console is served by the same mapped fallback the normal host uses, admitted only
         // while the phase is Bootstrap Configuration; once the file exists and the process
         // restarts, the normal host's /bootstrap redirect takes over.
-        AdminSpaBranch.MapNormalHostSpaFallback(bootstrapApp, httpPort)
+        AdminSpa.MapNormalHostSpaFallback(bootstrapApp, httpPort)
             .WithServiceMantlePhaseAdmission(ServiceStartupPhase.BootstrapConfiguration);
 
         await bootstrapApp.RunAsync();
@@ -265,7 +264,7 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
 {
     if (bootstrapResult.PlaintextSetupCode is not null)
     {
-        StartupBanner.WriteSetupCode(
+        Banner.WriteSetupCode(
             bootstrapResult.PlaintextSetupCode,
             bootstrapResult.SetupCodeExpiresAt
                 ?? DateTimeOffset.UtcNow.Add(ServiceMantle.Installation.SetupCodeLifetime.MaximumValue));
@@ -303,7 +302,7 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
     builder.Services.AddScoped<ServiceMantle.Installation.IServiceInstallationStore>(
         serviceProvider => InstallationStores.CreateInstallationStore(
             serviceProvider.GetRequiredService<IdentityDbContext>()));
-    builder.Services.AddScoped<IServiceHealthSnapshotSource, InstallationHealthSnapshotSource>();
+    builder.Services.AddScoped<IServiceHealthSnapshotSource, HealthSnapshotSource>();
 
     builder.Services.RegisterPasswordHashingDefaults();
     // The per-request contributor factory the completion executor resolves inside its fresh scope;
@@ -362,7 +361,7 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
 
     // The console is served by the same mapped fallback the normal host uses, admitted only while
     // the phase is PendingSetup; the SPA itself probes the setup entry and renders the setup form.
-    AdminSpaBranch.MapNormalHostSpaFallback(setupApp, httpPort)
+    AdminSpa.MapNormalHostSpaFallback(setupApp, httpPort)
         .WithServiceMantlePhaseAdmission(ServiceStartupPhase.PendingSetup);
 
     // A manually launched process has no supervisor: say so explicitly, but only when the
@@ -377,7 +376,7 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
                     row => row.ServiceId == InstallationStores.ServiceIdValue &&
                            row.Status == InstallationStatus.Completed))
             {
-                StartupBanner.WriteRestartInstruction();
+                Banner.WriteRestartInstruction();
             }
         }
         catch
@@ -420,7 +419,7 @@ await builder.Services.AddConsulDiscoveryLifecycleAsync(
 // default validator, which does not enforce the master-key rules of a running host. The manager
 // owns a store instance over the same resolved path, exactly like the mode host's registration.
 builder.Services.AddSingleton<IBootstrapCandidateValidator>(
-    _ => new BootstrapCandidateValidator(
+    _ => new CandidateValidator(
         BootstrapStore.CreateProviderRegistry(),
         currentMasterKey: bootstrapResult.Bootstrap.MasterKey));
 builder.Services.AddSingleton<BootstrapConfigurationManager>(provider =>
@@ -463,9 +462,9 @@ builder.Services.AddScoped<ServiceMantle.Installation.IServiceInstallationStore>
 // 503 anyway, so the credential is never consumed.
 mantle.AddServiceMantleBootstrapManagement(options =>
     options.UpdateBearerAuthenticationScheme =
-        ManagementBearerAuthenticationDefaults.AuthenticationScheme);
+        BearerAuthenticationDefaults.AuthenticationScheme);
 builder.Services.AddSingleton<IBootstrapCredentialStore>(
-    BootstrapCredentialProvisioner.CreateStore(bootstrapFilePath));
+    CredentialProvisioner.CreateStore(bootstrapFilePath));
 
 builder.Services.AddSingleton(bootstrapResult.RuntimeState);
 
@@ -566,7 +565,6 @@ using (var seedScope = app.Services.CreateScope())
         app.Services
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger(typeof(BootstrapAppSeeder).FullName!),
-        seedScope.ServiceProvider.GetRequiredService<IHostEnvironment>().IsDevelopment(),
         app.Lifetime.ApplicationStopping);
 }
 
@@ -743,7 +741,7 @@ app.MapControllers();
 app.MapSignaCoreManagementSession();
 
 // ---- Explicit management bearer sessions (issue / revoke) ----
-ManagementBearerSessionEndpoints.Map(app);
+BearerSessionEndpoints.Map(app);
 
 // ---- Shared management settings (definitions / current values / transactional update) ----
 // The admin console's settings page rides the shared group from here on: the queries read the
@@ -754,13 +752,13 @@ var managementApi = app.MapServiceMantleManagementApiV1();
 // The product validation-errors filter rides the shared group so exactly the shared update route's
 // definite validation rejection gains the closed validationErrors field; every other endpoint of
 // the group — including the diagnostics read below — passes through untouched.
-managementApi.AddEndpointFilter(new ManagementSettingValidationErrorsFilter());
+managementApi.AddEndpointFilter(new SettingValidationErrorsFilter());
 managementApi.MapServiceMantleRuntimeInfo();
 managementApi.MapServiceMantleSettingQueries();
-managementApi.MapServiceMantleSettingUpdates(ManagementSettingUpdateExecutor.ExecuteAsync);
+managementApi.MapServiceMantleSettingUpdates(SettingUpdateExecutor.ExecuteAsync);
 // The product diagnostics read rides the same protected group: one complete tolerant
 // materialization of the stored aggregate plus the fixed startup running version.
-ManagementSettingDiagnosticsEndpoints.Map(managementApi);
+SettingDiagnosticsEndpoints.Map(managementApi);
 // The admin console's audit page reads the shared restricted query from here on; the legacy
 // /api/admin/audit-logs endpoint is gone. The audit_logs table stays as a retained, unwritten
 // legacy store for pre-switch history rows.
@@ -783,7 +781,7 @@ app.MapServiceMantlePrometheusEndpoint();
 // ---- Static files & SPA for Admin Web (HTTP port only) ----
 // The normal host composes the ServiceMantle pipeline, whose phase gate 404s endpoint-less requests,
 // so the SPA is served by a mapped GET/HEAD fallback endpoint rather than a post-pipeline branch.
-AdminSpaBranch.MapNormalHostSpaFallback(app, httpPort);
+AdminSpa.MapNormalHostSpaFallback(app, httpPort);
 
 await app.RunAsync();
 return 0;

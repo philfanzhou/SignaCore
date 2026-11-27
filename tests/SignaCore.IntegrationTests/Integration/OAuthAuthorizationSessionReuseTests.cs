@@ -9,7 +9,6 @@ using Microsoft.Extensions.Logging;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Services;
-using SignaCore.Host;
 using SignaCore.Host.Security;
 using Xunit;
 using static SignaCore.Tests.Integration.OAuthLoginTestSupport;

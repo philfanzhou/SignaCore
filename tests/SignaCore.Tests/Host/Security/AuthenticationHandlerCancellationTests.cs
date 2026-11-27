@@ -257,9 +257,7 @@ public class AuthenticationHandlerCancellationTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(app);
         return (
-            new GatewayValidationService(
-                repository.Object,
-                NullLogger<GatewayValidationService>.Instance),
+            new GatewayValidationService(repository.Object),
             repository);
     }
 }

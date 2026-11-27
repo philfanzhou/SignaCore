@@ -349,13 +349,13 @@ public class ConfigurationJsonExporterTests
     [Fact]
     public void Export_ReturnsNullWhenTheSectionIsAbsent()
     {
-        Assert.Null(ConfigurationJsonExporter.Export(Section(new Dictionary<string, string?>(), "Missing")));
+        Assert.Null(JsonExporter.Export(Section(new Dictionary<string, string?>(), "Missing")));
     }
 
     [Fact]
     public void Export_RebuildsAnArrayFromIndexedKeys()
     {
-        var json = ConfigurationJsonExporter.Export(Section(
+        var json = JsonExporter.Export(Section(
             new Dictionary<string, string?>
             {
                 ["Callback:AllowedDomains:0"] = "a.example",
@@ -369,7 +369,7 @@ public class ConfigurationJsonExporterTests
     [Fact]
     public void Export_RebuildsNestedObjects()
     {
-        var json = ConfigurationJsonExporter.Export(Section(
+        var json = JsonExporter.Export(Section(
             new Dictionary<string, string?>
             {
                 ["Sms:Profiles:production:Provider"] = "AlibabaCloud"
@@ -386,7 +386,7 @@ public class ConfigurationJsonExporterTests
     [Fact]
     public void Export_TreatsACommaSeparatedScalarAsAnArray()
     {
-        var json = ConfigurationJsonExporter.Export(Section(
+        var json = JsonExporter.Export(Section(
             new Dictionary<string, string?> { ["Sms:BypassPhones"] = "13800000000, 13900000000" },
             "Sms:BypassPhones"));
 
@@ -396,7 +396,7 @@ public class ConfigurationJsonExporterTests
     [Fact]
     public void Export_PassesThroughAScalarThatIsAlreadyJson()
     {
-        var json = ConfigurationJsonExporter.Export(Section(
+        var json = JsonExporter.Export(Section(
             new Dictionary<string, string?> { ["AdminWeb:AllowedOrigins"] = """[ "https://a.test" ]""" },
             "AdminWeb:AllowedOrigins"));
 

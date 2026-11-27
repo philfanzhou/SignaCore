@@ -1,10 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using ServiceMantle.Audit;
 using ServiceMantle.Management;
 using ServiceMantle.Web.Management;
@@ -13,7 +11,6 @@ using SignaCore.Domain.Keys;
 using SignaCore.Host.Management;
 using SignaCore.Host.Security;
 using SignaCore.Host;
-using SignaCore.Tests.Domain.Keys;
 using System.Security.Claims;
 using Xunit;
 
@@ -146,15 +143,15 @@ public sealed class AdminSessionPolicyTests
         var policy = await GetPolicyAsync(provider, policyName);
 
         Assert.Equal(
-            ManagementBearerAuthenticationDefaults.SelectorScheme,
+            BearerAuthenticationDefaults.SelectorScheme,
             Assert.Single(policy.AuthenticationSchemes));
     }
 
     [Theory]
-    [InlineData("/api/admin/users", true, ManagementBearerAuthenticationDefaults.AuthenticationScheme)]
-    [InlineData("/API/Admin/session/me", true, ManagementBearerAuthenticationDefaults.AuthenticationScheme)]
-    [InlineData("/management/v1/settings", true, ManagementBearerAuthenticationDefaults.AuthenticationScheme)]
-    [InlineData("/management/v1/session", true, ManagementBearerAuthenticationDefaults.AuthenticationScheme)]
+    [InlineData("/api/admin/users", true, BearerAuthenticationDefaults.AuthenticationScheme)]
+    [InlineData("/API/Admin/session/me", true, BearerAuthenticationDefaults.AuthenticationScheme)]
+    [InlineData("/management/v1/settings", true, BearerAuthenticationDefaults.AuthenticationScheme)]
+    [InlineData("/management/v1/session", true, BearerAuthenticationDefaults.AuthenticationScheme)]
     [InlineData("/api/admin/users", false, ManagementSessionDefaults.AuthenticationScheme)]
     [InlineData("/management/v1/settings", false, ManagementSessionDefaults.AuthenticationScheme)]
     [InlineData("/api/administrator", true, ManagementSessionDefaults.AuthenticationScheme)]
@@ -174,7 +171,7 @@ public sealed class AdminSessionPolicyTests
             context.Request.Headers.Authorization = string.Empty;
         }
 
-        Assert.Equal(expected, ManagementBearerAuthenticationDefaults.SelectScheme(context));
+        Assert.Equal(expected, BearerAuthenticationDefaults.SelectScheme(context));
     }
 
     [Fact]

@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using SignaCore.Database;
 using SignaCore.Database.Entity;
 
 namespace SignaCore.Database.Repositories;

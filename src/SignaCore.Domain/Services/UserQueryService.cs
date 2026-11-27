@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using SignaCore.Database;
-using SignaCore.Domain;
 using SignaCore.Domain.Models;
 
 namespace SignaCore.Domain.Services;

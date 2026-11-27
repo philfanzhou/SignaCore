@@ -14,7 +14,6 @@ using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
-using SignaCore.Host;
 using Xunit;
 using static SignaCore.Tests.Integration.OAuthLoginTestSupport;
 

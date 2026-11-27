@@ -1,10 +1,8 @@
-using Microsoft.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
-using SignaCore.Host.Http;
 
 namespace SignaCore.Host.Services;
 

@@ -11,7 +11,6 @@ using SignaCore.Database;
 using SignaCore.Domain.Validators;
 using SignaCore.Domain.Services;
 using SignaCore.Database.Repositories;
-using SignaCore.Host;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;

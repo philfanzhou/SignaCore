@@ -6,8 +6,6 @@ using Npgsql;
 using ServiceMantle;
 using ServiceMantle.Bootstrap;
 using SignaCore.Database;
-using SignaCore.Database.Entity;
-using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Startup;
 using SignaCore.Host.Installation;
 using Testcontainers.PostgreSql;

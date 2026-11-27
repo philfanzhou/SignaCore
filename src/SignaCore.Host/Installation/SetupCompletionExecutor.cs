@@ -1,15 +1,11 @@
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ServiceMantle.Audit;
 using ServiceMantle.Configuration;
 using ServiceMantle.Installation;
 using ServiceMantle.Persistence.Relational.Stores;
 using ServiceMantle.Web.ManagementApi.Setup;
 using SignaCore.Database;
-using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host.Configuration;
 using System.Data;
@@ -136,7 +132,7 @@ internal static class SetupCompletionExecutor
         CancellationToken cancellationToken)
     {
         // The singleton row lock serializes concurrent completions before anything else runs.
-        var state = await InstallationStateLock.LoadLockedAsync(db, databaseOptions, cancellationToken);
+        var state = await StateLock.LoadLockedAsync(db, databaseOptions, cancellationToken);
         if (state is null)
         {
             // A migrated database must own its installation row; a missing row is a state the

@@ -4,7 +4,6 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
 using SignaCore.Database;
@@ -94,11 +93,11 @@ public class TokenControllerTests : IDisposable
     }
 
     /// <summary>
-    /// The token issuance flow itself lives in <see cref="TokenIssuanceService"/>; the controller
+    /// The token issuance flow itself lives in <see cref="TokenIssuance"/>; the controller
     /// only maps transport. These tests still enter through the controller, because what they assert
     /// is what an outside caller sees after the complete flow.
     /// </summary>
-    private TokenIssuanceService CreateIssuanceService(
+    private TokenIssuance CreateIssuanceService(
         IIdentityValidator[] validators,
         AdminIdentityOptions adminIdentityOptions,
         ICallbackService? callbackService = null,
@@ -120,7 +119,7 @@ public class TokenControllerTests : IDisposable
             _unitOfWorkMock.Object,
             _dbContext,
             adminIdentityOptions,
-            NullLogger<TokenIssuanceService>.Instance);
+            NullLogger<TokenIssuance>.Instance);
 
     // Written by the token service mock's callback, so the tests can assert on the claims.
     private List<Claim>? _capturedClaims;

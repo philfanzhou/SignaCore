@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Builder;
-using ServiceMantle.Web;
 using SignaCore.Host;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -13,7 +12,6 @@ using ServiceMantle.Persistence.Relational.Stores;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
-using SignaCore.Domain;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Management;
@@ -174,7 +172,7 @@ public sealed class AdminPasswordResetDatabaseContractTests
         string password = NewPassword, IAccountRepository? accounts = null)
     {
         var services = new ServiceCollection();
-        services.AddSingleton<ManagementOperatorReader>();
+        services.AddSingleton<OperatorReader>();
         services.AddSingleton<IManagementClaimsParser, ManagementClaimsParser>();
         services.AddSingleton<IManagementCurrentOperatorResolver, ManagementCurrentOperatorResolver>();
         var controller = new AdminController(NullLogger<AdminController>.Instance, services.BuildServiceProvider())
@@ -198,7 +196,7 @@ public sealed class AdminPasswordResetDatabaseContractTests
         public async ValueTask<ManagementAuditRecord> RecordAsync(ManagementAuditEvent auditEvent, CancellationToken cancellationToken = default)
         {
             Assert.Equal(cancellation.Token, cancellationToken);
-            var record = await inner.RecordAsync(auditEvent, cancellationToken);
+            await inner.RecordAsync(auditEvent, cancellationToken);
             if (failure == "cancel") { cancellation.Cancel(); cancellationToken.ThrowIfCancellationRequested(); }
             throw new InvalidOperationException("Injected audit failure.");
         }

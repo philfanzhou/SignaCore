@@ -8,7 +8,6 @@ using Moq;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
-using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using Xunit;
 

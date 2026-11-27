@@ -9,7 +9,6 @@ using Microsoft.Extensions.DependencyInjection;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Services;
-using SignaCore.Host;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;

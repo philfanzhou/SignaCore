@@ -1,4 +1,3 @@
-using System.Net;
 using SignaCore.Database;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

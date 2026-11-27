@@ -320,7 +320,7 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     /// </para>
     /// </summary>
     [Fact]
-    public void AdminSpaBranch_NeverSwallowsAnyRegisteredRoute()
+    public void AdminSpaFallback_NeverSwallowsAnyRegisteredRoute()
     {
         var routes = _fixture.Services
             .GetRequiredService<Microsoft.AspNetCore.Routing.EndpointDataSource>()
@@ -343,7 +343,7 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
         Assert.NotEmpty(routes);
 
         var swallowed = routes
-            .Where(path => AdminSpaRouting.ShouldServeSpa(ContextFor(path), HostHttpPort))
+            .Where(path => AdminSpaRouting.ShouldServeSpaFallback(ContextFor(path), HostHttpPort))
             .ToList();
 
         Assert.True(
@@ -1134,7 +1134,7 @@ public class IdentityHttpEndpointsTests : IClassFixture<IdentityServerFixture>
     {
         using var factory = _fixture.WithTestServices(_ => { });
 
-        var service = factory.Services.GetRequiredService<SignaCore.Host.Management.ManagementBearerSessionService>();
+        var service = factory.Services.GetRequiredService<SignaCore.Host.Management.BearerSessionService>();
         Assert.Same(service, factory.Services.GetRequiredService<SignaCore.Domain.Services.IManagementBearerSessionCleanup>());
         Assert.Same(TimeProvider.System, factory.Services.GetRequiredService<TimeProvider>());
         Assert.Equal(

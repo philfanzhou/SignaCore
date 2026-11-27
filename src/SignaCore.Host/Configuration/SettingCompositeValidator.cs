@@ -1,13 +1,11 @@
 using System.Globalization;
 using System.Text.Json;
-using Microsoft.Extensions.Configuration;
 using ServiceMantle.Configuration;
 using ServiceMantle.Diagnostics.Export.Otlp;
 using ServiceMantle.Logging.Remote;
 using SignaCore.Domain.Services.Ldap;
 using SignaCore.Domain.Services.Sms;
 using SignaCore.Domain.Services.WeChat;
-using SignaCore.Host.Security;
 
 namespace SignaCore.Host.Configuration;
 
@@ -41,7 +39,6 @@ internal sealed class SettingCompositeValidator(
 {
     internal const string RequiredCode = "signacore.setting.required";
     internal const string BaseUrlInvalidCode = "signacore.setting.base_url_invalid";
-    internal const string HttpsRequiredCode = "signacore.setting.https_required";
     internal const string IssuerMismatchCode = "signacore.setting.issuer_mismatch";
     internal const string RuntimeInvalidCode = "signacore.setting.runtime_invalid";
 

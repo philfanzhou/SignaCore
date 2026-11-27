@@ -9,7 +9,6 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -18,12 +17,9 @@ using ServiceMantle.Audit;
 using ServiceMantle.Bootstrap;
 using ServiceMantle.Management;
 using SignaCore.Database;
-using SignaCore.Database.Entity;
 using SignaCore.Domain.Keys;
-using SignaCore.Domain.Services;
 using SignaCore.Host.Bootstrap;
 using SignaCore.Host.Management;
-using SignaCore.Host.Models;
 using SignaCore.Host.Startup;
 using Xunit;
 
@@ -162,9 +158,9 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
 
     private async Task<HttpClient> CreateBearerClientAsync(WebApplicationFactory<Program> factory)
     {
-        var issued = await factory.Services.GetRequiredService<ManagementBearerSessionService>()
+        var issued = await factory.Services.GetRequiredService<BearerSessionService>()
             .IssueAsync(_adminAccountId, Token);
-        Assert.Equal(ManagementBearerIssueStatus.Issued, issued.Status);
+        Assert.Equal(BearerIssueStatus.Issued, issued.Status);
         var http = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri("http://192.0.2.20"),
@@ -692,7 +688,7 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
     /// </summary>
     private sealed class CountingValidator : IBootstrapCandidateValidator
     {
-        private readonly BootstrapCandidateValidator inner;
+        private readonly CandidateValidator inner;
         private readonly TaskCompletionSource? releaseGate;
         private readonly IHttpContextAccessor? accessor;
         private readonly bool cancelAfterValidation;
@@ -704,7 +700,7 @@ public sealed class AdminBootstrapReplacementTests : IAsyncLifetime
             bool cancelAfterValidation,
             IHttpContextAccessor? accessor)
         {
-            inner = new BootstrapCandidateValidator(
+            inner = new CandidateValidator(
                 BootstrapStore.CreateProviderRegistry(),
                 currentMasterKey);
             this.releaseGate = releaseGate;

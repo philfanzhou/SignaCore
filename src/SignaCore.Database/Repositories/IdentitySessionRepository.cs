@@ -61,7 +61,7 @@ public class IdentitySessionRepository : IIdentitySessionRepository
     }
 
     /// <summary>
-    /// Follows the <c>InstallationStateLock</c> precedent: PostgreSQL takes an explicit
+    /// Follows the <c>StateLock</c> precedent: PostgreSQL takes an explicit
     /// <c>FOR UPDATE</c> row lock that blocks a second locker until this transaction ends, while
     /// SQLite relies on its file-level writer serialization and reads inside the transaction. The
     /// change tracker is cleared first so the lock always re-reads the committed row instead of

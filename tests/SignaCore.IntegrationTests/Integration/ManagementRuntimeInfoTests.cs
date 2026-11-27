@@ -9,12 +9,10 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
-using ServiceMantle.Web.Health;
 using ServiceMantle.Web.Management;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
 using ServiceMantle.Management;
-using SignaCore.Host;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;

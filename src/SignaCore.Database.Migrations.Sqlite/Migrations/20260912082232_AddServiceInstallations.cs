@@ -1,5 +1,4 @@
-﻿using System;
-using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -36,7 +35,7 @@ namespace SignaCore.Database.Migrations.Sqlite.Migrations
             // startup phase resolution to read `service_installations`, an upgraded database is
             // never classified as PendingSetup and never re-exposes anonymous setup.
             //
-            // Condition mirrors InstallationStateResolver: a Completed `installation_state`
+            // Condition mirrors StateResolver: a Completed `installation_state`
             // singleton, OR any pre-existing business data (the same 9 tables HasBusinessDataAsync
             // probes). A Pending singleton with no business data, and a brand-new empty database,
             // correctly stay empty so anonymous setup remains open.

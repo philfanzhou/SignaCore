@@ -1,15 +1,11 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
@@ -22,7 +18,6 @@ using SignaCore.Host.Management;
 using SignaCore.Host.Models;
 using SignaCore.Host.Services;
 using SignaCore.Host;
-using System.Data.Common;
 using System.Net;
 using System.Security.Claims;
 using Testcontainers.PostgreSql;
@@ -452,7 +447,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
     // ---- Contender drivers ----
 
     private static async Task<object> RotateAsync(
-        InteractiveRefreshRotationService service,
+        InteractiveRefreshRotation service,
         ConcurrencySeed seed,
         string plaintext)
     {
@@ -474,7 +469,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
     }
 
     private static async Task<object> RedeemAsync(
-        AuthorizationCodeRedemptionService service,
+        AuthorizationCodeRedemption service,
         ConcurrencySeed seed,
         SeededCode code)
     {
@@ -524,7 +519,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
         private static IServiceProvider BuildServices()
         {
             var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-            services.AddSingleton<ManagementOperatorReader>();
+            services.AddSingleton<OperatorReader>();
             services.AddSingleton<ServiceMantle.Management.IManagementClaimsParser, ServiceMantle.Management.ManagementClaimsParser>();
             services.AddSingleton<ServiceMantle.Management.IManagementCurrentOperatorResolver, ServiceMantle.Management.ManagementCurrentOperatorResolver>();
             return services.BuildServiceProvider();
@@ -653,13 +648,13 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
             return optionsBuilder.Options;
         }
 
-        public static InteractiveRefreshRotationService BuildRotationService(
+        public static InteractiveRefreshRotation BuildRotationService(
             DbContextOptions<IdentityDbContext> options)
         {
             var context = new IdentityDbContext(options);
             var unitOfWork = new EfCoreUnitOfWork(context);
             var refreshTokens = new RefreshTokenRepository(context);
-            return new InteractiveRefreshRotationService(
+            return new InteractiveRefreshRotation(
                 refreshTokens,
                 new RefreshTokenFamilyStore(refreshTokens, unitOfWork, NullLogger<RefreshTokenFamilyStore>.Instance),
                 new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),
@@ -677,16 +672,16 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
                 context,
                 new AdminIdentityOptions(),
                 new SmsAdmissionService(context),
-                NullLogger<InteractiveRefreshRotationService>.Instance);
+                NullLogger<InteractiveRefreshRotation>.Instance);
         }
 
-        public static AuthorizationCodeRedemptionService BuildRedemptionService(
+        public static AuthorizationCodeRedemption BuildRedemptionService(
             DbContextOptions<IdentityDbContext> options)
         {
             var context = new IdentityDbContext(options);
             var unitOfWork = new EfCoreUnitOfWork(context);
             var refreshTokens = new RefreshTokenRepository(context);
-            return new AuthorizationCodeRedemptionService(
+            return new AuthorizationCodeRedemption(
                 new AuthorizationCodeStore(new AuthorizationCodeRepository(context), unitOfWork),
                 new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),
                 new AccountRepository(context),
@@ -705,7 +700,7 @@ public sealed class AdminStatePropagationConcurrencyDatabaseContractTests
                 context,
                 new AdminIdentityOptions(),
                 new SmsAdmissionService(context),
-                NullLogger<AuthorizationCodeRedemptionService>.Instance);
+                NullLogger<AuthorizationCodeRedemption>.Instance);
         }
 
         private static System.Diagnostics.Metrics.IMeterFactory StubMeterFactory()

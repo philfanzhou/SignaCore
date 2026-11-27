@@ -1,19 +1,14 @@
-using System.Security.Claims;
 using System.Text.Json;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
-using SignaCore.Host;
 using SignaCore.Host.Controllers;
 using SignaCore.Host.Models;
 using SignaCore.Host.Provisioning;
@@ -48,8 +43,6 @@ public class AdminOidcClientTests : IDisposable
     private readonly IRefreshTokenFamilyStore _familyStore;
     private readonly IPasswordHasher _passwordHasher = new BCryptPasswordHasher(
         new PasswordHasherOptions { WorkFactor = 4 });
-    private readonly IWebHostEnvironment _environment = ProductionEnvironment();
-
     private static readonly JwtOptions TestJwtOptions = new()
     {
         Issuer = "TestIssuer",
@@ -327,7 +320,6 @@ public class AdminOidcClientTests : IDisposable
             _repository,
             _unitOfWork,
             _auditServiceMock.Object,
-            _environment,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
@@ -346,7 +338,6 @@ public class AdminOidcClientTests : IDisposable
             _repository,
             _unitOfWork,
             _auditServiceMock.Object,
-            _environment,
             TestContext.Current.CancellationToken);
 
         Assert.IsType<BadRequestObjectResult>(result);
@@ -419,7 +410,6 @@ public class AdminOidcClientTests : IDisposable
     [Fact]
     public async Task RecognisableSensitiveValues_ReachNeitherAnErrorBodyNorAnAuditRecord()
     {
-        const string canaryUri = "https://attacker.example.test/cb?api_key=CANARY-SECRET-VALUE";
         var events = new List<ManagementAuditEvent>();
         _auditServiceMock
             .Setup(writer => writer.RecordAsync(
@@ -439,7 +429,6 @@ public class AdminOidcClientTests : IDisposable
             _repository,
             _unitOfWork,
             _auditServiceMock.Object,
-            _environment,
             TestContext.Current.CancellationToken);
 
         var body = Serialize(Assert.IsType<BadRequestObjectResult>(rejected).Value);
@@ -626,8 +615,7 @@ public class AdminOidcClientTests : IDisposable
             _dbContext,
             _auditServiceMock.Object,
             _passwordHasher,
-            NullLogger.Instance,
-            isDevelopment: false);
+            NullLogger.Instance);
 
         Assert.Empty(await _dbContext.AppRegistrations.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken));
     }
@@ -653,7 +641,6 @@ public class AdminOidcClientTests : IDisposable
             _repository,
             _unitOfWork,
             _auditServiceMock.Object,
-            _environment,
             _dbContext,
             _familyStore,
             TestContext.Current.CancellationToken);
@@ -665,7 +652,6 @@ public class AdminOidcClientTests : IDisposable
             _repository,
             _unitOfWork,
             _auditServiceMock.Object,
-            _environment,
             TestContext.Current.CancellationToken);
 
     private async Task AddUrisAsync(RedirectUriKind kind, params string[] uris)
@@ -686,7 +672,6 @@ public class AdminOidcClientTests : IDisposable
             _repository,
             _unitOfWork,
             _auditServiceMock.Object,
-            _environment,
             TestContext.Current.CancellationToken);
 
         if (expectSuccess)
@@ -742,26 +727,12 @@ public class AdminOidcClientTests : IDisposable
                 _dbContext,
                 _auditServiceMock.Object,
                 _passwordHasher,
-                NullLogger.Instance,
-                isDevelopment: false);
+                NullLogger.Instance);
             _dbContext.ChangeTracker.Clear();
         }
         finally
         {
             File.Delete(path);
         }
-    }
-
-    private static IWebHostEnvironment ProductionEnvironment()
-    {
-        var environment = new Mock<IWebHostEnvironment>();
-        environment.SetupGet(item => item.EnvironmentName).Returns("Production");
-        environment.SetupGet(item => item.ApplicationName).Returns("SignaCore.Host");
-        environment.SetupGet(item => item.ContentRootPath).Returns(AppContext.BaseDirectory);
-        environment.SetupGet(item => item.ContentRootFileProvider)
-            .Returns(new NullFileProvider());
-        environment.SetupGet(item => item.WebRootPath).Returns(AppContext.BaseDirectory);
-        environment.SetupGet(item => item.WebRootFileProvider).Returns(new NullFileProvider());
-        return environment.Object;
     }
 }

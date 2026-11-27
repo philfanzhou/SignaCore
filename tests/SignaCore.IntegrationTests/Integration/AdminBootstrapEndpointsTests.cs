@@ -147,9 +147,9 @@ public sealed class AdminBootstrapEndpointsTests : IAsyncLifetime
             .Where(row => row.Username == "endpoints_admin")
             .Select(row => row.AccountId)
             .SingleAsync(Token);
-        var issued = await factory.Services.GetRequiredService<ManagementBearerSessionService>()
+        var issued = await factory.Services.GetRequiredService<BearerSessionService>()
             .IssueAsync(accountId, Token);
-        Assert.Equal(ManagementBearerIssueStatus.Issued, issued.Status);
+        Assert.Equal(BearerIssueStatus.Issued, issued.Status);
 
         using var http = factory.CreateClient(new WebApplicationFactoryClientOptions
         {

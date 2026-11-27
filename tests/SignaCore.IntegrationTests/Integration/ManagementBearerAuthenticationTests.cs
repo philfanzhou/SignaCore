@@ -4,16 +4,13 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
-using ServiceMantle.Audit;
 using ServiceMantle.Web.Management;
-using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
 using SignaCore.Host.Management;
@@ -124,7 +121,7 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
         var cookie = await LoginCookieAsync(host);
         var adminId = await _fixture.GetAdminAccountIdAsync();
         var revoked = await IssueAsync(host, adminId);
-        Assert.Equal(ManagementBearerRevocationResult.Revoked, await Service(host).RevokeAsync(revoked, Ct));
+        Assert.Equal(BearerRevocationResult.Revoked, await Service(host).RevokeAsync(revoked, Ct));
         var expired = await IssueAsync(host, adminId);
         await ExpireAsync(expired);
         var notAdmin = await IssueAsync(host, await SeedAccountAsync());
@@ -187,12 +184,12 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
     {
         var missing = Path.Combine(PhysicalTempPath.Root(), $"missing-{Guid.NewGuid():N}", "bearer.db");
         using var host = CreateHost(services => services.Replace(ServiceDescriptor.Singleton(serviceProvider =>
-            new ManagementBearerSessionService(
+            new BearerSessionService(
                 new DatabaseOptions { Provider = "SQLite", ConnectionString = $"Data Source={missing};Pooling=false" },
                 serviceProvider.GetRequiredService<AdminIdentityOptions>(),
                 serviceProvider.GetRequiredService<IManagementBearerSessionRepository>(),
                 serviceProvider.GetRequiredService<TimeProvider>(),
-                serviceProvider.GetRequiredService<ILogger<ManagementBearerSessionService>>()))));
+                serviceProvider.GetRequiredService<ILogger<BearerSessionService>>()))));
         var cookie = await LoginCookieAsync(host);
         var token = ManagementBearerToken.Generate();
 
@@ -253,9 +250,9 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
         using var _ = Client(host);
         var schemes = host.Services.GetRequiredService<IAuthenticationSchemeProvider>();
 
-        Assert.Equal(ManagementBearerAuthenticationDefaults.SelectorScheme, (await schemes.GetDefaultAuthenticateSchemeAsync())!.Name);
-        Assert.Equal(ManagementBearerAuthenticationDefaults.SelectorScheme, (await schemes.GetDefaultChallengeSchemeAsync())!.Name);
-        Assert.Equal(ManagementBearerAuthenticationDefaults.SelectorScheme, (await schemes.GetDefaultForbidSchemeAsync())!.Name);
+        Assert.Equal(BearerAuthenticationDefaults.SelectorScheme, (await schemes.GetDefaultAuthenticateSchemeAsync())!.Name);
+        Assert.Equal(BearerAuthenticationDefaults.SelectorScheme, (await schemes.GetDefaultChallengeSchemeAsync())!.Name);
+        Assert.Equal(BearerAuthenticationDefaults.SelectorScheme, (await schemes.GetDefaultForbidSchemeAsync())!.Name);
         Assert.Equal(ManagementSessionDefaults.AuthenticationScheme, (await schemes.GetDefaultSignInSchemeAsync())!.Name);
         Assert.Equal(ManagementSessionDefaults.AuthenticationScheme, (await schemes.GetDefaultSignOutSchemeAsync())!.Name);
 
@@ -275,7 +272,7 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
                 options.AddPolicy(
                     ManagementAuthorizationDefaults.AdminPolicyName,
                     new AuthorizationPolicyBuilder(shared)
-                        .AddAuthenticationSchemes(ManagementBearerAuthenticationDefaults.SelectorScheme)
+                        .AddAuthenticationSchemes(BearerAuthenticationDefaults.SelectorScheme)
                         .Build());
             }));
 
@@ -320,7 +317,7 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
         carriers.Add((await ReadAsync(host, Get("/api/admin/bootstrap", bearer: token))).Describe());
         var created = await CreateUserAsync(host, bearer: token);
         carriers.Add((await ReadAsync(host, Get("/api/admin/users", bearer: token + "x"))).Describe());
-        Assert.Equal(ManagementBearerRevocationResult.Revoked, await Service(host).RevokeAsync(token, Ct));
+        Assert.Equal(BearerRevocationResult.Revoked, await Service(host).RevokeAsync(token, Ct));
         carriers.Add((await ReadAsync(host, Get("/management/v1/settings", bearer: token))).Describe());
         carriers.Add((await ReadAsync(host, Get("/api/admin/session/me", bearer: token))).Describe());
         carriers.Add((await ReadAsync(host, Get("/api/admin/bootstrap", bearer: token))).Describe());
@@ -361,13 +358,13 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
             HandleCookies = false
         });
 
-    private static ManagementBearerSessionService Service(WebApplicationFactory<Program> host) =>
-        host.Services.GetRequiredService<ManagementBearerSessionService>();
+    private static BearerSessionService Service(WebApplicationFactory<Program> host) =>
+        host.Services.GetRequiredService<BearerSessionService>();
 
     private static async Task<string> IssueAsync(WebApplicationFactory<Program> host, Guid accountId)
     {
         var issued = await Service(host).IssueAsync(accountId, Ct);
-        Assert.Equal(ManagementBearerIssueStatus.Issued, issued.Status);
+        Assert.Equal(BearerIssueStatus.Issued, issued.Status);
         return issued.Token!;
     }
 
@@ -518,12 +515,12 @@ public sealed class ManagementBearerAuthenticationTests : IClassFixture<Identity
 
     /// <summary>Replaces the host's service with one whose per-operation context carries an interceptor.</summary>
     private static void ReplaceService(IServiceCollection services, IInterceptor interceptor) =>
-        services.Replace(ServiceDescriptor.Singleton(serviceProvider => new ManagementBearerSessionService(
+        services.Replace(ServiceDescriptor.Singleton(serviceProvider => new BearerSessionService(
             serviceProvider.GetRequiredService<DatabaseOptions>(),
             serviceProvider.GetRequiredService<AdminIdentityOptions>(),
             serviceProvider.GetRequiredService<IManagementBearerSessionRepository>(),
             serviceProvider.GetRequiredService<TimeProvider>(),
-            serviceProvider.GetRequiredService<ILogger<ManagementBearerSessionService>>(),
+            serviceProvider.GetRequiredService<ILogger<BearerSessionService>>(),
             builder => builder.AddInterceptors(interceptor))));
 
     private static bool ReadsSessions(DbCommand command) =>

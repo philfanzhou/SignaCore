@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
-using Moq;
 using SignaCore.Database;
 using Xunit;
 

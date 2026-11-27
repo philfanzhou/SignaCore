@@ -1,5 +1,4 @@
 using System.Data.Common;
-using System.IO;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -17,7 +16,6 @@ using Microsoft.Extensions.Logging;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Validators;
-using SignaCore.Host;
 using SignaCore.Host.Security;
 using Xunit;
 

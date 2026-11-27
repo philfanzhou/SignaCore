@@ -24,7 +24,7 @@ issue #556); see [System settings retirement](../database/system-settings-retire
 | Store (single aggregate per service) | `EfCoreServiceSettingStore<IdentityDbContext>` over `IDbContextFactory<IdentityDbContext>` |
 | Transactional updates + audits | `EfCoreServiceSettingUpdateTransaction<IdentityDbContext>` + `ServiceSettingUpdateService` (scoped) |
 | Sensitive-value root key | `MasterKeyRootKeySource : IServiceSettingRootKeySource` (Base64 of the bootstrap master key) |
-| Query / snapshot services | `AddServiceMantleSettingSnapshots()` plus an isolated `ManagementSettingQuerySnapshot` for management observations |
+| Query / snapshot services | `AddServiceMantleSettingSnapshots()` plus an isolated `SettingQuerySnapshot` for management observations |
 
 Product definitions live in `src/SignaCore.Host/Configuration/` and management composition in
 `src/SignaCore.Host/Management/`; both are internal and add no public API.
@@ -143,7 +143,7 @@ inputs with pinned verdicts captured from the retired validator's baseline, and 
 
 - The normal host maps the shared management API v1 group with
   `MapServiceMantleSettingQueries()` (definitions + current values) and
-  `MapServiceMantleSettingUpdates(ManagementSettingUpdateExecutor.ExecuteAsync)`. The Bootstrap
+  `MapServiceMantleSettingUpdates(SettingUpdateExecutor.ExecuteAsync)`. The Bootstrap
   and Setup hosts never map the group, so those phases expose no settings surface. The legacy
   `AdminSettingsController` and its models are gone; `/api/admin/settings` no longer exists.
 - The update executor resolves a fresh scope and its own `IdentityDbContext` built with
@@ -154,7 +154,7 @@ inputs with pinned verdicts captured from the retired validator's baseline, and 
   shared contract forbids. One attempt, no replay.
 - The current-values response carries the product header
   `X-SignaCore-Running-Configuration-Version`: the version this process activated at bootstrap
-  (`InstallationRuntimeState.ConfigurationVersion`), added by a local middleware on exactly that
+  (`RuntimeState.ConfigurationVersion`), added by a local middleware on exactly that
   successful GET. The shared JSON stays untouched, the header appears on no other endpoint, and a
   cross-origin console reads it through the AdminWeb CORS `WithExposedHeaders` entry. The console
   derives restart-pending from the header versus the response version; a missing or unparseable

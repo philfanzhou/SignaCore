@@ -899,7 +899,7 @@ public sealed class SqliteStartupMigrationGateTests
             try
             {
                 using var cts = new CancellationTokenSource();
-                var (executor, entered) = CancellingExecutor(stage, cts);
+                var (executor, entered) = CancellingExecutor(stage);
                 var gate = InstallationStartup.RunAsync(
                     NewBootstrap(TestDatabaseOptions(databasePath)),
                     EmptyConfiguration(),
@@ -1006,8 +1006,7 @@ public sealed class SqliteStartupMigrationGateTests
         (string?)await StoredColumnAsync(databasePath, "service_installations", "setup_code_digest");
 
     private static (DelegateMigrationExecutor Executor, TaskCompletionSource Entered) CancellingExecutor(
-        Stage stage,
-        CancellationTokenSource cts)
+        Stage stage)
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var executed = false;

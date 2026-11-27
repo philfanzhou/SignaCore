@@ -6,7 +6,6 @@ using ServiceMantle.Installation;
 using ServiceMantle.Migration;
 using ServiceMantle.Persistence.Relational.Mapping;
 using ServiceMantle.Persistence.Relational.Stores;
-using SignaCore.Database.Entity;
 using SignaCore.Database;
 using SignaCore.Domain.Keys;
 using SignaCore.Host.Bootstrap;
@@ -86,7 +85,7 @@ internal static class InstallationStartup
             // original-token cancellation takes precedence over entering installation resolution.
             cancellationToken.ThrowIfCancellationRequested();
 
-            var resolution = await InstallationStateResolver.ResolveAsync(db, cancellationToken);
+            var resolution = await StateResolver.ResolveAsync(db, cancellationToken);
 
             if (resolution.Phase == InstallationPhase.LegacyImportRequired)
             {
@@ -101,7 +100,7 @@ internal static class InstallationStartup
 
             // The durable installation identity is the service id; this Guid is only a stable
             // per-boot reference for the setup status surface.
-            var runtimeState = new InstallationRuntimeState(
+            var runtimeState = new RuntimeState(
                 resolution.Phase,
                 Guid.NewGuid(),
                 resolution.ConfigurationVersion);
@@ -130,7 +129,7 @@ internal static class InstallationStartup
             // The aggregate version is a long; the host's configuration-version surfaces are int.
             // Versions count from 1 and are monotonic, so a real deployment cannot cross
             // int.MaxValue — the activation boundary above fails closed before this cast.
-            runtimeState = new InstallationRuntimeState(
+            runtimeState = new RuntimeState(
                 resolution.Phase,
                 runtimeState.InstallationId,
                 configurationVersion: (int)sharedSnapshot.Version);
@@ -251,7 +250,7 @@ internal static class InstallationStartup
     {
         // The product input rules live in the thin adapter; nothing is persisted while reading.
         var (legacyValues, importedKeyCount) = LegacyConfigurationInput.ReadCompleteInput(
-            configuration, logger);
+            configuration);
 
         var changes = SharedSettingComposition.BuildSeedChanges(legacyValues);
 
@@ -530,7 +529,7 @@ internal static class InstallationStartup
             return 1;
         }
 
-        StartupBanner.WriteSetupCode(
+        Banner.WriteSetupCode(
             issued.SetupCode!.Reveal(),
             new DateTimeOffset(issued.ExpiresAtUtc!.Value));
         return 0;

@@ -1,20 +1,16 @@
-using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using ServiceMantle.Audit;
-using ServiceMantle.Health;
 using ServiceMantle.Management;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
-using SignaCore.Domain;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using SignaCore.Host;
-using SignaCore.Host.Installation;
 using SignaCore.Host.Management;
 using SignaCore.Host.Services;
 using Xunit;
@@ -25,7 +21,7 @@ public sealed class ManagementIdentityProviderTests : IAsyncDisposable
 {
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
     private IdentityDbContext _context = null!;
-    private readonly ManagementCredentialAccessor _credentials = new();
+    private readonly CredentialAccessor _credentials = new();
     private readonly Guid _adminId = Guid.NewGuid();
     private const string AdminName = "session_admin";
     private const string AdminPassword = "SessionAdmin123!";
@@ -47,7 +43,7 @@ public sealed class ManagementIdentityProviderTests : IAsyncDisposable
         await _context.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
     }
 
-    private async Task<ManagementIdentityProvider> CreateProviderAsync(string adminUsername = AdminName)
+    private async Task<IdentityProvider> CreateProviderAsync(string adminUsername = AdminName)
     {
         await EnsureContextAsync();
 
@@ -72,7 +68,7 @@ public sealed class ManagementIdentityProviderTests : IAsyncDisposable
 
         var accessor = new HttpContextAccessor { HttpContext = new DefaultHttpContext() };
 
-        return new ManagementIdentityProvider(
+        return new IdentityProvider(
             _credentials,
             new ValidatorFactory([validator], NullLogger<ValidatorFactory>.Instance),
             new AdminIdentityOptions { Username = adminUsername },
@@ -83,7 +79,7 @@ public sealed class ManagementIdentityProviderTests : IAsyncDisposable
                 _context,
                 NullLogger<AdminLoginStateRecorder>.Instance),
             accessor,
-            NullLogger<ManagementIdentityProvider>.Instance);
+            NullLogger<IdentityProvider>.Instance);
     }
 
     [Fact]
@@ -237,7 +233,7 @@ public sealed class ManagementLoginAdapterTests
     private static ServiceProvider CreateServices(IManagementIdentityProvider provider)
     {
         var services = new ServiceCollection();
-        services.AddScoped<ManagementCredentialAccessor>();
+        services.AddScoped<CredentialAccessor>();
         services.AddSingleton(provider);
         return services.BuildServiceProvider();
     }
@@ -249,7 +245,7 @@ public sealed class ManagementLoginAdapterTests
         using var services = (ServiceProvider)CreateServices(recorder);
         var context = CreateHttpContext(services, "not json at all");
 
-        var result = await ManagementSessionComposition.LoginAdapter(
+        var result = await SessionComposition.LoginAdapter(
             context, TestContext.Current.CancellationToken);
 
         Assert.Equal(ManagementIdentityStatus.Unauthenticated, result.Status);
@@ -267,7 +263,7 @@ public sealed class ManagementLoginAdapterTests
         using var services = (ServiceProvider)CreateServices(recorder);
         var context = CreateHttpContext(services, body);
 
-        var result = await ManagementSessionComposition.LoginAdapter(
+        var result = await SessionComposition.LoginAdapter(
             context, TestContext.Current.CancellationToken);
 
         Assert.Equal(ManagementIdentityStatus.Unauthenticated, result.Status);
@@ -282,12 +278,12 @@ public sealed class ManagementLoginAdapterTests
         var context = CreateHttpContext(services,
             "{\"Username\": \"  SessionAdmin  \", \"password\": \"SessionAdmin123!\"}");
 
-        var result = await ManagementSessionComposition.LoginAdapter(
+        var result = await SessionComposition.LoginAdapter(
             context, TestContext.Current.CancellationToken);
 
         Assert.Equal(ManagementIdentityStatus.Authenticated, result.Status);
         Assert.Equal(1, recorder.Calls);
-        var accessor = context.RequestServices.GetRequiredService<ManagementCredentialAccessor>();
+        var accessor = context.RequestServices.GetRequiredService<CredentialAccessor>();
         Assert.True(accessor.HasCredentials);
         Assert.Equal("SessionAdmin", accessor.Username);
     }
@@ -302,7 +298,7 @@ public sealed class ManagementLoginAdapterTests
         await cancellation.CancelAsync();
 
         var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => ManagementSessionComposition.LoginAdapter(context, cancellation.Token).AsTask());
+            () => SessionComposition.LoginAdapter(context, cancellation.Token).AsTask());
         Assert.Equal(cancellation.Token, exception.CancellationToken);
     }
 

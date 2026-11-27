@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
-using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
@@ -10,7 +9,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using SignaCore.Database;
 using SignaCore.Domain.Services;
-using SignaCore.Host;
 using Xunit;
 using static SignaCore.Tests.Integration.OAuthLoginTestSupport;
 

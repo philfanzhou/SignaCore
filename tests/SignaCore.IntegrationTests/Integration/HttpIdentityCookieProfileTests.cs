@@ -12,7 +12,6 @@ using SignaCore.Domain.Services.Sms;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
 using SignaCore.Domain.Services;
-using SignaCore.Host;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Security;
 using SignaCore.Host.Startup;

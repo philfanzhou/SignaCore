@@ -1,13 +1,10 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using ServiceMantle.Web.Health;
-using ServiceMantle.Web.Http;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
 using SignaCore.Host;

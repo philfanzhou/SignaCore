@@ -94,7 +94,7 @@ public sealed partial class ManagementSettingRecoveryDatabaseContractTests
             var command = new ServiceSettingUpdateCommand(before.Version,
                 new Dictionary<string, string?> { ["jwt.audience"] = "valid-audience" },
                 ManagementAuditOperator.Create(WellKnownManagementAuditOperatorSources.InteractiveAdmin, "recovery-test"));
-            var recovery = new ManagementSettingRecovery(inner, keySource, false, command);
+            var recovery = new SettingRecovery(inner, keySource, false, command);
             var service = new ServiceSettingUpdateService(InstallationStores.ServiceId, recovery.Registry, recovery, keySource);
             var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
             {

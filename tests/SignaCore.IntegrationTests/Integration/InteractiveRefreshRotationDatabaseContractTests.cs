@@ -1,12 +1,10 @@
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
@@ -324,7 +322,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
             return optionsBuilder.Options;
         }
 
-        public static InteractiveRefreshRotationService BuildService(DbContextOptions<IdentityDbContext> options)
+        public static InteractiveRefreshRotation BuildService(DbContextOptions<IdentityDbContext> options)
         {
             var context = new IdentityDbContext(options);
             var unitOfWork = new EfCoreUnitOfWork(context);
@@ -333,7 +331,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
             meterFactory
                 .Setup(factory => factory.Create(It.IsAny<System.Diagnostics.Metrics.MeterOptions>()))
                 .Returns(new System.Diagnostics.Metrics.Meter("SignaCore"));
-            return new InteractiveRefreshRotationService(
+            return new InteractiveRefreshRotation(
                 refreshTokens,
                 new RefreshTokenFamilyStore(refreshTokens, unitOfWork, NullLogger<RefreshTokenFamilyStore>.Instance),
                 new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),
@@ -351,7 +349,7 @@ public sealed class InteractiveRefreshRotationDatabaseContractTests
                 context,
                 new AdminIdentityOptions(),
                 new SmsAdmissionService(context),
-                NullLogger<InteractiveRefreshRotationService>.Instance);
+                NullLogger<InteractiveRefreshRotation>.Instance);
         }
 
         public Task<Seed> SeedAsync(bool publicClient = false) => SeedAsync(BuildOptions(), publicClient);

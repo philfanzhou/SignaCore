@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using ServiceMantle.Installation;
 using ServiceMantle.Persistence.Relational.Mapping;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database;
 using SignaCore.IntegrationTests.Integration;

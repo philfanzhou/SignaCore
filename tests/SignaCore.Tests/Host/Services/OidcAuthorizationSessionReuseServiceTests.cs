@@ -1,8 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
@@ -165,13 +163,13 @@ public sealed class OidcAuthorizationSessionReuseServiceTests
     private sealed class ReuseDatabase(
         SqliteConnection connection,
         IdentityDbContext context,
-        OidcAuthorizationSessionReuseService service,
+        OidcAuthorizationSessionReuse service,
         IIdentitySessionStore sessions,
         IAuthorizationCodeStore codes) : IAsyncDisposable
     {
         public SqliteConnection Connection { get; } = connection;
         public IdentityDbContext Context { get; } = context;
-        public OidcAuthorizationSessionReuseService Service { get; } = service;
+        public OidcAuthorizationSessionReuse Service { get; } = service;
         public IIdentitySessionStore Sessions { get; } = sessions;
         public IAuthorizationCodeStore Codes { get; } = codes;
 
@@ -194,7 +192,7 @@ public sealed class OidcAuthorizationSessionReuseServiceTests
         var accountRepository = new AccountRepository(context);
         var sessions = new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork);
         var codes = new AuthorizationCodeStore(new AuthorizationCodeRepository(context), unitOfWork);
-        var service = new OidcAuthorizationSessionReuseService(
+        var service = new OidcAuthorizationSessionReuse(
             sessions,
             codes,
             accountRepository,

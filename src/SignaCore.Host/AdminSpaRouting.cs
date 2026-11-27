@@ -1,23 +1,12 @@
 namespace SignaCore.Host;
 
 /// <summary>
-/// Decides whether a request belongs to the admin SPA branch of the pipeline.
+/// Decides whether a request belongs to the admin console SPA.
 /// <para>
-/// The SPA branch is <b>terminal</b>: <c>MapWhen</c> never returns to the main pipeline, and the branch
-/// ends by rewriting the path to <c>/index.html</c>. Anything routed into it by mistake therefore never
-/// reaches <c>MapControllers()</c> — it silently 404s or gets HTML back. That already happened once:
-/// <c>/oauth2/*</c> was added without extending the prefix list and was swallowed whole in any real
-/// deployment. Tests did not catch it because <c>TestServer</c> leaves
-/// <see cref="ConnectionInfo.LocalPort"/> at 0, so the port condition was false and the branch was
-/// never taken.
-/// </para>
-/// <para>
-/// The primary guard is therefore <see cref="HttpContext.GetEndpoint"/> rather than the prefix list:
-/// routing runs at the start of the pipeline (no explicit <c>UseRouting</c> call, so the host inserts
-/// it there), which means every mapped API route already has an endpoint selected by the time this
-/// predicate runs. A new controller or minimal-API route is excluded automatically and cannot regress
-/// this way again. The prefix checks are kept as a second line of defence for paths that are
-/// API-shaped but unmapped — <c>/api/does-not-exist</c> should 404 as an API, not render the console.
+/// The console is served by a lowest-priority fallback endpoint (<c>{**path}</c>), which routing
+/// selects only when no more specific endpoint matched, so a registered API route can never be
+/// swallowed by it. The prefix check below is the second line of defence for API-shaped paths that
+/// are not mapped — <c>/api/does-not-exist</c> should 404 as an API, not render the console.
 /// </para>
 /// </summary>
 public static class AdminSpaRouting
@@ -25,29 +14,12 @@ public static class AdminSpaRouting
     private static readonly string[] NonSpaPrefixes =
         ["/api", "/oauth2", "/.well-known", "/health", "/metrics", "/management"];
 
-    public static bool ShouldServeSpa(HttpContext context, int httpPort)
-    {
-        if (context.Connection.LocalPort != httpPort)
-        {
-            return false;
-        }
-
-        // A matched endpoint means some Map* call owns this request; the SPA must not swallow it.
-        if (context.GetEndpoint() != null)
-        {
-            return false;
-        }
-
-        return IsSpaPath(context.Request.Path);
-    }
-
     /// <summary>
     /// Decides whether the normal host's SPA fallback endpoint should serve the console for a
     /// request. The fallback is itself a mapped endpoint (<c>{**path}</c>), reached only after
-    /// routing found no more specific match, so the <see cref="GetEndpoint"/> guard that
-    /// <see cref="ShouldServeSpa"/> applies would always reject it; only the port and the non-SPA
-    /// prefix guards remain. A declined request is answered 404 so API-shaped and management paths
-    /// keep their own contract instead of rendering the console.
+    /// routing found no more specific match, so only the port and the non-SPA prefix guards
+    /// apply. A declined request is answered 404 so API-shaped and management paths keep their
+    /// own contract instead of rendering the console.
     /// </summary>
     public static bool ShouldServeSpaFallback(HttpContext context, int httpPort)
     {

@@ -64,7 +64,7 @@ public sealed class OAuthAuthorizationController : ControllerBase
     private readonly IOidcAuthorizationRequestValidator _validator;
     private readonly IAuthorizationRequestStore _authorizationRequestStore;
     private readonly IIdentitySessionCookieReader _identitySessionCookieReader;
-    private readonly OidcAuthorizationSessionReuseService _sessionReuse;
+    private readonly OidcAuthorizationSessionReuse _sessionReuse;
     private readonly IManagementAuditWriter _auditWriter;
     private readonly IUnitOfWork _unitOfWork;
     private readonly AuthMetrics _metrics;
@@ -75,7 +75,7 @@ public sealed class OAuthAuthorizationController : ControllerBase
         IOidcAuthorizationRequestValidator validator,
         IAuthorizationRequestStore authorizationRequestStore,
         IIdentitySessionCookieReader identitySessionCookieReader,
-        OidcAuthorizationSessionReuseService sessionReuse,
+        OidcAuthorizationSessionReuse sessionReuse,
         IManagementAuditWriter auditWriter,
         IUnitOfWork unitOfWork,
         AuthMetrics metrics,

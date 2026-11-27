@@ -9,7 +9,6 @@ using ServiceMantle.Web.Management;
 using SignaCore.Database;
 using SignaCore.Host.Security;
 using SignaCore.Host.Startup;
-using SignaCore.Host;
 using System.Net.Http.Json;
 using System.Net;
 using System.Text.Json;

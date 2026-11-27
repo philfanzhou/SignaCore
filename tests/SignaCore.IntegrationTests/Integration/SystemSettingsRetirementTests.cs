@@ -7,7 +7,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using ServiceMantle.Bootstrap;
 using ServiceMantle.Persistence.Relational.Mapping;
-using ServiceMantle.Persistence.Relational;
 using ServiceMantle;
 using SignaCore.Database.Entity;
 using SignaCore.Database;
@@ -276,7 +275,7 @@ public sealed class SystemSettingsRetirementTests
             Assert.Equal(0, await CountSqliteTableAsync(context, "system_settings"));
 
             // The pending/code path is unchanged and no administrator is silently created.
-            var resolution = await InstallationStateResolver.ResolveAsync(
+            var resolution = await StateResolver.ResolveAsync(
                 context, TestContext.Current.CancellationToken);
             Assert.Equal(InstallationPhase.PendingSetup, resolution.Phase);
             Assert.Equal(0, await context.Accounts.LongCountAsync(TestContext.Current.CancellationToken));
@@ -430,7 +429,7 @@ public sealed class SystemSettingsRetirementTests
 
         Assert.Equal(0, await CountPostgreSqlTableAsync(context, "system_settings"));
 
-        var resolution = await InstallationStateResolver.ResolveAsync(
+        var resolution = await StateResolver.ResolveAsync(
             context, TestContext.Current.CancellationToken);
         Assert.Equal(InstallationPhase.PendingSetup, resolution.Phase);
     }

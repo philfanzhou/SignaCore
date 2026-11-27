@@ -1,13 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using ServiceMantle.Configuration;
-using ServiceMantle.Logging.Remote;
 using ServiceMantle.Logging;
 using SignaCore.Database;
 using SignaCore.Host.Configuration;

@@ -21,7 +21,6 @@ using SignaCore.Database.Entity;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Models;
 using SignaCore.Domain.Services;
-using SignaCore.Host;
 using SignaCore.Host.Security;
 using SignaCore.Host.Startup;
 using Xunit;

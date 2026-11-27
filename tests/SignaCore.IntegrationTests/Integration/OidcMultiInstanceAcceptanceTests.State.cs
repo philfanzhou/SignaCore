@@ -10,8 +10,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
-using SignaCore.Domain.Services;
-using SignaCore.Host;
 using SignaCore.Host.Security;
 using SignaCore.Host.Startup;
 using Xunit;

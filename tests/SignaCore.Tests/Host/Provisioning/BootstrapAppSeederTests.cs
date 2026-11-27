@@ -2,15 +2,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using ServiceMantle.Audit;
-using ServiceMantle.Persistence.Relational.Mapping;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
-using SignaCore.Database.Repositories;
 using SignaCore.Database;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Provisioning;
-using System.Text.Json;
 using Xunit;
 
 namespace SignaCore.Tests.Host.Provisioning;
@@ -61,8 +57,7 @@ public class BootstrapAppSeederTests : IDisposable
             _dbContext,
             _auditService,
             _passwordHasher,
-            _logger,
-            isDevelopment: false);
+            _logger);
 
         Assert.Empty(await _dbContext.AppRegistrations.AsNoTracking()
             .ToListAsync(TestContext.Current.CancellationToken));
@@ -336,7 +331,6 @@ public class BootstrapAppSeederTests : IDisposable
                 auditWriter ?? _auditService,
                 _passwordHasher,
                 _logger,
-                isDevelopment: false,
                 cancellationToken: cancellationToken);
             _dbContext.ChangeTracker.Clear();
         }

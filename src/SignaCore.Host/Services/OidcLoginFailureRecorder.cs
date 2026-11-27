@@ -1,4 +1,3 @@
-using Microsoft.EntityFrameworkCore;
 using SignaCore.Database;
 using SignaCore.Database.Repositories;
 using SignaCore.Domain;

@@ -1,12 +1,7 @@
 using System.Text;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
-using SignaCore.Domain.Models;
-using SignaCore.Domain.Services;
 using Xunit;
 
 namespace SignaCore.Tests.Integration;

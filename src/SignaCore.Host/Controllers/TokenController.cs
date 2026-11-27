@@ -15,16 +15,16 @@ namespace SignaCore.Host.Controllers;
 /// This is the contract endpoint existing downstream consumers depend on: its existing fields and
 /// behavior do not change, and only optional additive fields (such as the failure <c>code</c>) may be
 /// added. The RFC 6749 conformant equivalent lives on <see cref="OAuthTokenController"/>
-/// (<c>/oauth2/token</c>); both share <see cref="TokenIssuanceService"/>.
+/// (<c>/oauth2/token</c>); both share <see cref="TokenIssuance"/>.
 /// </para>
 /// </summary>
 [Route("api/auth")]
 [ApiController]
 public class TokenController : ControllerBase
 {
-    private readonly TokenIssuanceService _tokenIssuanceService;
+    private readonly TokenIssuance _tokenIssuanceService;
 
-    public TokenController(TokenIssuanceService tokenIssuanceService)
+    public TokenController(TokenIssuance tokenIssuanceService)
     {
         _tokenIssuanceService = tokenIssuanceService;
     }

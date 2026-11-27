@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging.Abstractions;
 using SignaCore.Host.Configuration;
 using Xunit;
 
@@ -16,8 +15,7 @@ public class LegacyConfigurationInputTests
     private static (Dictionary<string, string> Values, int ImportedKeyCount) Read(
         Dictionary<string, string?> source) =>
         LegacyConfigurationInput.ReadCompleteInput(
-            new ConfigurationBuilder().AddInMemoryCollection(source).Build(),
-            NullLogger.Instance);
+            new ConfigurationBuilder().AddInMemoryCollection(source).Build());
 
     private const string BaseUrl = "https://accounts.example.com";
 

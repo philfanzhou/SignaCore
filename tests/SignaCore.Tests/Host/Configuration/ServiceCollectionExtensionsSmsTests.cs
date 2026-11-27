@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using SignaCore.Database;
-using SignaCore.Domain;
 using SignaCore.Domain.Keys;
 using SignaCore.Domain.Services.Sms;
 using SignaCore.Host;

@@ -21,7 +21,7 @@ namespace SignaCore.Tests.Integration;
 
 /// <summary>
 /// The commit-boundary contract of the <c>EV-36</c> SMS login transaction
-/// (<see cref="OidcSmsLoginCompletionService"/>, #445) on both providers: the whole unit — the
+/// (<see cref="OidcSmsLoginCompletion"/>, #445) on both providers: the whole unit — the
 /// continuation and OTP consumptions, <c>AutoProvision</c> provisioning, the <c>PS-04</c> recheck,
 /// the <c>Sms</c> session, the code, the login info, and the masked audit — commits together or not
 /// at all. A lost continuation is <c>EV-03</c>; a lost OTP consumption, a failed recheck, and a
@@ -137,7 +137,7 @@ public sealed class OidcSmsLoginCompletionDatabaseContractTests
         var session = await db.IdentitySessions.AsNoTracking().SingleAsync(row => row.Id == completed.SessionId, Ct);
         Assert.Equal((account.Id, (Guid?)login.Id), (session.AccountId, session.SmsUserLoginId));
         Assert.Equal(account.Id, Assert.Single(await HistoriesAsync(db, seed)).AccountId);
-        Assert.Equal([OidcSmsLoginCompletionService.AccountCreationSource], unit.AccountCreations);
+        Assert.Equal([OidcSmsLoginCompletion.AccountCreationSource], unit.AccountCreations);
     }
 
     [Theory]
@@ -323,7 +323,7 @@ public sealed class OidcSmsLoginCompletionDatabaseContractTests
         Assert.Equal(1, await db.UserLogins.CountAsync(row => row.ProviderUserId == seed.Phone, Ct));
         Assert.Single(await HistoriesAsync(db, seed));
         Assert.Equal(OtpStatus.Consumed, (await OtpAsync(db, seed)).Status);
-        Assert.Equal([OidcSmsLoginCompletionService.AccountCreationSource], unit.AccountCreations);
+        Assert.Equal([OidcSmsLoginCompletion.AccountCreationSource], unit.AccountCreations);
     }
 
     // ---- SC-23: provisioning conflicts ----
@@ -398,7 +398,7 @@ public sealed class OidcSmsLoginCompletionDatabaseContractTests
             (await db.AppSmsAccesses.AsNoTracking().Where(row => row.UserLoginId == login.Id)
                 .Select(row => row.AppRegistrationId).ToListAsync(Ct)).Order());
         Assert.Equal(2, await db.IdentitySessions.CountAsync(row => row.SmsUserLoginId == login.Id, Ct));
-        Assert.Equal([OidcSmsLoginCompletionService.AccountCreationSource], a.AccountCreations.Concat(b.AccountCreations));
+        Assert.Equal([OidcSmsLoginCompletion.AccountCreationSource], a.AccountCreations.Concat(b.AccountCreations));
     }
 
     // ---- SC-26: two consuming submissions of one continuation ----
@@ -629,10 +629,10 @@ public sealed class OidcSmsLoginCompletionDatabaseContractTests
 
     // ---- Unit under test ----
 
-    private sealed class Unit(IdentityDbContext context, OidcSmsLoginCompletionService service, MeterListener listener,
+    private sealed class Unit(IdentityDbContext context, OidcSmsLoginCompletion service, MeterListener listener,
         ConcurrentQueue<string> creations, ServiceProvider meters) : IAsyncDisposable
     {
-        public OidcSmsLoginCompletionService Service => service;
+        public OidcSmsLoginCompletion Service => service;
 
         public IReadOnlyCollection<string> AccountCreations => creations;
 
@@ -675,7 +675,7 @@ public sealed class OidcSmsLoginCompletionDatabaseContractTests
             }
         });
         listener.Start();
-        var service = new OidcSmsLoginCompletionService(
+        var service = new OidcSmsLoginCompletion(
             Continuations(context),
             new OtpRepository(context),
             admissions?.Invoke(admissionService, context) ?? admissionService,
@@ -687,7 +687,7 @@ public sealed class OidcSmsLoginCompletionDatabaseContractTests
             unitOfWork,
             context,
             new AuthMetrics(meterFactory),
-            NullLogger<OidcSmsLoginCompletionService>.Instance);
+            NullLogger<OidcSmsLoginCompletion>.Instance);
         return new Unit(context, service, listener, creations, meters);
     }
 

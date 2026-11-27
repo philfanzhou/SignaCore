@@ -30,7 +30,6 @@ public static class OidcAuthorizationErrorDescriptions
 {
     public const string DuplicateParameter = "A request parameter was supplied more than once.";
     public const string UnsupportedResponseType = "The response_type must be code.";
-    public const string UnsupportedParameter = "The request contains a parameter this authorization server does not support.";
     public const string RequestObjectNotSupported = "This authorization server does not support request objects.";
     public const string RequestUriNotSupported = "This authorization server does not support request_uri.";
     public const string RegistrationNotSupported = "This authorization server does not support dynamic registration.";

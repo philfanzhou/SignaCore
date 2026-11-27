@@ -7,8 +7,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using ServiceMantle.Installation;
 using SignaCore.Database;
-using SignaCore.Host;
-using SignaCore.Host.Configuration;
 using SignaCore.Host.Startup;
 using Xunit;
 

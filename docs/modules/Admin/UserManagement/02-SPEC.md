@@ -27,7 +27,7 @@ Cookie login is `POST /management/v1/session/login`, addressed over HTTPS with t
 The console uses its existing explicit management Bearer credential for management API calls.
 The [shared management session contract](https://github.com/philfanzhou/ServiceMantle/blob/main/docs/contracts/management-session.md)
 owns session issuance, lifetime, logout, and Cookie request guards. Current selector composition is
-in [ManagementSessionComposition](../../../../src/SignaCore.Host/Management/ManagementSessionComposition.cs)
+in [SessionComposition](../../../../src/SignaCore.Host/Management/SessionComposition.cs)
 and policy requirements are registered by
 [ServiceCollectionExtensions](../../../../src/SignaCore.Host/ServiceCollectionExtensions.cs).
 
@@ -84,10 +84,10 @@ All logs and errors must redact passwords, application secrets, refresh tokens, 
   registers the `AdminSession` policy on the management selector with the authenticated-user
   and Admin-permission requirements. The Cookie comes from the
   shared package and the Bearer selector is composed in
-  [ManagementSessionComposition](../../../../src/SignaCore.Host/Management/ManagementSessionComposition.cs)
+  [SessionComposition](../../../../src/SignaCore.Host/Management/SessionComposition.cs)
   via `AddManagementCookieAuthentication` and the management Bearer selector registration; the
   same file owns the Cookie login adapter that invokes
-  [ManagementIdentityProvider](../../../../src/SignaCore.Host/Management/ManagementIdentityProvider.cs).
+  [IdentityProvider](../../../../src/SignaCore.Host/Management/IdentityProvider.cs).
 - [AdminController](../../../../src/SignaCore.Host/Controllers/AdminController.cs) applies the
   policy to `GetUsers`, `CreateUser`, `CreatePhoneUser`, `UpdateUserRemark`, `UpdateUserNickname`,
   `UpdateUserStatus`, and `ResetUserPassword`, and projects the resolved management operator in `GetCurrentSession`.

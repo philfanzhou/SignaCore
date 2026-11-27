@@ -12,7 +12,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using SignaCore.Domain.Models;
-using SignaCore.Host;
 using SignaCore.Host.Security;
 using Xunit;
 using static SignaCore.Tests.Integration.OAuthLoginTestSupport;

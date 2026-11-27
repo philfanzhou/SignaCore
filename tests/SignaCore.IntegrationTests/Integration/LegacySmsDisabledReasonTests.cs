@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
-using SignaCore.Host;
 using SignaCore.Host.Http;
 using Xunit;
 

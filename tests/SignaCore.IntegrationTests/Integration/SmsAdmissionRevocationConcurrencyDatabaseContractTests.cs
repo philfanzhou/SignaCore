@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using ServiceMantle.Persistence.Relational.Stores;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database.Entity;
 using SignaCore.Database.Repositories;
 using SignaCore.Database;
@@ -200,7 +199,7 @@ public sealed class SmsAdmissionRevocationConcurrencyDatabaseContractTests
         await using var context = new IdentityDbContext(options);
         var unitOfWork = new EfCoreUnitOfWork(context);
         var refreshTokens = new RefreshTokenRepository(context);
-        var service = new InteractiveRefreshRotationService(
+        var service = new InteractiveRefreshRotation(
             refreshTokens,
             new RefreshTokenFamilyStore(refreshTokens, unitOfWork, NullLogger<RefreshTokenFamilyStore>.Instance),
             new IdentitySessionStore(new IdentitySessionRepository(context), unitOfWork),
@@ -218,7 +217,7 @@ public sealed class SmsAdmissionRevocationConcurrencyDatabaseContractTests
             context,
             new AdminIdentityOptions(),
             new SmsAdmissionService(context),
-            NullLogger<InteractiveRefreshRotationService>.Instance);
+            NullLogger<InteractiveRefreshRotation>.Instance);
         var dispatch = await service.RotateAsync(
             seed.Application,
             Form(new Dictionary<string, string>
@@ -270,7 +269,7 @@ public sealed class SmsAdmissionRevocationConcurrencyDatabaseContractTests
         private static IServiceProvider BuildServices()
         {
             var services = new ServiceCollection();
-            services.AddSingleton<ManagementOperatorReader>();
+            services.AddSingleton<OperatorReader>();
             services.AddSingleton<ServiceMantle.Management.IManagementClaimsParser, ServiceMantle.Management.ManagementClaimsParser>();
             services.AddSingleton<ServiceMantle.Management.IManagementCurrentOperatorResolver, ServiceMantle.Management.ManagementCurrentOperatorResolver>();
             return services.BuildServiceProvider();
@@ -361,7 +360,7 @@ public sealed class SmsAdmissionRevocationConcurrencyDatabaseContractTests
             ct);
         context.ChangeTracker.Clear();
 
-        var redemption = new AuthorizationCodeRedemptionService(
+        var redemption = new AuthorizationCodeRedemption(
             codes,
             sessions,
             new AccountRepository(context),
@@ -380,7 +379,7 @@ public sealed class SmsAdmissionRevocationConcurrencyDatabaseContractTests
             context,
             new AdminIdentityOptions(),
             new SmsAdmissionService(context),
-            NullLogger<AuthorizationCodeRedemptionService>.Instance);
+            NullLogger<AuthorizationCodeRedemption>.Instance);
         var outcome = await redemption.RedeemAsync(
             seed.Application,
             Form(new Dictionary<string, string>

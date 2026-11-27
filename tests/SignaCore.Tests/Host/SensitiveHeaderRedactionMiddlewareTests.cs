@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Http;
 using SignaCore.Host.Http;
-using SignaCore.Host.Controllers;
 using SignaCore.Host.Middleware;
 using Xunit;
 

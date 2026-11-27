@@ -117,11 +117,11 @@ internal static class ServiceMantleComposition
         services.AddServiceMantleSettingSnapshots();
         // Management observes a complete tolerant snapshot on an isolated accessor. Refreshing
         // the settings page must never publish into the bootstrap/runtime authority.
-        services.AddSingleton(serviceProvider => new ManagementSettingQuerySnapshot(
+        services.AddSingleton(serviceProvider => new SettingQuerySnapshot(
             serviceProvider.GetRequiredService<IServiceSettingStore>(),
             serviceProvider.GetRequiredService<IServiceSettingRootKeySource>(), isDevelopment));
         services.Replace(ServiceDescriptor.Singleton(serviceProvider =>
-            serviceProvider.GetRequiredService<ManagementSettingQuerySnapshot>().Query));
+            serviceProvider.GetRequiredService<SettingQuerySnapshot>().Query));
         return services;
     }
 

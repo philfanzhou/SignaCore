@@ -7,7 +7,6 @@ using ServiceMantle.Configuration;
 using ServiceMantle.Health;
 using SignaCore.Database;
 using SignaCore.Host.Startup;
-using SignaCore.Host;
 using System.Net.Http.Json;
 using System.Net;
 using System.Text.Json;

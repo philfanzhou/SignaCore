@@ -1,11 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
-using ServiceMantle.Web.Health;
 using ServiceMantle.Web.Http;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;

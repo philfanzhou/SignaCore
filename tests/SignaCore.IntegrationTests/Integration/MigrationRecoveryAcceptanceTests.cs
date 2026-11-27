@@ -5,7 +5,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
-using ServiceMantle;
 using ServiceMantle.Bootstrap;
 using ServiceMantle.Migration;
 using SignaCore.Database;

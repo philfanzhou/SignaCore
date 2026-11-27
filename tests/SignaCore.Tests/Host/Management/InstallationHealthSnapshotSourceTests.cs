@@ -5,7 +5,6 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using ServiceMantle.Health;
 using ServiceMantle.Installation;
-using ServiceMantle.Persistence.Relational;
 using SignaCore.Database;
 using SignaCore.Host.Installation;
 using SignaCore.Host;
@@ -87,7 +86,7 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
         Assert.True(consumption.IsStaged);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var source = new InstallationHealthSnapshotSource(db, Metrics);
+        var source = new HealthSnapshotSource(db, Metrics);
         var snapshot = await source.GetSnapshotAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ServiceStartupPhase.Completed, snapshot.Phase);
@@ -101,7 +100,7 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
     {
         var db = await CreateContextAsync();
         Metrics.SetPhase(ServiceStartupPhase.Completed);
-        var source = new InstallationHealthSnapshotSource(db, Metrics);
+        var source = new HealthSnapshotSource(db, Metrics);
 
         var snapshot = await source.GetSnapshotAsync(TestContext.Current.CancellationToken);
 
@@ -132,10 +131,10 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
         }
 
         var state = await installationStore.FindAsync(InstallationStores.ServiceId, ct);
-        var shared = SharedInstallationPhase.Resolve(state);
-        var snapshot = await new InstallationHealthSnapshotSource(db, Metrics).GetSnapshotAsync(ct);
+        var shared = SharedPhase.Resolve(state);
+        var snapshot = await new HealthSnapshotSource(db, Metrics).GetSnapshotAsync(ct);
         db.ChangeTracker.Clear();
-        var resolution = await InstallationStateResolver.ResolveAsync(db, ct);
+        var resolution = await StateResolver.ResolveAsync(db, ct);
 
         Assert.Equal(shared, snapshot.Phase);
         AssertPhase(stateName == "completed" ? "completed" : stateName == "pending" ? "pending_setup" : "unknown");
@@ -151,7 +150,7 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
         Metrics.SetPhase(ServiceStartupPhase.Completed);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        var source = new InstallationHealthSnapshotSource(db, Metrics);
+        var source = new HealthSnapshotSource(db, Metrics);
         var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
             await source.GetSnapshotAsync(cancellation.Token));
         Assert.Equal(cancellation.Token, error.CancellationToken);
@@ -164,7 +163,7 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
         var db = await CreateContextAsync();
         await db.Database.ExecuteSqlRawAsync("DROP TABLE service_installations", TestContext.Current.CancellationToken);
         Metrics.SetPhase(ServiceStartupPhase.Completed);
-        var source = new InstallationHealthSnapshotSource(db, Metrics);
+        var source = new HealthSnapshotSource(db, Metrics);
         var error = await Assert.ThrowsAsync<ServiceInstallationStoreException>(async () => await source.GetSnapshotAsync(TestContext.Current.CancellationToken));
         Assert.IsType<SqliteException>(error.InnerException);
         AssertPhase("unknown");
