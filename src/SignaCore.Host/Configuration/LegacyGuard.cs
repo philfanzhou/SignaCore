@@ -7,7 +7,7 @@ namespace SignaCore.Host.Configuration;
 /// authoritative for the database connection. Deployment-provided overrides of either are legacy and
 /// are reported for a compatibility period so operators can remove them from their launchers.
 /// </summary>
-internal static class LegacyConfigurationGuard
+internal static class LegacyGuard
 {
     /// <summary>
     /// Managed settings still supplied by appsettings, environment variables, or the command line.

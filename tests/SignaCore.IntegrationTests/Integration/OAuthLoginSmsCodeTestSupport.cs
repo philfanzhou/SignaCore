@@ -512,8 +512,6 @@ internal sealed class SmsVerificationBarrier
         public Task<OtpSendOutcome> TrySendAsync(Guid appRegistrationId, string phoneE164, string profileKey,
             CancellationToken cancellationToken = default) =>
             inner.TrySendAsync(appRegistrationId, phoneE164, profileKey, cancellationToken);
-        public Task InvalidateAsync(Guid appRegistrationId, string phoneE164, CancellationToken cancellationToken = default) =>
-            inner.InvalidateAsync(appRegistrationId, phoneE164, cancellationToken);
         public async Task<OtpVerificationResult> VerifyAsync(Guid appRegistrationId, string phoneE164, string code,
             CancellationToken cancellationToken = default)
         {

@@ -20,7 +20,7 @@ internal static class InstallationStores
     internal static readonly SetupCodeLifetime SetupCodeLifetime =
         SetupCodeLifetime.Create(TimeSpan.FromHours(24));
 
-    internal static EfCoreServiceInstallationStore<IdentityDbContext> CreateInstallationStore(
+    internal static EfCoreServiceInstallationStore<IdentityDbContext> CreateStore(
         IdentityDbContext db) => new(db);
 
     internal static EfCoreServiceSetupCodeStore<IdentityDbContext> CreateSetupCodeStore(

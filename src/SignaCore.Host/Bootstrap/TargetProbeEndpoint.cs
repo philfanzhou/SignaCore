@@ -18,7 +18,7 @@ namespace SignaCore.Host.Bootstrap;
 /// through the retained inspector, answering with the same five-state classification and key
 /// compatibility the product contract documents. It never writes anything.
 /// </remarks>
-internal static class BootstrapTestEndpoint
+internal static class TargetProbeEndpoint
 {
     private const string Path = "/api/bootstrap/test";
     private const string CredentialHeaderName = "X-ServiceMantle-Bootstrap-Credential";

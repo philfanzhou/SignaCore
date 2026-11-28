@@ -20,7 +20,7 @@ namespace SignaCore.Tests.Host.Services;
 /// (<c>EV-04</c>), and the <c>EV-18</c> cancellation observed before the commit leaving no code,
 /// no touch, and no audit behind.
 /// </summary>
-public sealed class OidcAuthorizationSessionReuseServiceTests
+public sealed class OidcAuthorizationSessionReuseTests
 {
     private const string ClientId = "reuse-unit-app";
     private const string RedirectUri = "https://bff.reuse.unit.test/callback";

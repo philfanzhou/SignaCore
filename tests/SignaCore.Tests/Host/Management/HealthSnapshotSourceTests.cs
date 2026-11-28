@@ -12,7 +12,7 @@ using Xunit;
 
 namespace SignaCore.Tests.Host.Management;
 
-public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
+public sealed class HealthSnapshotSourceTests : IAsyncDisposable
 {
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
     private IdentityDbContext? _context;
@@ -73,7 +73,7 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
     public async Task CompletedInstallation_AdmitsTheManagementSession()
     {
         var db = await CreateContextAsync();
-        var installationStore = InstallationStores.CreateInstallationStore(db);
+        var installationStore = InstallationStores.CreateStore(db);
         var setupCodeStore = InstallationStores.CreateSetupCodeStore(db);
         await installationStore.CreatePendingAsync(InstallationStores.ServiceId, TestContext.Current.CancellationToken);
         var issued = await setupCodeStore.CreateAsync(
@@ -116,7 +116,7 @@ public sealed class InstallationHealthSnapshotSourceTests : IAsyncDisposable
     {
         var ct = TestContext.Current.CancellationToken;
         var db = await CreateContextAsync();
-        var installationStore = InstallationStores.CreateInstallationStore(db);
+        var installationStore = InstallationStores.CreateStore(db);
         if (stateName != "missing")
         {
             await installationStore.CreatePendingAsync(InstallationStores.ServiceId, ct);

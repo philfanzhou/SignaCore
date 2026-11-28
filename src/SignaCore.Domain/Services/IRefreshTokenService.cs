@@ -12,7 +12,7 @@ public interface IRefreshTokenService
     /// Newly issued entities are staged for the caller's unit of work. Rotation participates in a
     /// caller-owned transaction when one exists, so account state and login history can share its commit.
     /// </summary>
-    Task<string?> HandleRefreshTokenAsync(
+    Task<string?> HandleAsync(
         string grantType,
         string? existingRefreshToken,
         AccountEntity account,

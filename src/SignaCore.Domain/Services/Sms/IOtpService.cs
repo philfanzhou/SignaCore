@@ -38,9 +38,6 @@ public interface IOtpService
         string phoneE164,
         string code,
         CancellationToken cancellationToken = default);
-
-    Task InvalidateAsync(
-        Guid appRegistrationId, string phoneE164, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

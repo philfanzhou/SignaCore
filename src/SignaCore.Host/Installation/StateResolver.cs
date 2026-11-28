@@ -40,7 +40,7 @@ internal static class StateResolver
         CancellationToken cancellationToken = default)
     {
         var serviceId = InstallationStores.ServiceId;
-        var installationStore = InstallationStores.CreateInstallationStore(db);
+        var installationStore = InstallationStores.CreateStore(db);
         var state = await installationStore.FindAsync(serviceId, cancellationToken);
         var sharedPhase = SharedPhase.Resolve(state);
 

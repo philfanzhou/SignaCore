@@ -23,15 +23,6 @@ public class LoginAttemptRepository : ILoginAttemptRepository
                 cancellationToken);
     }
 
-    public Task AddAsync(
-        LoginAttemptEntity loginAttempt,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        _dbContext.LoginAttempts.Add(loginAttempt);
-        return Task.CompletedTask;
-    }
-
     public async Task<LoginAttemptEntity> RecordFailureAsync(
         string username,
         DateTimeOffset utcNow,

@@ -32,9 +32,5 @@ public interface ISecurityKeyRepository
     /// </para>
     /// </summary>
     Task<int> DeactivateAllActiveAsync(CancellationToken cancellationToken = default);
-
-    Task RemoveRangeAsync(
-        IEnumerable<SecurityKeyEntity> keys,
-        CancellationToken cancellationToken = default);
     Task RemoveExpiredInactiveAsync(CancellationToken cancellationToken = default);
 }

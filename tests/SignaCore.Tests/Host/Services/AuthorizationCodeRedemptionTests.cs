@@ -34,7 +34,7 @@ namespace SignaCore.Tests.Host.Services;
 /// and without a family link, the <c>EV-18</c> cancellation with zero writes, and the
 /// <c>DF-03</c>/<c>DF-04</c>/<c>DF-09</c> canary scan of the log surface.
 /// </summary>
-public sealed class AuthorizationCodeRedemptionServiceTests
+public sealed class AuthorizationCodeRedemptionTests
 {
     private const string ClientId = "redemption-unit-app";
     private const string RedirectUri = "https://bff.redemption.unit.test/callback";

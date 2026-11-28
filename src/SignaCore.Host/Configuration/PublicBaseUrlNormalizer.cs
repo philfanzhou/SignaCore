@@ -6,7 +6,7 @@ namespace SignaCore.Host.Configuration;
 /// </summary>
 internal static class PublicBaseUrlNormalizer
 {
-    public static bool TryNormalizeBaseUrl(
+    public static bool TryNormalize(
         string? candidate,
         out string normalized,
         out string reason)

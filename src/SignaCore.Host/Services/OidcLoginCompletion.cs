@@ -130,7 +130,7 @@ public sealed class OidcLoginCompletion(
                 operationCancellationToken);
             await LoginAttemptChangeApplier.ApplyAsync(
                 loginAttemptChange, loginAttemptRepository, operationCancellationToken);
-            await accountLoginInfo.UpdateLoginInfoAsync(
+            await accountLoginInfo.UpdateAsync(
                 account, clientIp, IdentityConstants.AuthMethodPassword, operationCancellationToken);
             await auditService.RecordLoginAsync(
                 account.Id,

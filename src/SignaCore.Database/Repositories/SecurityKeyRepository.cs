@@ -83,15 +83,6 @@ public class SecurityKeyRepository : ISecurityKeyRepository
         return activeKeys.Count;
     }
 
-    public Task RemoveRangeAsync(
-        IEnumerable<SecurityKeyEntity> keys,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        _dbContext.SecurityKeys.RemoveRange(keys);
-        return Task.CompletedTask;
-    }
-
     public async Task RemoveExpiredInactiveAsync(
         CancellationToken cancellationToken = default)
     {

@@ -3342,7 +3342,7 @@ public sealed class ServerDatabaseContractTests
 
             for (var attempt = 0; attempt < 6; attempt++)
             {
-                await recorder.RecordFailureAsync(
+                await recorder.RecordAsync(
                     new LoginAttemptChange(LoginAttemptChangeKind.RecordFailure, "overlong-ua-pg-user"),
                     "overlong-ua-pg-user",
                     "Wrong username or password",

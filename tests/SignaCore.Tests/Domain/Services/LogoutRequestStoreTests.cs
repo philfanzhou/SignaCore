@@ -15,7 +15,7 @@ namespace SignaCore.Tests.Domain.Services;
 public sealed class LogoutRequestStoreTests
 {
     [Fact]
-    public async Task CreateAsync_StoresOnlyTheDigestAndTheFiveMinuteLifecycle()
+    public async Task Create_StoresOnlyTheDigestAndTheFiveMinuteLifecycle()
     {
         await using var harness = await CreateHarnessAsync();
         var now = DateTimeOffset.UtcNow;
@@ -23,7 +23,7 @@ public sealed class LogoutRequestStoreTests
             harness.ApplicationId, Guid.NewGuid(), Guid.NewGuid(),
             "https://bff.unit.test/logged-out", "unit-state-0123456789abcdef");
 
-        var creation = await harness.Store.CreateAsync(descriptor, now, TestContext.Current.CancellationToken);
+        var creation = await CreatePersistedAsync(harness, descriptor, now, TestContext.Current.CancellationToken);
 
         Assert.NotEqual(Guid.Empty, creation.Id);
         Assert.Equal(43, creation.LogoutHandle.Length);
@@ -65,8 +65,8 @@ public sealed class LogoutRequestStoreTests
     {
         await using var harness = await CreateHarnessAsync();
         var now = DateTimeOffset.UtcNow;
-        var creation = await harness.Store.CreateAsync(
-            Descriptor(harness), now, TestContext.Current.CancellationToken);
+        var creation = await CreatePersistedAsync(
+            harness, Descriptor(harness), now, TestContext.Current.CancellationToken);
 
         // Usable now.
         Assert.NotNull(await harness.Store.GetActiveAsync(
@@ -98,8 +98,8 @@ public sealed class LogoutRequestStoreTests
     {
         await using var harness = await CreateHarnessAsync();
         var now = DateTimeOffset.UtcNow;
-        var creation = await harness.Store.CreateAsync(
-            Descriptor(harness), now, TestContext.Current.CancellationToken);
+        var creation = await CreatePersistedAsync(
+            harness, Descriptor(harness), now, TestContext.Current.CancellationToken);
 
         Assert.True(await harness.Store.TryConsumeAsync(
             creation.LogoutHandle, now.AddSeconds(1), TestContext.Current.CancellationToken));
@@ -116,8 +116,9 @@ public sealed class LogoutRequestStoreTests
     {
         await using var harness = await CreateHarnessAsync();
         var now = DateTimeOffset.UtcNow;
-        var fresh = await harness.Store.CreateAsync(Descriptor(harness), now, TestContext.Current.CancellationToken);
-        var old = await harness.Store.CreateAsync(
+        var fresh = await CreatePersistedAsync(harness, Descriptor(harness), now, TestContext.Current.CancellationToken);
+        var old = await CreatePersistedAsync(
+            harness,
             Descriptor(harness),
             now.AddHours(-IdentityConstants.LogoutRequestRetentionHours).AddMinutes(-10),
             TestContext.Current.CancellationToken);
@@ -129,6 +130,18 @@ public sealed class LogoutRequestStoreTests
             .Select(row => row.HandleDigest).ToListAsync(TestContext.Current.CancellationToken);
         Assert.Equal([LoginHandleDigest.Compute(fresh.LogoutHandle)], remaining);
         _ = old;
+    }
+
+    // The production path: the row is staged on the unit of work and saved with the operation.
+    private static async Task<LogoutRequestCreation> CreatePersistedAsync(
+        Harness harness,
+        LogoutRequestDescriptor descriptor,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var creation = await harness.Store.StageCreateAsync(descriptor, now, cancellationToken);
+        await harness.Context.SaveChangesAsync(cancellationToken);
+        return creation;
     }
 
     private static LogoutRequestDescriptor Descriptor(Harness harness) =>
@@ -169,8 +182,7 @@ public sealed class LogoutRequestStoreTests
         await context.SaveChangesAsync(TestContext.Current.CancellationToken);
         context.ChangeTracker.Clear();
 
-        var unitOfWork = new EfCoreUnitOfWork(context);
-        var store = new LogoutRequestStore(new LogoutRequestRepository(context), unitOfWork);
+        var store = new LogoutRequestStore(new LogoutRequestRepository(context));
         return new Harness(connection, context, store, applicationId);
     }
 }

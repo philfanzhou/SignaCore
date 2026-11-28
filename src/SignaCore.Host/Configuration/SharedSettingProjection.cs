@@ -25,7 +25,7 @@ namespace SignaCore.Host.Configuration;
 /// violation and fails closed; it is never silently dropped.
 /// </para>
 /// </remarks>
-internal static class SharedSettingConfigurationProjection
+internal static class SharedSettingProjection
 {
     /// <summary>
     /// Projects the activated snapshot into legacy-keyed values and expandable configuration

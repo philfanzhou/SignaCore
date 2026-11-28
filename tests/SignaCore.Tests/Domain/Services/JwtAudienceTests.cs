@@ -43,7 +43,7 @@ public class JwtAudienceTests
     }
 
     [Fact]
-    public void GenerateJwtToken_WritesTheRequestedAudience()
+    public void Generate_WritesTheRequestedAudience()
     {
         var token = ReadToken(GenerateToken(audience: "orders"));
 
@@ -51,7 +51,7 @@ public class JwtAudienceTests
     }
 
     [Fact]
-    public void GenerateJwtToken_WithoutAudience_FallsBackToTheDeploymentAudience()
+    public void Generate_WithoutAudience_FallsBackToTheDeploymentAudience()
     {
         var token = ReadToken(GenerateToken(audience: null));
 
@@ -60,7 +60,7 @@ public class JwtAudienceTests
 
     /// <summary>RFC 9068 §2.1: an access token has to carry typ: at+jwt.</summary>
     [Fact]
-    public void GenerateJwtToken_MarksTheTokenAsAnAccessToken()
+    public void Generate_MarksTheTokenAsAnAccessToken()
     {
         var token = ReadToken(GenerateToken(audience: null));
 
@@ -68,7 +68,7 @@ public class JwtAudienceTests
     }
 
     [Fact]
-    public void GenerateJwtToken_KeepsIssuerAndLifetime()
+    public void Generate_KeepsIssuerAndLifetime()
     {
         var token = ReadToken(GenerateToken(audience: null));
 
@@ -80,7 +80,7 @@ public class JwtAudienceTests
     {
         using var rsa = RSA.Create(2048);
         var key = new RsaSecurityKey(rsa) { KeyId = "test-key" };
-        return new JwtTokenService(Options).GenerateJwtToken(
+        return new JwtTokenService(Options).Generate(
             [new Claim(IdentityConstants.ClaimSubject, Guid.NewGuid().ToString())],
             key,
             Options.TokenExpirationHours,

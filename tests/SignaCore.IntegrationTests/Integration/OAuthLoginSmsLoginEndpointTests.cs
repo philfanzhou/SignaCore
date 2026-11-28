@@ -970,8 +970,5 @@ public sealed class OAuthLoginSmsLoginEndpointTests : IClassFixture<IdentityServ
 
             return result;
         }
-
-        public Task InvalidateAsync(Guid appRegistrationId, string phoneE164, CancellationToken cancellationToken = default) =>
-            inner.InvalidateAsync(appRegistrationId, phoneE164, cancellationToken);
     }
 }

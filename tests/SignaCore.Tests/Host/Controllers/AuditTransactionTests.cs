@@ -487,7 +487,7 @@ public sealed class AuditTransactionTests
         await using var database = await SqliteTestDatabase.CreateAsync();
         var target = await SeedSmsLoginAsync(database.Context);
         var tokenService = new Mock<ITokenService>();
-        tokenService.Setup(service => service.GenerateJwtToken(
+        tokenService.Setup(service => service.Generate(
                 It.IsAny<List<Claim>>(),
                 It.IsAny<Microsoft.IdentityModel.Tokens.RsaSecurityKey>(),
                 It.IsAny<int>(),

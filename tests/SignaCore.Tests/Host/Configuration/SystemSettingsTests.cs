@@ -279,9 +279,9 @@ public class PublicBaseUrlNormalizerTests
     [InlineData("https://identity.example.test/", "https://identity.example.test")]
     [InlineData("  https://identity.example.test  ", "https://identity.example.test")]
     [InlineData("https://identity.example.test:8443", "https://identity.example.test:8443")]
-    public void TryNormalizeBaseUrl_TrimsAndDropsTheTrailingSlash(string input, string expected)
+    public void TryNormalize_TrimsAndDropsTheTrailingSlash(string input, string expected)
     {
-        Assert.True(PublicBaseUrlNormalizer.TryNormalizeBaseUrl(input, out var normalized, out _));
+        Assert.True(PublicBaseUrlNormalizer.TryNormalize(input, out var normalized, out _));
         Assert.Equal(expected, normalized);
     }
 
@@ -292,9 +292,9 @@ public class PublicBaseUrlNormalizerTests
     [InlineData("https://user:pass@identity.example.test")]
     [InlineData("https://identity.example.test?x=1")]
     [InlineData("https://identity.example.test#fragment")]
-    public void TryNormalizeBaseUrl_RejectsUnusableValues(string input)
+    public void TryNormalize_RejectsUnusableValues(string input)
     {
-        Assert.False(PublicBaseUrlNormalizer.TryNormalizeBaseUrl(input, out _, out _));
+        Assert.False(PublicBaseUrlNormalizer.TryNormalize(input, out _, out _));
     }
 }
 
@@ -344,7 +344,7 @@ public class JsonSettingFlattenerTests
     }
 }
 
-public class ConfigurationJsonExporterTests
+public class JsonExporterTests
 {
     [Fact]
     public void Export_ReturnsNullWhenTheSectionIsAbsent()

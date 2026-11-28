@@ -101,7 +101,7 @@ public sealed class RefreshTokenRotationDatabaseContractTests
         await using (var context = new IdentityDbContext(database.BuildOptions(interceptor)))
         {
             var service = new RefreshTokenService(new RefreshTokenRepository(context), new RefreshTokenOptions());
-            var operation = () => service.HandleRefreshTokenAsync(
+            var operation = () => service.HandleAsync(
                 IdentityConstants.GrantTypeRefreshToken, TokenValue, new AccountEntity { Id = accountId },
                 "rotation-contract-app", cancellationToken: cancellation.Token);
             if (afterCommit)

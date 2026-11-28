@@ -32,11 +32,11 @@ public class RefreshTokenServiceTests
     [InlineData(IdentityConstants.GrantTypeSms)]
     [InlineData(IdentityConstants.GrantTypeWechat)]
     [InlineData(IdentityConstants.GrantTypeLdap)]
-    public async Task HandleRefreshTokenAsync_LoginGrants_GeneratesNewToken(string grantType)
+    public async Task HandleAsync_LoginGrants_GeneratesNewToken(string grantType)
     {
         var account = CreateAccount();
 
-        var token = await _service.HandleRefreshTokenAsync(grantType, null, account, "app-1");
+        var token = await _service.HandleAsync(grantType, null, account, "app-1");
 
         Assert.NotNull(token);
         Assert.False(string.IsNullOrEmpty(token));
@@ -56,14 +56,14 @@ public class RefreshTokenServiceTests
     }
 
     [Fact]
-    public async Task HandleRefreshTokenAsync_RefreshGrant_RevokesExistingThenGenerates()
+    public async Task HandleAsync_RefreshGrant_RevokesExistingThenGenerates()
     {
         var account = CreateAccount();
         _repoMock
             .Setup(r => r.TryRotateAsync("old-token", It.IsAny<RefreshTokenEntity>()))
             .ReturnsAsync(true);
 
-        var token = await _service.HandleRefreshTokenAsync(
+        var token = await _service.HandleAsync(
             IdentityConstants.GrantTypeRefreshToken, "old-token", account, "app-1");
 
         Assert.NotNull(token);
@@ -82,13 +82,13 @@ public class RefreshTokenServiceTests
     }
 
     [Fact]
-    public async Task HandleRefreshTokenAsync_CrossApplicationExchange_MintsWithoutRevokingTheSourceToken()
+    public async Task HandleAsync_CrossApplicationExchange_MintsWithoutRevokingTheSourceToken()
     {
         // Rotation would revoke the presented token, and the presented token is the source
         // application's session credential — the user would be signed out there instead.
         var account = CreateAccount();
 
-        var token = await _service.HandleRefreshTokenAsync(
+        var token = await _service.HandleAsync(
             IdentityConstants.GrantTypeRefreshToken, "source-token", account, "target-app",
             exchangedFromAppId: "source-app");
 
@@ -105,12 +105,12 @@ public class RefreshTokenServiceTests
     }
 
     [Fact]
-    public async Task HandleRefreshTokenAsync_LdapGrant_BindsTokenToLdapCredential()
+    public async Task HandleAsync_LdapGrant_BindsTokenToLdapCredential()
     {
         var account = CreateAccount();
         var credentialId = Guid.NewGuid();
 
-        await _service.HandleRefreshTokenAsync(
+        await _service.HandleAsync(
             IdentityConstants.GrantTypeLdap,
             null,
             account,
@@ -122,19 +122,19 @@ public class RefreshTokenServiceTests
     }
 
     [Fact]
-    public async Task HandleRefreshTokenAsync_IssuingGrantWithoutAppId_Throws()
+    public async Task HandleAsync_IssuingGrantWithoutAppId_Throws()
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            _service.HandleRefreshTokenAsync(
+            _service.HandleAsync(
                 IdentityConstants.GrantTypePassword, null, CreateAccount(), null));
 
         _repoMock.Verify(r => r.AddAsync(It.IsAny<RefreshTokenEntity>()), Times.Never);
     }
 
     [Fact]
-    public async Task HandleRefreshTokenAsync_RefreshGrantWithoutToken_ReturnsNull()
+    public async Task HandleAsync_RefreshGrantWithoutToken_ReturnsNull()
     {
-        var token = await _service.HandleRefreshTokenAsync(
+        var token = await _service.HandleAsync(
             IdentityConstants.GrantTypeRefreshToken, null, CreateAccount(), null);
 
         Assert.Null(token);
@@ -142,9 +142,9 @@ public class RefreshTokenServiceTests
     }
 
     [Fact]
-    public async Task HandleRefreshTokenAsync_UnknownGrant_ReturnsNull()
+    public async Task HandleAsync_UnknownGrant_ReturnsNull()
     {
-        var token = await _service.HandleRefreshTokenAsync("unknown-grant", "existing", CreateAccount(), null);
+        var token = await _service.HandleAsync("unknown-grant", "existing", CreateAccount(), null);
 
         Assert.Null(token);
         _repoMock.Verify(r => r.AddAsync(It.IsAny<RefreshTokenEntity>()), Times.Never);
@@ -164,7 +164,7 @@ public class RefreshTokenServiceTests
         _repoMock.Setup(repository => repository.TryRotateAsync(
                 It.IsAny<string>(), It.IsAny<RefreshTokenEntity>(), cancellation.Token)).ReturnsAsync(true);
 
-        var result = await _service.HandleRefreshTokenAsync(grant, "unused-source", CreateAccount(), "app-1",
+        var result = await _service.HandleAsync(grant, "unused-source", CreateAccount(), "app-1",
             exchangedFromAppId: exchange ? "source-app" : null, cancellationToken: cancellation.Token);
 
         Assert.False(string.IsNullOrEmpty(result));
@@ -194,7 +194,7 @@ public class RefreshTokenServiceTests
             .Returns(Task.FromCanceled<bool>(cancellation.Token));
 
         var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            _service.HandleRefreshTokenAsync(grant, "unused-source", CreateAccount(), "app-1",
+            _service.HandleAsync(grant, "unused-source", CreateAccount(), "app-1",
                 exchangedFromAppId: exchange ? "source-app" : null, cancellationToken: cancellation.Token));
 
         Assert.Equal(cancellation.Token, exception.CancellationToken);

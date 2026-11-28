@@ -28,7 +28,7 @@ public sealed class AppTitleSettingTests
         Assert.Equal("SignaCore", materialized.GetString());
 
         // The materialized default projects onto the flat configuration key the injector reads.
-        var (_, projectedEntries) = SharedSettingConfigurationProjection.Project(snapshot);
+        var (_, projectedEntries) = SharedSettingProjection.Project(snapshot);
         Assert.Equal("SignaCore", projectedEntries[SystemSettingKeys.AppTitle]);
     }
 
@@ -41,7 +41,7 @@ public sealed class AppTitleSettingTests
         Assert.True(snapshot.Values.TryGetValue("app.title", out var stored));
         Assert.Equal("Order Platform Console", stored!.GetString());
 
-        var (_, projectedEntries) = SharedSettingConfigurationProjection.Project(snapshot);
+        var (_, projectedEntries) = SharedSettingProjection.Project(snapshot);
         Assert.Equal("Order Platform Console", projectedEntries[SystemSettingKeys.AppTitle]);
     }
 

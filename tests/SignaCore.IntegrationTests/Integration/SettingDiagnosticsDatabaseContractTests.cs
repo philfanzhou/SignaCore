@@ -22,7 +22,7 @@ namespace SignaCore.Tests.Integration;
 /// </summary>
 [Collection(SqliteProcessState.CollectionName)]
 [UsesProcessWideSqlitePoolClearing]
-public sealed class ManagementSettingDiagnosticsDatabaseContractTests
+public sealed class SettingDiagnosticsDatabaseContractTests
 {
     private const string Root = "/management/v1/settings";
     private const string Diagnostics = Root + "/diagnostics";

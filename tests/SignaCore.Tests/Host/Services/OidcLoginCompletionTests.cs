@@ -20,7 +20,7 @@ namespace SignaCore.Tests.Host.Services;
 /// before the commit leaves zero writes (<c>EV-18</c>/<c>SC-20</c>); and a failing credential
 /// result or a missing credential id is a programming error, never a write.
 /// </summary>
-public sealed class OidcLoginCompletionServiceTests
+public sealed class OidcLoginCompletionTests
 {
     private const string ClientId = "completion-client";
     private const string RedirectUri = "https://bff.completion.test/callback";

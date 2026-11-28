@@ -154,7 +154,7 @@ public static class ServiceCollectionExtensions
         var smsOptions = configuration.GetSection(SmsOptions.SectionName).Get<SmsOptions>() ?? new SmsOptions();
         // The database-projected configuration is the only source; the retired flat-named
         // environment variables (SMS_BYPASS_CODE, SMS_OTP_HMAC_KEY, SMS_BYPASS_PHONES) are
-        // reported by LegacyConfigurationGuard instead of being read here.
+        // reported by LegacyGuard instead of being read here.
         smsOptions.BypassCode = configuration["Sms:BypassCode"];
         smsOptions.BypassPhones = ResolveBypassPhones(configuration);
         smsOptions.OtpHmacKey = configuration["Sms:OtpHmacKey"];

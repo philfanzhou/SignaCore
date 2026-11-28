@@ -11,7 +11,7 @@ namespace SignaCore.Tests.Host.Bootstrap;
 /// error code, a missing target is prepared explicitly once, and only an internal failure reports
 /// the shared 503 classification.
 /// </summary>
-public sealed class BootstrapCandidateValidatorTests : IAsyncLifetime
+public sealed class CandidateValidatorTests : IAsyncLifetime
 {
     private string _directory = string.Empty;
 

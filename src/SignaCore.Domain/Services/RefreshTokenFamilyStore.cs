@@ -10,15 +10,14 @@ namespace SignaCore.Domain.Services;
 /// The closed revocation-cause set of the interactive refresh family writes (<c>PS-06</c>). The
 /// refresh-token row itself stores only the boolean revocation fact — the first fact stays
 /// authoritative and is never rewritten — so the reason exists to keep every caller of the family
-/// API on one of the canonical events: code replay (<c>EV-24</c>), logout (<c>EV-06</c>),
-/// administrative session revocation (<c>EV-15</c>), and the rotation-time <c>EV-32</c> causes
+/// API on one of the canonical events: code replay (<c>EV-24</c>) and the rotation-time
+/// <c>EV-32</c> causes
 /// (session expiry, missing session authority, application max-age, SMS admission, scope
 /// removal) that revoke the family in the rejecting refresh transaction itself.
 /// </summary>
 public enum RefreshFamilyRevocationReason
 {
     CodeReplay,
-    Logout,
     Administrative,
 
     /// <summary><c>EV-31</c>: detected reuse of a consumed member revoked that member's live descendants.</summary>
@@ -195,17 +194,6 @@ public interface IRefreshTokenFamilyStore
     Task<int> RevokeLiveDescendantsAsync(
         Guid familyId,
         Guid memberId,
-        RefreshFamilyRevocationReason reason,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Revokes every unrevoked interactive refresh family bound to one identity session
-    /// (<c>EV-06</c>/<c>EV-15</c>): a conditional update over interactive rows only — legacy
-    /// rows have no session and are structurally out of reach. Returns the number of members
-    /// this call revoked.
-    /// </summary>
-    Task<int> RevokeBySessionAsync(
-        Guid identitySessionId,
         RefreshFamilyRevocationReason reason,
         CancellationToken cancellationToken = default);
 
@@ -425,28 +413,6 @@ public sealed class RefreshTokenFamilyStore(
                 "Revoked {Count} interactive refresh family members: RootId={RootId}, Reason={Reason}",
                 revoked,
                 rootId,
-                reason);
-        }
-
-        return revoked;
-    }
-
-    public async Task<int> RevokeBySessionAsync(
-        Guid identitySessionId,
-        RefreshFamilyRevocationReason reason,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var revoked = await refreshTokens.RevokeBySessionAsync(identitySessionId, cancellationToken);
-        if (revoked > 0)
-        {
-            // Ordinary revoke diagnostics carry no account or session identifier (canonical
-            // DF-06): only the fixed operation, the affected count, and the closed-set reason.
-            // The raw id still reaches the repository; the formal audit keeps the bounded record
-            // ids DF-13 allows.
-            logger.LogInformation(
-                "Revoked {Count} interactive refresh family members by session: Reason={Reason}",
-                revoked,
                 reason);
         }
 

@@ -7,7 +7,6 @@ public interface ILoginAttemptRepository
     Task<LoginAttemptEntity?> GetByUsernameAsync(
         string username,
         CancellationToken cancellationToken = default);
-    Task AddAsync(LoginAttemptEntity loginAttempt, CancellationToken cancellationToken = default);
     Task<LoginAttemptEntity> RecordFailureAsync(
         string username,
         DateTimeOffset utcNow,

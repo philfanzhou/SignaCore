@@ -163,7 +163,7 @@ internal static class SetupCompletionExecutor
             return SetupCompletionResult.ValidationFailed();
         }
 
-        if (!PublicBaseUrlNormalizer.TryNormalizeBaseUrl(publicBaseUrl, out var normalizedBaseUrl, out _))
+        if (!PublicBaseUrlNormalizer.TryNormalize(publicBaseUrl, out var normalizedBaseUrl, out _))
         {
             return SetupCompletionResult.ValidationFailed();
         }

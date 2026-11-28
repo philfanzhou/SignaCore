@@ -119,7 +119,7 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
         // the one the composed hosts observe, not a second empty one.
         var accessor = host.Services.GetRequiredService<IServiceSettingCurrentSnapshotAccessor>();
         Assert.True(accessor.TryGetCurrent(out var shared));
-        var (_, projectedEntries) = SharedSettingConfigurationProjection.Project(shared!);
+        var (_, projectedEntries) = SharedSettingProjection.Project(shared!);
 
         var expected = ExpectedEntries();
         Assert.Equal(
@@ -167,8 +167,8 @@ public sealed class SharedSettingStartupActivationTests : IClassFixture<Identity
 
         // The same complete snapshot: compare both through the legacy-keyed projection so every
         // materialized value, including sensitive ones, is compared by content.
-        var (_, firstEntries) = SharedSettingConfigurationProjection.Project(firstSnapshot);
-        var (_, secondEntries) = SharedSettingConfigurationProjection.Project(secondSnapshot);
+        var (_, firstEntries) = SharedSettingProjection.Project(firstSnapshot);
+        var (_, secondEntries) = SharedSettingProjection.Project(secondSnapshot);
         Assert.Equal(
             firstEntries.Keys.Order(StringComparer.OrdinalIgnoreCase),
             secondEntries.Keys.Order(StringComparer.OrdinalIgnoreCase));

@@ -20,7 +20,7 @@ public class JwtTokenServiceTests
     }
 
     [Fact]
-    public void GenerateJwtToken_ReturnsValidToken()
+    public void Generate_ReturnsValidToken()
     {
         var service = new JwtTokenService(CreateJwtOptions());
         var key = CreateTestKey();
@@ -31,7 +31,7 @@ public class JwtTokenServiceTests
             new(ClaimTypes.Name, "testuser")
         };
 
-        var token = service.GenerateJwtToken(claims, key, 2);
+        var token = service.Generate(claims, key, 2);
 
         Assert.NotNull(token);
         Assert.NotEmpty(token);
@@ -44,14 +44,14 @@ public class JwtTokenServiceTests
     }
 
     [Fact]
-    public void GenerateJwtToken_WithExpirationHours_SetsCorrectExpiry()
+    public void Generate_WithExpirationHours_SetsCorrectExpiry()
     {
         var service = new JwtTokenService(CreateJwtOptions());
         var key = CreateTestKey();
         var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()) };
 
         var before = DateTime.UtcNow;
-        var token = service.GenerateJwtToken(claims, key, 4);
+        var token = service.Generate(claims, key, 4);
         var after = DateTime.UtcNow;
 
         var handler = new JwtSecurityTokenHandler();
@@ -63,7 +63,7 @@ public class JwtTokenServiceTests
     }
 
     [Fact]
-    public void GenerateJwtToken_WithRoles_IncludesRoleClaims()
+    public void Generate_WithRoles_IncludesRoleClaims()
     {
         var service = new JwtTokenService(CreateJwtOptions());
         var key = CreateTestKey();
@@ -74,7 +74,7 @@ public class JwtTokenServiceTests
             new(ClaimTypes.Role, "user")
         };
 
-        var token = service.GenerateJwtToken(claims, key, 2);
+        var token = service.Generate(claims, key, 2);
 
         var handler = new JwtSecurityTokenHandler();
         var jwt = handler.ReadJwtToken(token);

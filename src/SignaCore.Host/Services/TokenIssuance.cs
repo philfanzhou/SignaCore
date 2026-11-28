@@ -177,7 +177,7 @@ public sealed class TokenIssuance
         await _keyManager.RefreshKeysAsync(cancellationToken);
         var rsaKey = _keyManager.GetCurrentKey();
         var audience = JwtTokenService.ResolveAudience(request.App, _jwtOptions);
-        var accessToken = _tokenService.GenerateJwtToken(
+        var accessToken = _tokenService.Generate(
             claims, rsaKey, _jwtOptions.TokenExpirationHours, audience);
         var expiresAt = DateTimeOffset.UtcNow.AddHours(_jwtOptions.TokenExpirationHours).ToUnixTimeSeconds();
 
@@ -316,10 +316,10 @@ public sealed class TokenIssuance
             roles,
             permissions);
 
-        Task StageLoginStateAsync(CancellationToken stageCancellationToken) => _accountLoginInfoService.UpdateLoginInfoAsync(
+        Task StageLoginStateAsync(CancellationToken stageCancellationToken) => _accountLoginInfoService.UpdateAsync(
             account, request.ClientIp, validationResult.AuthMethod ?? request.GrantType, stageCancellationToken);
 
-        Task<string?> StageRefreshTokenAsync(CancellationToken stageCancellationToken) => _refreshTokenService.HandleRefreshTokenAsync(
+        Task<string?> StageRefreshTokenAsync(CancellationToken stageCancellationToken) => _refreshTokenService.HandleAsync(
             request.GrantType, request.RefreshToken, account, appId,
             validationResult.LdapCredentialId, validationResult.SmsUserLoginId,
             validationResult.WechatUserLoginId, validationResult.SourceAppId, stageCancellationToken);

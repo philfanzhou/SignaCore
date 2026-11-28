@@ -20,7 +20,7 @@ namespace SignaCore.Tests.Host.Services;
 /// the count is <c>persistence_failed</c>, and cancellation before the count leaves nothing while
 /// cancellation after it keeps the slot taken (<c>EV-18</c>).
 /// </summary>
-public sealed class OidcSmsCodeSendServiceTests : IAsyncLifetime
+public sealed class OidcSmsCodeSendTests : IAsyncLifetime
 {
     private const string AppId = "sms-send-unit-app";
     private const string Phone = "+8613912345678";

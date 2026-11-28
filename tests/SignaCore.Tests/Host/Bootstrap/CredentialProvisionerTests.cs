@@ -8,7 +8,7 @@ namespace SignaCore.Tests.Host.Bootstrap;
 /// The startup credential decision: provisioned prints the anchor and plaintext exactly once,
 /// and every closed rejection fails without a plaintext and without touching the record.
 /// </summary>
-public sealed class BootstrapCredentialProvisionerTests : IAsyncLifetime
+public sealed class CredentialProvisionerTests : IAsyncLifetime
 {
     private string _directory = string.Empty;
     private string _bootstrapPath = string.Empty;

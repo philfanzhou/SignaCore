@@ -610,7 +610,7 @@ public class AdminOidcClientTests : IDisposable
             })
             .Build();
 
-        await BootstrapAppSeeder.SeedBootstrapAppsAsync(
+        await BootstrapAppSeeder.SeedAsync(
             configuration,
             _dbContext,
             _auditServiceMock.Object,
@@ -722,7 +722,7 @@ public class AdminOidcClientTests : IDisposable
                 })
                 .Build();
 
-            await BootstrapAppSeeder.SeedBootstrapAppsAsync(
+            await BootstrapAppSeeder.SeedAsync(
                 configuration,
                 _dbContext,
                 _auditServiceMock.Object,

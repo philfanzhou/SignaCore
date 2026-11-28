@@ -52,7 +52,7 @@ public sealed class OidcLoginFailureDatabaseContractTests
         await using var context = new IdentityDbContext(database.BuildOptions(interceptor));
         var recorder = CreateRecorder(context);
 
-        var operation = () => recorder.RecordFailureAsync(
+        var operation = () => recorder.RecordAsync(
             new LoginAttemptChange(LoginAttemptChangeKind.RecordFailure, CanaryUsername),
             CanaryUsername,
             FailureReason,
@@ -102,7 +102,7 @@ public sealed class OidcLoginFailureDatabaseContractTests
         await using (var context = new IdentityDbContext(database.BuildOptions(interceptor)))
         {
             var recorder = CreateRecorder(context);
-            await recorder.RecordFailureAsync(
+            await recorder.RecordAsync(
                 new LoginAttemptChange(LoginAttemptChangeKind.RecordFailure, CanaryUsername),
                 CanaryUsername,
                 FailureReason,
@@ -180,7 +180,7 @@ public sealed class OidcLoginFailureDatabaseContractTests
         var recorder = CreateRecorder(context, new ListLogger(logMessages));
 
         var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            recorder.RecordFailureAsync(
+            recorder.RecordAsync(
                 new LoginAttemptChange(LoginAttemptChangeKind.RecordFailure, CanaryUsername),
                 CanaryUsername,
                 FailureReason,

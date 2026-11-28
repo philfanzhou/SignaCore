@@ -200,10 +200,10 @@ public sealed class ConsulDiscoveryRegistrationTests : IAsyncLifetime
                 Enabled: "true", Register: "true", Deregister: "false",
                 AdvertisementAddress: AdvertisementAddress, AdvertisementPort: AdvertisementPort.ToString())));
         var actual = Unwrap(exception);
-        Assert.IsType<ConsulDiscoveryConfigurationException>(actual);
+        Assert.IsType<ConsulDiscoveryException>(actual);
         Assert.Equal(
-            ConsulDiscoveryConfigurationException.DeregisterRequired,
-            ((ConsulDiscoveryConfigurationException)actual).ErrorCode);
+            ConsulDiscoveryException.DeregisterRequired,
+            ((ConsulDiscoveryException)actual).ErrorCode);
     }
 
     [Fact]
@@ -215,10 +215,10 @@ public sealed class ConsulDiscoveryRegistrationTests : IAsyncLifetime
                 Enabled: "true", Register: "true", Deregister: "true",
                 AdvertisementAddress: null, AdvertisementPort: null)));
         var actual = Unwrap(exception);
-        Assert.IsType<ConsulDiscoveryConfigurationException>(actual);
+        Assert.IsType<ConsulDiscoveryException>(actual);
         Assert.Equal(
-            ConsulDiscoveryConfigurationException.AdvertisementRequired,
-            ((ConsulDiscoveryConfigurationException)actual).ErrorCode);
+            ConsulDiscoveryException.AdvertisementRequired,
+            ((ConsulDiscoveryException)actual).ErrorCode);
     }
 
     [Fact]
@@ -361,7 +361,7 @@ public sealed class ConsulDiscoveryRegistrationTests : IAsyncLifetime
     private static Exception Unwrap(Exception exception)
     {
         var current = exception;
-        while (current is not ConsulDiscoveryConfigurationException &&
+        while (current is not ConsulDiscoveryException &&
                current.InnerException is not null)
         {
             current = current.InnerException;

@@ -22,7 +22,7 @@ internal sealed class HealthSnapshotSource(IdentityDbContext db, ServiceMetrics?
     {
         try
         {
-            var installationStore = InstallationStores.CreateInstallationStore(db);
+            var installationStore = InstallationStores.CreateStore(db);
             var state = await installationStore.FindAsync(InstallationStores.ServiceId, cancellationToken);
             var phase = SharedPhase.Resolve(state);
             // A missing row is not evidence of a committed phase. Keep the existing not-ready

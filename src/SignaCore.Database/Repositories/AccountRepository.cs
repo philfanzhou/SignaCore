@@ -21,20 +21,6 @@ public class AccountRepository : IAccountRepository
             cancellationToken);
     }
 
-    public async Task<AccountEntity?> GetByLoginProviderAsync(
-        string providerName,
-        string providerUserId,
-        CancellationToken cancellationToken = default)
-    {
-        var normalizedProviderName = IdentityValueNormalizer.Normalize(providerName);
-        return await _dbContext.UserLogins
-            .Where(l =>
-                l.ProviderNameNormalized == normalizedProviderName &&
-                l.ProviderUserId == providerUserId)
-            .Join(_dbContext.Accounts, l => l.AccountId, a => a.Id, (_, a) => a)
-            .FirstOrDefaultAsync(cancellationToken);
-    }
-
     public async Task<AccountEntity?> GetByPasswordCredentialUsernameAsync(
         string username,
         CancellationToken cancellationToken = default)
@@ -53,20 +39,6 @@ public class AccountRepository : IAccountRepository
         cancellationToken.ThrowIfCancellationRequested();
         _dbContext.Accounts.Add(account);
         return Task.CompletedTask;
-    }
-
-    public Task<AccountEntity> CreateDefaultAccountAsync(
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var account = new AccountEntity
-        {
-            Id = Guid.NewGuid(),
-            IsActive = true,
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-        _dbContext.Accounts.Add(account);
-        return Task.FromResult(account);
     }
 
     public Task UpdateAsync(

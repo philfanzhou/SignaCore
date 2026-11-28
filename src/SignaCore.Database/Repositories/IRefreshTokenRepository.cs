@@ -29,10 +29,6 @@ public interface IRefreshTokenRepository
     Task AddAsync(
         RefreshTokenEntity refreshToken,
         CancellationToken cancellationToken = default);
-
-    Task RemoveRangeAsync(
-        IEnumerable<RefreshTokenEntity> tokens,
-        CancellationToken cancellationToken = default);
     Task<int> RemoveExpiredAndRevokedAsync(CancellationToken cancellationToken = default);
 
     /// <summary>

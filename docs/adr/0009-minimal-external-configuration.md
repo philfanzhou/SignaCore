@@ -82,4 +82,4 @@ Four confirmed decisions follow from this boundary and are recorded here as sett
   the generic unknown-key rejection, and dropping the rows is optional housekeeping.
 - This record changes no code, schema, or migration; a rollback of any implementing change
   follows that change's own notes. The boundary itself is enforced by the existing snapshot
-  layering, `LegacyConfigurationGuard` warnings, and the guarded bootstrap file.
+  layering, `LegacyGuard` warnings, and the guarded bootstrap file.
