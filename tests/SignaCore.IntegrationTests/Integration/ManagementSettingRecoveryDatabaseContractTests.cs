@@ -18,7 +18,7 @@ namespace SignaCore.Tests.Integration;
 /// <summary>Real protected HTTP recovery, persistence, runtime isolation, and restart on both providers.</summary>
 [Collection(SqliteProcessState.CollectionName)]
 [UsesProcessWideSqlitePoolClearing]
-public sealed partial class ManagementSettingRecoveryDatabaseContractTests
+public sealed partial class SettingRecoveryDatabaseContractTests
 {
     private const string Root = "/management/v1/settings";
     private const string LegacyOtlp = "collector.example.com:4317";

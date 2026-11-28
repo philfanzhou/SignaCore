@@ -41,7 +41,7 @@ internal static class AuthTestDoubles
     public static Mock<ITokenService> TokenService()
     {
         var mock = new Mock<ITokenService>();
-        mock.Setup(t => t.GenerateJwtToken(It.IsAny<List<Claim>>(), It.IsAny<RsaSecurityKey>(), It.IsAny<int>(), It.IsAny<string?>()))
+        mock.Setup(t => t.Generate(It.IsAny<List<Claim>>(), It.IsAny<RsaSecurityKey>(), It.IsAny<int>(), It.IsAny<string?>()))
             .Returns("token");
         return mock;
     }
@@ -49,7 +49,7 @@ internal static class AuthTestDoubles
     public static Mock<IRefreshTokenService> RefreshTokenService()
     {
         var mock = new Mock<IRefreshTokenService>();
-        mock.Setup(s => s.HandleRefreshTokenAsync(
+        mock.Setup(s => s.HandleAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
                 It.IsAny<AccountEntity>(),
@@ -82,7 +82,7 @@ internal static class AuthTestDoubles
     public static Mock<IAccountLoginInfoService> AccountLoginInfoService()
     {
         var mock = new Mock<IAccountLoginInfoService>();
-        mock.Setup(s => s.UpdateLoginInfoAsync(It.IsAny<AccountEntity>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        mock.Setup(s => s.UpdateAsync(It.IsAny<AccountEntity>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         return mock;
     }

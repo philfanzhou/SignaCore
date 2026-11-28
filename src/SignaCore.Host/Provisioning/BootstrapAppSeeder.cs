@@ -29,7 +29,7 @@ internal static class BootstrapAppSeeder
     /// a convenience mechanism and application registrations can also be created afterwards from
     /// the administration console.
     /// </summary>
-    internal static async Task SeedBootstrapAppsAsync(
+    internal static async Task SeedAsync(
         IConfiguration configuration,
         IdentityDbContext db,
         IManagementAuditWriter auditWriter,
@@ -87,7 +87,7 @@ internal static class BootstrapAppSeeder
 
             try
             {
-                var result = await SeedBootstrapAppAsync(
+                var result = await SeedEntryAsync(
                     entry,
                     db,
                     auditWriter,
@@ -130,7 +130,7 @@ internal static class BootstrapAppSeeder
             failedEntries);
     }
 
-    private static async Task<BootstrapAppSeedResult> SeedBootstrapAppAsync(
+    private static async Task<BootstrapAppSeedResult> SeedEntryAsync(
         BootstrapAppEntry entry,
         IdentityDbContext db,
         IManagementAuditWriter auditWriter,

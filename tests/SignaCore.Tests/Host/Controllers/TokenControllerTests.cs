@@ -127,7 +127,7 @@ public class TokenControllerTests : IDisposable
     private void BeginCaptureGeneratedClaims()
     {
         _capturedClaims = null;
-        _tokenServiceMock.Setup(t => t.GenerateJwtToken(
+        _tokenServiceMock.Setup(t => t.Generate(
                 It.IsAny<List<Claim>>(), It.IsAny<RsaSecurityKey>(), It.IsAny<int>(), It.IsAny<string?>()))
             .Callback((List<Claim> claims, RsaSecurityKey _, int __, string? ___) => _capturedClaims = claims)
             .Returns("token");
@@ -261,7 +261,7 @@ public class TokenControllerTests : IDisposable
             Assert.True(Assert.IsType<TokenResponse>(AuthTestDoubles.ExtractOk(result).Value).Success);
             Assert.Contains(AssertCapturedClaims(), claim => claim.Type == IdentityConstants.ClaimRole && claim.Value == "admin");
             _keyManagerMock.Verify(manager => manager.RefreshKeysAsync(cancellation.Token), Times.Once);
-            _accountLoginInfoServiceMock.Verify(service => service.UpdateLoginInfoAsync(
+            _accountLoginInfoServiceMock.Verify(service => service.UpdateAsync(
                 account, It.IsAny<string?>(), "Refresh", cancellation.Token), Times.Once);
         }
         _accountRepositoryMock.Verify(repository => repository.GetByPasswordCredentialUsernameAsync(
@@ -284,7 +284,7 @@ public class TokenControllerTests : IDisposable
         var validation = ValidationResult.Success(account, grant, "test-user");
         if (exchange) validation = validation.AsCrossApplicationExchange("source-app");
         validator.Setup(value => value.ValidateAsync(It.IsAny<ValidationRequest>())).ReturnsAsync(validation);
-        _refreshTokenServiceMock.Setup(service => service.HandleRefreshTokenAsync(
+        _refreshTokenServiceMock.Setup(service => service.HandleAsync(
                 grant, It.IsAny<string?>(), account, It.IsAny<string?>(), It.IsAny<Guid?>(),
                 It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Callback(new InvocationAction(invocation =>
@@ -347,7 +347,7 @@ public class TokenControllerTests : IDisposable
             .Callback<ValidationRequest>(request => Observe("validate", request.CancellationToken)).ReturnsAsync(validation);
         _keyManagerMock.Setup(manager => manager.RefreshKeysAsync(It.IsAny<CancellationToken>()))
             .Callback<CancellationToken>(ct => Observe("keys", ct)).Returns(Task.CompletedTask);
-        _tokenServiceMock.Setup(service => service.GenerateJwtToken(
+        _tokenServiceMock.Setup(service => service.Generate(
                 It.IsAny<List<Claim>>(), It.IsAny<RsaSecurityKey>(), It.IsAny<int>(), It.IsAny<string?>()))
             .Callback(() => calls.Add("sign")).Returns("test-token");
         _loginAttemptRepositoryMock.Setup(repository => repository.GetByUsernameAsync(attempt.Username, It.IsAny<CancellationToken>()))
@@ -365,11 +365,11 @@ public class TokenControllerTests : IDisposable
                 It.IsAny<string>(), It.IsAny<DateTimeOffset>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .Callback(new InvocationAction(invocation => Observe("otp-failure", (CancellationToken)invocation.Arguments[^1])))
             .ReturnsAsync(1);
-        _accountLoginInfoServiceMock.Setup(service => service.UpdateLoginInfoAsync(
+        _accountLoginInfoServiceMock.Setup(service => service.UpdateAsync(
                 account, It.IsAny<string?>(), grant, It.IsAny<CancellationToken>()))
             .Callback<AccountEntity, string?, string, CancellationToken>((_, _, _, ct) => Observe("login-state", ct))
             .Returns(Task.CompletedTask);
-        _refreshTokenServiceMock.Setup(service => service.HandleRefreshTokenAsync(
+        _refreshTokenServiceMock.Setup(service => service.HandleAsync(
                 grant, It.IsAny<string?>(), account, It.IsAny<string?>(), It.IsAny<Guid?>(),
                 It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Callback(new InvocationAction(invocation => Observe("refresh", (CancellationToken)invocation.Arguments[^1]))).ReturnsAsync("test-refresh");
@@ -435,12 +435,12 @@ public class TokenControllerTests : IDisposable
         Assert.Equal("refresh", response.RefreshToken);
 
         _keyManagerMock.Verify(k => k.GetCurrentKey(), Times.Once);
-        _tokenServiceMock.Verify(t => t.GenerateJwtToken(
+        _tokenServiceMock.Verify(t => t.Generate(
             It.Is<List<Claim>>(claims => claims.Any(c =>
                 c.Type == IdentityConstants.ClaimClientId && c.Value == "test-app")),
             It.IsAny<RsaSecurityKey>(), 2, It.IsAny<string?>()), Times.Once);
         _refreshTokenServiceMock.Verify(
-            s => s.HandleRefreshTokenAsync(
+            s => s.HandleAsync(
                 "sms",
                 It.IsAny<string?>(),
                 It.Is<AccountEntity>(a => a.Id == accountId),
@@ -578,12 +578,12 @@ public class TokenControllerTests : IDisposable
                 },
                 cancellation.Token));
 
-        _tokenServiceMock.Verify(service => service.GenerateJwtToken(
+        _tokenServiceMock.Verify(service => service.Generate(
             It.IsAny<List<Claim>>(),
             It.IsAny<RsaSecurityKey>(),
             It.IsAny<int>(),
             It.IsAny<string?>()), Times.Never);
-        _refreshTokenServiceMock.Verify(service => service.HandleRefreshTokenAsync(
+        _refreshTokenServiceMock.Verify(service => service.HandleAsync(
             It.IsAny<string>(),
             It.IsAny<string?>(),
             It.IsAny<AccountEntity>(),
@@ -597,7 +597,7 @@ public class TokenControllerTests : IDisposable
         var account = CreateTestAccount();
         var validatorMock = CreateRefreshValidator(account);
         _refreshTokenServiceMock
-            .Setup(service => service.HandleRefreshTokenAsync(
+            .Setup(service => service.HandleAsync(
                 IdentityConstants.GrantTypeRefreshToken,
                 "consumed-refresh-token",
                 account,
@@ -618,7 +618,7 @@ public class TokenControllerTests : IDisposable
         Assert.Equal("invalid_grant", response.Message);
         Assert.True(string.IsNullOrEmpty(response.AccessToken));
         _tokenServiceMock.Verify(
-            service => service.GenerateJwtToken(
+            service => service.Generate(
                 It.IsAny<List<Claim>>(),
                 It.IsAny<RsaSecurityKey>(),
                 It.IsAny<int>(),
@@ -631,7 +631,7 @@ public class TokenControllerTests : IDisposable
     {
         var account = CreateTestAccount();
         var validatorMock = CreateRefreshValidator(account);
-        _tokenServiceMock.Setup(service => service.GenerateJwtToken(
+        _tokenServiceMock.Setup(service => service.Generate(
                 It.IsAny<List<Claim>>(),
                 It.IsAny<RsaSecurityKey>(),
                 It.IsAny<int>(),
@@ -645,7 +645,7 @@ public class TokenControllerTests : IDisposable
             RefreshToken = "still-valid-refresh-token"
         }, CancellationToken.None));
 
-        _refreshTokenServiceMock.Verify(service => service.HandleRefreshTokenAsync(
+        _refreshTokenServiceMock.Verify(service => service.HandleAsync(
             It.IsAny<string>(),
             It.IsAny<string?>(),
             It.IsAny<AccountEntity>(),

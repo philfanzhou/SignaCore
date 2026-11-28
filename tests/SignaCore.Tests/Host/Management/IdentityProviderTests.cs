@@ -17,7 +17,7 @@ using Xunit;
 
 namespace SignaCore.Tests.Host.Management;
 
-public sealed class ManagementIdentityProviderTests : IAsyncDisposable
+public sealed class IdentityProviderTests : IAsyncDisposable
 {
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
     private IdentityDbContext _context = null!;
@@ -26,7 +26,7 @@ public sealed class ManagementIdentityProviderTests : IAsyncDisposable
     private const string AdminName = "session_admin";
     private const string AdminPassword = "SessionAdmin123!";
 
-    public ManagementIdentityProviderTests()
+    public IdentityProviderTests()
     {
     }
 

@@ -560,7 +560,7 @@ public sealed partial class OAuthLoginController : ControllerBase
             }
         }
 
-        await _failureRecorder.RecordFailureAsync(
+        await _failureRecorder.RecordAsync(
             result.LoginAttemptChange,
             username,
             result.ErrorMessage,
@@ -768,7 +768,7 @@ public sealed partial class OAuthLoginController : ControllerBase
         string reason,
         CancellationToken cancellationToken)
     {
-        var recorded = await _smsFailureRecorder.RecordFailureAsync(
+        var recorded = await _smsFailureRecorder.RecordAsync(
             failure.Continuation.Id,
             failure.Now,
             otpFailure,

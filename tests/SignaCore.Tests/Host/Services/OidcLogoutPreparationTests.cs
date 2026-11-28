@@ -24,7 +24,7 @@ namespace SignaCore.Tests.Host.Services;
 /// admitted token shape, every rejected dimension, the exact <c>IN-32</c> ordinal match, and the
 /// <c>IN-33</c> state bound.
 /// </summary>
-public sealed class OidcLogoutPreparationServiceTests
+public sealed class OidcLogoutPreparationTests
 {
     private const string Issuer = "https://logout-unit.test";
     private const string ClientId = "logout-unit-app";

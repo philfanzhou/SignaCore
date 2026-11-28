@@ -10,11 +10,11 @@ namespace SignaCore.Tests.Host.Configuration;
 /// the admin key alias with canonical-key precedence, every historical JSON shape, and the
 /// plain-HTTP compatibility opt-in — because a pre-change deployment gets exactly one import.
 /// </summary>
-public class LegacyConfigurationInputTests
+public class LegacyInputTests
 {
     private static (Dictionary<string, string> Values, int ImportedKeyCount) Read(
         Dictionary<string, string?> source) =>
-        LegacyConfigurationInput.ReadCompleteInput(
+        LegacyInput.ReadComplete(
             new ConfigurationBuilder().AddInMemoryCollection(source).Build());
 
     private const string BaseUrl = "https://accounts.example.com";

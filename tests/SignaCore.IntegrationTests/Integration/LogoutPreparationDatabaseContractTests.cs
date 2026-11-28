@@ -188,7 +188,7 @@ public sealed class LogoutPreparationDatabaseContractTests
             services.AddScoped<ILogoutRequestStore>(provider =>
             {
                 var context = provider.GetRequiredService<IdentityDbContext>();
-                var real = new LogoutRequestStore(new LogoutRequestRepository(context), new EfCoreUnitOfWork(context));
+                var real = new LogoutRequestStore(new LogoutRequestRepository(context));
                 var mock = new Mock<ILogoutRequestStore>(MockBehavior.Strict);
                 mock.Setup(store => store.StageCreateAsync(It.IsAny<LogoutRequestDescriptor>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
                     .Returns(async (LogoutRequestDescriptor descriptor, DateTimeOffset now, CancellationToken token) =>

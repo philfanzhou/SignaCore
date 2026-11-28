@@ -833,10 +833,6 @@ public sealed class SmsSessionApplicationOperationTests
             Guid familyId, Guid memberId, RefreshFamilyRevocationReason reason, CancellationToken cancellationToken = default) =>
             inner.RevokeLiveDescendantsAsync(familyId, memberId, reason, cancellationToken);
 
-        public Task<int> RevokeBySessionAsync(
-            Guid identitySessionId, RefreshFamilyRevocationReason reason, CancellationToken cancellationToken = default) =>
-            inner.RevokeBySessionAsync(identitySessionId, reason, cancellationToken);
-
         public Task<int> RevokeByAccountAsync(
             Guid accountId, RefreshFamilyRevocationReason reason, CancellationToken cancellationToken = default) =>
             inner.RevokeByAccountAsync(accountId, reason, cancellationToken);

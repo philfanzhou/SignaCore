@@ -12,19 +12,6 @@ public class UserLoginRepository : IUserLoginRepository
         _dbContext = dbContext;
     }
 
-    public async Task<UserLoginEntity?> GetByProviderAsync(
-        string providerName,
-        string providerUserId,
-        CancellationToken cancellationToken = default)
-    {
-        var normalizedProviderName = IdentityValueNormalizer.Normalize(providerName);
-        return await _dbContext.UserLogins
-            .FirstOrDefaultAsync(l =>
-                l.ProviderNameNormalized == normalizedProviderName &&
-                l.ProviderUserId == providerUserId,
-                cancellationToken);
-    }
-
     public async Task<UserLoginEntity?> GetBySmsPhoneAsync(
         string phone,
         CancellationToken cancellationToken = default)
@@ -47,21 +34,4 @@ public class UserLoginRepository : IUserLoginRepository
         return Task.CompletedTask;
     }
 
-    public Task RemoveAsync(
-        UserLoginEntity userLogin,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        _dbContext.UserLogins.Remove(userLogin);
-        return Task.CompletedTask;
-    }
-
-    public async Task<List<UserLoginEntity>> GetByAccountIdAsync(
-        Guid accountId,
-        CancellationToken cancellationToken = default)
-    {
-        return await _dbContext.UserLogins
-            .Where(l => l.AccountId == accountId)
-            .ToListAsync(cancellationToken);
-    }
 }

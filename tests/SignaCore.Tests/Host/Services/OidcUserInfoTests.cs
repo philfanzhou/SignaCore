@@ -26,7 +26,7 @@ namespace SignaCore.Tests.Host.Services;
 /// closed response set with the token-scope/current-allow-list intersection. Access tokens are
 /// signed with the same factory the endpoint trusts, so every cryptographic branch is real.
 /// </summary>
-public sealed class OidcUserInfoServiceTests
+public sealed class OidcUserInfoTests
 {
     private const string Issuer = "https://userinfo-unit.test";
     private const string ClientId = "userinfo-unit-app";

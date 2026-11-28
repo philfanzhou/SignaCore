@@ -18,7 +18,7 @@ public class RefreshTokenService : IRefreshTokenService
         _refreshTokenOptions = refreshTokenOptions;
     }
 
-    public async Task<string?> HandleRefreshTokenAsync(
+    public async Task<string?> HandleAsync(
         string grantType,
         string? existingRefreshToken,
         AccountEntity account,

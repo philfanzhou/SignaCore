@@ -9,7 +9,7 @@ namespace SignaCore.Tests.Domain.Services;
 public class AccountLoginInfoServiceTests
 {
     [Fact]
-    public async Task UpdateLoginInfoAsync_UpdatesFieldsAndStagesAccount()
+    public async Task UpdateAsync_UpdatesFieldsAndStagesAccount()
     {
         var accountRepoMock = new Mock<IAccountRepository>();
         var service = new AccountLoginInfoService(accountRepoMock.Object);
@@ -21,7 +21,7 @@ public class AccountLoginInfoServiceTests
             CreatedAt = DateTimeOffset.UtcNow
         };
 
-        await service.UpdateLoginInfoAsync(account, "10.0.0.1", "Password", TestContext.Current.CancellationToken);
+        await service.UpdateAsync(account, "10.0.0.1", "Password", TestContext.Current.CancellationToken);
 
         Assert.Equal("10.0.0.1", account.LastLoginIp);
         Assert.Equal("Password", account.LastLoginMethod);
@@ -31,7 +31,7 @@ public class AccountLoginInfoServiceTests
         accountRepoMock.Verify(r => r.UpdateAsync(account, TestContext.Current.CancellationToken), Times.Once);
     }
     [Fact]
-    public async Task UpdateLoginInfoAsync_WhenRepositoryObservesCancellation_PropagatesCancellation()
+    public async Task UpdateAsync_WhenRepositoryObservesCancellation_PropagatesCancellation()
     {
         using var cancellation = new CancellationTokenSource();
         var repository = new Mock<IAccountRepository>(MockBehavior.Strict);
@@ -41,7 +41,7 @@ public class AccountLoginInfoServiceTests
             .Throws(() => new OperationCanceledException(cancellation.Token));
 
         var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            new AccountLoginInfoService(repository.Object).UpdateLoginInfoAsync(
+            new AccountLoginInfoService(repository.Object).UpdateAsync(
                 account, "192.0.2.1", "password", cancellation.Token));
 
         Assert.Equal(cancellation.Token, exception.CancellationToken);

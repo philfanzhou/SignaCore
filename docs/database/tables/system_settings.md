@@ -20,4 +20,4 @@ Historical notes, kept for operators reading older databases:
 
 The runtime authority, its invariants, and its ownership rules are documented in
 [service_settings](./service_settings.md), and the upgrade procedure for deployments that still
-hold legacy rows is documented in [System settings retirement](./system-settings-retirement.md).
+hold legacy rows is documented in [System settings retirement](../system-settings-retirement.md).

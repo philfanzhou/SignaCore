@@ -249,7 +249,7 @@ internal static class InstallationStartup
         CancellationToken cancellationToken)
     {
         // The product input rules live in the thin adapter; nothing is persisted while reading.
-        var (legacyValues, importedKeyCount) = LegacyConfigurationInput.ReadCompleteInput(
+        var (legacyValues, importedKeyCount) = LegacyInput.ReadComplete(
             configuration);
 
         var changes = SharedSettingComposition.BuildSeedChanges(legacyValues);
@@ -449,7 +449,7 @@ internal static class InstallationStartup
                 []);
         }
 
-        var (_, entries) = SharedSettingConfigurationProjection.Project(refresh.Snapshot);
+        var (_, entries) = SharedSettingProjection.Project(refresh.Snapshot);
         return (refresh.Snapshot, entries);
     }
 

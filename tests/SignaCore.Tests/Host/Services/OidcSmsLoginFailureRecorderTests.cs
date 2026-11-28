@@ -88,7 +88,7 @@ public sealed class OidcSmsLoginFailureRecorderTests : IAsyncLifetime
     public async Task AFailureChange_CommitsWithTheMaskedAudit_AndNeverTouchesThePasswordCounter()
     {
         var accountId = Guid.NewGuid();
-        var committed = await Recorder().RecordFailureAsync(
+        var committed = await Recorder().RecordAsync(
             _continuationId, _now,
             FailureChange(maxAttempts: 5), Phone, accountId, OidcSmsLoginFailureReasons.OtpRejected, AppId,
             "203.0.113.5", "agent", CorrelationId, TestContext.Current.CancellationToken);
@@ -110,7 +110,7 @@ public sealed class OidcSmsLoginFailureRecorderTests : IAsyncLifetime
     [Fact]
     public async Task TheLastAllowedFailure_LocksTheOtp()
     {
-        await Recorder().RecordFailureAsync(
+        await Recorder().RecordAsync(
             _continuationId, _now,
             FailureChange(maxAttempts: 1), Phone, null, OidcSmsLoginFailureReasons.OtpRejected, AppId,
             null, null, CorrelationId, TestContext.Current.CancellationToken);
@@ -123,7 +123,7 @@ public sealed class OidcSmsLoginFailureRecorderTests : IAsyncLifetime
     [Fact]
     public async Task WithoutAChange_OnlyTheAuditCommits_WithoutAnAccountForAnUnresolvedPhone()
     {
-        Assert.Equal(OidcSmsLoginFailureResult.Recorded, await Recorder().RecordFailureAsync(
+        Assert.Equal(OidcSmsLoginFailureResult.Recorded, await Recorder().RecordAsync(
             _continuationId, _now,
             null, Phone, null, "not_registered", AppId, null, null, CorrelationId, TestContext.Current.CancellationToken));
 
@@ -138,7 +138,7 @@ public sealed class OidcSmsLoginFailureRecorderTests : IAsyncLifetime
     {
         var recorder = Recorder(new ThrowingAuditService());
 
-        var committed = await recorder.RecordFailureAsync(
+        var committed = await recorder.RecordAsync(
             _continuationId, _now,
             FailureChange(maxAttempts: 5), Phone, null, OidcSmsLoginFailureReasons.OtpRace, AppId,
             null, null, CorrelationId, TestContext.Current.CancellationToken);
@@ -158,7 +158,7 @@ public sealed class OidcSmsLoginFailureRecorderTests : IAsyncLifetime
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Recorder().RecordFailureAsync(
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Recorder().RecordAsync(
             _continuationId, _now,
             FailureChange(maxAttempts: 5), Phone, null, OidcSmsLoginFailureReasons.OtpRejected, AppId,
             null, null, CorrelationId, cancellation.Token));
@@ -172,7 +172,7 @@ public sealed class OidcSmsLoginFailureRecorderTests : IAsyncLifetime
     {
         var consume = FailureChange(maxAttempts: 5) with { Kind = OtpVerificationChangeKind.Consume };
 
-        await Assert.ThrowsAsync<ArgumentException>(() => Recorder().RecordFailureAsync(
+        await Assert.ThrowsAsync<ArgumentException>(() => Recorder().RecordAsync(
             _continuationId, _now,
             consume, Phone, null, OidcSmsLoginFailureReasons.OtpRejected, AppId, null, null, CorrelationId,
             TestContext.Current.CancellationToken));
@@ -195,7 +195,7 @@ public sealed class OidcSmsLoginFailureRecorderTests : IAsyncLifetime
                 .SetProperty(row => row.ExpiresAt, state == "expired" ? _now : _now.AddMinutes(10)),
                 TestContext.Current.CancellationToken);
 
-        var result = await Recorder().RecordFailureAsync(_continuationId, _now,
+        var result = await Recorder().RecordAsync(_continuationId, _now,
             FailureChange(5), Phone, null, OidcSmsLoginFailureReasons.OtpRejected, AppId,
             null, null, CorrelationId, TestContext.Current.CancellationToken);
 
@@ -210,7 +210,7 @@ public sealed class OidcSmsLoginFailureRecorderTests : IAsyncLifetime
     {
         var before = System.Text.Json.JsonSerializer.Serialize(await _context.AuthorizationRequests.AsNoTracking()
             .SingleAsync(TestContext.Current.CancellationToken));
-        await Recorder().RecordFailureAsync(_continuationId, _now, null, Phone, null, "not_registered",
+        await Recorder().RecordAsync(_continuationId, _now, null, Phone, null, "not_registered",
             AppId, null, null, CorrelationId, TestContext.Current.CancellationToken);
         var after = System.Text.Json.JsonSerializer.Serialize(await _context.AuthorizationRequests.AsNoTracking()
             .SingleAsync(TestContext.Current.CancellationToken));
@@ -222,7 +222,7 @@ public sealed class OidcSmsLoginFailureRecorderTests : IAsyncLifetime
     {
         using var cancellation = new CancellationTokenSource();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Recorder(new CancellingAuditService(cancellation, new AuditService(new LoginHistoryRepository(_context))))
-            .RecordFailureAsync(_continuationId, _now, FailureChange(5), Phone, null,
+            .RecordAsync(_continuationId, _now, FailureChange(5), Phone, null,
                 OidcSmsLoginFailureReasons.OtpRejected, AppId, null, null, CorrelationId, cancellation.Token));
         Assert.Equal(0, (await _context.Otps.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).Attempts);
         Assert.Empty(await _context.LoginHistories.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken));

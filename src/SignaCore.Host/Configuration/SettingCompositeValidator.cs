@@ -141,7 +141,7 @@ internal sealed class SettingCompositeValidator(
             return;
         }
 
-        if (!PublicBaseUrlNormalizer.TryNormalizeBaseUrl(publicBaseUrl, out var normalized, out _))
+        if (!PublicBaseUrlNormalizer.TryNormalize(publicBaseUrl, out var normalized, out _))
         {
             errors.Add(new ServiceSettingValidationError(PublicBaseUrl, BaseUrlInvalidCode));
             return;

@@ -12,7 +12,7 @@ using Xunit;
 
 namespace SignaCore.Tests.Integration;
 
-public sealed partial class ManagementSettingRecoveryDatabaseContractTests
+public sealed partial class SettingRecoveryDatabaseContractTests
 {
     [Theory]
     [InlineData(false, "unknown")]

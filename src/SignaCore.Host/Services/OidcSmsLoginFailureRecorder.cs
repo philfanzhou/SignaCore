@@ -61,7 +61,7 @@ public sealed class OidcSmsLoginFailureRecorder(
     /// identity resolved; <paramref name="failureReason"/> is one closed value.
     /// </summary>
     /// <exception cref="ArgumentException">The OTP change is not a failure record.</exception>
-    public async Task<OidcSmsLoginFailureResult> RecordFailureAsync(
+    public async Task<OidcSmsLoginFailureResult> RecordAsync(
         Guid continuationId,
         DateTimeOffset now,
         OtpVerificationChange? otpFailure,

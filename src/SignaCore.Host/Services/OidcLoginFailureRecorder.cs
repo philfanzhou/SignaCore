@@ -46,7 +46,7 @@ public sealed class OidcLoginFailureRecorder(
     /// existing audit standard; <paramref name="appId"/> is the <c>app_registrations.AppId</c> the
     /// continuation references.
     /// </summary>
-    public async Task RecordFailureAsync(
+    public async Task RecordAsync(
         LoginAttemptChange? loginAttemptChange,
         string username,
         string failureReason,

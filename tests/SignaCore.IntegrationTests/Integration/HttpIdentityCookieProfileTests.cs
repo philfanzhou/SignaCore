@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.TestHost;
 using SignaCore.Domain.Services.Sms;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
 using SignaCore.Host.Configuration;
 using SignaCore.Host.Security;
@@ -252,8 +253,10 @@ public sealed class HttpIdentityCookieProfileTests : IAsyncLifetime
         using var client = Client(host,origin); var page = await PageAsync(host,client);
         using var scope = host.Services.CreateScope();
         var app = await OAuthLoginSmsCodeTestSupport.SeedSmsAppAsync(host.Services,SmsLoginMode.Disabled);
-        var request = await scope.ServiceProvider.GetRequiredService<ILogoutRequestStore>().CreateAsync(
+        var logoutRequests = scope.ServiceProvider.GetRequiredService<ILogoutRequestStore>();
+        var request = await logoutRequests.StageCreateAsync(
             new LogoutRequestDescriptor(app.Id,Guid.NewGuid(),Guid.NewGuid(),null,null),DateTimeOffset.UtcNow,Ct);
+        await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct);
         using var response = await client.GetAsync("/oauth2/logout?logout_handle="+request.LogoutHandle,Ct);
         Assert.Equal(HttpStatusCode.OK,response.StatusCode);
         var cookies = response.Headers.GetValues("Set-Cookie").ToArray(); Assert.Equal(2,cookies.Length);

@@ -31,7 +31,7 @@ namespace SignaCore.Tests.Host.Services;
 /// rejections, the dispatch classification (<c>EV-33</c> legacy fall-through, corrupt partial
 /// marker), and the <c>IN-20</c>/<c>IN-26</c>/<c>IN-27</c> input contract.
 /// </summary>
-public sealed class InteractiveRefreshRotationServiceTests
+public sealed class InteractiveRefreshRotationTests
 {
     private const string ClientId = "rotation-unit-app";
     private const string CanonicalScope = "openid profile offline_access";

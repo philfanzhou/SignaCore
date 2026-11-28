@@ -5,7 +5,7 @@ using SignaCore.Database.Repositories;
 namespace SignaCore.Domain.Services;
 
 /// <summary>
-/// The single creation outcome of <see cref="ILogoutRequestStore.CreateAsync"/>.
+/// The single creation outcome of <see cref="ILogoutRequestStore.StageCreateAsync"/>.
 /// <paramref name="LogoutHandle"/> is the plaintext 43-character handle, returned exactly once
 /// here and never persisted, logged, or recoverable afterwards (<c>DF-10</c>).
 /// <paramref name="Id"/> is the public record id, safe for diagnostics (<c>DF-13</c>).
@@ -33,17 +33,6 @@ public sealed record LogoutRequestDescriptor(
 /// </summary>
 public interface ILogoutRequestStore
 {
-    /// <summary>
-    /// Persists one row from the already validated preparation, generating a fresh high-entropy
-    /// 43-character <c>[A-Za-z0-9_-]</c> handle (<c>IN-35</c> shape). The row expires
-    /// <see cref="IdentityConstants.LogoutHandleLifetimeMinutes"/> after <paramref name="now"/>,
-    /// the single captured UTC instant for every comparison and write (<c>PS-22</c>).
-    /// </summary>
-    Task<LogoutRequestCreation> CreateAsync(
-        LogoutRequestDescriptor descriptor,
-        DateTimeOffset now,
-        CancellationToken cancellationToken = default);
-
     /// <summary>
     /// Generates and stages an uncommitted request on the caller's unit of work. This method
     /// never saves; the caller must save the entire business operation or discard its scope.
@@ -97,25 +86,10 @@ public interface ILogoutRequestStore
 public sealed class LogoutRequestStore : ILogoutRequestStore
 {
     private readonly ILogoutRequestRepository _repository;
-    private readonly IUnitOfWork _unitOfWork;
 
-    public LogoutRequestStore(
-        ILogoutRequestRepository repository,
-        IUnitOfWork unitOfWork)
+    public LogoutRequestStore(ILogoutRequestRepository repository)
     {
         _repository = repository;
-        _unitOfWork = unitOfWork;
-    }
-
-    public async Task<LogoutRequestCreation> CreateAsync(
-        LogoutRequestDescriptor descriptor,
-        DateTimeOffset now,
-        CancellationToken cancellationToken = default)
-    {
-        var creation = await StageCreateAsync(descriptor, now, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        return creation;
     }
 
     public async Task<LogoutRequestCreation> StageCreateAsync(

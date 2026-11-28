@@ -90,7 +90,7 @@ second rule set:
   registry — and that every Number value is integer text (`IntegerSettingConstraint.IsIntegerText`,
   the legacy `NumberStyles.Integer` form), then maps through `SharedSettingKeys` onto the shared
   registry. All failures are closed, key-scoped codes.
-- `PublicBaseUrlNormalizer` holds the URL normalization helper (`TryNormalizeBaseUrl`) used by the
+- `PublicBaseUrlNormalizer` holds the URL normalization helper (`TryNormalize`) used by the
   composite validator, the setup pre-check, and the legacy import's plain-HTTP compatibility
   opt-in.
 
@@ -105,7 +105,7 @@ inputs with pinned verdicts captured from the retired validator's baseline, and 
   instance, pre-registered with DI as the runtime authority. Management queries refresh a separate
   accessor, so neither a read nor a persisted update replaces the process's activated snapshot.
 - The activated snapshot is projected back onto the legacy colon-keyed configuration shape
-  (`SharedSettingConfigurationProjection`): every normalized key maps through
+  (`SharedSettingProjection`): every normalized key maps through
   `SharedSettingKeys`, JSON values expand into `IConfiguration` sub-keys exactly like the legacy
   snapshot path, and no consumer of `IConfiguration` had to change. Equivalence against the legacy
   path is asserted key by key, including the JSON sub-keys.
@@ -274,7 +274,7 @@ housekeeping, not a migration requirement. See the upgrade notes in `Configurati
 - A pre-change deployment — business data present, no stored configuration of either era — is
   upgraded inside the startup initialization lock: the deployment's effective `IConfiguration`
   (appsettings, environment variables, launcher injection) is read once by
-  `LegacyConfigurationInput`, the thin product input adapter that owns the historical reading
+  `LegacyInput`, the thin product input adapter that owns the historical reading
   rules (catalog defaults, trimming, the `AdminBootstrap:Username` alias with canonical-key
   precedence, JSON section/scalar shapes, the plain-HTTP compatibility opt-in, and the
   required-key completeness check with key names only). This import is the configuration

@@ -186,88 +186,53 @@ public sealed class RefreshTokenFamilyStoreTests
 
         // A second call is a no-op — the first revocation fact stays authoritative.
         Assert.Equal(0, await harness.Store.RevokeFamilyAsync(
-            rootId, RefreshFamilyRevocationReason.Logout, TestContext.Current.CancellationToken));
+            rootId, RefreshFamilyRevocationReason.Administrative, TestContext.Current.CancellationToken));
 
         _ = (siblingId, legacyId);
     }
 
-    [Fact]
-    public async Task RevokeBySessionAsync_RevokesEveryInteractiveFamilyOfTheSession()
-    {
-        await using var harness = await CreateHarnessAsync();
-        var (rootId, siblingId, legacyId, childId) = await SeedFamiliesAsync(harness);
-
-        Assert.Equal(3, await harness.Store.RevokeBySessionAsync(
-            harness.SessionId, RefreshFamilyRevocationReason.Administrative, TestContext.Current.CancellationToken));
-
-        var survivors = await harness.Context.RefreshTokens.AsNoTracking()
-            .Where(row => !row.IsRevoked)
-            .Select(row => row.Id)
-            .ToListAsync(TestContext.Current.CancellationToken);
-        // Only the legacy row — structurally out of reach of the session predicate — survives.
-        Assert.Equal([legacyId], survivors);
-
-        _ = (rootId, siblingId, childId);
-    }
-
     /// <summary>
-    /// Ordinary revoke diagnostics carry no account or session identity (canonical DF-06): the
-    /// captured logger sees neither the raw id nor any common Guid rendering of it — in the
-    /// formatter text or in the structured state values themselves — while the repository still
-    /// receives the exact id and the caller's original token, and the success log keeps only the
-    /// fixed operation, the count, and the closed-set reason.
+    /// Ordinary revoke diagnostics carry no account identity (canonical DF-06): the captured
+    /// logger sees neither the raw id nor any common Guid rendering of it — in the formatter text
+    /// or in the structured state values themselves — while the repository still receives the
+    /// exact id and the caller's original token, and the success log keeps only the fixed
+    /// operation, the count, and the closed-set reason.
     /// </summary>
     [Fact]
-    public async Task RevokeByAccountAndSession_LogNoIdentityInStructuredStateOrText()
+    public async Task RevokeByAccount_LogNoIdentityInStructuredStateOrText()
     {
         var accountId = Guid.NewGuid();
-        var sessionId = Guid.NewGuid();
-        Assert.NotEqual(accountId, sessionId);
         var cancellationToken = TestContext.Current.CancellationToken;
         var repository = new Mock<IRefreshTokenRepository>();
         repository
             .Setup(value => value.RevokeByAccountAsync(accountId, cancellationToken))
             .ReturnsAsync(3);
-        repository
-            .Setup(value => value.RevokeBySessionAsync(sessionId, cancellationToken))
-            .ReturnsAsync(2);
         var logger = new StructuredStateLogger();
         var store = new RefreshTokenFamilyStore(repository.Object, new Mock<IUnitOfWork>().Object, logger);
 
         Assert.Equal(3, await store.RevokeByAccountAsync(
             accountId, RefreshFamilyRevocationReason.Administrative, cancellationToken));
-        Assert.Equal(2, await store.RevokeBySessionAsync(
-            sessionId, RefreshFamilyRevocationReason.Logout, cancellationToken));
 
-        Assert.Equal(2, logger.Entries.Count);
-        foreach (var entry in logger.Entries)
+        var entry = Assert.Single(logger.Entries);
+        Assert.DoesNotContain(accountId.ToString("D"), entry.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(accountId.ToString("N"), entry.Text, StringComparison.Ordinal);
+        foreach (var field in entry.State)
         {
-            Assert.DoesNotContain(accountId.ToString("D"), entry.Text, StringComparison.Ordinal);
-            Assert.DoesNotContain(accountId.ToString("N"), entry.Text, StringComparison.Ordinal);
-            Assert.DoesNotContain(sessionId.ToString("D"), entry.Text, StringComparison.Ordinal);
-            Assert.DoesNotContain(sessionId.ToString("N"), entry.Text, StringComparison.Ordinal);
-            foreach (var field in entry.State)
-            {
-                Assert.DoesNotContain("AccountId", field.Key, StringComparison.Ordinal);
-                Assert.DoesNotContain("SessionId", field.Key, StringComparison.Ordinal);
-                var value = field.Value?.ToString();
-                Assert.DoesNotContain(accountId.ToString("D"), value, StringComparison.Ordinal);
-                Assert.DoesNotContain(accountId.ToString("N"), value, StringComparison.Ordinal);
-                Assert.DoesNotContain(sessionId.ToString("D"), value, StringComparison.Ordinal);
-                Assert.DoesNotContain(sessionId.ToString("N"), value, StringComparison.Ordinal);
-            }
-
-            // The success projection is bounded: the fixed message, the affected count, and the
-            // reason — no hashed or otherwise derived identity substitute either.
-            var keys = entry.State.Select(field => field.Key).ToList();
-            Assert.Contains("Count", keys);
-            Assert.Contains("Reason", keys);
-            Assert.True(keys.TrueForAll(key =>
-                key is "Count" or "Reason" or "{OriginalFormat}"));
+            Assert.DoesNotContain("AccountId", field.Key, StringComparison.Ordinal);
+            var value = field.Value?.ToString();
+            Assert.DoesNotContain(accountId.ToString("D"), value, StringComparison.Ordinal);
+            Assert.DoesNotContain(accountId.ToString("N"), value, StringComparison.Ordinal);
         }
 
+        // The success projection is bounded: the fixed message, the affected count, and the
+        // reason — no hashed or otherwise derived identity substitute either.
+        var keys = entry.State.Select(field => field.Key).ToList();
+        Assert.Contains("Count", keys);
+        Assert.Contains("Reason", keys);
+        Assert.True(keys.TrueForAll(key =>
+            key is "Count" or "Reason" or "{OriginalFormat}"));
+
         repository.Verify(value => value.RevokeByAccountAsync(accountId, cancellationToken), Times.Once);
-        repository.Verify(value => value.RevokeBySessionAsync(sessionId, cancellationToken), Times.Once);
     }
 
     /// <summary>
@@ -275,25 +240,19 @@ public sealed class RefreshTokenFamilyStoreTests
     /// result still returns the repository's count unchanged.
     /// </summary>
     [Fact]
-    public async Task RevokeByAccountAndSession_WhenNothingMatches_WriteNoSuccessLog()
+    public async Task RevokeByAccount_WhenNothingMatches_WriteNoSuccessLog()
     {
         var accountId = Guid.NewGuid();
-        var sessionId = Guid.NewGuid();
         var cancellationToken = TestContext.Current.CancellationToken;
         var repository = new Mock<IRefreshTokenRepository>();
         repository
             .Setup(value => value.RevokeByAccountAsync(accountId, cancellationToken))
-            .ReturnsAsync(0);
-        repository
-            .Setup(value => value.RevokeBySessionAsync(sessionId, cancellationToken))
             .ReturnsAsync(0);
         var logger = new StructuredStateLogger();
         var store = new RefreshTokenFamilyStore(repository.Object, new Mock<IUnitOfWork>().Object, logger);
 
         Assert.Equal(0, await store.RevokeByAccountAsync(
             accountId, RefreshFamilyRevocationReason.Administrative, cancellationToken));
-        Assert.Equal(0, await store.RevokeBySessionAsync(
-            sessionId, RefreshFamilyRevocationReason.Logout, cancellationToken));
 
         Assert.Empty(logger.Entries);
     }
@@ -327,26 +286,26 @@ public sealed class RefreshTokenFamilyStoreTests
     /// success log, and neither undoes the caller's id or token.
     /// </summary>
     [Fact]
-    public async Task RevokeBySession_ObservesPreCanceledAndInFlightCanceledTokens()
+    public async Task RevokeByAccount_ObservesPreCanceledAndInFlightCanceledTokens()
     {
-        var sessionId = Guid.NewGuid();
-        var reason = RefreshFamilyRevocationReason.SessionExpired;
+        var accountId = Guid.NewGuid();
+        var reason = RefreshFamilyRevocationReason.AccountDisabled;
         using var cancellation = new CancellationTokenSource();
         var repository = new Mock<IRefreshTokenRepository>();
         repository
-            .Setup(value => value.RevokeBySessionAsync(sessionId, cancellation.Token))
+            .Setup(value => value.RevokeByAccountAsync(accountId, cancellation.Token))
             .ThrowsAsync(new OperationCanceledException(cancellation.Token));
         var logger = new StructuredStateLogger();
         var store = new RefreshTokenFamilyStore(repository.Object, new Mock<IUnitOfWork>().Object, logger);
 
         var preCanceled = new CancellationToken(canceled: true);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            store.RevokeBySessionAsync(sessionId, reason, preCanceled));
+            store.RevokeByAccountAsync(accountId, reason, preCanceled));
         repository.VerifyNoOtherCalls();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            store.RevokeBySessionAsync(sessionId, reason, cancellation.Token));
-        repository.Verify(value => value.RevokeBySessionAsync(sessionId, cancellation.Token), Times.Once);
+            store.RevokeByAccountAsync(accountId, reason, cancellation.Token));
+        repository.Verify(value => value.RevokeByAccountAsync(accountId, cancellation.Token), Times.Once);
 
         Assert.Empty(logger.Entries);
     }

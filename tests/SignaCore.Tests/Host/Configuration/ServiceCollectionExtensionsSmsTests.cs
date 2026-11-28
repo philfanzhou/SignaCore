@@ -65,7 +65,7 @@ public class ServiceCollectionExtensionsSmsTests
 
     /// <summary>
     /// The retired SMS_BYPASS_PHONES environment variable no longer feeds the allow-list; a
-    /// deployment that still sets it gets a LegacyConfigurationGuard warning instead.
+    /// deployment that still sets it gets a LegacyGuard warning instead.
     /// </summary>
     [Fact]
     public void ResolveBypassPhones_WithRetiredEnvironmentVariableSet_ReturnsEmpty()

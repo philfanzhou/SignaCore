@@ -197,15 +197,6 @@ public class RefreshTokenRepository : IRefreshTokenRepository
         }, cancellationToken);
     }
 
-    public Task RemoveRangeAsync(
-        IEnumerable<RefreshTokenEntity> tokens,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        _dbContext.RefreshTokens.RemoveRange(tokens);
-        return Task.CompletedTask;
-    }
-
     public async Task<int> RemoveExpiredAndRevokedAsync(
         CancellationToken cancellationToken = default)
     {

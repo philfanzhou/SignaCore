@@ -12,7 +12,7 @@ namespace SignaCore.Tests.Host.Configuration;
 /// former Production <c>OpenTelemetry:OtlpEndpoint: ""</c>) produced one spurious warning on every
 /// start because the guard counts any present value, including the empty string, as an override.
 /// </summary>
-public class LegacyConfigurationGuardTests
+public class LegacyGuardTests
 {
     [Fact]
     public void FindRetiredSmsEnvironmentVariables_WhenAllAreSet_ReturnsEachName()
@@ -26,7 +26,7 @@ public class LegacyConfigurationGuardTests
             })
             .Build();
 
-        var names = LegacyConfigurationGuard.FindRetiredSmsEnvironmentVariables(configuration);
+        var names = LegacyGuard.FindRetiredSmsEnvironmentVariables(configuration);
 
         // Declaration order, one entry per set variable, and names only — never values.
         Assert.Equal(["SMS_BYPASS_CODE", "SMS_OTP_HMAC_KEY", "SMS_BYPASS_PHONES"], names);
@@ -43,7 +43,7 @@ public class LegacyConfigurationGuardTests
             })
             .Build();
 
-        var names = LegacyConfigurationGuard.FindRetiredSmsEnvironmentVariables(configuration);
+        var names = LegacyGuard.FindRetiredSmsEnvironmentVariables(configuration);
 
         Assert.Equal(["SMS_BYPASS_CODE", "SMS_BYPASS_PHONES"], names);
     }
@@ -53,7 +53,7 @@ public class LegacyConfigurationGuardTests
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
 
-        var names = LegacyConfigurationGuard.FindRetiredSmsEnvironmentVariables(configuration);
+        var names = LegacyGuard.FindRetiredSmsEnvironmentVariables(configuration);
 
         Assert.Empty(names);
     }
@@ -72,7 +72,7 @@ public class LegacyConfigurationGuardTests
             .AddEnvironmentVariables()
             .Build();
 
-        var names = LegacyConfigurationGuard.FindRetiredSmsEnvironmentVariables(configuration);
+        var names = LegacyGuard.FindRetiredSmsEnvironmentVariables(configuration);
 
         Assert.Equal(["SMS_BYPASS_CODE"], names);
     }
@@ -92,7 +92,7 @@ public class LegacyConfigurationGuardTests
             })
             .Build();
 
-        var overrides = LegacyConfigurationGuard.FindManagedOverrides(configuration);
+        var overrides = LegacyGuard.FindManagedOverrides(configuration);
 
         Assert.Contains("APP_TITLE", overrides);
     }
@@ -109,8 +109,8 @@ public class LegacyConfigurationGuardTests
         // The two shipped files cover only logging and the bootstrap pre-seed path; none of the
         // managed keys may appear in them, so startup reports no legacy override and no legacy
         // database section from a clean deployment.
-        Assert.Empty(LegacyConfigurationGuard.FindManagedOverrides(configuration));
-        Assert.False(LegacyConfigurationGuard.HasDatabaseSectionOverride(configuration));
+        Assert.Empty(LegacyGuard.FindManagedOverrides(configuration));
+        Assert.False(LegacyGuard.HasDatabaseSectionOverride(configuration));
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public class LegacyConfigurationGuardTests
         // it would warn on every start while the value never reaches the telemetry decision.
         Assert.Contains(
             "OpenTelemetry:OtlpEndpoint",
-            LegacyConfigurationGuard.FindManagedOverrides(configuration));
+            LegacyGuard.FindManagedOverrides(configuration));
     }
 
     private static string RepositoryRoot()

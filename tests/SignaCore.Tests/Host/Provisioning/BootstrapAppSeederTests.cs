@@ -52,7 +52,7 @@ public class BootstrapAppSeederTests : IDisposable
     {
         var configuration = new ConfigurationBuilder().Build();
 
-        await BootstrapAppSeeder.SeedBootstrapAppsAsync(
+        await BootstrapAppSeeder.SeedAsync(
             configuration,
             _dbContext,
             _auditService,
@@ -325,7 +325,7 @@ public class BootstrapAppSeederTests : IDisposable
                 })
                 .Build();
 
-            await BootstrapAppSeeder.SeedBootstrapAppsAsync(
+            await BootstrapAppSeeder.SeedAsync(
                 configuration,
                 _dbContext,
                 auditWriter ?? _auditService,

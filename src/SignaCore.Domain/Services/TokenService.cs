@@ -8,7 +8,7 @@ namespace SignaCore.Domain.Services;
 
 public interface ITokenService
 {
-    string GenerateJwtToken(List<Claim> claims, RsaSecurityKey key, int expirationHours, string? audience = null);
+    string Generate(List<Claim> claims, RsaSecurityKey key, int expirationHours, string? audience = null);
 }
 
 public class JwtTokenService : ITokenService
@@ -31,7 +31,7 @@ public class JwtTokenService : ITokenService
     /// Callers pass the application's own identifier when the application runs in
     /// <see cref="AudienceMode.PerApplication"/>.
     /// </param>
-    public string GenerateJwtToken(
+    public string Generate(
         List<Claim> claims,
         RsaSecurityKey key,
         int expirationHours,

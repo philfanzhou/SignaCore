@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SignaCore.Database;
 using SignaCore.Database.Entity;
+using SignaCore.Database.Repositories;
 using SignaCore.Domain.Services;
 using SignaCore.Domain.Validators;
 using Xunit;
@@ -124,7 +125,9 @@ public sealed class OidcHttpRedirectTrustTests(IdentityServerFixture fixture) : 
             var credential = await db.PasswordCredentials.SingleAsync(x => x.Username == IdentityServerFixture.AdminUsername, Ct);
             var session = await scope.ServiceProvider.GetRequiredService<IIdentitySessionStore>().CreateAsync(credential.AccountId, credential.Id, DateTimeOffset.UtcNow, Ct);
             var created = await scope.ServiceProvider.GetRequiredService<IAuthorizationCodeStore>().CreateAsync(session, new(app.Id, Redirect, "openid", "nonce-01234567890123456789", Challenge), DateTimeOffset.UtcNow, Ct);
-            var prepared = await scope.ServiceProvider.GetRequiredService<ILogoutRequestStore>().CreateAsync(new(app.Id, session.AccountId, session.Id, Logout, null), DateTimeOffset.UtcNow, Ct);
+            var logoutRequests = scope.ServiceProvider.GetRequiredService<ILogoutRequestStore>();
+            var prepared = await logoutRequests.StageCreateAsync(new(app.Id, session.AccountId, session.Id, Logout, null), DateTimeOffset.UtcNow, Ct);
+            await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync(Ct);
             code = created.Code; codeId = created.Id; handle = prepared.LogoutHandle; logoutId = prepared.Id; sessionId = session.Id;
             if (drift == "registration") await db.AppRedirectUris.Where(x => x.AppRegistrationId == app.Id).ExecuteDeleteAsync(Ct);
             if (drift == "inactive") await db.AppRegistrations.Where(x => x.Id == app.Id).ExecuteUpdateAsync(x => x.SetProperty(a => a.IsActive, false), Ct);

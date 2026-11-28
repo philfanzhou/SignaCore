@@ -10,7 +10,7 @@ namespace SignaCore.Host.Configuration;
 /// The fixed configuration codes of the snapshot-driven Consul composition. Key names and codes
 /// only; no message ever carries a setting value.
 /// </summary>
-internal sealed class ConsulDiscoveryConfigurationException(string errorCode, string? detail = null)
+internal sealed class ConsulDiscoveryException(string errorCode, string? detail = null)
     : Exception(
         $"The Consul discovery configuration is invalid ({errorCode})." +
         (detail is null ? string.Empty : " " + detail))
@@ -73,7 +73,7 @@ internal static class ConsulDiscoveryComposition
     /// Derives the dedicated snapshot from the bootstrap-activated product snapshot and registers
     /// the shared Consul lifecycle with the typed accessor entry.
     /// </summary>
-    /// <exception cref="ConsulDiscoveryConfigurationException">
+    /// <exception cref="ConsulDiscoveryException">
     /// The enabled combination is refused by this composition, or the derived snapshot did not
     /// pass the shared loader's validation.
     /// </exception>
@@ -118,8 +118,8 @@ internal static class ConsulDiscoveryComposition
             // Safe classification codes only: the underlying values may include the ACL token.
             var details = string.Join(
                 ", ", refresh.Errors.Select(error => $"{error.Key ?? "<snapshot>"} ({error.ErrorCode})"));
-            throw new ConsulDiscoveryConfigurationException(
-                ConsulDiscoveryConfigurationException.SnapshotInvalid,
+            throw new ConsulDiscoveryException(
+                ConsulDiscoveryException.SnapshotInvalid,
                 $"The derived snapshot did not pass the shared validation: {details}.");
         }
 
@@ -156,7 +156,7 @@ internal static class ConsulDiscoveryProjection
     /// <summary>
     /// Derives the eight-key read and the instance advertisement from the product snapshot.
     /// </summary>
-    /// <exception cref="ConsulDiscoveryConfigurationException">
+    /// <exception cref="ConsulDiscoveryException">
     /// The enabled combination requires deregistration or an explicit advertisement and neither
     /// source provides it. Semantic validation of the enabled view is owned by the shared loader.
     /// </exception>
@@ -179,8 +179,8 @@ internal static class ConsulDiscoveryProjection
         ArgumentNullException.ThrowIfNull(product);
         if (product.ServiceId != ServiceId.Parse(ServiceMantleComposition.ServiceIdentifier))
         {
-            throw new ConsulDiscoveryConfigurationException(
-                ConsulDiscoveryConfigurationException.SnapshotInvalid);
+            throw new ConsulDiscoveryException(
+                ConsulDiscoveryException.SnapshotInvalid);
         }
 
         var host = Text(product, "consul.host");
@@ -207,14 +207,14 @@ internal static class ConsulDiscoveryProjection
         // silently ignoring the switch, so no stale-registration mode can survive the switch-over.
         if (wantsRegistration && !deregister)
         {
-            throw new ConsulDiscoveryConfigurationException(
-                ConsulDiscoveryConfigurationException.DeregisterRequired);
+            throw new ConsulDiscoveryException(
+                ConsulDiscoveryException.DeregisterRequired);
         }
 
         if (wantsRegistration && (effectiveAddress is null || effectivePort is null))
         {
-            throw new ConsulDiscoveryConfigurationException(
-                ConsulDiscoveryConfigurationException.AdvertisementRequired);
+            throw new ConsulDiscoveryException(
+                ConsulDiscoveryException.AdvertisementRequired);
         }
 
         // The scheme follows the same precedence: the per-instance process override, then the
@@ -290,8 +290,8 @@ internal static class ConsulDiscoveryProjection
         if (!product.Values.TryGetValue(key, out var value) ||
             !value.HasValue || value.ValueType != ServiceSettingValueType.String)
         {
-            throw new ConsulDiscoveryConfigurationException(
-                ConsulDiscoveryConfigurationException.SnapshotInvalid,
+            throw new ConsulDiscoveryException(
+                ConsulDiscoveryException.SnapshotInvalid,
                 $"The product snapshot is missing a usable '{key}' value.");
         }
 
@@ -312,8 +312,8 @@ internal static class ConsulDiscoveryProjection
         if (!product.Values.TryGetValue(key, out var value) ||
             !value.HasValue || value.ValueType != ServiceSettingValueType.Number)
         {
-            throw new ConsulDiscoveryConfigurationException(
-                ConsulDiscoveryConfigurationException.SnapshotInvalid,
+            throw new ConsulDiscoveryException(
+                ConsulDiscoveryException.SnapshotInvalid,
                 $"The product snapshot is missing a usable '{key}' value.");
         }
 

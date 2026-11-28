@@ -191,7 +191,7 @@ if (bootstrap is null)
         bootstrapApp.MapServiceMantleHealthEndpoints();
         bootstrapApp.MapServiceMantleBootstrap();
         bootstrapApp.MapServiceMantleInstallationStatus();
-        BootstrapTestEndpoint.Map(bootstrapApp);
+        TargetProbeEndpoint.Map(bootstrapApp);
 
         // The console is served by the same mapped fallback the normal host uses, admitted only
         // while the phase is Bootstrap Configuration; once the file exists and the process
@@ -229,9 +229,9 @@ catch (Exception exception)
 // ---- Legacy override diagnostics ----
 // The database is authoritative now. Values still supplied by appsettings, environment variables, or
 // the launcher are inert; report them so operators can remove them.
-var legacyOverrides = LegacyConfigurationGuard.FindManagedOverrides(builder.Configuration);
-var hasLegacyDatabaseSection = LegacyConfigurationGuard.HasDatabaseSectionOverride(builder.Configuration);
-var retiredSmsEnvironmentVariables = LegacyConfigurationGuard.FindRetiredSmsEnvironmentVariables(
+var legacyOverrides = LegacyGuard.FindManagedOverrides(builder.Configuration);
+var hasLegacyDatabaseSection = LegacyGuard.HasDatabaseSectionOverride(builder.Configuration);
+var retiredSmsEnvironmentVariables = LegacyGuard.FindRetiredSmsEnvironmentVariables(
     builder.Configuration);
 
 // ---- Activate the configuration snapshot ----
@@ -300,7 +300,7 @@ if (bootstrapResult.Phase != InstallationPhase.Completed)
     // The shared setup entry reads the installation authority through this store; the readiness
     // snapshot reads it through the same source below.
     builder.Services.AddScoped<ServiceMantle.Installation.IServiceInstallationStore>(
-        serviceProvider => InstallationStores.CreateInstallationStore(
+        serviceProvider => InstallationStores.CreateStore(
             serviceProvider.GetRequiredService<IdentityDbContext>()));
     builder.Services.AddScoped<IServiceHealthSnapshotSource, HealthSnapshotSource>();
 
@@ -453,7 +453,7 @@ mantle.AddSignaCoreManagementSession(
 // the status read with "completed" and refuses every completion with the fixed 409 without
 // parsing the request body. The handler needs the installation authority through this store.
 builder.Services.AddScoped<ServiceMantle.Installation.IServiceInstallationStore>(
-    serviceProvider => InstallationStores.CreateInstallationStore(
+    serviceProvider => InstallationStores.CreateStore(
         serviceProvider.GetRequiredService<IdentityDbContext>()));
 
 // The shared bootstrap group: the update entry the authenticated editor drives. The credential
@@ -557,7 +557,7 @@ if (!hasHttpsEndpoint)
 // optional bootstrap-apps.json pre-seed, which is a product capability rather than migration work.
 using (var seedScope = app.Services.CreateScope())
 {
-    await BootstrapAppSeeder.SeedBootstrapAppsAsync(
+    await BootstrapAppSeeder.SeedAsync(
         builder.Configuration,
         seedScope.ServiceProvider.GetRequiredService<IdentityDbContext>(),
         seedScope.ServiceProvider.GetRequiredService<IManagementAuditWriter>(),

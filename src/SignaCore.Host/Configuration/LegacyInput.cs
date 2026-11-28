@@ -18,7 +18,7 @@ namespace SignaCore.Host.Configuration;
 /// path that consumes its output.
 /// </para>
 /// </remarks>
-internal static class LegacyConfigurationInput
+internal static class LegacyInput
 {
     /// <summary>
     /// Reads the complete import candidate from the deployment configuration.
@@ -28,7 +28,7 @@ internal static class LegacyConfigurationInput
     /// A required setting with no default is missing from the deployment configuration. The
     /// message carries key names only.
     /// </exception>
-    public static (Dictionary<string, string> Values, int ImportedKeyCount) ReadCompleteInput(
+    public static (Dictionary<string, string> Values, int ImportedKeyCount) ReadComplete(
         IConfiguration configuration)
     {
         var values = ServiceSettingDefinitions.BuildLegacyDefaults();

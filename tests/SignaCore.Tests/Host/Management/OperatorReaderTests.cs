@@ -10,7 +10,7 @@ namespace SignaCore.Tests.Host.Management;
 /// The single SignaCore operator read point: the audit actor comes from the shared ServiceMantle
 /// operator claims, and ordinary NameIdentifier/Name claims are never trusted as a fallback.
 /// </summary>
-public sealed class ManagementOperatorReaderTests
+public sealed class OperatorReaderTests
 {
     private static readonly Guid OperatorId = Guid.NewGuid();
 

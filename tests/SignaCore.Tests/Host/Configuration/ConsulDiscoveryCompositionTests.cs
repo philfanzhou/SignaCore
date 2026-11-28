@@ -99,7 +99,7 @@ public sealed class ConsulDiscoveryCompositionTests
     [Fact]
     public async Task EnabledRegister_WithoutDeregister_IsRefusedWithTheFixedCode()
     {
-        var exception = await Assert.ThrowsAsync<ConsulDiscoveryConfigurationException>(() =>
+        var exception = await Assert.ThrowsAsync<ConsulDiscoveryException>(() =>
             DeriveAsync(
                 AdvertisementAddress: "10.1.2.3",
                 AdvertisementPort: 9443,
@@ -112,7 +112,7 @@ public sealed class ConsulDiscoveryCompositionTests
                 ]));
 
         Assert.Equal(
-            ConsulDiscoveryConfigurationException.DeregisterRequired, exception.ErrorCode);
+            ConsulDiscoveryException.DeregisterRequired, exception.ErrorCode);
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public sealed class ConsulDiscoveryCompositionTests
     public async Task EnabledRegister_WithoutAnAdvertisementFromEitherSource_IsRefusedWithTheFixedCode(
         string? advertisementAddress, int? advertisementPort)
     {
-        var exception = await Assert.ThrowsAsync<ConsulDiscoveryConfigurationException>(() =>
+        var exception = await Assert.ThrowsAsync<ConsulDiscoveryException>(() =>
             DeriveAsync(
                 AdvertisementAddress: advertisementAddress,
                 AdvertisementPort: advertisementPort,
@@ -163,7 +163,7 @@ public sealed class ConsulDiscoveryCompositionTests
                 ]));
 
         Assert.Equal(
-            ConsulDiscoveryConfigurationException.AdvertisementRequired, exception.ErrorCode);
+            ConsulDiscoveryException.AdvertisementRequired, exception.ErrorCode);
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public sealed class ConsulDiscoveryCompositionTests
     {
         // The seeded database port 0 means "not provided": a half-configured database
         // advertisement must keep the fixed advertisement code, never derive a port 0.
-        var exception = await Assert.ThrowsAsync<ConsulDiscoveryConfigurationException>(() =>
+        var exception = await Assert.ThrowsAsync<ConsulDiscoveryException>(() =>
             DeriveAsync(
                 AdvertisementAddress: null,
                 AdvertisementPort: null,
@@ -185,7 +185,7 @@ public sealed class ConsulDiscoveryCompositionTests
                 ]));
 
         Assert.Equal(
-            ConsulDiscoveryConfigurationException.AdvertisementRequired, exception.ErrorCode);
+            ConsulDiscoveryException.AdvertisementRequired, exception.ErrorCode);
     }
 
     [Fact]
@@ -394,11 +394,11 @@ public sealed class ConsulDiscoveryCompositionTests
                 [ConsulDiscoveryComposition.AdvertisementPortKey] = "9443"
             }).Build();
 
-        var exception = await Assert.ThrowsAsync<ConsulDiscoveryConfigurationException>(() =>
+        var exception = await Assert.ThrowsAsync<ConsulDiscoveryException>(() =>
             services.AddConsulDiscoveryLifecycleAsync(
                 configuration, product, new BootstrapMasterKeyProvider(RootSecret)));
 
-        Assert.Equal(ConsulDiscoveryConfigurationException.SnapshotInvalid, exception.ErrorCode);
+        Assert.Equal(ConsulDiscoveryException.SnapshotInvalid, exception.ErrorCode);
         Assert.Empty(services);
     }
 
@@ -512,11 +512,11 @@ public sealed class ConsulDiscoveryCompositionTests
                 [ConsulDiscoveryComposition.AdvertisementPortKey] = "9443"
             }).Build();
 
-        var exception = await Assert.ThrowsAsync<ConsulDiscoveryConfigurationException>(() =>
+        var exception = await Assert.ThrowsAsync<ConsulDiscoveryException>(() =>
             services.AddConsulDiscoveryLifecycleAsync(
                 configuration, product, new BootstrapMasterKeyProvider(RootSecret)));
 
-        Assert.Equal(ConsulDiscoveryConfigurationException.DeregisterRequired, exception.ErrorCode);
+        Assert.Equal(ConsulDiscoveryException.DeregisterRequired, exception.ErrorCode);
         Assert.Empty(services);
     }
 

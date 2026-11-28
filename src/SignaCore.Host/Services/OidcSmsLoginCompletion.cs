@@ -230,7 +230,7 @@ public sealed class OidcSmsLoginCompletion(
                     accepted.CodeChallenge),
                 request.Now,
                 operationCancellationToken);
-            await accountLoginInfo.UpdateLoginInfoAsync(
+            await accountLoginInfo.UpdateAsync(
                 account, request.ClientIp, IdentityConstants.AuthMethodSms, operationCancellationToken);
             await auditService.RecordLoginAsync(
                 account.Id,
